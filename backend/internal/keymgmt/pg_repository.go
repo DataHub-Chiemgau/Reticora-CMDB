@@ -202,13 +202,13 @@ func (r *PGRepository) Issue(ctx context.Context, a *Assignment) (*Item, error) 
 		}
 		now := time.Now().UTC()
 		a.IssuedAt = now
-		if err := tx.QueryRow(ctx, `
+		if insertErr := tx.QueryRow(ctx, `
 			INSERT INTO key_assignment (organization_id, key_item_id, assigned_to, issued_at, issued_by, notes)
 			VALUES ($1, $2, $3::uuid, $4, NULLIF($5,'')::uuid, $6)
 			RETURNING id::text, created_at
 		`, a.OrganizationID, a.KeyItemID, a.AssignedTo, a.IssuedAt, a.IssuedBy, a.Notes).
-			Scan(&a.ID, &a.CreatedAt); err != nil {
-			return err
+			Scan(&a.ID, &a.CreatedAt); insertErr != nil {
+			return insertErr
 		}
 		it, err = scanItem(tx.QueryRow(ctx, "UPDATE key_item SET status = 'issued', updated_at = now() WHERE organization_id = $1 AND id = $2 RETURNING "+itemCols, a.OrganizationID, a.KeyItemID))
 		return err

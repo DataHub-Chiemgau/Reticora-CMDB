@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -121,11 +122,21 @@ const (
 	LimitMaxUsers      = "max_users"
 	LimitMaxAPIKeys    = "max_api_keys"
 	// LimitMaxStorageMB is the document storage of the organization in MiB
-	// (2^20 bytes). Like every quota it gates only when stored (E-34); the
-	// usage check "usage + upload > limit" belongs to the document upload,
-	// not to AllowCreate.
+	// (2^20 bytes). A value stored in the limits of the documents row goes
+	// first (E-34); without one the plan default of E-44 applies
+	// (storageDefaultMB, StorageLimitBytes). The usage check "usage +
+	// upload > limit" belongs to the document upload, not to AllowCreate.
 	LimitMaxStorageMB = "max_storage_mb"
 )
+
+// storageDefaultMB is the document storage per plan in MiB when the
+// documents row stores no max_storage_mb (E-44): essential 1,000 MiB,
+// standard 10,000 MiB, pro 50,000 MiB; enterprise is unlimited (no entry).
+var storageDefaultMB = map[Plan]int64{
+	PlanEssential: 1000,
+	PlanStandard:  10000,
+	PlanPro:       50000,
+}
 
 // Quotas are the quota keys an entitlement row may carry.
 var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB}
@@ -150,7 +161,8 @@ var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 // the remaining phase-2 keys but internal_orders, pro adds internal_orders,
 // monitoring and workflow_forms, enterprise endpoint_agent and compliance.
 // No plan includes an add-on (CH14). Quotas only gate when stored in the
-// limits of a row (E-34); no plan has a default quota.
+// limits of a row (E-34); only max_storage_mb has a plan default (E-44,
+// storageDefaultMB).
 var planFeatures = func() map[Plan][]string {
 	essential := slices.Concat(Phase1Features, []string{
 		FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential})
@@ -523,6 +535,35 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 		return &v, nil
 	}
 	return nil, nil
+}
+
+// StorageLimitBytes returns the document storage limit of the organization
+// in bytes (max_storage_mb · 2^20, MGT-01): the value stored in the limits
+// of the documents row (E-34), else the default of the row's plan (E-44,
+// storageDefaultMB). It returns nil, unlimited, with enforcement off or for
+// an unlimited plan, and FeatureNotEntitledError without documents.
+func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, error) {
+	if !s.opts.Enforce {
+		return nil, nil
+	}
+	ent, entitled, err := s.Check(ctx, orgID, FeatureDocuments)
+	if err != nil {
+		return nil, err
+	}
+	if !entitled {
+		return nil, &FeatureNotEntitledError{FeatureKey: FeatureDocuments}
+	}
+	mb, ok := ent.Limits[LimitMaxStorageMB]
+	if !ok {
+		if mb, ok = storageDefaultMB[normalizePlan(ent.Plan)]; !ok {
+			return nil, nil
+		}
+	}
+	if mb > math.MaxInt64>>20 {
+		return nil, nil
+	}
+	limit := mb << 20
+	return &limit, nil
 }
 
 // AllowCreate enforces a quota (max_cis, max_collectors, max_users,

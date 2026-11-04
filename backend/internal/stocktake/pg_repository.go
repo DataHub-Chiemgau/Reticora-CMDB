@@ -267,7 +267,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.TotalExpected != nil {
 			setClauses = append(setClauses, fmt.Sprintf("total_expected = $%d", argPos))
 			args = append(args, *req.TotalExpected)
-			argPos++
 		}
 
 		if len(setClauses) == 0 {
@@ -496,7 +495,7 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 		}
 
 		if applyCorrections {
-			rows, err := tx.Query(ctx, `
+			rows, queryErr := tx.Query(ctx, `
 				SELECT s.id::text, s.scan_result, COALESCE(s.location_found, ''),
 				       a.id::text, a.asset_tag, a.status, COALESCE(a.location, '')
 				FROM stock_scan s
@@ -504,8 +503,8 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 				WHERE s.stocktake_id = $1
 				  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
 				ORDER BY s.scanned_at ASC`, id)
-			if err != nil {
-				return fmt.Errorf("list deviating scans: %w", err)
+			if queryErr != nil {
+				return fmt.Errorf("list deviating scans: %w", queryErr)
 			}
 			type correctionRow struct {
 				scan                      StockScan
@@ -514,15 +513,15 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 			var pending []correctionRow
 			for rows.Next() {
 				var cr correctionRow
-				if err := rows.Scan(&cr.scan.ID, &cr.scan.ScanResult, &cr.scan.LocationFound, &cr.assetID, &cr.tag, &cr.status, &cr.loc); err != nil {
+				if rowErr := rows.Scan(&cr.scan.ID, &cr.scan.ScanResult, &cr.scan.LocationFound, &cr.assetID, &cr.tag, &cr.status, &cr.loc); rowErr != nil {
 					rows.Close()
-					return fmt.Errorf("scan deviating row: %w", err)
+					return fmt.Errorf("scan deviating row: %w", rowErr)
 				}
 				pending = append(pending, cr)
 			}
 			rows.Close()
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("iterate deviating scans: %w", err)
+			if iterErr := rows.Err(); iterErr != nil {
+				return fmt.Errorf("iterate deviating scans: %w", iterErr)
 			}
 
 			for _, p := range pending {
@@ -556,14 +555,14 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 					continue
 				}
 				var cmdTag pgconn.CommandTag
-				var err error
+				var execErr error
 				if c.NewLocation != "" {
-					cmdTag, err = tx.Exec(ctx, query, p.assetID, p.scan.LocationFound)
+					cmdTag, execErr = tx.Exec(ctx, query, p.assetID, p.scan.LocationFound)
 				} else {
-					cmdTag, err = tx.Exec(ctx, query, p.assetID)
+					cmdTag, execErr = tx.Exec(ctx, query, p.assetID)
 				}
-				if err != nil {
-					return fmt.Errorf("apply correction for asset %s: %w", p.assetID, err)
+				if execErr != nil {
+					return fmt.Errorf("apply correction for asset %s: %w", p.assetID, execErr)
 				}
 				c.Applied = cmdTag.RowsAffected() > 0
 				completion.Corrections = append(completion.Corrections, c)

@@ -86,6 +86,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Templates of a CI (MET-16, WP-710).
 	r.Get("/api/v1/cis/{id}/templates", h.ListTemplates)
 	r.Put("/api/v1/cis/{id}/templates", h.SetTemplates)
+	// Tag catalog and tags of a CI (CI-08, WP-753).
+	h.registerTagRoutes(r)
 }
 
 // List handles GET /api/v1/cis

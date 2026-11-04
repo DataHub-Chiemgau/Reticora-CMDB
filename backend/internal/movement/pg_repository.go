@@ -346,7 +346,6 @@ func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req Upd
 		if req.Attributes != nil {
 			sets = append(sets, fmt.Sprintf("attributes = $%d", pos))
 			args = append(args, req.Attributes)
-			pos++
 		}
 		if len(sets) == 0 {
 			item, err := scanItem(tx.QueryRow(ctx, fmt.Sprintf(

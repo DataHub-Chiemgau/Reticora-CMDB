@@ -1078,8 +1078,13 @@ export interface paths {
      *     response is chunked and neither the server nor the client has to hold
      *     the full result set in memory. There is no row limit. CSV and DATEV
      *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
-     *     names the CI fields the layout leaves out. The export job resource
-     *     /api/v1/exports (202, presigned download, manifest) replaces it.
+     *     names the CI fields the layout leaves out. format=datev is gated
+     *     (WP-790): it needs the module inventory (otherwise 400 like an
+     *     unknown format), the entitlements export_datev and assets_basic
+     *     (otherwise 403 feature-not-entitled) and the permission asset:read
+     *     (otherwise 403). On this path DATEV keeps the CI layout until the
+     *     sunset (E-141). The export job resource /api/v1/exports (202,
+     *     presigned download, manifest) replaces it.
      */
     get: operations['exportCIs'];
     put?: never;
@@ -1112,6 +1117,11 @@ export interface paths {
      *     exactly this scope in the requested format into object storage. Once
      *     the job is `completed` it exposes a signed download URL until
      *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     *     The format datev is gated (WP-790): module inventory (otherwise
+     *     400), entitlements export_datev and assets_basic (otherwise 403
+     *     feature-not-entitled) and permission asset:read (otherwise 403); the
+     *     worker checks module and entitlements again and fails the job if
+     *     one of them is gone.
      */
     post: operations['createExportJobLegacy'];
     delete?: never;
@@ -1230,6 +1240,11 @@ export interface paths {
      *     exactly this scope in the requested format into object storage. Once
      *     the job is `completed` it exposes a signed download URL until
      *     `expires_at`. Requires blob storage to be configured — otherwise 503.
+     *     The format datev is gated (WP-790): module inventory (otherwise
+     *     400), entitlements export_datev and assets_basic (otherwise 403
+     *     feature-not-entitled) and permission asset:read (otherwise 403); the
+     *     worker checks module and entitlements again and fails the job if
+     *     one of them is gone.
      */
     post: operations['createExportJob'];
     delete?: never;
@@ -1460,7 +1475,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a document
-     * @description A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     * @description Soft-deletes the document (MGT-01, WP-732): it sets deleted_at and writes the audit entry document.deleted. From then on list, detail, PATCH, content, versions and links treat the document as missing (404), and the search shows no hit; a second DELETE answers 404. Versions, links and stored content count against the storage usage until the retention run retention.soft_deleted removes the document after RETICORA_RETENTION_SOFT_DELETE_DAYS (at least 90 days) and writes document.purged. A principal restricted to some clients or sites deletes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
      */
     delete: operations['deleteDocument'];
     options?: never;
@@ -4280,11 +4295,14 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a time-limited download URL for the document content */
+    /**
+     * Get a time-limited download URL for the document content
+     * @description The URL of the current version, or with `version` of that version; a version the document does not have answers 404. Only a version whose malware scan is clean is presigned (SEC-09, E-42, fail-closed): pending_scan and scan_failed answer 409 with type https://reticora.io/problems/document-pending-scan, infected (quarantine) 409 with type https://reticora.io/problems/document-quarantined. Content whose object key lies outside the document answers 409 as well.
+     */
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the document's object in blob storage. The Content-Type header is validated against a whitelist of common office and image formats; the body is limited to 25 MiB. A principal restricted to some clients or sites uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09).
+     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created.
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -4312,7 +4330,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -7638,14 +7656,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List tags
-     * @description Planned (E-38); WP-753 implements the operation.
+     * List tags (CI-08)
+     * @description The tag catalog of the organization, sorted by key and id (API-02): `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor is 400. Tags are core, without a module gate (E-105). Requires ci:read.
      */
     get: operations['listTags'];
     put?: never;
     /**
-     * Create a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * Create a tag (CI-08)
+     * @description A catalog tag with an unchangeable key (lower case, digits, _ and -, at most 63 characters), display_name in de and/or en (defaults to the key) and an optional color #rrggbb. A taken key is 409 on key, an invalid value 422 with the fields. Audit tag.created. Requires tag:manage.
      */
     post: operations['createTag'];
     delete?: never;
@@ -7666,21 +7684,21 @@ export interface paths {
     };
     /**
      * Get a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description A tag of the organization; an unknown or foreign id is 404. Requires ci:read.
      */
     get: operations['getTag'];
     put?: never;
     post?: never;
     /**
      * Delete a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description Deletes a tag no CI carries (deleted CIs count). A tag assigned to a CI and a system tag (is_system, e.g. archived) are 409. Audit tag.deleted. Requires tag:manage.
      */
     delete: operations['deleteTag'];
     options?: never;
     head?: never;
     /**
      * Update a tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description Sent fields change: display_name replaces the names, color null removes the color. The key is unchangeable: a sent key is 422. Audit tag.updated. Requires tag:manage.
      */
     patch: operations['updateTag'];
     trace?: never;
@@ -7699,7 +7717,7 @@ export interface paths {
     put?: never;
     /**
      * Merge a tag into another tag
-     * @description Planned (E-38); WP-753 implements the operation.
+     * @description In one transaction every CI with this tag gets the tag into_id instead (a CI with both keeps one); then this tag is deleted. Each live CI changed is a manual update: version + 1, ci_change of the field tags, audit ci.updated and the event ci.changed (webhook ci.updated), like PUT /api/v1/cis/{id}/tags; deleted CIs keep the target tag for a restore. Audit tag.merged. A system tag cannot be merged away (409); assignments outside the caller's client or site scope are 409 as well. An unknown into_id or the tag itself is 422. Requires tag:manage.
      */
     post: operations['mergeTag'];
     delete?: never;
@@ -7720,8 +7738,8 @@ export interface paths {
     };
     get?: never;
     /**
-     * Replace the tags of a CI
-     * @description Planned (E-38); WP-753 implements the operation.
+     * Replace the tags of a CI (CI-08)
+     * @description Replaces the tags of the CI with the catalog tags `tags` (keys) in one transaction; an empty list removes every tag. Unknown keys are 422 with the entries (tags[i]); tags are not created implicitly (POST /api/v1/tags). A changed list raises the version by 1 and writes ci_change (field tags, old and new keys), the audit entry ci.updated and the event ci.changed with changed_fields ["tags"] (webhook ci.updated); no override. If-Match as with PATCH (API-07): 412 when it is required but missing or names no version of the CI, 409 with the fields when the tags changed since. A CI outside the caller's scope is 404. This replaces the deprecated attributes.tags of POST and PATCH /api/v1/cis. Requires ci:write.
      */
     put: operations['replaceCITags'];
     post?: never;
@@ -8324,7 +8342,7 @@ export interface paths {
     };
     /**
      * Get the storage usage of the documents
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description The stored bytes of every document version of the whole organization (also of documents outside the caller's scope) and the limit max_storage_mb in MiB, null when unlimited (MGT-01, E-44). A value stored in the entitlement documents goes first; else the plan default applies (essential 1,000 MiB, standard 10,000 MiB, pro 50,000 MiB, enterprise unlimited).
      */
     get: operations['getDocumentUsage'];
     put?: never;
@@ -8347,13 +8365,13 @@ export interface paths {
     };
     /**
      * List the versions of a document
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description Version, size, MIME type, checksum and scan status of every version of a visible document, highest version first, paged with `limit` and the signed `cursor` (API-02). A document outside the caller's scope answers 404.
      */
     get: operations['listDocumentVersions'];
     put?: never;
     /**
      * Upload a new version of a document
-     * @description Planned (E-38); WP-731 implements the operation.
+     * @description Stores the request body as version n+1 of the document under an object key of its own; the document mirrors the new version. Only a document the caller may change takes versions (all its links in the caller's write scope, WP-341); any other answers 404 before anything is stored. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44); of two parallel uploads at the limit only the one that fits succeeds. A new version has the scan status pending_scan. The audit log records document.version_created with version, size, MIME type and checksum.
      */
     post: operations['createDocumentVersion'];
     delete?: never;
@@ -8527,8 +8545,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Start an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * Start an import run (IMP-IO-01)
+     * @description Starts the import of the current version of a document with a mapping profile as a job of kind import.run (API-09, JOB-04). Before the job is created the request is checked in this order: the document lies in the caller's scope (404), the profile belongs to the organization (404), the version is scanned clean (409 document-pending-scan for pending_scan and scan_failed, 409 document-quarantined for infected; E-42), the version is at most 50 MB = 52428800 bytes (422 import-file-too-large, E-49) and its verified type fits the profile format (CSV: text/csv or text/plain, XLSX: the OOXML spreadsheet type; .xls, .ods, any other type and the profile format json are 422 import-format-unsupported). `mode` defaults to the mode of the profile, `dry_run` to false. The job reads exactly the checked version and checks it clean again before reading; at most 50000 data rows (more: the job fails with import-row-limit), 500 columns and 1 MiB per row (more: import-file-too-complex). Progress and status are in the job (/api/v1/jobs/{id}), which a holder of import:run cancels while it runs. Without job service or blob storage 503. Requires import:run.
      */
     post: operations['createImport'];
     delete?: never;
@@ -8547,8 +8565,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Preview the columns of an import file
-     * @description Planned (E-38); WP-301 implements the operation.
+     * Preview the columns of an import file (IMP-IO-01)
+     * @description Checks the document like POST /api/v1/imports (scope 404, scan status 409, size and type 422) without a profile: the format follows from the verified type of the current version. Reads synchronously the header and at most 20 data rows with the parser and the limits of the import; import-format-unsupported, import-sheet-not-found and import-file-too-complex are 422 with that problem type. No job is created. Without blob storage 503. Requires import:run.
      */
     post: operations['previewImport'];
     delete?: never;
@@ -8569,7 +8587,7 @@ export interface paths {
     };
     /**
      * Get an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * @description The projection of an import job: profile, document and version, mode, status, progress, the counters of the result and the error code of a failed run. A job of another kind, one outside the caller's scope and one whose document the caller does not see are 404. The runs are listed by the job list with kind=import.run. Without job service 503. Requires import:run.
      */
     get: operations['getImport'];
     put?: never;
@@ -8592,7 +8610,7 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file with line, column, code and message of every parse and limit error. While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
     put?: never;
@@ -10851,6 +10869,8 @@ export interface components {
       attributes: {
         [key: string]: unknown;
       };
+      /** @description Keys of the catalog tags of the CI (CI-07, CI-08), sorted; [] for a CI without tags. Written with PUT /api/v1/cis/{id}/tags; the catalog is /api/v1/tags. */
+      readonly tags?: string[];
       discovery_source?: components['schemas']['CIDiscoverySource'];
       /** Format: date-time */
       first_seen_at?: string;
@@ -10946,6 +10966,12 @@ export interface components {
       sys_object_id?: string;
       /** @description The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
+        /**
+         * @deprecated
+         * @description Deprecated (E-125, API-01): replaces the tags of the CI with the keys of these texts (lower case, other characters than a-z, 0-9, _ and - become _); missing catalog tags are created, null removes every tag. The value is not kept in the attributes. A value that is no array of strings is 400 on attributes.tags. The answer carries Deprecation and Sunset; at the sunset on 2028-06-30 the member is switched off. Use PUT /api/v1/cis/{id}/tags with catalog keys instead.
+         */
+        tags?: string[] | null;
+      } & {
         [key: string]: unknown;
       };
       /** @description Defaults to manual. With manual or import the CI is manual (is_manual); an unknown source is rejected (400 with the field). */
@@ -10981,6 +11007,12 @@ export interface components {
       sys_object_id?: string | null;
       /** @description RFC 7396 merge patch. The keys _overrides, _observed, _provenance and _instance are reserved (GLO-13): 400 with the field. */
       attributes?: {
+        /**
+         * @deprecated
+         * @description Deprecated (E-125, API-01): replaces the tags of the CI with the keys of these texts (lower case, other characters than a-z, 0-9, _ and - become _); missing catalog tags are created, null removes every tag. The value is not kept in the attributes. A value that is no array of strings is 400 on attributes.tags. The answer carries Deprecation and Sunset; at the sunset on 2028-06-30 the member is switched off. Use PUT /api/v1/cis/{id}/tags with catalog keys instead.
+         */
+        tags?: string[] | null;
+      } & {
         [key: string]: unknown;
       };
       discovery_source?: components['schemas']['CIDiscoverySource'];
@@ -11544,6 +11576,7 @@ export interface components {
     };
     CreateExportJobRequest: {
       /**
+       * @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
        * @default json
        * @enum {string}
        */
@@ -11878,7 +11911,7 @@ export interface components {
       file_name: string;
       file_size: number;
       mime_type: string;
-      /** @description Server-generated object key below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content; empty until content is uploaded. */
+      /** @description Server-generated object key of the current version below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content or POST /api/v1/documents/{id}/versions; empty until content is uploaded. */
       readonly storage_key: string;
       version: number;
       category: string;
@@ -11888,6 +11921,16 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /**
+       * @description Malware scan status of the current version (SEC-09); absent without stored content. Only clean content is downloadable, infected is the quarantine.
+       * @enum {string}
+       */
+      readonly scan_status?: 'pending_scan' | 'clean' | 'infected' | 'scan_failed';
+      /**
+       * Format: date-time
+       * @description Time of the last scan result of the current version; absent while pending_scan.
+       */
+      readonly scanned_at?: string;
     };
     CreateDocumentRequest: {
       title: string;
@@ -12802,6 +12845,122 @@ export interface components {
     };
     ImportProfileListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ImportProfile'][];
+    };
+    ImportStartRequest: {
+      document_id: string;
+      profile_id: string;
+      /**
+       * @description Defaults to the mode of the profile.
+       * @enum {string}
+       */
+      mode?: 'create_missing' | 'update_existing' | 'both';
+      /** @default false */
+      dry_run: boolean;
+    };
+    ImportJobAccepted: {
+      job_id: string;
+      status: string;
+      kind: string;
+    };
+    ImportPreviewRequest: {
+      document_id: string;
+      /** @description The sheet of an XLSX file; the first when omitted. */
+      sheet?: string;
+    };
+    ImportPreview: {
+      /** @enum {string} */
+      format: 'csv' | 'xlsx';
+      /** @description The sheets of an XLSX file; empty for CSV. */
+      sheets: string[];
+      /** @description The header row. */
+      columns: string[];
+      sample_rows: string[][];
+    };
+    ImportRun: {
+      id: string;
+      /** @enum {string} */
+      kind: 'import.run';
+      /** @enum {string} */
+      status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+      progress: number;
+      document_id: string;
+      document_version: number;
+      profile_id: string;
+      /** @enum {string} */
+      mode: 'create_missing' | 'update_existing' | 'both';
+      dry_run: boolean;
+      sheet: string | null;
+      /** @description Data rows read; null until the run succeeded. */
+      rows_total: number | null;
+      /** @description Rows with an error; null until the run succeeded. */
+      rows_failed: number | null;
+      /** @description The code of a failed run, e.g. import-row-limit, import-file-too-complex, import-format-unsupported, import-sheet-not-found, document-pending-scan. */
+      error_code: string | null;
+      error: string | null;
+      cancellable: boolean;
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      started_at: string | null;
+      /** Format: date-time */
+      finished_at: string | null;
+    };
+    ImportReportLink: {
+      download_url: string;
+    };
+    /** @description A catalog tag of the organization (CI-08, WP-753). */
+    Tag: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** @description Unique and unchangeable in the organization; CI.tags lists it. */
+      key: string;
+      display_name: components['schemas']['TagDisplayName'];
+      color: string | null;
+      /** @description A tag the system relies on (archived); it cannot be deleted or merged away. */
+      is_system: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description The name in de and/or en; no other language, no empty name. */
+    TagDisplayName: {
+      de?: string;
+      en?: string;
+    };
+    TagListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Tag'][];
+    };
+    CreateTagRequest: {
+      key: string;
+      display_name?: components['schemas']['TagDisplayName'];
+      color?: string | null;
+    };
+    UpdateTagRequest: {
+      /** @description Not changeable; a sent key is 422. */
+      key?: string;
+      display_name?: components['schemas']['TagDisplayName'];
+      /** @description null removes the color. */
+      color?: string | null;
+    };
+    MergeTagRequest: {
+      /**
+       * Format: uuid
+       * @description The tag that takes the assignments.
+       */
+      into_id: string;
+    };
+    TagMergeResult: {
+      tag: components['schemas']['Tag'];
+      /** @description Number of live CIs whose assignment moved to the tag. */
+      moved: number;
+    };
+    ReplaceCITagsRequest: {
+      /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
+      tags: string[];
     };
     BusinessCalendarListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['BusinessCalendar'][];
@@ -14614,6 +14773,46 @@ export interface components {
     DocumentLinkListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['DocumentLink'][];
     };
+    DocumentVersion: {
+      id: string;
+      organization_id: string;
+      document_id: string;
+      /** @description Version number, 1 for the first content; the document mirrors the highest. */
+      version: number;
+      /** Format: int64 */
+      size: number;
+      mime_type: string;
+      /** @description Hex sha256 of the content; null only for versions stored before versioning. */
+      checksum_sha256: string | null;
+      /**
+       * @description Malware scan status (SEC-09); a new version is pending_scan. Only a clean version is downloadable, infected is the quarantine.
+       * @enum {string}
+       */
+      scan_status: 'pending_scan' | 'clean' | 'infected' | 'scan_failed';
+      /**
+       * Format: date-time
+       * @description Time of the last scan result; absent while pending_scan.
+       */
+      scanned_at?: string;
+      uploaded_by?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    DocumentVersionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['DocumentVersion'][];
+    };
+    DocumentUsage: {
+      /**
+       * Format: int64
+       * @description Stored bytes of every document version of the organization.
+       */
+      storage_bytes: number;
+      /**
+       * Format: int64
+       * @description max_storage_mb in MiB (2^20 bytes); null when unlimited.
+       */
+      limit_mb: number | null;
+    };
     CreateDocumentLinkRequest: {
       /** @description ci, asset, assignment, ticket, location, disposal_record or stocktake. */
       entity_type: string;
@@ -15161,6 +15360,14 @@ export interface components {
      *     attributes may be filtered (otherwise 400 with a hint), and they
      *     compare by their data type. An unknown field yields 422, an unknown
      *     operator or a malformed value 400.
+     *
+     *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+     *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+     *     at least one of the tags, `filter[tags][all]=a,b` those with every
+     *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+     *     distinct values; an unknown key matches no tag. `all` is accepted
+     *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+     *     `gte` and `lte` on a set field are 400.
      */
     ListFilter: {
       [key: string]: unknown;
@@ -15843,6 +16050,14 @@ export interface operations {
          *     attributes may be filtered (otherwise 400 with a hint), and they
          *     compare by their data type. An unknown field yields 422, an unknown
          *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
          */
         filter?: components['parameters']['ListFilter'];
         /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
@@ -15917,6 +16132,10 @@ export interface operations {
       /** @description Configuration item created */
       201: {
         headers: {
+          /** @description Set (RFC 9745, @1793664000 = 2026-11-03) when the request carried the deprecated attributes.tags (E-125, WP-281). */
+          Deprecation?: string;
+          /** @description Set (RFC 8594) with Deprecation: attributes.tags is switched off on Fri, 30 Jun 2028 00:00:00 GMT; then PUT /api/v1/cis/{id}/tags is the only way to write tags. */
+          Sunset?: string;
           [name: string]: unknown;
         };
         content: {
@@ -16050,6 +16269,10 @@ export interface operations {
         headers: {
           /** @description The new CI version. */
           ETag?: string;
+          /** @description Set (RFC 9745, @1793664000 = 2026-11-03) when the request carried the deprecated attributes.tags (E-125, WP-281). */
+          Deprecation?: string;
+          /** @description Set (RFC 8594) with Deprecation: attributes.tags is switched off on Fri, 30 Jun 2028 00:00:00 GMT; then PUT /api/v1/cis/{id}/tags is the only way to write tags. */
+          Sunset?: string;
           [name: string]: unknown;
         };
         content: {
@@ -17300,6 +17523,7 @@ export interface operations {
   exportCIs: {
     parameters: {
       query?: {
+        /** @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read. */
         format?: 'csv' | 'json' | 'datev';
         status?: components['parameters']['CIStatus'];
         /** @description CI type id to filter by. The filter includes the subtypes (MET-06): CIs of the type and of every type below it (parent_type_id) the caller sees. The same holds for filter[ci_type_id] and filter[ci_type_id][in] (the union of the subtrees). An attribute filter then also follows the inheritable definitions of the ancestors of the named types. */
@@ -17324,6 +17548,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -17388,6 +17613,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -17638,6 +17864,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -18188,7 +18415,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Document deleted */
+      /** @description Document soft-deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -25433,7 +25660,10 @@ export interface operations {
   };
   downloadDocumentContent: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Version number (GET /api/v1/documents/{id}/versions); default the current version. */
+        version?: number;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -25455,8 +25685,18 @@ export interface operations {
           };
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The version is not scanned clean: type https://reticora.io/problems/document-pending-scan (pending_scan, scan_failed) or https://reticora.io/problems/document-quarantined (infected); or the stored object key lies outside the document. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Blob storage is not configured */
       503: {
         headers: {
@@ -25478,9 +25718,25 @@ export interface operations {
       };
       cookie?: never;
     };
+    /** @description The binary content (SEC-09). The Content-Type names its type and must be one of the listed ones; the content must carry the signature of that type: %PDF- for PDF, the image signatures for PNG, JPEG, GIF and WebP, a ZIP archive for application/zip, a ZIP archive with [Content_Types].xml for the OOXML formats (docx, xlsx, pptx), a compound file (D0 CF 11 E0 A1 B1 1A E1) for doc, xls and ppt, an XML declaration for application/xml, and valid UTF-8 text that is no HTML for JSON, CSV and plain text. HTML, executables (PE, ELF, Mach-O) and scripts (#!) are refused whatever the declaration. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB, 413 above it). */
     requestBody: {
       content: {
-        'application/octet-stream': string;
+        'application/pdf': string;
+        'image/png': string;
+        'image/jpeg': string;
+        'image/gif': string;
+        'image/webp': string;
+        'application/zip': string;
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': string;
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': string;
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': string;
+        'application/msword': string;
+        'application/vnd.ms-excel': string;
+        'application/vnd.ms-powerpoint': string;
+        'application/xml': string;
+        'application/json': string;
+        'text/csv': string;
+        'text/plain': string;
       };
     };
     responses: {
@@ -25495,6 +25751,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       /** @description Payload too large */
       413: {
@@ -25505,7 +25762,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Unsupported media type */
+      /** @description The Content-Type is missing or not one of the allowed types (application/octet-stream is not accepted). */
       415: {
         headers: {
           [name: string]: unknown;
@@ -25514,9 +25771,20 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Blob storage is not configured */
+      /** @description The content does not match its declared Content-Type (type https://reticora.io/problems/mime-mismatch), or it is HTML, an executable (PE, ELF, Mach-O) or a script (#!). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Blob storage is not configured, or the instance runs as many uploads as RETICORA_DOCUMENT_UPLOAD_CONCURRENCY allows (with Retry-After). */
       503: {
         headers: {
+          /** @description Seconds to wait before retrying when all upload slots are taken. */
+          'Retry-After'?: number;
           [name: string]: unknown;
         };
         content: {
@@ -25596,6 +25864,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
@@ -35120,12 +35397,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List tags. The page follows the cursor contract (API-02); the item schema comes with WP-753. */
+      /** @description Tags, sorted by key */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TagListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -35139,19 +35418,34 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTagRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-753. */
+      /** @description Tag created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
+      /** @description An invalid key, display_name or color; `violations` names the fields. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   getTag: {
@@ -35166,12 +35460,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a tag. The response schema comes with WP-753. */
+      /** @description Tag */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -35190,7 +35486,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description Tag deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -35200,6 +35496,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The tag is assigned to CIs or is a system tag. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateTag: {
@@ -35212,20 +35517,34 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateTagRequest'];
+      };
+    };
     responses: {
-      /** @description Updated. The request and response schemas come with WP-753. */
+      /** @description Tag updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Tag'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description A sent key or an invalid display_name or color; `violations` names the fields. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   mergeTag: {
@@ -35238,46 +35557,108 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MergeTagRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-753. */
+      /** @description Tags merged */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TagMergeResult'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tag is a system tag, or it is assigned to CIs outside the caller's scope. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description into_id names no other tag of the organization. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   replaceCITags: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceCITagsRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-753. */
+      /** @description Tags replaced; the CI */
       200: {
         headers: {
+          /** @description The new CI version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CI'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tags changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the CI */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description tags is missing or names unknown tags; `violations` names the entries. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   listSubnetReservations: {
@@ -36048,12 +36429,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the storage usage of the documents. The response schema comes with WP-731. */
+      /** @description Storage usage of the organization */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentUsage'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -36082,12 +36465,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the versions of a document. The page follows the cursor contract (API-02); the item schema comes with WP-731. */
+      /** @description Paginated document versions */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentVersionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -36105,20 +36490,79 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    /** @description The binary content (SEC-09). The Content-Type names its type and must be one of the listed ones; the content must carry the signature of that type: %PDF- for PDF, the image signatures for PNG, JPEG, GIF and WebP, a ZIP archive for application/zip, a ZIP archive with [Content_Types].xml for the OOXML formats (docx, xlsx, pptx), a compound file (D0 CF 11 E0 A1 B1 1A E1) for doc, xls and ppt, an XML declaration for application/xml, and valid UTF-8 text that is no HTML for JSON, CSV and plain text. HTML, executables (PE, ELF, Mach-O) and scripts (#!) are refused whatever the declaration. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB, 413 above it). */
+    requestBody: {
+      content: {
+        'application/pdf': string;
+        'image/png': string;
+        'image/jpeg': string;
+        'image/gif': string;
+        'image/webp': string;
+        'application/zip': string;
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': string;
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': string;
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation': string;
+        'application/msword': string;
+        'application/vnd.ms-excel': string;
+        'application/vnd.ms-powerpoint': string;
+        'application/xml': string;
+        'application/json': string;
+        'text/csv': string;
+        'text/plain': string;
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-731. */
+      /** @description Version created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentVersion'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description Payload too large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The Content-Type is missing or not one of the allowed types (application/octet-stream is not accepted). */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The content does not match its declared Content-Type (type https://reticora.io/problems/mime-mismatch), or it is HTML, an executable (PE, ELF, Mach-O) or a script (#!). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Blob storage is not configured, or the instance runs as many uploads as RETICORA_DOCUMENT_UPLOAD_CONCURRENCY allows (with Retry-After). */
+      503: {
+        headers: {
+          /** @description Seconds to wait before retrying when all upload slots are taken. */
+          'Retry-After'?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteDocumentLink: {
@@ -36424,19 +36868,29 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ImportStartRequest'];
+      };
+    };
     responses: {
-      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-301. */
+      /** @description The import runs as a job; the Location header names it. */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportJobAccepted'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   previewImport: {
@@ -36446,19 +36900,28 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ImportPreviewRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-301. */
+      /** @description Format, sheets, header and sample rows of the file */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportPreview'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getImport: {
@@ -36473,16 +36936,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an import run. The response schema comes with WP-301. */
+      /** @description The import run */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportRun'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getImportReport: {
@@ -36497,16 +36963,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the report of an import run. The response schema comes with WP-301. */
+      /** @description Download link of the report */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportReportLink'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
 }

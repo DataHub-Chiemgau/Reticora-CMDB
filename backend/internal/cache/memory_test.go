@@ -24,8 +24,8 @@ func TestMemoryStore_GetSet(t *testing.T) {
 	}
 
 	// Set and get
-	if err := store.Set(ctx, "key1", "value1", time.Minute); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if setErr := store.Set(ctx, "key1", "value1", time.Minute); setErr != nil {
+		t.Fatalf("unexpected error: %v", setErr)
 	}
 	val, found, err = store.Get(ctx, "key1")
 	if err != nil {

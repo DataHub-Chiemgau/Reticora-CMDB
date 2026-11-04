@@ -60,6 +60,7 @@ func TestOpenSearchHTTPQuery(t *testing.T) {
 		t.Fatalf("res=%#v err=%v", res, err)
 	}
 }
+
 // orgWideContext carries an org-wide tenant scope, as the auth middleware
 // attaches it to every request.
 func orgWideContext(orgID string) context.Context {

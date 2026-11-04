@@ -58,18 +58,18 @@ type TeamMember struct {
 
 // CustomRole represents a custom permission role.
 type CustomRole struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	IsSystem       bool      `json:"is_system"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	IsSystem       bool   `json:"is_system"`
 	// IsBuiltin marks the four seeded standard roles (org_admin, engineer,
 	// viewer, client_technician). Builtin roles live in the `role` table and
 	// are assigned via role_id; custom roles live in `custom_role`.
-	IsBuiltin    bool      `json:"is_builtin"`
-	Permissions  []string  `json:"permissions"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	IsBuiltin   bool      `json:"is_builtin"`
+	Permissions []string  `json:"permissions"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // UserRoleAssignment represents a user's role assignment. Exactly one of

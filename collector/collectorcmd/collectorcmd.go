@@ -411,9 +411,9 @@ func loadTLSMaterial(ctx context.Context, cfg collectorConfig) (certPEM, keyPEM,
 		if len(current) > 0 || path == "" {
 			return current, nil
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read TLS material from %s: %w", path, err)
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, fmt.Errorf("read TLS material from %s: %w", path, readErr)
 		}
 		return data, nil
 	}
@@ -991,11 +991,11 @@ func (u *uploader) postPayload(ctx context.Context, payload []byte) (lost int, e
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(payload); err != nil {
-		return 0, fmt.Errorf("compress results: %w", err)
+	if _, writeErr := gz.Write(payload); writeErr != nil {
+		return 0, fmt.Errorf("compress results: %w", writeErr)
 	}
-	if err := gz.Close(); err != nil {
-		return 0, fmt.Errorf("finalize compression: %w", err)
+	if closeErr := gz.Close(); closeErr != nil {
+		return 0, fmt.Errorf("finalize compression: %w", closeErr)
 	}
 
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + "/api/v1/discovery/ingest"

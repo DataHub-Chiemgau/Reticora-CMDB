@@ -19,17 +19,12 @@ func TestEnrollCollectorFlow(t *testing.T) {
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
-	// create a code via the HTTP handler path needs tenant context; use repo directly
-	code := &discovery.EnrollmentCode{}
-	code.OrganizationID = "org-1"
-	code.Label = "x"
 	// seed via memory repo internal: use CreateEnrollmentCode with a raw code
 	c2 := &discovery.EnrollmentCode{OrganizationID: "org-1", Label: "l", ExpiresAt: time.Now().UTC().Add(30 * time.Minute)}
 	c2.SetRawCode("raw-code-123")
 	if err := repo.CreateEnrollmentCode(context.Background(), c2); err != nil {
 		t.Fatal(err)
 	}
-	_ = code
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/collectors/enroll", strings.NewReader(`{"code":"raw-code-123","name":"col-x"}`))
 	req.Header.Set("Content-Type", "application/json")

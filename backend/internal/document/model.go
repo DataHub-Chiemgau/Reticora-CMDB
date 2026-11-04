@@ -19,6 +19,10 @@ type Document struct {
 	UploadedBy     string    `json:"uploaded_by"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// ScanStatus and ScannedAt are those of the current version (WP-733,
+	// SEC-09); both are empty for a document without stored content.
+	ScanStatus string     `json:"scan_status,omitempty"`
+	ScannedAt  *time.Time `json:"scanned_at,omitempty"`
 }
 
 // DocumentLink links a document to another entity (CI, asset, ticket, etc.).
@@ -71,4 +75,56 @@ type FilterParams struct {
 	// that target (WP-811); both are set or both are empty.
 	EntityType string
 	EntityID   string
+}
+
+// Scan status of a document version (SEC-09, E-42). Every new version
+// starts with ScanPending; only a ScanClean version is downloadable
+// (WP-733), the malware scan (WP-734) sets the result with SetScanResult.
+// ScanInfected is the quarantine: blob and links stay, the download and new
+// links answer 409 document-quarantined.
+const (
+	ScanPending  = "pending_scan"
+	ScanClean    = "clean"
+	ScanInfected = "infected"
+	ScanFailed   = "scan_failed"
+)
+
+// validScanStatus reports whether status is one of the four scan states.
+func validScanStatus(status string) bool {
+	switch status {
+	case ScanPending, ScanClean, ScanInfected, ScanFailed:
+		return true
+	}
+	return false
+}
+
+// Version is one stored content of a document (WP-731, MGT-01). The
+// document mirrors its highest version in version, storage_key, file_size
+// and mime_type.
+type Version struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	DocumentID     string `json:"document_id"`
+	Version        int    `json:"version"`
+	// StorageKey is org/<org>/documents/<document>/<version id> (legacy:
+	// documents/<org>/<document>/…); it is served only as a presigned URL.
+	StorageKey string `json:"-"`
+	Size       int64  `json:"size"`
+	MimeType   string `json:"mime_type"`
+	// ChecksumSHA256 is the hex sha256 of the content; nil only for the
+	// versions of the backfill of migration 000220.
+	ChecksumSHA256 *string    `json:"checksum_sha256"`
+	ScanStatus     string     `json:"scan_status"`
+	ScannedAt      *time.Time `json:"scanned_at,omitempty"`
+	// UploadedBy is the user id without foreign key (uploaded_by_surrogate).
+	UploadedBy string    `json:"uploaded_by,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// Usage is the document storage of the organization (GET
+// /api/v1/documents/usage): the bytes of every stored version and the limit
+// of max_storage_mb in MiB, nil when unlimited.
+type Usage struct {
+	StorageBytes int64  `json:"storage_bytes"`
+	LimitMB      *int64 `json:"limit_mb"`
 }

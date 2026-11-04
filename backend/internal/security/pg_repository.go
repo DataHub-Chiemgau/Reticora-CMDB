@@ -124,7 +124,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateF
 		if req.Status != nil {
 			sets = append(sets, fmt.Sprintf("status = $%d", pos))
 			args = append(args, *req.Status)
-			pos++
 			if *req.Status == "resolved" || *req.Status == "false_positive" {
 				sets = append(sets, "resolved_at = now()")
 			} else {

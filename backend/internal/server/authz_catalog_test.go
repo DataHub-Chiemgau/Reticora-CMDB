@@ -116,7 +116,6 @@ var unroutedUntil = map[string]string{
 	"contract:read":           "suppliers and contracts (WP-269)",
 	"contract:write":          "suppliers and contracts (WP-269)",
 	"field_permission:manage": "field-permissions (WP-264, WP-726)",
-	"tag:manage":              "tags (WP-281, WP-753)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the

@@ -83,3 +83,17 @@ func TestSuccessStaysJSON(t *testing.T) {
 		t.Errorf("success: %q %s", ct, w.Body.String())
 	}
 }
+
+// TestWriteJSONUnencodableBodyIsServerError covers F-123 (errcheck): a body
+// that does not encode is answered with a 500 problem instead of a success
+// status with a truncated body.
+func TestWriteJSONUnencodableBodyIsServerError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	api.WriteJSON(rec, http.StatusOK, map[string]any{"bad": make(chan int)})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != api.ProblemContentType {
+		t.Fatalf("Content-Type = %q, want %q", ct, api.ProblemContentType)
+	}
+}

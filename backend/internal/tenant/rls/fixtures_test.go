@@ -613,8 +613,44 @@ func inheritedModels(ids matrixIDs) map[string]*inheritedModel {
 			}
 			return id, nil
 		}),
+		"document_version":    documentVersionModel(ids),
 		"review_item":         reviewItemModel(ids),
 		"training_assignment": trainingAssignmentModel(ids),
+	}
+}
+
+// documentVersionModel: a version is read, changed and deleted exactly when
+// its document is visible (migration 000220, pattern of
+// training_assignment); it is added only to a document the principal could
+// create with its links (require_visible_parent with the team argument:
+// a scoped principal versions only linked documents). Each row is a
+// document with the links of the row and one version; an INSERT attempt
+// creates both in its own transaction.
+func documentVersionModel(ids matrixIDs) *inheritedModel {
+	docs := documentModel(ids, nil)
+	return &inheritedModel{
+		rows: docs.rows,
+		insert: func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			var doc string
+			if err := q.QueryRow(ctx, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+				VALUES ($1, 'matrix', 'f', '', $2) RETURNING id::text`, r.org, w.userFor(r.org)).Scan(&doc); err != nil {
+				return "", err
+			}
+			for _, k := range r.parents {
+				if _, err := q.Exec(ctx, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'ci', $3)`,
+					r.org, doc, w.parents[k].id); err != nil {
+					return "", err
+				}
+			}
+			var id string
+			err := q.QueryRow(ctx, `INSERT INTO document_version (organization_id, document_id, version, storage_key, size, mime)
+				VALUES ($1, $2, 1, $3, 1, 'text/plain') RETURNING id::text`,
+				r.org, doc, "org/"+r.org+"/documents/"+doc+"/matrix").Scan(&id)
+			return id, err
+		},
+		read:     docs.read,
+		write:    docs.read,
+		insertOK: docs.write,
 	}
 }
 

@@ -39,7 +39,9 @@ func scanDesk(s pgx.Row) (*Desk, error) {
 		return nil, err
 	}
 	if len(attrs) > 0 {
-		json.Unmarshal(attrs, &d.Attributes)
+		if err := json.Unmarshal(attrs, &d.Attributes); err != nil {
+			return nil, fmt.Errorf("decode attributes of desk %s: %w", d.ID, err)
+		}
 	}
 	if d.Attributes == nil {
 		d.Attributes = map[string]any{}
@@ -181,7 +183,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateD
 			attrs, _ := json.Marshal(req.Attributes)
 			sets = append(sets, fmt.Sprintf("attributes = $%d::jsonb", pos))
 			args = append(args, string(attrs))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {

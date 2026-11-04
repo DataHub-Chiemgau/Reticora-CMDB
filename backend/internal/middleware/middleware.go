@@ -550,6 +550,11 @@ func (w *responseWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
+// Unwrap gives http.ResponseController the underlying writer, so a handler
+// behind Logger, RegisterHTTPMetrics or the rate limiter can extend its
+// deadlines (WP-268).
+func (w *responseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func newRequestID() string {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {

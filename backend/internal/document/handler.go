@@ -1,77 +1,173 @@
 package document
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
-// maxDocumentUpload is the hard limit for a single document upload.
-const maxDocumentUpload = 25 << 20 // 25 MiB
-
-// allowedMimeTypes restricts uploads to common, safe office/image formats.
-// Executables, scripts and HTML are excluded on purpose: a stored file is
-// later downloaded by other users, and serving attacker-controlled HTML/JS
-// from our own origin would be an XSS vector.
-var allowedMimeTypes = map[string]bool{
-	"application/pdf":    true,
-	"application/json":   true,
-	"application/xml":    true,
-	"application/zip":    true,
-	"application/msword": true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.ms-excel": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
-	"application/vnd.ms-powerpoint":                                             true,
-	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
-	"application/octet-stream": true,
-	"image/png":                true,
-	"image/jpeg":               true,
-	"image/gif":                true,
-	"image/svg+xml":            false, // SVG can carry script — excluded
-	"image/webp":               true,
-	"text/plain":               true,
-	"text/csv":                 true,
-}
-
 // Handler provides HTTP handlers for document endpoints.
 type Handler struct {
 	repo   Repository
 	blobs  blob.Store
 	bucket string
+	// limits resolves max_storage_mb (WithLimits); nil is unlimited.
+	limits StorageLimiter
+	// uploads are the size, parallelism and deadline of uploads
+	// (WithUploads, SEC-09).
+	uploads uploadLimits
 }
 
 // NewHandler creates a new document handler. blobs may be nil; content
 // upload/download then answer 503 while metadata CRUD keeps working.
+// Uploads use the defaults of config.DocumentSettings until WithUploads.
 func NewHandler(repo Repository, blobs blob.Store) *Handler {
-	if blobs == nil {
-		return &Handler{repo: repo}
+	h := &Handler{repo: repo, uploads: newUploadLimits(config.DocumentSettings{})}
+	if blobs != nil {
+		h.blobs, h.bucket = blobs, documentBucket
 	}
-	return &Handler{repo: repo, blobs: blobs, bucket: documentBucket}
+	return h
 }
 
-// documentBucket is the blob bucket document content is stored in.
-const documentBucket = "reticora-documents"
+// WithUploads sets the upload limits (SEC-09, WP-268): the largest body
+// (RETICORA_DOCUMENT_MAX_UPLOAD_MB), the uploads running at the same time on
+// this instance (RETICORA_DOCUMENT_UPLOAD_CONCURRENCY) and the read and
+// write deadline of an upload request (RETICORA_DOCUMENT_UPLOAD_TIMEOUT). A
+// zero value keeps its default.
+func (h *Handler) WithUploads(settings config.DocumentSettings) *Handler {
+	h.uploads = newUploadLimits(settings)
+	return h
+}
+
+// uploadLimits are the limits of the upload paths PUT …/content and POST
+// …/versions.
+type uploadLimits struct {
+	maxBytes int64
+	timeout  time.Duration
+	// slots holds one token per running upload.
+	slots chan struct{}
+}
+
+func newUploadLimits(s config.DocumentSettings) uploadLimits {
+	if s.MaxUploadMB <= 0 {
+		s.MaxUploadMB = config.DefaultDocumentMaxUploadMB
+	}
+	if s.UploadConcurrency <= 0 {
+		s.UploadConcurrency = config.DefaultDocumentUploadConcurrency
+	}
+	if s.UploadTimeout <= 0 {
+		s.UploadTimeout = config.DefaultDocumentUploadTimeout
+	}
+	return uploadLimits{maxBytes: s.MaxUploadBytes(), timeout: s.UploadTimeout, slots: make(chan struct{}, s.UploadConcurrency)}
+}
+
+// uploadRetryAfter is the Retry-After (seconds) of an upload refused
+// because all upload slots are taken.
+const uploadRetryAfter = "5"
+
+// beginUpload takes an upload slot and extends the read and write deadline
+// of the connection to the upload timeout; the global 15 s of the server
+// stay in force for every other route. Without a free slot it answers 503
+// with Retry-After and reports false; otherwise the caller runs the
+// returned release when the upload is done.
+func (h *Handler) beginUpload(w http.ResponseWriter) (release func(), ok bool) {
+	select {
+	case h.uploads.slots <- struct{}{}:
+	default:
+		w.Header().Set("Retry-After", uploadRetryAfter)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable",
+			"too many document uploads in progress, retry later")
+		return nil, false
+	}
+	// A writer without deadlines (tests) keeps the server's; the
+	// middleware writers pass the controller through (Unwrap).
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(h.uploads.timeout)
+	_ = rc.SetReadDeadline(deadline)
+	_ = rc.SetWriteDeadline(deadline)
+	return func() { <-h.uploads.slots }, true
+}
+
+// readUpload verifies and reads the body of an upload (sniff.go) and
+// answers a refusal itself: 415 for a missing or non-whitelisted
+// Content-Type, 413 above the size limit, 422 mime-mismatch for content
+// that does not match its type. It returns the verified type and the body.
+func (h *Handler) readUpload(w http.ResponseWriter, r *http.Request) (mimeType string, payload []byte, ok bool) {
+	mimeType, payload, err := verifyUpload(w, r, r.Header.Get("Content-Type"), h.uploads.maxBytes)
+	var maxErr *http.MaxBytesError
+	var mm *mismatchError
+	switch {
+	case err == nil:
+		return mimeType, payload, true
+	case errors.Is(err, errUnsupportedType):
+		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
+			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
+	case errors.As(err, &maxErr):
+		api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
+			fmt.Sprintf("document content exceeds the %d MiB limit", h.uploads.maxBytes>>20))
+	case errors.As(err, &mm):
+		api.WriteProblem(w, http.StatusUnprocessableEntity, ProblemMimeMismatch, "Content Type Mismatch", mm.detail)
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
+	}
+	return "", nil, false
+}
+
+// Problem types of a refused download or link (WP-733, SEC-09, E-42): a
+// version not (yet) scanned clean, i.e. pending_scan or scan_failed, and
+// a quarantined (infected) one. Both answer 409.
+const (
+	ProblemPendingScan = "https://reticora.io/problems/document-pending-scan"
+	ProblemQuarantined = "https://reticora.io/problems/document-quarantined"
+)
+
+// writeScanRefusal answers a download of a version that is not clean with
+// 409 (fail-closed, E-42): document-quarantined for infected,
+// document-pending-scan for every other status, an unknown or missing one
+// included. It reports whether it answered.
+func writeScanRefusal(w http.ResponseWriter, status string) bool {
+	switch status {
+	case ScanClean:
+		return false
+	case ScanInfected:
+		api.WriteProblem(w, http.StatusConflict, ProblemQuarantined, "Document Quarantined",
+			"the document content was found infected and is quarantined")
+	default:
+		api.WriteProblem(w, http.StatusConflict, ProblemPendingScan, "Document Pending Scan",
+			"the document content has not been scanned clean yet")
+	}
+	return true
+}
+
+// Bucket is the blob bucket document content is stored in; the import
+// (WP-301) reads document versions from it.
+const Bucket = "reticora-documents"
+
+// documentBucket is the bucket of this package's handler, Bucket.
+const documentBucket = Bucket
 
 // RegisterRoutes registers document routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/documents", h.List)
 	r.Post("/api/v1/documents", h.Create)
+	r.Get("/api/v1/documents/usage", h.Usage)
 	r.Get("/api/v1/documents/{id}", h.Get)
 	r.Patch("/api/v1/documents/{id}", h.Update)
 	r.Delete("/api/v1/documents/{id}", h.Delete)
 	r.Put("/api/v1/documents/{id}/content", h.UploadContent)
 	r.Get("/api/v1/documents/{id}/content", h.DownloadContent)
+	r.Post("/api/v1/documents/{id}/versions", h.CreateVersion)
+	r.Get("/api/v1/documents/{id}/versions", h.ListVersions)
 	r.Post("/api/v1/documents/{id}/links", h.Link)
 	r.Get("/api/v1/documents/{id}/links", h.GetLinks)
 	r.Delete("/api/v1/documents/{id}/links/{link_id}", h.Unlink)
@@ -311,74 +407,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// UploadContent handles PUT /api/v1/documents/{id}/content. The request body
-// is stored as the document's object; the storage key is server-generated so
-// a client can never overwrite another tenant's blob.
-func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-	if h.blobs == nil {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "document content upload requires blob storage")
-		return
-	}
-
-	// The object key is fixed per document version, so only a principal that
-	// may change the document may write it (WP-341): a document shared with
-	// another client or an org-wide one answers 404 before anything is stored.
-	id := chi.URLParam(r, "id")
-	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
-		return
-	}
-
-	mimeType := r.Header.Get("Content-Type")
-	if idx := strings.Index(mimeType, ";"); idx >= 0 {
-		mimeType = strings.TrimSpace(mimeType[:idx])
-	}
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	allowed, known := allowedMimeTypes[mimeType]
-	if !known || !allowed {
-		api.WriteError(w, http.StatusUnsupportedMediaType, "Unsupported Media Type",
-			fmt.Sprintf("content type %q is not allowed for document uploads", mimeType))
-		return
-	}
-
-	body := http.MaxBytesReader(w, r.Body, maxDocumentUpload)
-	payload, err := io.ReadAll(body)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
-				fmt.Sprintf("document content exceeds the %d MiB limit", maxDocumentUpload>>20))
-			return
-		}
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
-		return
-	}
-
-	storageKey := blob.OrgKey(t.OrganizationID, "documents", doc.ID, strconv.Itoa(doc.Version))
-	if err := h.blobs.Put(r.Context(), h.bucket, storageKey,
-		bytes.NewReader(payload), int64(len(payload)), mimeType); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not store the document content")
-		return
-	}
-
-	updated, err := h.repo.SetStorage(r.Context(), t.OrganizationID, id, storageKey, mimeType, int64(len(payload)))
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, updated)
-}
-
 // DownloadContent handles GET /api/v1/documents/{id}/content and answers with
-// a time-limited presigned URL for the stored object.
+// a time-limited presigned URL for the stored object: of version n with
+// ?version=n (404 when the document has no such version), else of the
+// current version. Only a version scanned clean is presigned (WP-733,
+// fail-closed after E-42); any other answers 409 (writeScanRefusal).
 func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -390,22 +423,43 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	version, ok := requestedVersion(r)
+	if !ok {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "version must be a positive integer")
+		return
+	}
 	id := chi.URLParam(r, "id")
 	doc, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
 	}
-	if doc.StorageKey == "" {
+	key, scanStatus := doc.StorageKey, doc.ScanStatus
+	if version > 0 {
+		v, verr := h.repo.GetVersion(r.Context(), t.OrganizationID, doc.ID, version)
+		if verr != nil {
+			if errors.Is(verr, api.ErrNotFound) {
+				api.WriteError(w, http.StatusNotFound, "Not Found", "document version not found")
+				return
+			}
+			api.WriteRepoError(w, verr)
+			return
+		}
+		key, scanStatus = v.StorageKey, v.ScanStatus
+	}
+	if key == "" {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document has no stored content")
 		return
 	}
-	if !ownsStorageKey(t.OrganizationID, doc.ID, doc.StorageKey) {
+	if !ownsStorageKey(t.OrganizationID, doc.ID, key) {
 		api.WriteError(w, http.StatusConflict, "Conflict", "document content is stored outside the organization")
 		return
 	}
+	if writeScanRefusal(w, scanStatus) {
+		return
+	}
 
-	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, doc.StorageKey)
+	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a download URL")
 		return
@@ -447,8 +501,13 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// An unknown entity type answers 422, a target outside the scope or
-	// missing 404 (WP-267).
+	// missing 404 (WP-267), a quarantined document 409 (WP-733).
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
+		if errors.Is(err, ErrQuarantined) {
+			api.WriteProblem(w, http.StatusConflict, ProblemQuarantined, "Document Quarantined",
+				"the document is quarantined and cannot be linked")
+			return
+		}
 		if errors.Is(err, api.ErrNotFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "document or linked object not found")
 			return
@@ -504,6 +563,14 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, api.Page(links, page))
+}
+
+// OwnsStorageKey reports whether key is an object of document docID of
+// organization orgID, the check of the download (ownsStorageKey) for
+// readers outside the package such as the import (WP-301): the legacy keys
+// documents/<org>/<doc>/… are accepted, unlike blob.CheckOrgKey.
+func OwnsStorageKey(orgID, docID, key string) bool {
+	return ownsStorageKey(orgID, docID, key)
 }
 
 // ownsStorageKey reports whether key is an object of document docID of

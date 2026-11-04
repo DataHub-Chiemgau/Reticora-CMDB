@@ -159,7 +159,6 @@ func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req Upd
 		if req.Active != nil {
 			set = append(set, fmt.Sprintf("active=$%d", pos))
 			args = append(args, *req.Active)
-			pos++
 		}
 		if len(set) == 0 {
 			var err error

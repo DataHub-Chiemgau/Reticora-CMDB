@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -20,6 +22,22 @@ func tenantCtx(r *http.Request) *http.Request {
 	ctx := tenant.WithTenant(r.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
 	scope := database.OrgWideScope("org-1", "user-1")
 	return r.WithContext(database.ContextWithTenantScope(ctx, &scope))
+}
+
+// allowAll is an entitlement checker that enables every feature.
+type allowAll struct{}
+
+func (allowAll) IsEnabled(context.Context, string, string) bool { return true }
+
+// openDATEVGate is a DATEV gate with the module inventory on and every
+// entitlement granted (WP-790).
+func openDATEVGate() *DATEVGate { return NewDATEVGate(allowAll{}, true) }
+
+// assetReader adds a principal with asset:read to a request, as DATEV
+// requires (WP-790).
+func assetReader(r *http.Request) *http.Request {
+	return r.WithContext(identity.WithPrincipal(r.Context(), identity.Principal{Subject: "user-1",
+		Permissions: []identity.Permission{identity.PermExportRun, identity.PermCIRead, identity.PermAssetRead}}))
 }
 
 func TestExportJSON(t *testing.T) {
@@ -109,12 +127,12 @@ func TestExportDATEV(t *testing.T) {
 		},
 	})
 
-	h := NewHandler(repo)
+	h := NewHandler(repo).WithDATEVGate(openDATEVGate())
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/export/cis?format=datev", nil)
-	req = tenantCtx(req)
+	req = assetReader(tenantCtx(req))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -146,7 +164,7 @@ func TestExportStreamsBeyondOneBatch(t *testing.T) {
 		}
 	}
 
-	h := NewHandler(repo)
+	h := NewHandler(repo).WithDATEVGate(openDATEVGate())
 	h.batchSize = 5 // force several streaming batches
 	mux := chi.NewRouter()
 	h.RegisterRoutes(mux)
@@ -154,7 +172,7 @@ func TestExportStreamsBeyondOneBatch(t *testing.T) {
 	for _, format := range []string{"json", "csv", "datev"} {
 		t.Run(format, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/api/v1/export/cis?format="+format, nil)
-			req = tenantCtx(req)
+			req = assetReader(tenantCtx(req))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, req)
 
@@ -219,7 +237,7 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 		}
 	}
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
+	NewHandler(repo).WithDATEVGate(openDATEVGate()).RegisterRoutes(mux)
 
 	read := func(t *testing.T, body string) [][]string {
 		t.Helper()
@@ -250,7 +268,7 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 	} {
 		t.Run(c.format, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format="+c.format, nil)))
+			mux.ServeHTTP(w, assetReader(tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format="+c.format, nil))))
 			if w.Code != http.StatusOK {
 				t.Fatalf("export: %d %s", w.Code, w.Body.String())
 			}
@@ -311,11 +329,14 @@ func TestCSVNeutralizesFormulas(t *testing.T) {
 
 // TestCSVFormatAndManifest covers EXP-01 (WP-189): CSV in UTF-8 with BOM
 // and semicolons; the manifest lists the fields of the layout and the
-// visible CI fields it leaves out, also in a response header.
+// visible CI fields it leaves out, also in a response header. The tag keys
+// are the last column, separated by | (WP-754), and tags is no longer
+// omitted.
 func TestCSVFormatAndManifest(t *testing.T) {
 	repo := ci.NewMemoryRepository()
+	tags := []string{"Web", "prod"}
 	if err := repo.Create(context.Background(), &ci.Item{OrganizationID: "org-1", CITypeID: "type-server",
-		Name: "srv; \"quoted\"", Status: "active", Hostname: "srv01", Attributes: map[string]any{}}); err != nil {
+		Name: "srv; \"quoted\"", Status: "active", Hostname: "srv01", Attributes: map[string]any{}, LegacyTags: &tags}); err != nil {
 		t.Fatal(err)
 	}
 	mux := chi.NewRouter()
@@ -323,14 +344,18 @@ func TestCSVFormatAndManifest(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest("GET", "/api/v1/export/cis?format=csv", nil)))
 	body := w.Body.String()
-	if !strings.HasPrefix(body, "\ufeffid;name;status;ci_type_id;") {
-		t.Errorf("header: %q", body[:min(60, len(body))])
+	if !strings.HasPrefix(body, "\ufeffid;name;status;ci_type_id;") || !strings.Contains(body, ";created_at;updated_at;tags\n") {
+		t.Errorf("header: %q", body[:min(200, len(body))])
+	}
+	if !strings.HasSuffix(body, ";prod|web\n") {
+		t.Errorf("tags cell: %q", body)
 	}
 	// A value with the separator is quoted.
 	if !strings.Contains(body, `;"srv; ""quoted""";active;`) {
 		t.Errorf("row: %q", body)
 	}
-	if omitted := w.Header().Get("X-Export-Omitted-Fields"); !strings.Contains(omitted, "hostname") || strings.Contains(omitted, "serial_number") {
+	if omitted := w.Header().Get("X-Export-Omitted-Fields"); !strings.Contains(omitted, "hostname") || strings.Contains(omitted, "serial_number") ||
+		slices.Contains(strings.Split(omitted, ","), "tags") {
 		t.Errorf("omitted header %q", omitted)
 	}
 
@@ -342,6 +367,12 @@ func TestCSVFormatAndManifest(t *testing.T) {
 		if o.Reason == "" {
 			t.Errorf("omitted %s without reason", o.Field)
 		}
+		if o.Field == "tags" {
+			t.Error("csv manifest omits tags")
+		}
+	}
+	if !slices.Contains(m.Fields, "tags") {
+		t.Errorf("csv manifest fields %v without tags", m.Fields)
 	}
 	if j := ManifestFor("json"); len(j.Omitted) != 0 || len(j.Fields) != len(ciFieldNames) {
 		t.Errorf("json manifest %+v", j)

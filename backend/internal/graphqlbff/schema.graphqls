@@ -73,6 +73,8 @@ type CI {
   createdAt: String!
   updatedAt: String!
   attributes: Map
+  "The keys of the catalog tags of the CI, sorted (CI-07, WP-754)."
+  tags: [String!]!
 }
 
 type Relationship {

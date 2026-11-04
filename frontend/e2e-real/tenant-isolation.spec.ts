@@ -590,12 +590,16 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
       '/jobs?limit=200',
       '/export/cis?format=json',
       '/export/cis?format=csv',
-      '/export/cis?format=datev',
     ]) {
       const r = await api(w.rq, w.b.token, 'GET', path);
       expect(r.status, `GET ${path} as B`).toBe(200);
       expectNoTraceOfA(`GET ${path} as B`, r.body);
     }
+    // DATEV sits behind module inventory, export_datev, assets_basic and asset:read (WP-790,
+    // E-141): without them the export is refused (400/403); either way nothing of A shows.
+    const datev = await api(w.rq, w.b.token, 'GET', '/export/cis?format=datev');
+    expect([200, 400, 403], 'GET /export/cis?format=datev as B').toContain(datev.status);
+    expectNoTraceOfA('GET /export/cis?format=datev as B', datev.body);
     // Impact of B's own CI never reaches A's graph.
     const impactB = await api(w.rq, w.b.token, 'GET', `/impact/${w.bOwn.id}`);
     expect(impactB.status).toBe(200);

@@ -63,6 +63,9 @@ type workerDeps struct {
 	// entitlements checks the discovery license on the collectors' scope
 	// channel (F-400); nil treats every organization as licensed.
 	entitlements *entitlement.Service
+	// modules are the late modules; the export worker checks inventory for
+	// DATEV jobs (WP-790).
+	modules *server.ModuleSet
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
@@ -109,6 +112,13 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		if d.repos.Jobs != nil {
 			exportWorker.Tracker = jobs.NewService(d.repos.Jobs)
 		}
+		// DATEV jobs are checked again before rendering (WP-790); without
+		// entitlements DATEV is refused instead of licensed.
+		var datevEntitlements export.EntitlementChecker
+		if d.entitlements != nil {
+			datevEntitlements = d.entitlements
+		}
+		exportWorker.DATEV = export.NewDATEVGate(datevEntitlements, d.modules.Enabled(server.ModuleInventory))
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },
@@ -314,6 +324,9 @@ type systemJobDeps struct {
 	jobQueue *jobs.Queue
 	// notifier bundles the digests (notify.digest); nil: no digest run.
 	notifier *notify.Notifier
+	// blobs holds the document content the soft-delete run deletes with
+	// the documents (WP-732); nil keeps documents with stored content.
+	blobs blob.Store
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -343,7 +356,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		systemJobs = append(systemJobs, jobs.NewRotation(pool, d.encryptor, dekRotator{repo: credential.NewPGRepository(pool)},
 			webhook.NewPGRepository(pool)).Schedules()...)
 		systemJobs = append(systemJobs, jobs.NewRetention(pool, jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
-			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).Schedules()...)
+			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).WithBlobs(d.blobs).Schedules()...)
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)

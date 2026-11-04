@@ -208,7 +208,6 @@ func metricWhere(q MetricQuery) (string, []any) {
 	if !q.To.IsZero() {
 		where = append(where, fmt.Sprintf("time <= $%d", pos))
 		args = append(args, q.To.UTC())
-		pos++
 	}
 	return strings.Join(where, " AND "), args
 }

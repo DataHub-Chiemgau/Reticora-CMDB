@@ -50,29 +50,29 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	orgID := "33333333-3333-3333-3333-333333333333"
-	if _, err := pool.Exec(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'audit-roundtrip', 'audit-roundtrip') ON CONFLICT (id) DO NOTHING`, orgID); err != nil {
-		t.Fatalf("insert org: %v", err)
+	if _, orgErr := pool.Exec(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'audit-roundtrip', 'audit-roundtrip') ON CONFLICT (id) DO NOTHING`, orgID); orgErr != nil {
+		t.Fatalf("insert org: %v", orgErr)
 	}
 	// audit_log is append-only (migration 000056). This fixture needs to reset
 	// and later tamper with the chain, which it does under
 	// session_replication_role = replica: that skips triggers for this session
 	// only, so it cannot race with other packages sharing the database.
 	unguarded := func(sql string, args ...any) error {
-		conn, err := pool.Acquire(ctx)
-		if err != nil {
-			return err
+		conn, connErr := pool.Acquire(ctx)
+		if connErr != nil {
+			return connErr
 		}
 		defer conn.Release()
-		if _, err := conn.Exec(ctx, `SET session_replication_role = replica`); err != nil {
-			return err
+		if _, replicaErr := conn.Exec(ctx, `SET session_replication_role = replica`); replicaErr != nil {
+			return replicaErr
 		}
 		defer conn.Exec(ctx, `SET session_replication_role = origin`)
-		_, err = conn.Exec(ctx, sql, args...)
-		return err
+		_, connErr = conn.Exec(ctx, sql, args...)
+		return connErr
 	}
 	// Repeat runs of this test share the org; start from an empty chain.
-	if err := unguarded(`DELETE FROM audit_log WHERE organization_id = $1`, orgID); err != nil {
-		t.Fatalf("reset audit log: %v", err)
+	if resetErr := unguarded(`DELETE FROM audit_log WHERE organization_id = $1`, orgID); resetErr != nil {
+		t.Fatalf("reset audit log: %v", resetErr)
 	}
 	t.Cleanup(func() {
 		unguarded(`DELETE FROM audit_log WHERE organization_id = $1`, orgID)
@@ -81,14 +81,14 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 
 	recorder := audit.NewPGRecorder()
 	for i, action := range []string{"ci.created", "ci.updated", "ci.deleted"} {
-		tx, err := pool.Begin(ctx)
-		if err != nil {
-			t.Fatalf("begin tx: %v", err)
+		tx, txErr := pool.Begin(ctx)
+		if txErr != nil {
+			t.Fatalf("begin tx: %v", txErr)
 		}
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); err != nil {
-			t.Fatalf("set tenant: %v", err)
+		if _, tenantErr := tx.Exec(ctx, "SELECT set_config('app.org_id', $1, true)", orgID); tenantErr != nil {
+			t.Fatalf("set tenant: %v", tenantErr)
 		}
-		_, err = recorder.Record(ctx, tx, audit.Entry{
+		_, txErr = recorder.Record(ctx, tx, audit.Entry{
 			OrganizationID: orgID,
 			ActorID:        "44444444-4444-4444-4444-444444444444",
 			ActorType:      "user",
@@ -97,11 +97,11 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 			ResourceID:     "55555555-5555-5555-5555-555555555555",
 			Changes:        map[string]interface{}{"seq": i, "note": "roundtrip"},
 		})
-		if err != nil {
-			t.Fatalf("record %s: %v", action, err)
+		if txErr != nil {
+			t.Fatalf("record %s: %v", action, txErr)
 		}
-		if err := tx.Commit(ctx); err != nil {
-			t.Fatalf("commit: %v", err)
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			t.Fatalf("commit: %v", commitErr)
 		}
 	}
 
@@ -124,8 +124,8 @@ func TestPGRecorderChainRoundtripPG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pick tamper target: %v", err)
 	}
-	if err := unguarded(`UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); err != nil {
-		t.Fatalf("tamper: %v", err)
+	if tamperErr := unguarded(`UPDATE audit_log SET action = 'ci.tampered' WHERE id = $1`, tamperedID); tamperErr != nil {
+		t.Fatalf("tamper: %v", tamperErr)
 	}
 
 	result, err = audit.Verify(ctx, pool, orgID)

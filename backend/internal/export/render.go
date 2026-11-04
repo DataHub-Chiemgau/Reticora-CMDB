@@ -39,8 +39,8 @@ func RenderFormat(ctx context.Context, ciRepo ci.Repository, orgID string, forma
 			writer.row(item)
 			written++
 		}
-		if err := writer.flush(); err != nil {
-			return written, err
+		if flushErr := writer.flush(); flushErr != nil {
+			return written, flushErr
 		}
 		if len(items) < renderBatchSize {
 			break

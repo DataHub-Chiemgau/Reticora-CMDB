@@ -84,7 +84,7 @@ func TestCreateIgnoresRequestedStorageKey(t *testing.T) {
 		t.Fatalf("created document storage key %q, want empty", created.StorageKey)
 	}
 
-	w = contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+created.ID+"/content", "application/pdf", "%PDF")
+	w = contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+created.ID+"/content", "application/pdf", "%PDF-1.7")
 	if w.Code != http.StatusOK {
 		t.Fatalf("upload: status %d: %s", w.Code, w.Body.String())
 	}
@@ -95,12 +95,25 @@ func TestCreateIgnoresRequestedStorageKey(t *testing.T) {
 		t.Fatalf("upload key %q, want prefix %q", created.StorageKey, want)
 	}
 
+	// Right after the upload the download answers 409 (WP-733); once the
+	// version is scanned clean it is presigned, so the check of foreign keys
+	// below is what refuses the download.
+	w = contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+created.ID+"/content", "", "")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), ProblemPendingScan) {
+		t.Fatalf("download before the scan: status %d body %s, want 409 document-pending-scan", w.Code, w.Body.String())
+	}
+	markClean(t, repo, created.ID, 1)
+	w = contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+created.ID+"/content", "", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), created.StorageKey) {
+		t.Fatalf("download after the clean scan: status %d body %s, want 200", w.Code, w.Body.String())
+	}
+
 	// A key of another organization (as left by older data) is not presigned.
 	if _, err := repo.SetStorage(context.Background(), "org-1", created.ID, "org/org-2/documents/x/1", "application/pdf", 4); err != nil {
 		t.Fatalf("plant foreign key: %v", err)
 	}
 	w = contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+created.ID+"/content", "", "")
-	if w.Code != http.StatusConflict || strings.Contains(w.Body.String(), "org-2") {
+	if w.Code != http.StatusConflict || strings.Contains(w.Body.String(), "org-2") || strings.Contains(w.Body.String(), ProblemPendingScan) {
 		t.Fatalf("download of a foreign key: status %d body %s, want 409 without URL", w.Code, w.Body.String())
 	}
 }

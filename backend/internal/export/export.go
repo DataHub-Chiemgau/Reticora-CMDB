@@ -25,6 +25,8 @@ const streamBatchSize = 500
 type Handler struct {
 	ciRepo    ci.Repository
 	batchSize int
+	// datev guards format=datev (WP-790); nil refuses it.
+	datev *DATEVGate
 }
 
 // NewHandler creates a new export handler.
@@ -32,12 +34,21 @@ func NewHandler(ciRepo ci.Repository) *Handler {
 	return &Handler{ciRepo: ciRepo, batchSize: streamBatchSize}
 }
 
+// WithDATEVGate sets the gate of format=datev; without one DATEV is refused
+// (fail closed).
+func (h *Handler) WithDATEVGate(gate *DATEVGate) *Handler {
+	h.datev = gate
+	return h
+}
+
 // RegisterRoutes registers export routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/export/cis", h.ExportCIs)
 }
 
-// ExportCIs handles GET /api/v1/export/cis?format=csv|json|datev.
+// ExportCIs handles GET /api/v1/export/cis?format=csv|json|datev. Until
+// the sunset of the path (2027-10-15, E-141) format=datev keeps the CI
+// layout, but only behind the DATEV gate (WP-790).
 //
 // The export is streamed: rows are fetched in keyset-paginated batches and
 // flushed to the client as they are produced, so an export of a large tenant
@@ -55,6 +66,9 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	}
 	if format != "csv" && format != "datev" && format != "json" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "format must be 'csv', 'datev' or 'json'")
+		return
+	}
+	if !guardDATEV(w, r, h.datev, t.OrganizationID, format) {
 		return
 	}
 
@@ -195,6 +209,7 @@ func (rw *rowWriter) row(item ci.Item) {
 			item.DiscoverySource,
 			item.CreatedAt,
 			item.UpdatedAt,
+			strings.Join(item.Tags, "|"),
 		})
 	case "datev":
 		rw.writeCells([]string{
@@ -292,9 +307,10 @@ func attributeString(attrs map[string]any, keys ...string) string {
 // utf8BOM starts every CSV export (EXP-01).
 const utf8BOM = "\ufeff"
 
-// csvColumns are the CI fields of the CSV export, in this order.
+// csvColumns are the CI fields of the CSV export, in this order. tags holds
+// the tag keys separated by | (WP-754).
 var csvColumns = []string{"id", "name", "status", "ci_type_id", "manufacturer", "model", "serial_number", "management_ip",
-	"firmware_version", "discovery_source", "created_at", "updated_at"}
+	"firmware_version", "discovery_source", "created_at", "updated_at", "tags"}
 
 // datevFields are the CI fields the DATEV layout reads.
 var datevFields = []string{"id", "name", "manufacturer", "model", "serial_number", "attributes", "status"}

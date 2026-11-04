@@ -237,8 +237,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		Algorithm string `json:"alg"`
 		KeyID     string `json:"kid"`
 	}
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, fmt.Errorf("identity: parse ID token header: %w", err)
+	if headerErr := json.Unmarshal(headerBytes, &header); headerErr != nil {
+		return nil, fmt.Errorf("identity: parse ID token header: %w", headerErr)
 	}
 	if header.Algorithm != "RS256" && header.Algorithm != "ES256" {
 		return nil, fmt.Errorf("identity: unexpected ID token algorithm %q", header.Algorithm)
@@ -253,8 +253,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 	if err != nil {
 		return nil, fmt.Errorf("identity: decode ID token signature: %w", err)
 	}
-	if err := verifyJWTSignature(parts[0]+"."+parts[1], signature, header.Algorithm, key); err != nil {
-		return nil, fmt.Errorf("identity: verify ID token signature: %w", err)
+	if signatureErr := verifyJWTSignature(parts[0]+"."+parts[1], signature, header.Algorithm, key); signatureErr != nil {
+		return nil, fmt.Errorf("identity: verify ID token signature: %w", signatureErr)
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
@@ -280,8 +280,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		IssuedAt        int64           `json:"iat,omitempty"`
 		NotBefore       int64           `json:"nbf,omitempty"`
 	}
-	if err := json.Unmarshal(payload, &tokenClaims); err != nil {
-		return nil, fmt.Errorf("identity: parse ID token claims: %w", err)
+	if claimsErr := json.Unmarshal(payload, &tokenClaims); claimsErr != nil {
+		return nil, fmt.Errorf("identity: parse ID token claims: %w", claimsErr)
 	}
 
 	expectedIssuer := strings.TrimSpace(p.config.IssuerURL)
@@ -292,8 +292,8 @@ func (p *OIDCProvider) ValidateIDTokenWithNonce(ctx context.Context, rawToken, e
 		return nil, fmt.Errorf("identity: unexpected ID token issuer %q", tokenClaims.Issuer)
 	}
 
-	if err := p.verifyAudience(tokenClaims.Audience, tokenClaims.AuthorizedParty); err != nil {
-		return nil, err
+	if audienceErr := p.verifyAudience(tokenClaims.Audience, tokenClaims.AuthorizedParty); audienceErr != nil {
+		return nil, audienceErr
 	}
 
 	now := time.Now().Unix()

@@ -51,3 +51,24 @@ func TestAgentRegisterHeartbeatKillSwitch(t *testing.T) {
 		t.Fatalf("expected 1 agent, got %d", total)
 	}
 }
+
+// jsonColumnRow is a pgx.Row whose JSON columns hold a JSON array, which no
+// object-shaped field accepts.
+type jsonColumnRow struct{}
+
+func (jsonColumnRow) Scan(dest ...any) error {
+	for _, d := range dest {
+		if p, ok := d.(*[]byte); ok {
+			*p = []byte(`[1]`)
+		}
+	}
+	return nil
+}
+
+// TestScanAgentReportsUndecodablePolicy covers F-123 (errcheck): a policy
+// that does not decode is an error instead of a silently partial policy.
+func TestScanAgentReportsUndecodablePolicy(t *testing.T) {
+	if a, err := scanAgent(jsonColumnRow{}); err == nil {
+		t.Fatalf("scanAgent = %+v, want decode error", a)
+	}
+}

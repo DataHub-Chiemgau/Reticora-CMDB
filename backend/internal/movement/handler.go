@@ -360,8 +360,8 @@ func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 		AssetTag     string `json:"asset_tag"`
 		SerialNumber string `json:"serial_number,omitempty"`
 	}
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	if readErr := api.ReadJSON(r, &req); readErr != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", readErr.Error())
 		return
 	}
 	if req.AssetTag == "" {

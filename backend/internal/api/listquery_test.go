@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -127,6 +129,96 @@ func TestFilterSQLAndMatch(t *testing.T) {
 	}
 	if (Filter{Op: OpGTE, Kind: KindNumber, Values: []string{"1"}}).Match("") {
 		t.Error("an empty value satisfied gte")
+	}
+}
+
+// TestParseListQuerySet covers set fields (E-126, WP-754): exact, in and
+// all, the values deduplicated and at most maxFilterValues; all only on
+// set fields (else 400 "unknown operator", also for attributes), like,
+// gte and lte not on set fields.
+func TestParseListQuerySet(t *testing.T) {
+	spec := testListFields
+	spec.Filterable = map[string]string{"name": KindText, "tags": KindSet}
+	q, err := parse(t, url.Values{
+		"filter[tags]":      {"prod"},
+		"filter[tags][in]":  {"web, db,web"},
+		"filter[tags][all]": {"a,b,a"},
+	}.Encode(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, f := range q.Filters {
+		if f.Kind != KindSet {
+			t.Errorf("%s/%s: kind %q", f.Field, f.Op, f.Kind)
+		}
+		got[f.Op] = f.Values
+	}
+	want := map[string][]string{OpExact: {"prod"}, OpIn: {"web", "db"}, OpAll: {"a", "b"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("values %v, want %v", got, want)
+	}
+
+	values := func(n int) string {
+		out := make([]string, n)
+		for i := range out {
+			out[i] = "t" + strconv.Itoa(i)
+		}
+		return strings.Join(out, ",")
+	}
+	if _, err = parse(t, "filter[tags][all]="+values(100), spec); err != nil {
+		t.Errorf("100 values: %v", err)
+	}
+	// Duplicates count once: 101 values with one twice are 100.
+	if _, err = parse(t, "filter[tags][in]="+values(100)+",t7", spec); err != nil {
+		t.Errorf("100 distinct values with a duplicate: %v", err)
+	}
+	for _, query := range []string{
+		"filter[tags][all]=" + values(101),
+		"filter[tags][in]=" + values(101),
+		"filter[tags][all]=",
+		"filter[name][all]=a",
+		"filter[attributes.x][all]=a",
+		"filter[tags][like]=a",
+		"filter[tags][gte]=a",
+		"filter[tags][lte]=a",
+		"filter[tags][any]=a",
+	} {
+		_, perr := parse(t, query, spec)
+		var fe *FieldError
+		if !errors.As(perr, &fe) || (fe.Status != 0 && fe.Status != http.StatusBadRequest) {
+			t.Errorf("%s: %v, want 400", query, perr)
+		}
+	}
+	if _, perr := parse(t, "filter[name][all]=a", spec); perr == nil || !strings.Contains(perr.Error(), "unknown operator") {
+		t.Errorf("all on a text field: %v, want unknown operator", perr)
+	}
+	// An attribute gets its kind from the repository; Check refuses all.
+	if cerr := (Filter{Field: "attributes.x", Op: OpAll, Kind: KindText, Values: []string{"a"}}).Check(); cerr == nil {
+		t.Error("Check accepted all on a text attribute")
+	}
+}
+
+// TestFilterMatchSet: in and exact need one of the values, all every one,
+// case-insensitively.
+func TestFilterMatchSet(t *testing.T) {
+	set := []string{"prod", "web"}
+	for _, c := range []struct {
+		f    Filter
+		want bool
+	}{
+		{Filter{Op: OpExact, Values: []string{"web"}}, true},
+		{Filter{Op: OpIn, Values: []string{"db", "WEB"}}, true},
+		{Filter{Op: OpIn, Values: []string{"db"}}, false},
+		{Filter{Op: OpAll, Values: []string{"prod", "web"}}, true},
+		{Filter{Op: OpAll, Values: []string{"prod", "db"}}, false},
+	} {
+		if got := c.f.MatchSet(set); got != c.want {
+			t.Errorf("%s %v: %v, want %v", c.f.Op, c.f.Values, got, c.want)
+		}
+	}
+	if (Filter{Op: OpIn, Values: []string{"web"}}).MatchSet(nil) {
+		t.Error("an empty set matched")
 	}
 }
 

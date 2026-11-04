@@ -232,6 +232,35 @@ func typeScope(ctx context.Context, tx pgx.Tx, groups [][]string) ([]string, err
 	return types, nil
 }
 
+// tagIDsOf returns the IDs of the organization's tags that the
+// filter[tags] conditions name, by key (WP-754): one statement, none
+// without a tag filter. Row level security restricts tag to the
+// organization.
+func tagIDsOf(ctx context.Context, tx pgx.Tx, filters []api.Filter) (map[string]string, error) {
+	var keys []string
+	for _, f := range filters {
+		if f.Field == TagsField {
+			keys = append(keys, tagFilterKeys(f)...)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT key, id::text FROM tag WHERE key = ANY($1::text[])`, keys)
+	if err != nil {
+		return nil, fmt.Errorf("tags of the filter: %w", err)
+	}
+	ids := map[string]string{}
+	var key, id string
+	if _, err = pgx.ForEachRow(rows, []any{&key, &id}, func() error {
+		ids[key] = id
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("tags of the filter: %w", err)
+	}
+	return ids, nil
+}
+
 // attributeFilterOf checks that an attribute may be filtered (API-02) and
 // returns its filter kind and the CI types the filter is restricted to (nil
 // for none). The definitions of a CI's type decide (WP-566, F-216): a
@@ -376,10 +405,21 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
+		tagIDs, terr := tagIDsOf(ctx, tx, filter.Filters)
+		if terr != nil {
+			return terr
+		}
 		orgNamed := false
 		for _, f := range filter.Filters {
 			if f.Field == "ci_type_id" && (f.Op == api.OpExact || f.Op == api.OpIn) {
 				continue // in the type filter above
+			}
+			if f.Field == TagsField {
+				clause, fargs := tagsPredicate(f, tagIDs, argPos)
+				whereParts = append(whereParts, clause)
+				args = append(args, fargs...)
+				argPos += len(fargs)
+				continue
 			}
 			expr := filterColumns[f.Field].expr
 			if key, ok := f.Attribute(); ok {
@@ -1167,35 +1207,42 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return err
 		}
 		item = w.after
-		if len(w.changes) == 0 {
-			// A replaced template list alone (PUT /cis/{id}/templates).
-			return r.recordTemplatesChange(ctx, tx, item, w.templates)
-		}
-		set := newChangeSet(w.kind())
-		if err := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); err != nil {
-			return err
-		}
-		if err := r.recordTemplatesHistory(ctx, tx, item, w.templates); err != nil {
-			return err
-		}
-		if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
-			return err
-		}
-		if err := r.recordTemplatesAudit(ctx, tx, item, w.templates); err != nil {
-			return err
-		}
-		changed := changedFieldNames(w.changes)
-		if err := r.recordEvent(ctx, tx, events.CIChanged, item, changed); err != nil {
-			return err
-		}
-		// A status change is also its own event (EVT-03, WP-707).
-		if err := r.recordStatusEvent(ctx, tx, w, changed); err != nil {
-			return err
-		}
-		return r.recordTemplatesEvent(ctx, tx, item, w.templates)
+		return r.recordUpdate(ctx, tx, orgID, id, w)
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// recordUpdate writes history, audit entry and events of the row update w
+// of CI id in tx (AUD-03, K20).
+func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID, id string, w *rowUpdate) error {
+	item := w.after
+	if len(w.changes) == 0 {
+		// A replaced template list alone (PUT /cis/{id}/templates).
+		return r.recordTemplatesChange(ctx, tx, item, w.templates)
+	}
+	set := newChangeSet(w.kind())
+	if err := r.recordFieldChanges(ctx, tx, set, orgID, id, item.Version, w.changes); err != nil {
+		return err
+	}
+	if err := r.recordTemplatesHistory(ctx, tx, item, w.templates); err != nil {
+		return err
+	}
+	if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
+		return err
+	}
+	if err := r.recordTemplatesAudit(ctx, tx, item, w.templates); err != nil {
+		return err
+	}
+	changed := changedFieldNames(w.changes)
+	if err := r.recordEvent(ctx, tx, events.CIChanged, item, changed); err != nil {
+		return err
+	}
+	// A status change is also its own event (EVT-03, WP-707).
+	if err := r.recordStatusEvent(ctx, tx, w, changed); err != nil {
+		return err
+	}
+	return r.recordTemplatesEvent(ctx, tx, item, w.templates)
 }
 
 // rowUpdate is the UPDATE of a CI row: the row before and after it, the
@@ -1988,7 +2035,7 @@ func (r *PGRepository) ListChanges(ctx context.Context, orgID, ciID string, page
 			var change Change
 			var oldValue []byte
 			var newValue []byte
-			if err := rows.Scan(
+			if scanErr := rows.Scan(
 				&change.ID,
 				&change.OrganizationID,
 				&change.CIID,
@@ -1999,19 +2046,19 @@ func (r *PGRepository) ListChanges(ctx context.Context, orgID, ciID string, page
 				&newValue,
 				&change.Comment,
 				&change.CreatedAt,
-			); err != nil {
-				return fmt.Errorf("scan ci change: %w", err)
+			); scanErr != nil {
+				return fmt.Errorf("scan ci change: %w", scanErr)
 			}
-			if err := json.Unmarshal(oldValue, &change.OldValue); err != nil {
-				return fmt.Errorf("decode old ci change value: %w", err)
+			if decodeErr := json.Unmarshal(oldValue, &change.OldValue); decodeErr != nil {
+				return fmt.Errorf("decode old ci change value: %w", decodeErr)
 			}
-			if err := json.Unmarshal(newValue, &change.NewValue); err != nil {
-				return fmt.Errorf("decode new ci change value: %w", err)
+			if decodeErr := json.Unmarshal(newValue, &change.NewValue); decodeErr != nil {
+				return fmt.Errorf("decode new ci change value: %w", decodeErr)
 			}
 			changes = append(changes, change)
 		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate ci changes: %w", err)
+		if iterErr := rows.Err(); iterErr != nil {
+			return fmt.Errorf("iterate ci changes: %w", iterErr)
 		}
 		// The history shows the personal values the surrogates stand for;
 		// deleted ones are null (SEC-05).
@@ -3153,4 +3200,353 @@ func writeCITags(ctx context.Context, tx pgx.Tx, orgID string, writes []ciTagWri
 		return fmt.Errorf("assign ci tags: %w", err)
 	}
 	return nil
+}
+
+// ─── Tag catalog and tags of a CI (CI-08, WP-753) ─────────────────────────────
+
+// tagColumns are the columns scanTag reads.
+const tagColumns = `id::text, organization_id::text, key, display_name, color, is_system, created_at, updated_at`
+
+// tagSortColumn sorts by bytes, as the in-memory store and the keyset
+// cursor compare.
+const tagSortColumn = `key COLLATE "C"`
+
+func scanTag(row ciScanner) (*Tag, error) {
+	var tag Tag
+	var names []byte
+	if err := row.Scan(&tag.ID, &tag.OrganizationID, &tag.Key, &names, &tag.Color, &tag.IsSystem, &tag.CreatedAt, &tag.UpdatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTagNotFound
+		}
+		return nil, fmt.Errorf("scan tag: %w", err)
+	}
+	if err := json.Unmarshal(names, &tag.DisplayName); err != nil {
+		return nil, fmt.Errorf("decode tag display name: %w", err)
+	}
+	return &tag, nil
+}
+
+// recordTagAudit writes the audit entry of a catalog change (tag.created,
+// tag.updated, tag.deleted, tag.merged) in tx.
+func (r *PGRepository) recordTagAudit(ctx context.Context, tx pgx.Tx, orgID, action, tagID string, changes map[string]any) error {
+	if r.recorder == nil {
+		return nil
+	}
+	t := tenant.FromContext(ctx)
+	actorType := "system"
+	if strings.TrimSpace(t.UserID) != "" {
+		actorType = "user"
+	}
+	entry := audit.Entry{OrganizationID: orgID, ActorID: strings.TrimSpace(t.UserID), ActorType: actorType,
+		Action: action, ResourceType: "tag", ResourceID: tagID, Changes: changes}
+	return lastInTx(ctx, func() error {
+		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
+			return fmt.Errorf("record audit: %w", err)
+		}
+		return nil
+	})
+}
+
+// lockTag reads a tag of the organization FOR UPDATE.
+func lockTag(ctx context.Context, tx pgx.Tx, orgID, id string) (*Tag, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrTagNotFound
+	}
+	return scanTag(tx.QueryRow(ctx, "SELECT "+tagColumns+" FROM tag WHERE organization_id = $1 AND id = $2 FOR UPDATE", orgID, id))
+}
+
+// ListTags implements TagStore: the tags sorted by key and id, one row more
+// than the page limit for the keyset cursor.
+func (r *PGRepository) ListTags(ctx context.Context, orgID string, page api.PaginationParams) ([]Tag, int, error) {
+	items := make([]Tag, 0)
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1"
+		args := []any{orgID}
+		pos := 2
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM tag WHERE "+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count tags: %w", err)
+		}
+		if page.Cursor != nil {
+			key, id, posErr := tagPosition(page.Cursor)
+			if posErr != nil {
+				return posErr
+			}
+			where += " AND " + api.KeysetClause(tagSortColumn, "text", tagDir, pos)
+			args = append(args, key, id)
+			pos += 2
+		}
+		tail := fmt.Sprintf(" ORDER BY %s ASC, id ASC LIMIT $%d", tagSortColumn, pos)
+		args = append(args, page.Limit+1)
+		if page.Cursor == nil && page.Offset > 0 {
+			tail += fmt.Sprintf(" OFFSET $%d", pos+1)
+			args = append(args, page.Offset)
+		}
+		rows, err := tx.Query(ctx, "SELECT "+tagColumns+" FROM tag WHERE "+where+tail, args...)
+		if err != nil {
+			return fmt.Errorf("list tags: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			tag, scanErr := scanTag(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			items = append(items, *tag)
+		}
+		return rows.Err()
+	})
+	return items, total, err
+}
+
+// GetTag implements TagStore.
+func (r *PGRepository) GetTag(ctx context.Context, orgID, id string) (*Tag, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrTagNotFound
+	}
+	var tag *Tag
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		tag, err = scanTag(tx.QueryRow(ctx, "SELECT "+tagColumns+" FROM tag WHERE organization_id = $1 AND id = $2", orgID, id))
+		return err
+	})
+	return tag, err
+}
+
+// tagWriteError maps the constraint violations of a catalog write: a taken
+// key is a conflict on key (409); a CHECK the service checked before is
+// 422.
+func tagWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.Code {
+	case "23505":
+		return &api.ConflictError{Field: "key", Message: "a tag with this key exists"}
+	case "23514":
+		return &ValidationError{Violations: []Violation{{Field: "display_name", Detail: "violates the rules of the catalog"}}}
+	}
+	return err
+}
+
+// CreateTag implements TagStore: a new catalog tag with the audit entry
+// tag.created.
+func (r *PGRepository) CreateTag(ctx context.Context, tag *Tag) error {
+	names, err := json.Marshal(tag.DisplayName)
+	if err != nil {
+		return fmt.Errorf("encode tag display name: %w", err)
+	}
+	return database.WithRequestTenant(ctx, r.pool, tag.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		created, insErr := scanTag(tx.QueryRow(ctx, `INSERT INTO tag (organization_id, key, display_name, color)
+			VALUES ($1, $2, $3, $4) RETURNING `+tagColumns, tag.OrganizationID, tag.Key, names, tag.Color))
+		if insErr != nil {
+			return tagWriteError(insErr)
+		}
+		*tag = *created
+		return r.recordTagAudit(ctx, tx, tag.OrganizationID, "tag.created", tag.ID, map[string]any{"after": created})
+	})
+}
+
+// UpdateTag implements TagStore: display_name and color, with the audit
+// entry tag.updated.
+func (r *PGRepository) UpdateTag(ctx context.Context, orgID, id string, req *UpdateTagRequest) (*Tag, error) {
+	var tag *Tag
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		before, err := lockTag(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		after := *before
+		req.apply(&after)
+		names, err := json.Marshal(after.DisplayName)
+		if err != nil {
+			return fmt.Errorf("encode tag display name: %w", err)
+		}
+		tag, err = scanTag(tx.QueryRow(ctx, `UPDATE tag SET display_name = $3, color = $4
+			WHERE organization_id = $1 AND id = $2 RETURNING `+tagColumns, orgID, id, names, after.Color))
+		if err != nil {
+			return tagWriteError(err)
+		}
+		return r.recordTagAudit(ctx, tx, orgID, "tag.updated", id, map[string]any{"before": before, "after": tag})
+	})
+	return tag, err
+}
+
+// tagInUse reports ErrTagInUse when tag id is assigned to a CI (409). The
+// repository checks it itself: the foreign key violation of ci_tag would be
+// 422 through api.ClassifyDBError. Rows outside the tenant scope are
+// invisible; the foreign key catches them at the DELETE (deleteTagRow).
+func tagInUse(ctx context.Context, tx pgx.Tx, id string) error {
+	var used bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_tag WHERE tag_id = $1)`, id).Scan(&used); err != nil {
+		return fmt.Errorf("check tag use: %w", err)
+	}
+	if used {
+		return ErrTagInUse
+	}
+	return nil
+}
+
+// deleteTagRow deletes the row of tag id; a remaining assignment (one the
+// tenant scope hides) is ErrTagInUse.
+func deleteTagRow(ctx context.Context, tx pgx.Tx, orgID, id string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM tag WHERE organization_id = $1 AND id = $2`, orgID, id); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrTagInUse
+		}
+		return fmt.Errorf("delete tag: %w", err)
+	}
+	return nil
+}
+
+// DeleteTag implements TagStore: a tag no CI carries and that is no
+// system tag, with the audit entry tag.deleted.
+func (r *PGRepository) DeleteTag(ctx context.Context, orgID, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := lockTag(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if tag.IsSystem {
+			return ErrSystemTag
+		}
+		if useErr := tagInUse(ctx, tx, id); useErr != nil {
+			return useErr
+		}
+		if delErr := deleteTagRow(ctx, tx, orgID, id); delErr != nil {
+			return delErr
+		}
+		return r.recordTagAudit(ctx, tx, orgID, "tag.deleted", id, map[string]any{"before": tag})
+	})
+}
+
+// manualTagChange is the UpdateRequest of a manual tag change of a CI:
+// the keys, the author of the context, If-Match (API-07).
+func manualTagChange(ctx context.Context, keys []string, ifMatch *int64) UpdateRequest {
+	list := slices.Clone(keys)
+	return UpdateRequest{LegacyTags: &list, IfMatch: ifMatch, Manual: &ManualChange{Author: tenant.FromContext(ctx).UserID}}
+}
+
+// ReplaceCITags implements TagStore (PUT /cis/{id}/tags): the keys must be
+// catalog tags (422 per unknown key; FOR SHARE keeps them until the
+// commit); the write is a manual update of the CI with ci_change (field
+// tags), the audit entry ci.updated and the event ci.changed, no override.
+func (r *PGRepository) ReplaceCITags(ctx context.Context, orgID, ciID string, keys []string, ifMatch *int64) (*Item, error) {
+	sorted, violations := catalogKeys(keys)
+	var item *Item
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT key FROM tag WHERE organization_id = $1 AND key = ANY($2) FOR SHARE`, orgID, sorted)
+		if err != nil {
+			return fmt.Errorf("read catalog tags: %w", err)
+		}
+		found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("read catalog tags: %w", err)
+		}
+		known := make(map[string]bool, len(found))
+		for _, key := range found {
+			known[key] = true
+		}
+		violations = append(violations, unknownTags(keys, known)...)
+		if len(violations) > 0 {
+			return &ValidationError{Violations: violations}
+		}
+		req := manualTagChange(ctx, sorted, ifMatch)
+		w, err := r.updateRow(ctx, tx, orgID, ciID, &req)
+		if err != nil {
+			return err
+		}
+		item = w.after
+		return r.recordUpdate(ctx, tx, orgID, ciID, w)
+	})
+	return item, err
+}
+
+// taggedCI is a CI of a tag merge with its tag keys.
+type taggedCI struct {
+	id   string
+	keys []string
+}
+
+// MergeTag implements TagStore (POST /tags/{id}/merge): in one transaction
+// every live CI with the source tag gets the target tag instead, as a
+// manual update with history, audit entry ci.updated and event ci.changed
+// (version + 1); the assignments of deleted CIs move without history; a
+// duplicate drops. The source tag is deleted, the audit entry tag.merged
+// records both tags. A system tag is no source (409).
+func (r *PGRepository) MergeTag(ctx context.Context, orgID, sourceID, intoID string) (*TagMergeResult, error) {
+	result := &TagMergeResult{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		source, err := lockTag(ctx, tx, orgID, sourceID)
+		if err != nil {
+			return err
+		}
+		into, err := lockTag(ctx, tx, orgID, intoID)
+		if errors.Is(err, ErrTagNotFound) {
+			return &ValidationError{Violations: []Violation{{Field: "into_id", Detail: "unknown tag"}}}
+		}
+		if err != nil {
+			return err
+		}
+		if source.IsSystem {
+			return ErrSystemTag
+		}
+		// The live CIs with the source tag, locked in id order, with their
+		// keys.
+		rows, err := tx.Query(ctx, `SELECT ci.id::text, COALESCE((SELECT array_agg(t.key ORDER BY t.key)
+				FROM ci_tag x JOIN tag t ON t.id = x.tag_id WHERE x.ci_id = ci.id), '{}')
+			FROM ci WHERE ci.organization_id = $1 AND ci.deleted_at IS NULL
+				AND EXISTS (SELECT 1 FROM ci_tag ct WHERE ct.ci_id = ci.id AND ct.tag_id = $2)
+			ORDER BY ci.id FOR UPDATE OF ci`, orgID, sourceID)
+		if err != nil {
+			return fmt.Errorf("read tagged cis: %w", err)
+		}
+		cis, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (taggedCI, error) {
+			var c taggedCI
+			return c, row.Scan(&c.id, &c.keys)
+		})
+		if err != nil {
+			return fmt.Errorf("read tagged cis: %w", err)
+		}
+		anyVersion := api.IfMatchAny
+		for _, c := range cis {
+			keys := slices.DeleteFunc(c.keys, func(k string) bool { return k == source.Key })
+			if !slices.Contains(keys, into.Key) {
+				keys = append(keys, into.Key)
+			}
+			slices.Sort(keys)
+			req := manualTagChange(ctx, keys, &anyVersion)
+			w, uerr := r.updateRow(ctx, tx, orgID, c.id, &req)
+			if uerr != nil {
+				return uerr
+			}
+			if recErr := r.recordUpdate(ctx, tx, orgID, c.id, w); recErr != nil {
+				return recErr
+			}
+			result.CIs = append(result.CIs, w.after)
+		}
+		result.Moved = len(cis)
+		// Deleted CIs keep their tags for a restore: their rows move as
+		// they are; a duplicate drops.
+		if _, err = tx.Exec(ctx, `UPDATE ci_tag SET tag_id = $2 WHERE tag_id = $1
+			AND NOT EXISTS (SELECT 1 FROM ci_tag d WHERE d.ci_id = ci_tag.ci_id AND d.tag_id = $2)`, sourceID, intoID); err != nil {
+			return fmt.Errorf("move tag assignments: %w", err)
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM ci_tag WHERE tag_id = $1`, sourceID); err != nil {
+			return fmt.Errorf("drop duplicate tag assignments: %w", err)
+		}
+		if delErr := deleteTagRow(ctx, tx, orgID, sourceID); delErr != nil {
+			return delErr
+		}
+		result.Tag = into
+		return r.recordTagAudit(ctx, tx, orgID, "tag.merged", sourceID, map[string]any{
+			"source": source, "into": into, "cis": result.Moved,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

@@ -61,6 +61,7 @@ DELETE /api/v1/slas/{id} sla:write
 DELETE /api/v1/stocktakes/{id} stocktake:write
 DELETE /api/v1/subnets/{id} ipam:write
 DELETE /api/v1/subnets/{id}/reservations/{ip_id} ipam:write
+DELETE /api/v1/tags/{id} tag:manage
 DELETE /api/v1/teams/{id} team:manage
 DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
 DELETE /api/v1/templates/{id} citype:manage
@@ -161,9 +162,11 @@ GET /api/v1/discovery/review-items discovery:read
 GET /api/v1/disposal-records disposal:read
 GET /api/v1/disposal-records/{id} disposal:read
 GET /api/v1/documents document:read
+GET /api/v1/documents/usage document:read
 GET /api/v1/documents/{id} document:read
 GET /api/v1/documents/{id}/content document:read
 GET /api/v1/documents/{id}/links document:read
+GET /api/v1/documents/{id}/versions document:read
 GET /api/v1/entitlements entitlement:read
 GET /api/v1/entitlements/check/{feature} entitlement:read
 GET /api/v1/export/cis ci:read
@@ -190,6 +193,8 @@ GET /api/v1/impact topology:read
 GET /api/v1/impact/{ci_id} topology:read
 GET /api/v1/import-profiles import:run
 GET /api/v1/import-profiles/{id} import:run
+GET /api/v1/imports/{id} import:run
+GET /api/v1/imports/{id}/report import:run
 GET /api/v1/inventory/availability stock:read
 GET /api/v1/inventory/items stock:read
 GET /api/v1/inventory/items/{id} stock:read
@@ -285,6 +290,8 @@ GET /api/v1/subnets ipam:read
 GET /api/v1/subnets/{id} ipam:read
 GET /api/v1/subnets/{id}/addresses ipam:read
 GET /api/v1/subnets/{id}/reservations ipam:read
+GET /api/v1/tags ci:read
+GET /api/v1/tags/{id} ci:read
 GET /api/v1/teams user:read
 GET /api/v1/teams/{id} user:read
 GET /api/v1/teams/{id}/members user:read
@@ -373,6 +380,7 @@ PATCH /api/v1/sites/{id} location:write
 PATCH /api/v1/slas/{id} sla:write
 PATCH /api/v1/stocktakes/{id} stocktake:write
 PATCH /api/v1/subnets/{id} ipam:write
+PATCH /api/v1/tags/{id} tag:manage
 PATCH /api/v1/teams/{id} team:manage
 PATCH /api/v1/templates/{id} citype:manage
 PATCH /api/v1/tickets/{id} ticket:write
@@ -451,6 +459,7 @@ POST /api/v1/discovery/review-items/{id}/resolve review:resolve
 POST /api/v1/disposal-records disposal:write
 POST /api/v1/documents document:write
 POST /api/v1/documents/{id}/links document:write
+POST /api/v1/documents/{id}/versions document:write
 POST /api/v1/export/jobs export:run
 POST /api/v1/exports export:run
 POST /api/v1/forms form:write
@@ -470,6 +479,8 @@ POST /api/v1/iga/jml-policies iga:write
 POST /api/v1/iga/jml/resolve iga:write
 POST /api/v1/iga/tasks/{id}/retry iga:write
 POST /api/v1/import-profiles import:manage
+POST /api/v1/imports import:run
+POST /api/v1/imports/preview import:run
 POST /api/v1/ingest/bulk discovery:ingest
 POST /api/v1/inventory/items stock:write
 POST /api/v1/inventory/items/{id}/convert stock:write
@@ -530,6 +541,8 @@ POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write
 POST /api/v1/subnets ipam:write
 POST /api/v1/subnets/{id}/reservations ipam:write
+POST /api/v1/tags tag:manage
+POST /api/v1/tags/{id}/merge tag:manage
 POST /api/v1/teams team:manage
 POST /api/v1/teams/{id}/members team:manage
 POST /api/v1/templates citype:manage
@@ -563,6 +576,7 @@ PUT /api/v1/ci-types/{id}/fields citype:manage
 PUT /api/v1/cis/{id}/field-definitions ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/fields/{name}/override override:write
 PUT /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
+PUT /api/v1/cis/{id}/tags ci:write
 PUT /api/v1/cis/{id}/templates ci:write
 PUT /api/v1/documents/{id}/content document:write
 PUT /api/v1/notifications/preferences authenticated

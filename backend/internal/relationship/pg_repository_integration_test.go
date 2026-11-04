@@ -54,15 +54,15 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 	defer pool.Close()
 
 	orgID := "11111111-1111-1111-1111-111111111111"
-	if _, err := pool.Exec(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'traverse-org', 'traverse-org') ON CONFLICT (id) DO NOTHING`, orgID); err != nil {
-		t.Fatalf("insert org: %v", err)
+	if _, orgErr := pool.Exec(ctx, `INSERT INTO organization (id, name, slug) VALUES ($1, 'traverse-org', 'traverse-org') ON CONFLICT (id) DO NOTHING`, orgID); orgErr != nil {
+		t.Fatalf("insert org: %v", orgErr)
 	}
 	t.Cleanup(func() {
 		pool.Exec(ctx, `DELETE FROM organization WHERE id = $1`, orgID)
 	})
 	// Repeat runs share the org and its CIs; clear the graph first.
-	if _, err := pool.Exec(ctx, `DELETE FROM ci_relationship WHERE organization_id = $1`, orgID); err != nil {
-		t.Fatalf("reset relationships: %v", err)
+	if _, resetErr := pool.Exec(ctx, `DELETE FROM ci_relationship WHERE organization_id = $1`, orgID); resetErr != nil {
+		t.Fatalf("reset relationships: %v", resetErr)
 	}
 
 	ciIDs := []string{
@@ -71,12 +71,12 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 		"22222222-2222-2222-2222-222222222223",
 	}
 	var typeID string
-	if err := pool.QueryRow(ctx, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&typeID); err != nil {
-		t.Fatalf("lookup server ci_type: %v", err)
+	if typeErr := pool.QueryRow(ctx, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&typeID); typeErr != nil {
+		t.Fatalf("lookup server ci_type: %v", typeErr)
 	}
 	for _, id := range ciIDs {
-		if _, err := pool.Exec(ctx, `INSERT INTO ci (id, organization_id, ci_type_id, name, status) VALUES ($1, $2, $3, $4, 'active') ON CONFLICT (id) DO NOTHING`, id, orgID, typeID, "ci-"+id[len(id)-2:]); err != nil {
-			t.Fatalf("insert ci: %v", err)
+		if _, insertErr := pool.Exec(ctx, `INSERT INTO ci (id, organization_id, ci_type_id, name, status) VALUES ($1, $2, $3, $4, 'active') ON CONFLICT (id) DO NOTHING`, id, orgID, typeID, "ci-"+id[len(id)-2:]); insertErr != nil {
+			t.Fatalf("insert ci: %v", insertErr)
 		}
 	}
 
@@ -91,8 +91,8 @@ func TestTraverseFromProjectsRelTypePG(t *testing.T) {
 			TargetCIID:     dst,
 			RelType:        typ,
 		}
-		if err := repo.Create(ctx, r); err != nil {
-			t.Fatalf("create relationship %s->%s: %v", src, dst, err)
+		if createErr := repo.Create(ctx, r); createErr != nil {
+			t.Fatalf("create relationship %s->%s: %v", src, dst, createErr)
 		}
 	}
 	mk(ciIDs[0], ciIDs[1], "connected_to")

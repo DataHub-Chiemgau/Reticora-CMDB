@@ -35,7 +35,9 @@ func scanAgent(s pgx.Row) (*Agent, error) {
 		return nil, err
 	}
 	if len(policy) > 0 {
-		json.Unmarshal(policy, &a.Policy)
+		if err := json.Unmarshal(policy, &a.Policy); err != nil {
+			return nil, fmt.Errorf("decode policy of agent %s: %w", a.ID, err)
+		}
 	}
 	if a.Policy.IntervalSeconds == 0 {
 		a.Policy = DefaultPolicy()

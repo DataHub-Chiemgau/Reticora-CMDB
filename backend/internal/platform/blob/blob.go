@@ -85,8 +85,8 @@ func (s *FileStore) Put(_ context.Context, bucket, key string, reader io.Reader,
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(objectPath), 0o755); err != nil {
-		return fmt.Errorf("blob: create directory for %q: %w", objectPath, err)
+	if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0o755); mkdirErr != nil {
+		return fmt.Errorf("blob: create directory for %q: %w", objectPath, mkdirErr)
 	}
 
 	file, err := os.OpenFile(objectPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
@@ -269,8 +269,8 @@ func (s *S3Store) EnsureBucket(ctx context.Context, bucket string) error {
 	if err != nil {
 		return fmt.Errorf("blob: create bucket request: %w", err)
 	}
-	if err := s.signRequest(req, emptyPayloadSHA256); err != nil {
-		return fmt.Errorf("blob: sign bucket request: %w", err)
+	if signErr := s.signRequest(req, emptyPayloadSHA256); signErr != nil {
+		return fmt.Errorf("blob: sign bucket request: %w", signErr)
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -423,8 +423,8 @@ func (s *S3Store) doRequest(ctx context.Context, method, bucket, key string, bod
 			req.Header.Add(key, value)
 		}
 	}
-	if err := s.signRequest(req, payloadHash); err != nil {
-		return nil, err
+	if signErr := s.signRequest(req, payloadHash); signErr != nil {
+		return nil, signErr
 	}
 
 	resp, err := s.client.Do(req)

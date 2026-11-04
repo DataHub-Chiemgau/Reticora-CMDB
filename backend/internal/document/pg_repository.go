@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -27,7 +28,9 @@ const documentSelectColumns = `
 	COALESCE(tags, '{}'),
 	uploaded_by::text,
 	created_at,
-	updated_at
+	updated_at,
+	(SELECT dv.scan_status FROM document_version dv WHERE dv.document_id = document.id AND dv.version = document.version),
+	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = document.id AND dv.version = document.version)
 `
 
 const documentSelectColumnsWithAlias = `
@@ -44,7 +47,9 @@ const documentSelectColumnsWithAlias = `
 	COALESCE(d.tags, '{}'),
 	d.uploaded_by::text,
 	d.created_at,
-	d.updated_at
+	d.updated_at,
+	(SELECT dv.scan_status FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version),
+	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version)
 `
 
 const documentLinkSelectColumns = `
@@ -68,12 +73,15 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 // A link is visible when its target is visible under the transaction's
 // tenant scope (linkVisible, links.go); a document is visible when it is not
-// linked at all or linked to at least one visible target. The policies of
-// document and document_link (migrations 000064, 000139, 000217) filter the
-// same rows; the predicates keep the repository exact without them.
+// soft-deleted (WP-732) and not linked at all or linked to at least one
+// visible target. The policies of document and document_link (migrations
+// 000064, 000139, 000217) filter the same rows except the deleted ones,
+// which only the repository and the search hide (migration 000221: the
+// retention run sees them under its org-wide scope); the predicates keep
+// the repository exact without them.
 var (
-	documentVisible = "(NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
-		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + "))"
+	documentVisible = "(" + documentNotDeleted + " AND (NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
+		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + ")))"
 	// documentWritable admits a document for UPDATE and DELETE (WP-341,
 	// migration 000139): a principal restricted in none of the client, site
 	// and team scope writes every document; any other only a linked one
@@ -81,11 +89,16 @@ var (
 	// its scope, migrations 000146 and 000217), so neither a document shared
 	// with another client or team or linked to an org-wide object nor an
 	// unlinked (org-wide) one is writable (E-09, E-11).
-	documentWritable = "(" + orgWideDocumentSQL +
+	// A soft-deleted document is not writable either.
+	documentWritable = "(" + documentNotDeleted + " AND (" + orgWideDocumentSQL +
 		" OR (document.link_count > 0 AND document.link_count = (SELECT count(*) FROM document_link" +
 		" WHERE document_link.document_id = document.id AND " + linkVisible + " AND " + database.ScopedWriteSQL +
-		" AND " + teamWriteSQL + ")))"
+		" AND " + teamWriteSQL + "))))"
 )
+
+// documentNotDeleted is the SQL condition "the document is not
+// soft-deleted" (WP-732).
+const documentNotDeleted = "document.deleted_at IS NULL"
 
 // requireVisible fails with "not found" when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
@@ -434,17 +447,310 @@ func (r *PGRepository) SetStorage(ctx context.Context, orgID, id, storageKey, mi
 	return doc, err
 }
 
-// Delete deletes a document. The document table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
+// CreateVersion stores v as the next version of a writable document in one
+// transaction (WP-731, K20: the blob is already stored, no lock is held
+// during the transfer). It locks the document, adds v.Size to the usage of
+// the organization only within limit (the UPDATE on organization_usage
+// serializes parallel uploads of the organization, so exactly the uploads
+// that fit succeed), numbers v after the highest version, inserts it,
+// mirrors it in the document and records document.version_created last.
+// The usage row is counted org-wide: its policy checks only app.org_id, so
+// a scoped caller cannot hide stored bytes from the limit.
+func (r *PGRepository) CreateVersion(ctx context.Context, v *Version, limit *int64) (*Document, error) {
+	if err := blob.CheckOrgKey(v.OrganizationID, v.StorageKey); err != nil {
+		return nil, err
+	}
+	if !api.IsUUID(v.DocumentID) {
+		return nil, api.ErrNotFound
+	}
+	var doc *Document
+	err := database.WithRequestTenant(ctx, r.pool, v.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var locked string
+		lockErr := tx.QueryRow(ctx, "SELECT id::text FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2 FOR UPDATE",
+			v.DocumentID, v.OrganizationID).Scan(&locked)
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if lockErr != nil {
+			return fmt.Errorf("lock document: %w", lockErr)
+		}
+		if err := addStorageUsage(ctx, tx, v.OrganizationID, v.Size, limit); err != nil {
+			return err
+		}
+		if v.ScanStatus == "" {
+			v.ScanStatus = ScanPending
+		}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO document_version (id, organization_id, document_id, version, storage_key, size, mime,
+			                              checksum_sha256, scan_status, uploaded_by_surrogate)
+			SELECT $1, $2, $3, COALESCE(max(version), 0) + 1, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid
+			  FROM document_version WHERE document_id = $3
+			RETURNING version, created_at`,
+			v.ID, v.OrganizationID, v.DocumentID, v.StorageKey, v.Size, v.MimeType, v.ChecksumSHA256, v.ScanStatus,
+			uuidOrEmpty(v.UploadedBy)).Scan(&v.Version, &v.CreatedAt); err != nil {
+			return fmt.Errorf("insert document version: %w", err)
+		}
+		v.CreatedAt = v.CreatedAt.UTC()
+		var err error
+		if doc, err = scanDocument(tx.QueryRow(ctx, `
+			UPDATE document
+			SET version = $2, storage_key = $3, file_size = $4, mime_type = $5, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $6
+			RETURNING `+documentSelectColumns, v.DocumentID, v.Version, v.StorageKey, v.Size, v.MimeType, v.OrganizationID)); err != nil {
+			return fmt.Errorf("mirror document version: %w", err)
+		}
+		return recordVersionAudit(ctx, tx, v)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// addStorageUsage adds size bytes to the usage of the organization when the
+// sum stays within limit (nil: unlimited); otherwise it fails with
+// *entitlement.LimitExceededError naming the usage.
+func addStorageUsage(ctx context.Context, tx pgx.Tx, orgID string, size int64, limit *int64) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO organization_usage (organization_id) VALUES ($1) ON CONFLICT DO NOTHING`, orgID); err != nil {
+		return fmt.Errorf("create storage usage: %w", err)
+	}
+	var used int64
+	err := tx.QueryRow(ctx, `
+		UPDATE organization_usage SET storage_bytes = storage_bytes + $2, updated_at = NOW()
+		WHERE organization_id = $1 AND ($3::bigint IS NULL OR storage_bytes + $2 <= $3)
+		RETURNING storage_bytes`, orgID, size, limit).Scan(&used)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if err = tx.QueryRow(ctx, `SELECT storage_bytes FROM organization_usage WHERE organization_id = $1`, orgID).Scan(&used); err != nil {
+			return fmt.Errorf("read storage usage: %w", err)
+		}
+		return storageLimitError(*limit, used)
+	}
+	if err != nil {
+		return fmt.Errorf("count storage usage: %w", err)
+	}
+	return nil
+}
+
+const documentVersionSelectColumns = `
+	id::text,
+	organization_id::text,
+	document_id::text,
+	version,
+	storage_key,
+	size,
+	mime,
+	checksum_sha256,
+	scan_status,
+	scanned_at,
+	COALESCE(uploaded_by_surrogate::text, ''),
+	created_at
+`
+
+// ListVersions returns a page of the versions of a visible document,
+// highest first.
+func (r *PGRepository) ListVersions(ctx context.Context, orgID, docID string, page api.PaginationParams) ([]Version, int, error) {
+	if !api.IsUUID(docID) {
+		return nil, 0, api.ErrNotFound
+	}
+	after := 0
+	if page.Cursor != nil {
+		var err error
+		if after, err = versionCursorAfter(page.Cursor); err != nil {
+			return nil, 0, err
+		}
+	}
+	var out []Version
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisible(ctx, tx, "document", documentVisible, docID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM document_version WHERE document_id = $1`, docID).Scan(&total); err != nil {
+			return fmt.Errorf("count document versions: %w", err)
+		}
+		query := "SELECT " + documentVersionSelectColumns + " FROM document_version WHERE document_id = $1"
+		args := []any{docID, page.Limit}
+		if page.Cursor != nil {
+			query += " AND version < $3 ORDER BY version DESC LIMIT $2"
+			args = append(args, after)
+		} else {
+			query += " ORDER BY version DESC LIMIT $2 OFFSET $3"
+			args = append(args, page.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list document versions: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Version, error) {
+			v, scanErr := scanVersion(row)
+			if scanErr != nil {
+				return Version{}, scanErr
+			}
+			return *v, nil
+		})
+		if err != nil {
+			return fmt.Errorf("scan document versions: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// GetVersion returns version n of a visible document.
+func (r *PGRepository) GetVersion(ctx context.Context, orgID, docID string, n int) (*Version, error) {
+	if !api.IsUUID(docID) {
+		return nil, api.ErrNotFound
+	}
+	var v *Version
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireVisible(ctx, tx, "document", documentVisible, docID); err != nil {
+			return err
+		}
+		var err error
+		v, err = scanVersion(tx.QueryRow(ctx, "SELECT "+documentVersionSelectColumns+
+			" FROM document_version WHERE document_id = $1 AND version = $2", docID, n))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get document version: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+// StorageUsage returns the stored bytes of the organization from
+// organization_usage (no count over the versions); its policy checks only
+// the organization, so every caller gets the org-wide value.
+func (r *PGRepository) StorageUsage(ctx context.Context, orgID string) (int64, error) {
+	var used int64
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT storage_bytes FROM organization_usage WHERE organization_id = $1), 0)`,
+			orgID).Scan(&used); err != nil {
+			return fmt.Errorf("read storage usage: %w", err)
+		}
+		return nil
+	})
+	return used, err
+}
+
+// SetScanResult stores the scan result of version n of the document
+// (WP-733): status, scanned_at (now, NULL for pending_scan) and the
+// signature name of a finding in scan_signature. It joins a transaction of
+// the context (database.WithRequestTenant), so the scan job (WP-734) writes
+// status, audit and event in one transaction. The document is not checked
+// for visibility beyond the policies of document_version: the job runs
+// org-wide. A missing version fails with api.ErrNotFound.
+func (r *PGRepository) SetScanResult(ctx context.Context, orgID, documentID string, n int, status, signature string) error {
+	if !validScanStatus(status) {
+		return errInvalidScanStatus
+	}
+	if !api.IsUUID(documentID) {
+		return api.ErrNotFound
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, "DELETE FROM document WHERE "+documentWritable+" AND id = $1 AND organization_id = $2", id, orgID)
+		tag, err := tx.Exec(ctx, `
+			UPDATE document_version
+			   SET scan_status = $4,
+			       scanned_at = CASE WHEN $4 = 'pending_scan' THEN NULL ELSE now() END,
+			       scan_signature = NULLIF($5, '')
+			 WHERE organization_id = $1 AND document_id = $2 AND version = $3`,
+			orgID, documentID, n, status, signature)
+		if err != nil {
+			return fmt.Errorf("set document scan result: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return api.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// PendingScans returns up to limit open versions (pending_scan,
+// scan_failed) of the organization, oldest first. The predicate
+// scan_status <> 'clean' lets the planner use the partial index
+// idx_document_version_scan_open (migration 000222); versions of
+// soft-deleted documents are left out.
+func (r *PGRepository) PendingScans(ctx context.Context, orgID string, limit int) ([]Version, error) {
+	var out []Version
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT "+documentVersionSelectColumns+` FROM document_version
+			WHERE organization_id = $1 AND scan_status <> 'clean' AND scan_status IN ('pending_scan', 'scan_failed')
+			  AND NOT EXISTS (SELECT 1 FROM document WHERE document.id = document_version.document_id AND document.deleted_at IS NOT NULL)
+			ORDER BY created_at, id LIMIT $2`, orgID, max(limit, 0))
+		if err != nil {
+			return fmt.Errorf("list pending document scans: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Version, error) {
+			v, scanErr := scanVersion(row)
+			if scanErr != nil {
+				return Version{}, scanErr
+			}
+			return *v, nil
+		})
+		if err != nil {
+			return fmt.Errorf("scan pending document scans: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func scanVersion(scanner documentScanner) (*Version, error) {
+	v := &Version{}
+	if err := scanner.Scan(&v.ID, &v.OrganizationID, &v.DocumentID, &v.Version, &v.StorageKey, &v.Size, &v.MimeType,
+		&v.ChecksumSHA256, &v.ScanStatus, &v.ScannedAt, &v.UploadedBy, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	v.CreatedAt = v.CreatedAt.UTC()
+	if v.ScannedAt != nil {
+		t := v.ScannedAt.UTC()
+		v.ScannedAt = &t
+	}
+	return v, nil
+}
+
+// uuidOrEmpty returns s when it is a UUID, else "" (stored as NULL): the
+// surrogate of a version names a user only by a valid id.
+func uuidOrEmpty(s string) string {
+	if api.IsUUID(s) {
+		return s
+	}
+	return ""
+}
+
+// Delete soft-deletes a writable document (WP-732): it sets deleted_at, so
+// every read and write of the repository and the search treat it as
+// missing, and a second call fails with "not found". Versions, links, blobs
+// and the storage usage stay until the retention run retention.soft_deleted
+// purges the document after the soft-delete period. The audit entry
+// document.deleted is the last step of the transaction.
+func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return fmt.Errorf("not found")
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var title string
+		var deletedAt time.Time
+		err := tx.QueryRow(ctx, "UPDATE document SET deleted_at = NOW() WHERE "+documentWritable+
+			" AND id = $1 AND organization_id = $2 RETURNING title, deleted_at", id, orgID).Scan(&title, &deletedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
 		if err != nil {
 			return fmt.Errorf("delete document: %w", err)
 		}
-		if cmdTag.RowsAffected() == 0 {
-			return fmt.Errorf("not found")
-		}
-		return nil
+		return recordDeleteAudit(ctx, tx, orgID, id, title, deletedAt)
 	})
 }
 
@@ -470,11 +776,31 @@ func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) err
 		if err := requireVisible(ctx, tx, "document", documentVisible, link.DocumentID); err != nil {
 			return err
 		}
+		if err := refuseQuarantined(ctx, tx, link.DocumentID); err != nil {
+			return err
+		}
 		if err := requireVisible(ctx, tx, "document_link", linkVisible, link.ID); err != nil {
 			return err
 		}
 		return recordLinkAudit(ctx, tx, ActionLinked, link)
 	})
+}
+
+// refuseQuarantined fails with ErrQuarantined when the current version of
+// the document is infected (WP-733, E-42): a quarantined document gets no
+// new link; its existing links stay, since removing them would widen its
+// visibility to the whole organization (000064, 000139).
+func refuseQuarantined(ctx context.Context, tx pgx.Tx, docID string) error {
+	var infected bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM document d JOIN document_version dv
+		  ON dv.document_id = d.id AND dv.version = d.version
+		 WHERE d.id = $1 AND dv.scan_status = 'infected')`, docID).Scan(&infected); err != nil {
+		return fmt.Errorf("check document quarantine: %w", err)
+	}
+	if infected {
+		return ErrQuarantined
+	}
+	return nil
 }
 
 // UnlinkDocument removes link linkID of document docID when the link is
@@ -491,6 +817,7 @@ func (r *PGRepository) UnlinkDocument(ctx context.Context, orgID, docID, linkID 
 		err := tx.QueryRow(ctx, `
 			DELETE FROM document_link
 			WHERE id = $1 AND document_id = $2 AND organization_id = $3 AND `+linkVisible+`
+			  AND EXISTS (SELECT 1 FROM document WHERE document.id = $2 AND `+documentNotDeleted+`)
 			RETURNING entity_type, entity_id::text`, linkID, docID, orgID).Scan(&link.EntityType, &link.EntityID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return api.ErrNotFound
@@ -502,11 +829,19 @@ func (r *PGRepository) UnlinkDocument(ctx context.Context, orgID, docID, linkID 
 	})
 }
 
-// GetLinks returns all entity links for a document.
+// GetLinks returns the visible entity links of a document; a soft-deleted
+// document fails with api.ErrNotFound (WP-732).
 func (r *PGRepository) GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error) {
 	var links []DocumentLink
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var deleted bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM document WHERE id = $1 AND deleted_at IS NOT NULL)`, docID).Scan(&deleted); err != nil {
+			return fmt.Errorf("get document links: %w", err)
+		}
+		if deleted {
+			return api.ErrNotFound
+		}
 		query := fmt.Sprintf("SELECT %s FROM document_link WHERE "+linkVisible+" AND document_id = $1 ORDER BY created_at DESC, id DESC", documentLinkSelectColumns)
 		rows, err := tx.Query(ctx, query, docID)
 		if err != nil {
@@ -538,7 +873,7 @@ func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType,
 			SELECT %s
 			FROM document d
 			JOIN document_link l ON l.document_id = d.id
-			WHERE l.entity_type = $1 AND l.entity_id = $2
+			WHERE l.entity_type = $1 AND l.entity_id = $2 AND d.deleted_at IS NULL
 			  AND EXISTS (SELECT 1 FROM document_link WHERE document_link.id = l.id AND `+linkVisible+`)
 			ORDER BY d.created_at DESC
 		`, documentSelectColumnsWithAlias)
@@ -567,8 +902,11 @@ type documentScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanDocument scans the columns of documentSelectColumns; scan status and
+// scanned_at are those of the current version (WP-733), NULL without one.
 func scanDocument(scanner documentScanner) (*Document, error) {
 	item := &Document{}
+	var scanStatus *string
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
@@ -584,14 +922,23 @@ func scanDocument(scanner documentScanner) (*Document, error) {
 		&item.UploadedBy,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&scanStatus,
+		&item.ScannedAt,
 	); err != nil {
 		return nil, err
 	}
 	if item.Tags == nil {
 		item.Tags = []string{}
 	}
+	if scanStatus != nil {
+		item.ScanStatus = *scanStatus
+	}
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()
+	if item.ScannedAt != nil {
+		at := item.ScannedAt.UTC()
+		item.ScannedAt = &at
+	}
 	return item, nil
 }
 

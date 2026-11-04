@@ -252,3 +252,24 @@ func TestRackFieldsNeedRackView(t *testing.T) {
 		t.Errorf("RackMount.ci with rack_view: %v, %v", item, err)
 	}
 }
+
+// TestCITags covers WP-754: CI.tags carries the tag keys of the CI in cis
+// and ci, [] for a CI without tags.
+func TestCITags(t *testing.T) {
+	f := newBFFFixture(t)
+	tags := []string{"Prod", "web"}
+	if _, err := f.cis.Update(context.Background(), "org-1", f.hub, ci.UpdateRequest{LegacyTags: &tags}); err != nil {
+		t.Fatal(err)
+	}
+	resp := f.query(t, allRead, `{ ci(id: "`+f.hub+`") { name tags } }`)
+	raw, _ := json.Marshal(resp.Data["ci"])
+	if len(resp.Errors) != 0 || string(raw) != `{"name":"hub","tags":["prod","web"]}` {
+		t.Errorf("ci { tags }: %s %+v", raw, resp.Errors)
+	}
+	resp = f.query(t, allRead, `{ cis(first: 100) { nodes { name tags } } }`)
+	raw, _ = json.Marshal(resp.Data["cis"])
+	if len(resp.Errors) != 0 || !strings.Contains(string(raw), `{"name":"hub","tags":["prod","web"]}`) ||
+		!strings.Contains(string(raw), `{"name":"leaf-00","tags":[]}`) {
+		t.Errorf("cis { tags }: %s %+v", raw, resp.Errors)
+	}
+}

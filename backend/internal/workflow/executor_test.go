@@ -3,14 +3,15 @@ package workflow
 import (
 	"context"
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
-	"testing"
-	"time"
 )
 
 func TestExecutorApprovalFlow(t *testing.T) {
@@ -85,7 +86,7 @@ func TestExecutorListStepsFailureFailsRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when ListSteps fails")
 	}
-	runs, _, lerr := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, lerr := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
@@ -105,7 +106,7 @@ func TestExecutorUpdateStepFailurePropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when UpdateStep fails")
 	}
-	runs, _, _ := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed after UpdateStep failure, got %+v", runs)
 	}
@@ -126,12 +127,12 @@ func TestExecutorApproveListStepsFailure(t *testing.T) {
 		t.Fatalf("want waiting, got %s", run.Status)
 	}
 	repo.listStepsErr = errors.New("db down")
-	if _, err := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); err == nil {
+	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
 		t.Fatal("expected error when ListSteps fails during approval")
 	}
 	repo.listStepsErr = nil
 	repo.updateStepErr = errors.New("write denied")
-	if _, err := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); err == nil {
+	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
 		t.Fatal("expected error when UpdateStep fails during approval")
 	}
 	repo.updateStepErr = nil

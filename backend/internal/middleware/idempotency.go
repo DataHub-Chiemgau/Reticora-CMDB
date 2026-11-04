@@ -72,6 +72,12 @@ func writeRequestBodyTooLarge(w http.ResponseWriter) {
 // shared store, the cache equivalent of INSERT … ON CONFLICT), and a
 // concurrent duplicate gets 409 instead of executing twice. A 5xx response
 // is not stored (executeAndStore).
+//
+// A JSON body (or one without Content-Type) is read and hashed before the
+// handler. Any other body, such as the content of POST
+// /api/v1/documents/{id}/versions, is neither read ahead nor cut (SEC-09,
+// WP-268): the handler reads it from the connection while it is hashed
+// (io.TeeReader), and a replay hashes it without a buffer.
 func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,10 +94,15 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 
 			storeKey := "idempotency:" + idempotencyScope(r) + ":" + key
 
+			if !bufferedBody(r) {
+				serveStreamed(store, storeKey, w, r, next)
+				return
+			}
+
 			// Buffer and hash the whole body: the replay decision falls
-			// before the handler, so a streaming hash does not suffice. The
-			// handler receives exactly the hashed body; a body above the
-			// cap gets 413 without reserving the key.
+			// before the handler. The handler receives exactly the hashed
+			// body; a body above the cap gets 413 without reserving the
+			// key.
 			body, err := readRequestBody(r)
 			if errors.Is(err, errRequestBodyTooLarge) {
 				writeRequestBodyTooLarge(w)
@@ -103,8 +114,10 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			bodyHash := hashBody(body)
+			hashed := func() (string, bool) { return bodyHash, true }
 
-			if replayStored(w, r, store, storeKey, bodyHash) {
+			if entry, ok := lookupStored(r, store, storeKey); ok {
+				replayIdempotent(w, r, entry, bodyHash)
 				return
 			}
 
@@ -114,42 +127,101 @@ func IdempotencyWithStore(store cache.Store) func(http.Handler) http.Handler {
 				// losing deduplication during a cache outage is preferable
 				// to rejecting every POST.
 				slog.Warn("idempotency: reservation failed, executing", "error", err)
-				executeAndStore(r.Context(), store, storeKey, bodyHash, w, r, next)
+				executeAndStore(r.Context(), store, storeKey, hashed, w, r, next)
 				return
 			}
 			if reserved > 1 {
 				// Another request holds the key: replay its result when it
 				// has finished, otherwise report the conflict.
-				if replayStored(w, r, store, storeKey, bodyHash) {
+				if entry, ok := lookupStored(r, store, storeKey); ok {
+					replayIdempotent(w, r, entry, bodyHash)
 					return
 				}
 				httpx.Conflict(w, r, "a request with this Idempotency-Key is still in progress")
 				return
 			}
 
-			executeAndStore(r.Context(), store, storeKey, bodyHash, w, r, next)
+			executeAndStore(r.Context(), store, storeKey, hashed, w, r, next)
 		})
 	}
 }
 
-// replayStored replays a stored response for the key and reports whether it
-// did.
-func replayStored(w http.ResponseWriter, r *http.Request, store cache.Store, storeKey, bodyHash string) bool {
+// bufferedBody reports whether the body is read ahead: a JSON body (also a
+// +json type) or one without Content-Type, as before WP-268.
+func bufferedBody(r *http.Request) bool {
+	ct := r.Header.Get("Content-Type")
+	return strings.TrimSpace(ct) == "" || isJSONMediaType(ct)
+}
+
+// serveStreamed is IdempotencyWithStore for a body that is not read ahead:
+// a stored response is replayed after the body is hashed without a buffer;
+// otherwise the handler reads the body while it is hashed, and the rest the
+// handler left is hashed afterwards (executeAndStore).
+func serveStreamed(store cache.Store, storeKey string, w http.ResponseWriter, r *http.Request, next http.Handler) {
+	replay := func(entry idempotencyEntry) {
+		h := sha256.New()
+		if _, err := io.Copy(h, r.Body); err != nil {
+			httpx.Internal(w, r, "failed to read request body")
+			return
+		}
+		replayIdempotent(w, r, entry, hex.EncodeToString(h.Sum(nil)))
+	}
+	if entry, ok := lookupStored(r, store, storeKey); ok {
+		replay(entry)
+		return
+	}
+
+	body := r.Body
+	h := sha256.New()
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{io.TeeReader(body, h), body}
+	// hashed reads what the handler left (at most the cap) and returns the
+	// hash of the whole body; a body above the cap or a read error stores
+	// nothing.
+	hashed := func() (string, bool) {
+		n, err := io.Copy(h, io.LimitReader(body, maxIdempotentRequestBody+1))
+		if err != nil || n > maxIdempotentRequestBody {
+			return "", false
+		}
+		return hex.EncodeToString(h.Sum(nil)), true
+	}
+
+	reserved, err := store.Increment(r.Context(), storeKey+":lock", idempotencyLockTTL)
+	if err != nil {
+		slog.Warn("idempotency: reservation failed, executing", "error", err)
+		executeAndStore(r.Context(), store, storeKey, hashed, w, r, next)
+		return
+	}
+	if reserved > 1 {
+		if entry, ok := lookupStored(r, store, storeKey); ok {
+			r.Body = body
+			replay(entry)
+			return
+		}
+		httpx.Conflict(w, r, "a request with this Idempotency-Key is still in progress")
+		return
+	}
+	executeAndStore(r.Context(), store, storeKey, hashed, w, r, next)
+}
+
+// lookupStored returns the stored response of the key, if any.
+func lookupStored(r *http.Request, store cache.Store, storeKey string) (idempotencyEntry, bool) {
+	var entry idempotencyEntry
 	existing, found, err := store.Get(r.Context(), storeKey)
 	if err != nil {
 		slog.Warn("idempotency: cache lookup failed", "error", err)
-		return false
+		return entry, false
 	}
 	if !found {
-		return false
+		return entry, false
 	}
-	var entry idempotencyEntry
 	if jsonErr := json.Unmarshal([]byte(existing), &entry); jsonErr != nil {
 		slog.Warn("idempotency: failed to unmarshal cached entry", "key", storeKey, "error", jsonErr)
-		return false
+		return entry, false
 	}
-	replayIdempotent(w, r, entry, bodyHash)
-	return true
+	return entry, true
 }
 
 // idempotencyScope binds a key to the authenticated principal (organization,
@@ -186,11 +258,18 @@ func replayIdempotent(w http.ResponseWriter, r *http.Request, entry idempotencyE
 // a stored audit intent), so a retry with the same key reaches the handler
 // again instead of replaying the error for 24 hours. Any other response is
 // replayed verbatim, a 4xx body with the trace_id of the first request.
-func executeAndStore(ctx context.Context, store cache.Store, storeKey, bodyHash string, w http.ResponseWriter, r *http.Request, next http.Handler) {
+// bodyHash returns the hash of the request body once the handler has run;
+// without one (a streamed body above the cap) nothing is stored either.
+func executeAndStore(ctx context.Context, store cache.Store, storeKey string, bodyHash func() (string, bool), w http.ResponseWriter,
+	r *http.Request, next http.Handler) {
 	rec := newResponseRecorder(w)
 	next.ServeHTTP(rec, r)
 
-	if rec.status >= http.StatusInternalServerError {
+	hash, hashed := "", false
+	if rec.status < http.StatusInternalServerError {
+		hash, hashed = bodyHash()
+	}
+	if !hashed {
 		if err := store.Delete(context.WithoutCancel(ctx), storeKey+":lock"); err != nil {
 			// The reservation expires after idempotencyLockTTL; until then
 			// a retry gets 409.
@@ -201,7 +280,7 @@ func executeAndStore(ctx context.Context, store cache.Store, storeKey, bodyHash 
 
 	entry := idempotencyEntry{
 		StatusCode:  rec.status,
-		BodyHash:    bodyHash,
+		BodyHash:    hash,
 		ContentType: rec.Header().Get("Content-Type"),
 		Body:        rec.body,
 	}
@@ -254,3 +333,7 @@ func (r *responseRecorder) Write(data []byte) (int, error) {
 	}
 	return r.ResponseWriter.Write(data)
 }
+
+// Unwrap gives http.ResponseController the underlying writer, so a handler
+// behind the middleware can extend its deadlines (WP-268).
+func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

@@ -84,6 +84,7 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{connectors: map[string]*ConnectorConfig{}, tasks: map[string]*ProvisioningTask{}, policies: map[string]*LifecyclePolicy{}, requests: map[string]*AccessRequest{}, reviews: map[string]*AccessReview{}, reviewItems: map[string]*AccessReviewItem{}, drift: map[string]*DriftFinding{}}
 }
+
 // id returns ids of UUID form, as the handler accepts only UUID ids
 // (API-03); all kinds share the counter.
 func (r *MemoryRepository) id(_ string) string {

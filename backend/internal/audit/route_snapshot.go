@@ -356,7 +356,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	for collection, table := range map[string]string{
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "compositions": "composition", "consumables": "consumable",
-		"contacts": "contact", "desks": "desk", "discovery-scopes": "discovery_scope", "documents": "document",
+		"contacts": "contact", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "quantity_item",
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
@@ -367,6 +367,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// DELETE /documents/{id} records document.deleted in its transaction
+	// (WP-732).
+	crud(m, v1+"documents", "document", "POST", "PATCH")
 	// DELETE /users/{id} records user.deleted in its transaction (F-393).
 	crud(m, v1+"users", "app_user", "POST", "PATCH")
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
@@ -428,6 +431,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The template migration job (WP-712): the answer names it as job_id;
 	// the migrated CIs are audited by the job (ci.template_migrated).
 	m["POST /api/v1/templates/{id}/migrations"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
+	// The import run (WP-301): the answer names its job as job_id.
+	m["POST /api/v1/imports"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	// A role assignment is a custom-role grant or a standard-role
 	// assignment.
 	for _, route := range []string{"POST /api/v1/role-assignments", "POST /api/v1/roles/assign"} {
@@ -450,6 +455,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/desk-bookings/{id}/cancel":           "desk_booking",
 		"POST /api/v1/discovery/review-items/{id}/resolve": "review_item",
 		"PUT /api/v1/documents/{id}/content":               "document",
+		"POST /api/v1/documents/{id}/versions":             "document",
 		"POST /api/v1/iga/access-requests/{id}/approve":    "iga_access_request",
 		"POST /api/v1/iga/access-requests/{id}/reject":     "iga_access_request",
 		"POST /api/v1/iga/connectors/{id}/sync":            "iga_connector",
@@ -524,6 +530,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/credentials/rotate-keys":         "re-encrypts every credential; no readable column changes",
 		"POST /api/v1/iga/drift/reconcile":             "reconciliation run over every connector",
 		"POST /api/v1/iga/jml/resolve":                 "resolves a joiner/mover/leaver event into provisioning tasks",
+		"POST /api/v1/imports/preview":                 "reads the head of an import file; creates no job and changes no data",
 		"POST /api/v1/maintenance-windows/{id}/notify": "sends notices; the window is unchanged",
 		"POST /api/v1/privacy/erasure":                 "erasure of personal data, which must not enter the audit",
 		"POST /api/v1/search/reindex":                  "rebuilds the search index; no business data changes",

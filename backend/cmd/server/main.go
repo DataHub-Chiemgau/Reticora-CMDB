@@ -110,7 +110,11 @@ func main() {
 		slog.Error("failed to init observability", "error", err)
 		os.Exit(1)
 	}
-	defer shutdown(context.Background())
+	defer func() {
+		if shutdownErr := shutdown(context.Background()); shutdownErr != nil {
+			slog.Warn("failed to shut down observability", "error", shutdownErr)
+		}
+	}()
 
 	// Initialize envelope encryptor. Credentials are stored encrypted, so a
 	// missing master key must fail startup instead of silently disabling the
@@ -222,17 +226,17 @@ func main() {
 			slog.Error("RETICORA_DATABASE_URL is required; start with --no-db for an ephemeral development server")
 			os.Exit(1)
 		}
-		pool, err := database.NewPool(context.Background(), cfg.DatabaseURL)
-		if err != nil {
-			slog.Error("failed to connect to database", "error", err, "url", config.MaskDSN(cfg.DatabaseURL))
+		pool, poolErr := database.NewPool(context.Background(), cfg.DatabaseURL)
+		if poolErr != nil {
+			slog.Error("failed to connect to database", "error", poolErr, "url", config.MaskDSN(cfg.DatabaseURL))
 			os.Exit(1)
 		}
 		defer pool.Close()
 
 		slog.Info("connected to PostgreSQL", "url", config.MaskDSN(cfg.DatabaseURL))
 		dbCheck := server.DatabaseReadiness(pool, server.RequiredExtensions)
-		if err := dbCheck.Check(context.Background()); err != nil {
-			slog.Error("database is not ready", "error", err)
+		if readyErr := dbCheck.Check(context.Background()); readyErr != nil {
+			slog.Error("database is not ready", "error", readyErr)
 			os.Exit(1)
 		}
 		readiness = append(readiness, dbCheck)
@@ -355,14 +359,14 @@ func main() {
 		osBackend := search.NewOpenSearchBackend(search.OpenSearchConfig{
 			URL: cfg.OpenSearchURL, Username: cfg.OpenSearchUsername, Password: cfg.OpenSearchPassword, Index: cfg.OpenSearchIndex,
 		}, nil)
-		if err := osBackend.Ping(context.Background()); err != nil {
-			slog.Error("failed to connect to OpenSearch", "error", err)
+		if pingErr := osBackend.Ping(context.Background()); pingErr != nil {
+			slog.Error("failed to connect to OpenSearch", "error", pingErr)
 			os.Exit(1)
 		}
 		// Apply the index template on every startup so the mapping is explicit
 		// and reproducible instead of relying on dynamic mapping guesses.
-		if err := osBackend.EnsureIndexTemplate(context.Background()); err != nil {
-			slog.Error("failed to apply OpenSearch index template", "error", err)
+		if templateErr := osBackend.EnsureIndexTemplate(context.Background()); templateErr != nil {
+			slog.Error("failed to apply OpenSearch index template", "error", templateErr)
 			os.Exit(1)
 		}
 		if pgSearch, ok := repos.Search.(*search.PGRepository); ok {
@@ -450,8 +454,8 @@ func main() {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := webhookDispatcher.Shutdown(ctx); err != nil {
-			slog.Error("webhook dispatcher shutdown error", "error", err)
+		if dispatcherErr := webhookDispatcher.Shutdown(ctx); dispatcherErr != nil {
+			slog.Error("webhook dispatcher shutdown error", "error", dispatcherErr)
 		}
 	}()
 
@@ -544,6 +548,7 @@ func main() {
 		AuditPool:            auditPool,
 		AIProvider:           aiProvider,
 		Blobs:                blobStore,
+		Documents:            cfg.Documents,
 		Egress:               egressPolicy,
 		Readiness:            readiness,
 		IngestQueue:          ingestQueue,
@@ -585,7 +590,7 @@ func main() {
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
 		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
-		jobQueue: jobQueue, notifier: notifier}); err != nil {
+		jobQueue: jobQueue, notifier: notifier, blobs: blobStore}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}
@@ -596,7 +601,7 @@ func main() {
 	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
 		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
 		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
-		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc})
+		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules})
 	if err != nil {
 		slog.Error("failed to set up the workers", "error", err)
 		os.Exit(1)

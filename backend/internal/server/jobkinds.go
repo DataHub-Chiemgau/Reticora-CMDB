@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 )
@@ -41,6 +42,13 @@ var (
 	// not repeated, a lost worker leaves the draft untested. A running
 	// test can be cancelled; the draft stays draft.
 	metamodelTestJobKind = jobs.Kind{Name: metamodel.TestJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
+	// importJobKind (WP-301): an import run is not repeated; its run ends
+	// on its own within importer.RunTimeout, before the reaper fails it
+	// after the timeout of the kind. A holder of import:run cancels a
+	// running import (WP-514); it stops at its next progress report. Like
+	// exportJobKind it has no queue handler yet: the run goes in the
+	// process that accepted it (the queue handler follows with WP-775).
+	importJobKind = jobs.Kind{Name: importer.JobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -67,16 +75,20 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 	return kinds
 }
 
-// registerJobKinds registers the submitted kinds and the export kind with
-// svc, the job service of the requests, and wires their submitters: with queue (NATS) the
-// handlers run on the queue and the submitters submit there, without it
-// the submitters run their jobs in this process on svc.
+// registerJobKinds registers the submitted kinds, the export kind and the
+// import kind with svc, the job service of the requests, and wires their
+// submitters: with queue (NATS) the handlers run on the queue and the
+// submitters submit there, without it the submitters run their jobs in
+// this process on svc.
 //
 // The template migration takes progress and cancel from svc in both cases,
-// the test run of a draft the state of a running test.
+// the test run of a draft the state of a running test, the import its
+// jobs (it runs in this process also with a queue, WP-301).
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
-	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler) {
+	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler) {
 	svc.Register(exportJobKind)
+	svc.Register(importJobKind)
+	importHandler.WithJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}

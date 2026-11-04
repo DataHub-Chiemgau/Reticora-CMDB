@@ -304,7 +304,6 @@ func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req U
 		if req.Settings != nil {
 			sets = append(sets, fmt.Sprintf("settings = $%d", pos))
 			args = append(args, req.Settings)
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {
@@ -574,7 +573,6 @@ func (r *PGRepository) UpdateBuilding(ctx context.Context, orgID, id string, req
 		if req.FloorplanObjectKey != nil {
 			sets = append(sets, fmt.Sprintf("floorplan_object_key = $%d", pos))
 			args = append(args, nilIfEmpty(*req.FloorplanObjectKey))
-			pos++
 		}
 		var err error
 		if len(sets) == 0 {
@@ -743,7 +741,6 @@ func (r *PGRepository) UpdateRoom(ctx context.Context, orgID, id string, req Upd
 			}
 			sets = append(sets, fmt.Sprintf("layout = $%d::jsonb", pos))
 			args = append(args, string(layoutJSON))
-			pos++
 		}
 		if len(sets) == 0 {
 			rm, err = scanRoom(tx.QueryRow(ctx, "SELECT "+roomCols+" FROM room WHERE organization_id = $1 AND id = $2 AND "+roomVisible, orgID, id))

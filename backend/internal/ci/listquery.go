@@ -1,6 +1,7 @@
 package ci
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 	"strconv"
@@ -43,10 +44,15 @@ var filterColumns = map[string]struct{ expr, kind string }{
 	"last_seen_at":     {"last_seen_at", api.KindTime},
 }
 
+// TagsField is the set field of the CI tags (WP-754): filter[tags] with
+// exact, in or all compares the keys of the tags (ci_tag), outside
+// filterColumns.
+const TagsField = "tags"
+
 // ListFields is the whitelist of the CI list (API-02): filterable fields,
 // sortable fields (sortColumnCasts) and the selectable response fields.
 var ListFields = func() api.ListFields {
-	spec := api.ListFields{Filterable: map[string]string{}, Attributes: true}
+	spec := api.ListFields{Filterable: map[string]string{TagsField: api.KindSet}, Attributes: true}
 	for field, c := range filterColumns {
 		spec.Filterable[field] = c.kind
 	}
@@ -85,6 +91,49 @@ func (p *FilterParams) namedTypes() (groups [][]string, named bool) {
 		}
 	}
 	return groups, len(groups) > 0
+}
+
+// tagFilterKeys returns the tag keys of a filter[tags] in lower case and
+// without duplicates: tag keys are lower case (TagKey), and all counts the
+// distinct keys.
+func tagFilterKeys(f api.Filter) []string {
+	keys := make([]string, 0, len(f.Values))
+	for _, v := range f.Values {
+		if v = strings.ToLower(v); !slices.Contains(keys, v) {
+			keys = append(keys, v)
+		}
+	}
+	return keys
+}
+
+// tagsPredicate renders filter[tags] as a predicate on the CI row with the
+// tag IDs as parameter argPos (WP-754): exact and in need one of the tags,
+// all every one. ids maps the keys of the organization's tags to their IDs
+// (tagIDsOf); an unknown key matches no tag, so all with one matches no CI.
+// The IDs are a parameter, not a join with tag on the key: then the planner
+// estimates the CIs of the tags from the statistics of ci_tag.tag_id and
+// reads the CIs of a rare tag through idx_ci_tag_org_tag, where with the
+// join it estimated the average tag (ci_tag rows / distinct tags), walked
+// the list in sort order and probed every CI of the organization
+// (TestCIQueryBudget; as for the types, typeScope).
+func tagsPredicate(f api.Filter, ids map[string]string, argPos int) (clause string, args []any) {
+	keys := tagFilterKeys(f)
+	known := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if id, ok := ids[key]; ok {
+			known = append(known, id)
+		}
+	}
+	if len(known) == 0 || (f.Op == api.OpAll && len(known) < len(keys)) {
+		return "false", nil
+	}
+	if f.Op == api.OpAll {
+		// (ci_id, tag_id) is unique: the count is the number of the tags
+		// the CI holds.
+		return fmt.Sprintf("(SELECT count(*) FROM ci_tag ct WHERE ct.ci_id = ci.id AND ct.tag_id = ANY($%[1]d::uuid[]))"+
+			" = cardinality($%[1]d::uuid[])", argPos), []any{known}
+	}
+	return fmt.Sprintf("EXISTS (SELECT 1 FROM ci_tag ct WHERE ct.ci_id = ci.id AND ct.tag_id = ANY($%d::uuid[]))", argPos), []any{known}
 }
 
 // fieldValue returns the value of a filterable field (or an attribute) of

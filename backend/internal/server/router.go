@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -205,6 +206,9 @@ type Options struct {
 	// Blobs persists asynchronous export results; nil disables export-job
 	// creation (the streaming export endpoint stays available).
 	Blobs blob.Store
+	// Documents are the upload limits of the document module (SEC-09,
+	// WP-268); the zero value uses the defaults of config.DocumentSettings.
+	Documents config.DocumentSettings
 	// Egress is the destination policy of webhook and connector URLs and
 	// of own SMTP servers (SEC-08), when they are stored (webhooks, IGA
 	// connectors, notification channels) and called; the zero value
@@ -427,6 +431,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.Modules.Enabled(ModuleMetamodel) {
 		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
 	}
+	// The import runs (WP-301) get the job service in registerJobKinds; the
+	// routes serve in both profiles and answer 503 without it.
+	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -441,6 +448,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running test of a metamodel draft is cancelled with
 			// metamodel:publish like its start (WP-721, E-106).
 			WithKind(metamodel.TestJobKind, identity.PermMetamodelPublish, nil).
+			// A running import is cancelled with import:run like its
+			// start (WP-301, WP-514).
+			WithKind(importer.JobKind, identity.PermImportRun, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -473,10 +483,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
+	datevGate := exportDATEVGate(&opts)
+	exportWorker.DATEV = datevGate
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -570,13 +582,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
 		topologyHandler,
-		export.NewHandler(repos.CI),
-		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs),
+		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
+		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
-		document.NewHandler(repos.Document, opts.Blobs),
+		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents),
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order).WithMovements(repos.Movement),
@@ -613,6 +625,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
 		draftHandler,
 		importer.NewHandler(repos.Import),
+		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver),
@@ -936,4 +949,16 @@ func (a roleExport) ExportRoles(ctx context.Context, orgID string) ([]citype.Exp
 			return out, nil
 		}
 	}
+}
+
+// exportDATEVGate is the gate of the export format datev (WP-790): the
+// entitlements of the organization and the module inventory, passed as a
+// value because export does not import server. Without entitlements DATEV
+// is refused.
+func exportDATEVGate(opts *Options) *export.DATEVGate {
+	var entitlements export.EntitlementChecker
+	if opts.Entitlements != nil {
+		entitlements = opts.Entitlements
+	}
+	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
 }

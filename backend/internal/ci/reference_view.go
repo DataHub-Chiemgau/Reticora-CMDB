@@ -111,7 +111,7 @@ var referenceNameQueries = map[string]string{
 	fieldmeta.TargetAsset: `SELECT id::text, name, '' FROM asset
 		WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
 	fieldmeta.TargetDocument: `SELECT id::text, title, '' FROM document
-		WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
+		WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
 }
 
 // mergedTargetsQuery selects the survivors of merged CIs among $2 whose

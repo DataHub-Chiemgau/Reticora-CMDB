@@ -63,6 +63,9 @@ type budgetCall struct {
 // and analyzed; the expectations hold in both and the negative cases fail
 // in both.
 //
+// The tag filter (filter[tags][in], WP-754) reads the CIs of its tags
+// through idx_ci_tag_org_tag of ci_tag (WP-281).
+//
 // Known gaps (queryBudget.gap): the name filter of the list (search= with
 // name ILIKE, filter[name]=) and the list filter on hostname have no index
 // the application role can use; they read the organization once. ILIKE
@@ -137,9 +140,22 @@ func TestCIQueryBudget(t *testing.T) {
 		t.Fatalf("E-73: %s", problem)
 	}
 	rackIndex := rackIndexes[0].name
+	// Tags (WP-754): budget-rare on every 500th CI, budget-common on every
+	// other one, so that ci_tag holds more than the organization's CIs.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO tag (organization_id, key, display_name)
+		VALUES ($1, 'budget-rare', '{"de": "Selten"}'), ($1, 'budget-common', '{"de": "Häufig"}')`, f.OrgA); err != nil {
+		t.Fatalf("seed tags: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci_tag (organization_id, ci_id, tag_id)
+		SELECT ci.organization_id, ci.id, tag.id FROM ci JOIN tag ON tag.organization_id = ci.organization_id
+		WHERE ci.organization_id = $1 AND CASE tag.key
+			WHEN 'budget-rare' THEN substring(ci.name FROM 8)::int % 500 = 7
+			ELSE substring(ci.name FROM 8)::int % 2 = 0 END`, f.OrgA); err != nil {
+		t.Fatalf("seed ci tags: %v", err)
+	}
 	analyze := func() {
 		t.Helper()
-		if _, err := f.Admin.Exec(bg, `ANALYZE ci, ci_identity_mac`); err != nil {
+		if _, err := f.Admin.Exec(bg, `ANALYZE ci, ci_identity_mac, tag, ci_tag`); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -218,6 +234,9 @@ func TestCIQueryBudget(t *testing.T) {
 	serial := []string{"idx_ci_serial_number_lc"}
 	ip := []string{"idx_ci_mgmt_ip_sys_object", "idx_ci_mgmt_ip"}
 	byID := []string{"ci_pkey", "ci_id_organization_key"}
+	tagged := func(op string, keys ...string) ci.FilterParams {
+		return ci.FilterParams{Filters: []api.Filter{{Field: ci.TagsField, Op: op, Kind: api.KindSet, Values: keys}}}
+	}
 	calls := []budgetCall{
 		{name: "list", match: listPage, statements: listBudget, ordered: true,
 			budget: queryBudget{indexes: [][]string{{listSortIndex}}, maxRows: maxRows},
@@ -234,6 +253,12 @@ func TestCIQueryBudget(t *testing.T) {
 		{name: "attribute filter", match: listPage, statements: listBudget,
 			budget: queryBudget{indexes: [][]string{{rackIndex}}, maxRows: maxRows},
 			run:    listItems(exact(api.AttributePrefix+rack.Key, "R7")), want: ids(`attributes ->> 'wp436_rack' = 'R7'`, "id")},
+		// filter[tags][in] (WP-754): the CIs of the tag through the index of
+		// ci_tag, an unknown key matches nothing.
+		{name: "tag filter (filter[tags][in])", match: listPage, statements: listBudget,
+			budget: queryBudget{indexes: [][]string{{"idx_ci_tag_org_tag"}}, maxRows: maxRows},
+			run:    listItems(tagged(api.OpIn, "budget-rare", "budget-unknown")),
+			want:   ids(`substring(name FROM 8)::int % 500 = 7`, "id")},
 		{name: "detail", match: " FROM ci WHERE id = $1", statements: detailBudget,
 			budget: queryBudget{indexes: [][]string{byID}, maxRows: maxRows},
 			run: func() ([]string, error) {

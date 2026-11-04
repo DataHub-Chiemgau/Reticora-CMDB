@@ -43,9 +43,6 @@ type jwk struct {
 	Curve     string `json:"crv"`
 }
 
-// keyFunc resolves the verification key for a token header.
-type keyFunc func(kid, alg string) (any, error)
-
 // jwksCache fetches and caches the provider's JSON Web Key Set.
 type jwksCache struct {
 	mu     sync.RWMutex
@@ -177,7 +174,7 @@ func (p *OIDCProvider) resolveKey(ctx context.Context, kid, alg string) (any, er
 		return nil, err
 	}
 
-	if key, err := selectKey(keys, kid, alg); err == nil {
+	if key, selectErr := selectKey(keys, kid, alg); selectErr == nil {
 		return key, nil
 	}
 
@@ -257,10 +254,21 @@ func (k *jwk) publicKey() (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("identity: invalid EC y coordinate: %w", err)
 		}
-		if !elliptic.P256().IsOnCurve(x, y) {
+		// The uncompressed point 0x04 || X || Y; ParseUncompressedPublicKey
+		// rejects a point that is not on the curve.
+		const coordinateSize = 32
+		if x.BitLen() > 8*coordinateSize || y.BitLen() > 8*coordinateSize {
 			return nil, errors.New("identity: EC point is not on P-256")
 		}
-		return &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}, nil
+		point := make([]byte, 1+2*coordinateSize)
+		point[0] = 4
+		x.FillBytes(point[1 : 1+coordinateSize])
+		y.FillBytes(point[1+coordinateSize:])
+		pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), point)
+		if err != nil {
+			return nil, fmt.Errorf("identity: EC point is not on P-256: %w", err)
+		}
+		return pub, nil
 	default:
 		return nil, fmt.Errorf("identity: unsupported JWK key type %q", k.KeyType)
 	}

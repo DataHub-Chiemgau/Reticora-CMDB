@@ -315,7 +315,7 @@ func AcquireAdvisoryLock(ctx context.Context, tx pgx.Tx, orgID string) error {
 	orgHash := sha256.Sum256([]byte(orgID))
 	orgKey := int32(orgHash[0])<<24 | int32(orgHash[1])<<16 | int32(orgHash[2])<<8 | int32(orgHash[3])
 
-	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)", int32(AdvisoryLockID), orgKey)
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2)", AdvisoryLockID, orgKey)
 	if err != nil {
 		return fmt.Errorf("audit: acquire advisory lock: %w", err)
 	}

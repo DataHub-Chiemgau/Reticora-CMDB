@@ -170,8 +170,8 @@ func (r *PGRepository) UpdateConnector(ctx context.Context, orgID, id string, re
 		if refErr := requireConnectorRefs(ctx, tx, orgID, credentialID, collectorID); refErr != nil {
 			return refErr
 		}
-		_, err := tx.Exec(ctx, `UPDATE iga_connector SET name=$3,base_url=$4,credential_id=$5,collector_id=$6,capabilities=$7,config=$8,status=$9,updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, cur.Name, nullString(cur.BaseURL), nullString(cur.CredentialID), nullString(cur.CollectorID), cur.Capabilities, cur.Config, cur.Status)
-		return err
+		_, execErr := tx.Exec(ctx, `UPDATE iga_connector SET name=$3,base_url=$4,credential_id=$5,collector_id=$6,capabilities=$7,config=$8,status=$9,updated_at=now() WHERE organization_id=$1 AND id=$2`, orgID, id, cur.Name, nullString(cur.BaseURL), nullString(cur.CredentialID), nullString(cur.CollectorID), cur.Capabilities, cur.Config, cur.Status)
+		return execErr
 	})
 	if err != nil {
 		return nil, err
@@ -424,9 +424,9 @@ func (r *PGRepository) DecideAccessRequest(ctx context.Context, orgID, id, statu
 	}
 	var out *AccessRequest
 	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		v, err := scanReq(tx.QueryRow(ctx, "SELECT "+reqCols+" FROM iga_access_request WHERE organization_id=$1 AND id=$2", orgID, id))
+		v, scanErr := scanReq(tx.QueryRow(ctx, "SELECT "+reqCols+" FROM iga_access_request WHERE organization_id=$1 AND id=$2", orgID, id))
 		out = v
-		return err
+		return scanErr
 	})
 	return out, err
 }
@@ -570,9 +570,9 @@ func (r *PGRepository) DecideReviewItem(ctx context.Context, orgID, id, decision
 	}
 	var out *AccessReviewItem
 	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		v, err := scanItem(tx.QueryRow(ctx, "SELECT "+itemCols+" FROM iga_access_review_item WHERE organization_id=$1 AND id=$2", orgID, id))
+		v, scanErr := scanItem(tx.QueryRow(ctx, "SELECT "+itemCols+" FROM iga_access_review_item WHERE organization_id=$1 AND id=$2", orgID, id))
 		out = v
-		return err
+		return scanErr
 	})
 	return out, err
 }

@@ -18,14 +18,14 @@ type Desk struct {
 
 // Booking is a time-window reservation of a desk.
 type Booking struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	DeskID         string     `json:"desk_id"`
-	UserID         string     `json:"user_id"`
-	StartsAt       time.Time  `json:"starts_at"`
-	EndsAt         time.Time  `json:"ends_at"`
-	Status         string     `json:"status"` // active | cancelled | completed
-	CreatedAt      time.Time  `json:"created_at"`
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	DeskID         string    `json:"desk_id"`
+	UserID         string    `json:"user_id"`
+	StartsAt       time.Time `json:"starts_at"`
+	EndsAt         time.Time `json:"ends_at"`
+	Status         string    `json:"status"` // active | cancelled | completed
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // CreateDeskRequest is the payload for creating a desk.
@@ -37,10 +37,10 @@ type CreateDeskRequest struct {
 
 // UpdateDeskRequest is the payload for updating a desk.
 type UpdateDeskRequest struct {
-	RoomID     *string         `json:"room_id,omitempty"`
-	Name       *string         `json:"name,omitempty"`
-	Status     *string         `json:"status,omitempty"`
-	Attributes map[string]any  `json:"attributes,omitempty"`
+	RoomID     *string        `json:"room_id,omitempty"`
+	Name       *string        `json:"name,omitempty"`
+	Status     *string        `json:"status,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 // CreateBookingRequest books a desk for a time window.

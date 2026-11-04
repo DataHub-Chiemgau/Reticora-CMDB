@@ -295,8 +295,8 @@ func (s *SessionIssuer) Validate(token string) (*SessionClaims, error) {
 		Algorithm string `json:"alg"`
 		KeyID     string `json:"kid"`
 	}
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, fmt.Errorf("identity: parse JWT header: %w", err)
+	if headerErr := json.Unmarshal(headerBytes, &header); headerErr != nil {
+		return nil, fmt.Errorf("identity: parse JWT header: %w", headerErr)
 	}
 	if header.Algorithm != "RS256" {
 		return nil, fmt.Errorf("identity: unexpected JWT algorithm %q", header.Algorithm)

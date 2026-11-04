@@ -184,7 +184,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if req.IsActive != nil {
 			setClauses = append(setClauses, fmt.Sprintf("is_active = $%d", argPos))
 			args = append(args, *req.IsActive)
-			argPos++
 		}
 
 		if len(setClauses) == 0 {

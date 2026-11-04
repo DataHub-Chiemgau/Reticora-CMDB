@@ -6,14 +6,14 @@ import "time"
 
 // Course is a training course definition.
 type Course struct {
-	ID              string    `json:"id"`
-	OrganizationID  string    `json:"organization_id"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description,omitempty"`
-	Category        string    `json:"category,omitempty"`
-	ValidityMonths  *int      `json:"validity_months,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	Title          string    `json:"title"`
+	Description    string    `json:"description,omitempty"`
+	Category       string    `json:"category,omitempty"`
+	ValidityMonths *int      `json:"validity_months,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // Assignment is a user's enrollment in a course with due date and proof.

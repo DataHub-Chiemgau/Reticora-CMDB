@@ -390,8 +390,8 @@ func parseJWTClaims(token string) (Claims, error) {
 	var header struct {
 		Algorithm string `json:"alg"`
 	}
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return Claims{}, fmt.Errorf("parse JWT header: %w", err)
+	if headerErr := json.Unmarshal(headerBytes, &header); headerErr != nil {
+		return Claims{}, fmt.Errorf("parse JWT header: %w", headerErr)
 	}
 	if header.Algorithm != "RS256" {
 		return Claims{}, fmt.Errorf("unexpected JWT algorithm %q", header.Algorithm)
@@ -412,8 +412,8 @@ func parseJWTClaims(token string) (Claims, error) {
 		ExpiresAt      json.RawMessage `json:"exp,omitempty"`
 		IssuedAt       json.RawMessage `json:"iat,omitempty"`
 	}
-	if err := json.Unmarshal(payload, &raw); err != nil {
-		return Claims{}, fmt.Errorf("parse JWT claims: %w", err)
+	if claimsErr := json.Unmarshal(payload, &raw); claimsErr != nil {
+		return Claims{}, fmt.Errorf("parse JWT claims: %w", claimsErr)
 	}
 
 	expiresAt, err := parseTimestampClaim(raw.ExpiresAt)

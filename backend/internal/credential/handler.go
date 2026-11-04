@@ -84,9 +84,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(cred)
+	api.WriteJSON(w, http.StatusCreated, cred)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -125,8 +123,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(cred)
+	api.WriteJSON(w, http.StatusOK, cred)
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
@@ -169,8 +166,7 @@ func (h *Handler) rotateKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	api.WriteJSON(w, http.StatusOK, result)
 }
 
 // writeError writes an RFC 7807 problem response.

@@ -3,6 +3,11 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"slices"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -347,5 +352,179 @@ func TestRetentionEndsMergeSnapshotsAndTombstones(t *testing.T) {
 	}
 	if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
 		t.Errorf("chain of A after the run: %+v %v", result, err)
+	}
+}
+
+// fakeBlobs records the deleted keys of the document bucket and fails the
+// delete of the keys in fail.
+type fakeBlobs struct {
+	mu      sync.Mutex
+	deleted []string
+	fail    map[string]bool
+}
+
+func (b *fakeBlobs) Put(context.Context, string, string, io.Reader, int64, string) error { return nil }
+
+func (b *fakeBlobs) Get(context.Context, string, string) (io.ReadCloser, error) {
+	return nil, errors.New("not stored")
+}
+
+func (b *fakeBlobs) PresignedGetURL(context.Context, string, string) (string, error) { return "", nil }
+
+func (b *fakeBlobs) Delete(_ context.Context, bucket, key string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if bucket != "reticora-documents" {
+		return fmt.Errorf("bucket %s", bucket)
+	}
+	if b.fail[key] {
+		return errors.New("blob store unavailable")
+	}
+	b.deleted = append(b.deleted, key)
+	return nil
+}
+
+// TestRetentionPurgesSoftDeletedDocuments covers WP-732 (MGT-01, NFR-06):
+// retention.soft_deleted removes a document soft-deleted 91 days ago with
+// its versions and links, deletes every version key from the blob store
+// (delete markers), lowers organization_usage by the version sizes and
+// writes document.purged (source system) and the run entry. A document
+// deleted 89 days ago stays. A blob error, or a run without blob store,
+// keeps an expired document with content: it counts as kept, and the next
+// run with a working store purges it. An expired document without content
+// goes without a blob store.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionPurgesSoftDeletedDocuments(t *testing.T) {
+	f := scopetest.Seed(t, "97")
+	bg := context.Background()
+	now := time.Now().UTC()
+	user := f.AppUser(t, f.OrgA, "retention-doc")
+	asset := f.Asset(t, f.OrgA, f.Client1, "retention-doc-asset")
+
+	scalar := func(sql string, args ...any) string {
+		t.Helper()
+		var out string
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&out); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		return out
+	}
+	// doc stores a document of A deleted age days ago with versions of the
+	// given sizes and one link to the asset; it returns id and keys.
+	doc := func(title string, age int, sizes ...int64) (string, []string) {
+		t.Helper()
+		id := scalar(`INSERT INTO document (organization_id, title, file_name, mime_type, storage_key, uploaded_by, deleted_at)
+			VALUES ($1, $2, $2 || '.pdf', 'application/pdf', '', $3, $4) RETURNING id::text`, f.OrgA, title, user, now.AddDate(0, 0, -age))
+		var keys []string
+		for i, size := range sizes {
+			key := "org/" + f.OrgA + "/documents/" + id + "/" + f.ID()
+			if _, err := f.Admin.Exec(bg, `INSERT INTO document_version (organization_id, document_id, version, storage_key, size, mime)
+				VALUES ($1, $2, $3, $4, $5, 'application/pdf')`, f.OrgA, id, i+1, key, size); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Admin.Exec(bg, `UPDATE document SET version = $2, storage_key = $3, file_size = $4 WHERE id = $1`,
+				id, i+1, key, size); err != nil {
+				t.Fatal(err)
+			}
+			keys = append(keys, key)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
+			VALUES ($1, $2, 'asset', $3)`, f.OrgA, id, asset); err != nil {
+			t.Fatal(err)
+		}
+		return id, keys
+	}
+	expired, expiredKeys := doc("retention-expired-doc", 91, 100, 200)
+	young, _ := doc("retention-young-doc", 89, 50)
+	failing, failingKeys := doc("retention-failing-doc", 120, 30)
+	empty, _ := doc("retention-empty-doc", 95)
+	if _, err := f.Admin.Exec(bg, `INSERT INTO organization_usage (organization_id, storage_bytes) VALUES ($1, 380)
+		ON CONFLICT (organization_id) DO UPDATE SET storage_bytes = EXCLUDED.storage_bytes`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		return scalar(`SELECT EXISTS (SELECT 1 FROM document WHERE id = $1)::text`, id) == "true"
+	}
+	usage := func() string {
+		t.Helper()
+		return scalar(`SELECT storage_bytes::text FROM organization_usage WHERE organization_id = $1`, f.OrgA)
+	}
+	purgedEntries := func(id string) int {
+		t.Helper()
+		n, _ := strconv.Atoi(scalar(`SELECT count(*)::text FROM audit_log WHERE organization_id = $1 AND action = 'document.purged'
+			AND resource_id = $2 AND source = 'system'`, f.OrgA, id))
+		return n
+	}
+
+	// Without a blob store only the document without content goes.
+	policy := jobs.RetentionFromDays(10, 3*365, 90, 365)
+	if err := jobs.NewRetention(f.App, policy).RunSoftDeleted(bg); err != nil {
+		t.Fatal(err)
+	}
+	if exists(empty) || !exists(expired) || !exists(failing) || !exists(young) {
+		t.Errorf("without blob store: empty %v expired %v failing %v young %v, want only the empty one purged",
+			exists(empty), exists(expired), exists(failing), exists(young))
+	}
+	if got := usage(); got != "380" {
+		t.Errorf("usage after the run without blob store: %s, want 380", got)
+	}
+
+	// With a blob store that fails for one key.
+	store := &fakeBlobs{fail: map[string]bool{failingKeys[0]: true}}
+	if err := jobs.NewRetention(f.App, policy).WithBlobs(store).RunSoftDeleted(bg); err != nil {
+		t.Fatal(err)
+	}
+	if exists(expired) {
+		t.Error("the document deleted 91 days ago stays")
+	}
+	if !exists(young) {
+		t.Error("the document deleted 89 days ago is gone")
+	}
+	if !exists(failing) {
+		t.Error("the document with a failing blob delete is gone")
+	}
+	for _, key := range expiredKeys {
+		if !slices.Contains(store.deleted, key) {
+			t.Errorf("blob %s not deleted (deleted: %v)", key, store.deleted)
+		}
+	}
+	if n := scalar(`SELECT ((SELECT count(*) FROM document_version WHERE document_id = $1) + (SELECT count(*) FROM document_link WHERE document_id = $1))::text`,
+		expired); n != "0" {
+		t.Errorf("versions and links of the purged document: %s", n)
+	}
+	if got := usage(); got != "80" {
+		t.Errorf("usage after the purge: %s, want 80 (380 - 300)", got)
+	}
+	if purgedEntries(expired) != 1 || purgedEntries(empty) != 1 || purgedEntries(failing) != 0 || purgedEntries(young) != 0 {
+		t.Errorf("document.purged entries: expired %d empty %d failing %d young %d",
+			purgedEntries(expired), purgedEntries(empty), purgedEntries(failing), purgedEntries(young))
+	}
+	rows, err := f.Admin.Query(bg, `SELECT changes FROM audit_log WHERE organization_id = $1 AND action = $2 ORDER BY seq`, f.OrgA, jobs.RetentionSoftDeleted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, err := pgx.CollectRows(rows, pgx.RowTo[map[string]any])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || runs[0]["deleted"] != float64(1) || runs[1]["deleted"] != float64(1) {
+		t.Errorf("retention.soft_deleted entries: %v, want two with deleted 1", runs)
+	}
+
+	// The next run with a working store purges the kept document.
+	store.fail = nil
+	if err = jobs.NewRetention(f.App, policy).WithBlobs(store).RunSoftDeleted(bg); err != nil {
+		t.Fatal(err)
+	}
+	if exists(failing) || !exists(young) {
+		t.Errorf("second run: failing %v young %v, want the failing one purged", exists(failing), exists(young))
+	}
+	if got := usage(); got != "50" {
+		t.Errorf("usage after the second purge: %s, want 50", got)
+	}
+	if result, verr := audit.Verify(bg, f.App, f.OrgA); verr != nil || !result.Intact {
+		t.Errorf("chain after the purges: %+v %v", result, verr)
 	}
 }

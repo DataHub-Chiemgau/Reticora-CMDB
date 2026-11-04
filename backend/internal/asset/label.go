@@ -31,7 +31,7 @@ func RenderLabelSVG(a *Asset, baseURL string) string {
 	for _, b := range []byte(code) {
 		w := 1 + int(b%3)
 		if b%2 == 0 {
-			bars.WriteString(fmt.Sprintf(`<rect x="%d" y="78" width="%d" height="30" fill="#111"/>`, x, w))
+			fmt.Fprintf(&bars, `<rect x="%d" y="78" width="%d" height="30" fill="#111"/>`, x, w)
 		}
 		x += w + 1
 		if x > 268 {

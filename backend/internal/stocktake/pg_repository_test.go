@@ -52,21 +52,21 @@ func TestCompleteAppliesCorrections(t *testing.T) {
 	missing := &asset.Asset{OrganizationID: orgID, AssetTag: "PG-MISS", Name: "missing switch", Category: "hardware", Status: "assigned", Location: "Raum A"}
 	wrongLoc := &asset.Asset{OrganizationID: orgID, AssetTag: "PG-WL", Name: "misplaced server", Category: "hardware", Status: "assigned", Location: "Raum A"}
 	for _, a := range []*asset.Asset{missing, wrongLoc} {
-		if err := assetRepo.Create(ctx, a); err != nil {
-			t.Fatalf("create asset: %v", err)
+		if createErr := assetRepo.Create(ctx, a); createErr != nil {
+			t.Fatalf("create asset: %v", createErr)
 		}
 	}
 
 	st := &stocktake.Stocktake{OrganizationID: orgID, Title: "PG completion", Status: "in_progress", Scope: "full", StartedBy: userID}
-	if err := stRepo.Create(ctx, st); err != nil {
-		t.Fatalf("create stocktake: %v", err)
+	if stocktakeErr := stRepo.Create(ctx, st); stocktakeErr != nil {
+		t.Fatalf("create stocktake: %v", stocktakeErr)
 	}
 	for _, scan := range []*stocktake.StockScan{
 		{OrganizationID: orgID, StocktakeID: st.ID, AssetID: missing.ID, ScannedBy: userID, ScanMethod: "manual", ScanResult: "missing"},
 		{OrganizationID: orgID, StocktakeID: st.ID, AssetID: wrongLoc.ID, ScannedBy: userID, ScanMethod: "barcode", ScanResult: "wrong_location", LocationFound: "Raum B"},
 	} {
-		if err := stRepo.AddScan(ctx, scan); err != nil {
-			t.Fatalf("add scan: %v", err)
+		if scanErr := stRepo.AddScan(ctx, scan); scanErr != nil {
+			t.Fatalf("add scan: %v", scanErr)
 		}
 	}
 
@@ -136,9 +136,9 @@ func seedOrgAndUser(t *testing.T, dsn, orgID string) string {
 	cleanup()
 	t.Cleanup(cleanup)
 
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO organization (id, name, slug) VALUES ($1, 'ST Org', 'st-org-36')`, orgID); err != nil {
-		t.Fatalf("seed org: %v", err)
+	if _, orgErr := db.ExecContext(ctx,
+		`INSERT INTO organization (id, name, slug) VALUES ($1, 'ST Org', 'st-org-36')`, orgID); orgErr != nil {
+		t.Fatalf("seed org: %v", orgErr)
 	}
 	var userID string
 	err = db.QueryRowContext(ctx,

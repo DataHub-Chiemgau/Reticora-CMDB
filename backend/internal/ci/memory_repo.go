@@ -3,6 +3,7 @@ package ci
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -20,6 +21,11 @@ type MemoryRepository struct {
 	deleted map[string]deletedState
 	// types holds the CI types known for a type change (CI-11).
 	types map[string]memoryType
+	// tags is the tag catalog by id (CI-08, WP-753); seeded orgs have the
+	// system tag archived.
+	tags     map[string]*Tag
+	tagSeq   int
+	tagSeeds map[string]bool
 }
 
 type memoryType struct {
@@ -32,9 +38,11 @@ type deletedState struct{ status, assetID string }
 // NewMemoryRepository creates a new in-memory repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		items:   make(map[string]*Item),
-		deleted: make(map[string]deletedState),
-		types:   make(map[string]memoryType),
+		items:    make(map[string]*Item),
+		deleted:  make(map[string]deletedState),
+		types:    make(map[string]memoryType),
+		tags:     make(map[string]*Tag),
+		tagSeeds: make(map[string]bool),
 	}
 }
 
@@ -158,7 +166,9 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	}
 	item.Tags = []string{}
 	if item.LegacyTags != nil {
-		item.Tags, _ = tagKeys(*item.LegacyTags)
+		var names []string
+		item.Tags, names = tagKeys(*item.LegacyTags)
+		r.ensureTags(item.OrganizationID, item.Tags, names)
 		item.LegacyTags = nil
 	}
 	r.seq++
@@ -196,7 +206,9 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 		}
 	}
 	if req.LegacyTags != nil {
-		item.Tags, _ = tagKeys(*req.LegacyTags)
+		var names []string
+		item.Tags, names = tagKeys(*req.LegacyTags)
+		r.ensureTags(orgID, item.Tags, names)
 	}
 	if item.Tags == nil {
 		item.Tags = []string{}
@@ -339,6 +351,12 @@ func toLower(r rune) rune {
 // a number when the filter value is one, otherwise as text.
 func matchesFilters(item *Item, filters []api.Filter) bool {
 	for _, f := range filters {
+		if f.Kind == api.KindSet {
+			if !f.MatchSet(item.Tags) {
+				return false
+			}
+			continue
+		}
 		if f.Kind == "" {
 			f.Kind = api.KindText
 			if _, err := strconv.ParseFloat(f.Values[0], 64); err == nil {
@@ -384,4 +402,237 @@ func (r *MemoryRepository) ChangeType(_ context.Context, orgID, ciID, typeID, mo
 	cp := *item
 	result.CI = &cp
 	return result, nil
+}
+
+// ─── Tag catalog and tags of a CI (CI-08, WP-753) ─────────────────────────────
+
+// seedTags gives an organization its system tag archived once, like the
+// trigger organization_default_tags (migration 000218). The caller holds
+// the write lock.
+func (r *MemoryRepository) seedTags(orgID string) {
+	if r.tagSeeds[orgID] {
+		return
+	}
+	r.tagSeeds[orgID] = true
+	r.addTag(&Tag{OrganizationID: orgID, Key: "archived", DisplayName: map[string]string{"de": "Archiviert", "en": "Archived"},
+		IsSystem: true})
+}
+
+// addTag stores a new catalog tag with an id and times.
+func (r *MemoryRepository) addTag(tag *Tag) {
+	r.tagSeq++
+	tag.ID = fmt.Sprintf("7a900000-0000-4000-8000-%012d", r.tagSeq)
+	tag.CreatedAt = time.Now().UTC()
+	tag.UpdatedAt = tag.CreatedAt
+	cp := *tag
+	r.tags[tag.ID] = &cp
+}
+
+// tagByKey returns the catalog tag of key in the organization.
+func (r *MemoryRepository) tagByKey(orgID, key string) *Tag {
+	for _, tag := range r.tags {
+		if tag.OrganizationID == orgID && tag.Key == key {
+			return tag
+		}
+	}
+	return nil
+}
+
+// ensureTags creates the catalog tags of a write through attributes.tags
+// that are missing (names: the texts of the keys), like writeCITags. The
+// caller holds the write lock.
+func (r *MemoryRepository) ensureTags(orgID string, keys, names []string) {
+	r.seedTags(orgID)
+	for i, key := range keys {
+		if r.tagByKey(orgID, key) == nil {
+			r.addTag(&Tag{OrganizationID: orgID, Key: key, DisplayName: map[string]string{"de": names[i], "en": names[i]}})
+		}
+	}
+}
+
+// tagOf returns the tag id of the organization.
+func (r *MemoryRepository) tagOf(orgID, id string) (*Tag, error) {
+	r.seedTags(orgID)
+	tag, ok := r.tags[id]
+	if !ok || tag.OrganizationID != orgID {
+		return nil, ErrTagNotFound
+	}
+	return tag, nil
+}
+
+// ListTags implements TagStore like the PostgreSQL repository.
+func (r *MemoryRepository) ListTags(_ context.Context, orgID string, page api.PaginationParams) ([]Tag, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seedTags(orgID)
+	all := []Tag{}
+	for _, tag := range r.tags {
+		if tag.OrganizationID == orgID {
+			all = append(all, *tag)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Key < all[j].Key })
+	total := len(all)
+	rows := all
+	if page.Cursor != nil {
+		if _, _, err := tagPosition(page.Cursor); err != nil {
+			return nil, 0, err
+		}
+		rows = []Tag{}
+		for _, tag := range all {
+			if api.KeysetCompare(tag.Key, tag.ID, *page.Cursor, tagDir) {
+				rows = append(rows, tag)
+			}
+		}
+	} else {
+		rows = rows[min(page.Offset, len(rows)):]
+	}
+	return rows[:min(len(rows), page.Limit+1)], total, nil
+}
+
+// GetTag implements TagStore.
+func (r *MemoryRepository) GetTag(_ context.Context, orgID, id string) (*Tag, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tag, err := r.tagOf(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	cp := *tag
+	return &cp, nil
+}
+
+// CreateTag implements TagStore; a taken key is a conflict on key.
+func (r *MemoryRepository) CreateTag(_ context.Context, tag *Tag) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seedTags(tag.OrganizationID)
+	if r.tagByKey(tag.OrganizationID, tag.Key) != nil {
+		return &api.ConflictError{Field: "key", Message: "a tag with this key exists"}
+	}
+	r.addTag(tag)
+	return nil
+}
+
+// UpdateTag implements TagStore.
+func (r *MemoryRepository) UpdateTag(_ context.Context, orgID, id string, req *UpdateTagRequest) (*Tag, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tag, err := r.tagOf(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	req.apply(tag)
+	tag.UpdatedAt = time.Now().UTC()
+	cp := *tag
+	return &cp, nil
+}
+
+// tagged reports whether a CI of the organization (a deleted one too)
+// carries key.
+func (r *MemoryRepository) tagged(orgID, key string) bool {
+	for _, item := range r.items {
+		if item.OrganizationID == orgID && slices.Contains(item.Tags, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// DeleteTag implements TagStore: no system tag, no assigned tag (409).
+func (r *MemoryRepository) DeleteTag(_ context.Context, orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tag, err := r.tagOf(orgID, id)
+	if err != nil {
+		return err
+	}
+	if tag.IsSystem {
+		return ErrSystemTag
+	}
+	if r.tagged(orgID, tag.Key) {
+		return ErrTagInUse
+	}
+	delete(r.tags, id)
+	return nil
+}
+
+// MergeTag implements TagStore like the PostgreSQL repository: live CIs
+// with the source tag get the target tag (version + 1), deleted CIs keep
+// it under the target, the source tag goes.
+func (r *MemoryRepository) MergeTag(_ context.Context, orgID, sourceID, intoID string) (*TagMergeResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	source, err := r.tagOf(orgID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	into, err := r.tagOf(orgID, intoID)
+	if err != nil {
+		return nil, &ValidationError{Violations: []Violation{{Field: "into_id", Detail: "unknown tag"}}}
+	}
+	if source.IsSystem {
+		return nil, ErrSystemTag
+	}
+	result := &TagMergeResult{}
+	ids := make([]string, 0, len(r.items))
+	for id := range r.items {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		item := r.items[id]
+		if item.OrganizationID != orgID || !slices.Contains(item.Tags, source.Key) {
+			continue
+		}
+		keys := slices.DeleteFunc(slices.Clone(item.Tags), func(k string) bool { return k == source.Key })
+		if !slices.Contains(keys, into.Key) {
+			keys = append(keys, into.Key)
+		}
+		slices.Sort(keys)
+		item.Tags = keys
+		if item.DeletedAt != nil {
+			continue
+		}
+		item.Version++
+		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		cp := *item
+		result.CIs = append(result.CIs, &cp)
+	}
+	result.Moved = len(result.CIs)
+	delete(r.tags, sourceID)
+	cp := *into
+	result.Tag = &cp
+	return result, nil
+}
+
+// ReplaceCITags implements TagStore: catalog keys only (422), If-Match on
+// the version (412 for another one); an unchanged list keeps the version.
+func (r *MemoryRepository) ReplaceCITags(_ context.Context, orgID, ciID string, keys []string, ifMatch *int64) (*Item, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.seedTags(orgID)
+	sorted, violations := catalogKeys(keys)
+	known := map[string]bool{}
+	for _, key := range sorted {
+		known[key] = r.tagByKey(orgID, key) != nil
+	}
+	violations = append(violations, unknownTags(keys, known)...)
+	if len(violations) > 0 {
+		return nil, &ValidationError{Violations: violations}
+	}
+	item, ok := r.items[ciID]
+	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	if ifMatch != nil && *ifMatch != api.IfMatchAny && *ifMatch != item.Version {
+		return nil, ErrPreconditionFailed
+	}
+	if !slices.Equal(item.Tags, sorted) {
+		item.Tags = sorted
+		item.Version++
+		item.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	cp := *item
+	return &cp, nil
 }

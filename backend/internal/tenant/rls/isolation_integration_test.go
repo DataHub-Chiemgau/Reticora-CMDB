@@ -161,10 +161,10 @@ func TestPoolRefusesRLSBypassingRole(t *testing.T) {
 	}
 	defer admin.Close()
 	var super, bypass bool
-	if err := admin.QueryRow(ctx,
+	if roleErr := admin.QueryRow(ctx,
 		`SELECT COALESCE(rolsuper,false), COALESCE(rolbypassrls,false) FROM pg_roles WHERE rolname = current_user`,
-	).Scan(&super, &bypass); err != nil {
-		t.Fatalf("inspect login role: %v", err)
+	).Scan(&super, &bypass); roleErr != nil {
+		t.Fatalf("inspect login role: %v", roleErr)
 	}
 	if !super && !bypass {
 		t.Skip("login role already restricted; the bypass guard cannot be exercised")

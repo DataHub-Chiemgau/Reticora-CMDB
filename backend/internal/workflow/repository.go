@@ -45,6 +45,7 @@ type MemoryRepository struct {
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{definitions: map[string]*Definition{}, runs: map[string]*Run{}, steps: map[string]*Step{}}
 }
+
 // nextID returns ids of UUID form, as the handler accepts only UUID ids
 // (API-03); definitions, runs and steps share the counter.
 func (r *MemoryRepository) nextID(_ string) string {
