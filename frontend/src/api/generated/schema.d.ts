@@ -6515,6 +6515,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/metamodel/import': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import a metamodel export as a draft (MET-54, MET-53)
+     * @description Takes a metamodel export with `format_version` 2 (WP-262, at most 10 MiB, otherwise 413; another format version is 422 `unsupported-format-version`, an unknown field 400; `exported_at`, `organization_id` and `omitted_sections` are ignored) and compares it key by key with the metamodel of the organization, read in one snapshot. System parts and lifecycle models are only resolved, roles by their name, relationship types and `applies_to_type_keys` against the visible ones. The differences become typed items of a new draft (WP-260) in the order of their dependencies; a part the draft creates is referenced by its item (E-112). Parts of the organization missing in the file stay unchanged. Of a template only the current published version is taken over (`template_version` create, items, publish); older versions and their rules are reported as `history-skipped`. Conflicts (`datatype-conflict`, `missing-reference`, `system-key-collision`) answer 422 with the report and create no draft; a file without differences answers 200 with `report.unchanged`. Requires citype:manage and the write permission of every item (e.g. ci_attribute:manage, metamodel:publish), otherwise 403. The draft becomes productive only with its publication (WP-261); without the database 503.
+     */
+    post: operations['importMetamodel'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -9635,6 +9655,57 @@ export interface components {
       layouts: components['schemas']['MetamodelExportLayout'][];
       /** @description Sorted by key. */
       lifecycle_models: components['schemas']['MetamodelExportLifecycleModel'][];
+    };
+    /** @description A metamodel export (MetamodelExportV2) as the body of the import; only format_version 2 is accepted (another one is 422 with the problem type unsupported-format-version). */
+    MetamodelImportDocument: {
+      format_version: number;
+      /** Format: date-time */
+      exported_at?: string;
+      organization_id?: string;
+      omitted_sections?: string[];
+      ci_types?: components['schemas']['MetamodelExportType'][];
+      attribute_definitions?: components['schemas']['MetamodelExportAttribute'][];
+      attribute_sets?: components['schemas']['MetamodelExportAttributeSet'][];
+      templates?: components['schemas']['MetamodelExportTemplate'][];
+      rules?: components['schemas']['MetamodelExportRule'][];
+      layouts?: components['schemas']['MetamodelExportLayout'][];
+      lifecycle_models?: components['schemas']['MetamodelExportLifecycleModel'][];
+    };
+    /** @description The answer of the import (WP-722) - the new draft (null without differences) and the report. */
+    MetamodelImportResult: {
+      /** Format: uuid */
+      draft_id: string | null;
+      report: components['schemas']['MetamodelImportReport'];
+    };
+    /** @description The report of an import - every part of the file with its action, the conflicts and the notes (history-skipped, not-imported). */
+    MetamodelImportReport: {
+      unchanged: boolean;
+      items: {
+        kind: string;
+        key: string;
+        /** @description The owner of an attribute definition or of a rule of a template version (ci_type:<key>, attribute_set:<key>, template:<key>). */
+        owner?: string;
+        /** @enum {string} */
+        action: 'create' | 'update' | 'unchanged' | 'resolved';
+      }[];
+      conflicts: {
+        /** @enum {string} */
+        code: 'datatype-conflict' | 'missing-reference' | 'system-key-collision';
+        kind: string;
+        key: string;
+        owner?: string;
+        /** @description The kind of a missing reference (parent_type, ci_type, attribute_definition, attribute_set, template, template_version, rule, role, lifecycle_model, relationship_type). */
+        reference?: string;
+        reference_key?: string;
+        detail: string;
+      }[];
+      notes: {
+        /** @enum {string} */
+        code: 'history-skipped' | 'not-imported';
+        kind: string;
+        key: string;
+        detail: string;
+      }[];
     };
     /** @description A CI type; a system type carries only key and is_system. */
     MetamodelExportType: {
@@ -32583,6 +32654,65 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  importMetamodel: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MetamodelImportDocument'];
+      };
+    };
+    responses: {
+      /** @description Nothing differs; no draft was created */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelImportResult'];
+        };
+      };
+      /** @description The draft with the items of the import */
+      201: {
+        headers: {
+          Location?: string;
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelImportResult'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description Body larger than 10 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Another format version (`unsupported-format-version`), or conflicts with the metamodel of the organization; the problem carries the report. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'] & {
+            report?: components['schemas']['MetamodelImportReport'];
+          };
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };

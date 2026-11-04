@@ -14401,6 +14401,86 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/metamodel/import:
+    x-phase: P2
+    post:
+      operationId: importMetamodel
+      tags: [Metamodel]
+      summary: Import a metamodel export as a draft (MET-54, MET-53)
+      description: >-
+        Takes a metamodel export with `format_version` 2 (WP-262, at most
+        10 MiB, otherwise 413; another format version is 422
+        `unsupported-format-version`, an unknown field 400;
+        `exported_at`, `organization_id` and `omitted_sections` are
+        ignored) and compares it key by key with the metamodel of the
+        organization, read in one snapshot. System parts and lifecycle
+        models are only resolved, roles by their name, relationship types
+        and `applies_to_type_keys` against the visible ones. The
+        differences become typed items of a new draft (WP-260) in the order
+        of their dependencies; a part the draft creates is referenced by
+        its item (E-112). Parts of the organization missing in the file
+        stay unchanged. Of a template only the current published version
+        is taken over (`template_version` create, items, publish); older
+        versions and their rules are reported as `history-skipped`.
+        Conflicts (`datatype-conflict`, `missing-reference`,
+        `system-key-collision`) answer 422 with the report and create no
+        draft; a file without differences answers 200 with
+        `report.unchanged`. Requires citype:manage and the write
+        permission of every item (e.g. ci_attribute:manage,
+        metamodel:publish), otherwise 403. The draft becomes productive
+        only with its publication (WP-261); without the database 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetamodelImportDocument'
+      responses:
+        '200':
+          description: Nothing differs; no draft was created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelImportResult'
+        '201':
+          description: The draft with the items of the import
+          headers:
+            Location:
+              schema: { type: string }
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelImportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          description: Body larger than 10 MiB
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            Another format version (`unsupported-format-version`), or
+            conflicts with the metamodel of the organization; the problem
+            carries the report.
+          content:
+            application/problem+json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ProblemDetail'
+                  - type: object
+                    properties:
+                      report:
+                        $ref: '#/components/schemas/MetamodelImportReport'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -20380,6 +20460,111 @@ components:
           type: array
           description: Sorted by key.
           items: { $ref: '#/components/schemas/MetamodelExportLifecycleModel' }
+    MetamodelImportDocument:
+      type: object
+      description: >-
+        A metamodel export (MetamodelExportV2) as the body of the import;
+        only format_version 2 is accepted (another one is 422 with the
+        problem type unsupported-format-version).
+      required: [format_version]
+      properties:
+        format_version:
+          type: integer
+        exported_at:
+          type: string
+          format: date-time
+        organization_id:
+          type: string
+        omitted_sections:
+          type: array
+          items: { type: string }
+        ci_types:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportType' }
+        attribute_definitions:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportAttribute' }
+        attribute_sets:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportAttributeSet' }
+        templates:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportTemplate' }
+        rules:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportRule' }
+        layouts:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportLayout' }
+        lifecycle_models:
+          type: array
+          items: { $ref: '#/components/schemas/MetamodelExportLifecycleModel' }
+    MetamodelImportResult:
+      type: object
+      description: The answer of the import (WP-722) - the new draft (null without differences) and the report.
+      required: [draft_id, report]
+      properties:
+        draft_id:
+          type: [string, 'null']
+          format: uuid
+        report:
+          $ref: '#/components/schemas/MetamodelImportReport'
+    MetamodelImportReport:
+      type: object
+      description: >-
+        The report of an import - every part of the file with its action,
+        the conflicts and the notes (history-skipped, not-imported).
+      required: [unchanged, items, conflicts, notes]
+      properties:
+        unchanged:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            required: [kind, key, action]
+            properties:
+              kind: { type: string }
+              key: { type: string }
+              owner:
+                type: string
+                description: The owner of an attribute definition or of a rule of a template version (ci_type:<key>, attribute_set:<key>, template:<key>).
+              action:
+                type: string
+                enum: [create, update, unchanged, resolved]
+        conflicts:
+          type: array
+          items:
+            type: object
+            required: [code, kind, key, detail]
+            properties:
+              code:
+                type: string
+                enum: [datatype-conflict, missing-reference, system-key-collision]
+              kind: { type: string }
+              key: { type: string }
+              owner: { type: string }
+              reference:
+                type: string
+                description: >-
+                  The kind of a missing reference (parent_type, ci_type,
+                  attribute_definition, attribute_set, template,
+                  template_version, rule, role, lifecycle_model,
+                  relationship_type).
+              reference_key: { type: string }
+              detail: { type: string }
+        notes:
+          type: array
+          items:
+            type: object
+            required: [code, kind, key, detail]
+            properties:
+              code:
+                type: string
+                enum: [history-skipped, not-imported]
+              kind: { type: string }
+              key: { type: string }
+              detail: { type: string }
     MetamodelExportType:
       type: object
       description: A CI type; a system type carries only key and is_system.

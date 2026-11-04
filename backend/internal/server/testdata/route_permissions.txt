@@ -507,6 +507,7 @@ POST /api/v1/metamodel/drafts citype:manage
 POST /api/v1/metamodel/drafts/{id}/items citype:manage
 POST /api/v1/metamodel/drafts/{id}/publish metamodel:publish
 POST /api/v1/metamodel/drafts/{id}/test metamodel:publish
+POST /api/v1/metamodel/import citype:manage
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write

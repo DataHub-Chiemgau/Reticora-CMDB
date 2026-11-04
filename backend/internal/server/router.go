@@ -651,6 +651,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
 		draftHandler,
+		metamodelImportHandler(&repos),
 		importer.NewHandler(repos.Import),
 		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
@@ -952,6 +953,24 @@ func exportLifecycleModel(d *lifecycle.Definition) citype.ExportLifecycleModelV2
 			FromStateKey: t.FromStateKey, ToStateKey: t.ToStateKey, RequiredFields: t.RequiredFields, Validation: t.Validation})
 	}
 	return citype.ExportLifecycleModelV2{ID: d.ID, Key: d.Key, IsSystem: d.IsSystem, ExportLifecycleModelBody: body}
+}
+
+// metamodelImportHandler serves POST /api/v1/metamodel/import (WP-722) in
+// both profiles: it reads the target with the export v2 builder (the
+// readers of the export, the relationship types) and captures its items
+// into a draft of repos.MetamodelDraft; without the database it answers
+// 503.
+func metamodelImportHandler(repos *Repositories) *metamodel.ImportHandler {
+	var target metamodel.ImportTargetReader
+	if src, ok := repos.CIType.(citype.ExportV2Source); ok && repos.RelationshipType != nil {
+		target = metamodel.NewImportTarget(src, lifecycleModelExport{repo: repos.Lifecycle}, roleExport{repo: repos.User},
+			repos.RelationshipType)
+	}
+	var store metamodel.ImportDraftStore
+	if s, ok := repos.MetamodelDraft.(metamodel.ImportDraftStore); ok {
+		store = s
+	}
+	return metamodel.NewImportHandler(target, store)
 }
 
 // roleExport reads the role names for the layouts of the metamodel export
