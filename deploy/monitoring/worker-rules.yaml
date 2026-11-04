@@ -1,7 +1,8 @@
 # Alert rules for the background workers (WP-103, OPS-05). The workers
 # export reticora_worker_{enabled,up,runs_total,errors_total,
 # last_success_timestamp_seconds,backlog} per worker name of their operator
-# switch (docs/ops/workers.md). Alerts route to the operators through
+# switch (docs/ops/workers.md), the job queue reticora_job_* per job kind
+# (backend/internal/jobs/metrics.go). Alerts route to the operators through
 # deploy/monitoring/alertmanager.yaml, by e-mail and over the NTF bridge.
 # Unit test: deploy/monitoring/tests/worker-rules.test.yaml
 # (tests/monitoring-config.test.sh, CI job monitoring-config).
@@ -67,3 +68,26 @@ spec:
           annotations:
             summary: "Backlog of worker {{ $labels.worker }} keeps growing"
             description: "The backlog has grown for 30 minutes; the worker does not keep up."
+        - alert: ReticoraDocumentScanBacklog
+          # Malware scan of document uploads (SEC-09, E-42, WP-735): the
+          # oldest queued document.scan has waited for more than 15 minutes,
+          # for 10 minutes. Uploads stay locked (pending_scan) meanwhile.
+          # Every instance exports the same age from the job table; max
+          # keeps one alert.
+          expr: max by (kind) (reticora_job_oldest_queued_age_seconds{kind="document.scan"}) > 900
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Malware scan of uploads is backlogged"
+            description: "The oldest queued document.scan job has waited {{ $value }} seconds. New document versions stay locked until they are scanned: check that the worker jobs runs and that clamd (RETICORA_CLAMD_ADDR) answers."
+        - alert: ReticoraDocumentScanFailing
+          # More than 5 failed attempts of document.scan in 15 minutes:
+          # clamd unreachable, too slow or refusing the stream. Each instance
+          # counts the attempts it ran; the sum covers all of them.
+          expr: sum by (kind) (increase(reticora_job_failures_total{kind="document.scan"}[15m])) > 5
+          labels:
+            severity: warning
+          annotations:
+            summary: "Malware scan of uploads keeps failing"
+            description: "More than 5 document.scan attempts failed in 15 minutes. The versions stay locked (fail-closed) and are rescanned by document.scan_sweep once clamd answers again; check clamd (RETICORA_CLAMD_ADDR) and its log."

@@ -41,6 +41,8 @@ services:
     logging: *logging-json
   opensearch:
     logging: *logging-json
+  clamd:
+    logging: *logging-json
   server:
     logging: *logging-json
   frontend:

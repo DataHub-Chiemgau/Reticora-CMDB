@@ -1334,3 +1334,6 @@ MET-53;[P2];B;backend/internal/metamodel/publish_integration_test.go;WP-261
 AUD-07;[B];B;backend/internal/metamodel/publish_integration_test.go;WP-261
 EVT-03;[P2–P3];B;backend/internal/metamodel/publish_integration_test.go;WP-261
 MET-10;B/G1, Teil P2/G2;B;backend/internal/ci/computed_integration_test.go;WP-717
+SEC-09;[P2];B;backend/internal/document/clamd_integration_test.go;WP-735
+OPS-06;[Q];B;tests/outage/run.sh;WP-735
+INS-01;[Q];B;.github/workflows/install-smoke.yml;WP-735

@@ -25,8 +25,11 @@
 #       backpressure, every record it sent is ingested and the loss counter
 #       is 0 (collector.sh, WP-587);
 #   component: server unreachable for the collector, webhook target down,
-#       spool limits: the component tests of the collector spool, the edge
-#       buffer and the webhook retry/dead-letter path.
+#       spool limits, clamd unreachable: the component tests of the
+#       collector spool, the edge buffer, the webhook retry/dead-letter path
+#       and the malware scan (fail-closed: a version stays pending_scan
+#       while clamd is down, the sweep rescans it once clamd is back;
+#       SEC-09, E-42, WP-735).
 #
 # Writes the protocol to OUTAGE_REPORT (default outage-report.md) with every
 # count and exits non-zero when a scenario fails. OUTAGE_SELFTEST_DROP=1
@@ -125,6 +128,7 @@ component_scenarios() {
 collector-server-unreachable collector/collectorcmd TestUploadRecords_FailureSpoolsAndFlushDelivers|TestHeartbeatReportsSpoolBackpressureAndLoss
 collector-spool-limits edgecore/buffer TestDiskBufferSizeLimitAppliesBackpressure|TestDiskBufferMaxAgeKeepsMessagesFor24Hours|TestPersistenceAcrossBufferInstances
 webhook-target-down backend/internal/webhook TestDispatcherPersistsAndRetriesFailedDelivery|TestDispatcherMarksDeliveryFailedAfterMaxAttempts
+clamd-unreachable backend/internal/document TestScanStaysPendingWhileScannerDown|TestSweepRescansAfterScannerReturns
 LIST
 }
 

@@ -401,7 +401,8 @@ check "log-retention.test.sh on an unchanged copy: 3 passed, 0 failed" \
 # shellcheck disable=SC2016 # awk program
 retention_copy redis-unbounded "$service_awk"' svc == "redis" && $0 == "    logging: *logging" { next } { print }'
 check "copy with redis without logging section: one line less than the original" \
-    test "$(grep -c 'logging: \*logging' "$TMP/lr-redis-unbounded/deploy/docker-compose/docker-compose.yml")" -eq 11
+    test "$(grep -c 'logging: \*logging' "$TMP/lr-redis-unbounded/deploy/docker-compose/docker-compose.yml")" \
+    -eq "$(($(grep -c 'logging: \*logging' "$COMPOSE_SRC/docker-compose.yml") - 1))"
 check "copy with redis without logging section: log-retention.test.sh fails" \
     test "$(cat "$TMP/lr-redis-unbounded.rc")" != 0
 check "copy with redis without logging section: it names redis" \

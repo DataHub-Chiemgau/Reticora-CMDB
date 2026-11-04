@@ -1,5 +1,6 @@
 # promtool unit test of deploy/monitoring/worker-rules.yaml (WP-446, OPS-05):
-# each of the five worker alerts fires and stays silent where it must.
+# each of the five worker alerts and the two alerts of the malware scan
+# (document.scan, WP-735) fires and stays silent where it must.
 # promtool reads plain rule groups, not a PrometheusRule: the groups of
 # spec.groups are extracted into worker-rules.groups.yaml next to a copy of
 # this file (tests/monitoring-config.test.sh, CI job monitoring-config):
@@ -260,3 +261,79 @@ tests:
             exp_annotations:
               summary: "Backlog of worker ingest keeps growing"
               description: "The backlog has grown for 30 minutes; the worker does not keep up."
+
+  # ReticoraDocumentScanBacklog (WP-735): the oldest queued document.scan
+  # ages by a minute every minute, above 900 s from minute 16; it fires 10
+  # minutes later, once, although both instances export the age. Not: the
+  # age of another kind (ci.bulk).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_job_oldest_queued_age_seconds{instance="server-1:8080",job="reticora-server",kind="document.scan"}'
+        values: '0+60x40'
+      - series: 'reticora_job_oldest_queued_age_seconds{instance="server-2:8080",job="reticora-server",kind="document.scan"}'
+        values: '0+60x40'
+      - series: 'reticora_job_oldest_queued_age_seconds{instance="server-1:8080",job="reticora-server",kind="ci.bulk"}'
+        values: '5000x40'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ReticoraDocumentScanBacklog
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: ReticoraDocumentScanBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              kind: document.scan
+            exp_annotations:
+              summary: "Malware scan of uploads is backlogged"
+              description: "The oldest queued document.scan job has waited 1560 seconds. New document versions stay locked until they are scanned: check that the worker jobs runs and that clamd (RETICORA_CLAMD_ADDR) answers."
+
+  # ReticoraDocumentScanBacklog: above 900 s for 9 minutes only, then the
+  # queue is drained.
+  - interval: 1m
+    input_series:
+      - series: 'reticora_job_oldest_queued_age_seconds{instance="server-1:8080",job="reticora-server",kind="document.scan"}'
+        values: '1000x8 0x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: ReticoraDocumentScanBacklog
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ReticoraDocumentScanBacklog
+        exp_alerts: []
+
+  # ReticoraDocumentScanFailing (WP-735): two instances fail 3 attempts of
+  # document.scan in 15 minutes each, together 6: it fires without a hold
+  # time. Not: the failures of another kind (ci.bulk).
+  - interval: 1m
+    input_series:
+      - series: 'reticora_job_failures_total{instance="server-1:8080",job="reticora-server",kind="document.scan"}'
+        values: '0+0.2x40'
+      - series: 'reticora_job_failures_total{instance="server-2:8080",job="reticora-server",kind="document.scan"}'
+        values: '0+0.2x40'
+      - series: 'reticora_job_failures_total{instance="server-1:8080",job="reticora-server",kind="ci.bulk"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReticoraDocumentScanFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              kind: document.scan
+            exp_annotations:
+              summary: "Malware scan of uploads keeps failing"
+              description: "More than 5 document.scan attempts failed in 15 minutes. The versions stay locked (fail-closed) and are rescanned by document.scan_sweep once clamd answers again; check clamd (RETICORA_CLAMD_ADDR) and its log."
+
+  # ReticoraDocumentScanFailing: 4.5 failed attempts in 15 minutes, then
+  # none.
+  - interval: 1m
+    input_series:
+      - series: 'reticora_job_failures_total{instance="server-1:8080",job="reticora-server",kind="document.scan"}'
+        values: '0+0.3x20 6x20'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ReticoraDocumentScanFailing
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: ReticoraDocumentScanFailing
+        exp_alerts: []

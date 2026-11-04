@@ -242,6 +242,21 @@ jobs:
           for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
           docker logs minio; exit 1
 
+      # SEC-09 (WP-735, E-42): the malware scan is tested against a real
+      # clamd (internal/document/clamd_integration_test.go: EICAR infected,
+      # a valid PDF clean), the image of deploy/docker-compose. The image
+      # ships its signatures, freshclam stays off; loading them takes about
+      # a minute, so the step waits for PONG.
+      - name: Start clamd
+        run: |
+          docker run -d --name clamd -p 3310:3310 -e CLAMAV_NO_FRESHCLAMD=true \
+            clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+          for _ in $(seq 1 180); do
+            [ "$(printf 'zPING\0' | nc -w 2 localhost 3310 2>/dev/null | tr -d '\0')" = PONG ] && exit 0
+            sleep 2
+          done
+          docker logs clamd; exit 1
+
       # Every PostgreSQL test activates itself through TEST_DATABASE_URL, so the
       # whole module runs without a name filter. -p 1 runs packages one after
       # another: they share this database and some fixtures are not isolated.
@@ -256,6 +271,7 @@ jobs:
           TEST_S3_ENDPOINT: http://localhost:9000
           TEST_S3_ACCESS_KEY: reticora
           TEST_S3_SECRET_KEY: reticora_dev
+          TEST_CLAMD_ADDR: localhost:3310
         run: gotestsum --format testname --jsonfile test-db.json -- -count=1 -p 1 ./...
 
       # ABN-02/NFR-10 (WP-436, retest of F-115 and F-280): the plan budget of
@@ -944,7 +960,8 @@ jobs:
       # release image of release.yml, ghcr.io/datahub-chiemgau/<image of the
       # release matrix> with a version tag v*. NATS, OpenSearch and the
       # TimescaleDB image of the pg_dump CronJob are upstream images the release
-      # does not build. Negative fixture: an overlay that switches the server
+      # does not build, as is clamav/clamav, the clamd of the component clamav
+      # (WP-735). Negative fixture: an overlay that switches the server
       # back to reticora-cmdb/server is rejected.
       - name: Assert release image origin
         run: |
@@ -964,7 +981,7 @@ jobs:
                     continue
                   fi
                   ;;
-                nats:* | opensearchproject/opensearch:* | timescale/timescaledb:*) continue ;;
+                nats:* | opensearchproject/opensearch:* | timescale/timescaledb:* | clamav/clamav:*) continue ;;
               esac
               echo "$image"
             done

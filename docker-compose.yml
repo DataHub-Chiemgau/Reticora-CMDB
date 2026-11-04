@@ -54,6 +54,27 @@ services:
       timeout: 3s
       retries: 5
 
+  # Malware scan of document uploads (SEC-09, E-42, WP-735): the server's
+  # development default RETICORA_CLAMD_ADDR=localhost:3310 reaches it. The
+  # image ships a signature database and freshclam keeps it current; the
+  # first start loads the signatures for about a minute (healthcheck).
+  clamd:
+    image: clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+    environment:
+      CLAMD_CONF_StreamMaxLength: "51M"
+      CLAMD_CONF_MaxFileSize: "51M"
+      CLAMD_CONF_MaxScanSize: "200M"
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamdata:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 5m
+
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
     command: start-dev --import-realm
@@ -75,3 +96,4 @@ volumes:
   pgdata:
   natsdata:
   miniodata:
+  clamdata:
