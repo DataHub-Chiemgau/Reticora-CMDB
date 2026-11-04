@@ -96,6 +96,8 @@ var matrixOverrides = map[string]map[string]string{
 	// The number is unique per organization and assigned by a trigger the
 	// matrix skips (WP-290, 000214).
 	"ticket": {"ticket_number": "@seq"},
+	// The i18n check of the tag catalog needs a de/en map (WP-281).
+	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

@@ -65,7 +65,8 @@ const ciSelectColumns = `
 	health,
 	health_updated_at,
 	schema_version,
-	COALESCE(merged_into_id::text, '')
+	COALESCE(merged_into_id::text, ''),
+	COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id), '{}')
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -767,6 +768,9 @@ func applyNodeOverride(n *Node, field string, value any) {
 // without ChosenType (discovery, agent) cost no statement more.
 func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := takeLegacyTags(item); err != nil {
+			return err
+		}
 		if item.Attributes == nil {
 			item.Attributes = make(map[string]any)
 		}
@@ -858,6 +862,9 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 			return err
 		}
+		if err := writeCreatedTags(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
+			return err
+		}
 		// The templates of the creation (WP-710), checked under RLS in the
 		// writing transaction.
 		var assigned *templatesChange
@@ -913,6 +920,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		if item.OrganizationID != orgID {
 			return res, fmt.Errorf("create cis: item of organization %q in a batch of %q", item.OrganizationID, orgID)
 		}
+		if err := takeLegacyTags(item); err != nil {
+			return res, err
+		}
 	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := checkCITypes(ctx, tx, orgID, items); err != nil {
@@ -933,6 +943,9 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 			return nil
 		}
 		if err := loadAssetFacts(ctx, tx, created); err != nil {
+			return err
+		}
+		if err := writeCreatedTags(ctx, tx, orgID, created); err != nil {
 			return err
 		}
 		if err := r.recordCreates(ctx, tx, orgID, created); err != nil {
@@ -1145,7 +1158,7 @@ func (r *PGRepository) recordCreatedEvents(ctx context.Context, tx pgx.Tx, items
 }
 
 // Update modifies an existing CI.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository
 	var item *Item
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1374,6 +1387,17 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
 		return nil, reviveErr
 	}
+	// attributes.tags of an automated write (ingest) is the tag list like
+	// the LegacyTags of the API (E-125).
+	if req.LegacyTags == nil {
+		rest, legacy, tagsErr := ExtractLegacyTags(req.Attributes)
+		if tagsErr != nil {
+			return nil, tagsErr
+		}
+		if legacy != nil {
+			req.Attributes, req.LegacyTags = rest, legacy
+		}
+	}
 	if req.Manual != nil {
 		if preErr := checkPrecondition(ctx, tx, orgID, before, &req); preErr != nil {
 			return nil, preErr
@@ -1404,6 +1428,19 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 				prior = []citype.CITemplate{}
 			}
 			templates = &templatesChange{before: prior, after: resolved}
+		}
+	}
+	// A replaced tag assignment (attributes.tags, E-125) is written before
+	// the row, so the row read back carries it; an unchanged one writes
+	// nothing.
+	tagsChanged := false
+	if req.LegacyTags != nil {
+		keys, names := tagKeys(*req.LegacyTags)
+		if !slices.Equal(keys, before.Tags) {
+			if werr := writeCITags(ctx, tx, orgID, []ciTagWrite{{ciID: id, keys: keys, names: names}}, true); werr != nil {
+				return nil, werr
+			}
+			tagsChanged = true
 		}
 	}
 
@@ -1470,7 +1507,7 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		argPos++
 	}
 
-	if len(setClauses) == 0 && templates == nil {
+	if len(setClauses) == 0 && templates == nil && !tagsChanged {
 		return &rowUpdate{before: before, after: before}, nil
 	}
 
@@ -2049,8 +2086,12 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&healthUpdated,
 		&item.SchemaVersion,
 		&item.MergedIntoID,
+		&item.Tags,
 	); err != nil {
 		return nil, err
+	}
+	if item.Tags == nil {
+		item.Tags = []string{}
 	}
 
 	item.Overridden = overridden(item.Attributes)
@@ -2290,6 +2331,7 @@ func diffCI(before, after *Item) []ciFieldChange {
 		{"discovery_source", before.DiscoverySource, after.DiscoverySource},
 		{"first_seen_at", timePtrRFC3339(before.FirstSeenAt), timePtrRFC3339(after.FirstSeenAt)},
 		{"is_manual", before.IsManual, after.IsManual},
+		{"tags", before.Tags, after.Tags},
 	}
 	changes := make([]ciFieldChange, 0, len(fields))
 	for _, field := range fields {
@@ -2397,8 +2439,10 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 }
 
 // derivedFields are set by the database, not by the writer of a change.
-// The asset link is structural, not an observed value.
-var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true}
+// The asset link is structural, not an observed value. Tags are no field
+// value (ci_tag, CHECK ci_field_value_no_tags; WP-281).
+var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true,
+	"tags": true}
 
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
@@ -2622,6 +2666,7 @@ func requestedFields(req *UpdateRequest) []string {
 		"fqdn": req.FQDN != nil, "os_name": req.OSName != nil, "os_version": req.OSVersion != nil,
 		"firmware_version": req.FirmwareVersion != nil, "sys_object_id": req.SysObjectID != nil,
 		"attributes": req.Attributes != nil, "discovery_source": req.DiscoverySource != nil,
+		"tags": req.LegacyTags != nil,
 	} {
 		if set {
 			out = append(out, name)
@@ -3014,4 +3059,98 @@ func (r *PGRepository) recordOnline(ctx context.Context, tx pgx.Tx, item *Item) 
 		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.CIOnline, EntityID: id, Data: data})
 		return err
 	})
+}
+
+// takeLegacyTags moves attributes.tags of a CI to create into LegacyTags
+// (E-125): the ingest and the other automated creations pass it in the
+// attributes, the API already took it out (Service.create).
+func takeLegacyTags(item *Item) error {
+	if item.LegacyTags != nil {
+		return nil
+	}
+	rest, legacy, err := ExtractLegacyTags(item.Attributes)
+	if err != nil || legacy == nil {
+		return err
+	}
+	if rest == nil {
+		rest = map[string]any{}
+	}
+	item.Attributes, item.LegacyTags = rest, legacy
+	return nil
+}
+
+// writeCreatedTags assigns the LegacyTags of new CIs (WP-281) and sets
+// their Tags; CIs without tags cost no statement.
+func writeCreatedTags(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
+	var writes []ciTagWrite
+	for _, item := range items {
+		item.Tags = []string{}
+		if item.LegacyTags == nil {
+			continue
+		}
+		keys, names := tagKeys(*item.LegacyTags)
+		if len(keys) > 0 {
+			writes = append(writes, ciTagWrite{ciID: item.ID, keys: keys, names: names})
+			item.Tags = keys
+		}
+	}
+	if len(writes) == 0 {
+		return nil
+	}
+	return writeCITags(ctx, tx, orgID, writes, false)
+}
+
+// ciTagWrite is the tag assignment a write gives one CI: the sorted keys
+// and the text each key came from.
+type ciTagWrite struct {
+	ciID        string
+	keys, names []string
+}
+
+// writeCITags writes the tag assignments of CIs in tx (ci_tag, WP-281):
+// catalog tags missing for a key are created with the text as display name
+// in de and en, then the CIs get the tags; replace removes the tags of the
+// CIs the write does not name. The statement count does not grow with the
+// number of CIs (NFR-03). The scope of the rows follows the CI (trigger
+// ci_tag_scope).
+func writeCITags(ctx context.Context, tx pgx.Tx, orgID string, writes []ciTagWrite, replace bool) error {
+	var ciIDs, keys, names, all []string
+	for _, w := range writes {
+		all = append(all, w.ciID)
+		for i, key := range w.keys {
+			ciIDs, keys, names = append(ciIDs, w.ciID), append(keys, key), append(names, w.names[i])
+		}
+	}
+	if len(keys) > 0 {
+		if _, err := tx.Exec(ctx, `INSERT INTO tag (organization_id, key, display_name)
+			SELECT DISTINCT ON (u.key) $1, u.key, jsonb_build_object('de', u.name, 'en', u.name)
+			FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS u(key, name, ord)
+			ORDER BY u.key, u.ord
+			ON CONFLICT (organization_id, key) DO NOTHING`, orgID, keys, names); err != nil {
+			return fmt.Errorf("create catalog tags: %w", err)
+		}
+	}
+	if replace {
+		if _, err := tx.Exec(ctx, `DELETE FROM ci_tag ct WHERE ct.ci_id = ANY($1::uuid[]) AND NOT EXISTS (
+				SELECT 1 FROM unnest($2::uuid[], $3::text[]) AS u(ci_id, key)
+				JOIN tag t ON t.organization_id = $4 AND t.key = u.key
+				WHERE u.ci_id = ct.ci_id AND t.id = ct.tag_id)`, all, ciIDs, keys, orgID); err != nil {
+			return fmt.Errorf("replace ci tags: %w", err)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	author := tenant.FromContext(ctx).UserID
+	if !api.IsUUID(author) {
+		author = ""
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO ci_tag (organization_id, ci_id, tag_id, created_by)
+		SELECT $1, u.ci_id, t.id, NULLIF($4, '')::uuid
+		FROM unnest($2::uuid[], $3::text[]) AS u(ci_id, key)
+		JOIN tag t ON t.organization_id = $1 AND t.key = u.key
+		ON CONFLICT (ci_id, tag_id) DO NOTHING`, orgID, ciIDs, keys, author); err != nil {
+		return fmt.Errorf("assign ci tags: %w", err)
+	}
+	return nil
 }

@@ -153,6 +153,14 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := takeLegacyTags(item); err != nil {
+		return err
+	}
+	item.Tags = []string{}
+	if item.LegacyTags != nil {
+		item.Tags, _ = tagKeys(*item.LegacyTags)
+		item.LegacyTags = nil
+	}
 	r.seq++
 	item.ID = fmt.Sprintf("%08d-0000-0000-0000-%012d", r.seq, r.seq)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -176,6 +184,22 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	}
 	if err := reviveSighted(item, &req); err != nil {
 		return nil, err
+	}
+	// The tag assignment like the PostgreSQL repository (WP-281).
+	if req.LegacyTags == nil {
+		rest, legacy, err := ExtractLegacyTags(req.Attributes)
+		if err != nil {
+			return nil, err
+		}
+		if legacy != nil {
+			req.Attributes, req.LegacyTags = rest, legacy
+		}
+	}
+	if req.LegacyTags != nil {
+		item.Tags, _ = tagKeys(*req.LegacyTags)
+	}
+	if item.Tags == nil {
+		item.Tags = []string{}
 	}
 
 	if req.Name != nil {

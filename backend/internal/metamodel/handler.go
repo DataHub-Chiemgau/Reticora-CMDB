@@ -279,7 +279,9 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	c, err := checkItem(&in)
+	// The payload is checked like the resource route without the stored
+	// metamodel (WP-720, citype/draft_payload.go).
+	c, err := checkItemPayload(&in)
 	if err != nil {
 		writeDraftError(w, err)
 		return

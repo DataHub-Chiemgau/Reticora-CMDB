@@ -7,8 +7,11 @@ package rls_test
 // its links and may write every one of them. A row shared with another
 // client or with an org-wide object (WP-353, migration 000146) and an
 // unlinked (org-wide) row answer 404 and stay unchanged, including the other
-// client's and the org-wide links (no foreign key cascade); creating an unlinked row is refused with 403,
-// and linking an org-wide document does not take it away from other
+// client's and the org-wide links (no foreign key cascade); creating an
+// unlinked row is refused with 403. A document is created by such a
+// principal only with links to objects in its scope (E-61 option 1,
+// WP-851): a link to another client's object answers 404 and creates
+// nothing. Linking an org-wide document does not take it away from other
 // clients. Org-wide principals are unchanged.
 //
 // Retest:
@@ -277,6 +280,30 @@ func TestDocumentWritesOutsideScope(t *testing.T) {
 		}
 		if n := w.scalar(`SELECT count(*)::text FROM document WHERE organization_id = $1 AND title LIKE 't1-doc-created-by-%'`, f.OrgA); n != "0" {
 			t.Errorf("documents created by scoped principals: %s, want 0", n)
+		}
+		// E-61 option 1 (WP-851): with a link to an own CI client 1 creates
+		// the document, with a link to an object of client 2, also next to
+		// an own one, nothing (404 without a hint on the target).
+		linked := w.create(client1, "/api/v1/documents", map[string]any{"title": "t1-doc-linked-by-c1", "file_name": "x.pdf",
+			"links": []map[string]any{{"entity_type": "ci", "entity_id": ci1}}})
+		if got := w.scalar(`SELECT count(*)::text || '|' || min(client_id::text) FROM document_link WHERE document_id = $1`, linked); got != "1|"+f.Client1 {
+			t.Errorf("links|client of the document created by client 1: %s, want 1|client 1", got)
+		}
+		if n := w.scalar(`SELECT count(*)::text FROM audit_log WHERE organization_id = $1 AND resource_id = $2 AND action IN ('document.created', 'document.linked')`,
+			f.OrgA, linked); n != "2" {
+			t.Errorf("document.created and document.linked of the document created by client 1: %s entries, want 2", n)
+		}
+		for _, links := range [][]map[string]any{
+			{{"entity_type": "asset", "entity_id": asset2}},
+			{{"entity_type": "ci", "entity_id": ci1}, {"entity_type": "asset", "entity_id": asset2}},
+		} {
+			code, body = w.do(client1, http.MethodPost, "/api/v1/documents", map[string]any{"title": "t1-doc-foreign-by-c1", "file_name": "x.pdf", "links": links})
+			if code != http.StatusNotFound || strings.Contains(body, asset2) {
+				t.Errorf("POST a document linked to the asset of client 2 as client 1 (%d links): %d %s, want 404 without the target", len(links), code, trim(body))
+			}
+		}
+		if n := w.scalar(`SELECT count(*)::text FROM document WHERE organization_id = $1 AND title = 't1-doc-foreign-by-c1'`, f.OrgA); n != "0" {
+			t.Errorf("documents created by client 1 with a link to client 2: %s, want 0", n)
 		}
 		// Linking the org-wide document to an own CI must not take it away
 		// from client 2.

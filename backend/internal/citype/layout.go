@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
@@ -652,15 +653,26 @@ func cloneTypeLayoutsTx(ctx context.Context, tx pgx.Tx, orgID, sourceID, cloneID
 
 // FormRoles implements FormSource: the roles and custom roles of a user
 // (role_assignment ∪ user_custom_role, pattern visibleTo of savedview),
-// whatever the scope of the assignment (WP-719, E-110).
+// whatever the scope of the assignment (WP-719), and the builtin org roles
+// the IdP groups of the request's session map to
+// (identity.StandardRolesForGroups, like permission.RoleGrants; E-110,
+// WP-725). Without a principal of this user or without groups only the
+// stored assignments count.
 func (r *PGRepository) FormRoles(ctx context.Context, orgID, userID string) ([]string, error) {
 	if !api.IsUUID(userID) {
 		return nil, nil
 	}
+	idpRoles := []string{}
+	if p, ok := identity.PrincipalFromContext(ctx); ok && p.Subject == userID && len(p.Groups) > 0 {
+		idpRoles = append(idpRoles, identity.StandardRolesForGroups(p.Groups)...)
+	}
 	var roles []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT ARRAY(SELECT ra.role_id::text FROM role_assignment ra WHERE ra.user_id = $1
-			UNION SELECT ucr.custom_role_id::text FROM user_custom_role ucr WHERE ucr.user_id = $1)`, userID).Scan(&roles)
+			UNION SELECT ucr.custom_role_id::text FROM user_custom_role ucr WHERE ucr.user_id = $1
+			UNION SELECT ro.id::text FROM role ro
+			 WHERE ro.organization_id = $2 AND ro.is_builtin AND ro.scope = 'org' AND ro.name = ANY($3))`,
+			userID, orgID, idpRoles).Scan(&roles)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("read roles of user: %w", err)

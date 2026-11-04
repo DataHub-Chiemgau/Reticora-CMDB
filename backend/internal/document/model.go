@@ -41,6 +41,10 @@ type CreateRequest struct {
 	StorageKey  string   `json:"storage_key"`
 	Category    string   `json:"category,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	// Links are created with the document in one transaction (E-61,
+	// option 1). A principal restricted in the client, site or team scope
+	// needs at least one; each target is checked like POST …/links.
+	Links []LinkRequest `json:"links,omitempty"`
 }
 
 // UpdateRequest is the payload for updating a document.
@@ -63,4 +67,8 @@ type FilterParams struct {
 	Search   string
 	SortBy   string
 	SortDir  string
+	// EntityType and EntityID restrict the list to the documents linked to
+	// that target (WP-811); both are set or both are empty.
+	EntityType string
+	EntityID   string
 }

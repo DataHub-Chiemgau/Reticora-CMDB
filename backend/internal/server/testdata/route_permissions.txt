@@ -4,6 +4,7 @@ DELETE /api/v1/assignments/{id} assignment:write
 DELETE /api/v1/attribute-definitions/{id} ci_attribute:manage
 DELETE /api/v1/attribute-sets/{id} citype:manage
 DELETE /api/v1/buildings/{id} location:write
+DELETE /api/v1/business-calendars/{id} sla:write
 DELETE /api/v1/cables/{id} rack:write
 DELETE /api/v1/ci-contacts/{id} contact:write
 DELETE /api/v1/ci-fields/global/{name} ci_attribute:manage
@@ -24,6 +25,7 @@ DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/documents/{id}/links/{link_id} document:write
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
+DELETE /api/v1/import-profiles/{id} import:manage
 DELETE /api/v1/inventory/items/{id} stock:write
 DELETE /api/v1/invitations/{id} user:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
@@ -99,6 +101,8 @@ GET /api/v1/auth/config public
 GET /api/v1/auth/me authenticated
 GET /api/v1/buildings location:read
 GET /api/v1/buildings/{id} location:read
+GET /api/v1/business-calendars sla:read
+GET /api/v1/business-calendars/{id} sla:read
 GET /api/v1/cables rack:read
 GET /api/v1/cables/{id} rack:read
 GET /api/v1/ci-fields/global ci:read
@@ -184,6 +188,8 @@ GET /api/v1/iga/tasks iga:read
 GET /api/v1/iga/tasks/{id} iga:read
 GET /api/v1/impact topology:read
 GET /api/v1/impact/{ci_id} topology:read
+GET /api/v1/import-profiles import:run
+GET /api/v1/import-profiles/{id} import:run
 GET /api/v1/inventory/availability stock:read
 GET /api/v1/inventory/items stock:read
 GET /api/v1/inventory/items/{id} stock:read
@@ -322,6 +328,7 @@ PATCH /api/v1/assets/{id} asset:write
 PATCH /api/v1/attribute-definitions/{id} ci_attribute:manage
 PATCH /api/v1/attribute-sets/{id} citype:manage
 PATCH /api/v1/buildings/{id} location:write
+PATCH /api/v1/business-calendars/{id} sla:write
 PATCH /api/v1/cables/{id} rack:write
 PATCH /api/v1/ci-types/{id} citype:manage
 PATCH /api/v1/cis/{id} ci:write
@@ -336,6 +343,7 @@ PATCH /api/v1/discovery-scopes/{id} discovery:manage
 PATCH /api/v1/documents/{id} document:write
 PATCH /api/v1/forms/{id} form:write
 PATCH /api/v1/iga/connectors/{id} iga:write
+PATCH /api/v1/import-profiles/{id} import:manage
 PATCH /api/v1/inventory/items/{id} stock:write
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/ips/{id} ipam:write
@@ -405,6 +413,7 @@ POST /api/v1/auth/callback public
 POST /api/v1/auth/logout public
 POST /api/v1/auth/refresh public
 POST /api/v1/buildings location:write
+POST /api/v1/business-calendars sla:write
 POST /api/v1/cables rack:write
 POST /api/v1/ci-types citype:manage
 POST /api/v1/ci-types/{id}/activate citype:manage
@@ -460,6 +469,7 @@ POST /api/v1/iga/drift/{id}/remediate iga:write
 POST /api/v1/iga/jml-policies iga:write
 POST /api/v1/iga/jml/resolve iga:write
 POST /api/v1/iga/tasks/{id}/retry iga:write
+POST /api/v1/import-profiles import:manage
 POST /api/v1/ingest/bulk discovery:ingest
 POST /api/v1/inventory/items stock:write
 POST /api/v1/inventory/items/{id}/convert stock:write

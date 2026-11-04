@@ -8,7 +8,9 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/go-chi/chi/v5"
 )
@@ -51,6 +53,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"desk-bookings":        identity.PermDeskRead,
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
+	"business-calendars":   identity.PermSLARead,   // business calendars of the SLA clock (WP-768); writes sla:write
+	"import-profiles":      identity.PermImportRun, // import mapping profiles (WP-774, E-106); writes import:manage
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
 	// Invitations name addresses and grant roles: read and write need
@@ -217,6 +221,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"rules":                 identity.PermCITypeManage, // rule catalog writes like ci-types (WP-716, E-106)
 	"layouts":               identity.PermCITypeManage, // form layouts write like ci-types (WP-259, E-106)
 	"metamodel":             identity.PermCITypeManage, // drafts (WP-260); test and publish map their own rules (WP-721, WP-261)
+	"import-profiles":       identity.PermImportManage, // only org_admin manages profiles, engineer runs imports (WP-774, E-106)
 	"locations":             identity.PermLocationWrite,
 	"stock-movements":       identity.PermAssetMove,
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
@@ -534,10 +539,14 @@ type authorizingRouter struct {
 	// modules drops the routes of switched-off late modules (WP-214); nil
 	// registers every route.
 	modules *ModuleSet
+	// drafts captures the writes with ?draft into metamodel drafts
+	// (WP-720); nil (no database) answers them with 503.
+	drafts metamodel.Repository
 }
 
 func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor, modules: a.modules}
+	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor,
+		modules: a.modules, drafts: a.drafts}
 }
 
 // auditExemptions are the write routes that write no audit entry of their
@@ -712,7 +721,11 @@ func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
 	if !a.modules.RouteAllowed(full) {
 		return
 	}
-	chain := append([]func(http.Handler) http.Handler{AuthorizeRoute(method, full)}, a.after...)
+	chain := []func(http.Handler) http.Handler{AuthorizeRoute(method, full)}
+	if guard := draftGuard(a.modules, a.drafts, method, full); guard != nil {
+		chain = append(chain, guard)
+	}
+	chain = append(chain, a.after...)
 	if isWriteMethod(method) {
 		// Behind idempotency: a replayed response writes no second entry.
 		key := method + " " + full
@@ -731,7 +744,67 @@ func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
 		chain = append(chain, middleware.AuditRoute(method, full, a.auditor, mode, source))
 		auditedRoutes.Store(key, !exempt)
 	}
+	if _, capable := metamodel.DraftCapableRoutes[method+" "+full]; capable && a.modules.Enabled(ModuleMetamodel) {
+		// Innermost: behind authorization, validation, idempotency (a
+		// replayed POST answers the stored 202) and the audit, whose
+		// domain recorder is the draft's (metamodel_draft.item_added).
+		chain = append(chain, metamodel.CaptureDraft(a.drafts, method, full))
+	}
 	a.Router.With(chain...).Method(method, pattern, h)
+}
+
+// draftPreviewRoute is the only read route that evaluates ?draft: the
+// preview of a form with the items of a draft (E-113).
+const draftPreviewRoute = "GET /api/v1/ci-types/{id}/form"
+
+// draftGuard returns the fail-closed check of ?draft of a route (WP-720,
+// MET-53), whatever the module state, or nil: a write route outside
+// metamodel.DraftCapableRoutes (including metamodel.DraftExemptRoutes)
+// refuses ?draft with 400 draft-unsupported; with the module metamodel
+// switched off the capable routes and the form preview answer ?draft with
+// 404, so a client that expects a draft never writes productively. The
+// preview gets the draft source in its context. Without ?draft every route
+// runs unchanged.
+func draftGuard(modules *ModuleSet, drafts metamodel.Repository, method, full string) func(http.Handler) http.Handler {
+	key := method + " " + full
+	_, capable := metamodel.DraftCapableRoutes[key]
+	moduleOn := modules.Enabled(ModuleMetamodel)
+	var refuse func(w http.ResponseWriter)
+	switch {
+	case isWriteMethod(method) && !capable:
+		refuse = func(w http.ResponseWriter) {
+			api.WriteProblem(w, http.StatusBadRequest, "urn:reticora:problem:draft-unsupported", "Bad Request",
+				"this route cannot write into a metamodel draft")
+		}
+	case (capable || key == draftPreviewRoute) && !moduleOn:
+		refuse = func(w http.ResponseWriter) {
+			api.WriteProblem(w, http.StatusNotFound, "urn:reticora:problem:not-found", "Not Found", "Modul metamodel abgeschaltet")
+		}
+	case key == draftPreviewRoute:
+		forms, ok := drafts.(citype.DraftForms)
+		if !ok {
+			return nil
+		}
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Has(metamodel.DraftParam) {
+					r = r.WithContext(citype.WithDraftForms(r.Context(), forms))
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
+	default:
+		return nil
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Has(metamodel.DraftParam) {
+				refuse(w)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (a authorizingRouter) Method(method, pattern string, h http.Handler) {
@@ -767,7 +840,8 @@ func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 
 func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor, modules: a.modules})
+		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor, modules: a.modules,
+			drafts: a.drafts})
 	})
 }
 

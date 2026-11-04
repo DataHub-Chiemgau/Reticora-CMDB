@@ -1277,6 +1277,19 @@ MET-52;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
 GQL-03;[P2];B;backend/internal/citype/form_integration_test.go;WP-719
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/citype/form_integration_test.go;WP-719
 TKT-02;[P2];B;backend/internal/sla/sla_integration_test.go;WP-292
+TKT-02;[P2];B;backend/internal/sla/calendar_api_integration_test.go;WP-768
 MGT-01;[P2];B;backend/internal/document/links_integration_test.go;WP-267
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/document/links_integration_test.go;WP-267
 MET-53;[P2];B;backend/internal/metamodel/publish_job_integration_test.go;WP-721
+MGT-01;[P2];B;backend/internal/document/entity_filter_integration_test.go;WP-811
+RBA-07;[P2];B;backend/internal/permission/scope_integration_test.go;WP-725
+MET-53;[P2];B;backend/internal/server/draft_isolation_integration_test.go;WP-720
+MGT-01;[P2];B;backend/internal/document/create_links_integration_test.go;WP-851
+IMP-IO-01;[P2];C;backend/internal/importer/handler_test.go;WP-774
+API-06;[P2]/[P3]/[P4]/[A];C;backend/internal/importer/handler_test.go;WP-774
+MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_v2_integration_test.go;WP-262
+CI-08;[P2];B;backend/internal/ci/tags_integration_test.go;WP-281
+CI-07;[P2];B;backend/internal/ci/tags_integration_test.go;WP-281
+CI-12;[B];B;backend/internal/ci/merge_integration_test.go;WP-281
+LOC-08;P2/G2;B;backend/internal/locations/loc08_integration_test.go;WP-282
+LOC-08;P2/G2;B;frontend/src/pages/LocationTreePage.test.tsx;WP-282

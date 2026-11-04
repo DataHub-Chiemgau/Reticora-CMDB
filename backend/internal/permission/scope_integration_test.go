@@ -271,6 +271,42 @@ func TestAccessGrantsResolveScopesFromRoleAssignments(t *testing.T) {
 		}
 	})
 
+	// WP-725 (RBA-07): every grant names its role, the scope stays the same.
+	t.Run("grants carry the role or custom role id", func(t *testing.T) {
+		grants, err := repo.AccessGrants(ctx, rbaOrg, rbaUserTwo)
+		if err != nil {
+			t.Fatalf("AccessGrants: %v", err)
+		}
+		if len(grants) != 2 {
+			t.Fatalf("grants %+v, want the role and the custom role assignment", grants)
+		}
+		sort.Slice(grants, func(i, j int) bool { return grants[i].RoleID > grants[j].RoleID })
+		role, custom := grants[0], grants[1]
+		if role.RoleID != rbaRoleTech || role.CustomRoleID != "" || len(role.Clients) != 1 || role.Clients[0] != rbaClient1 {
+			t.Errorf("role assignment grant %+v, want role %s in client 1", role, rbaRoleTech)
+		}
+		if custom.CustomRoleID != rbaCustomRole || custom.RoleID != "" || len(custom.Clients) != 1 || custom.Clients[0] != rbaClient2 {
+			t.Errorf("custom role grant %+v, want custom role %s in client 2", custom, rbaCustomRole)
+		}
+		assertPermissions(t, role.Permissions, "ci:read", "ci:write")
+		assertPermissions(t, custom.Permissions, "asset:read")
+
+		var viewerID string
+		scope := database.OrgWideScope(rbaOrg, "")
+		if viewerErr := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT id::text FROM role WHERE organization_id = $1 AND is_builtin AND name = 'viewer'`, rbaOrg).Scan(&viewerID)
+		}); viewerErr != nil {
+			t.Fatalf("read viewer role: %v", viewerErr)
+		}
+		mapped, mappedErr := repo.RoleGrants(ctx, rbaOrg, []string{"viewer"})
+		if mappedErr != nil || len(mapped) != 1 {
+			t.Fatalf("RoleGrants: %+v, %v; want the viewer", mapped, mappedErr)
+		}
+		if mapped[0].RoleID != viewerID || mapped[0].CustomRoleID != "" || len(mapped[0].Clients) != 0 || len(mapped[0].Sites) != 0 {
+			t.Errorf("viewer grant %+v, want role %s org-wide", mapped[0], viewerID)
+		}
+	})
+
 	t.Run("scoped assignment without scope id grants nothing", func(t *testing.T) {
 		for _, user := range []string{rbaUserBroken, rbaUserNone} {
 			access := resolve(ctx, t, repo, user)

@@ -21,6 +21,24 @@ type EventDispatcher interface {
 type Handler struct {
 	repo       Repository
 	dispatcher EventDispatcher
+	// lifecycleModels and roles feed the export v2 (WP-262); without them
+	// it answers 503.
+	lifecycleModels LifecycleModelReader
+	roles           RoleReader
+}
+
+// WithLifecycleModels sets the reader of the lifecycle models for the
+// metamodel export v2.
+func (h *Handler) WithLifecycleModels(r LifecycleModelReader) *Handler {
+	h.lifecycleModels = r
+	return h
+}
+
+// WithRoles sets the reader of the role names for the layouts of the
+// metamodel export v2.
+func (h *Handler) WithRoles(r RoleReader) *Handler {
+	h.roles = r
+	return h
 }
 
 // NewHandler creates a new CI type handler.
@@ -686,19 +704,41 @@ func (h *Handler) ListTemplates(w http.ResponseWriter, r *http.Request) {
 }
 
 // Export handles GET /api/v1/ci-types/export: the metamodel as a JSON
-// download (MET-54).
+// download (MET-54). format_version 1 (default) is BuildExport, 2 the
+// complete export of BuildExportV2 (WP-262); another value is 400, since
+// the OpenAPI validation does not check enums. The export v2 needs the
+// database and the readers of lifecycle models and roles (503 otherwise).
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
 		return
 	}
 	now := time.Now().UTC()
-	out, err := BuildExport(r.Context(), h.repo, t.OrganizationID, now)
+	var (
+		out  any
+		err  error
+		name = "metamodel-"
+	)
+	switch r.URL.Query().Get("format_version") {
+	case "", "1":
+		out, err = BuildExport(r.Context(), h.repo, t.OrganizationID, now)
+	case "2":
+		src, isSource := h.repo.(ExportV2Source)
+		if !isSource || h.lifecycleModels == nil || h.roles == nil {
+			api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the metamodel export v2 needs the database")
+			return
+		}
+		out, err = BuildExportV2(r.Context(), src, h.lifecycleModels, h.roles, t.OrganizationID, now)
+		name = "metamodel-v2-"
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "format_version must be 1 or 2")
+		return
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	w.Header().Set("Content-Disposition", `attachment; filename="metamodel-`+now.Format("20060102")+`.json"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+now.Format("20060102")+`.json"`)
 	api.WriteJSON(w, http.StatusOK, out)
 }
 

@@ -432,6 +432,7 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/vlans': ['site_id'],
   '/subnets': ['client_id', 'site_id'],
   '/slas': ['client_id'],
+  '/business-calendars': ['client_id'],
   '/forms': ['client_id'],
 };
 

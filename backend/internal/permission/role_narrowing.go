@@ -102,10 +102,10 @@ func CheckRoleNarrowing(ctx context.Context, tx pgx.Tx, orgID, roleID string, ca
 		return fmt.Errorf("iterate role assignments: %w", err)
 	}
 	var missing []identity.Permission
-	for _, target := range targets {
+	for i := range targets {
 		// One assignment at a time: the union of several would widen the
 		// scope each of them needs.
-		for _, perm := range identity.GrantCeiling(caller, []identity.Grant{target}) {
+		for _, perm := range identity.GrantCeiling(caller, []identity.Grant{targets[i]}) {
 			if !slices.Contains(missing, perm) {
 				missing = append(missing, perm)
 			}

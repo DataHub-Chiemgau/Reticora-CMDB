@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -546,4 +547,222 @@ func refreshTicketSLA(ctx context.Context, tx pgx.Tx, id string) error {
 func refreshTicketSLAByTicket(ctx context.Context, tx pgx.Tx, orgID, ticketID string) error {
 	_, err := tx.Exec(ctx, `UPDATE ticket_sla SET response_breached = CASE WHEN first_response_at IS NULL THEN now() > response_due_at ELSE first_response_at > response_due_at END, resolution_breached = CASE WHEN resolved_at IS NULL THEN now() > resolution_due_at ELSE resolved_at > resolution_due_at END, updated_at = now() WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2`, orgID, ticketID)
 	return err
+}
+
+// calendarColumns are the columns of a BusinessCalendar (scanCalendar).
+const calendarColumns = `id::text, organization_id::text, client_id::text, name, timezone, weekly_hours, holidays, is_default, created_at, updated_at`
+
+// calendarConstraints maps the partial unique index of the default
+// calendar onto its request field (409 on is_default).
+var calendarConstraints = map[string]string{"business_calendar_default": "is_default"}
+
+// calendarDBError turns a second default per organization and client into
+// the conflict on is_default; other errors pass unchanged.
+func calendarDBError(err error) error {
+	mapped := api.FieldDBError(err, calendarConstraints)
+	var conflict *api.ConflictError
+	if errors.As(mapped, &conflict) {
+		return errCalendarDefaultTaken
+	}
+	return mapped
+}
+
+// errCalendarClient: client_id names no client visible under the scope
+// (400 on client_id, alike for unknown and foreign clients).
+var errCalendarClient = &api.FieldError{Field: "client_id", Message: "client not found"}
+
+func scanCalendar(s scanner) (*BusinessCalendar, error) {
+	c := &BusinessCalendar{}
+	var weekly, holidays []byte
+	if err := s.Scan(&c.ID, &c.OrganizationID, &c.ClientID, &c.Name, &c.Timezone, &weekly, &holidays, &c.IsDefault, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(weekly, &c.WeeklyHours); err != nil {
+		return nil, fmt.Errorf("decode weekly hours: %w", err)
+	}
+	if err := json.Unmarshal(holidays, &c.Holidays); err != nil {
+		return nil, fmt.Errorf("decode holidays: %w", err)
+	}
+	if c.WeeklyHours == nil {
+		c.WeeklyHours = []Window{}
+	}
+	if c.Holidays == nil {
+		c.Holidays = []Holiday{}
+	}
+	return c, nil
+}
+
+// calendarJSON encodes the windows and holidays for the jsonb columns.
+func calendarJSON(c *BusinessCalendar) (weekly, holidays string, err error) {
+	w, err := json.Marshal(c.WeeklyHours)
+	if err != nil {
+		return "", "", fmt.Errorf("encode weekly hours: %w", err)
+	}
+	h, err := json.Marshal(c.Holidays)
+	if err != nil {
+		return "", "", fmt.Errorf("encode holidays: %w", err)
+	}
+	return string(w), string(h), nil
+}
+
+// ListCalendars reads the calendars visible under the scope (org-wide and
+// those of the principal's clients, E-09), sorted by name and id, one row
+// more than the page limit for the keyset cursor.
+func (r *PGRepository) ListCalendars(ctx context.Context, orgID string, filter BusinessCalendarFilter, page api.PaginationParams) ([]BusinessCalendar, int, error) {
+	items := make([]BusinessCalendar, 0)
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := "organization_id = $1"
+		args := []any{orgID}
+		pos := 2
+		if filter.ClientID != "" {
+			where += fmt.Sprintf(" AND client_id = $%d::uuid", pos)
+			args = append(args, filter.ClientID)
+			pos++
+		}
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM business_calendar WHERE "+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count business calendars: %w", err)
+		}
+		if page.Cursor != nil {
+			name, id, posErr := calendarPosition(page.Cursor)
+			if posErr != nil {
+				return posErr
+			}
+			where += " AND " + api.KeysetClause(calendarSort, "text", calendarDir, pos)
+			args = append(args, name, id)
+			pos += 2
+		}
+		tail := fmt.Sprintf(" ORDER BY name ASC, id ASC LIMIT $%d", pos)
+		args = append(args, page.Limit+1)
+		if page.Cursor == nil && page.Offset > 0 {
+			tail += fmt.Sprintf(" OFFSET $%d", pos+1)
+			args = append(args, page.Offset)
+		}
+		rows, err := tx.Query(ctx, "SELECT "+calendarColumns+" FROM business_calendar WHERE "+where+tail, args...)
+		if err != nil {
+			return fmt.Errorf("list business calendars: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, scanErr := scanCalendar(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			items = append(items, *item)
+		}
+		return rows.Err()
+	})
+	return items, total, err
+}
+
+func (r *PGRepository) GetCalendar(ctx context.Context, orgID, id string) (*BusinessCalendar, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrCalendarNotFound
+	}
+	var item *BusinessCalendar
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		item, err = scanCalendar(tx.QueryRow(ctx, "SELECT "+calendarColumns+" FROM business_calendar WHERE organization_id = $1 AND id = $2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCalendarNotFound
+		}
+		return err
+	})
+	return item, err
+}
+
+// CreateCalendar stores a calendar after Calendar.Validate. client_id must
+// name a client visible under the scope (400 on client_id); an org-wide
+// calendar of a client-scoped principal violates WITH CHECK (E-09, 403);
+// a second default is 409 on is_default.
+func (r *PGRepository) CreateCalendar(ctx context.Context, c *BusinessCalendar) error {
+	if err := c.validate(); err != nil {
+		return err
+	}
+	if c.ClientID != nil && !api.IsUUID(*c.ClientID) {
+		return errCalendarClient
+	}
+	weekly, holidays, err := calendarJSON(c)
+	if err != nil {
+		return err
+	}
+	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if c.ClientID != nil {
+			var visible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM client WHERE organization_id = $1 AND id = $2::uuid)`, c.OrganizationID, *c.ClientID).Scan(&visible); err != nil {
+				return fmt.Errorf("read client: %w", err)
+			}
+			if !visible {
+				return errCalendarClient
+			}
+		}
+		created, err := scanCalendar(tx.QueryRow(ctx, `
+			INSERT INTO business_calendar (organization_id, client_id, name, timezone, weekly_hours, holidays, is_default)
+			VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6::jsonb, $7)
+			RETURNING `+calendarColumns, c.OrganizationID, c.ClientID, c.Name, c.Timezone, weekly, holidays, c.IsDefault))
+		if err != nil {
+			return calendarDBError(err)
+		}
+		*c = *created
+		return nil
+	})
+}
+
+// UpdateCalendar changes a calendar the principal may change: the row is
+// locked with FOR UPDATE, which applies business_calendar_scoped_update,
+// so an org-wide calendar of a client-scoped principal is not found (404)
+// and stays unchanged. The merged calendar passes Calendar.Validate.
+func (r *PGRepository) UpdateCalendar(ctx context.Context, orgID, id string, req *UpdateBusinessCalendarRequest) (*BusinessCalendar, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrCalendarNotFound
+	}
+	var item *BusinessCalendar
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := scanCalendar(tx.QueryRow(ctx, "SELECT "+calendarColumns+" FROM business_calendar WHERE organization_id = $1 AND id = $2 FOR UPDATE", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCalendarNotFound
+		}
+		if err != nil {
+			return err
+		}
+		req.apply(current)
+		if invalid := current.validate(); invalid != nil {
+			return invalid
+		}
+		weekly, holidays, err := calendarJSON(current)
+		if err != nil {
+			return err
+		}
+		item, err = scanCalendar(tx.QueryRow(ctx, `
+			UPDATE business_calendar SET name = $3, timezone = $4, weekly_hours = $5::jsonb, holidays = $6::jsonb, is_default = $7
+			WHERE organization_id = $1 AND id = $2
+			RETURNING `+calendarColumns, orgID, id, current.Name, current.Timezone, weekly, holidays, current.IsDefault))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCalendarNotFound
+		}
+		if err != nil {
+			return calendarDBError(err)
+		}
+		return nil
+	})
+	return item, err
+}
+
+// DeleteCalendar removes a calendar the principal may delete
+// (business_calendar_scoped_delete; otherwise 404). The foreign keys set
+// sla.calendar_id and ticket_sla.calendar_id to NULL; due times stay.
+func (r *PGRepository) DeleteCalendar(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return ErrCalendarNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		cmd, err := tx.Exec(ctx, "DELETE FROM business_calendar WHERE organization_id = $1 AND id = $2", orgID, id)
+		if err != nil {
+			return fmt.Errorf("delete business calendar: %w", err)
+		}
+		if cmd.RowsAffected() == 0 {
+			return ErrCalendarNotFound
+		}
+		return nil
+	})
 }

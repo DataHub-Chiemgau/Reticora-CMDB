@@ -442,7 +442,8 @@ func (h *APIKeyHandler) holderGrants(ctx context.Context, key *StoredAPIKey) (gr
 // with when its holder has the grants.
 func restrictGrants(grants []Grant, perms []Permission) []Grant {
 	out := make([]Grant, 0, len(grants))
-	for _, g := range grants {
+	for i := range grants {
+		g := grants[i]
 		if held := intersectPermissions(perms, g.Permissions); len(held) > 0 {
 			g.Permissions = held
 			out = append(out, g)

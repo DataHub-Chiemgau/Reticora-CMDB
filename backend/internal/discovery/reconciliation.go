@@ -563,5 +563,34 @@ func dropInvalidTyped(ctx context.Context, item *IngestItem) int {
 	if item.Name == "" && values["name"] != nil {
 		item.Name = firstNonEmpty(item.Hostname, item.ManagementIP)
 	}
-	return dropped
+	return dropped + dropInvalidTags(ctx, item)
+}
+
+// dropInvalidTags removes attributes.tags of an item when it is no array of
+// strings and returns 1 then, else 0 (E-125, WP-281). A valid list reaches
+// the CI write, which assigns the tags in the record's transaction
+// (ci.ExtractLegacyTags); it is no field value, so its provenance is not
+// recorded (withoutLegacyTags). The attributes are replaced, not changed:
+// callers share them.
+func dropInvalidTags(ctx context.Context, item *IngestItem) int {
+	if _, _, err := ci.ExtractLegacyTags(item.Attributes); err == nil {
+		return 0
+	}
+	attributes := maps.Clone(item.Attributes)
+	delete(attributes, ci.LegacyTagsKey)
+	item.Attributes = attributes
+	slog.WarnContext(ctx, "discovery value rejected by its data type", "field", "attributes."+ci.LegacyTagsKey)
+	return 1
+}
+
+// withoutLegacyTags returns the discovered values without tags: the tag
+// assignment is no field value (CHECK ci_field_value_no_tags, WP-281) and
+// has no provenance.
+func withoutLegacyTags(values map[string]any) map[string]any {
+	if _, ok := values[ci.LegacyTagsKey]; !ok {
+		return values
+	}
+	out := maps.Clone(values)
+	delete(out, ci.LegacyTagsKey)
+	return out
 }

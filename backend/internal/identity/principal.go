@@ -49,6 +49,13 @@ type Principal struct {
 	// (sid; the token id jti for tokens without sid) of a session or the id
 	// of an API key. The per-credential rate limit counts it (API-04).
 	Credential string
+	// Groups are the IdP groups and roles of a session (SessionClaims.Groups);
+	// StandardRolesForGroups maps them to the standard roles the session holds
+	// through its IdP (RBA-02, RBA-07). Empty for API keys.
+	Groups []string
+	// ServiceAccountID is the service account an API key acts as (RBA-08);
+	// empty for sessions and for keys acting as their creator.
+	ServiceAccountID string
 }
 
 type principalContextKey struct{}
@@ -56,6 +63,7 @@ type principalContextKey struct{}
 // WithPrincipal stores the authenticated principal in the request context.
 func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	p.Permissions = append([]Permission(nil), p.Permissions...)
+	p.Groups = append([]string(nil), p.Groups...)
 	return context.WithValue(ctx, principalContextKey{}, p)
 }
 
@@ -66,6 +74,7 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 		return Principal{}, false
 	}
 	p.Permissions = append([]Permission(nil), p.Permissions...)
+	p.Groups = append([]string(nil), p.Groups...)
 	return p, true
 }
 
@@ -139,11 +148,17 @@ func (s ScopeSet) equal(o ScopeSet) bool {
 // the client of its site; sites without clients restrict the client dimension
 // to none (fail-closed, E-08). A team grant restricts the team dimension only:
 // the team predicate applies to rows that carry a team (TEN-05, E-11).
+// RoleID or CustomRoleID names the role the grant stems from (at most one is
+// set); field permissions are assigned to roles (RBA-07). Grants without role
+// reference, such as OrgWideGrant, leave both empty. ResolveAccess ignores
+// them.
 type Grant struct {
-	Permissions []Permission
-	Clients     []string
-	Sites       []string
-	Teams       []string
+	Permissions  []Permission
+	Clients      []string
+	Sites        []string
+	Teams        []string
+	RoleID       string
+	CustomRoleID string
 }
 
 // OrgWideGrant grants the permissions in the whole organization.
@@ -183,7 +198,8 @@ func ResolveAccess(grants []Grant) Access {
 	access := Access{Scope: aggregateScope(grants)}
 	byPermission := make(map[Permission][]Grant)
 	order := make([]Permission, 0)
-	for _, g := range grants {
+	for i := range grants {
+		g := &grants[i]
 		for _, p := range g.Permissions {
 			if p == "" {
 				continue
@@ -191,7 +207,7 @@ func ResolveAccess(grants []Grant) Access {
 			if _, ok := byPermission[p]; !ok {
 				order = append(order, p)
 			}
-			byPermission[p] = append(byPermission[p], g)
+			byPermission[p] = append(byPermission[p], *g)
 		}
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
@@ -232,8 +248,8 @@ func aggregateScope(grants []Grant) Scope {
 func unionDimension(grants []Grant, dimension func(Grant) (ids []string, restricts bool)) ScopeSet {
 	seen := make(map[string]struct{})
 	restricted := false
-	for _, g := range grants {
-		values, restricts := dimension(g)
+	for i := range grants {
+		values, restricts := dimension(grants[i])
 		if !restricts {
 			continue
 		}

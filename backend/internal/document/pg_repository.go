@@ -101,16 +101,36 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 	return nil
 }
 
-// List returns paginated documents filtered by the given parameters.
+// List returns paginated documents filtered by the given parameters. The
+// entity filter (WP-811) first checks that the target is visible under the
+// tenant scope (registry of links.go, api.ErrNotFound otherwise) and then
+// keeps the documents with a link to it (idx_doc_link_entity); the policies
+// of document_link hide the links outside the scope.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
 	var docs []Document
 	var total int
 
+	filtered := filter.EntityType != "" || filter.EntityID != ""
+	if filtered {
+		if err := checkEntityFilter(filter.EntityType, filter.EntityID); err != nil {
+			return nil, 0, err
+		}
+	}
+
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
-		args := make([]any, 0, 4)
+		args := make([]any, 0, 6)
 		argPos := 1
 
+		if filtered {
+			if err := targetVisible(ctx, tx, &DocumentLink{EntityType: filter.EntityType, EntityID: filter.EntityID}); err != nil {
+				return err
+			}
+			whereParts = append(whereParts, fmt.Sprintf("EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id"+
+				" AND document_link.entity_type = $%d AND document_link.entity_id = $%d::uuid)", argPos, argPos+1))
+			args = append(args, filter.EntityType, filter.EntityID)
+			argPos += 2
+		}
 		if filter.Category != "" {
 			whereParts = append(whereParts, fmt.Sprintf("category = $%d", argPos))
 			args = append(args, filter.Category)
@@ -228,40 +248,102 @@ func (r *PGRepository) GetWritable(ctx context.Context, orgID, id string) (*Docu
 // Create inserts a new document. It has no stored content yet: the storage
 // key stays empty until SetStorage, whatever d.StorageKey holds.
 func (r *PGRepository) Create(ctx context.Context, d *Document) error {
+	return r.CreateWithLinks(ctx, d, nil)
+}
+
+// CreateWithLinks inserts the document and then its links in one
+// transaction (E-61 option 1). Every link is checked like LinkDocument:
+// an entity type outside the registry fails with a 422 field error before
+// the transaction, an invisible or missing target with api.ErrNotFound and
+// rolls the document back. For a principal restricted in the client, site
+// or team scope the links must also be writable (WITH CHECK of
+// document_link), and the deferred trigger document_scoped_insert_linked
+// refuses a document left without a link (403). With links the
+// transaction ends with the entries document.created and one
+// document.linked per link (WP-851, recordCreateAudit); without links the
+// route audit records the creation.
+func (r *PGRepository) CreateWithLinks(ctx context.Context, d *Document, links []DocumentLink) error {
+	for i := range links {
+		if err := checkEntityType(links[i].EntityType); err != nil {
+			return err
+		}
+		if !api.IsUUID(links[i].EntityID) {
+			return errInvalidEntityID
+		}
+	}
 	return database.WithRequestTenant(ctx, r.pool, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if d.Tags == nil {
-			d.Tags = []string{}
+		if err := insertDocument(ctx, tx, d); err != nil {
+			return err
 		}
-		d.StorageKey = ""
-		query := `
-			INSERT INTO document (
-				organization_id, title, description, file_name, file_size, mime_type,
-				storage_key, version, category, tags, uploaded_by
-			) VALUES (
-				$1, $2, $3, $4, $5, $6,
-				$7, COALESCE(NULLIF($8, 0), 1), $9, $10, $11
-			)
-			RETURNING id::text, version, created_at, updated_at
-		`
-		if err := tx.QueryRow(ctx, query,
-			d.OrganizationID,
-			d.Title,
-			nilIfEmpty(d.Description),
-			d.FileName,
-			d.FileSize,
-			d.MimeType,
-			d.StorageKey,
-			d.Version,
-			d.Category,
-			d.Tags,
-			d.UploadedBy,
-		).Scan(&d.ID, &d.Version, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			return fmt.Errorf("create document: %w", err)
+		for i := range links {
+			link := &links[i]
+			link.OrganizationID, link.DocumentID = d.OrganizationID, d.ID
+			if err := targetVisible(ctx, tx, link); err != nil {
+				return err
+			}
+			if err := insertLink(ctx, tx, link); err != nil {
+				return err
+			}
+			if err := requireVisible(ctx, tx, "document_link", linkVisible, link.ID); err != nil {
+				return err
+			}
 		}
-		d.CreatedAt = d.CreatedAt.UTC()
-		d.UpdatedAt = d.UpdatedAt.UTC()
-		return nil
+		if len(links) == 0 {
+			return nil
+		}
+		return recordCreateAudit(ctx, tx, d, links)
 	})
+}
+
+// insertDocument inserts d in tx and sets its id, version and timestamps.
+func insertDocument(ctx context.Context, tx pgx.Tx, d *Document) error {
+	if d.Tags == nil {
+		d.Tags = []string{}
+	}
+	d.StorageKey = ""
+	query := `
+		INSERT INTO document (
+			organization_id, title, description, file_name, file_size, mime_type,
+			storage_key, version, category, tags, uploaded_by
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, COALESCE(NULLIF($8, 0), 1), $9, $10, $11
+		)
+		RETURNING id::text, version, created_at, updated_at
+	`
+	if err := tx.QueryRow(ctx, query,
+		d.OrganizationID,
+		d.Title,
+		nilIfEmpty(d.Description),
+		d.FileName,
+		d.FileSize,
+		d.MimeType,
+		d.StorageKey,
+		d.Version,
+		d.Category,
+		d.Tags,
+		d.UploadedBy,
+	).Scan(&d.ID, &d.Version, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		return fmt.Errorf("create document: %w", err)
+	}
+	d.CreatedAt = d.CreatedAt.UTC()
+	d.UpdatedAt = d.UpdatedAt.UTC()
+	return nil
+}
+
+// insertLink inserts link in tx and sets its id and creation time; the
+// trigger derive_document_link_scope sets client, site and team.
+func insertLink(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id::text, created_at`,
+		link.OrganizationID, link.DocumentID, link.EntityType, link.EntityID,
+	).Scan(&link.ID, &link.CreatedAt); err != nil {
+		return fmt.Errorf("link document: %w", err)
+	}
+	link.CreatedAt = link.CreatedAt.UTC()
+	return nil
 }
 
 // Update modifies an existing document.
@@ -381,20 +463,9 @@ func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) err
 		if err := targetVisible(ctx, tx, link); err != nil {
 			return err
 		}
-		query := `
-			INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
-			VALUES ($1, $2, $3, $4)
-			RETURNING id::text, created_at
-		`
-		if err := tx.QueryRow(ctx, query,
-			link.OrganizationID,
-			link.DocumentID,
-			link.EntityType,
-			link.EntityID,
-		).Scan(&link.ID, &link.CreatedAt); err != nil {
-			return fmt.Errorf("link document: %w", err)
+		if err := insertLink(ctx, tx, link); err != nil {
+			return err
 		}
-		link.CreatedAt = link.CreatedAt.UTC()
 		// Document and linked object must both be visible under the scope.
 		if err := requireVisible(ctx, tx, "document", documentVisible, link.DocumentID); err != nil {
 			return err

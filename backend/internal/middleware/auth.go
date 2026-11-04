@@ -43,6 +43,9 @@ type Claims struct {
 	// SessionID is the sid of a session token: the refresh family that
 	// every access token of the session carries.
 	SessionID string `json:"sid,omitempty"`
+	// Groups are the IdP groups of the session (SessionClaims.Groups); they
+	// name the standard roles held through the IdP (RBA-07).
+	Groups []string `json:"groups,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -170,6 +173,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 			Permissions:      info.Scopes,
 			Type:             identity.PrincipalTypeAPIKey,
 			Credential:       "apikey:" + info.ID,
+			ServiceAccountID: info.ServiceAccountID,
 		}
 		return principal, Claims{
 			Subject:        subject,
@@ -190,6 +194,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		PermissionScopes: claims.PermissionScopes,
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
+		Groups:           append([]string(nil), claims.Groups...),
 	}
 	// The session budget of API-04 counts the session (sid), which every
 	// refresh keeps; tokens issued without sid (until they expire, at most
@@ -249,6 +254,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		ExpiresAt:        sessionClaims.ExpiresAt.Unix(),
 		TokenID:          sessionClaims.ID,
 		SessionID:        sessionClaims.SessionID,
+		Groups:           append([]string(nil), sessionClaims.Groups...),
 	}, nil
 }
 

@@ -200,6 +200,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The event stream RETICORA_EVENTS reserves RETICORA_EVENTS_MAX_BYTES
+      # (10 GiB) of JetStream file storage, and NATS grants at most 75 % of
+      # the free disk (see the job e2e-real). The installed stack runs on the
+      # runner's disk, also in the Debian container variant.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 

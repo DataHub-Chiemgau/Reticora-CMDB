@@ -361,7 +361,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
-		"saved-views": "saved_view", "sites": "site", "slas": "sla", "stocktakes": "stocktake", "subnets": "subnet",
+		"saved-views": "saved_view", "sites": "site", "slas": "sla", "business-calendars": "business_calendar", "stocktakes": "stocktake", "subnets": "subnet",
 		"teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vrfs": "vrf",
 		"workflows": "workflow_def",
 	} {
@@ -383,6 +383,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"ci-types", "ci_type", "PATCH")
 	crud(m, v1+"locations", "location", "PATCH")
 	crud(m, v1+"jobs", "job", "DELETE")
+	crud(m, v1+"import-profiles", "import_profile", all...)
 	crud(m, "/scim/v2/Groups", "team", all...)
 	m["PUT /scim/v2/Groups/{id}"] = row("team")
 	crud(m, "/scim/v2/Users", "app_user", "POST", "PATCH")

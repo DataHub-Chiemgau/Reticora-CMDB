@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
@@ -476,6 +477,25 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// The lifecycle of the deprecated write attributes.tags (E-125, API-01):
+// deprecated with WP-281, switched off at the sunset, at least 12 months
+// after the G2 release. Then attributes.tags answers 400.
+var (
+	legacyTagsDeprecatedAt = time.Date(2026, time.November, 3, 0, 0, 0, 0, time.UTC)
+	legacyTagsSunset       = time.Date(2028, time.June, 30, 0, 0, 0, 0, time.UTC)
+)
+
+// markLegacyTags sets Deprecation and Sunset (RFC 9745, RFC 8594, in the
+// form of the deprecated operations, middleware.writeDeprecation) on the
+// answer of a write that carries attributes.tags (E-125).
+func markLegacyTags(w http.ResponseWriter, attributes map[string]any) {
+	if _, ok := attributes[LegacyTagsKey]; !ok {
+		return
+	}
+	w.Header().Set("Deprecation", "@"+strconv.FormatInt(legacyTagsDeprecatedAt.Unix(), 10))
+	w.Header().Set("Sunset", legacyTagsSunset.Format(http.TimeFormat))
+}
+
 // Create handles POST /api/v1/cis
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
@@ -490,6 +510,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	markLegacyTags(w, req.Attributes)
 	if req.Name == "" || req.CITypeID == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and ci_type_id are required")
 		return
@@ -578,6 +599,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	markLegacyTags(w, req.Attributes)
 	// A PATCH through the API is a manual change: its fields get protected
 	// overrides (OVR-01) and its If-Match is checked (API-07).
 	req.Manual = &ManualChange{Author: t.UserID}
@@ -773,6 +795,20 @@ func writeValidationError(w http.ResponseWriter, err error) bool {
 			ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/400", Title: "Bad Request",
 				Status: http.StatusBadRequest, Detail: reserved.Error()},
 			Violations: violations,
+		})
+		return true
+	}
+	// attributes.tags that is no array of strings is a malformed request
+	// (E-125): 400 on the field.
+	var legacyTags *LegacyTagsError
+	if errors.As(err, &legacyTags) {
+		api.WriteJSON(w, http.StatusBadRequest, struct {
+			api.ProblemDetail
+			Violations []Violation `json:"violations"`
+		}{
+			ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/400", Title: "Bad Request",
+				Status: http.StatusBadRequest, Detail: legacyTags.Error()},
+			Violations: []Violation{{Field: "attributes.tags", Detail: "must be an array of strings"}},
 		})
 		return true
 	}

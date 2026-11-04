@@ -285,8 +285,14 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 	if v := ctx.Value(txKey{}); v != nil {
 		return joinTx(ctx, v, scope, fn)
 	}
+	return runTenantTx(ctx, pool, scope, beginTenantSQL(scope), fn)
+}
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{BeginQuery: beginTenantSQL(scope)})
+// runTenantTx opens a tenant transaction with begin (the statement that
+// opens it and sets the GUCs of scope), runs fn and commits on success; see
+// WithTenant. scope is validated.
+func runTenantTx(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, begin string, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{BeginQuery: begin})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -324,7 +330,20 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 // ones, so a session-level value set elsewhere on this connection can never
 // widen the scope. The ids are validated UUIDs; the user id is quoted.
 func beginTenantSQL(scope *TenantScope) string {
-	return "BEGIN; SELECT set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
+	return "BEGIN; SELECT " + tenantGUCsSQL(scope)
+}
+
+// beginTenantSnapshotSQL is beginTenantSQL for a reading transaction with
+// one snapshot (WithRequestTenantSnapshot): REPEATABLE READ and READ ONLY,
+// in the same round trip as the GUCs (NFR-03).
+func beginTenantSnapshotSQL(scope *TenantScope) string {
+	return "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; SELECT " + tenantGUCsSQL(scope)
+}
+
+// tenantGUCsSQL is the select list that sets the five GUCs of scope
+// transaction-locally.
+func tenantGUCsSQL(scope *TenantScope) string {
+	return "set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
 		"set_config('" + UserGUC + "', " + quoteLiteral(scope.UserID) + ", true), " +
 		"set_config('" + ClientScopeGUC + "', " + quoteLiteral(scope.Clients.gucValue()) + ", true), " +
 		"set_config('" + SiteScopeGUC + "', " + quoteLiteral(scope.Sites.gucValue()) + ", true), " +

@@ -24,8 +24,8 @@ import (
 
 // CI merge (CI-12): POST /cis/{survivor}/merge {victim_id} moves the
 // relationships, interfaces (with their IPs), contacts, history, documents,
-// the endpoint agents and the asset link of the victim to the survivor. Attributes follow the
-// provenance rank of the discovery sources, tags are united; the field
+// the endpoint agents, the tag assignments and the asset link of the victim to the survivor.
+// Attributes follow the provenance rank of the discovery sources; the field
 // values (provenance and overrides) of both stay, an override of the victim
 // that contradicts one of the survivor opens an override_conflict review.
 // The victim is soft-deleted with merged_into_id; GET on it answers 301 to
@@ -206,7 +206,8 @@ func newMergeID() string {
 
 // mergedAttributes unites the business attributes of both CIs: keys only
 // the victim carries are taken, for keys both carry the value of the higher
-// ranked discovery source wins (the survivor on a tie); tags are united.
+// ranked discovery source wins (the survivor on a tie). Tags are no
+// attribute: their assignments move with mergeReferences (ci_tag, WP-281).
 // The reserved namespaces are left to the field values. Instance
 // attributes are no business attributes (MET-14, CI-12, WP-714): those of
 // both CIs (survivorInstance, victimInstance) are left out, so none lands
@@ -231,42 +232,9 @@ func mergedAttributes(survivor, victim *Item, survivorInstance, victimInstance [
 		if IsReservedKey(k) || instance[k] || v == nil {
 			continue
 		}
-		current, ok := out[k]
-		switch {
-		case k == "tags":
-			out[k] = unitedTags(current, v)
-		case !ok || current == nil || current == "" || victimWins:
+		if current, ok := out[k]; !ok || current == nil || current == "" || victimWins {
 			out[k] = v
 		}
-	}
-	return out
-}
-
-func unitedTags(a, b any) any {
-	seen := map[string]bool{}
-	var tags []string
-	for _, list := range []any{a, b} {
-		items, ok := list.([]any)
-		if !ok {
-			continue
-		}
-		for _, t := range items {
-			if s, isString := t.(string); isString && !seen[s] {
-				seen[s] = true
-				tags = append(tags, s)
-			}
-		}
-	}
-	if tags == nil {
-		if a != nil {
-			return a
-		}
-		return b
-	}
-	sort.Strings(tags)
-	out := make([]any, len(tags))
-	for i, t := range tags {
-		out[i] = t
 	}
 	return out
 }
@@ -357,6 +325,14 @@ var mergeReferences = []mergeReference{
 	// The endpoint agent follows its CI, so its next telemetry updates the
 	// survivor instead of creating a new CI (F-083).
 	{key: "agents", table: "endpoint_agent", column: "ci_id"},
+	// The tags of both CIs are united: a tag the survivor has already is
+	// removed from the victim (snapshot), the rest moves (WP-281).
+	{
+		key: "tags", table: "ci_tag", column: "ci_id",
+		dedupe: `DELETE FROM ci_tag v WHERE v.ci_id = $2 AND EXISTS (SELECT 1 FROM ci_tag s
+			WHERE s.ci_id = $1 AND s.tag_id = v.tag_id)
+			RETURNING to_jsonb(v)`,
+	},
 }
 
 // Merge implements Merger in one transaction.
@@ -804,6 +780,7 @@ func (s *Service) Unmerge(ctx context.Context, orgID, victimID string, force boo
 var snapshotTables = map[string]bool{
 	"asset": true, "ci_relationship": true, "network_interface": true, "ci_contact": true,
 	"ci_change": true, "document_link": true, "ci_field_value": true, "ci": true, "endpoint_agent": true,
+	"ci_tag": true,
 }
 
 // snapshotRestoreColumns limits what the unmerge writes back for a table:

@@ -80,6 +80,14 @@ type Item struct {
 	// write paths carry them, GET /cis does not load them (K23). On a
 	// create they are the list to assign ([{template_id, version}]).
 	Templates []citype.CITemplate `json:"templates,omitempty"`
+	// Tags are the keys of the catalog tags assigned to the CI, sorted
+	// (ci_tag, CI-07, CI-08, WP-281); [] without tags. Read-only here: they
+	// are written through the deprecated attributes.tags (E-125).
+	Tags []string `json:"tags"`
+	// LegacyTags is the tag list a write through attributes.tags gives the
+	// CI (ExtractLegacyTags, E-125): the original texts; nil leaves the
+	// assignment, an empty list removes it.
+	LegacyTags *[]string `json:"-"`
 	// ChosenType marks a create through the CI service (POST /cis): the
 	// writer chose the type, which must be an active system type or an
 	// active type of the organization, read in the writing transaction
@@ -92,6 +100,17 @@ type Item struct {
 	// projected _overrides and _observed as read with the CI (REC-12).
 	// Read-only, not part of the API.
 	Overridden map[string]*Observation `json:"-"`
+}
+
+// MarshalJSON writes the item with tags [] when it has none, so every
+// answer, event and export carries the list (WP-281).
+func (i Item) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver: json.Marshal of values and pointers
+	type plain Item
+	p := plain(i)
+	if p.Tags == nil {
+		p.Tags = []string{}
+	}
+	return json.Marshal(p)
 }
 
 // Observation is a value a source reported for a field.
@@ -203,6 +222,11 @@ type UpdateRequest struct {
 	// Templates replaces the template list of the CI (PUT
 	// /cis/{id}/templates, WP-710); nil leaves it. Not a member of PATCH.
 	Templates *[]citype.CITemplate `json:"-"`
+	// LegacyTags replaces the tag assignment of the CI (attributes.tags,
+	// E-125; ExtractLegacyTags): the original texts, an empty list removes
+	// it; nil leaves it. The repositories also take attributes.tags from
+	// Attributes when it is nil (ingest).
+	LegacyTags *[]string `json:"-"`
 	// IfMatch is the version the writer last read (If-Match); nil when the
 	// request carried none, api.IfMatchAny for "*". Checked for manual
 	// changes only.

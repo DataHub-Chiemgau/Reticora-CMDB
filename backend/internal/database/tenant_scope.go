@@ -347,6 +347,36 @@ func WithRequestTenantTx(ctx context.Context, pool *pgxpool.Pool, orgID string, 
 	})
 }
 
+// ErrSnapshotInTx is returned by WithRequestTenantSnapshot when the context
+// already carries a transaction: joining it would not give one snapshot.
+var ErrSnapshotInTx = errors.New("a snapshot transaction cannot join the context transaction")
+
+// WithRequestTenantSnapshot is WithRequestTenantTx for readers that need one
+// consistent state (WP-262): the transaction is REPEATABLE READ and READ
+// ONLY, opened in the same round trip as the five GUCs
+// (beginTenantSnapshotSQL, NFR-03). The repository calls fn makes with its
+// context join it, so they all read the snapshot of its first statement and
+// a write fails. A context that already carries a transaction is refused
+// (ErrSnapshotInTx).
+func WithRequestTenantSnapshot(ctx context.Context, pool *pgxpool.Pool, orgID string, fn func(ctx context.Context) error) error {
+	scope, ok := TenantScopeFromContext(ctx)
+	if !ok {
+		return ErrNoTenantScope
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return fmt.Errorf("%w: %q", ErrTenantMismatch, orgID)
+	}
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	if v, ok := ctx.Value(txKey{}).(pgx.Tx); ok && v != nil {
+		return ErrSnapshotInTx
+	}
+	return runTenantTx(ctx, pool, &scope, beginTenantSnapshotSQL(&scope), func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ContextWithTx(ctx, tx))
+	})
+}
+
 // InTx reports whether ctx carries an open transaction that WithTenant
 // joins.
 func InTx(ctx context.Context) bool {
