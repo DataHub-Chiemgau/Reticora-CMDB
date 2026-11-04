@@ -6,13 +6,34 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
-// sortColumnCasts maps the sortable columns to their PostgreSQL type. Only
-// columns in this map may be interpolated into SQL.
+// sortColumnCasts maps the sortable columns to the PostgreSQL type of their
+// sort expression (sortExpr). Only columns in this map may be interpolated
+// into SQL.
 var sortColumnCasts = map[string]string{
-	"created_at": "timestamptz",
-	"updated_at": "timestamptz",
-	"name":       "text",
-	"status":     "text",
+	"created_at":    "timestamptz",
+	"updated_at":    "timestamptz",
+	"name":          "text",
+	"status":        "text",
+	"owner_user_id": "text",
+	"owner_team_id": "text",
+}
+
+// nullableSort are the sortable columns that may be NULL: the owner
+// (WP-752), sorted by its UUID, not by a display name (no PII join).
+var nullableSort = map[string]bool{"owner_user_id": true, "owner_team_id": true}
+
+// sortExpr returns the SQL expression a list orders and pages by. A
+// nullable column sorts as text with the empty string for NULL and in byte
+// order (COLLATE "C"), exactly like sortValue: the keyset row comparison
+// (api.KeysetClause) is never NULL, so paging with a cursor neither skips
+// nor repeats the CIs without the value, and the cursors of both
+// repositories stay interchangeable. The text of a uuid is lower case, so
+// its byte order is the order of the uuid.
+func sortExpr(column string) string {
+	if nullableSort[column] {
+		return `COALESCE(ci.` + column + `::text, '') COLLATE "C"`
+	}
+	return "ci." + column
 }
 
 // NormalizeSort maps the requested sort onto the supported column/direction
@@ -40,6 +61,10 @@ func sortValue(item *Item, column string) string {
 		return item.Status
 	case "updated_at":
 		return item.UpdatedAt
+	case "owner_user_id":
+		return strings.ToLower(item.OwnerUserID)
+	case "owner_team_id":
+		return strings.ToLower(item.OwnerTeamID)
 	default:
 		return item.CreatedAt
 	}

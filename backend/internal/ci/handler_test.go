@@ -493,3 +493,105 @@ func TestHandler_IncludeAndRestore(t *testing.T) {
 		t.Errorf("restore after the retention: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestHandler_OwnerFilterAndSort covers CI-07 (WP-752) against the memory
+// repository: PATCH sets and ("") clears the owner, filter[owner_user_id]
+// and filter[owner_team_id][in] select by it, and sort=owner_user_id pages
+// with next_cursor over the CIs with and without an owner, each exactly
+// once.
+func TestHandler_OwnerFilterAndSort(t *testing.T) {
+	const (
+		userA = "a0000000-0000-4000-8000-0000000000a1"
+		userB = "a0000000-0000-4000-8000-0000000000b2"
+		team  = "a0000000-0000-4000-8000-0000000000c3"
+	)
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(NewService(repo)).RegisterRoutes(mux)
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		req := tenantCtx(httptest.NewRequest(method, path, bytes.NewBufferString(body)))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	ids := make([]string, 5)
+	for i := range ids {
+		w := call(http.MethodPost, "/api/v1/cis", `{"name":"owner-`+string(rune('a'+i))+`","ci_type_id":"`+testServerType+`"}`)
+		var item Item
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &item) != nil {
+			t.Fatalf("create: %d %s", w.Code, w.Body.String())
+		}
+		ids[i] = item.ID
+	}
+	for i, body := range []string{
+		`{"owner_user_id":"` + userA + `","owner_team_id":"` + team + `"}`,
+		`{"owner_user_id":"` + userB + `"}`,
+		`{"owner_team_id":"` + team + `"}`,
+		`{"owner_user_id":"` + userA + `"}`,
+	} {
+		w := call(http.MethodPatch, "/api/v1/cis/"+ids[i], body)
+		var item Item
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &item) != nil {
+			t.Fatalf("PATCH %s: %d %s", body, w.Code, w.Body.String())
+		}
+		if strings.Contains(body, userA) && item.OwnerUserID != userA {
+			t.Errorf("PATCH %s: owner_user_id %q", body, item.OwnerUserID)
+		}
+	}
+	// "" clears the user of the fourth CI again; it has no owner then.
+	if w := call(http.MethodPatch, "/api/v1/cis/"+ids[3], `{"owner_user_id":""}`); w.Code != http.StatusOK ||
+		strings.Contains(w.Body.String(), `"owner_user_id"`) {
+		t.Fatalf("PATCH clear: %d %s", w.Code, w.Body.String())
+	}
+	list := func(query string) (got []string, next string) {
+		t.Helper()
+		w := call(http.MethodGet, "/api/v1/cis?"+query, "")
+		var resp api.ListResponse[Item]
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
+			t.Fatalf("GET %s: %d %s", query, w.Code, w.Body.String())
+		}
+		for i := range resp.Data {
+			got = append(got, resp.Data[i].ID)
+		}
+		return got, resp.NextCursor
+	}
+	same := func(name string, got, want []string) {
+		t.Helper()
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: %v, want %v", name, got, want)
+		}
+	}
+	got, _ := list("filter[owner_user_id]=" + userA + "&sort=name")
+	same("filter[owner_user_id]", got, []string{ids[0]})
+	got, _ = list("filter[owner_user_id][in]=" + userA + "," + strings.ToUpper(userB) + "&sort=name")
+	same("filter[owner_user_id][in]", got, []string{ids[0], ids[1]})
+	got, _ = list("filter[owner_team_id][in]=" + team + "&sort=name")
+	same("filter[owner_team_id][in]", got, []string{ids[0], ids[2]})
+	if w := call(http.MethodGet, "/api/v1/cis?filter[owner_team_id][like]=a0*", ""); w.Code != http.StatusUnprocessableEntity &&
+		w.Code != http.StatusBadRequest {
+		t.Errorf("like on the owner: %d %s", w.Code, w.Body.String())
+	}
+
+	// Pages of one CI: the CIs without an owner (the empty string) come
+	// first ascending and last descending, ties in id order.
+	for _, c := range []struct {
+		sort string
+		want []string
+	}{
+		{"owner_user_id", []string{ids[2], ids[3], ids[4], ids[0], ids[1]}},
+		{"-owner_user_id", []string{ids[1], ids[0], ids[4], ids[3], ids[2]}},
+		{"owner_team_id", []string{ids[1], ids[3], ids[4], ids[0], ids[2]}},
+	} {
+		var all []string
+		cursor := ""
+		for range 10 {
+			page, next := list("sort=" + c.sort + "&limit=1" + cursor)
+			all = append(all, page...)
+			if next == "" {
+				break
+			}
+			cursor = "&cursor=" + next
+		}
+		same("sort="+c.sort, all, c.want)
+	}
+}
