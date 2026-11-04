@@ -131,8 +131,8 @@ func TestMountFitAndOverlap(t *testing.T) {
 		t.Errorf("overlap: expected 409, got %d: %s", got.Code, got.Body.String())
 	}
 	// non-overlapping on rear face is fine
-	if w := do(mux, "POST", base, `{"ci_id":"ci-3","position_u":1,"height_u":2,"face":"rear"}`, "org-1"); w.Code != http.StatusCreated {
-		t.Errorf("rear face: expected 201, got %d: %s", w.Code, w.Body.String())
+	if rear := do(mux, "POST", base, `{"ci_id":"ci-3","position_u":1,"height_u":2,"face":"rear"}`, "org-1"); rear.Code != http.StatusCreated {
+		t.Errorf("rear face: expected 201, got %d: %s", rear.Code, rear.Body.String())
 	}
 	// both faces overlap front and rear at the same units (RCK-01)
 	if got := do(mux, "POST", base, `{"ci_id":"ci-4","position_u":2,"height_u":1,"face":"both"}`, "org-1"); got.Code != http.StatusConflict {

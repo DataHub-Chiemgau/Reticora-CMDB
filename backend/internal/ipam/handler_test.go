@@ -143,8 +143,8 @@ func TestInterfaceCRUD(t *testing.T) {
 	}
 
 	// missing name
-	if w := do(mux, "POST", "/api/v1/cis/ci-1/interfaces", `{}`, "org-1"); w.Code != http.StatusBadRequest {
-		t.Errorf("missing name: expected 400, got %d", w.Code)
+	if missing := do(mux, "POST", "/api/v1/cis/ci-1/interfaces", `{}`, "org-1"); missing.Code != http.StatusBadRequest {
+		t.Errorf("missing name: expected 400, got %d", missing.Code)
 	}
 	// invalid type
 	if bad := do(mux, "POST", "/api/v1/cis/ci-1/interfaces", `{"name":"x","if_type":"bogus"}`, "org-1"); bad.Code != http.StatusBadRequest {

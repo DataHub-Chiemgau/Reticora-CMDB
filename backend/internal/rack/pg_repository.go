@@ -373,8 +373,8 @@ func (r *PGRepository) CreateMount(ctx context.Context, m *RackMount) error {
 		if err != nil {
 			return err
 		}
-		if err := validateMountFit(height, m.PositionU, m.HeightU, m.Face, existing, ""); err != nil {
-			return err
+		if fitErr := validateMountFit(height, m.PositionU, m.HeightU, m.Face, existing, ""); fitErr != nil {
+			return fitErr
 		}
 		err = tx.QueryRow(ctx,
 			`INSERT INTO rack_mount (organization_id, rack_id, ci_id, position_u, height_u, face)
@@ -460,8 +460,8 @@ func (r *PGRepository) UpdateMount(ctx context.Context, orgID, id string, req Up
 		if err != nil {
 			return err
 		}
-		if err := validateMountFit(rackHeight, pos, height, face, existing, id); err != nil {
-			return err
+		if fitErr := validateMountFit(rackHeight, pos, height, face, existing, id); fitErr != nil {
+			return fitErr
 		}
 		m, err = scanMount(tx.QueryRow(ctx,
 			`UPDATE rack_mount SET rack_id = $6, position_u = $3, height_u = $4, face = $5, updated_at = NOW()

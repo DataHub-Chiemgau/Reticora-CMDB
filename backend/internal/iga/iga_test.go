@@ -56,8 +56,8 @@ func TestSCIMConnectorUsesPagingAndPatch(t *testing.T) {
 	if !sawAuth {
 		t.Fatal("bearer auth missing")
 	}
-	if err := c.DisableAccount(context.Background(), "u1"); err != nil {
-		t.Fatal(err)
+	if disableErr := c.DisableAccount(context.Background(), "u1"); disableErr != nil {
+		t.Fatal(disableErr)
 	}
 	if patchPath != "/Users/u1" {
 		t.Fatalf("patch not called")

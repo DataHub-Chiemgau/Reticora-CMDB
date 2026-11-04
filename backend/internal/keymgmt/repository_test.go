@@ -17,7 +17,7 @@ func TestKeyIssueReturnCycle(t *testing.T) {
 		t.Fatalf("issue: %+v err=%v", updated, err)
 	}
 	// double issue must fail
-	if _, err := repo.Issue(context.Background(), &Assignment{OrganizationID: "org-1", KeyItemID: item.ID, AssignedTo: "u2"}); err == nil {
+	if _, issueErr := repo.Issue(context.Background(), &Assignment{OrganizationID: "org-1", KeyItemID: item.ID, AssignedTo: "u2"}); issueErr == nil {
 		t.Fatal("expected not available error")
 	}
 	// return

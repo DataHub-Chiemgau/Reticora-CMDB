@@ -350,10 +350,8 @@ func (r *MemoryRepository) UpdateMount(_ context.Context, orgID, id string, req 
 			return nil, ruleError(ErrValidation, "invalid face")
 		}
 	}
-	if rk != nil {
-		if err := validateMountFit(rk.HeightUnits, pos, height, face, r.mountsForRack(rackID), id); err != nil {
-			return nil, err
-		}
+	if err := validateMountFit(rk.HeightUnits, pos, height, face, r.mountsForRack(rackID), id); err != nil {
+		return nil, err
 	}
 	m.RackID, m.PositionU, m.HeightU, m.Face = rackID, pos, height, face
 	m.UpdatedAt = time.Now().UTC()

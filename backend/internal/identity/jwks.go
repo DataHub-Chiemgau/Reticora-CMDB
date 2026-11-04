@@ -174,7 +174,7 @@ func (p *OIDCProvider) resolveKey(ctx context.Context, kid, alg string) (any, er
 		return nil, err
 	}
 
-	if key, err := selectKey(keys, kid, alg); err == nil {
+	if key, selectErr := selectKey(keys, kid, alg); selectErr == nil {
 		return key, nil
 	}
 
