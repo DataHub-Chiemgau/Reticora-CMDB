@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000237_ci_owner
+Stand: Migration 000239_ticket_external_ref
 
 ## Prüfung
 
@@ -1253,6 +1253,18 @@ würde. RLS nach TEN-05: `ci_isolation` und `asset_tenant_isolation` tragen
 neben Org-, Client- und Site-Prädikat das Team-Prädikat auf
 `owner_team_id` (USING mit NULL-Ausnahme, WITH CHECK ohne), `ci_scoped_*`
 und `asset_scoped_*` folgen dem neuen WITH CHECK.
+
+Fremdreferenz von Tickets und Kommentaren (TKT-03 [O], CH17, WP-293, E-47,
+Migration 000239): `ticket` und `ticket_comment` erhalten
+`external_provider` und `external_ref` (TEXT, nullable, benannt wie
+`client.external_ref`). Je Tabelle verlangt
+`ticket_external_ref_pair_check` bzw.
+`ticket_comment_external_ref_pair_check` beide Spalten gemeinsam oder
+keine (23514); die Teil-Unique-Indizes `uq_ticket_org_external_ref` bzw.
+`uq_ticket_comment_org_external_ref` (`organization_id`,
+`external_provider`, `external_ref`) WHERE `external_ref` IS NOT NULL
+machen die Referenz je Organisation und Provider eindeutig (23505, ohne
+Ausdruck, K22). RLS und Policies bleiben unverändert.
 
 ## Tabellen, RLS und Policies
 

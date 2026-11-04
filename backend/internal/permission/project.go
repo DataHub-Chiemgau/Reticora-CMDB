@@ -77,11 +77,12 @@ var contractStructural = map[string]bool{
 }
 
 // ticketStructural are the members of the ticket DTO field permissions do
-// not cover (WP-765): identity, number, title and the timestamps; the
-// other members are the core fields of the kind ticket.
+// not cover (WP-765): identity, number, title, the timestamps and the
+// read-only foreign reference (WP-293); the other members are the core
+// fields of the kind ticket.
 var ticketStructural = map[string]bool{
 	"id": true, "organization_id": true, "ticket_number": true, "title": true, "resolved_at": true,
-	"closed_at": true, "created_at": true, "updated_at": true,
+	"closed_at": true, "created_at": true, "updated_at": true, "external_provider": true, "external_ref": true,
 }
 
 // Members of the CI DTO with a projection of their own.

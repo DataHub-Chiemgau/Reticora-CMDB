@@ -1392,3 +1392,4 @@ TEN-05;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/owner_integration_test.go;WP-280
 TLC-04;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
 CI-07;[P2];B;backend/internal/ci/owner_query_integration_test.go;WP-752
+TKT-03;[O];B;backend/internal/ticket/provider_test.go;WP-293

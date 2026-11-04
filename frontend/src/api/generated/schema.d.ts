@@ -12873,6 +12873,10 @@ export interface components {
       closed_at?: string;
       /** @description Sorted keys of the catalog tags of the ticket (ticket_tag, E-127); [] without tags. */
       tags?: string[];
+      /** @description Provider of the foreign reference (TKT-03, WP-293), set together with external_ref by a ticket provider; absent without a reference. No request sets it. */
+      readonly external_provider?: string;
+      /** @description Id of the ticket in the provider (TKT-03, WP-293); unique per organization and provider. */
+      readonly external_ref?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -12950,6 +12954,10 @@ export interface components {
       author_type: 'user' | 'system';
       content: string;
       is_internal: boolean;
+      /** @description Provider of the foreign reference (TKT-03, WP-293), set together with external_ref by a ticket provider; absent without a reference. */
+      readonly external_provider?: string;
+      /** @description Id of the comment in the provider (TKT-03, WP-293); unique per organization and provider. */
+      readonly external_ref?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
