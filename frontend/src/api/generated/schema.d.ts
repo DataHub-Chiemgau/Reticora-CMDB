@@ -2845,6 +2845,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/review-items/{id}/ticket': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open a ticket for a review item
+     * @description Opens a ticket for an open review item through the ticket service (TKT-01, WP-291); the item stays open. Requires ticket:write (route) and review:resolve (403 otherwise), the module ticketing (404 while it is off) and the feature ticketing_essential (403 feature-not-entitled). The ticket is linked to the item (ticket_link review_item), to every candidate CI (ci) and, for serial_mismatch, to the asset of payload.asset_id (asset, also related_asset_id). The first candidate CI (else payload.ci_id or payload.matched_ci_id) is related_ci_id, so the ticket takes its client and site; an item without candidates opens an organization-wide ticket, which a client- or site-restricted caller cannot create (403), and a team-restricted caller must name a team_id of its scope (403 otherwise). Title "<kind>: <payload.name | payload.cidr | CI name>", the description names object_key and the payload fields without raw_data and fingerprint, category task, status as POST /tickets. The priority follows the type (high: ambiguous_identity, probable_duplicate, resurrected_device, duplicate_ip, serial_mismatch, unlicensed_ci; medium: conflicting_values, override_conflict, unclassified_device, unknown_relationship; low: scope_suggested); priority of the body takes precedence. At most one ticket that is not closed is linked to an item: a second one is 409 naming the id and ticket_number of the open ticket (a ticket the caller does not see does not count and is not named). One audit entry ticket.create names the ticket and the review item. The endpoint is idempotent per item, so the inbox can open tickets for many items with one request each.
+     */
+    post: operations['createReviewItemTicket'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/discovery/review-items': {
     parameters: {
       query?: never;
@@ -14767,10 +14790,22 @@ export interface components {
       action?: 'merge' | 'new' | 'dismiss' | 'accept';
       /** @description Open longer than 14 days (REC-08). */
       escalated?: boolean;
+      /** @description The tickets linked to the item that the caller sees (WP-291); absent without ticket:read, without the module ticketing or without the feature ticketing_essential. */
+      tickets?: components['schemas']['ReviewItemTicketRef'][];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    ReviewItemTicketRef: {
+      id: string;
+      ticket_number: number;
+      status: components['schemas']['TicketStatus'];
+    };
+    ReviewItemTicketRequest: {
+      priority?: components['schemas']['TicketPriority'];
+      assignee_id?: string;
+      team_id?: string;
     };
     ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ReviewItem'][];
@@ -22693,6 +22728,56 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       /** @description The action does not resolve items of this type, new cannot tell the client of the device, new has no CI type (field ci_type_id), or the effect refuses a value of the item (the field it names, e.g. collector_id or target of a suggested scope) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createReviewItemTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['ReviewItemTicketRequest'];
+      };
+    };
+    responses: {
+      /** @description Ticket created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Ticket'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      /** @description The item is no longer open, or an open ticket is already linked to it (the detail names its id and ticket_number) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description priority is no ticket priority, or assignee_id or team_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;

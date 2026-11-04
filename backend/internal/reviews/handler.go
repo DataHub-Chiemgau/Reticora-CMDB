@@ -2,6 +2,7 @@ package reviews
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -34,6 +36,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/review-items", h.List)
 	r.Get("/api/v1/review-items/{id}", h.Get)
 	r.Post("/api/v1/review-items/{id}/resolve", h.Resolve)
+	// Tickets from items (WP-291); no alias under /discovery.
+	r.Post("/api/v1/review-items/{id}/ticket", h.Ticket)
 	r.Get("/api/v1/discovery/review-items", deprecated("/api/v1/review-items", h.List))
 	r.Post("/api/v1/discovery/review-items/{id}/resolve", deprecated("/api/v1/review-items/{id}/resolve", h.Resolve))
 }
@@ -81,6 +85,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	page := api.ParsePagination(r)
 	items, total, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
+	if err == nil {
+		// One query for the tickets of the page (WP-291).
+		err = h.svc.attachTickets(r.Context(), t.OrganizationID, items)
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -102,7 +110,44 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, item)
+	one := []Item{*item}
+	if err = h.svc.attachTickets(r.Context(), t.OrganizationID, one); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, &one[0])
+}
+
+// Ticket handles POST /api/v1/review-items/{id}/ticket (WP-291): the route
+// requires ticket:write, the handler also review:resolve (403). The body
+// is optional.
+func (h *Handler) Ticket(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// An item outside the caller's scope is not found before the
+	// permission is checked (404 before 403, like mayControl of jobs).
+	if _, err := h.svc.Get(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+		writeError(w, err)
+		return
+	}
+	if p, ok := identity.PrincipalFromContext(r.Context()); !ok || !p.Has(identity.PermReviewResolve) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "opening a ticket from a review item requires "+string(identity.PermReviewResolve))
+		return
+	}
+	var body TicketRequest
+	if err := api.ReadJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	created, err := h.svc.CreateTicket(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &body)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, created)
 }
 
 // Resolve handles POST /api/v1/review-items/{id}/resolve (review:resolve).

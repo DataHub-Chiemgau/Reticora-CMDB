@@ -67,12 +67,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
@@ -657,11 +659,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// queue of discovery, deduplicated with its items (REC-12). Both modules
 	// stay switched off in G1 (E-03); the protection holds once they are on.
 	// The queue is built here, after the last option of the handler.
-	conflictReviews := discoveryHandler.ReviewService()
-	// One executor runs the runs of the workflow API and the run an IGA
-	// access request starts (WFL-04).
-	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	// Tickets and comments are created through one service (WP-766).
 	// SLAs are ticketing_standard (E-39, WP-769): the hooks apply, choose
 	// again and reset them only with the feature.
@@ -670,6 +667,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		slaHooks.Features = opts.Entitlements
 	}
 	tickets := ticket.NewService(repos.Ticket, slaHooks)
+	// Review items open tickets only while the module ticketing is on
+	// (WP-291); before the queue is built.
+	if opts.Modules.Enabled("ticketing") {
+		discoveryHandler.WithReviewTickets(reviewTickets{svc: tickets, cis: repos.CI, features: opts.Entitlements})
+	}
+	conflictReviews := discoveryHandler.ReviewService()
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04).
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -795,6 +802,97 @@ func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
 		return evaluating.AlertStore()
 	}
 	return nil
+}
+
+// reviewTickets is the ticket side of the review queue (TKT-01, WP-291)
+// over the ticket service: package reviews does not import package ticket.
+type reviewTickets struct {
+	svc *ticket.Service
+	cis ci.Repository
+	// features gates the tickets of an item on ticketing_essential; nil
+	// checks none.
+	features *entitlement.Service
+}
+
+// CreateTicket creates the ticket with its links in one transaction,
+// exclusive for the item (at most one ticket that is not closed) and with
+// the item as origin of the audit entry ticket.create. The fields the body
+// sets must be editable (field permissions, WP-765); the answer is the
+// ticket as the caller may read it.
+func (a reviewTickets) CreateTicket(ctx context.Context, nt *reviews.NewTicket) (any, error) {
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if writeErr := permission.CheckWrite(policy, permission.KindTicket, "", permission.ObjectRef{TeamID: nt.TeamID},
+		nt.RequestFields); writeErr != nil {
+		return nil, writeErr
+	}
+	t := &ticket.Ticket{
+		OrganizationID: nt.OrganizationID, Title: nt.Title, Description: nt.Description,
+		Status: ticket.StatusNew, Priority: nt.Priority, Category: nt.Category,
+		ReporterID: tenant.FromContext(ctx).UserID, AssigneeID: nt.AssigneeID, TeamID: nt.TeamID,
+		RelatedCIID: nt.RelatedCIID, RelatedAssetID: nt.RelatedAssetID,
+	}
+	links := make([]ticket.Link, 0, len(nt.CIIDs)+1)
+	for _, id := range nt.CIIDs {
+		links = append(links, ticket.Link{EntityType: ticket.LinkCI, EntityID: id})
+	}
+	if nt.AssetID != "" {
+		links = append(links, ticket.Link{EntityType: ticket.LinkAsset, EntityID: nt.AssetID})
+	}
+	item := &ticket.Target{EntityType: ticket.LinkReviewItem, EntityID: nt.ReviewItemID}
+	err = a.svc.Create(ctx, t, links, ticket.CreateOptions{Exclusive: item, Origin: item})
+	var open *ticket.ErrOpenTicketExists
+	switch {
+	case errors.As(err, &open):
+		return nil, reviews.TicketConflict(open.ID, open.TicketNumber)
+	case errors.Is(err, ticket.ErrNotFound):
+		return nil, reviews.ErrNotFound
+	case err != nil:
+		return nil, err
+	}
+	return permission.ProjectValue(policy, permission.KindTicket, "",
+		permission.ObjectRef{ID: t.ID, ClientID: t.ClientID, SiteID: t.SiteID, TeamID: t.TeamID}, t)
+}
+
+// LinkedTickets names the tickets of the items the caller sees, with one
+// query; none without ticket:read or without ticketing_essential.
+func (a reviewTickets) LinkedTickets(ctx context.Context, orgID string, itemIDs []string) (map[string][]reviews.TicketRef, error) {
+	if p, ok := identity.PrincipalFromContext(ctx); !ok || !p.Has(identity.PermTicketRead) {
+		return nil, nil
+	}
+	if a.features != nil && !a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential) {
+		return nil, nil
+	}
+	linked, err := a.svc.LinkedTickets(ctx, orgID, ticket.LinkReviewItem, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]reviews.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]reviews.TicketRef, len(list))
+		for i := range list {
+			refs[i] = reviews.TicketRef{ID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// CIName returns the name of a CI the caller sees, "" for none.
+func (a reviewTickets) CIName(ctx context.Context, orgID, ciID string) (string, error) {
+	item, err := a.cis.GetByID(ctx, orgID, ciID)
+	switch {
+	case errors.Is(err, ci.ErrNotFound) || errors.Is(err, api.ErrNotFound):
+		// A CI that is gone leaves the title without its name.
+		return "", nil
+	case err != nil:
+		return "", err
+	case item == nil:
+		return "", nil
+	}
+	return item.Name, nil
 }
 
 // accessRequestRuns is the executor that starts the workflow run of an IGA

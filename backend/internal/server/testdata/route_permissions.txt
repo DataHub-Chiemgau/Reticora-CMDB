@@ -547,6 +547,7 @@ POST /api/v1/relationships relationship:write
 POST /api/v1/reservations reservation:write
 POST /api/v1/reservations/{id}/release reservation:write
 POST /api/v1/review-items/{id}/resolve review:resolve
+POST /api/v1/review-items/{id}/ticket ticket:write
 POST /api/v1/role-assignments role:manage
 POST /api/v1/roles role:manage
 POST /api/v1/roles/assign role:manage

@@ -326,6 +326,9 @@ var routeRules = []routeRule{
 	// Resolving a review item is its own right (RBA-01, RBA-02).
 	{http.MethodPost, "discovery/review-items/*/resolve", identity.PermReviewResolve},
 	{http.MethodPost, "review-items/*/resolve", identity.PermReviewResolve},
+	// Opening a ticket from a review item is writing a ticket; the handler
+	// also requires review:resolve (WP-291).
+	{http.MethodPost, "review-items/*/ticket", identity.PermTicketWrite},
 	// Reading jobs (RBA-01); starting an export stays export:run.
 	{http.MethodGet, "export/jobs", identity.PermJobRead},
 	{http.MethodGet, "export/jobs/*", identity.PermJobRead},

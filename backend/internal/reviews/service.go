@@ -32,6 +32,8 @@ type Service struct {
 	notifier Notifier
 	// jobs records every merge resolution as a job (JOB-04).
 	jobs jobs.Tracker
+	// tickets opens the tickets of items and names them (WP-291).
+	tickets TicketCreator
 }
 
 // MergeJobKind is the job kind of a review merge (JOB-04).

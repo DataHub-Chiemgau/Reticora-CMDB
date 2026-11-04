@@ -118,6 +118,10 @@ type Item struct {
 	Escalated bool   `json:"escalated"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// Tickets are the tickets linked to the item that the caller sees
+	// (WP-291); absent without ticket:read, without the module ticketing or
+	// without the entitlement ticketing_essential.
+	Tickets []TicketRef `json:"tickets,omitempty"`
 	// Deduplicated is set by CreateReviewItem when an open item of the same
 	// object and type already existed; Item then describes that item.
 	Deduplicated bool `json:"-"`

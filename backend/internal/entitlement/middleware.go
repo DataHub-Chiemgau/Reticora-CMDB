@@ -116,7 +116,7 @@ var featureRules = []featureRule{
 	gate("/api/v1/business-calendars", FeatureTicketingStandard),
 	// Reading the review queue stays core; opening a ticket from an item
 	// is ticketing (WP-291).
-	{method: http.MethodPost, prefix: "/api/v1/review-items", suffix: "/ticket", features: []string{FeatureTicketingEssential}},
+	{prefix: "/api/v1/review-items", suffix: "/ticket", features: []string{FeatureTicketingEssential}},
 
 	gate("/api/v1/maintenance-windows", FeatureMonitoring),
 	gate("/api/v1/keys", FeatureCompliance),

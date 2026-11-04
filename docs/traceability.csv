@@ -1374,3 +1374,4 @@ SRC-02;[P2];C;backend/internal/search/hits_integration_test.go;WP-786
 AST-04;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-03;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-01;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/reviews/ticket_integration_test.go;WP-291

@@ -71,6 +71,9 @@ func (h *Handler) ReviewService() *reviews.Service {
 		if h.reviewJobs != nil {
 			svc.WithJobs(h.reviewJobs)
 		}
+		if h.reviewTickets != nil {
+			svc.WithTickets(h.reviewTickets)
+		}
 		h.reviews = svc
 	})
 	return h.reviews
@@ -80,6 +83,14 @@ func (h *Handler) ReviewService() *reviews.Service {
 // (JOB-04).
 func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 	h.reviewJobs = tracker
+	return h
+}
+
+// WithReviewTickets opens tickets from review items and names them on the
+// items (TKT-01, WP-291); it must be attached before ReviewService is
+// first called.
+func (h *Handler) WithReviewTickets(tickets reviews.TicketCreator) *Handler {
+	h.reviewTickets = tickets
 	return h
 }
 

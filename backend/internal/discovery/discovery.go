@@ -514,6 +514,9 @@ type Handler struct {
 	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// reviewTickets opens tickets from review items (WP-291); nil while
+	// the module ticketing is off.
+	reviewTickets reviews.TicketCreator
 	// merger carries out the resolution merge of probable_duplicate items
 	// as the CI-12 merge (WithMerger).
 	merger CIMerger
