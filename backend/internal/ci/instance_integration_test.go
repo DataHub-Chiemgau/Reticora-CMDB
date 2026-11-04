@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -42,6 +43,9 @@ func TestInstanceAttributeValuesOnPostgreSQL(t *testing.T) {
 	f := scopetest.Seed(t, "83")
 	bg := context.Background()
 	base := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	// The policy source of a request for the direct service calls: the
+	// action grants resolve the policy of every write (WP-728).
+	base = permission.WithPolicySource(base, phase1Resolver{})
 	principal := func(perms ...identity.Permission) context.Context {
 		return identity.WithPrincipal(base, identity.Principal{Subject: f.User, OrganizationID: f.OrgA,
 			Type: identity.PrincipalTypeUser, Permissions: perms})

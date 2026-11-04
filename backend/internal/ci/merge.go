@@ -14,11 +14,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -760,10 +763,27 @@ type UnmergeResult struct {
 // merge stays (ENT-03, F-399). The admission and the unmerge share one
 // transaction (activating), so the max_cis lock holds until the victim is
 // active again (WP-835, SR-09).
+//
+// Both routes of an unmerge end here (POST /cis/{id}/unmerge and the revert
+// of a ci.merge job): ci:delete is checked against the action grants on the
+// type and scope of victim and survivor (RBA-07, WP-728) before any
+// refusal of the merge state (E-80, F-416), also with force: a principal
+// the grants refuse gets 403, never 409.
 func (s *Service) Unmerge(ctx context.Context, orgID, victimID string, force bool) (*UnmergeResult, error) {
 	unmerger, ok := s.repo.(Unmerger)
 	if !ok {
 		return nil, ErrMergeUnsupported
+	}
+	if err := permission.CheckActionOn(ctx, permission.KindCI, identity.PermCIDelete,
+		func(ctx context.Context) ([]permission.ActionTarget, error) {
+			reader, ok := s.repo.(actionRefReader)
+			if !ok {
+				return nil, permission.ErrNoActionTarget
+			}
+			nodes, err := reader.UnmergeActionRefs(ctx, orgID, victimID)
+			return nodeTargets(nodes), err
+		}); err != nil {
+		return nil, err
 	}
 	var result *UnmergeResult
 	err := s.activating(ctx, orgID, func(ctx context.Context) error {
@@ -1076,4 +1096,60 @@ func (r *PGRepository) MergeVictim(ctx context.Context, orgID, mergeID string) (
 		return "", fmt.Errorf("not found")
 	}
 	return victim, err
+}
+
+// actionRefColumns are the columns of a Node for the action grants (type
+// and scope); name, status and management IP stay empty.
+const actionRefColumns = `c.id::text, c.ci_type_id::text, COALESCE(c.client_id::text, ''), COALESCE(c.site_id::text, '')`
+
+// ActionRefs implements actionRefReader: the type and scope of the CIs
+// among ids the tenant scope shows, deleted and merged ones included
+// (restore, WP-728).
+func (r *PGRepository) ActionRefs(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	valid := make([]string, 0, len(ids))
+	for _, id := range ids {
+		// An id that is no UUID names no CI (the operation answers 404).
+		if api.IsUUID(id) {
+			valid = append(valid, id)
+		}
+	}
+	if len(valid) == 0 {
+		return nil, nil
+	}
+	return r.actionRefs(ctx, orgID, "SELECT "+actionRefColumns+
+		" FROM ci c WHERE c.organization_id = $1 AND c.id = ANY($2::uuid[])", orgID, valid)
+}
+
+// UnmergeActionRefs implements actionRefReader: victim and survivor of the
+// open merge of victimID (WP-728).
+func (r *PGRepository) UnmergeActionRefs(ctx context.Context, orgID, victimID string) ([]Node, error) {
+	if !api.IsUUID(victimID) {
+		return nil, nil
+	}
+	return r.actionRefs(ctx, orgID, "SELECT "+actionRefColumns+` FROM ci c
+		JOIN ci_merge m ON m.organization_id = c.organization_id AND (c.id = m.victim_id OR c.id = m.survivor_id)
+		WHERE m.organization_id = $1 AND m.victim_id = $2::uuid AND m.unmerged_at IS NULL`, orgID, victimID)
+}
+
+func (r *PGRepository) actionRefs(ctx context.Context, orgID, query string, args ...any) ([]Node, error) {
+	var nodes []Node
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("read ci action refs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var n Node
+			if err = rows.Scan(&n.ID, &n.CITypeID, &n.ClientID, &n.SiteID); err != nil {
+				return fmt.Errorf("scan ci action ref: %w", err)
+			}
+			nodes = append(nodes, n)
+		}
+		return rows.Err()
+	})
+	return nodes, err
 }

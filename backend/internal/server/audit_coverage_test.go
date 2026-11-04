@@ -634,6 +634,13 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	}
 	handler := middleware.RequestID(middleware.TenantMiddleware(mux))
 	user := f.AppUser(t, f.OrgA, "audit-a5-admin")
+	// The administrator holds org_admin: once a route created a field
+	// permission row, actions resolve through the role assignments
+	// (WP-728).
+	if _, err = f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, user); err != nil {
+		t.Fatal(err)
+	}
 	var citype string
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&citype); err != nil {
 		t.Fatal(err)

@@ -560,6 +560,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// queue when there is one (jobkinds.go, TEC-14).
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
+			// A queue bulk job checks its ids with the policy of its creator,
+			// reloaded from the job row (WP-728); without the user status it
+			// fails (fail-closed).
+			if users, ok := repos.User.(permission.CreatorStatus); ok {
+				opts.CIService.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
+			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
 			documentScanner)
@@ -719,7 +725,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
-			repos.LifecycleResolver),
+			repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
@@ -926,6 +932,18 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 
 // The production route auditor reads route snapshots (WP-505).
 var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
+
+// lifecycleCIScope reads the type and scope of a CI for the action grant
+// of its lifecycle transition (WP-728).
+func lifecycleCIScope(repo ci.Repository) lifecycle.CIScopeFunc {
+	return func(ctx context.Context, orgID, ciID string) (string, permission.ObjectRef, error) {
+		item, err := repo.GetByID(ctx, orgID, ciID)
+		if err != nil {
+			return "", permission.ObjectRef{}, err
+		}
+		return item.CITypeID, permission.ObjectRef{ID: item.ID, ClientID: item.ClientID, SiteID: item.SiteID}, nil
+	}
+}
 
 // overrideCILookup reads the type, scope and instance attributes of a CI
 // for the field permissions of its overrides (RBA-07, WP-265): the

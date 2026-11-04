@@ -40,13 +40,20 @@ const ProblemTypeForbidden = "urn:reticora:problem:forbidden"
 
 // FieldForbiddenError refuses a request on fields the principal may not
 // read or write (field permissions, RBA-07): 403 with the DTO paths of the
-// fields (hostname, attributes.cost_center), never their values.
+// fields (hostname, attributes.cost_center), never their values. With
+// Action it refuses the action itself (action grant none or an object
+// grant none, WP-728): the permission key of the route, Fields empty.
 type FieldForbiddenError struct {
 	Fields []string
+	Action string
 }
 
-// validation: a fixed rule text with the DTO paths of the refused fields.
+// validation: a fixed rule text with the DTO paths of the refused fields
+// or the refused action.
 func (e *FieldForbiddenError) Error() string {
+	if e.Action != "" {
+		return "action permissions do not allow " + e.Action + " on this object"
+	}
 	return "field permissions do not allow this request on: " + strings.Join(e.Fields, ", ")
 }
 
@@ -54,6 +61,8 @@ func (e *FieldForbiddenError) Error() string {
 type FieldForbiddenProblem struct {
 	ProblemDetail
 	Fields []string `json:"fields"`
+	// Action is the refused action (WP-728); omitted for fields.
+	Action string `json:"action,omitempty"`
 }
 
 // FieldProblem is an RFC 7807 problem that names the request field.
@@ -92,6 +101,7 @@ func WriteFieldError(w http.ResponseWriter, err error) bool {
 			ProblemDetail: ProblemDetail{Type: ProblemTypeForbidden, Title: "Forbidden",
 				Status: http.StatusForbidden, Detail: ff.Error()},
 			Fields: fields,
+			Action: ff.Action,
 		})
 		return true
 	}

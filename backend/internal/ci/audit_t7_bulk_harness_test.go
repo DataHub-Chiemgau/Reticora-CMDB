@@ -63,7 +63,9 @@ func newAuditT7BulkEnvOn(t *testing.T, tag, natsURL string) *auditT7BulkEnv {
 	// As registered by the server (server/jobkinds.go).
 	kind := jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Cancellable: true}
 	jobSvc.Register(kind)
-	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()))
+	// A queue job resolves the policy of its creator (WP-728); here the
+	// policy without grants.
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithCreatorPolicy(phase1CreatorPolicy)
 	if natsURL == "" {
 		svc.WithBulkJobs(jobSvc)
 	} else {

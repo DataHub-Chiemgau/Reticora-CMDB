@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
@@ -284,6 +285,9 @@ type Service struct {
 	// bulkQueue they run on the job queue (TEC-14).
 	bulkJobs  BulkJobs
 	bulkQueue BulkQueue
+	// creatorPolicy resolves the policy of the creator of a queue bulk
+	// job (WP-728).
+	creatorPolicy CreatorPolicy
 	// restoreRetention is the restore window (CI-05); 0 is RestoreRetention.
 	restoreRetention time.Duration
 }
@@ -493,6 +497,16 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 // The type is the writer's choice (ChosenType): an ID that is no UUID is
 // refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
+	// The action grant of the route (ci:write unless the context names
+	// another) on the type and client of the new CI, before the quota, the
+	// field permissions and the validation (RBA-07, WP-728).
+	target := permission.ActionTarget{TypeID: item.CITypeID, Ref: permission.ObjectRef{ClientID: item.ClientID, SiteID: item.SiteID}}
+	if err := permission.CheckActionOn(ctx, permission.KindCI, permission.ActionFrom(ctx),
+		func(context.Context) ([]permission.ActionTarget, error) {
+			return []permission.ActionTarget{target}, nil
+		}); err != nil {
+		return err
+	}
 	// The definitions the validation resolves are those the repository
 	// computes with (WP-717).
 	ctx = WithFieldsMemo(ctx)
@@ -609,11 +623,29 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	if legacy != nil {
 		req.Attributes, req.LegacyTags = rest, legacy
 	}
-	// Field permissions before the validation and the If-Match (403 before
-	// 422, 409 and 412, RBA-07, WP-265).
-	checked, checkErr := s.checkUpdateFields(ctx, orgID, id, &req)
+	// The action grant of the route (ci:write unless the context names
+	// another, WP-728), then the field permissions, both before the
+	// validation and the If-Match (403 before 422, 409 and 412, RBA-07,
+	// WP-265). The CI is read once for both, and only when the policy
+	// needs it.
+	var read *Item
+	if err := permission.CheckActionOn(ctx, permission.KindCI, permission.ActionFrom(ctx),
+		func(ctx context.Context) ([]permission.ActionTarget, error) {
+			item, err := s.repo.GetByID(ctx, orgID, id)
+			if err != nil {
+				return nil, err
+			}
+			read = item
+			return []permission.ActionTarget{ciTarget(item)}, nil
+		}); err != nil {
+		return nil, err
+	}
+	checked, checkErr := s.checkUpdateFields(ctx, orgID, id, &req, read)
 	if checkErr != nil {
 		return nil, checkErr
+	}
+	if checked == nil {
+		checked = read
 	}
 	// null clears a nullable field; on a required one it is refused (CI-04).
 	if err := req.nullViolations(); err != nil {
@@ -775,6 +807,55 @@ func (s *Service) Restore(ctx context.Context, orgID, id string) (*Item, error) 
 	return restored, nil
 }
 
+// actionRefReader reads the type and scope of CIs for their action grants
+// (WP-728), also of deleted and merged ones (restore, unmerge): one
+// statement under the tenant scope of ctx; a CI it does not see is
+// missing from the result.
+type actionRefReader interface {
+	ActionRefs(ctx context.Context, orgID string, ids []string) ([]Node, error)
+	// UnmergeActionRefs reads the victim and the survivor of the open
+	// merge of victimID; none without one.
+	UnmergeActionRefs(ctx context.Context, orgID, victimID string) ([]Node, error)
+}
+
+// ciTarget is the CI as the object of an action grant.
+func ciTarget(item *Item) permission.ActionTarget {
+	return permission.ActionTarget{TypeID: item.CITypeID, Ref: ciRef(item)}
+}
+
+func nodeTargets(nodes []Node) []permission.ActionTarget {
+	out := make([]permission.ActionTarget, len(nodes))
+	for i := range nodes {
+		out[i] = permission.ActionTarget{TypeID: nodes[i].CITypeID,
+			Ref: permission.ObjectRef{ID: nodes[i].ID, ClientID: nodes[i].ClientID, SiteID: nodes[i].SiteID}}
+	}
+	return out
+}
+
+// CheckAction checks the action grant of a route on CIs (RBA-07, WP-728):
+// a *api.FieldForbiddenError with the action when the policy of ctx
+// refuses it on the type or scope of one of them. The CIs are read only
+// when the policy needs them, deleted and merged ones included (restore);
+// a repository without that read (memory) reads the visible ones and
+// answers a missing one ErrNotFound (fail-closed).
+func (s *Service) CheckAction(ctx context.Context, orgID string, action identity.Permission, ids ...string) error {
+	return permission.CheckActionOn(ctx, permission.KindCI, action, func(ctx context.Context) ([]permission.ActionTarget, error) {
+		if reader, ok := s.repo.(actionRefReader); ok {
+			nodes, err := reader.ActionRefs(ctx, orgID, ids)
+			return nodeTargets(nodes), err
+		}
+		out := make([]permission.ActionTarget, 0, len(ids))
+		for _, id := range ids {
+			item, err := s.repo.GetByID(ctx, orgID, id)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ciTarget(item))
+		}
+		return out, nil
+	})
+}
+
 // Delete removes a CI after loading its prior state.
 func (s *Service) Delete(ctx context.Context, orgID, id string) (*Item, error) {
 	item, err := s.repo.GetByID(ctx, orgID, id)
@@ -845,7 +926,7 @@ func updatePaths(req *UpdateRequest) map[string]any {
 // The instance attributes of the CI are checked as _instance.<key>. It
 // returns the CI it read (nil when the policy does not restrict CIs or the
 // update names no projected field).
-func (s *Service) checkUpdateFields(ctx context.Context, orgID, id string, req *UpdateRequest) (*Item, error) {
+func (s *Service) checkUpdateFields(ctx context.Context, orgID, id string, req *UpdateRequest, read *Item) (*Item, error) {
 	sent := updatePaths(req)
 	if len(sent) == 0 {
 		return nil, nil
@@ -857,9 +938,11 @@ func (s *Service) checkUpdateFields(ctx context.Context, orgID, id string, req *
 	if !policy.Restricted(permission.KindCI) {
 		return nil, nil
 	}
-	before, err := s.repo.GetByID(ctx, orgID, id)
-	if err != nil {
-		return nil, err
+	before := read
+	if before == nil {
+		if before, err = s.repo.GetByID(ctx, orgID, id); err != nil {
+			return nil, err
+		}
 	}
 	instance := slices.Clone(before.InstanceKeys)
 	if len(req.Attributes) > 0 {

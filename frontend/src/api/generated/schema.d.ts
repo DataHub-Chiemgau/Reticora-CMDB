@@ -10809,7 +10809,7 @@ export interface components {
         id: string;
         /** @enum {string} */
         result: 'ok' | 'error' | 'skipped';
-        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. */
+        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. 403 when the action grants (ci:write on the type and scope of the CI, WP-728) or the field permissions refuse the id; the other ids go on. */
         code: number;
         error?: string;
       }[];
@@ -13763,9 +13763,11 @@ export interface components {
       /** Format: int64 */
       current_version: number;
     };
-    /** @description A request refused by the field permissions (RBA-07, WP-265): type urn:reticora:problem:forbidden, status 403. `fields` names the DTO paths of the refused fields (hostname, attributes.cost_center), never their values. The route permission answers 403 with type https://reticora.io/problems/403 instead. */
+    /** @description A request refused by the field permissions (RBA-07, WP-265): type urn:reticora:problem:forbidden, status 403. `fields` names the DTO paths of the refused fields (hostname, attributes.cost_center), never their values. A refusal of the action grants (WP-728) names the refused action in `action` (the permission key of the route, e.g. ci:delete) and leaves `fields` empty. The route permission answers 403 with type https://reticora.io/problems/403 instead. */
     FieldForbiddenProblem: components['schemas']['ProblemDetail'] & {
       fields: string[];
+      /** @description The action the action grants refuse on the object (WP-728): an action grant none of its CI type or an object grant none. */
+      action?: string;
     };
     /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
     UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
@@ -16926,6 +16928,16 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission ci:delete (https://reticora.io/problems/403, ProblemDetail) or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`): an action grant none of the CI type or an object grant none of the CI. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -17030,7 +17042,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03, the CI stays deleted), or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the deleted CI. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
       409: {
@@ -17085,7 +17106,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): the CI carries values in fields the caller may not read in its current type. */
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): the CI carries values in fields the caller may not read in its current type; or the action grants (WP-728, `action` ci:write, empty `fields`) on its current type, checked before the fields. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -17146,7 +17167,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): survivor or victim carry values in fields the caller may not read in their type. */
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): survivor or victim carry values in fields the caller may not read in their type; or the action grants (WP-728, `action` ci:delete, empty `fields`) on survivor or victim, checked before the fields. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -17203,7 +17224,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03, the merge stays), or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor. The action grants are checked before the state of the merge, also with force=true: a caller they refuse gets 403, never 409. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), one of the CIs is locked by another write, or another active CI holds a value of a unique attribute of the merged CI or of the survivor in the snapshot meanwhile (MET-15: urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; force does not override it, the merge stays). */
       409: {
@@ -18499,7 +18529,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind, a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
@@ -34364,6 +34403,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden: the route permission lifecycle:transition (https://reticora.io/problems/403, ProblemDetail) or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` lifecycle:transition and empty `fields`) on the type and scope of the CI, checked before the model and the guards. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
       };
       404: components['responses']['NotFound'];
       /** @description from_state is not the current state; current_state names it. */

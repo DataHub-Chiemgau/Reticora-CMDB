@@ -303,12 +303,41 @@ func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	writeOverride(w, fv)
 }
 
-// allowWrite answers 403 with the field when the principal may not write
-// the field of the path and reports whether the override may go on.
+// allowWrite answers 403 when the action grants refuse override:write on
+// the CI (with the action, WP-728) or the principal may not write the field
+// of the path (with the field, WP-265) and reports whether the override
+// may go on.
 func (h *Handler) allowWrite(w http.ResponseWriter, r *http.Request, orgID string) bool {
 	ciID := chi.URLParam(r, "id")
 	access, ok := h.access(w, r, orgID, ciID)
 	if !ok {
+		return false
+	}
+	actionErr := permission.CheckActionOn(r.Context(), permission.KindCI, identity.PermOverrideWrite,
+		func(ctx context.Context) ([]permission.ActionTarget, error) {
+			scope := access.scope
+			if scope == nil {
+				if h.cis == nil {
+					return nil, permission.ErrNoActionTarget
+				}
+				read, readErr := h.cis.FieldScope(ctx, orgID, ciID)
+				if readErr != nil {
+					return nil, readErr
+				}
+				scope = read
+			}
+			return []permission.ActionTarget{{TypeID: scope.TypeID,
+				Ref: permission.ObjectRef{ID: ciID, ClientID: scope.ClientID, SiteID: scope.SiteID}}}, nil
+		})
+	switch {
+	case actionErr == nil:
+	case api.WriteFieldError(w, actionErr):
+		return false
+	case errors.Is(actionErr, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return false
+	default:
+		api.WriteRepoError(w, actionErr)
 		return false
 	}
 	if err := access.checkWrite(ciID, chi.URLParam(r, "name")); err != nil {

@@ -19,8 +19,17 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
+
+// phase1Resolver resolves every principal to the policy without field
+// permissions (an organization without grants).
+type phase1Resolver struct{}
+
+func (phase1Resolver) Resolve(_ context.Context, p identity.Principal) (*permission.FieldPolicy, error) { //nolint:gocritic // interface of permission.PolicyResolver
+	return permission.UnrestrictedPolicy(p.Permissions), nil
+}
 
 // TestJobRevertAgainstPostgres covers the revert of a merge job (API-09,
 // JOB-03, WP-553; probe f6 of WP-182, retest of F-329) against PostgreSQL
@@ -57,6 +66,9 @@ func TestJobRevertAgainstPostgres(t *testing.T) {
 	// The revert of server/router.go: the unmerge of the merge, its
 	// refusals as 409.
 	mux := chi.NewRouter()
+	// The field policy source of the server router: the unmerge checks the
+	// action grants of ci:delete (WP-728).
+	mux.Use(permission.FieldPolicyMiddleware(phase1Resolver{}))
 	jobs.NewAPIHandler(svc).WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 		_, err := ciSvc.RevertMerge(ctx, job.OrganizationID, job.RefID)
 		for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {

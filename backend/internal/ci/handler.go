@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -332,6 +333,11 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// ci:delete after the action grants on the type and scope of the
+	// deleted CI (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "no deleted CI with this id", chi.URLParam(r, "id")) {
+		return
+	}
 	item, err := h.svc.Restore(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	switch {
 	case errors.Is(err, ErrRetentionExpired):
@@ -379,6 +385,11 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 	// into another type's grants (RBA-07, WP-265).
 	policy, ok := requestPolicy(w, r)
 	if !ok {
+		return
+	}
+	// The action grant ci:write on the current type before the field
+	// permissions (WP-728).
+	if !h.allowAction(w, r, identity.PermCIWrite, "CI not found", chi.URLParam(r, "id")) {
 		return
 	}
 	if !h.refuseUnreadableValues(w, r, policy, chi.URLParam(r, "id")) {
@@ -436,6 +447,11 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	// their type: the merge would move or reveal it (RBA-07, WP-265).
 	policy, ok := requestPolicy(w, r)
 	if !ok {
+		return
+	}
+	// ci:delete on survivor and victim after the action grants, before the
+	// field permissions (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "survivor or victim not found", chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID)) {
 		return
 	}
 	if !h.refuseUnreadableValues(w, r, policy, chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID)) {
@@ -792,6 +808,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	// ci:delete after the action grants on the type and scope of the CI
+	// (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "CI not found", id) {
+		return
+	}
 	item, err := h.svc.Delete(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -915,7 +936,7 @@ func (h *Handler) SetTemplates(w http.ResponseWriter, r *http.Request) {
 	item, err := h.svc.SetTemplates(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.Templates, ifMatch, t.UserID)
 	switch {
 	case err == nil:
-	case writeConcurrencyError(w, err), writeValidationError(w, err), writeTemplatesUnavailable(w, err):
+	case writeFieldForbidden(w, err), writeConcurrencyError(w, err), writeValidationError(w, err), writeTemplatesUnavailable(w, err):
 		return
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -1034,6 +1055,24 @@ func requestPolicy(w http.ResponseWriter, r *http.Request) (*permission.FieldPol
 		return nil, false
 	}
 	return policy, true
+}
+
+// allowAction checks the action grant of the route on the CIs (RBA-07,
+// WP-728) and reports whether the request may go on: 403 with the action
+// when the grants refuse it, 404 with notFound for a CI the check could
+// not read, 500 otherwise (fail-closed).
+func (h *Handler) allowAction(w http.ResponseWriter, r *http.Request, action identity.Permission, notFound string, ids ...string) bool {
+	err := h.svc.CheckAction(r.Context(), tenant.FromContext(r.Context()).OrganizationID, action, ids...)
+	switch {
+	case err == nil:
+		return true
+	case writeFieldForbidden(w, err):
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	default:
+		api.WriteRepoError(w, err)
+	}
+	return false
 }
 
 // ciRef is the object reference of a CI for its field permissions.
