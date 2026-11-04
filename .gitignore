@@ -6,6 +6,7 @@ dist/
 frontend/dist/
 backend/bin/
 /backend/agent
+/backend/server
 
 # Test artifacts
 frontend/test-results/
