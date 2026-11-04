@@ -1894,7 +1894,24 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail), an edge between two org-wide CIs for a principal
+            restricted to some clients or sites (ProblemDetail, E-09, E-62)
+            or the field permissions of the edge (RBA-07, WP-770; type
+            urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields`
+            names the sorted DTO paths, e.g. attributes.cost_center and
+            notes): a field of the request (attributes.<key>, notes,
+            confidence) the caller may not read, whatever its value, or a
+            readable field it may not write whose value is not empty. The lower level of both ends of the edge counts;
+            attributes.provenance is recorded by the system and not checked.
+            Checked after 400 and before the write.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '409':
           description: >-
             The edge exists already (the same source, target, type and
@@ -1967,6 +1984,24 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission (https://reticora.io/problems/403,
+            ProblemDetail) or the field permissions of the edge (RBA-07,
+            WP-770; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the sorted DTO paths, e.g.
+            attributes.cost_center and notes): a field of the request
+            (attributes.<key>, notes, confidence) the caller may not read,
+            whatever its value, or a readable field it may not write whose
+            value differs from the stored one. The lower level of both ends of the edge counts;
+            attributes.provenance is recorded by the system and not checked.
+            Checked after 400 and before the write.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -24301,6 +24336,12 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: >-
+            Attributes of the edge. Field permissions (RBA-07, WP-770) project
+            them: a key the caller may not read (field key attributes.<key>
+            of the object kind relationship, its relationship type, field
+            sensitivity, object grant; the lower level of both ends of the
+            edge counts) is missing; the object itself stays, {} at least.
         source:
           type: string
           description: >-
@@ -24315,6 +24356,15 @@ components:
           type: number
           minimum: 0
           maximum: 1
+          description: >-
+            Confidence of the edge. Missing when the field permissions do not
+            let the caller read core.confidence of the edge (RBA-07, WP-770).
+        notes:
+          type: string
+          description: >-
+            Notes on the edge. Missing when empty or when the field
+            permissions do not let the caller read core.notes of the edge
+            (RBA-07, WP-770).
         source_interface_id:
           type: string
           description: Port of the source CI the edge starts at (REL-02).

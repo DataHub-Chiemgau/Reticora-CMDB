@@ -1354,3 +1354,4 @@ RBA-07;[P2];B;backend/internal/graphqlbff/fieldrights_test.go;WP-727
 GQL-04;[B];B;backend/internal/graphqlbff/fieldrights_test.go;WP-727
 RBA-07;[P2];B;backend/internal/export/fieldrights_test.go;WP-729
 RBA-07;[P2];B;backend/internal/ci/actions_integration_test.go;WP-728
+RBA-07;[P2];B;backend/internal/relationship/fieldrights_integration_test.go;WP-770

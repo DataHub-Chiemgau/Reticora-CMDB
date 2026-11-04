@@ -11675,12 +11675,16 @@ export interface components {
       /** @description Rack (mounted_in) or location (located_in) of a projected relationship. */
       readonly target_location_id?: string;
       rel_type: components['schemas']['RelationshipType'];
+      /** @description Attributes of the edge. Field permissions (RBA-07, WP-770) project them: a key the caller may not read (field key attributes.<key> of the object kind relationship, its relationship type, field sensitivity, object grant; the lower level of both ends of the edge counts) is missing; the object itself stays, {} at least. */
       attributes: {
         [key: string]: unknown;
       };
       /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). An edge that is verified or re-confirmed is kept, also while a cleanup run is under way: a verification answered with 200 is never undone by the cleanup (F-411). */
       source: string;
+      /** @description Confidence of the edge. Missing when the field permissions do not let the caller read core.confidence of the edge (RBA-07, WP-770). */
       confidence?: number;
+      /** @description Notes on the edge. Missing when empty or when the field permissions do not let the caller read core.notes of the edge (RBA-07, WP-770). */
+      notes?: string;
       /** @description Port of the source CI the edge starts at (REL-02). */
       source_interface_id?: string;
       /** @description Port of the target CI the edge ends at (REL-02). */
@@ -17649,7 +17653,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail), an edge between two org-wide CIs for a principal restricted to some clients or sites (ProblemDetail, E-09, E-62) or the field permissions of the edge (RBA-07, WP-770; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the sorted DTO paths, e.g. attributes.cost_center and notes): a field of the request (attributes.<key>, notes, confidence) the caller may not read, whatever its value, or a readable field it may not write whose value is not empty. The lower level of both ends of the edge counts; attributes.provenance is recorded by the system and not checked. Checked after 400 and before the write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description The edge exists already (the same source, target, type and interfaces), e.g. a repeated create */
       409: {
         headers: {
@@ -17739,6 +17752,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions of the edge (RBA-07, WP-770; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the sorted DTO paths, e.g. attributes.cost_center and notes): a field of the request (attributes.<key>, notes, confidence) the caller may not read, whatever its value, or a readable field it may not write whose value differs from the stored one. The lower level of both ends of the edge counts; attributes.provenance is recorded by the system and not checked. Checked after 400 and before the write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
       422: {

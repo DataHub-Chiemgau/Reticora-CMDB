@@ -998,7 +998,13 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	return h.WithIncludes(map[string]ci.IncludeFunc{
 		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)
-			return rels, total > len(rels), err
+			if err != nil {
+				return nil, false, err
+			}
+			// The edge fields as the principal may read them (RBA-07, WP-770).
+			capped := total > len(rels)
+			rels, err = relationship.ProjectEdges(ctx, orgID, rels, repos.RelationshipType)
+			return rels, capped, err
 		},
 		"contacts": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			contacts, total, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)

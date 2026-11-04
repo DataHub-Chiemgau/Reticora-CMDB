@@ -43,7 +43,11 @@ const relationshipSelectColumns = `
 	COALESCE(target_interface_id::text, ''),
 	last_confirmed_at,
 	COALESCE(verified_by::text, ''),
-	verified_at
+	verified_at,
+	COALESCE(source_client_id::text, ''),
+	COALESCE(source_site_id::text, ''),
+	COALESCE(target_client_id::text, ''),
+	COALESCE(target_site_id::text, '')
 `
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
@@ -158,10 +162,13 @@ func listEdges(byCI bool, filters string) string {
 			SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
 			       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
 			       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
-			       false AS projected, NULL::uuid AS target_location_id
+			       false AS projected, NULL::uuid AS target_location_id,
+			       source_client_id, source_site_id, target_client_id, target_site_id
 			FROM ci_relationship WHERE organization_id = $1 AND ` + visibleEndpoints
 	projected := `
-			SELECT * FROM (` + projectedEdges + `) p WHERE p.organization_id = $1`
+			SELECT p.*, NULL::uuid AS source_client_id, NULL::uuid AS source_site_id,
+			       NULL::uuid AS target_client_id, NULL::uuid AS target_site_id
+			FROM (` + projectedEdges + `) p WHERE p.organization_id = $1`
 	arms := []string{stored, projected}
 	if byCI {
 		arms = make([]string, 0, 4)
@@ -217,6 +224,8 @@ func (r *PGRepository) ListFiltered(ctx context.Context, orgID string, filter Li
 				COALESCE(source_system, ''), COALESCE(notes, ''), created_at, updated_at,
 				COALESCE(source_interface_id::text, ''), COALESCE(target_interface_id::text, ''), last_confirmed_at,
 				COALESCE(verified_by::text, ''), verified_at,
+				COALESCE(source_client_id::text, ''), COALESCE(source_site_id::text, ''),
+				COALESCE(target_client_id::text, ''), COALESCE(target_site_id::text, ''),
 				projected, COALESCE(target_location_id::text, '')
 			FROM (%s) e ORDER BY projected, created_at DESC, id LIMIT $%d OFFSET $%d`, edges, limitPos, limitPos+1)
 		rows, err := tx.Query(ctx, query, append(args, page.Limit, page.Offset)...)
@@ -417,10 +426,29 @@ func lockCardinalityEnds(ctx context.Context, tx pgx.Tx, rel *Relationship) erro
 }
 
 // Update edits the provenance and verification metadata of a relationship.
-// The edge endpoints and rel_type are intentionally immutable.
+// The edge endpoints and rel_type are intentionally immutable. With
+// req.Check it first reads and locks the edge (SELECT … FOR UPDATE, the
+// visible edges of DeleteWithPolicy) and writes only when the check passes
+// (field permissions, RBA-07, WP-770).
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
 	var out *Relationship
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.Check != nil {
+			// The check sees the edge as stored, locked until the write
+			// (RBA-07, WP-770): type, attributes, notes, confidence and the
+			// scope of both ends.
+			current, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
+				WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			if err != nil {
+				return fmt.Errorf("read relationship: %w", err)
+			}
+			if checkErr := req.Check(database.ContextWithTx(ctx, tx), current); checkErr != nil {
+				return checkErr
+			}
+		}
 		sets := []string{"updated_at = now()"}
 		args := []any{id, orgID}
 		pos := 3
@@ -473,6 +501,30 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		return nil, err
 	}
 	return out, nil
+}
+
+// EndpointScopes implements ScopeReader: the client and site of the
+// visible, not deleted CIs among ids, read under the caller's scope (RLS).
+func (r *PGRepository) EndpointScopes(ctx context.Context, orgID string, ids []string) (map[string]EndpointScope, error) {
+	out := make(map[string]EndpointScope, len(ids))
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+			FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`, orgID, ids)
+		if err != nil {
+			return fmt.Errorf("read endpoint scopes: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var scope EndpointScope
+			if scanErr := rows.Scan(&id, &scope.ClientID, &scope.SiteID); scanErr != nil {
+				return fmt.Errorf("scan endpoint scope: %w", scanErr)
+			}
+			out[id] = scope
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
@@ -1404,6 +1456,10 @@ func scanRelationship(scanner relationshipScanner, withProjection ...bool) (*Rel
 		&confirmedAt,
 		&item.VerifiedBy,
 		&verifiedAt,
+		&item.SourceClientID,
+		&item.SourceSiteID,
+		&item.TargetClientID,
+		&item.TargetSiteID,
 	}
 	if len(withProjection) > 0 && withProjection[0] {
 		dest = append(dest, &item.Projected, &item.TargetLocationID)

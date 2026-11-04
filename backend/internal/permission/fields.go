@@ -245,7 +245,7 @@ func (p *FieldPolicy) roleLevel(r *roleScope, kind ObjectKind, chain []string, r
 	}
 	if kind == KindRelationship && relType != "" {
 		if level, ok := p.stage(r, kind, nil, func(g *FieldGrant) bool {
-			return g.RelationshipTypeID != nil && g.RelationshipType == relType
+			return g.RelationshipTypeID != nil && (*g.RelationshipTypeID == relType || g.RelationshipType == relType)
 		}); ok {
 			return minLevel(level, right)
 		}
@@ -261,8 +261,9 @@ func (p *FieldPolicy) roleLevel(r *roleScope, kind ObjectKind, chain []string, r
 // Level returns the level of a field of an object (RBA-07, E-43): the
 // highest level of the roles whose assignment covers the object (union,
 // RBA-03), each at most its object right. typeID is the CI type of a ci or
-// asset (its ancestors apply too) and the relationship type key (rel_type)
-// of a relationship; fieldKey is core.<column>, attributes.<key> or
+// asset (its ancestors apply too) and for a relationship the id of its
+// relationship_type row (WP-770: the organization's row before the system
+// row of the key) or, without a resolved row, the key (rel_type); fieldKey is core.<column>, attributes.<key> or
 // _instance.<key>, empty for the object as a whole.
 func (p *FieldPolicy) Level(kind ObjectKind, typeID, fieldKey string, obj ObjectRef) Level {
 	if p == nil {

@@ -535,3 +535,52 @@ func TestHandler_DeleteMapsErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestMemoryUpdateCheckUnderLock covers the write check of WP-770 (RBA-07)
+// in the memory repository: Update calls UpdateRequest.Check with the
+// stored edge while it holds its lock, and a refusal leaves the edge
+// unchanged.
+func TestMemoryUpdateCheckUnderLock(t *testing.T) {
+	repo := NewMemoryRepository()
+	rel := &Relationship{OrganizationID: "org-1", SourceCIID: "a", TargetCIID: "b", RelType: "depends_on",
+		Attributes: map[string]any{"cost_center": "X"}, Notes: "old"}
+	if err := repo.Create(context.Background(), rel); err != nil {
+		t.Fatal(err)
+	}
+	notes := "new"
+	refused := &api.FieldForbiddenError{Fields: []string{"attributes.cost_center", "notes"}}
+	var seen *Relationship
+	_, err := repo.Update(context.Background(), "org-1", rel.ID, UpdateRequest{
+		Attributes: map[string]any{"cost_center": "Y"}, Notes: &notes,
+		Check: func(_ context.Context, current *Relationship) error {
+			if repo.mu.TryRLock() {
+				repo.mu.RUnlock()
+				t.Error("Check ran without the lock of the repository")
+			}
+			seen = current
+			return refused
+		},
+	})
+	var forbidden *api.FieldForbiddenError
+	if !errors.As(err, &forbidden) || !slices.Equal(forbidden.Fields, refused.Fields) {
+		t.Fatalf("update: got %v, want the refusal of the check", err)
+	}
+	if seen == nil || seen.Notes != "old" || seen.Attributes["cost_center"] != "X" {
+		t.Fatalf("check saw %+v, want the stored edge", seen)
+	}
+	rels, _, err := repo.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10})
+	if err != nil || len(rels) != 1 || rels[0].Notes != "old" || rels[0].Attributes["cost_center"] != "X" {
+		t.Fatalf("edge after a refused update: %+v (%v), want unchanged", rels, err)
+	}
+
+	// Without a principal the policy is unrestricted: the handler sets no
+	// check and the PATCH passes.
+	mux := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodPatch, "/api/v1/relationships/"+rel.ID,
+		strings.NewReader(`{"notes":"patched"}`))))
+	if w.Code != http.StatusOK {
+		t.Fatalf("unrestricted PATCH: %d %s", w.Code, w.Body.String())
+	}
+}

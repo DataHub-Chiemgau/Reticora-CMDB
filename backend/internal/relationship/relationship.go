@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -17,6 +19,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -56,6 +60,15 @@ type Relationship struct {
 	// TargetLocationID is the target of mounted_in (the rack) and located_in
 	// (the location); TargetCIID is empty for them.
 	TargetLocationID string `json:"target_location_id,omitempty"`
+	// SourceClientID, SourceSiteID, TargetClientID and TargetSiteID are the
+	// scope of both ends (migration 000061, empty for an org-wide end,
+	// 000142): the field permissions of the edge are evaluated for both
+	// (RBA-07, E-140, WP-770). The PostgreSQL repository reads them; the
+	// memory repository knows no client and no site.
+	SourceClientID string `json:"-"`
+	SourceSiteID   string `json:"-"`
+	TargetClientID string `json:"-"`
+	TargetSiteID   string `json:"-"`
 	// checkTypeLists makes the PostgreSQL repository check the CI types of
 	// the ends against allowed_source_types and allowed_target_types of the
 	// relationship type, subtypes included (ErrSourceCITypeNotAllowed,
@@ -111,6 +124,12 @@ type UpdateRequest struct {
 	// ActorID is the user who changes the edge; a change of the
 	// verification state records it as verified_by (set by the handler).
 	ActorID string `json:"-"`
+	// Check, when set, is called with the edge as stored before the write,
+	// in the transaction and under the lock of the write (the memory
+	// repository: under its lock); an error refuses the write and leaves
+	// the edge unchanged. The handler sets it for the field permissions
+	// (RBA-07, WP-770).
+	Check func(ctx context.Context, current *Relationship) error `json:"-"`
 }
 
 // ValidVerificationStates lists the verification vocabulary for relationships.
@@ -669,13 +688,20 @@ func (r *MemoryRepository) Create(_ context.Context, rel *Relationship) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
+func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	rel, ok := r.items[id]
 	if !ok || rel.OrganizationID != orgID {
 		return nil, fmt.Errorf("not found")
+	}
+	if req.Check != nil {
+		current := *rel
+		current.Attributes = maps.Clone(rel.Attributes)
+		if err := req.Check(ctx, &current); err != nil {
+			return nil, err
+		}
 	}
 	if req.Attributes != nil {
 		if rel.Attributes == nil {
@@ -957,6 +983,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	// The fields of each edge as the principal may read them (RBA-07).
+	if rels, err = ProjectEdges(r.Context(), t.OrganizationID, rels, h.types); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Relationship]{
 		Data:    rels,
@@ -1082,7 +1113,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		rel.VerifiedBy = t.UserID
 	}
 
-	if err := h.repo.Create(r.Context(), rel); err != nil {
+	// The fields of the request against the field permissions (RBA-07):
+	// after the checks of the request form (400), before the write.
+	rights, err := newEdgeRights(r.Context(), t.OrganizationID, h.types)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if rights != nil {
+		if err = h.checkCreate(r.Context(), rights, &req, rel); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+
+	if err = h.repo.Create(r.Context(), rel); err != nil {
 		if writeEndpointError(w, err) {
 			return
 		}
@@ -1090,7 +1135,55 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, rel)
+	out := *rel
+	if rights != nil {
+		if err = rights.project(r.Context(), &out); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusCreated, &out)
+}
+
+// checkCreate checks the fields of a POST /relationships against the field
+// permissions of the new edge (RBA-07, WP-770): its type and the scope of
+// both CIs. An end the caller cannot see skips the check; Create then
+// answers 422 on it.
+func (h *Handler) checkCreate(ctx context.Context, rights *edgeRights, req *CreateRequest, rel *Relationship) error {
+	if reader, ok := h.repo.(ScopeReader); ok {
+		if !api.IsUUID(rel.SourceCIID) || !api.IsUUID(rel.TargetCIID) {
+			return nil
+		}
+		scopes, err := reader.EndpointScopes(ctx, rel.OrganizationID, []string{rel.SourceCIID, rel.TargetCIID})
+		if err != nil {
+			return err
+		}
+		source, sourceOK := scopes[rel.SourceCIID]
+		target, targetOK := scopes[rel.TargetCIID]
+		if !sourceOK || !targetOK {
+			return nil
+		}
+		rel.SourceClientID, rel.SourceSiteID = source.ClientID, source.SiteID
+		rel.TargetClientID, rel.TargetSiteID = target.ClientID, target.SiteID
+	}
+	typeID, err := rights.typeID(ctx, rel.RelType)
+	if err != nil {
+		return err
+	}
+	var writes []fieldWrite
+	for k, v := range req.Attributes {
+		// The server records the provenance (REL-08).
+		if k != ProvenanceAttribute {
+			writes = append(writes, fieldWrite{key: permission.NamespaceAttributes + "." + k, changed: !emptyValue(v)})
+		}
+	}
+	if req.Notes != "" {
+		writes = append(writes, fieldWrite{key: fieldNotes, changed: true})
+	}
+	if req.Confidence != nil {
+		writes = append(writes, fieldWrite{key: fieldConfidence, changed: true})
+	}
+	return rights.checkWrite(typeID, rel, writes)
 }
 
 // violation is one rejected field of a 422 (ViolationProblem).
@@ -1184,8 +1277,25 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.ActorID = t.UserID
+	rights, err := newEdgeRights(r.Context(), t.OrganizationID, h.types)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if rights != nil {
+		// The repository calls it with the stored edge under the lock of
+		// the write (RBA-07, WP-770).
+		req.Check = func(ctx context.Context, current *Relationship) error {
+			return rights.checkUpdate(ctx, &req, current)
+		}
+	}
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		var forbidden *api.FieldForbiddenError
+		if errors.As(err, &forbidden) {
+			api.WriteFieldError(w, forbidden)
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "relationship not found")
 			return
@@ -1195,6 +1305,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not update relationship")
 		return
+	}
+	if rights != nil {
+		if err = rights.project(r.Context(), rel); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
 	}
 
 	api.WriteJSON(w, http.StatusOK, rel)
@@ -1321,4 +1437,223 @@ func (h *Handler) LiftSuppression(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.WriteRepoError(w, err)
 	}
+}
+
+// Field permissions of edges (RBA-07, E-43, E-140, WP-770): the fields
+// attributes.<key>, core.notes and core.confidence of an edge resolve by
+// FieldPolicy.Level with the object kind relationship, the id of its
+// relationship type and the scope of each end; the lower level of both
+// ends counts. Every other member of Relationship stays; RLS and the scope
+// decide whether the edge is visible. Grants of the object kind ci with a
+// relationship type do not act on edges (E-140).
+
+// The core fields of an edge the projection covers.
+const (
+	fieldNotes      = permission.NamespaceCore + ".notes"
+	fieldConfidence = permission.NamespaceCore + ".confidence"
+)
+
+// orgWideEnd stands for the missing client or site of an edge end (an
+// org-wide CI, 000142): only role assignments without a client or site
+// scope cover it, so only their grants count there (E-140).
+const orgWideEnd = "\x00org-wide"
+
+// EndpointScope is the client and site of a CI at an end of an edge, empty
+// without one.
+type EndpointScope struct {
+	ClientID string
+	SiteID   string
+}
+
+// ScopeReader reads the client and site of the visible, not deleted CIs
+// among ids under the caller's scope; an invisible CI is missing from the
+// map. The PostgreSQL repository implements it.
+type ScopeReader interface {
+	EndpointScopes(ctx context.Context, orgID string, ids []string) (map[string]EndpointScope, error)
+}
+
+// TypeResolver resolves a relationship type key as the caller sees it: the
+// organization's row before the system row (relationshiptype.Repository).
+type TypeResolver interface {
+	GetByKey(ctx context.Context, orgID, key string) (*relationshiptype.Type, error)
+}
+
+// edgeRights evaluates the field permissions of edges for one request.
+type edgeRights struct {
+	orgID  string
+	policy *permission.FieldPolicy
+	types  TypeChecker
+	// typeIDs caches the relationship type id per key, resolved once per
+	// request.
+	typeIDs map[string]string
+}
+
+// newEdgeRights returns the field permissions of the request for edges,
+// nil when the policy does not restrict the object kind relationship
+// (no grant and no sensitive field): the answers stay unchanged.
+func newEdgeRights(ctx context.Context, orgID string, types TypeChecker) (*edgeRights, error) {
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !policy.Restricted(permission.KindRelationship) {
+		return nil, nil //nolint:nilnil // nil means no restriction
+	}
+	return &edgeRights{orgID: orgID, policy: policy, types: types, typeIDs: map[string]string{}}, nil
+}
+
+// typeID returns the id of the relationship type of key, empty without a
+// catalogue row (only grants without relationship type apply then).
+func (e *edgeRights) typeID(ctx context.Context, key string) (string, error) {
+	if id, ok := e.typeIDs[key]; ok {
+		return id, nil
+	}
+	id := ""
+	if resolver, ok := e.types.(TypeResolver); ok {
+		typ, err := resolver.GetByKey(ctx, e.orgID, key)
+		switch {
+		case err == nil && typ != nil:
+			id = typ.ID
+		case err == nil, errors.Is(err, relationshiptype.ErrNotFound):
+		default:
+			return "", err
+		}
+	}
+	e.typeIDs[key] = id
+	return id, nil
+}
+
+// endRef is the object reference of one end of the edge.
+func endRef(id, clientID, siteID string) permission.ObjectRef {
+	if clientID == "" {
+		clientID = orgWideEnd
+	}
+	if siteID == "" {
+		siteID = orgWideEnd
+	}
+	return permission.ObjectRef{ID: id, ClientID: clientID, SiteID: siteID}
+}
+
+// level returns the level of the field of the edge: the lower level of
+// both ends (E-140).
+func (e *edgeRights) level(typeID, fieldKey string, rel *Relationship) permission.Level {
+	source := e.policy.Level(permission.KindRelationship, typeID, fieldKey, endRef(rel.ID, rel.SourceClientID, rel.SourceSiteID))
+	if !source.Readable() {
+		return permission.LevelNone
+	}
+	target := e.policy.Level(permission.KindRelationship, typeID, fieldKey, endRef(rel.ID, rel.TargetClientID, rel.TargetSiteID))
+	switch {
+	case !target.Readable():
+		return permission.LevelNone
+	case !source.Editable() || !target.Editable():
+		return permission.LevelRead
+	}
+	return permission.LevelWrite
+}
+
+// project removes the fields of the edge the principal may not read: the
+// attribute keys from attributes (the object stays, {} at least), notes
+// and confidence from the edge. A projected structural edge carries none
+// of them and stays. The attributes are replaced, not changed in place.
+func (e *edgeRights) project(ctx context.Context, rel *Relationship) error {
+	if rel.Projected {
+		return nil
+	}
+	typeID, err := e.typeID(ctx, rel.RelType)
+	if err != nil {
+		return err
+	}
+	attrs := make(map[string]any, len(rel.Attributes))
+	for k, v := range rel.Attributes {
+		if e.level(typeID, permission.NamespaceAttributes+"."+k, rel).Readable() {
+			attrs[k] = v
+		}
+	}
+	rel.Attributes = attrs
+	if rel.Notes != "" && !e.level(typeID, fieldNotes, rel).Readable() {
+		rel.Notes = ""
+	}
+	if rel.Confidence != nil && !e.level(typeID, fieldConfidence, rel).Readable() {
+		rel.Confidence = nil
+	}
+	return nil
+}
+
+// ProjectEdges returns the edges with the fields the principal of ctx may
+// read (RBA-07, WP-770): GET /relationships, GET /cis/{id}/relationships
+// and the include relationships of GET /cis/{id}. types resolves the
+// relationship types (a TypeResolver; nil or another TypeChecker leaves
+// only grants without relationship type). Without a restriction of the
+// object kind relationship the edges are returned unchanged.
+func ProjectEdges(ctx context.Context, orgID string, rels []Relationship, types TypeChecker) ([]Relationship, error) {
+	rights, err := newEdgeRights(ctx, orgID, types)
+	if err != nil || rights == nil || len(rels) == 0 {
+		return rels, err
+	}
+	out := make([]Relationship, len(rels))
+	copy(out, rels)
+	for i := range out {
+		if projectErr := rights.project(ctx, &out[i]); projectErr != nil {
+			return nil, projectErr
+		}
+	}
+	return out, nil
+}
+
+// fieldWrite is a field of a write request: its field key and whether its
+// value differs from the stored one (for a new edge: is not empty).
+type fieldWrite struct {
+	key     string
+	changed bool
+}
+
+// checkWrite applies the write rule of WP-265 to the fields of a request:
+// a field the principal may not read is refused whatever its value, a
+// readable field that is not editable when its value changes. The refusal
+// is an *api.FieldForbiddenError with the sorted DTO paths
+// (attributes.<key>, notes, confidence).
+func (e *edgeRights) checkWrite(typeID string, rel *Relationship, writes []fieldWrite) error {
+	var refused []string
+	for _, w := range writes {
+		level := e.level(typeID, w.key, rel)
+		if !level.Readable() || (w.changed && !level.Editable()) {
+			refused = append(refused, permission.DTOPath(w.key))
+		}
+	}
+	if len(refused) == 0 {
+		return nil
+	}
+	sort.Strings(refused)
+	return &api.FieldForbiddenError{Fields: refused}
+}
+
+// checkUpdate checks the fields of a PATCH /relationships/{id} against the
+// stored edge (RBA-07, WP-770).
+func (e *edgeRights) checkUpdate(ctx context.Context, req *UpdateRequest, current *Relationship) error {
+	typeID, err := e.typeID(ctx, current.RelType)
+	if err != nil {
+		return err
+	}
+	var writes []fieldWrite
+	for k, v := range req.Attributes {
+		if k == ProvenanceAttribute {
+			continue
+		}
+		stored, ok := current.Attributes[k]
+		writes = append(writes, fieldWrite{key: permission.NamespaceAttributes + "." + k, changed: !ok || !reflect.DeepEqual(stored, v)})
+	}
+	if req.Notes != nil {
+		writes = append(writes, fieldWrite{key: fieldNotes, changed: *req.Notes != current.Notes})
+	}
+	if req.Confidence != nil {
+		writes = append(writes, fieldWrite{key: fieldConfidence, changed: current.Confidence == nil || *current.Confidence != *req.Confidence})
+	}
+	return e.checkWrite(typeID, current, writes)
+}
+
+// emptyValue reports whether an attribute value of a new edge is empty
+// (null or an empty string).
+func emptyValue(v any) bool {
+	s, isString := v.(string)
+	return v == nil || (isString && s == "")
 }
