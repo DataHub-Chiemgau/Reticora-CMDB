@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -44,8 +45,13 @@ func (failingApproval) ApproveAccessRequest(context.Context, string, string, str
 	return nil, errors.New(`ERROR: insert into "iga_provisioning_task" failed (SQLSTATE 08006)`)
 }
 
+// traceID matches the random trace_id of a problem response; its hex digits
+// can contain a searched code such as 08006 by chance.
+var traceID = regexp.MustCompile(`"trace_id":"[0-9a-f]*"`)
+
 // leaked reports a response body that carries database or injected text.
 func leaked(body string) bool {
+	body = traceID.ReplaceAllString(body, "")
 	for _, s := range []string{"wp461", "iga_provisioning_task", "SQLSTATE", "P0001", "08006", "injected"} {
 		if strings.Contains(body, s) {
 			return true
