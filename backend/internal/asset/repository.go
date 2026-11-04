@@ -32,6 +32,14 @@ type Lookup interface {
 	Update(ctx context.Context, orgID, id string, req *UpdateRequest) (*Asset, error)
 }
 
+// memoryDefaultCurrency and memoryInitialState stand in for the
+// organization currency and the initial state of the lifecycle model
+// physical_asset in the in-memory repository.
+const (
+	memoryDefaultCurrency = "EUR"
+	memoryInitialState    = "ordered"
+)
+
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
 	mu     sync.RWMutex
@@ -132,6 +140,12 @@ func (r *MemoryRepository) Create(_ context.Context, a *Asset) error {
 	r.nextID++
 	// UUID form, as the handler accepts only UUID ids (API-03).
 	a.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
+	// Without a database there is no organization currency and no
+	// lifecycle model: EUR and the initial state of physical_asset stand in.
+	if strings.TrimSpace(a.Currency) == "" {
+		a.Currency = memoryDefaultCurrency
+	}
+	a.LifecycleState = memoryInitialState
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -147,7 +161,24 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *Upda
 	if !ok || a.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
+	if req.Check != nil {
+		if err := req.Check(a); err != nil {
+			return nil, err
+		}
+	}
 
+	for _, f := range []struct {
+		value *string
+		dst   *string
+	}{
+		{req.Manufacturer, &a.Manufacturer}, {req.Model, &a.Model}, {req.CostCenter, &a.CostCenter},
+		{req.SupplierID, &a.SupplierID}, {req.ContractID, &a.ContractID}, {req.OwnerUserID, &a.OwnerUserID},
+		{req.OwnerTeamID, &a.OwnerTeamID}, {req.RFIDTag, &a.RFIDTag}, {req.Barcode, &a.Barcode},
+	} {
+		if f.value != nil {
+			*f.dst = *f.value
+		}
+	}
 	if req.Name != nil {
 		a.Name = *req.Name
 	}
@@ -165,6 +196,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *Upda
 	}
 	if req.Currency != nil {
 		a.Currency = *req.Currency
+		if strings.TrimSpace(a.Currency) == "" {
+			a.Currency = memoryDefaultCurrency
+		}
 	}
 	if req.WarrantyEnd != nil {
 		a.WarrantyEnd = *req.WarrantyEnd

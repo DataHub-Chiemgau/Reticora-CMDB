@@ -29,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -109,8 +110,10 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 		scope.Clients = database.ScopeIDs(client)
 		ctx := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope),
 			tenant.TenantInfo{OrganizationID: f.OrgA, UserID: user, ClientID: client})
-		return identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: f.OrgA,
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: f.OrgA,
 			Type: identity.PrincipalTypeUser, Permissions: perms})
+		// The policy source of FieldPolicyMiddleware: no field permissions (WP-729).
+		return permission.WithPolicy(ctx, permission.UnrestrictedPolicy(perms))
 	}
 	creator := principal(f.User, f.Client1, all...)
 	do := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
@@ -234,6 +237,11 @@ func TestExportCancelViaJobAPI(t *testing.T) {
 		reported := completedEvents()
 		var cancel int
 		store.onPut = func() {
+			// The cancel arrives after the first stored object (the export;
+			// its manifest follows, WP-729).
+			if cancel != 0 {
+				return
+			}
 			cancel = do(creator, http.MethodDelete, "/api/v1/jobs/"+jobID, "").Code
 		}
 		drain()

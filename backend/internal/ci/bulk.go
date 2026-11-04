@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -120,6 +121,38 @@ func (s *Service) WithBulkQueue(q BulkQueue) *Service {
 	return s
 }
 
+// CreatorPolicy resolves the field and action policy of the creator of a
+// queue job (job.CreatedBy, the rights at the time of the run narrowed to
+// the scope snapshot of the job row; permission.FieldResolver.
+// PolicyForCreator). Nothing of it is stored in the job parameters.
+type CreatorPolicy func(ctx context.Context, job *jobs.Job) (*permission.FieldPolicy, error)
+
+// ErrNoCreatorPolicy fails a bulk job of the queue that cannot resolve the
+// policy of its creator: without it the run would check no action and no
+// field (fail-closed, WP-728).
+var ErrNoCreatorPolicy = errors.New("bulk job: the rights of its creator cannot be resolved")
+
+// WithCreatorPolicy sets how a bulk job of the queue resolves the policy
+// of its creator (RunBulkJob, WP-728); without it such a job fails.
+func (s *Service) WithCreatorPolicy(fn CreatorPolicy) *Service {
+	s.creatorPolicy = fn
+	return s
+}
+
+// CreatorPolicyOf is the CreatorPolicy of the field resolver: the creator
+// must be an active user (users), its role assignments of the run time are
+// narrowed to the scope snapshot of the job (a job without snapshot gets
+// no right).
+func CreatorPolicyOf(resolver *permission.FieldResolver, users permission.CreatorStatus) CreatorPolicy {
+	return func(ctx context.Context, job *jobs.Job) (*permission.FieldPolicy, error) {
+		var scope *permission.CreatorScope
+		if job.Scope != nil {
+			scope = &permission.CreatorScope{Clients: job.Scope.Clients, Sites: job.Scope.Sites, Teams: job.Scope.Teams}
+		}
+		return resolver.PolicyForCreator(ctx, users, job.OrganizationID, job.CreatedBy, scope)
+	}
+}
+
 // validateBulk normalizes and checks a bulk request: known action, 1–500
 // distinct ids, a valid status for set_status. It checks every id as a
 // UUID: a malformed id does not fail the request, it is reported on its own
@@ -220,7 +253,11 @@ func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 
 // RunBulkJob runs a bulk job of the job queue (handler of ci.bulk): the
 // operation of its parameters with the tenant and scope of its creator
-// (jobs.CreatorContext), who is the author of its changes. The report is
+// (jobs.CreatorContext), who is the author of its changes, and the policy
+// of the creator (WithCreatorPolicy): each id is checked against the
+// action and field permissions like a PATCH (403 in the report, WP-728);
+// a creator that is no active user, or a service without creator policy,
+// fails the job (fail-closed). The report is
 // the job result; a job cancelled while it ran stops at the next
 // checkpoint and keeps the partial report (keepCancelled), the queue then
 // records nothing.
@@ -241,7 +278,16 @@ func (s *Service) RunBulkJob(ctx context.Context, job *jobs.Job) (any, error) {
 	// ctx ends with a cancel (the queue's run context): the checkpoint
 	// and the report of the cancelled job do not.
 	jobCtx := context.WithoutCancel(ctx)
-	result := s.runBulk(jobs.CreatorContext(ctx, job), job.OrganizationID, job.CreatedBy, &req,
+	if s.creatorPolicy == nil {
+		return nil, ErrNoCreatorPolicy
+	}
+	runCtx := jobs.CreatorContext(ctx, job)
+	policy, err := s.creatorPolicy(runCtx, job)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrNoCreatorPolicy, err)
+	}
+	runCtx = permission.WithPolicy(runCtx, policy)
+	result := s.runBulk(runCtx, job.OrganizationID, job.CreatedBy, &req,
 		s.cancelCheck(jobCtx, cancels, job.OrganizationID, job.ID))
 	if cancels != nil && keepCancelled(jobCtx, cancels, job.OrganizationID, job.ID, result) {
 		return nil, nil
@@ -344,15 +390,21 @@ func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRe
 }
 
 // bulkError maps the error of one id onto the status and message the
-// single operation would answer: database errors like the single PATCH
+// single operation would answer: 403 for a refusal of the action or field
+// permissions, database errors like the single PATCH
 // (api.ClassifyDBError, sanitized details), an unreachable dependency 503;
 // internal errors stay generic.
 func bulkError(err error) (code int, msg string) {
 	var fe *api.FieldError
 	var ve *ValidationError
+	var forbidden *api.FieldForbiddenError
 	switch {
 	case errors.Is(err, ErrNotFound) || err.Error() == "not found":
 		return http.StatusNotFound, "CI not found"
+	case errors.As(err, &forbidden):
+		// An action grant or a field permission refuses the id (RBA-07,
+		// WP-728); the other ids go on (BLK-01).
+		return http.StatusForbidden, forbidden.Error()
 	case errors.As(err, &fe):
 		if fe.Status != 0 {
 			return fe.Status, fe.Error()

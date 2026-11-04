@@ -20,6 +20,24 @@ models:
       - github.com/99designs/gqlgen/graphql.Int64
   CI:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci.Item
+    # The fields under field permissions (RBA-07, WP-727): resolver.go
+    # projects them with the policy of the request; an unreadable one is
+    # null, an unreadable attribute key is left out.
+    fields:
+      hostname:
+        resolver: true
+      fqdn:
+        resolver: true
+      serialNumber:
+        resolver: true
+      manufacturer:
+        resolver: true
+      model:
+        resolver: true
+      managementIp:
+        resolver: true
+      attributes:
+        resolver: true
   Relationship:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship.Relationship
   TopologyGraph:

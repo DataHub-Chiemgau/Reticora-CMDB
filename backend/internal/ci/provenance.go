@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -97,6 +98,10 @@ func (h *Handler) Provenance(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
 	item, err := h.svc.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -109,7 +114,42 @@ func (h *Handler) Provenance(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	api.WriteJSON(w, http.StatusOK, api.CompleteList(BuildProvenance(item, records)))
+	api.WriteJSON(w, http.StatusOK, api.CompleteList(ProjectProvenance(policy, item, BuildProvenance(item, records))))
+}
+
+// ProjectProvenance leaves out the entries of fields the principal may not
+// read (RBA-07, WP-265); an entry whose value is the asset's also needs the
+// asset field. Without a restriction it returns entries unchanged.
+func ProjectProvenance(policy *permission.FieldPolicy, item *Item, entries []FieldProvenance) []FieldProvenance {
+	if !permission.NeedsProjection(policy, permission.KindCI) {
+		return entries
+	}
+	out := make([]FieldProvenance, 0, len(entries))
+	for i := range entries {
+		e := &entries[i]
+		if !ciFieldReadable(policy, item, e.Field) {
+			continue
+		}
+		if e.Reason == ReasonAsset && !assetFieldReadable(policy, item, e.Field) {
+			continue
+		}
+		out = append(out, *e)
+	}
+	return out
+}
+
+// assetFieldReadable reports whether the principal may read the field of
+// the CI's asset (asset policy); without a known asset only when the asset
+// policy is not restricted.
+func assetFieldReadable(policy *permission.FieldPolicy, item *Item, field string) bool {
+	if !policy.Restricted(permission.KindAsset) {
+		return true
+	}
+	if item.Asset == nil {
+		return false
+	}
+	return permission.Readable(policy, permission.KindAsset, item.Asset.AssetTypeID,
+		permission.ObjectRef{ID: item.Asset.ID, ClientID: item.Asset.ClientID, SiteID: item.Asset.SiteID}, field)
 }
 
 // BuildProvenance merges the provenance rows of a CI with its typed fields

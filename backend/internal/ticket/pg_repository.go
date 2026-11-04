@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,10 +34,17 @@ const ticketSelectColumns = `
 	due_date,
 	resolved_at,
 	closed_at,
-	COALESCE(tags, '{}'::text[]),
+	` + ticketTagsColumn + `,
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, '')
 `
+
+// ticketTagsColumn are the sorted keys of the catalog tags of a ticket
+// (ticket_tag, WP-764, E-127), {} without tags.
+const ticketTagsColumn = `COALESCE((SELECT array_agg(tg.key ORDER BY tg.key)
+		FROM ticket_tag tt JOIN tag tg ON tg.id = tt.tag_id WHERE tt.ticket_id = ticket.id), '{}'::text[])`
 
 const ticketCommentSelectColumns = `
 	id::text,
@@ -75,6 +83,8 @@ const (
 	changeStatus  = "status"
 	changeComment = "comment"
 	changeDeleted = "deleted"
+	changeLink    = "link"
+	changeUnlink  = "unlink"
 )
 
 // ticketEvent is the data of ticket.updated: the frame of WP-246 (id,
@@ -91,6 +101,11 @@ type ticketEvent struct {
 	StatusTo      string   `json:"status_to,omitempty"`
 	CommentID     string   `json:"comment_id,omitempty"`
 	IsInternal    *bool    `json:"is_internal,omitempty"`
+	// LinkID, EntityType and EntityID name the link of a change link or
+	// unlink (WP-764).
+	LinkID     string `json:"link_id,omitempty"`
+	EntityType string `json:"entity_type,omitempty"`
+	EntityID   string `json:"entity_id,omitempty"`
 }
 
 // recordEvent writes ticket.updated of a ticket mutation in tx as the last
@@ -205,6 +220,13 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		} else {
 			addFilter("team_id", filter.TeamID)
 		}
+		// tags: every key (WP-764).
+		for _, key := range filter.Tags {
+			whereParts = append(whereParts, fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM ticket_tag tt JOIN tag tg ON tg.id = tt.tag_id WHERE tt.ticket_id = ticket.id AND tg.key = $%d)", argPos))
+			args = append(args, key)
+			argPos++
+		}
 		if filter.Search != "" {
 			whereParts = append(whereParts, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", argPos, argPos))
 			args = append(args, "%"+filter.Search+"%")
@@ -301,10 +323,11 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 		return err
 	}
 	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if t.Tags == nil {
-			t.Tags = []string{}
-		}
+		tags := NormalizeTags(t.Tags)
 		if err := requireRefs(ctx, tx, t.OrganizationID, &t.AssigneeID, &t.TeamID, &t.RelatedCIID, &t.RelatedAssetID); err != nil {
+			return err
+		}
+		if err := requireCatalogTags(ctx, tx, t.OrganizationID, tags); err != nil {
 			return err
 		}
 		query := `
@@ -320,11 +343,10 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 				team_id,
 				related_ci_id,
 				related_asset_id,
-				due_date,
-				tags
+				due_date
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13
+				$8, $9, $10, $11, $12
 			)
 			RETURNING id::text, ticket_number, created_at, updated_at,
 				COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
@@ -347,13 +369,17 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 			nilIfEmpty(t.RelatedCIID),
 			nilIfEmpty(t.RelatedAssetID),
 			dueDate,
-			t.Tags,
 		).Scan(&t.ID, &t.TicketNumber, &t.CreatedAt, &t.UpdatedAt, &clientID, &siteID); err != nil {
 			return fmt.Errorf("create ticket: %w", err)
 		}
 		if err := requireVisible(ctx, tx, "ticket", ticketVisible, t.ID); err != nil {
 			return err
 		}
+		if err := replaceTags(ctx, tx, t.OrganizationID, t.ID, tags); err != nil {
+			return err
+		}
+		t.Tags = tags
+		t.ClientID, t.SiteID = clientID, siteID
 		return r.recordEvent(ctx, tx, t.OrganizationID, &ticketEvent{ID: t.ID, ClientID: clientID, SiteID: siteID, Change: changeCreated})
 	})
 }
@@ -383,6 +409,21 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 		}
 		if refErr := requireRefs(ctx, tx, orgID, req.AssigneeID, req.TeamID, req.RelatedCIID, req.RelatedAssetID); refErr != nil {
 			return refErr
+		}
+		// tags replace the catalog tags of the ticket before the UPDATE,
+		// whose RETURNING reads them (WP-764).
+		tagsChanged := false
+		if req.Tags != nil {
+			tags := NormalizeTags(req.Tags)
+			if tagErr := requireCatalogTags(ctx, tx, orgID, tags); tagErr != nil {
+				return tagErr
+			}
+			if !slices.Equal(tags, before.Tags) {
+				if tagErr := replaceTags(ctx, tx, orgID, id, tags); tagErr != nil {
+					return tagErr
+				}
+				tagsChanged = true
+			}
 		}
 		setClauses := make([]string, 0, 12)
 		args := []any{id, orgID}
@@ -425,26 +466,20 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			}
 			setClauses = append(setClauses, fmt.Sprintf("due_date = $%d", argPos))
 			args = append(args, dueDate)
-			argPos++
-		}
-		if req.Tags != nil {
-			setClauses = append(setClauses, fmt.Sprintf("tags = $%d", argPos))
-			args = append(args, req.Tags)
 		}
 
-		if len(setClauses) == 0 {
+		if len(setClauses) == 0 && !tagsChanged {
 			item = before
 			return nil
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
 		query := fmt.Sprintf(
-			"UPDATE ticket SET %s WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2 RETURNING %s, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')",
+			"UPDATE ticket SET %s WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2 RETURNING %s",
 			strings.Join(setClauses, ", "),
 			ticketSelectColumns,
 		)
-		var clientID, siteID string
-		item, err = scanTicket(tx.QueryRow(ctx, query, args...), &clientID, &siteID)
+		item, err = scanTicket(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -454,7 +489,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 		if visErr := requireVisible(ctx, tx, "ticket", ticketVisible, id); visErr != nil {
 			return visErr
 		}
-		ev := &ticketEvent{ID: id, ClientID: clientID, SiteID: siteID, Change: changeUpdated, ChangedFields: changedFields(before, item, req)}
+		ev := &ticketEvent{ID: id, ClientID: item.ClientID, SiteID: item.SiteID, Change: changeUpdated, ChangedFields: changedFields(before, item, req)}
 		if statusChange {
 			ev.Change, ev.StatusFrom, ev.StatusTo = changeStatus, before.Status, item.Status
 		}
@@ -577,13 +612,268 @@ func (r *PGRepository) ListComments(ctx context.Context, orgID, ticketID string,
 	return items, total, err
 }
 
+// ─── Tags (WP-764, E-127) ──────────────────────────────────────────────────────
+
+// requireCatalogTags fails with a 422 field error naming the keys the tag
+// catalog of the organization lacks; the tags it finds stay locked (FOR
+// SHARE) until the commit, so a merge or delete waits for the write.
+func requireCatalogTags(ctx context.Context, tx pgx.Tx, orgID string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT key FROM tag WHERE organization_id = $1 AND key = ANY($2) FOR SHARE`, orgID, keys)
+	if err != nil {
+		return fmt.Errorf("read catalog tags: %w", err)
+	}
+	found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read catalog tags: %w", err)
+	}
+	var unknown []string
+	for _, key := range keys {
+		if !slices.Contains(found, key) {
+			unknown = append(unknown, key)
+		}
+	}
+	if len(unknown) > 0 {
+		return &api.FieldError{Field: "tags", Status: http.StatusUnprocessableEntity,
+			Message: "unknown tags: " + strings.Join(unknown, ", ")}
+	}
+	return nil
+}
+
+// replaceTags makes keys (catalog tags, checked by requireCatalogTags) the
+// tags of ticket ticketID: the others are removed, the missing ones added.
+// The scope of the rows follows the ticket (trigger ticket_tag_scope).
+func replaceTags(ctx context.Context, tx pgx.Tx, orgID, ticketID string, keys []string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM ticket_tag tt WHERE tt.ticket_id = $1 AND NOT EXISTS (
+			SELECT 1 FROM tag tg WHERE tg.id = tt.tag_id AND tg.organization_id = $2 AND tg.key = ANY($3))`,
+		ticketID, orgID, keys); err != nil {
+		return fmt.Errorf("replace ticket tags: %w", err)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO ticket_tag (organization_id, ticket_id, tag_id)
+		SELECT $1, $2, tg.id FROM tag tg WHERE tg.organization_id = $1 AND tg.key = ANY($3)
+		ON CONFLICT (ticket_id, tag_id) DO NOTHING`, orgID, ticketID, keys); err != nil {
+		return fmt.Errorf("assign ticket tags: %w", err)
+	}
+	return nil
+}
+
+// ─── Links (WP-764) ────────────────────────────────────────────────────────────
+
+// reviewItemVisible is the predicate visible of reviews/pg_repository.go
+// (WP-342): an item with candidate CIs is visible when all of them are, one
+// without candidates when its client and site lie in a restricted scope
+// (fail-closed, E-08).
+const reviewItemVisible = `(CASE WHEN cardinality(COALESCE(review_item.candidate_ci_ids, '{}'::uuid[])) = 0 THEN
+	(NULLIF(current_setting('` + database.ClientScopeGUC + `', true), '') IS NULL
+	 OR review_item.client_id = ANY (string_to_array(current_setting('` + database.ClientScopeGUC + `', true), ',')::uuid[]))
+	AND (NULLIF(current_setting('` + database.SiteScopeGUC + `', true), '') IS NULL
+	 OR review_item.site_id = ANY (string_to_array(current_setting('` + database.SiteScopeGUC + `', true), ',')::uuid[]))
+ELSE NOT EXISTS (
+	SELECT 1 FROM unnest(review_item.candidate_ci_ids) AS candidate(id)
+	WHERE NOT EXISTS (SELECT 1 FROM ci WHERE ci.id = candidate.id)) END)`
+
+// linkTarget is an entity type of ticket_link: its target column and the
+// predicate that the target with the id expression id is visible under the
+// transaction's tenant scope (the policies of the target table filter the
+// subquery).
+type linkTarget struct {
+	column  string
+	visible func(id string) string
+}
+
+// linkTargets is the registry of the entity types; every key stands in
+// ticket_link_entity_type_check (migration 000230) and LinkEntityTypes.
+var linkTargets = map[string]linkTarget{
+	LinkCI: {"ci_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM ci WHERE ci.id = " + id + ")"
+	}},
+	LinkAsset: {"asset_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM asset WHERE asset.id = " + id + ")"
+	}},
+	LinkLocation: {"location_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM location WHERE location.id = " + id + ")"
+	}},
+	LinkContract: {"contract_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM contract WHERE contract.id = " + id + ")"
+	}},
+	LinkReviewItem: {"review_item_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM review_item WHERE review_item.id = " + id + " AND " + reviewItemVisible + ")"
+	}},
+}
+
+// linkVisible is the SQL condition "the row of ticket_link belongs to a
+// visible ticket and names a visible target"; an entity type outside the
+// registry is never visible.
+var linkVisible = func() string {
+	var b strings.Builder
+	b.WriteString("EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_link.ticket_id AND " + ticketVisible + ")")
+	b.WriteString(" AND CASE ticket_link.entity_type")
+	for _, entityType := range LinkEntityTypes {
+		target := linkTargets[entityType]
+		b.WriteString(" WHEN '" + entityType + "' THEN " + target.visible("ticket_link."+target.column))
+	}
+	b.WriteString(" ELSE false END")
+	return b.String()
+}()
+
+// linkSelectColumns are the columns scanLink reads.
+const linkSelectColumns = `id::text, organization_id::text, ticket_id::text, entity_type,
+	COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id)::text, created_at`
+
+func scanLink(row scanner) (*Link, error) {
+	l := &Link{}
+	if err := row.Scan(&l.ID, &l.OrganizationID, &l.TicketID, &l.EntityType, &l.EntityID, &l.CreatedAt); err != nil {
+		return nil, err
+	}
+	return l, nil
+}
+
+// visibleTicketScope reads client and site of a ticket visible under the
+// tenant scope, or fails with ErrNotFound.
+func visibleTicketScope(ctx context.Context, tx pgx.Tx, orgID, ticketID string) (clientID, siteID string, err error) {
+	err = tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ticket WHERE "+ticketVisible+
+		" AND id = $1 AND organization_id = $2", ticketID, orgID).Scan(&clientID, &siteID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", fmt.Errorf("read ticket: %w", err)
+	}
+	return clientID, siteID, nil
+}
+
+// ListLinks implements Repository: the links of a visible ticket whose
+// target is visible, in the order created_at, id.
+func (r *PGRepository) ListLinks(ctx context.Context, orgID, ticketID string, page api.PaginationParams) ([]Link, int, error) {
+	items := make([]Link, 0)
+	var total int
+	if !api.IsUUID(ticketID) {
+		return nil, 0, ErrNotFound
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, _, err := visibleTicketScope(ctx, tx, orgID, ticketID); err != nil {
+			return err
+		}
+		where := "ticket_link.organization_id = $1 AND ticket_link.ticket_id = $2 AND " + linkVisible
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ticket_link WHERE "+where, orgID, ticketID).Scan(&total); err != nil {
+			return fmt.Errorf("count ticket links: %w", err)
+		}
+		args := []any{orgID, ticketID}
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(linkSortColumn, linkSortDir) {
+				return fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+			}
+			where += " AND " + api.KeysetClause(linkSortColumn, "timestamptz", linkSortDir, 3)
+			args = append(args, page.Cursor.Value, page.Cursor.ID)
+		}
+		args = append(args, page.Limit)
+		query := fmt.Sprintf("SELECT %s FROM ticket_link WHERE %s ORDER BY created_at, id LIMIT $%d", linkSelectColumns, where, len(args))
+		if page.Cursor == nil {
+			args = append(args, page.Offset)
+			query += fmt.Sprintf(" OFFSET $%d", len(args))
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list ticket links: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			l, scanErr := scanLink(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan ticket link: %w", scanErr)
+			}
+			items = append(items, *l)
+		}
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("iterate ticket links: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// CreateLink implements Repository: ticket and target must be visible under
+// the tenant scope (else ErrNotFound, no existence leak); the link takes
+// client, site and team of the ticket (trigger ticket_link_scope). The
+// event ticket.updated with change link is written in the transaction.
+func (r *PGRepository) CreateLink(ctx context.Context, link *Link) error {
+	target, ok := linkTargets[link.EntityType]
+	if !ok {
+		return &api.FieldError{Field: "entity_type", Status: http.StatusUnprocessableEntity,
+			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")}
+	}
+	if !api.IsUUID(link.TicketID) || !api.IsUUID(link.EntityID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		clientID, siteID, err := visibleTicketScope(ctx, tx, link.OrganizationID, link.TicketID)
+		if err != nil {
+			return err
+		}
+		var visible bool
+		if err = tx.QueryRow(ctx, "SELECT "+target.visible("$1::uuid"), link.EntityID).Scan(&visible); err != nil {
+			return fmt.Errorf("check link target: %w", err)
+		}
+		if !visible {
+			return ErrNotFound
+		}
+		err = tx.QueryRow(ctx, `INSERT INTO ticket_link (organization_id, ticket_id, entity_type, `+target.column+`)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (ticket_id, `+target.column+`) DO NOTHING
+			RETURNING id::text, created_at`,
+			link.OrganizationID, link.TicketID, link.EntityType, link.EntityID).Scan(&link.ID, &link.CreatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLinkExists
+		}
+		if err != nil {
+			return fmt.Errorf("create ticket link: %w", err)
+		}
+		return r.recordEvent(ctx, tx, link.OrganizationID, &ticketEvent{ID: link.TicketID, ClientID: clientID, SiteID: siteID,
+			Change: changeLink, LinkID: link.ID, EntityType: link.EntityType, EntityID: link.EntityID})
+	})
+}
+
+// DeleteLink implements Repository: it removes a link of a visible ticket
+// whose target is visible and that the caller may delete (restrictive
+// DELETE policy of ticket_link), with the event ticket.updated with change
+// unlink; any other link is ErrNotFound.
+func (r *PGRepository) DeleteLink(ctx context.Context, orgID, ticketID, linkID string) error {
+	if !api.IsUUID(ticketID) || !api.IsUUID(linkID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		clientID, siteID, err := visibleTicketScope(ctx, tx, orgID, ticketID)
+		if err != nil {
+			return err
+		}
+		ev := &ticketEvent{ID: ticketID, ClientID: clientID, SiteID: siteID, Change: changeUnlink, LinkID: linkID}
+		err = tx.QueryRow(ctx, `DELETE FROM ticket_link WHERE id = $1 AND ticket_id = $2 AND organization_id = $3 AND `+linkVisible+`
+			RETURNING entity_type, COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id)::text`,
+			linkID, ticketID, orgID).Scan(&ev.EntityType, &ev.EntityID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("delete ticket link: %w", err)
+		}
+		return r.recordEvent(ctx, tx, orgID, ev)
+	})
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
 
-// scanTicket reads the columns of ticketSelectColumns, followed by extra
-// columns into extra.
-func scanTicket(scanner scanner, extra ...any) (*Ticket, error) {
+// scanTicket reads the columns of ticketSelectColumns.
+func scanTicket(scanner scanner) (*Ticket, error) {
 	item := &Ticket{}
 	var dueDate sql.NullTime
 	var resolvedAt sql.NullTime
@@ -608,8 +898,10 @@ func scanTicket(scanner scanner, extra ...any) (*Ticket, error) {
 		&item.Tags,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.ClientID,
+		&item.SiteID,
 	}
-	if err := scanner.Scan(append(dest, extra...)...); err != nil {
+	if err := scanner.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if item.Tags == nil {

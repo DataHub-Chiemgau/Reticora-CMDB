@@ -262,9 +262,21 @@ type DocumentScannedData struct {
 }
 
 // ImportCompletedData is the data of import.completed, the import run
-// (WP-302).
+// (WP-775): its profile, entity and mode, whether it was a dry run, the
+// counters of its rows and the user who started it (absent for a run
+// without a user, e.g. of an API key acting as a service account).
 type ImportCompletedData struct {
-	ID string `json:"id"`
+	ID          string `json:"id"`
+	ProfileID   string `json:"profile_id"`
+	Entity      string `json:"entity"`
+	Mode        string `json:"mode"`
+	DryRun      bool   `json:"dry_run"`
+	Total       int    `json:"total"`
+	Created     int    `json:"created"`
+	Updated     int    `json:"updated"`
+	Skipped     int    `json:"skipped"`
+	Failed      int    `json:"failed"`
+	InitiatedBy string `json:"initiated_by,omitempty"`
 }
 
 // Payloads assigns every phase 2 type the frame of its data.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -295,6 +296,34 @@ func (r *indexingRepository) MergeVictim(ctx context.Context, orgID, mergeID str
 		return "", ErrMergeUnsupported
 	}
 	return reader.MergeVictim(ctx, orgID, mergeID)
+}
+
+// ActionRefs forwards the read of the action grants (WP-728); a wrapped
+// repository without it reads the visible CIs, a missing one is
+// ErrNotFound (fail-closed, as Service.CheckAction).
+func (r *indexingRepository) ActionRefs(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	if reader, ok := r.Repository.(actionRefReader); ok {
+		return reader.ActionRefs(ctx, orgID, ids)
+	}
+	nodes := make([]Node, 0, len(ids))
+	for _, id := range ids {
+		item, err := r.GetByID(ctx, orgID, id)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, NodeOf(item))
+	}
+	return nodes, nil
+}
+
+// UnmergeActionRefs forwards the read of the action grants of an unmerge
+// (WP-728).
+func (r *indexingRepository) UnmergeActionRefs(ctx context.Context, orgID, victimID string) ([]Node, error) {
+	reader, ok := r.Repository.(actionRefReader)
+	if !ok {
+		return nil, permission.ErrNoActionTarget
+	}
+	return reader.UnmergeActionRefs(ctx, orgID, victimID)
 }
 
 // MergedInto forwards the tombstone lookup (CI-12).

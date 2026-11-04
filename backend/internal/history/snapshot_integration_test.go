@@ -58,6 +58,8 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 	jobSvc := jobs.NewService(jobs.NewPGRepository(f.App))
 	jobSvc.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 3, Timeout: 15 * time.Minute, Cancellable: true})
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()))).RegisterRoutes(mux)
 	asset.NewHandler(asset.NewPGRepository(f.App)).RegisterRoutes(mux)
 	history.NewHandler(history.NewPGRepository(f.App)).WithJobs(jobSvc).RegisterRoutes(mux)

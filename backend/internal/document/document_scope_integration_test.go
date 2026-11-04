@@ -59,8 +59,8 @@ func TestDocumentRepositoryClientScope(t *testing.T) {
 	if _, err = repo.GetByID(ctx, f.OrgA, foreignDoc.ID); err == nil {
 		t.Fatal("client-1 principal read a document of a client-2 CI")
 	}
-	if docs, linkErr := repo.GetLinksForEntity(ctx, f.OrgA, "ci", foreignCI); linkErr != nil || len(docs) != 0 {
-		t.Fatalf("client-1 documents of client-2 CI: %+v err=%v, want none", docs, linkErr)
+	if docs, linked, linkErr := repo.GetLinksForEntity(ctx, f.OrgA, "ci", foreignCI, api.PaginationParams{Limit: 100}); linkErr != nil || len(docs) != 0 || linked != 0 {
+		t.Fatalf("client-1 documents of client-2 CI: %d %+v err=%v, want none", linked, docs, linkErr)
 	}
 	if err = repo.LinkDocument(ctx, &document.DocumentLink{OrganizationID: f.OrgA, DocumentID: ownDoc.ID, EntityType: "ci", EntityID: foreignCI}); err == nil {
 		t.Fatal("client-1 principal linked a document to a client-2 CI")

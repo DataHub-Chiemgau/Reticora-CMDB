@@ -163,7 +163,9 @@ func TestHistoryAccessByRole(t *testing.T) {
 	const route = "/api/v1/history/{entityType}/{id}"
 	r := chi.NewRouter()
 	h := history.NewHandler(history.NewPGRepository(f.App))
-	r.With(server.AuthorizeRoute(http.MethodGet, route)).Get(route, h.List)
+	// The field policy source behind the route permission, as in the
+	// server router (WP-727 projects the CI history).
+	r.With(server.AuthorizeRoute(http.MethodGet, route), fieldPolicySource()).Get(route, h.List)
 	clientCtx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
 	get := func(keys []string, path string) (*httptest.ResponseRecorder, history.ListResponse) {
 		t.Helper()

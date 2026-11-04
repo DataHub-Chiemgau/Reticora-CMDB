@@ -726,10 +726,11 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		"collector_enrollment_code_site_fkey": true,
 	}
 	// Foreign keys that follow a delete: the specialist row goes with its
-	// location row; a desk loses its room and a review item its site.
+	// location row; a desk loses its room and a review item its site; the
+	// object link of a ticket goes with its location (WP-764).
 	follow := map[string]string{
 		"site_location_fkey": "c", "building_location_fkey": "c", "room_location_fkey": "c", "rack_location_fkey": "c",
-		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n",
+		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n", "ticket_link_location_fkey": "c",
 	}
 	tree := []string{"location", "building", "room", "rack"}
 	seen := 0

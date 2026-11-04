@@ -8,6 +8,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -89,8 +90,22 @@ func (s *Service) ListInstanceAttributes(ctx context.Context, orgID, ciID string
 	if err != nil {
 		return nil, err
 	}
+	// The entries of instance attributes the principal may not read are
+	// left out (_instance.<key>, RBA-07, WP-265).
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, len(defs))
+	for i := range defs {
+		keys[i] = defs[i].Name
+	}
+	ref, instance := ciRef(item), permission.WithInstanceKeys(keys)
 	out := make([]InstanceAttribute, 0, len(defs))
 	for i := range defs {
+		if !permission.Readable(policy, permission.KindCI, item.CITypeID, ref, "attributes."+defs[i].Name, instance) {
+			continue
+		}
 		out = append(out, InstanceAttribute{Key: defs[i].Name, Definition: defs[i], Value: item.Attributes[defs[i].Name]})
 	}
 	return out, nil
@@ -102,9 +117,13 @@ func (s *Service) ListInstanceAttributes(ctx context.Context, orgID, ciID string
 // definition and stored under _instance. A key without a definition or a
 // null value is a *ValidationError.
 func (s *Service) SetInstanceAttribute(ctx context.Context, orgID, ciID, key string, value any, ifMatch *int64, author string) (*InstanceAttribute, *Item, error) {
+	ctx = permission.WithAction(ctx, identity.PermCIInstanceAttributeManage)
 	before, err := s.repo.GetByID(ctx, orgID, ciID)
 	if err != nil {
 		return nil, nil, err
+	}
+	if actionErr := checkInstanceAction(ctx, before); actionErr != nil {
+		return nil, nil, actionErr
 	}
 	def, err := s.instanceField(ctx, orgID, ciID, key)
 	if err != nil {
@@ -128,8 +147,13 @@ func (s *Service) SetInstanceAttribute(ctx context.Context, orgID, ciID, key str
 // from _instance of a CI through Update; the definition stays. A key
 // without a definition is a *ValidationError.
 func (s *Service) DeleteInstanceAttribute(ctx context.Context, orgID, ciID, key string, ifMatch *int64, author string) (*Item, error) {
-	if _, err := s.repo.GetByID(ctx, orgID, ciID); err != nil {
+	ctx = permission.WithAction(ctx, identity.PermCIInstanceAttributeManage)
+	before, err := s.repo.GetByID(ctx, orgID, ciID)
+	if err != nil {
 		return nil, err
+	}
+	if actionErr := checkInstanceAction(ctx, before); actionErr != nil {
+		return nil, actionErr
 	}
 	if _, err := s.instanceField(ctx, orgID, ciID, key); err != nil {
 		return nil, err
@@ -139,6 +163,16 @@ func (s *Service) DeleteInstanceAttribute(ctx context.Context, orgID, ciID, key 
 		IfMatch:    ifMatch,
 		Manual:     &ManualChange{Author: author},
 	})
+}
+
+// checkInstanceAction checks the action of the instance attribute routes
+// (ci_instance_attribute:manage, not ci:write; WP-728) on the CI before
+// its key is validated; Update checks it again with the action of ctx.
+func checkInstanceAction(ctx context.Context, item *Item) error {
+	return permission.CheckActionOn(ctx, permission.KindCI, permission.ActionFrom(ctx),
+		func(context.Context) ([]permission.ActionTarget, error) {
+			return []permission.ActionTarget{ciTarget(item)}, nil
+		})
 }
 
 // replacePatch is the merge patch member that replaces old with value
@@ -279,7 +313,7 @@ func instanceIfMatch(w http.ResponseWriter, r *http.Request) (*int64, bool) {
 // PATCH /cis/{id} does: 412/409, 400/409/422 with violations, 403, 404.
 func writeInstanceError(w http.ResponseWriter, err error) {
 	switch {
-	case writeConcurrencyError(w, err), writeValidationError(w, err):
+	case writeFieldForbidden(w, err), writeConcurrencyError(w, err), writeValidationError(w, err):
 	case errors.Is(err, ErrInstanceAttributeForbidden):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", instanceForbiddenDetail)
 	case errors.Is(err, ErrNotFound):

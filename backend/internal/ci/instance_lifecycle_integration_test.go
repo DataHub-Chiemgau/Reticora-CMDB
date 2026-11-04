@@ -44,6 +44,8 @@ func newLifecycleEnv(t *testing.T, tag string) *lifecycleEnv {
 	repo := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
 	types := citype.NewPGRepository(f.App)
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(ci.NewService(repo).WithFieldResolver(types)).RegisterRoutes(mux)
 	override.NewHandler(override.NewPGRepository(f.App)).RegisterRoutes(mux)
 	return &lifecycleEnv{t: t, f: f, manager: manager, repo: repo, types: types, mux: mux}

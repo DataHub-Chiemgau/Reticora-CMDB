@@ -1,6 +1,9 @@
 package export
 
 import (
+	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -8,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -112,7 +116,12 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	api.WriteJSON(w, http.StatusAccepted, h.toResponse(r, job))
+	resp, err := h.toResponse(r, job)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusAccepted, resp)
 }
 
 // ListJobs handles GET /api/v1/export/jobs and returns the caller's own
@@ -133,7 +142,12 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 
 	data := make([]jobResponse, 0, len(jobs))
 	for i := range jobs {
-		data = append(data, h.toResponse(r, &jobs[i]))
+		resp, rerr := h.toResponse(r, &jobs[i])
+		if rerr != nil {
+			api.WriteRepoError(w, rerr)
+			return
+		}
+		data = append(data, resp)
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[jobResponse]{
 		Data:    data,
@@ -158,23 +172,76 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "export job not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, h.toResponse(r, job))
+	resp, err := h.toResponse(r, job)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-// toResponse attaches a fresh signed URL to completed, unexpired jobs. An
-// expired or failed job never exposes its object key as a URL.
-func (h *JobHandler) toResponse(r *http.Request, job *Job) jobResponse {
-	resp := jobResponse{Job: *job, Manifest: ManifestFor(job.Format)}
+// toResponse attaches the manifest and, to completed, unexpired jobs, a
+// fresh signed URL. An expired or failed job never exposes its object key
+// as a URL. The manifest of a completed job is the one its worker stored
+// with the file (WP-729); any other job shows the preview with the field
+// permissions of the caller (GetJob and ListJobs return its own jobs
+// only). A policy that cannot be resolved is an error (fail-closed).
+func (h *JobHandler) toResponse(r *http.Request, job *Job) (jobResponse, error) {
+	manifest, err := h.manifest(r, job)
+	if err != nil {
+		return jobResponse{}, err
+	}
+	resp := jobResponse{Job: *job, Manifest: manifest}
 	if job.Status != JobStatusCompleted || job.ObjectKey == "" || h.blobs == nil {
-		return resp
+		return resp, nil
 	}
 	if job.ExpiresAt != nil && !job.ExpiresAt.After(time.Now().UTC()) {
-		return resp
+		return resp, nil
 	}
 	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, job.ObjectKey)
 	if err != nil {
-		return resp
+		return resp, nil
 	}
 	resp.DownloadURL = url
-	return resp
+	return resp, nil
+}
+
+// manifest returns the stored manifest of a completed job or the preview
+// for the caller. A completed job without a readable manifest (rendered
+// before WP-729) shows the preview as well.
+func (h *JobHandler) manifest(r *http.Request, job *Job) (Manifest, error) {
+	if job.Status == JobStatusCompleted && job.ObjectKey != "" && h.blobs != nil {
+		if m, ok := h.storedManifest(r.Context(), job); ok {
+			return m, nil
+		}
+	}
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		return Manifest{}, err
+	}
+	return ManifestForPolicy(job.Format, policy, typeFilter(job.Filters.CITypeID)), nil
+}
+
+// maxManifestBytes bounds the stored manifest read back.
+const maxManifestBytes = 1 << 20
+
+// storedManifest reads the manifest the worker stored next to the object.
+func (h *JobHandler) storedManifest(ctx context.Context, job *Job) (Manifest, bool) {
+	rc, err := h.blobs.Get(ctx, h.bucket, ManifestKey(job))
+	if err != nil {
+		return Manifest{}, false
+	}
+	defer func() { _ = rc.Close() }()
+	var m Manifest
+	if derr := json.NewDecoder(io.LimitReader(rc, maxManifestBytes)).Decode(&m); derr != nil || m.Format != job.Format {
+		slog.WarnContext(ctx, "read export manifest", "job", job.ID, "error", derr)
+		return Manifest{}, false
+	}
+	if m.Fields == nil {
+		m.Fields = []string{}
+	}
+	if m.Omitted == nil {
+		m.Omitted = []OmittedField{}
+	}
+	return m, true
 }

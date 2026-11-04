@@ -42,6 +42,7 @@ export const A11Y_MARKERS = {
   location: 'a11y-location-site',
   savedView: 'a11y-saved-view',
   ciType: 'a11y-org-type',
+  ciTypeChild: 'a11y-child-type',
   consumable: 'a11y-toner',
   order: 'a11y-order-title',
   maintenance: 'a11y-maintenance-window',
@@ -262,6 +263,106 @@ const compliance = {
 
 const fixed = (body: unknown) => (): Reply => ({ body });
 
+// The type hierarchy of the CI type administration (UI-11, WP-313): the
+// organization type M.ciType is the parent of M.ciTypeChild (WP-248). The
+// child carries attributes in the index states none, queued and failed
+// (WP-796), inherits one of the parent and sees one global attribute.
+const ORG_TYPE = CI_TYPES.find((type) => !type.is_system)!;
+const CHILD_TYPE = {
+  ...ORG_TYPE,
+  id: '5e1b0c3a-7d2f-4a10-9c01-0000000000a2',
+  key: 'a11y_child',
+  name: M.ciTypeChild,
+  display_name: { de: M.ciTypeChild, en: M.ciTypeChild },
+  category: 'network',
+  parent_type_id: ORG_TYPE.id,
+};
+
+function indexStatus(state: string, extra: Record<string, unknown> = {}) {
+  return {
+    state,
+    index_name: 'idx_attr_a11y',
+    valid: state === 'succeeded',
+    attempts: 0,
+    max_attempts: 3,
+    ...extra,
+  };
+}
+
+function attributeDefinition(id: string, key: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    organization_id: ORG,
+    ci_type_id: CHILD_TYPE.id,
+    scope: 'type',
+    key,
+    display_name: { de: key, en: key },
+    data_type: 'text',
+    required: false,
+    multi_value: false,
+    searchable: false,
+    unique: false,
+    unique_scope: 'org',
+    inheritable: true,
+    order: 0,
+    is_system: false,
+    applies_to: 'all',
+    applies_to_categories: [],
+    applies_to_type_ids: [],
+    created_at: AT,
+    updated_at: AT,
+    index_status: indexStatus('none'),
+    ...extra,
+  };
+}
+
+const GLOBAL_ATTRIBUTE = attributeDefinition(
+  'ad000000-0000-4000-8000-0000000000g1',
+  'a11y_cost_center',
+  {
+    ci_type_id: undefined,
+    scope: 'global',
+    searchable: true,
+    applies_to: 'categories',
+    applies_to_categories: ['network'],
+    index_status: indexStatus('succeeded'),
+  },
+);
+
+const ATTRIBUTES_BY_TYPE: Record<string, unknown[]> = {
+  [CHILD_TYPE.id]: [
+    attributeDefinition('ad000000-0000-4000-8000-000000000001', 'a11y_plain', { required: true }),
+    attributeDefinition('ad000000-0000-4000-8000-000000000002', 'a11y_serial', {
+      searchable: true,
+      index_status: indexStatus('queued', { attempts: 1, error: 'lock timeout' }),
+    }),
+    attributeDefinition('ad000000-0000-4000-8000-000000000003', 'a11y_inventory', {
+      unique: true,
+      index_status: indexStatus('failed', { error: 'duplicate values' }),
+    }),
+  ],
+  [ORG_TYPE.id]: [
+    attributeDefinition('ad000000-0000-4000-8000-000000000004', 'a11y_vendor', {
+      ci_type_id: ORG_TYPE.id,
+      index_status: indexStatus('none'),
+    }),
+  ],
+};
+
+/** GET /attribute-definitions by its filters (applicable_to, ci_type_id, scope). */
+function attributeDefinitions(_request: Request, url: URL): Reply {
+  const applicable = url.searchParams.get('applicable_to');
+  const typeId = url.searchParams.get('ci_type_id');
+  const data = applicable
+    ? [...(ATTRIBUTES_BY_TYPE[applicable] ?? []), GLOBAL_ATTRIBUTE]
+    : typeId
+      ? (ATTRIBUTES_BY_TYPE[typeId] ?? [])
+      : url.searchParams.get('scope') === 'global'
+        ? [GLOBAL_ATTRIBUTE]
+        : [];
+  return { body: { data } };
+}
+
 /**
  * A11Y_HANDLERS answer every read of the pages with data. Paths are matched
  * below /api/v1 without the query (support/backend.ts).
@@ -333,6 +434,7 @@ export const A11Y_HANDLERS: Handler[] = [
         'discovery:read',
         'review:resolve',
         'saved_view:write',
+        'ci_attribute:manage',
         'ticket:write',
         'user:manage',
         'user:read',
@@ -978,16 +1080,36 @@ export const A11Y_HANDLERS: Handler[] = [
   {
     path: '/ci-types',
     reply: fixed(
-      list(
-        CI_TYPES.map((type) =>
+      list([
+        ...CI_TYPES.map((type) =>
           type.is_system
             ? type
             : { ...type, name: M.ciType, display_name: { de: M.ciType, en: M.ciType } },
         ),
-      ),
+        CHILD_TYPE,
+      ]),
     ),
   },
-  { path: '/attribute-definitions', reply: fixed({ data: [] }) },
+  { path: '/attribute-definitions', reply: attributeDefinitions },
+  // The sensitive fields of WP-726: one attribute of the child is marked.
+  {
+    path: '/field-permissions/sensitive-fields',
+    reply: fixed({
+      data: [
+        {
+          id: 'sf000000-0000-4000-8000-000000000001',
+          organization_id: ORG,
+          object_kind: 'ci',
+          ci_type_id: CHILD_TYPE.id,
+          field_key: 'attributes.a11y_serial',
+          created_by: USER,
+          created_at: AT,
+        },
+      ],
+      limit: 200,
+      has_more: false,
+    }),
+  },
   // Administration: users, teams, roles, permissions.
   {
     path: '/users',

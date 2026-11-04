@@ -35,6 +35,8 @@ func TestBulkAgainstPostgres(t *testing.T) {
 	jobSvc := jobs.NewService(jobs.NewPGRepository(f.App))
 	jobSvc.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1})
 	mux := chi.NewRouter()
+	// The field policy source of the server router (WP-265).
+	mux.Use(fieldPolicySource())
 	ci.NewHandler(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkJobs(jobSvc)).RegisterRoutes(mux)
 	post := func(req ci.BulkRequest) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(req)
@@ -425,7 +427,10 @@ func TestBulkJobOnQueueRunsWithCreatorScope(t *testing.T) {
 	ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User, ClientID: f.Client1})
 	repo := jobs.NewPGRepository(f.App)
 	queue := jobs.NewQueue(jobs.NewService(repo), nil)
-	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkQueue(queue)
+	// The creator's policy as the server resolves it (WP-728); here the
+	// policy without grants.
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())).WithBulkQueue(queue).
+		WithCreatorPolicy(phase1CreatorPolicy)
 	queue.Handle(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1}, svc.RunBulkJob)
 
 	var ids []string

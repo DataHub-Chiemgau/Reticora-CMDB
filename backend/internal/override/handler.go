@@ -7,6 +7,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -20,6 +21,115 @@ type EventDispatcher interface {
 type Handler struct {
 	repo       Repository
 	dispatcher EventDispatcher
+	cis        CILookup
+}
+
+// CIScope is the type and scope of a CI and the keys of its instance
+// attributes: the field permissions of its overrides follow them (RBA-07,
+// WP-265).
+type CIScope struct {
+	TypeID       string
+	ClientID     string
+	SiteID       string
+	InstanceKeys []string
+}
+
+// CILookup reads the CIScope of a visible CI; ErrNotFound when the CI is
+// unknown, not visible or deleted.
+type CILookup interface {
+	FieldScope(ctx context.Context, orgID, ciID string) (*CIScope, error)
+}
+
+// WithCIs sets the CI lookup of the field permissions. Without it a
+// principal whose policy restricts CIs sees no field value and writes no
+// override (fail-closed).
+func (h *Handler) WithCIs(lookup CILookup) *Handler {
+	h.cis = lookup
+	return h
+}
+
+// fieldAccess is the field policy of a request on one CI.
+type fieldAccess struct {
+	policy *permission.FieldPolicy
+	scope  *CIScope
+}
+
+// restricted reports whether the policy restricts CI fields.
+func (a *fieldAccess) restricted() bool { return a.policy.Restricted(permission.KindCI) }
+
+// options name the instance attributes of the CI: with them the field
+// name maps to its key (permission.CIFieldPath): a typed column is
+// core.<name>, an instance attribute of the CI _instance.<name>, anything
+// else attributes.<name>; name and status are structural.
+func (a *fieldAccess) options() []permission.ProjectOption {
+	if a.scope == nil {
+		return nil
+	}
+	return []permission.ProjectOption{permission.WithInstanceKeys(a.scope.InstanceKeys)}
+}
+
+func (a *fieldAccess) ref() (typeID string, ref permission.ObjectRef) {
+	if a.scope == nil {
+		return "", permission.ObjectRef{}
+	}
+	return a.scope.TypeID, permission.ObjectRef{ClientID: a.scope.ClientID, SiteID: a.scope.SiteID}
+}
+
+// readable reports whether the principal may read the field.
+func (a *fieldAccess) readable(ciID, name string) bool {
+	if !a.restricted() {
+		return true
+	}
+	if a.scope == nil {
+		_, structural, _ := permission.FieldKeyOf(permission.KindCI, permission.CIFieldPath(name))
+		return structural
+	}
+	typeID, ref := a.ref()
+	ref.ID = ciID
+	return permission.Readable(a.policy, permission.KindCI, typeID, ref, permission.CIFieldPath(name), a.options()...)
+}
+
+// checkWrite refuses an override of a field the principal may not write
+// (*api.FieldForbiddenError).
+func (a *fieldAccess) checkWrite(ciID, name string) error {
+	if !a.restricted() {
+		return nil
+	}
+	path := permission.CIFieldPath(name)
+	if a.scope == nil {
+		if _, structural, _ := permission.FieldKeyOf(permission.KindCI, path); structural {
+			return nil
+		}
+		return &api.FieldForbiddenError{Fields: []string{path}}
+	}
+	typeID, ref := a.ref()
+	ref.ID = ciID
+	return permission.CheckWrite(a.policy, permission.KindCI, typeID, ref, []string{path}, a.options()...)
+}
+
+// access resolves the field policy of the request and, when it restricts
+// CIs, the scope of the CI. It answers the failure and reports false: 404
+// for a CI that is not visible, 500 otherwise (fail-closed).
+func (h *Handler) access(w http.ResponseWriter, r *http.Request, orgID, ciID string) (*fieldAccess, bool) {
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return nil, false
+	}
+	a := &fieldAccess{policy: policy}
+	if !a.restricted() || h.cis == nil {
+		return a, true
+	}
+	a.scope, err = h.cis.FieldScope(r.Context(), orgID, ciID)
+	if errors.Is(err, ErrNotFound) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return nil, false
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return nil, false
+	}
+	return a, true
 }
 
 // NewHandler creates a new override handler.
@@ -56,7 +166,8 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	items, err := h.repo.ListForCI(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	ciID := chi.URLParam(r, "id")
+	items, err := h.repo.ListForCI(r.Context(), t.OrganizationID, ciID)
 	if errors.Is(err, ErrNotFound) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
@@ -64,6 +175,21 @@ func (h *Handler) ListForCI(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
+	}
+	// Entries of fields the principal may not read are left out (RBA-07,
+	// WP-265).
+	access, ok := h.access(w, r, t.OrganizationID, ciID)
+	if !ok {
+		return
+	}
+	if access.restricted() {
+		visible := make([]FieldValue, 0, len(items))
+		for i := range items {
+			if access.readable(ciID, items[i].FieldName) {
+				visible = append(visible, items[i])
+			}
+		}
+		items = visible
 	}
 	api.WriteJSON(w, http.StatusOK, api.CompleteList(items))
 }
@@ -92,6 +218,11 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if refuseReservedName(w, r) {
+		return
+	}
+	// An override writes the field: it needs the write level of the field
+	// (RBA-07, WP-265), before the body is validated.
+	if !h.allowWrite(w, r, t.OrganizationID) {
 		return
 	}
 	var req SetOverrideRequest
@@ -146,6 +277,9 @@ func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	if refuseReservedName(w, r) {
 		return
 	}
+	if !h.allowWrite(w, r, t.OrganizationID) {
+		return
+	}
 	fv, err := h.repo.ClearOverride(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), chi.URLParam(r, "name"))
 	if errors.Is(err, ErrNotFound) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "field value not found")
@@ -167,6 +301,50 @@ func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	}
 	h.dispatch(r, t.OrganizationID, "override.changed", fv)
 	writeOverride(w, fv)
+}
+
+// allowWrite answers 403 when the action grants refuse override:write on
+// the CI (with the action, WP-728) or the principal may not write the field
+// of the path (with the field, WP-265) and reports whether the override
+// may go on.
+func (h *Handler) allowWrite(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	ciID := chi.URLParam(r, "id")
+	access, ok := h.access(w, r, orgID, ciID)
+	if !ok {
+		return false
+	}
+	actionErr := permission.CheckActionOn(r.Context(), permission.KindCI, identity.PermOverrideWrite,
+		func(ctx context.Context) ([]permission.ActionTarget, error) {
+			scope := access.scope
+			if scope == nil {
+				if h.cis == nil {
+					return nil, permission.ErrNoActionTarget
+				}
+				read, readErr := h.cis.FieldScope(ctx, orgID, ciID)
+				if readErr != nil {
+					return nil, readErr
+				}
+				scope = read
+			}
+			return []permission.ActionTarget{{TypeID: scope.TypeID,
+				Ref: permission.ObjectRef{ID: ciID, ClientID: scope.ClientID, SiteID: scope.SiteID}}}, nil
+		})
+	switch {
+	case actionErr == nil:
+	case api.WriteFieldError(w, actionErr):
+		return false
+	case errors.Is(actionErr, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
+		return false
+	default:
+		api.WriteRepoError(w, actionErr)
+		return false
+	}
+	if err := access.checkWrite(ciID, chi.URLParam(r, "name")); err != nil {
+		api.WriteFieldError(w, err)
+		return false
+	}
+	return true
 }
 
 // writeOverride answers an override change with the field value and the

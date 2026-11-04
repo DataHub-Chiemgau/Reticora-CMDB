@@ -78,7 +78,11 @@ type Repository interface {
 	// and may delete; otherwise it fails with api.ErrNotFound (WP-267).
 	UnlinkDocument(ctx context.Context, orgID, docID, linkID string) error
 	GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error)
-	GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string) ([]Document, error)
+	// GetLinksForEntity returns a page of the documents linked to an
+	// entity whose link the caller sees, newest first on (created_at, id)
+	// with at most one more than the limit (api.NewestFirstSQL), and their
+	// number; a cursor of another order is api.ErrInvalidCursor (WP-765).
+	GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Document, int, error)
 }
 
 // ErrQuarantined is the refusal of a new link to a document whose current
@@ -546,17 +550,25 @@ func (r *MemoryRepository) GetLinks(_ context.Context, orgID, docID string) ([]D
 	return result, nil
 }
 
-func (r *MemoryRepository) GetLinksForEntity(_ context.Context, orgID, entityType, entityID string) ([]Document, error) {
+// GetLinksForEntity pages the linked documents like PGRepository
+// (api.NewestFirstSlice); a document linked twice counts once.
+func (r *MemoryRepository) GetLinksForEntity(_ context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Document, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var result []Document
+	seen := map[string]bool{}
 	for _, l := range r.links {
-		if l.OrganizationID == orgID && l.EntityType == entityType && l.EntityID == entityID {
+		if l.OrganizationID == orgID && l.EntityType == entityType && l.EntityID == entityID && !seen[l.DocumentID] {
 			if d, ok := r.live(orgID, l.DocumentID); ok {
+				seen[l.DocumentID] = true
 				result = append(result, *r.view(d))
 			}
 		}
 	}
-	return result, nil
+	return api.NewestFirstSlice(result, page, documentPosition)
 }
+
+// documentPosition is the (created_at, id) position of a document in a
+// newest-first list.
+func documentPosition(d *Document) (createdAt time.Time, id string) { return d.CreatedAt, d.ID }

@@ -1,6 +1,7 @@
 package citype
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -21,16 +22,59 @@ func (h *Handler) registerFormRoutes(r chi.Router) {
 	r.Get("/api/v1/ci-types/{id}/form", h.GetCITypeForm)
 }
 
-// formResolver returns the resolver over the repository or answers 503
+// formSource returns the form source of the repository or answers 503
 // (in-memory mode has no layouts and no rule catalog, like
 // attributeStore).
-func (h *Handler) formResolver(w http.ResponseWriter) (*FormResolver, bool) {
+func (h *Handler) formSource(w http.ResponseWriter) (FormSource, bool) {
 	source, ok := h.repo.(FormSource)
 	if !ok {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "resolved forms need the database")
 		return nil, false
 	}
-	return NewFormResolver(source, nil), true
+	return source, true
+}
+
+// FormPolicySubject names the form a field policy is made for (WP-727):
+// a stored CI (CIID) or a new CI of a type (CITypeID); PreviewRoleID is
+// the role of a preview, whose policy then applies instead of the
+// caller's.
+type FormPolicySubject struct {
+	CIID          string
+	CITypeID      string
+	PreviewRoleID string
+}
+
+// FormPolicyFactory makes the FieldPolicy of a resolved form from the field
+// permissions (RBA-07, E-43, WP-727): the policy of the caller of ctx (or
+// of the preview role) for the type and scope of the CI. A field it does
+// not let read is left out of the layout, one it does not let change is
+// read only. citype does not know the field permissions; the server
+// builds the factory, and the BFF field ciForm (WP-311) takes the same.
+// An error answers the form with 500 (fail-closed); a CI the factory
+// does not find is ErrFormCINotFound.
+type FormPolicyFactory func(ctx context.Context, orgID string, subject FormPolicySubject) (FieldPolicy, error)
+
+// WithFormPolicy sets the factory of the field policy of the resolved
+// forms; without it every field is readable and editable (NoopFieldPolicy).
+func (h *Handler) WithFormPolicy(f FormPolicyFactory) *Handler {
+	h.formPolicy = f
+	return h
+}
+
+// formFieldPolicy returns the field policy of the form of req: the
+// policy of the preview role with preview and role_id, otherwise the
+// caller's. A CI or role that is no UUID gets NoopFieldPolicy: the
+// resolution answers 404 before it arranges a field.
+func (h *Handler) formFieldPolicy(ctx context.Context, orgID string, req *FormRequest) (FieldPolicy, error) {
+	if h.formPolicy == nil || (req.CIID != "" && !api.IsUUID(req.CIID)) ||
+		(req.CIID == "" && !api.IsUUID(req.CITypeID)) || (req.Preview && req.RoleID != "" && !api.IsUUID(req.RoleID)) {
+		return NoopFieldPolicy{}, nil
+	}
+	subject := FormPolicySubject{CIID: req.CIID, CITypeID: req.CITypeID}
+	if req.Preview {
+		subject.PreviewRoleID = req.RoleID
+	}
+	return h.formPolicy(ctx, orgID, subject)
 }
 
 // GetCIForm handles GET /api/v1/cis/{id}/form (?preview=, role_id=,
@@ -87,22 +131,32 @@ func (h *Handler) serveForm(w http.ResponseWriter, r *http.Request, req FormRequ
 			return
 		}
 	}
-	resolver, ok := h.formResolver(w)
+	source, ok := h.formSource(w)
 	if !ok {
 		return
 	}
-	if withDraft {
-		drafts, _ := DraftFormsFromContext(r.Context())
-		resolver.WithDraft(drafts, draftID)
+	// The field policy (WP-727) follows the resolved request: a role
+	// other than the caller's is resolved as a preview of that role.
+	resolve := func(req FormRequest) (*ResolvedForm, error) {
+		policy, perr := h.formFieldPolicy(r.Context(), t.OrganizationID, &req)
+		if perr != nil {
+			return nil, perr
+		}
+		resolver := NewFormResolver(source, policy)
+		if withDraft {
+			drafts, _ := DraftFormsFromContext(r.Context())
+			resolver.WithDraft(drafts, draftID)
+		}
+		return resolver.ResolveForm(r.Context(), t.OrganizationID, req)
 	}
-	form, err := resolver.ResolveForm(r.Context(), t.OrganizationID, req)
+	form, err := resolve(req)
 	if errors.Is(err, ErrFormRoleNotOwn) {
 		if !manage {
 			api.WriteError(w, http.StatusForbidden, "Forbidden", "another role than the caller's requires citype:manage")
 			return
 		}
 		req.Preview = true
-		form, err = resolver.ResolveForm(r.Context(), t.OrganizationID, req)
+		form, err = resolve(req)
 	}
 	if err != nil {
 		writeFormError(w, err)

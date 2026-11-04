@@ -102,6 +102,11 @@ var matrixOverrides = map[string]map[string]string{
 	"object_grant": {"grantee_role_id": "@uuid"},
 	// The i18n check of the tag catalog needs a de/en map (WP-281).
 	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
+	// The currency of a contract is an ISO 4217 code (WP-269).
+	"contract": {"currency": "EUR"},
+	// A ticket link has exactly one target column, the one of its
+	// entity_type (ticket_link_target_check, WP-764).
+	"ticket_link": {"entity_type": "ci", "ci_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)
@@ -370,6 +375,8 @@ type matrixParent struct {
 	id, org string
 	dims    map[string]string // client and site of a CI
 	teams   []string          // teams of a user
+	// searchDoc is the search document of a CI (search_document_field).
+	searchDoc string
 }
 
 // inheritedRow is one seeded row of an inherited table. It takes its scope
@@ -484,7 +491,12 @@ func seedMatrixWorld(ctx context.Context, t *testing.T, pool *pgxpool.Pool, ids 
 		id := matrixUUID()
 		exec(`INSERT INTO ci (id, organization_id, client_id, location_id, ci_type_id, name, status)
 			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $6, 'active')`, id, c[0], c[1], c[2], w.ids.ciType, "matrix-"+id[:8])
-		w.parents[key] = matrixParent{id: id, org: c[0], dims: map[string]string{"client": c[1], "site": c[2]}}
+		var doc string
+		if err := tx.QueryRow(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title) VALUES ($1, 'ci', $2, 'matrix')
+			RETURNING id::text`, c[0], id).Scan(&doc); err != nil {
+			t.Fatalf("search document of %s: %v", key, err)
+		}
+		w.parents[key] = matrixParent{id: id, org: c[0], dims: map[string]string{"client": c[1], "site": c[2]}, searchDoc: doc}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit matrix parents: %v", err)
@@ -617,9 +629,51 @@ func inheritedModels(ids matrixIDs) map[string]*inheritedModel {
 			}
 			return id, nil
 		}),
-		"document_version":    documentVersionModel(ids),
-		"review_item":         reviewItemModel(ids),
-		"training_assignment": trainingAssignmentModel(ids),
+		"document_version":      documentVersionModel(ids),
+		"search_document_field": searchFieldModel(ids),
+		"review_item":           reviewItemModel(ids),
+		"training_assignment":   trainingAssignmentModel(ids),
+	}
+}
+
+// searchFieldModel: a field row of the full-text index is read, changed
+// and deleted exactly when its search document is visible (migration
+// 000228, WP-266); the document of a CI carries the client and site of the
+// CI (000067). WITH CHECK checks the organization only: the index writes a
+// document and its field rows in one statement, whose snapshot does not
+// show the new document, so a row is accepted for every document of the
+// organization (the foreign key binds it to one). Each row belongs to the
+// committed search document of its CI; the INSERT attempts write another
+// field of it.
+func searchFieldModel(ids matrixIDs) *inheritedModel {
+	visible := func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+		return r.org == p.org && w.parentVisible(p, r.parents[0])
+	}
+	return &inheritedModel{
+		rows: []inheritedRow{
+			{name: "A/c1s1", org: ids.orgA, parents: []string{"ci c1/s1"}},
+			{name: "A/c1s3", org: ids.orgA, parents: []string{"ci c1/s3"}},
+			{name: "A/c2s2", org: ids.orgA, parents: []string{"ci c2/s2"}},
+			{name: "A/org-wide CI", org: ids.orgA, parents: []string{"org-wide ci"}},
+			{name: "B/cBsB", org: ids.orgB, parents: []string{"ci cB/sB"}},
+		},
+		insert: func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			doc := w.parents[r.parents[0]].searchDoc
+			if attempt {
+				// No RETURNING: it would check the new row against the
+				// read policy.
+				_, err := q.Exec(ctx, `INSERT INTO search_document_field (organization_id, document_id, field, content) VALUES ($1, $2, 'core.model', 'matrix')`,
+					r.org, doc)
+				return "", err
+			}
+			var id string
+			err := q.QueryRow(ctx, `INSERT INTO search_document_field (organization_id, document_id, field, content) VALUES ($1, $2, 'core.hostname', 'matrix')
+				RETURNING id::text`, r.org, doc).Scan(&id)
+			return id, err
+		},
+		read:     visible,
+		write:    visible,
+		insertOK: func(_ *matrixWorld, p *matrixPrincipal, r inheritedRow) bool { return r.org == p.org },
 	}
 }
 

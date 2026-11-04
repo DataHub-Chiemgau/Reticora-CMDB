@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -126,6 +129,17 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if lq.Q != "" {
 		filter.Search = lq.Q
 	}
+	// A filter on a field the principal cannot read in every scope is an
+	// oracle of its values: 403 with the fields, before the list and its
+	// total (RBA-07, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	if ferr := checkListFilters(policy, &filter); ferr != nil {
+		api.WriteFieldError(w, ferr)
+		return
+	}
 
 	items, counted, err := h.svc.List(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
@@ -148,6 +162,31 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	total, capped := api.CapTotal(counted)
 	next := NextCursor(items, &filter, page.Limit)
+	if permission.NeedsProjection(policy, permission.KindCI) {
+		// The projection first, then the selection: a field the principal
+		// cannot read is missing per CI, also when fields= names it.
+		data := make([]map[string]json.RawMessage, len(items))
+		for i := range items {
+			projected, perr := permission.Project(policy, permission.KindCI, items[i].CITypeID, ciRef(&items[i]), &items[i],
+				ciProjectOptions(&items[i])...)
+			if perr != nil {
+				api.WriteRepoError(w, perr)
+				return
+			}
+			data[i] = projected
+		}
+		if len(lq.Fields) > 0 {
+			selected, serr := api.SelectFields(data, lq.Fields)
+			if serr != nil {
+				api.WriteRepoError(w, serr)
+				return
+			}
+			data = selected
+		}
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{Data: data, Total: total, TotalCapped: capped,
+			Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: next})
+		return
+	}
 	if len(lq.Fields) > 0 {
 		data, perr := api.SelectFields(items, lq.Fields)
 		if perr != nil {
@@ -190,9 +229,13 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
 	w.Header().Set("ETag", api.ETag(item.Version))
 	if raw := strings.TrimSpace(r.URL.Query().Get("include")); raw != "" {
-		body, ierr := h.withIncludes(r.Context(), t.OrganizationID, item, raw)
+		body, ierr := h.withIncludes(r.Context(), t.OrganizationID, policy, item, raw)
 		if ierr != nil {
 			if !api.WriteFieldError(w, ierr) {
 				api.WriteRepoError(w, ierr)
@@ -202,20 +245,31 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, body)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, item)
+	writeCI(w, http.StatusOK, policy, item)
 }
 
 // withIncludes embeds the requested related collections into the CI
 // (API-05): include=relationships,contacts,asset. An unknown name is 422.
 // A collection the server capped is named in truncated (F-223).
-func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, raw string) (map[string]json.RawMessage, error) {
-	encoded, err := json.Marshal(item)
-	if err != nil {
-		return nil, err
-	}
+// The CI and its asset facts are projected by the field permissions, the
+// references like the attributes (RBA-07, WP-265).
+func (h *Handler) withIncludes(ctx context.Context, orgID string, policy *permission.FieldPolicy, item *Item, raw string) (map[string]json.RawMessage, error) {
+	projecting := permission.NeedsProjection(policy, permission.KindCI)
 	var body map[string]json.RawMessage
-	if uerr := json.Unmarshal(encoded, &body); uerr != nil {
-		return nil, uerr
+	var err error
+	if projecting {
+		body, err = permission.Project(policy, permission.KindCI, item.CITypeID, ciRef(item), item, ciProjectOptions(item)...)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		encoded, merr := json.Marshal(item)
+		if merr != nil {
+			return nil, merr
+		}
+		if uerr := json.Unmarshal(encoded, &body); uerr != nil {
+			return nil, uerr
+		}
 	}
 	truncated := map[string]bool{}
 	for _, name := range strings.Split(raw, ",") {
@@ -225,6 +279,12 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 		}
 		var value any
 		switch load, ok := h.includes[name]; {
+		case name == IncludeAsset && projecting:
+			// The projected asset facts of the CI, null without them.
+			if body[name] == nil {
+				body[name] = json.RawMessage("null")
+			}
+			continue
 		case name == IncludeAsset:
 			value = item.Asset
 		case ok:
@@ -234,6 +294,9 @@ func (h *Handler) withIncludes(ctx context.Context, orgID string, item *Item, ra
 			}
 			if capped {
 				truncated[name] = true
+			}
+			if refs, isRefs := value.(map[string]any); isRefs && name == IncludeReferences {
+				value = permission.ProjectAttributes(policy, item.CITypeID, ciRef(item), refs, ciProjectOptions(item)...)
 			}
 		default:
 			known := []string{IncludeAsset}
@@ -265,6 +328,16 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	// The field policy is resolved before the write (fail-closed, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	// ci:delete after the action grants on the type and scope of the
+	// deleted CI (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "no deleted CI with this id", chi.URLParam(r, "id")) {
+		return
+	}
 	item, err := h.svc.Restore(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	switch {
 	case errors.Is(err, ErrRetentionExpired):
@@ -290,7 +363,7 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", api.ETag(item.Version))
-	api.WriteJSON(w, http.StatusOK, item)
+	writeCI(w, http.StatusOK, policy, item)
 }
 
 // ChangeType handles POST /api/v1/cis/{id}/type: the manual type change
@@ -306,6 +379,20 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.CITypeID) == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "ci_type_id is required")
+		return
+	}
+	// Values the principal cannot read in the source type do not move
+	// into another type's grants (RBA-07, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	// The action grant ci:write on the current type before the field
+	// permissions (WP-728).
+	if !h.allowAction(w, r, identity.PermCIWrite, "CI not found", chi.URLParam(r, "id")) {
+		return
+	}
+	if !h.refuseUnreadableValues(w, r, policy, chi.URLParam(r, "id")) {
 		return
 	}
 	result, err := h.svc.ChangeType(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.CITypeID))
@@ -324,6 +411,20 @@ func (h *Handler) ChangeType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.CI.Version))
+	if permission.NeedsProjection(policy, permission.KindCI) && result.CI != nil {
+		// The CI after the change is projected by its new type; findings
+		// name only readable fields.
+		findings := make([]TypeFinding, 0, len(result.Findings))
+		for _, f := range result.Findings {
+			if ciFieldReadable(policy, result.CI, f.Field) {
+				findings = append(findings, f)
+			}
+		}
+		projected := *result
+		projected.Findings = findings
+		writeWithCIs(w, http.StatusOK, policy, &projected, map[string]*Item{"ci": result.CI})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -340,6 +441,20 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.VictimID) == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "victim_id is required")
+		return
+	}
+	// Survivor and victim carry no value the principal cannot read in
+	// their type: the merge would move or reveal it (RBA-07, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	// ci:delete on survivor and victim after the action grants, before the
+	// field permissions (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "survivor or victim not found", chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID)) {
+		return
+	}
+	if !h.refuseUnreadableValues(w, r, policy, chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID)) {
 		return
 	}
 	result, err := h.svc.Merge(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), strings.TrimSpace(body.VictimID))
@@ -364,6 +479,17 @@ func (h *Handler) Merge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("ETag", api.ETag(result.Survivor.Version))
+	if permission.NeedsProjection(policy, permission.KindCI) && result.Survivor != nil {
+		projected := *result
+		projected.OverrideConflicts = make([]string, 0, len(result.OverrideConflicts))
+		for _, field := range result.OverrideConflicts {
+			if ciFieldReadable(policy, result.Survivor, field) {
+				projected.OverrideConflicts = append(projected.OverrideConflicts, field)
+			}
+		}
+		writeWithCIs(w, http.StatusOK, policy, &projected, map[string]*Item{"survivor": result.Survivor})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -381,6 +507,11 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// The field policy is resolved before the write (fail-closed, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
 		return
 	}
 	force := false
@@ -448,6 +579,10 @@ func (h *Handler) Unmerge(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	if permission.NeedsProjection(policy, permission.KindCI) {
+		writeWithCIs(w, http.StatusOK, policy, result, map[string]*Item{"survivor": result.Survivor, "victim": result.Victim})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
 
@@ -503,6 +638,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// The field policy is resolved before the write (fail-closed, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
 		return
 	}
 
@@ -562,6 +702,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	item.IsManual = IsManualSource(item.DiscoverySource)
 
 	if err := h.svc.Create(r.Context(), item); err != nil {
+		// Fields the principal may not write (RBA-07, WP-265): 403 with
+		// the fields, before the validation.
+		if writeFieldForbidden(w, err) {
+			return
+		}
 		if isEntitlementError(err) {
 			if !api.WriteTypedProblem(w, http.StatusForbidden, err) {
 				api.WriteError(w, http.StatusForbidden, "Forbidden", err.Error())
@@ -584,7 +729,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.created", item)
 	}
 
-	api.WriteJSON(w, http.StatusCreated, item)
+	writeCI(w, http.StatusCreated, policy, item)
 }
 
 // Update handles PATCH /api/v1/cis/{id}
@@ -592,6 +737,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	// The field policy is resolved before the write (fail-closed, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
 		return
 	}
 
@@ -616,6 +766,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
+		// Fields the principal may not write (RBA-07, WP-265): 403 with
+		// the fields, checked before the validation and If-Match.
+		if writeFieldForbidden(w, err) {
+			return
+		}
 		if writeConcurrencyError(w, err) {
 			return
 		}
@@ -641,7 +796,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("ETag", api.ETag(item.Version))
-	api.WriteJSON(w, http.StatusOK, item)
+	writeCI(w, http.StatusOK, policy, item)
 }
 
 // Delete handles DELETE /api/v1/cis/{id}
@@ -653,6 +808,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	// ci:delete after the action grants on the type and scope of the CI
+	// (WP-728).
+	if !h.allowAction(w, r, identity.PermCIDelete, "CI not found", id) {
+		return
+	}
 	item, err := h.svc.Delete(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -679,6 +839,16 @@ func (h *Handler) ListChanges(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
+	}
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	if permission.NeedsProjection(policy, permission.KindCI) {
+		if changes, err = h.projectChanges(r.Context(), t.OrganizationID, id, policy, changes); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
 	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Change]{
@@ -736,6 +906,11 @@ func (h *Handler) SetTemplates(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
+	// The field policy is resolved before the write (fail-closed, WP-265).
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
 	if !h.svc.TemplatesAvailable() {
 		writeTemplatesUnavailable(w, ErrTemplatesUnavailable)
 		return
@@ -761,7 +936,7 @@ func (h *Handler) SetTemplates(w http.ResponseWriter, r *http.Request) {
 	item, err := h.svc.SetTemplates(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req.Templates, ifMatch, t.UserID)
 	switch {
 	case err == nil:
-	case writeConcurrencyError(w, err), writeValidationError(w, err), writeTemplatesUnavailable(w, err):
+	case writeFieldForbidden(w, err), writeConcurrencyError(w, err), writeValidationError(w, err), writeTemplatesUnavailable(w, err):
 		return
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
@@ -774,7 +949,7 @@ func (h *Handler) SetTemplates(w http.ResponseWriter, r *http.Request) {
 		h.dispatcher.Dispatch(r.Context(), t.OrganizationID, "ci.updated", item)
 	}
 	w.Header().Set("ETag", api.ETag(item.Version))
-	api.WriteJSON(w, http.StatusOK, item)
+	writeCI(w, http.StatusOK, policy, item)
 }
 
 // writeValidationError renders a field-metadata validation failure as an
@@ -865,4 +1040,247 @@ func writeConcurrencyError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	return true
+}
+
+// Field permissions of the CI REST API (RBA-07, E-43, WP-265): the answers
+// carry only the fields the principal may read (permission.Project), the
+// writes are checked by the service (Service.Create, Service.Update).
+
+// requestPolicy returns the field policy of the request; when it cannot be
+// resolved it answers 500 and reports false (fail-closed).
+func requestPolicy(w http.ResponseWriter, r *http.Request) (*permission.FieldPolicy, bool) {
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return nil, false
+	}
+	return policy, true
+}
+
+// allowAction checks the action grant of the route on the CIs (RBA-07,
+// WP-728) and reports whether the request may go on: 403 with the action
+// when the grants refuse it, 404 with notFound for a CI the check could
+// not read, 500 otherwise (fail-closed).
+func (h *Handler) allowAction(w http.ResponseWriter, r *http.Request, action identity.Permission, notFound string, ids ...string) bool {
+	err := h.svc.CheckAction(r.Context(), tenant.FromContext(r.Context()).OrganizationID, action, ids...)
+	switch {
+	case err == nil:
+		return true
+	case writeFieldForbidden(w, err):
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	default:
+		api.WriteRepoError(w, err)
+	}
+	return false
+}
+
+// ciRef is the object reference of a CI for its field permissions.
+func ciRef(item *Item) permission.ObjectRef {
+	return permission.ObjectRef{ID: item.ID, ClientID: item.ClientID, SiteID: item.SiteID}
+}
+
+// ciProjectOptions name the instance attributes of the CI and the type and
+// scope of its asset.
+func ciProjectOptions(item *Item) []permission.ProjectOption {
+	opts := []permission.ProjectOption{permission.WithInstanceKeys(item.InstanceKeys)}
+	if item.Asset != nil {
+		opts = append(opts, permission.WithAsset(item.Asset.AssetTypeID,
+			permission.ObjectRef{ID: item.Asset.ID, ClientID: item.Asset.ClientID, SiteID: item.Asset.SiteID}))
+	}
+	return opts
+}
+
+// projectCI returns the CI as the policy lets the principal read it: the
+// item itself without a restriction.
+func projectCI(policy *permission.FieldPolicy, item *Item) (any, error) {
+	return permission.ProjectValue(policy, permission.KindCI, item.CITypeID, ciRef(item), item, ciProjectOptions(item)...)
+}
+
+// writeCI answers the projected CI.
+func writeCI(w http.ResponseWriter, status int, policy *permission.FieldPolicy, item *Item) {
+	body, err := projectCI(policy, item)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, status, body)
+}
+
+// writeWithCIs answers result with its CI members (by JSON name) replaced
+// by their projection.
+func writeWithCIs(w http.ResponseWriter, status int, policy *permission.FieldPolicy, result any, members map[string]*Item) {
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	var body map[string]json.RawMessage
+	if err = json.Unmarshal(encoded, &body); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	for name, item := range members {
+		if item == nil {
+			continue
+		}
+		projected, perr := projectCI(policy, item)
+		if perr != nil {
+			api.WriteRepoError(w, perr)
+			return
+		}
+		if body[name], err = json.Marshal(projected); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, status, body)
+}
+
+// writeFieldForbidden answers a *api.FieldForbiddenError (403 with the
+// fields) and reports whether err was one.
+func writeFieldForbidden(w http.ResponseWriter, err error) bool {
+	var forbidden *api.FieldForbiddenError
+	if !errors.As(err, &forbidden) {
+		return false
+	}
+	return api.WriteFieldError(w, forbidden)
+}
+
+// ciFieldReadable reports whether the principal may read the field of the
+// CI named as provenance, overrides and findings name it (bare name).
+func ciFieldReadable(policy *permission.FieldPolicy, item *Item, name string) bool {
+	return permission.Readable(policy, permission.KindCI, item.CITypeID, ciRef(item), permission.CIFieldPath(name),
+		ciProjectOptions(item)...)
+}
+
+// unreadableValues returns the DTO paths of the projected fields with a
+// value the principal may not read in the CI's type.
+func unreadableValues(policy *permission.FieldPolicy, item *Item) []string {
+	var out []string
+	ref, opts := ciRef(item), ciProjectOptions(item)
+	check := func(path string) {
+		if !permission.Readable(policy, permission.KindCI, item.CITypeID, ref, path, opts...) {
+			out = append(out, path)
+		}
+	}
+	for name := range typedValues(item) {
+		if permission.IsProjectedCIField(name) {
+			check(name)
+		}
+	}
+	for key, value := range item.Attributes {
+		if value != nil {
+			check("attributes." + key)
+		}
+	}
+	return out
+}
+
+// refuseUnreadableValues answers 403 with the fields when one of the CIs
+// carries a value the principal may not read in its type (type change,
+// merge) and reports whether the request may go on. A CI that is not
+// visible is 404, as the service would answer.
+func (h *Handler) refuseUnreadableValues(w http.ResponseWriter, r *http.Request, policy *permission.FieldPolicy, ids ...string) bool {
+	if !policy.Restricted(permission.KindCI) {
+		return true
+	}
+	orgID := tenant.FromContext(r.Context()).OrganizationID
+	var refused []string
+	for _, id := range ids {
+		item, err := h.svc.GetByID(r.Context(), orgID, id)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
+			return false
+		case err != nil:
+			api.WriteRepoError(w, err)
+			return false
+		}
+		refused = append(refused, unreadableValues(policy, item)...)
+	}
+	if len(refused) == 0 {
+		return true
+	}
+	sort.Strings(refused)
+	api.WriteFieldError(w, &api.FieldForbiddenError{Fields: slices.Compact(refused)})
+	return false
+}
+
+// checkListFilters refuses filters on projected fields the principal
+// cannot read in every scope for the queried types (WP-265).
+func checkListFilters(policy *permission.FieldPolicy, filter *FilterParams) error {
+	if len(filter.Filters) == 0 || !policy.Restricted(permission.KindCI) {
+		return nil
+	}
+	paths := make([]string, 0, len(filter.Filters))
+	for i := range filter.Filters {
+		paths = append(paths, filter.Filters[i].Field)
+	}
+	var types []string
+	if groups, named := filter.namedTypes(); named {
+		for _, group := range groups {
+			types = append(types, group...)
+		}
+	}
+	return permission.CheckListFilter(policy, permission.KindCI, types, paths)
+}
+
+// projectChanges projects the history of a CI (WP-265): entries of a
+// field the principal may not read are left out, the attributes of an
+// attributes entry are projected per key and the whole CI of a create or
+// delete entry like a CI. A CI that cannot be read (deleted) is projected
+// with the policy that reads nothing (fail-closed).
+func (h *Handler) projectChanges(ctx context.Context, orgID, ciID string, policy *permission.FieldPolicy, changes []Change) ([]Change, error) {
+	item, err := h.svc.GetByID(ctx, orgID, ciID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		item, policy = &Item{ID: ciID}, nil
+	case err != nil:
+		return nil, err
+	}
+	ref, opts := ciRef(item), ciProjectOptions(item)
+	out := make([]Change, 0, len(changes))
+	for i := range changes {
+		c := changes[i]
+		switch c.FieldName {
+		case "":
+			if c.OldValue, err = projectChangeCI(policy, item, c.OldValue); err != nil {
+				return nil, err
+			}
+			if c.NewValue, err = projectChangeCI(policy, item, c.NewValue); err != nil {
+				return nil, err
+			}
+		case "attributes":
+			c.OldValue = projectChangeAttributes(policy, item, c.OldValue)
+			c.NewValue = projectChangeAttributes(policy, item, c.NewValue)
+		default:
+			if !permission.Readable(policy, permission.KindCI, item.CITypeID, ref, permission.CIFieldPath(c.FieldName), opts...) {
+				continue
+			}
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// projectChangeCI projects the whole CI of a create or delete entry; its
+// asset facts are left out when the asset policy is restricted (the asset
+// of the entry is not known).
+func projectChangeCI(policy *permission.FieldPolicy, item *Item, value any) (any, error) {
+	if _, isObject := value.(map[string]any); !isObject {
+		return value, nil
+	}
+	return permission.Project(policy, permission.KindCI, item.CITypeID, ciRef(item), value,
+		permission.WithInstanceKeys(item.InstanceKeys))
+}
+
+// projectChangeAttributes projects the attributes of an attributes entry
+// per key; a value that is no object is left out (fail-closed).
+func projectChangeAttributes(policy *permission.FieldPolicy, item *Item, value any) any {
+	attrs, isObject := value.(map[string]any)
+	if !isObject {
+		return nil
+	}
+	return permission.ProjectAttributes(policy, item.CITypeID, ciRef(item), attrs, permission.WithInstanceKeys(item.InstanceKeys))
 }

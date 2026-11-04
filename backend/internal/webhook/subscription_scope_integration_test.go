@@ -42,6 +42,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
@@ -558,7 +559,8 @@ func TestSubscriptionScopeDelivery(t *testing.T) {
 	defer srv.Close()
 	newDispatcher := func() *webhook.Dispatcher {
 		return webhook.NewDispatcher(repo, srv.Client(), webhook.DispatcherOptions{Deliveries: store,
-			Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(f.App)}, Objects: webhook.NewPGObjectResolver(f.App), PollInterval: -1})
+			Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(f.App),
+				Fields: permission.NewFieldResolver(nil, nil, permission.NewPGFieldGrants(f.App), nil)}, Objects: webhook.NewPGObjectResolver(f.App), PollInterval: -1})
 	}
 
 	snapshotOf := func(ctx context.Context) *webhook.Scope {

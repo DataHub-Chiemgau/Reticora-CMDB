@@ -356,7 +356,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	for collection, table := range map[string]string{
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "compositions": "composition", "consumables": "consumable",
-		"contacts": "contact", "desks": "desk", "discovery-scopes": "discovery_scope",
+		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "quantity_item",
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
@@ -387,6 +387,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"locations", "location", "PATCH")
 	crud(m, v1+"jobs", "job", "DELETE")
 	crud(m, v1+"import-profiles", "import_profile", all...)
+	// Field permissions (RBA-07, WP-726): grants, object grants and
+	// sensitive fields; only the level of a grant changes.
+	crud(m, v1+"field-permissions", "field_grant", all...)
+	crud(m, v1+"field-permissions/object-grants", "object_grant", "POST", "DELETE")
+	crud(m, v1+"field-permissions/sensitive-fields", "field_sensitivity", "POST", "DELETE")
 	crud(m, "/scim/v2/Groups", "team", all...)
 	m["PUT /scim/v2/Groups/{id}"] = row("team")
 	crud(m, "/scim/v2/Users", "app_user", "POST", "PATCH")
@@ -418,6 +423,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/subnets/{id}/reservations":   "ip_address",
 		"POST /api/v1/teams/{id}/members":          "team_member",
 		"POST /api/v1/tickets/{id}/comments":       "ticket_comment",
+		"POST /api/v1/tickets/{id}/links":          "ticket_link",
 		"POST /api/v1/trainings/{id}/assignments":  "training_assignment",
 		"POST /api/v1/workflows/{id}/runs":         "workflow_run",
 	} {
@@ -487,6 +493,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The released IP reservation of the subnet (NET-09, WP-299).
 	m["DELETE /api/v1/subnets/{id}/reservations/{ip_id}"] = RouteSnapshot{Table: "ip_address",
 		Keys: []SnapshotKey{{"id", "ip_id"}, {"subnet_id", "id"}}}
+	// The removed object link of the ticket (WP-764).
+	m["DELETE /api/v1/tickets/{id}/links/{link_id}"] = RouteSnapshot{Table: "ticket_link",
+		Keys: []SnapshotKey{{"id", "link_id"}, {"ticket_id", "id"}}}
 	m["DELETE /api/v1/teams/{teamId}/members/{userId}"] = RouteSnapshot{Table: "team_member",
 		Keys: []SnapshotKey{{"team_id", "teamId"}, {"user_id", "userId"}}}
 	// The permissions of a standard role are the rows of role_permission and

@@ -941,7 +941,7 @@ type (both allow further fields).
 | `ticket.sla_breached` | ticket | plan addition | WP-292 |
 | `metamodel.published` | publication (content after E-37) | EVT-03 | WP-261 |
 | `document.scanned` | document | plan addition | WP-734 |
-| `import.completed` | import run | plan addition | WP-302 |
+| `import.completed` | import run | plan addition | WP-775 |
 
 **`ci.status_changed`** (WP-707): an update of a CI
 (`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status

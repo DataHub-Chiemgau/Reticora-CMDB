@@ -1374,7 +1374,7 @@
     "select": "Select a type to edit its fields.",
     "name": "Name",
     "fields": "Fields",
-    "fromTemplate": "From template",
+    "fromTemplate": "From type template",
     "observable": "observed",
     "schemaVersion": "Schema",
     "dataTypes": {
@@ -1415,38 +1415,103 @@
       "forbidden": "You are not allowed to manage attributes.",
       "notFound": "The attribute no longer exists.",
       "reason": "Reason: {{detail}}",
-      "partial": "The field “{{name}}” was saved, its index settings were not. {{reason}}",
-      "flagsNotSaved": "Index settings not saved. {{reason}}",
       "fieldNotSaved": "Field not saved. {{reason}}",
       "forbiddenPermission": "Not allowed: your session lacks the permission “{{permission}}”.",
-      "systemType": "System types are read-only and get no fields of their own. Clone the type or add an organization-wide field.",
-      "readOnly": "System attributes are read-only."
-    },
-    "indexJob": {
-      "scheduled": "Index job scheduled",
-      "label": "Index job: {{status}}",
-      "status": {
-        "queued": "queued",
-        "running": "running",
-        "succeeded": "succeeded",
-        "failed": "failed",
-        "cancelled": "cancelled"
-      }
+      "systemType": "System types are read-only and get no fields of their own. Clone the type, create a subtype or add a global attribute.",
+      "readOnly": "System attributes are read-only.",
+      "changesNotSaved": "Changes not saved. {{reason}}"
     },
     "systemReadOnly": "System type: read-only. Fields cannot be added here and the type cannot be deactivated. To add your own fields:",
     "systemReadOnlyClone": "“Clone” creates your own type with all fields of this type, which you can extend. Existing CIs and CIs found by discovery keep the system type.",
-    "systemReadOnlyOrgFields": "Organization-wide fields apply to every CI type of the organization, including system types and discovered CIs.",
-    "orgFields": {
-      "title": "Organization-wide fields",
-      "hint": "These fields apply to every CI type of the organization, including system types and CIs found by discovery. System fields are read-only.",
-      "add": "New organization-wide field",
-      "editorHint": "The field applies to every CI type of the organization. Organization-wide fields added here are optional.",
-      "empty": "No organization-wide fields defined.",
+    "systemReadOnlyOrgFields": "Global attributes apply to every CI type of the organization, including system types and discovered CIs.",
+    "labelDe": "Label (German)",
+    "labelEn": "Label (English)",
+    "description": "Description",
+    "fieldOrder": "Order",
+    "inheritable": "Inherited by subtypes",
+    "editHint": "Saving applies only the changed properties; a change of “Searchable” or “Unique” starts an index job in the background.",
+    "computedHint": "Computed attribute: the value comes from an expression; it cannot be required or unique.",
+    "flagRequired": "required",
+    "flagInheritable": "inheritable",
+    "flagComputed": "computed",
+    "flagSensitive": "sensitive",
+    "editType": "Edit type",
+    "parentOf": "Parent type: {{name}}",
+    "deleteFieldAction": "Delete: {{name}}",
+    "tree": {
+      "label": "CI types",
+      "noMatch": "No type matches the search.",
+      "empty": "No CI types yet."
+    },
+    "typeDialog": {
+      "editTitle": "Edit type “{{name}}”",
+      "key": "Key",
+      "keyImmutable": "The key cannot be changed after creation.",
+      "category": "Category",
+      "parent": "Parent type",
+      "noParent": "No parent (root)",
+      "systemParent": "{{name}} (system)"
+    },
+    "typeErrors": {
+      "notSaved": "Type not saved. {{reason}}",
+      "checkFields": "Type not saved. Please check the marked fields.",
+      "parentConflict": "Conflict in the type chain, e.g. a cycle. Reason: {{detail}}",
+      "parentInactive": "The chosen parent type is deactivated.",
+      "parentInvalid": "Parent type not allowed. Reason: {{detail}}",
+      "activeSubtypes": "Cannot deactivate: the type has active subtypes. Deactivate them first.",
+      "cloneParentInactive": "Cannot clone: the parent type is deactivated.",
+      "activateParentInactive": "Cannot activate: the parent type is deactivated.",
+      "deactivateParentInactive": "Cannot deactivate: the parent type is deactivated.",
+      "cloneFailed": "Clone failed. {{reason}}",
+      "activateFailed": "Activation failed. {{reason}}",
+      "deactivateFailed": "Deactivation failed. {{reason}}"
+    },
+    "attributes": {
+      "title": "Attributes",
+      "deleteConfirm": "Delete the attribute “{{name}}”?",
+      "deleteFailed": "Attribute “{{name}}” not deleted. {{reason}}"
+    },
+    "origin": {
+      "own": "own",
+      "inherited": "inherited from {{type}}",
+      "global": "global",
+      "open": "Go to origin: {{type}}",
+      "openGlobal": "Go to global attributes"
+    },
+    "globals": {
+      "title": "Global attributes",
+      "hint": "Global attributes apply to the CI types of their scope, including system types and CIs found by discovery. System attributes are read-only.",
+      "add": "New global attribute",
+      "editorHint": "The attribute applies to the CI types of its scope. Global attributes added here are optional.",
+      "empty": "No global attributes defined.",
       "readOnly": "Read-only: changing them needs the permission “ci_attribute:manage”.",
-      "editAction": "Edit organization-wide field: {{name}}",
-      "deleteAction": "Delete organization-wide field: {{name}}",
-      "deleteConfirm": "Delete the organization-wide field “{{name}}”? It is then removed from every CI type of the organization.",
-      "deleteFailed": "Field “{{name}}” not deleted. {{reason}}"
+      "editAction": "Edit global attribute: {{name}}",
+      "deleteAction": "Delete global attribute: {{name}}",
+      "deleteConfirm": "Delete the global attribute “{{name}}”? It is then removed from every CI type of its scope."
+    },
+    "appliesTo": {
+      "label": "Applies to",
+      "modes": {
+        "all": "All CI types",
+        "categories": "Types of certain categories",
+        "types": "Certain types and their subtypes"
+      },
+      "categories": "Categories (comma-separated)",
+      "types": "Types",
+      "badge": {
+        "all": "applies to all types",
+        "categories": "Categories: {{list}}",
+        "types": "Types: {{list}}"
+      }
+    },
+    "indexStatus": {
+      "label": "Index: {{status}}",
+      "none": "no index",
+      "retry": "retry {{attempt}}/{{max}}",
+      "error": "Error: {{error}}",
+      "reindex": "Rebuild index",
+      "reindexAction": "Rebuild index: {{name}}",
+      "reindexFailed": "Index not rebuilt. {{reason}}"
     }
   },
   "inventory": {
@@ -1827,7 +1892,12 @@
     "cancelNotFound": "The job was not found.",
     "cancelFailed": "The job could not be cancelled: {{error}}",
     "partialReport": "Partial report",
-    "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped"
+    "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped",
+    "kinds": {
+      "attribute": {
+        "index": "Attribute index"
+      }
+    }
   },
   "provenance": {
     "show": "Provenance of {{field}}",

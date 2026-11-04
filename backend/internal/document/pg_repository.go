@@ -33,25 +33,6 @@ const documentSelectColumns = `
 	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = document.id AND dv.version = document.version)
 `
 
-const documentSelectColumnsWithAlias = `
-	d.id::text,
-	d.organization_id::text,
-	d.title,
-	COALESCE(d.description, ''),
-	d.file_name,
-	d.file_size,
-	d.mime_type,
-	d.storage_key,
-	d.version,
-	d.category,
-	COALESCE(d.tags, '{}'),
-	d.uploaded_by::text,
-	d.created_at,
-	d.updated_at,
-	(SELECT dv.scan_status FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version),
-	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version)
-`
-
 const documentLinkSelectColumns = `
 	id::text,
 	organization_id::text,
@@ -864,28 +845,39 @@ func (r *PGRepository) GetLinks(ctx context.Context, orgID, docID string) ([]Doc
 	return links, err
 }
 
-// GetLinksForEntity returns documents linked to an entity.
-func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string) ([]Document, error) {
+// GetLinksForEntity returns a page of the documents linked to an entity,
+// newest first on (created_at, id) (api.NewestFirstSQL: at most one more
+// than the limit), and their number. A document counts when it is not
+// soft-deleted and has a link to the entity that is visible under the
+// transaction's tenant scope (linkVisible, the target check of WP-267);
+// the link is checked with EXISTS, so the keyset predicate names the
+// columns of document unqualified. A cursor of another order is
+// api.ErrInvalidCursor.
+func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]Document, int, error) {
 	var docs []Document
+	var total int
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf(`
-			SELECT %s
-			FROM document d
-			JOIN document_link l ON l.document_id = d.id
-			WHERE l.entity_type = $1 AND l.entity_id = $2 AND d.deleted_at IS NULL
-			  AND EXISTS (SELECT 1 FROM document_link WHERE document_link.id = l.id AND `+linkVisible+`)
-			ORDER BY d.created_at DESC
-		`, documentSelectColumnsWithAlias)
-		rows, err := tx.Query(ctx, query, entityType, entityID)
+		linked := `document.organization_id = $1 AND ` + documentNotDeleted + `
+			AND EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id
+				AND document_link.entity_type = $2 AND document_link.entity_id = $3 AND ` + linkVisible + `)`
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM document WHERE "+linked, orgID, entityType, entityID).Scan(&total); err != nil {
+			return fmt.Errorf("count documents for entity: %w", err)
+		}
+		where, tail, args, err := api.NewestFirstSQL(page, 4)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+documentSelectColumns+" FROM document WHERE "+linked+" AND "+where+" "+tail,
+			append([]any{orgID, entityType, entityID}, args...)...)
 		if err != nil {
 			return fmt.Errorf("get documents for entity: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			doc, err := scanDocument(rows)
-			if err != nil {
-				return fmt.Errorf("scan linked document: %w", err)
+			doc, scanErr := scanDocument(rows)
+			if scanErr != nil {
+				return fmt.Errorf("scan linked document: %w", scanErr)
 			}
 			docs = append(docs, *doc)
 		}
@@ -895,7 +887,7 @@ func (r *PGRepository) GetLinksForEntity(ctx context.Context, orgID, entityType,
 		return nil
 	})
 
-	return docs, err
+	return docs, total, err
 }
 
 type documentScanner interface {

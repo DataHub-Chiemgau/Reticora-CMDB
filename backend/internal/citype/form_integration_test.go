@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -369,4 +372,110 @@ func TestResolvedFormWithoutDatabase(t *testing.T) {
 			t.Errorf("GET %s: %d %s, want 503", path, w.Code, w.Body.String())
 		}
 	}
+}
+
+// TestResolvedFormFieldRightsAgainstPostgres covers RBA-07 in the resolved
+// form (WP-727): with the factory of the server (server.FormPolicyFactory)
+// and the policy source of the router, a field the caller may not read is
+// left out of the layout (also an instance attribute), a field it may only
+// read is read only, both on GET /cis/{id}/form and GET
+// /ci-types/{id}/form; a preview as role X follows the policy of X; a
+// caller whose roles restrict no field gets every field editable.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestResolvedFormFieldRightsAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "a8")
+	a := newSetAPI(t, f)
+	bg := context.Background()
+	org := f.OrgA
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+
+	leaf := a.createType(org, "wp727-leaf")
+	for i, key := range []string{"wp727_open", "wp727_hidden", "wp727_ro"} {
+		a.definition(org, `{"ci_type_id":"`+leaf.ID+`","key":"`+key+`","data_type":"text","order":`+strconv.Itoa(i+1)+`}`)
+	}
+	var ciID string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+		VALUES ($1, $2, $3, 'wp727-form-ci', 'active', '{}') RETURNING id::text`, org, f.Client1, leaf.ID).Scan(&ciID); err != nil {
+		t.Fatal(err)
+	}
+	a.must(http.StatusOK, org, http.MethodPut, "/api/v1/cis/"+ciID+"/field-definitions", `{"name":"wp727_inst","data_type":"text"}`, nil)
+
+	// Role R of the user: wp727_hidden and the instance attribute none,
+	// wp727_ro read. Role X (preview only): wp727_open none.
+	roleR, roleX := f.ID(), f.ID()
+	for _, r := range []struct{ id, name string }{{roleR, "wp727-r"}, {roleX, "wp727-x"}} {
+		exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, $3, '["ci:read", "ci:write"]')`, r.id, org, r.name)
+	}
+	userR, manager := f.AppUser(t, org, "wp727-form-r"), f.AppUser(t, org, "wp727-form-manager")
+	exec(`INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, org, userR, roleR)
+	for _, g := range []struct{ role, key, level string }{
+		{roleR, "attributes.wp727_hidden", "none"}, {roleR, "_instance.wp727_inst", "none"}, {roleR, "attributes.wp727_ro", "read"},
+		{roleX, "attributes.wp727_open", "none"},
+	} {
+		exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'ci', $3, $4)`,
+			org, g.role, g.key, g.level)
+	}
+
+	repos := server.PostgresRepositories(f.App, audit.NewPGRecorder())
+	resolver := permission.NewFieldResolver(repos.Permission, nil, repos.FieldGrants, nil)
+	mux := chi.NewRouter()
+	mux.Use(permission.FieldPolicyMiddleware(resolver))
+	citype.NewHandler(a.repo).WithFormPolicy(server.FormPolicyFactory(&repos, resolver)).RegisterRoutes(mux)
+	get := func(user string, perms []identity.Permission, path string) citype.ResolvedForm {
+		t.Helper()
+		scope := database.OrgWideScope(org, user)
+		ctx := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope), tenant.TenantInfo{OrganizationID: org, UserID: user})
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser,
+			Permissions: perms})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
+		}
+		var out citype.ResolvedForm
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	// state checks the fields of a form: absent ones and read-only ones.
+	state := func(what string, form *citype.ResolvedForm, absent []string, readOnly map[string]bool) {
+		t.Helper()
+		for _, name := range absent {
+			if field, _ := resolvedField(form, name); field != nil {
+				t.Errorf("%s: unreadable field %s in the layout", what, name)
+			}
+		}
+		for name, ro := range readOnly {
+			field, _ := resolvedField(form, name)
+			if field == nil {
+				t.Errorf("%s: readable field %s missing", what, name)
+				continue
+			}
+			if field.State.ReadOnly != ro {
+				t.Errorf("%s: field %s read_only %v, want %v", what, name, field.State.ReadOnly, ro)
+			}
+		}
+	}
+	write := []identity.Permission{identity.PermCIRead, identity.PermCIWrite}
+	ciForm := get(userR, write, "/api/v1/cis/"+ciID+"/form")
+	state("CI form of role R", &ciForm, []string{"wp727_hidden", "wp727_inst"}, map[string]bool{"wp727_open": false, "wp727_ro": true})
+	typeForm := get(userR, write, "/api/v1/ci-types/"+leaf.ID+"/form")
+	state("type form of role R", &typeForm, []string{"wp727_hidden"}, map[string]bool{"wp727_open": false, "wp727_ro": true})
+
+	managePerms := []identity.Permission{identity.PermCIRead, identity.PermCIWrite, identity.PermCITypeManage}
+	preview := get(manager, managePerms, "/api/v1/cis/"+ciID+"/form?preview=true&role_id="+roleX)
+	state("preview as role X", &preview, []string{"wp727_open"},
+		map[string]bool{"wp727_hidden": false, "wp727_ro": false, "wp727_inst": false})
+	other := get(manager, managePerms, "/api/v1/cis/"+ciID+"/form?role_id="+roleR)
+	state("another role R as a preview", &other, []string{"wp727_hidden", "wp727_inst"}, map[string]bool{"wp727_ro": true})
+	own := get(manager, managePerms, "/api/v1/cis/"+ciID+"/form")
+	state("caller without restricting roles", &own, nil,
+		map[string]bool{"wp727_open": false, "wp727_hidden": false, "wp727_ro": false, "wp727_inst": false})
 }

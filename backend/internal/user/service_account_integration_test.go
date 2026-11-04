@@ -514,3 +514,79 @@ func TestServiceAccountSiteGrantConfinedToClient(t *testing.T) {
 		}
 	}
 }
+
+// TestServiceAccountFieldPolicy covers WP-730 (RBA-07, E-43): the field
+// policy of webhook payloads of a bound subscription is resolved from the
+// roles and scopes of service_account_role through the resolver of
+// WP-264, on every call; an inactive or unknown account has no rights; an
+// unbound subscription ("") gets the default policy without role, in which
+// sensitive fields are closed and role grants do not apply.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestServiceAccountFieldPolicy(t *testing.T) {
+	f := scopetest.Seed(t, "73")
+	bg := context.Background()
+	run := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	var serverType string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	roleID := f.ID()
+	run(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'wp730-sa-role', '["ci:read"]')`, roleID, f.OrgA)
+	run(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'ci', 'core.serial_number', 'none')`,
+		f.OrgA, roleID)
+	run(`INSERT INTO field_sensitivity (organization_id, object_kind, field_key) VALUES ($1, 'ci', 'attributes.salary')`, f.OrgA)
+	saID := f.ID()
+	run(`INSERT INTO service_account (id, organization_id, name) VALUES ($1, $2, 'wp730-sa')`, saID, f.OrgA)
+	run(`INSERT INTO service_account_role (organization_id, service_account_id, role_id, scope_client_id) VALUES ($1, $2, $3, $4)`,
+		f.OrgA, saID, roleID, f.Client1)
+
+	repo := user.NewPGServiceAccounts(f.App)
+	// Every call reads the account and its grants anew; only the grant
+	// snapshot of the organization is cached.
+	resolver := permission.NewFieldResolver(nil, nil, permission.NewPGFieldGrants(f.App), nil)
+	access := user.ServiceAccountAccess{Repo: repo, Fields: resolver}
+	var _ webhook.SubscriberAccess = access
+
+	level := func(serviceAccountID, client, key string) permission.Level {
+		t.Helper()
+		policy, err := access.FieldPolicy(bg, f.OrgA, serviceAccountID)
+		if err != nil {
+			t.Fatalf("FieldPolicy(%q): %v", serviceAccountID, err)
+		}
+		return policy.Level(permission.KindCI, serverType, key, permission.ObjectRef{ID: f.ID(), ClientID: client})
+	}
+	for _, tc := range []struct {
+		name, account, client, key string
+		want                       permission.Level
+	}{
+		{"account: readable field in its client", saID, f.Client1, "core.hostname", permission.LevelRead},
+		{"account: grant none", saID, f.Client1, "core.serial_number", permission.LevelNone},
+		{"account: sensitive without grant", saID, f.Client1, "attributes.salary", permission.LevelNone},
+		{"account: outside the scope of its assignment", saID, f.Client2, "core.hostname", permission.LevelNone},
+		{"unbound: readable field", "", f.Client2, "core.hostname", permission.LevelRead},
+		{"unbound: role grant does not apply", "", f.Client1, "core.serial_number", permission.LevelRead},
+		{"unbound: sensitive closed", "", f.Client1, "attributes.salary", permission.LevelNone},
+		{"unknown account", f.ID(), f.Client1, "core.hostname", permission.LevelNone},
+	} {
+		if got := level(tc.account, tc.client, tc.key); got != tc.want {
+			t.Errorf("%s: level %s, want %s", tc.name, got, tc.want)
+		}
+	}
+
+	// Deactivation removes every right at once (no stored rights).
+	run(`UPDATE service_account SET is_active = false WHERE id = $1`, saID)
+	if got := level(saID, f.Client1, "core.hostname"); got != permission.LevelNone {
+		t.Errorf("inactive account: level %s, want none", got)
+	}
+	// Without a resolver the policy reads nothing (fail-closed).
+	if policy, err := (user.ServiceAccountAccess{Repo: repo}).FieldPolicy(bg, f.OrgA, ""); err != nil ||
+		policy.Level(permission.KindCI, serverType, "core.hostname", permission.ObjectRef{}) != permission.LevelNone {
+		t.Errorf("FieldPolicy without resolver: %v, want the nil policy reading nothing", err)
+	}
+}

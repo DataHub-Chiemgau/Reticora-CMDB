@@ -46,10 +46,12 @@ const orEdges = `
 	SELECT id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence,
 	       first_seen_at, last_seen_at, verification_state, source_system, notes, created_at, updated_at,
 	       source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at,
-	       false AS projected, NULL::uuid AS target_location_id
+	       false AS projected, NULL::uuid AS target_location_id,
+	       source_client_id, source_site_id, target_client_id, target_site_id
 	FROM ci_relationship WHERE organization_id = $1 AND ` + visibleEndpoints + ` AND (source_ci_id = $2 OR target_ci_id = $2)
 	UNION ALL
-	SELECT * FROM (` + projectedEdges + `) p WHERE p.organization_id = $1 AND (source_ci_id = $2 OR target_ci_id = $2)`
+	SELECT p.*, NULL::uuid, NULL::uuid, NULL::uuid, NULL::uuid
+	FROM (` + projectedEdges + `) p WHERE p.organization_id = $1 AND (source_ci_id = $2 OR target_ci_id = $2)`
 
 // orEdgesPage selects the rows of orEdges in the columns and the order of
 // a page of List.
@@ -58,6 +60,8 @@ const orEdgesPage = `SELECT id::text, organization_id::text, source_ci_id::text,
 		COALESCE(source_system, ''), COALESCE(notes, ''), created_at, updated_at,
 		COALESCE(source_interface_id::text, ''), COALESCE(target_interface_id::text, ''), last_confirmed_at,
 		COALESCE(verified_by::text, ''), verified_at,
+		COALESCE(source_client_id::text, ''), COALESCE(source_site_id::text, ''),
+		COALESCE(target_client_id::text, ''), COALESCE(target_site_id::text, ''),
 		projected, COALESCE(target_location_id::text, '')
 	FROM (` + orEdges + `) e ORDER BY projected, created_at DESC, id`
 

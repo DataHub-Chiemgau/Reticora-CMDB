@@ -76,7 +76,12 @@ func newJobKindsEnv(t *testing.T, queue func(repo jobs.Repository) *jobs.Queue) 
 	t.Cleanup(func() { _ = dispatcher.Shutdown(context.Background()) })
 	mux, _, err := server.NewRouter(repos, server.Options{
 		Version: "wp-503", Entitlements: entitlements, Dispatcher: dispatcher,
-		CIService:   ci.NewServiceWithLimits(repos.CI, entitlements),
+		// The memory profile has no user status: the creator policy of
+		// the queue bulk job (WP-728) is the policy without grants here.
+		CIService: ci.NewServiceWithLimits(repos.CI, entitlements).WithCreatorPolicy(
+			func(context.Context, *jobs.Job) (*permission.FieldPolicy, error) {
+				return permission.UnrestrictedPolicy(identity.AllPermissions()), nil
+			}),
 		Credentials: credential.NewService(repos.Credential, encryptor),
 		OIDC:        identity.NewOIDCProvider(identity.OIDCConfig{}),
 		JobQueue:    q,

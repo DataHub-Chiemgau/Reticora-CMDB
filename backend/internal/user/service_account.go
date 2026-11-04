@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/jackc/pgx/v5"
@@ -122,14 +123,14 @@ type ServiceAccountRepository interface {
 // a shared row that client- and site-scoped readers read as well (RLS).
 // Without objects the scope of the event is unknown (webhook/scope.go):
 // only an account that holds the permission org-wide may read it.
-func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
+func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, serviceAccountID, perm string, objects []webhook.ObjectScope) (bool, error) {
 	grants, err := repo.ServiceAccountGrants(ctx, orgID, serviceAccountID)
 	if err != nil {
 		return false, err
 	}
 	access := identity.ResolveAccess(grants)
 	p := identity.Principal{OrganizationID: orgID, Permissions: access.Permissions, Scope: &access.Scope, PermissionScopes: access.PermissionScopes}
-	scope, ok := p.ScopeFor(identity.Permission(permission))
+	scope, ok := p.ScopeFor(identity.Permission(perm))
 	if !ok {
 		return false, nil
 	}
@@ -147,13 +148,59 @@ func CanReadEvent(ctx context.Context, repo ServiceAccountRepository, orgID, ser
 	return true, nil
 }
 
+// GrantPolicies resolves the field policy of role grants without request
+// (permission.FieldResolver.PolicyForGrants).
+type GrantPolicies interface {
+	PolicyForGrants(ctx context.Context, orgID string, grants []identity.Grant, teamIDs []string) (*permission.FieldPolicy, error)
+}
+
 // ServiceAccountAccess adapts a repository to the webhook dispatcher and the
-// API key service.
-type ServiceAccountAccess struct{ Repo ServiceAccountRepository }
+// API key service. Fields resolves the field policies of webhook payloads
+// (FieldPolicy, WP-730); the API key service does not need it.
+type ServiceAccountAccess struct {
+	Repo   ServiceAccountRepository
+	Fields GrantPolicies
+}
+
+// FieldPolicy implements webhook.SubscriberAccess (RBA-07, E-43, WP-730):
+// the grants of the service account (ServiceAccountGrants: the roles of
+// service_account_role with their client and site scope) through the
+// resolver of WP-264, read on every dispatch and never stored with the
+// subscription or the delivery. An inactive or unknown account has no
+// grants and so no rights. For "" (an unbound subscription) it is the
+// default policy without role: every object kind readable, sensitive
+// fields closed, no role grant applies (E-43). Without Fields it is the nil
+// policy, which reads no field with field permissions (fail-closed): the
+// dispatcher leaves out every such field and withholds what it cannot
+// project, without holding up the outbox of the organization.
+func (a ServiceAccountAccess) FieldPolicy(ctx context.Context, orgID, serviceAccountID string) (*permission.FieldPolicy, error) {
+	if a.Fields == nil {
+		return nil, nil
+	}
+	if serviceAccountID == "" {
+		return a.Fields.PolicyForGrants(ctx, orgID, []identity.Grant{defaultWebhookGrant()}, nil)
+	}
+	grants, err := a.Repo.ServiceAccountGrants(ctx, orgID, serviceAccountID)
+	if err != nil {
+		return nil, err
+	}
+	return a.Fields.PolicyForGrants(ctx, orgID, grants, nil)
+}
+
+// defaultWebhookGrant is the grant of the default policy of unbound
+// subscriptions: the read right of every object kind with field
+// permissions, without role and scope.
+func defaultWebhookGrant() identity.Grant {
+	grant := identity.Grant{}
+	for _, kind := range permission.ObjectKinds {
+		grant.Permissions = append(grant.Permissions, identity.Permission(string(kind)+":read"))
+	}
+	return grant
+}
 
 // CanReadEvent implements webhook.SubscriberAccess.
-func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission string, objects []webhook.ObjectScope) (bool, error) {
-	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, permission, objects)
+func (a ServiceAccountAccess) CanReadEvent(ctx context.Context, orgID, serviceAccountID, perm string, objects []webhook.ObjectScope) (bool, error) {
+	return CanReadEvent(ctx, a.Repo, orgID, serviceAccountID, perm, objects)
 }
 
 // ServiceAccountGrants implements identity.ServiceAccountAccessResolver.

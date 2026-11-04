@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -87,7 +88,8 @@ func TestDispatcherDeliversOutboxEventsByReadRights(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	d := webhook.NewDispatcher(repo, srv.Client(), webhook.DispatcherOptions{Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(f.App)},
+	d := webhook.NewDispatcher(repo, srv.Client(), webhook.DispatcherOptions{Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(f.App),
+		Fields: permission.NewFieldResolver(nil, nil, permission.NewPGFieldGrants(f.App), nil)},
 		Objects: webhook.NewPGObjectResolver(f.App), PollInterval: -1})
 
 	// CIs of client 1, client 2 and without client.

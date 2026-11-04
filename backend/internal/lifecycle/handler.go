@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -23,11 +26,25 @@ type EntityResolver interface {
 	LifecycleModelFor(r *http.Request, orgID, entityType, entityID string) (string, error)
 }
 
+// CIScopeFunc reads the type and scope of a visible CI for the action
+// grant of its transition (RBA-07, WP-728); an error "not found" for a CI
+// that is unknown, not visible or deleted.
+type CIScopeFunc func(ctx context.Context, orgID, ciID string) (typeID string, ref permission.ObjectRef, err error)
+
 // Handler provides HTTP handlers for lifecycle definitions and transitions.
 type Handler struct {
 	repo     Repository
 	service  *Service
 	resolver EntityResolver
+	ciScope  CIScopeFunc
+}
+
+// WithCIScope sets the CI lookup of the action grant lifecycle:transition
+// (WP-728). Without it a transition of a CI is refused with 403 whenever
+// the policy depends on the type of the CI (fail-closed).
+func (h *Handler) WithCIScope(fn CIScopeFunc) *Handler {
+	h.ciScope = fn
+	return h
 }
 
 // NewHandler creates a lifecycle handler. resolver may be nil when transition
@@ -549,6 +566,12 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 	if !ok {
 		return
 	}
+	// lifecycle:transition after the action grants on the type and scope
+	// of the CI, before the model and the guards (WP-728). Assets follow
+	// with the action grants of their object kind (convention 11).
+	if entityType == "ci" && !h.allowCIAction(w, r, t.OrganizationID, entityID) {
+		return
+	}
 	modelID, err := h.resolver.LifecycleModelFor(r, t.OrganizationID, entityType, entityID)
 	if errors.Is(err, ErrNoLifecycleModel) {
 		writeNoLifecycleModel(w)
@@ -564,6 +587,33 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, entityType 
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, result)
+}
+
+// allowCIAction checks lifecycle:transition against the action grants of
+// the CI and reports whether the transition may go on: 403 with the action,
+// 404 for a CI that is not visible, 500 otherwise.
+func (h *Handler) allowCIAction(w http.ResponseWriter, r *http.Request, orgID, ciID string) bool {
+	err := permission.CheckActionOn(r.Context(), permission.KindCI, identity.PermLifecycleTransition,
+		func(ctx context.Context) ([]permission.ActionTarget, error) {
+			if h.ciScope == nil {
+				return nil, &api.FieldForbiddenError{Fields: []string{}, Action: string(identity.PermLifecycleTransition)}
+			}
+			typeID, ref, err := h.ciScope(ctx, orgID, ciID)
+			if err != nil {
+				return nil, err
+			}
+			return []permission.ActionTarget{{TypeID: typeID, Ref: ref}}, nil
+		})
+	switch {
+	case err == nil:
+		return true
+	case api.WriteFieldError(w, err):
+	case err.Error() == "not found":
+		api.WriteError(w, http.StatusNotFound, "Not Found", "entity not found")
+	default:
+		api.WriteRepoError(w, err)
+	}
+	return false
 }
 
 // validAppliesTo are the entity kinds of a lifecycle model (the CHECK of

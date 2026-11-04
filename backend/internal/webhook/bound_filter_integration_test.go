@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -165,7 +166,8 @@ func (b *boundFixture) deliver(t *testing.T, event string, payload any) map[stri
 			t.Fatal(err)
 		}
 	}
-	d := webhook.NewDispatcher(repo, srv.Client(), webhook.DispatcherOptions{Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(b.App)},
+	d := webhook.NewDispatcher(repo, srv.Client(), webhook.DispatcherOptions{Access: user.ServiceAccountAccess{Repo: user.NewPGServiceAccounts(b.App),
+		Fields: permission.NewFieldResolver(nil, nil, permission.NewPGFieldGrants(b.App), nil)},
 		Objects: webhook.NewPGObjectResolver(b.App), PollInterval: -1})
 	if err := d.Consume(bg, &events.Envelope{OrgID: b.OrgA, Type: event, Data: data}); err != nil {
 		t.Fatalf("consume %s: %v", event, err)

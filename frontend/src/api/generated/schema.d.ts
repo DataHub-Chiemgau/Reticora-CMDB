@@ -1078,7 +1078,14 @@ export interface paths {
      *     response is chunked and neither the server nor the client has to hold
      *     the full result set in memory. There is no row limit. CSV and DATEV
      *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
-     *     names the CI fields the layout leaves out. format=datev is gated
+     *     names the CI fields the layout leaves out and those the caller may
+     *     not read (field permissions, RBA-07, WP-729): a CSV column not
+     *     readable for one of the exported CI types (ci_type_id, otherwise
+     *     every type of the organization) drops out, in the fixed DATEV
+     *     layout its cells stay empty, JSON writes each CI as the projected
+     *     DTO of the CI API; a field not readable on single CIs only (object
+     *     grant, scope of a role assignment) leaves their cells empty. Without
+     *     field permissions the payload is unchanged. format=datev is gated
      *     (WP-790): it needs the module inventory (otherwise 400 like an
      *     unknown format), the entitlements export_datev and assets_basic
      *     (otherwise 403 feature-not-entitled) and the permission asset:read
@@ -1369,7 +1376,10 @@ export interface paths {
     /** List assets */
     get: operations['listAssets'];
     put?: never;
-    /** Create an asset */
+    /**
+     * Create an asset
+     * @description Creates an asset (AST-01, WP-271). A missing or empty currency is the currency of the organization; the asset starts in the initial state of its effective lifecycle model (physical_asset: ordered). The location and the lifecycle state are not writable here.
+     */
     post: operations['createAsset'];
     delete?: never;
     options?: never;
@@ -2470,10 +2480,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List tickets */
+    /**
+     * List tickets
+     * @description Each ticket carries only the fields the caller may read (field permissions of the object kind ticket, RBA-07, WP-765; see Ticket). A filter, the search (title and description) or a sort on a field the caller cannot read in every scope of its role assignments is 403 with the fields.
+     */
     get: operations['listTickets'];
     put?: never;
-    /** Create a ticket */
+    /**
+     * Create a ticket
+     * @description Every field the request sets must be editable for the caller (field permissions of the object kind ticket, RBA-07, WP-765), otherwise 403 with the fields; the answer carries only the fields the caller may read.
+     */
     post: operations['createTicket'];
     delete?: never;
     options?: never;
@@ -2491,7 +2507,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a ticket */
+    /**
+     * Get a ticket
+     * @description The ticket with the fields the caller may read (field permissions of the object kind ticket, RBA-07, WP-765; see Ticket).
+     */
     get: operations['getTicket'];
     put?: never;
     post?: never;
@@ -2499,7 +2518,10 @@ export interface paths {
     delete: operations['deleteTicket'];
     options?: never;
     head?: never;
-    /** Update a ticket */
+    /**
+     * Update a ticket
+     * @description A field the caller may not edit is 403 with the fields (RBA-07, WP-765): every sent field it cannot read counts, whatever its value, and every readable field whose value changes. The answer carries only the fields the caller may read; ticket.updated names changed fields without values.
+     */
     patch: operations['updateTicket'];
     trace?: never;
   };
@@ -6526,10 +6548,155 @@ export interface paths {
     put?: never;
     /**
      * Import a metamodel export as a draft (MET-54, MET-53)
-     * @description Takes a metamodel export with `format_version` 2 (WP-262, at most 10 MiB, otherwise 413; another format version is 422 `unsupported-format-version`, an unknown field 400; `exported_at`, `organization_id` and `omitted_sections` are ignored) and compares it key by key with the metamodel of the organization, read in one snapshot. System parts and lifecycle models are only resolved, roles by their name, relationship types and `applies_to_type_keys` against the visible ones. The differences become typed items of a new draft (WP-260) in the order of their dependencies; a part the draft creates is referenced by its item (E-112). Parts of the organization missing in the file stay unchanged. Of a template only the current published version is taken over (`template_version` create, items, publish); older versions and their rules are reported as `history-skipped`. Conflicts (`datatype-conflict`, `missing-reference`, `system-key-collision`) answer 422 with the report and create no draft; a file without differences answers 200 with `report.unchanged`. Requires citype:manage and the write permission of every item (e.g. ci_attribute:manage, metamodel:publish), otherwise 403. The draft becomes productive only with its publication (WP-261); without the database 503.
+     * @description Takes a metamodel export with `format_version` 2 (WP-262, at most 10 MiB, otherwise 413; another format version is 422 `unsupported-format-version`, an unknown field 400; `exported_at`, `organization_id` and `omitted_sections` are ignored; `field_grants` and `field_sensitivity` are accepted but not imported, the report names them as `field-permissions-skipped`, E-115) and compares it key by key with the metamodel of the organization, read in one snapshot. System parts and lifecycle models are only resolved, roles by their name, relationship types and `applies_to_type_keys` against the visible ones. The differences become typed items of a new draft (WP-260) in the order of their dependencies; a part the draft creates is referenced by its item (E-112). Parts of the organization missing in the file stay unchanged. Of a template only the current published version is taken over (`template_version` create, items, publish); older versions and their rules are reported as `history-skipped`. Conflicts (`datatype-conflict`, `missing-reference`, `system-key-collision`) answer 422 with the report and create no draft; a file without differences answers 200 with `report.unchanged`. Requires citype:manage and the write permission of every item (e.g. ci_attribute:manage, metamodel:publish), otherwise 403. The draft becomes productive only with its publication (WP-261); without the database 503.
      */
     post: operations['importMetamodel'];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/field-permissions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List field grants (RBA-07, E-38)
+     * @description The field grants of the organization (E-43): the level none, read or write of a role or custom role for an object kind, optionally narrowed to a CI type (and its subtypes) and to one field, one relationship type or one action. Configuration of the organization, paged by creation time and id with `limit` (at most 200) and the signed `cursor` from `next_cursor`. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    get: operations['listFieldGrants'];
+    put?: never;
+    /**
+     * Create a field grant (RBA-07, E-38)
+     * @description Exactly one of role_id and custom_role_id, at most one of field_key, relationship_type_id and action; a CI type only for ci and asset, a relationship type only for ci and relationship, an action (a key of the permission catalogue) only with none or write. field_key is core.<column>, attributes.<key> or _instance.<key> (permission.ParseFieldKey); an unknown key is 422 on field_key, an unknown or invisible CI type, relationship type or action 422, a role or custom role that is unknown or of another organization 422, an equal grant 409. The policies of the organization follow at once (the cached snapshot is dropped after the commit). Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    post: operations['createFieldGrant'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/field-permissions/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete a field grant
+     * @description An unknown id or one of another organization is 404. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    delete: operations['deleteFieldGrant'];
+    options?: never;
+    head?: never;
+    /**
+     * Change the level of a field grant
+     * @description Only the level changes (an action grant stays none or write, 422 otherwise); an unknown id or one of another organization is 404. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    patch: operations['updateFieldGrant'];
+    trace?: never;
+  };
+  '/api/v1/field-permissions/object-grants': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List object grants (RBA-07, E-38)
+     * @description The exceptions for single objects (E-43): the level of a role, custom role or team for one CI, asset, ticket, document or relationship. Paged like the field grants. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    get: operations['listObjectGrants'];
+    put?: never;
+    /**
+     * Create an object grant (RBA-07, E-38)
+     * @description Exactly one grantee (grantee_role_id, grantee_custom_role_id, grantee_team_id). The object must exist and be visible to the caller (422 otherwise; contract has no table before WP-269); a grantee that is unknown or of another organization is 422, an equal grant 409. The grant is removed with its object. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    post: operations['createObjectGrant'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/field-permissions/object-grants/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete an object grant
+     * @description An unknown id or one of another organization is 404. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    delete: operations['deleteObjectGrant'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/field-permissions/sensitive-fields': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List sensitive fields (RBA-07, E-38)
+     * @description The fields marked sensitive (E-43): only a field grant with exactly this field key opens them. Paged like the field grants. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    get: operations['listSensitiveFields'];
+    put?: never;
+    /**
+     * Mark a field sensitive (RBA-07, E-38)
+     * @description Marks a field of an object kind, optionally of a CI type and its subtypes, as sensitive; also system attributes and typed columns. An unknown field key is 422 on field_key, an unknown or invisible CI type 422, an equal mark 409. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    post: operations['createSensitiveField'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/field-permissions/sensitive-fields/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a sensitive mark
+     * @description An unknown id or one of another organization is 404. Requires field_permission:manage for the whole organization (only org_admin holds it, E-106); a holder restricted to some clients, sites or teams is refused with 403 as well.
+     */
+    delete: operations['deleteSensitiveField'];
     options?: never;
     head?: never;
     patch?: never;
@@ -6588,7 +6755,7 @@ export interface paths {
     };
     /**
      * Export the metamodel
-     * @description The organization's metamodel as one JSON document, served as a download (Content-Disposition attachment). Format 1 (default, MET-54 phase 1): every CI type it sees — system and own, active or not — with its attribute definitions, and the global attribute definitions. Format 2 (`format_version=2`, opt-in, WP-262): the complete metamodel — types, attribute definitions, attribute sets, templates with versions, catalog rules, form layouts and lifecycle models — with every reference as a key instead of an id, read in one snapshot; system parts appear as references only (key and is_system). Another format_version is 400; format 2 without the database is 503.
+     * @description The organization's metamodel as one JSON document, served as a download (Content-Disposition attachment). Format 1 (default, MET-54 phase 1): every CI type it sees — system and own, active or not — with its attribute definitions, and the global attribute definitions. Format 2 (`format_version=2`, opt-in, WP-262): the complete metamodel — types, attribute definitions, attribute sets, templates with versions, catalog rules, form layouts and lifecycle models — with every reference as a key instead of an id, read in one snapshot; system parts appear as references only (key and is_system). The field grants and sensitive fields (`field_grants`, `field_sensitivity`, WP-726) are part of format 2 only for a caller holding field_permission:manage for the whole organization; otherwise they are left out and `omitted_sections` names them. Object grants are not exported. Another format_version is 400; format 2 without the database is 503.
      */
     get: operations['exportMetamodel'];
     put?: never;
@@ -7746,6 +7913,61 @@ export interface paths {
     patch: operations['updateSupplier'];
     trace?: never;
   };
+  '/api/v1/contracts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List contracts (MGT-12)
+     * @description The contracts of the organization visible under the caller's scope: org-wide contracts (client_id null) and those of the caller's clients (E-09). Filters `filter[status]`, `filter[kind]`, `filter[supplier_id]`, `filter[client_id]` and `filter[end_date][gte|lte]` (API-02); `sort` number (default), start_date, end_date or created_at, a leading `-` sorts descending; contracts without the sorted date come last ascending. `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor or one of another sort is 400. Each contract carries only the fields the field permissions let the caller read (object kind contract, RBA-07). Requires contract:read.
+     */
+    get: operations['listContracts'];
+    put?: never;
+    /**
+     * Create a contract (MGT-12)
+     * @description A contract of the organization (client_id null) or of a client. number is unique per organization (409 on number). A missing currency is the currency of the organization, a missing status active. The supplier must be org-wide or of the contract's client; a supplier of another client, another organization or outside the caller's scope is 422 on supplier_id. A client of another organization is 422 on client_id. end_date before start_date, a negative notice_period_days, an unknown kind or status and an invalid currency are 422 on the field. A caller restricted to clients cannot create an org-wide contract or one of another client (403, E-09). A sent field the caller may not edit is 403 with the fields (RBA-07). Requires contract:write.
+     */
+    post: operations['createContract'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/contracts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a contract
+     * @description A contract visible under the caller's scope, with its version as ETag; an unknown, foreign or invisible id is 404. Fields the caller may not read are left out (RBA-07); the ETag does not depend on them. Requires contract:read.
+     */
+    get: operations['getContract'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a contract
+     * @description Deletes a contract and its object grants (RBA-07). An org-wide contract is 404 for a caller restricted to clients. Requires contract:write.
+     */
+    delete: operations['deleteContract'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a contract
+     * @description Sent fields change, null clears an optional field (number, currency and status cannot be null); every change raises the version by 1. `client_id` cannot change (400 on client_id). A field the caller may not edit is 403 with the fields (RBA-07): every sent field it cannot read and every readable field whose value changes counts. If-Match (API-07): 412 when the organization requires it (require_if_match) and it is missing, or when it names another than the current version. A taken number is 409, an incompatible supplier or a violated value rule 422. An org-wide contract is 404 for a caller restricted to clients and stays unchanged. Requires contract:write.
+     */
+    patch: operations['updateContract'];
+    trace?: never;
+  };
   '/api/v1/tags': {
     parameters: {
       query?: never;
@@ -8515,13 +8737,13 @@ export interface paths {
     };
     /**
      * List the object links of a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description The objects linked to the ticket besides its primary object (related_ci_id, related_asset_id; TKT-01, WP-764), oldest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02). A link appears only when the ticket and its target are visible under the caller's scope; a ticket that does not exist or lies outside the scope answers 404.
      */
     get: operations['listTicketLinks'];
     put?: never;
     /**
      * Link an object to a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description entity_type is one of asset, ci, contract, location and review_item; any other value answers 422. A ticket or target that does not exist or lies outside the caller's scope answers 404 (a review item is visible when all its candidate CIs are, one without candidates when its client and site lie in the scope), a second link of the same object 409. The link takes client, site and team of the ticket; a hard delete of the target or the ticket removes it. The transaction writes ticket.updated with change link, link_id, entity_type and entity_id.
      */
     post: operations['createTicketLink'];
     delete?: never;
@@ -8547,7 +8769,7 @@ export interface paths {
     post?: never;
     /**
      * Remove an object link of a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description Removes one link of the ticket (WP-764). Only a link the caller sees (ticket and target visible) and may write is removed; any other link, also one of another ticket, answers 404. The transaction writes ticket.updated with change unlink, link_id, entity_type and entity_id.
      */
     delete: operations['deleteTicketLink'];
     options?: never;
@@ -8567,7 +8789,7 @@ export interface paths {
     };
     /**
      * List the documents attached to a ticket
-     * @description Planned (E-38); WP-765 implements the operation.
+     * @description The documents linked to the ticket (document_link with entity_type ticket; TKT-01, WP-765), newest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02); a forged cursor is 400. A ticket that does not exist or lies outside the caller's scope answers 404; of its documents the caller sees those whose link to the ticket it sees. Upload, scan and linking stay with the documents (POST /api/v1/documents/{id}/links with entity_type ticket). Requires document:read.
      */
     get: operations['listTicketAttachments'];
     put?: never;
@@ -8708,7 +8930,7 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file with line, column, code and message of every parse and limit error. While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
     put?: never;
@@ -8802,7 +9024,7 @@ export interface components {
       components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
     /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
     RuleAST: components['schemas']['rule'];
-    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_end, purchase_date, purchase_cost, asset_tag, serial_number, status), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
+    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_until, purchase_date, purchase_price, inventory_no, serial_number, status; deprecated: warranty_end, purchase_cost, asset_tag), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
     ComputedExpression: components['schemas']['expr'];
     /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
     AttributeValidationLegacy: {
@@ -9639,7 +9861,7 @@ export interface components {
       /** Format: date-time */
       exported_at: string;
       organization_id: string;
-      /** @description Sections left out for the reader's permissions (WP-264); empty for now. */
+      /** @description Sections left out for the reader's permissions: field_grants and field_sensitivity for a reader without field_permission:manage for the whole organization (WP-726). */
       omitted_sections: string[];
       /** @description Sorted by key. */
       ci_types: components['schemas']['MetamodelExportType'][];
@@ -9655,6 +9877,10 @@ export interface components {
       layouts: components['schemas']['MetamodelExportLayout'][];
       /** @description Sorted by key. */
       lifecycle_models: components['schemas']['MetamodelExportLifecycleModel'][];
+      /** @description The field grants with keys instead of ids (WP-726), sorted by role kind, role, object kind, CI type and target; absent when omitted. */
+      field_grants?: components['schemas']['MetamodelExportFieldGrant'][];
+      /** @description The sensitive fields, sorted by object kind, CI type and field key; absent when omitted. */
+      field_sensitivity?: components['schemas']['MetamodelExportSensitiveField'][];
     };
     /** @description A metamodel export (MetamodelExportV2) as the body of the import; only format_version 2 is accepted (another one is 422 with the problem type unsupported-format-version). */
     MetamodelImportDocument: {
@@ -9670,6 +9896,10 @@ export interface components {
       rules?: components['schemas']['MetamodelExportRule'][];
       layouts?: components['schemas']['MetamodelExportLayout'][];
       lifecycle_models?: components['schemas']['MetamodelExportLifecycleModel'][];
+      /** @description Accepted but not imported (E-115); reported as field-permissions-skipped. */
+      field_grants?: components['schemas']['MetamodelExportFieldGrant'][];
+      /** @description Accepted but not imported (E-115); reported as field-permissions-skipped. */
+      field_sensitivity?: components['schemas']['MetamodelExportSensitiveField'][];
     };
     /** @description The answer of the import (WP-722) - the new draft (null without differences) and the report. */
     MetamodelImportResult: {
@@ -9701,11 +9931,139 @@ export interface components {
       }[];
       notes: {
         /** @enum {string} */
-        code: 'history-skipped' | 'not-imported';
+        code: 'history-skipped' | 'not-imported' | 'field-permissions-skipped';
         kind: string;
         key: string;
         detail: string;
       }[];
+    };
+    /** @description A field grant of the metamodel export (WP-726): the role by name and kind, CI type and relationship type by key, the field key and the permission key of an action; empty values are left out. */
+    MetamodelExportFieldGrant: {
+      role: string;
+      /** @enum {string} */
+      role_kind: 'role' | 'custom_role';
+      /** @enum {string} */
+      object_kind: 'ci' | 'asset' | 'contract' | 'ticket' | 'document' | 'relationship';
+      ci_type?: string;
+      field_key?: string;
+      relationship_type?: string;
+      action?: string;
+      /** @enum {string} */
+      level: 'none' | 'read' | 'write';
+    };
+    /** @description A sensitive field of the metamodel export (WP-726); ci_type is the key of the type. */
+    MetamodelExportSensitiveField: {
+      /** @enum {string} */
+      object_kind: 'ci' | 'asset' | 'contract' | 'ticket' | 'document' | 'relationship';
+      ci_type?: string;
+      field_key: string;
+    };
+    /**
+     * @description The object kind of a field permission (E-43).
+     * @enum {string}
+     */
+    FieldPermissionObjectKind: 'ci' | 'asset' | 'contract' | 'ticket' | 'document' | 'relationship';
+    /**
+     * @description The access level (E-43).
+     * @enum {string}
+     */
+    FieldPermissionLevel: 'none' | 'read' | 'write';
+    /** @description A field grant (RBA-07, E-43): the level of a role or custom role for an object kind, optionally of a CI type and its subtypes, and for one field, relationship type or action, or the whole kind. */
+    FieldGrant: {
+      id: string;
+      organization_id: string;
+      role_id: string | null;
+      custom_role_id: string | null;
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      ci_type_id: string | null;
+      field_key: string | null;
+      relationship_type_id: string | null;
+      /** @description The key of the relationship type (read only). */
+      relationship_type?: string;
+      action: string | null;
+      level: components['schemas']['FieldPermissionLevel'];
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateFieldGrantRequest: {
+      role_id?: string | null;
+      custom_role_id?: string | null;
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      ci_type_id?: string | null;
+      /** @description core.<column>, attributes.<key> or _instance.<key>. */
+      field_key?: string | null;
+      relationship_type_id?: string | null;
+      /** @description A key of the permission catalogue. */
+      action?: string | null;
+      level: components['schemas']['FieldPermissionLevel'];
+    };
+    UpdateFieldGrantRequest: {
+      level: components['schemas']['FieldPermissionLevel'];
+    };
+    /** @description The exception for a single object (E-43) for a role, custom role or team. */
+    ObjectGrant: {
+      id: string;
+      organization_id: string;
+      grantee_role_id: string | null;
+      grantee_custom_role_id: string | null;
+      grantee_team_id: string | null;
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      object_id: string;
+      level: components['schemas']['FieldPermissionLevel'];
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateObjectGrantRequest: {
+      grantee_role_id?: string | null;
+      grantee_custom_role_id?: string | null;
+      grantee_team_id?: string | null;
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      object_id: string;
+      level: components['schemas']['FieldPermissionLevel'];
+    };
+    /** @description A field marked sensitive (E-43); only a grant with exactly its field key opens it. */
+    SensitiveField: {
+      id: string;
+      organization_id: string;
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      ci_type_id: string | null;
+      field_key: string;
+      created_by: string | null;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateSensitiveFieldRequest: {
+      object_kind: components['schemas']['FieldPermissionObjectKind'];
+      ci_type_id?: string | null;
+      field_key: string;
+    };
+    /** @description A cursor page of field grants (configuration, no count). */
+    FieldGrantListResponse: {
+      data: components['schemas']['FieldGrant'][];
+      limit: number;
+      has_more: boolean;
+      /** @description Opaque cursor of the next page; absent on the last one. */
+      next_cursor?: string;
+    };
+    /** @description A cursor page of object grants (configuration, no count). */
+    ObjectGrantListResponse: {
+      data: components['schemas']['ObjectGrant'][];
+      limit: number;
+      has_more: boolean;
+      /** @description Opaque cursor of the next page; absent on the last one. */
+      next_cursor?: string;
+    };
+    /** @description A cursor page of sensitive fields (configuration, no count). */
+    SensitiveFieldListResponse: {
+      data: components['schemas']['SensitiveField'][];
+      limit: number;
+      has_more: boolean;
+      /** @description Opaque cursor of the next page; absent on the last one. */
+      next_cursor?: string;
     };
     /** @description A CI type; a system type carries only key and is_system. */
     MetamodelExportType: {
@@ -10466,7 +10824,7 @@ export interface components {
         id: string;
         /** @enum {string} */
         result: 'ok' | 'error' | 'skipped';
-        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. */
+        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. 403 when the action grants (ci:write on the type and scope of the CI, WP-728) or the field permissions refuse the id; the other ids go on. */
         code: number;
         error?: string;
       }[];
@@ -10972,6 +11330,7 @@ export interface components {
      */
     CIDiscoverySource:
       'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'agent' | 'sweep' | 'manual' | 'import';
+    /** @description A configuration item as the caller may read it (field permissions, RBA-07, WP-265): the typed columns manufacturer, model, serial_number, hardware_uuid, management_ip, primary_mac, hostname, fqdn, os_name, os_version, firmware_version and sys_object_id (core.<column>), every key of attributes (attributes.<key>, instance attributes _instance.<key>) and the members of asset (by the field permissions of the asset) are left out when the caller may not read them; sensitive fields without a grant are never answered. The structural members (id, type, client, location, name, status, lifecycle, health, timestamps, version) always stay; version and the ETag do not depend on the visible fields. */
     CI: {
       id: string;
       organization_id: string;
@@ -11082,6 +11441,12 @@ export interface components {
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
       id: string;
+      /** @description Inventory number of the asset (AST-01, WP-738). */
+      inventory_no: string;
+      /**
+       * @deprecated
+       * @description Deprecated name of inventory_no (API-01, E-120 (c)).
+       */
       asset_tag: string;
       name: string;
       serial_number?: string;
@@ -11093,10 +11458,49 @@ export interface components {
       rfid_tag?: string;
       /** Format: date */
       purchase_date?: string;
-      /** Format: date */
+      /**
+       * Format: date
+       * @description End of the warranty of the asset (AST-01, WP-738).
+       */
+      warranty_until?: string;
+      /**
+       * Format: date
+       * @deprecated
+       * @description Deprecated name of warranty_until (API-01, E-120 (c)).
+       */
       warranty_end?: string;
+      /**
+       * @deprecated
+       * @description Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)).
+       */
       supplier?: string;
       invoice_number?: string;
+      /** @description Manufacturer of the asset (AST-01 */
+      manufacturer?: string;
+      /** @description Model of the asset (AST-01 */
+      model?: string;
+      /** @description Cost center of the asset (AST-01 */
+      cost_center?: string;
+      /**
+       * Format: uuid
+       * @description Owning user of the asset (WP-271).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning team of the asset (WP-271).
+       */
+      owner_team_id?: string;
+      /**
+       * Format: uuid
+       * @description Supplier record of the asset (E-41
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Contract of the asset (WP-271).
+       */
+      contract_id?: string;
     };
     CreateCIRequest: {
       /**
@@ -11292,10 +11696,46 @@ export interface components {
       cardinality: components['schemas']['RelationshipTypeCardinality'];
       readonly is_system: boolean;
       description?: string;
+      /** @description Schema of the attributes of the edges of the type (REL-07, WP-295). A system type has none ([]). */
+      metadata_schema: components['schemas']['RelationshipAttributeDefinition'][];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description A definition of the attribute schema of a relationship type (REL-07, WP-295) in the format of AttributeDefinition, limited to these members (another member is 400). POST and PATCH /relationships check the attributes of an edge against the definitions as CI attributes are checked: visible, required, read only, type and validation rule, allowed values (422); a key without definition is allowed. Discovery, agent and import edges are not checked. */
+    RelationshipAttributeDefinition: {
+      /** @description Attribute key, unique in the schema. provenance and the field names of a Relationship (id, source_ci_id, notes …) are reserved (400). */
+      key: string;
+      display_name?: components['schemas']['LocalizedText'];
+      /**
+       * @description A phase 1 type of MET-11. file, json, the reference types and the former type names are 400.
+       * @enum {string}
+       */
+      data_type:
+        | 'text'
+        | 'multiline'
+        | 'integer'
+        | 'decimal'
+        | 'boolean'
+        | 'date'
+        | 'datetime'
+        | 'enum'
+        | 'multiselect'
+        | 'ip'
+        | 'mac'
+        | 'url'
+        | 'email'
+        | 'uuid';
+      required?: boolean;
+      /** @description Prefills a form; valid for the data type. The server does not set it. */
+      default?: unknown;
+      enum_values?: string[];
+      validation?: components['schemas']['AttributeValidation'];
+      /** @description visible_when, required_when, read_only_when and allowed_values_when (as AttributeDefinition). */
+      conditional?: {
+        [key: string]: unknown;
+      };
     };
     /** @description Create (key, display_name, reverse_name required; defaults directed, logical, source_depends_on_target, many_to_many) or change a relationship type. impact_direction undirected belongs to undirected types of the category network only (400, REL-06). */
     RelationshipTypeUpsert: {
@@ -11312,6 +11752,8 @@ export interface components {
       allowed_target_types?: string[];
       cardinality?: components['schemas']['RelationshipTypeCardinality'];
       description?: string;
+      /** @description Replaces the attribute schema of the type (REL-07, WP-295); missing keeps it, [] clears it. An invalid definition (data type, reserved or repeated key, validation rule) is 400. Existing edges are not checked again. */
+      metadata_schema?: components['schemas']['RelationshipAttributeDefinition'][];
     };
     /**
      * @description Enforced on POST /relationships (REL-06): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing edge; many_to_many has no bound. Another value is 400. Discovery edges are not checked.
@@ -11331,12 +11773,16 @@ export interface components {
       /** @description Rack (mounted_in) or location (located_in) of a projected relationship. */
       readonly target_location_id?: string;
       rel_type: components['schemas']['RelationshipType'];
+      /** @description Attributes of the edge. Field permissions (RBA-07, WP-770) project them: a key the caller may not read (field key attributes.<key> of the object kind relationship, its relationship type, field sensitivity, object grant; the lower level of both ends of the edge counts) is missing; the object itself stays, {} at least. */
       attributes: {
         [key: string]: unknown;
       };
       /** @description Provenance (REL-08) – manual, discovery, agent, import, api, integration, workflow ("rule" is accepted as workflow). attributes.provenance records actor, actor type and time of the edge. Discovery edges are re-confirmed when seen again (last_seen_at, last_confirmed_at) and removed with relationship.removed after max(7 days, 5 × the scope interval) without confirmation or when a suppression covers them (TOP-02). An edge that is verified or re-confirmed is kept, also while a cleanup run is under way: a verification answered with 200 is never undone by the cleanup (F-411). */
       source: string;
+      /** @description Confidence of the edge. Missing when the field permissions do not let the caller read core.confidence of the edge (RBA-07, WP-770). */
       confidence?: number;
+      /** @description Notes on the edge. Missing when empty or when the field permissions do not let the caller read core.notes of the edge (RBA-07, WP-770). */
+      notes?: string;
       /** @description Port of the source CI the edge starts at (REL-02). */
       source_interface_id?: string;
       /** @description Port of the target CI the edge ends at (REL-02). */
@@ -11361,6 +11807,7 @@ export interface components {
       source_ci_id: string;
       target_ci_id: string;
       rel_type: components['schemas']['RelationshipType'];
+      /** @description Checked against the metadata_schema of the relationship type (422, REL-07). Reserved keys are 422 on attributes.<key>, as attributes.provenance: provenance (recorded by the server, REL-08) and the field names of a Relationship (id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state, source_system, notes, source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at, created_at, updated_at, projected, target_location_id). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -11377,7 +11824,7 @@ export interface components {
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
-      /** @description Merged into the existing attributes. The key provenance is reserved to the system (422, F-270). */
+      /** @description Merged into the existing attributes; the merged attributes are checked against the metadata_schema of the relationship type (422, REL-07). Reserved keys are 422 on attributes.<key>: provenance (reserved to the system, F-270) and the field names of a Relationship (id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state, source_system, notes, source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at, created_at, updated_at, projected, target_location_id). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -11789,13 +12236,14 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
-    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01). */
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. */
     ExportManifest: {
       format: string;
       fields: string[];
       omitted: {
         field: string;
-        reason: string;
+        /** @enum {string} */
+        reason: 'layout' | 'field_permission';
       }[];
     };
     ExportJob: {
@@ -11937,27 +12385,59 @@ export interface components {
     ModuleListResponse: {
       data: components['schemas']['ModuleStatus'][];
     };
+    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). */
     Asset: {
       id: string;
       organization_id: string;
       client_id?: string;
       ci_id?: string;
-      asset_tag: string;
+      /** @description Inventory number, unique per organization. */
+      asset_tag?: string;
       name: string;
-      category: string;
-      status: string;
+      category?: string;
+      /**
+       * @deprecated
+       * @description Legacy status; the state of the asset is lifecycle_state (E-120).
+       */
+      status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
+      /** @description ISO 4217 code; the currency of the organization unless set. */
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /**
+       * @deprecated
+       * @description Free text of the supplier; the supplier record is supplier_id (E-41).
+       */
       supplier?: string;
+      /** Format: uuid */
+      supplier_id?: string;
+      /** Format: uuid */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
+      /** @description Unique per organization. */
+      rfid_tag?: string;
+      /** @description Unique per organization. */
+      barcode?: string;
+      /**
+       * @deprecated
+       * @description Free text of the location; the location is location_id (E-120).
+       */
       location?: string;
-      /** @description Node of the canonical location tree; changed through stock movements. */
+      /** @description Node of the canonical location tree; changed through stock movements and rack placement only. */
       readonly location_id?: string;
+      /** @description State of the effective asset lifecycle model (E-120); changed through POST /api/v1/assets/{id}/lifecycle-transitions only. */
+      readonly lifecycle_state?: string;
       notes?: string;
       custom_fields: {
         [key: string]: unknown;
@@ -11973,39 +12453,75 @@ export interface components {
       asset_tag: string;
       name: string;
       category?: string;
+      /** @deprecated */
       status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
+      /** @description ISO 4217 code (400 on currency otherwise); missing or empty is the currency of the organization. */
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /** @deprecated */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Org-wide supplier or one of the asset's client (422 otherwise).
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Org-wide contract or one of the asset's client (422 otherwise).
+       */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
       rfid_tag?: string;
       barcode?: string;
+      /** @deprecated */
       location?: string;
       notes?: string;
       custom_fields?: {
         [key: string]: unknown;
       };
     };
+    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization. */
     UpdateAssetRequest: {
       name?: string;
       category?: string;
+      /** @deprecated */
       status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /** @deprecated */
       supplier?: string;
+      /** Format: uuid */
+      supplier_id?: string;
+      /** Format: uuid */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
       rfid_tag?: string;
       barcode?: string;
+      /** @deprecated */
       location?: string;
       notes?: string;
       ci_id?: string;
@@ -12215,6 +12731,7 @@ export interface components {
       corrections_applied: number;
       corrections: components['schemas']['StocktakeCorrection'][];
     };
+    /** @description A ticket (TKT-01). The fields id, organization_id, ticket_number, title, resolved_at, closed_at and the timestamps are present (the optional ones when set); the others are left out when the field permissions do not let the caller read them (object kind ticket, field keys core.<field>, RBA-07, WP-765). */
     Ticket: {
       id: string;
       organization_id: string;
@@ -12222,10 +12739,10 @@ export interface components {
       ticket_number: number;
       title: string;
       description?: string;
-      status: components['schemas']['TicketStatus'];
-      priority: components['schemas']['TicketPriority'];
-      category: string;
-      reporter_id: string;
+      status?: components['schemas']['TicketStatus'];
+      priority?: components['schemas']['TicketPriority'];
+      category?: string;
+      reporter_id?: string;
       assignee_id?: string;
       team_id?: string;
       related_ci_id?: string;
@@ -12236,7 +12753,8 @@ export interface components {
       resolved_at?: string;
       /** Format: date-time */
       closed_at?: string;
-      tags: string[];
+      /** @description Sorted keys of the catalog tags of the ticket (ticket_tag, E-127); [] without tags. */
+      tags?: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -12254,6 +12772,7 @@ export interface components {
       related_asset_id?: string;
       /** Format: date-time */
       due_date?: string;
+      /** @description Keys of catalog tags (E-127); a key the catalog lacks answers 422 naming the unknown keys. */
       tags?: string[];
     };
     /**
@@ -12275,10 +12794,30 @@ export interface components {
       related_asset_id?: string;
       /** Format: date-time */
       due_date?: string;
+      /** @description Keys of catalog tags (E-127); they replace the tags of the ticket, [] removes all. A key the catalog lacks answers 422 naming the unknown keys. */
       tags?: string[];
     };
     TicketListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Ticket'][];
+    };
+    /** @description An object linked to a ticket besides its primary object (WP-764). */
+    TicketLink: {
+      id: string;
+      organization_id: string;
+      ticket_id: string;
+      /** @enum {string} */
+      entity_type: 'asset' | 'ci' | 'contract' | 'location' | 'review_item';
+      entity_id: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    TicketLinkListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TicketLink'][];
+    };
+    CreateTicketLinkRequest: {
+      /** @description asset, ci, contract, location or review_item; any other value answers 422. */
+      entity_type: string;
+      entity_id: string;
     };
     TicketComment: {
       id: string;
@@ -13124,6 +13663,104 @@ export interface components {
     SupplierListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Supplier'][];
     };
+    /** @description A contract of the organization or one of its clients (MGT-12, WP-269). The fields id, organization_id, client_id, number, version and the timestamps are always present; the others are left out when the field permissions do not let the caller read them (object kind contract, field keys core.<field>, RBA-07). */
+    Contract: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Client of the contract; null is org-wide.
+       */
+      client_id: string | null;
+      /**
+       * Format: uuid
+       * @description Supplier, org-wide or of the contract's client.
+       */
+      supplier_id?: string | null;
+      /** @description Contract number, unique per organization. */
+      number: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /**
+       * Format: date
+       * @description Not before start_date.
+       */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      /** @description Contract value in currency (decimal). */
+      value?: number | null;
+      /** @description ISO 4217 code; the currency of the organization unless set. */
+      currency?: string;
+      /**
+       * @description draft, active, terminated (gekündigt) or ended (beendet).
+       * @enum {string}
+       */
+      status?: 'draft' | 'active' | 'terminated' | 'ended';
+      notes?: string | null;
+      /**
+       * Format: int64
+       * @description Raised by every change; the ETag of the contract.
+       */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateContractRequest: {
+      /**
+       * Format: uuid
+       * @description Client of the contract; null or absent is org-wide. Set only at creation.
+       */
+      client_id?: string | null;
+      /** Format: uuid */
+      supplier_id?: string | null;
+      number: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /** Format: date */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      value?: number | null;
+      /** @description ISO 4217 code; absent or null is the currency of the organization. */
+      currency?: string | null;
+      /**
+       * @description Absent or null is active.
+       * @enum {string|null}
+       */
+      status?: 'draft' | 'active' | 'terminated' | 'ended' | null;
+      notes?: string | null;
+    };
+    /** @description Sent fields change, null clears an optional field. client_id cannot change; sending it is 400 on client_id. number, currency and status cannot be null. */
+    UpdateContractRequest: {
+      /** Format: uuid */
+      supplier_id?: string | null;
+      number?: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /** Format: date */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      value?: number | null;
+      currency?: string;
+      /** @enum {string} */
+      status?: 'draft' | 'active' | 'terminated' | 'ended';
+      notes?: string | null;
+    };
+    ContractListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Contract'][];
+    };
     /** @description A catalog tag of the organization (CI-08, WP-753). */
     Tag: {
       /** Format: uuid */
@@ -13319,6 +13956,12 @@ export interface components {
       fields: string[];
       /** Format: int64 */
       current_version: number;
+    };
+    /** @description A request refused by the field permissions (RBA-07, WP-265): type urn:reticora:problem:forbidden, status 403. `fields` names the DTO paths of the refused fields (hostname, attributes.cost_center), never their values. A refusal of the action grants (WP-728) names the refused action in `action` (the permission key of the route, e.g. ci:delete) and leaves `fields` empty. The route permission answers 403 with type https://reticora.io/problems/403 instead. */
+    FieldForbiddenProblem: components['schemas']['ProblemDetail'] & {
+      fields: string[];
+      /** @description The action the action grants refuse on the object (WP-728): an action grant none of its CI type or an object grant none. */
+      action?: string;
     };
     /** @description The unmerge is blocked by a later open merge of the survivor (F-416): the merge later_merge_id of later_merge_victim_id into later_merge_survivor_id is unmerged first. A later merge into a CI outside the caller's scope is named only by its victim (the survivor of this merge); later_merge_id and later_merge_survivor_id are absent. */
     UnmergeLaterMergeProblem: components['schemas']['ProblemDetail'] & {
@@ -15261,12 +15904,15 @@ export interface components {
         | string
         | unknown
         | (
-            | 'asset.warranty_end'
+            | 'asset.warranty_until'
             | 'asset.purchase_date'
-            | 'asset.purchase_cost'
-            | 'asset.asset_tag'
+            | 'asset.purchase_price'
+            | 'asset.inventory_no'
             | 'asset.serial_number'
             | 'asset.status'
+            | 'asset.warranty_end'
+            | 'asset.purchase_cost'
+            | 'asset.asset_tag'
           );
     };
     /** @description A constant string, number or boolean. */
@@ -16302,6 +16948,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter on a typed column or attribute the caller cannot read in every client and site scope of its role assignments for one of the queried CI types (without ci_type_id every type), or any such filter under an object grant none. No list and no total are answered. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description An unknown field in filter, sort or fields (API-02). */
       422: {
         headers: {
@@ -16362,7 +17018,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the plan (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03), or a non-empty value in a field the caller may not write for the type and client_id of the request (field permissions, RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`), checked before the validation (422) and the unique check (409). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description Another active CI holds the value of a unique attribute (MET-15); `violations` names the attributes. The check covers every CI of the scope of the attribute, also those outside the client or site scope of the caller, and never names the other CI. */
       409: {
         headers: {
@@ -16460,6 +17125,16 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission ci:delete (https://reticora.io/problems/403, ProblemDetail) or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`): an action grant none of the CI type or an object grant none of the CI. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
     };
   };
@@ -16499,7 +17174,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths, e.g. hostname or attributes.cost_center): a field of the request the caller may not read (whatever its value), a readable field it may not write whose value differs from the current effective value, every projected field under an object grant read, or an instance attribute changed without ci_instance_attribute:manage. Checked before 422, 409 and 412. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Fields of the request changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15, `violations` names the attributes; also a CI outside the client or site scope of the caller, which is never named) */
       409: {
@@ -16555,7 +17239,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03, the CI stays deleted), or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the deleted CI. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
       409: {
@@ -16610,7 +17303,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): the CI carries values in fields the caller may not read in its current type; or the action grants (WP-728, `action` ci:write, empty `fields`) on its current type, checked before the fields. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description Another active CI holds a value the CI carries of a unique attribute of the target type (MET-15): urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists. The CI keeps its type. */
       409: {
@@ -16662,7 +17364,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): survivor or victim carry values in fields the caller may not read in their type; or the action grants (WP-728, `action` ci:delete, empty `fields`) on survivor or victim, checked before the fields. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description One of the CIs is part of another merge. */
       409: {
@@ -16710,7 +17421,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis, ENT-03, the merge stays), or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor. The action grants are checked before the state of the merge, also with force=true: a caller they refuse gets 403, never 409. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The survivor changed after the merge (VersionConflictProblem: `fields` names the changed fields, `current_version` the version of the survivor; retry with force=true to overwrite them), the survivor is part of a later open merge (UnmergeLaterMergeProblem, type urn:reticora:problem:unmerge-later-merge: unmerge that merge first; force does not override it), one of the CIs is locked by another write, or another active CI holds a value of a unique attribute of the merged CI or of the survivor in the snapshot meanwhile (MET-15: urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; force does not override it, the merge stays). */
       409: {
@@ -17126,7 +17846,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail), an edge between two org-wide CIs for a principal restricted to some clients or sites (ProblemDetail, E-09, E-62) or the field permissions of the edge (RBA-07, WP-770; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the sorted DTO paths, e.g. attributes.cost_center and notes): a field of the request (attributes.<key>, notes, confidence) the caller may not read, whatever its value, or a readable field it may not write whose value is not empty. The lower level of both ends of the edge counts; attributes.provenance is recorded by the system and not checked. Checked after 400 and before the write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description The edge exists already (the same source, target, type and interfaces), e.g. a repeated create */
       409: {
         headers: {
@@ -17136,7 +17865,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, a subtype of a listed CI type (parent_type_id) is allowed, nothing is stored (REL-01, REL-06, E-95, F-313). An edge that would exceed the cardinality of the relationship type names rel_type ("the edge would exceed the cardinality of the relationship type"): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing; nothing is stored (REL-06, E-125). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, a subtype of a listed CI type (parent_type_id) is allowed, nothing is stored (REL-01, REL-06, E-95, F-313). An edge that would exceed the cardinality of the relationship type names rel_type ("the edge would exceed the cardinality of the relationship type"): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing; nothing is stored (REL-06, E-125). A reserved key in attributes (provenance, which the server records, or a field name of the edge such as source_ci_id or notes) names attributes.<key>, one violation per key; checked after 400 and before the field permissions (403, REL-07, WP-295). Attributes that violate the metadata_schema of the relationship type (the organization's row before the system row) name the attribute key, sorted by field: a required attribute that is missing, a value of another type, one the validation rule refuses or one not among the allowed values; checked after the field permissions. A key without definition is accepted; nothing is stored (REL-07, WP-295). A schema that cannot be read is 500. Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -17216,8 +17945,18 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions of the edge (RBA-07, WP-770; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the sorted DTO paths, e.g. attributes.cost_center and notes): a field of the request (attributes.<key>, notes, confidence) the caller may not read, whatever its value, or a readable field it may not write whose value differs from the stored one. The lower level of both ends of the edge counts; attributes.provenance is recorded by the system and not checked. Checked after 400 and before the write. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
-      /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
+      /** @description attributes carries a reserved key: provenance (F-270) or a field name of the edge such as source_ci_id or notes (REL-07); `violations` names attributes.<key> per such key, checked after 400 and before the field permissions (403). Or the attributes after the merge (the stored ones with those of the request) violate the metadata_schema of the relationship type: `violations` names the attribute keys, sorted by field (a required attribute that is missing, a value of another type, one the validation rule refuses, one not among the allowed values or a read-only one changed), checked after the field permissions under the lock of the write. A PATCH without attributes is not checked against the schema. Nothing is changed (REL-07, WP-295). A schema that cannot be read is 500. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18006,7 +18745,16 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind, a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
@@ -18247,6 +18995,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (asset_tag) or a sort on asset_tag, category or status the caller cannot read in every scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -18274,8 +19032,18 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description client_id lies outside the caller's scope. */
+      /** @description client_id lies outside the caller's scope (ProblemDetail), or the field permissions do not let the caller edit a sent field (FieldForbiddenProblem with `fields`). */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      /** @description The inventory number (asset_tag), the barcode or the rfid_tag is already taken in the organization; `field` names it. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -18283,7 +19051,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization. */
+      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization; or supplier_id, contract_id, owner_user_id or owner_team_id is not usable: unknown, of another organization, outside the caller's scope or (supplier, contract) of another client than the asset (all alike, `field` names it). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18370,8 +19138,18 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The field permissions do not let the caller edit a sent field: a field it cannot read (whatever the value) or a readable field whose value changes (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
-      /** @description The field is owned by the parent asset of a composition (spec §5). */
+      /** @description The field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -18380,7 +19158,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a reference (supplier_id, contract_id, owner_user_id, owner_team_id) is not usable for the asset (all alike); or the body sends the read-only location_id (written through stock movements and rack placement) or lifecycle_state (written through POST /api/v1/assets/{id}/lifecycle-transitions). `field` names the field. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -20951,6 +21729,8 @@ export interface operations {
         assignee_id?: string;
         /** @description Tickets of one team (UUID), or `mine` for the tickets of every team the caller is a member of (`team_member`, E-143), with cursor, sort and `total` like a team id; without team membership the list is empty. */
         team_id?: string;
+        /** @description Tag keys of the catalog, comma separated: a ticket must carry every one of them (WP-764, E-127). */
+        tags?: string;
       };
       header?: never;
       path?: never;
@@ -20969,6 +21749,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter, the search or a sort on a field the caller cannot read in every scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20996,7 +21786,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may not edit. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description priority is no ticket priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
@@ -21084,7 +21883,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may not edit. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The status change is no transition of the ticket state machine (TKT-01, e.g. new to waiting); the ticket is unchanged and the detail names both states. */
       409: {
@@ -32716,6 +33524,324 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
+  listFieldGrants: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description Grants of this standard role. */
+        role_id?: string;
+        /** @description Grants of this custom role. */
+        custom_role_id?: string;
+        /** @description ci, asset, contract, ticket, document or relationship; another value is 400. */
+        object_kind?: string;
+        /** @description Grants narrowed to this CI type. */
+        ci_type_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page, oldest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FieldGrantListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createFieldGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateFieldGrantRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FieldGrant'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteFieldGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  updateFieldGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateFieldGrantRequest'];
+      };
+    };
+    responses: {
+      /** @description Field grant updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FieldGrant'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listObjectGrants: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description ci, asset, contract, ticket, document or relationship; another value is 400. */
+        object_kind?: string;
+        /** @description Grants of this object. */
+        object_id?: string;
+        /** @description Grants to this standard role. */
+        grantee_role_id?: string;
+        /** @description Grants to this custom role. */
+        grantee_custom_role_id?: string;
+        /** @description Grants to this team. */
+        grantee_team_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page, oldest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ObjectGrantListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createObjectGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateObjectGrantRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ObjectGrant'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteObjectGrant: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSensitiveFields: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description ci, asset, contract, ticket, document or relationship; another value is 400. */
+        object_kind?: string;
+        /** @description Marks narrowed to this CI type. */
+        ci_type_id?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page, oldest first */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SensitiveFieldListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createSensitiveField: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateSensitiveFieldRequest'];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SensitiveField'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  deleteSensitiveField: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
   listCiTypes: {
     parameters: {
       query?: {
@@ -33421,6 +34547,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the field): the caller may not write the field of the path (a typed column is core.<name>, an instance attribute of the CI _instance.<name>, any other name attributes.<name>; name and status are structural). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The field cannot be overridden (a structural column, an instance attribute or a computed attribute) */
       422: {
@@ -33460,6 +34596,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (https://reticora.io/problems/403, ProblemDetail) or the field permissions (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the field): the caller may not write the field of the path (a typed column is core.<name>, an instance attribute of the CI _instance.<name>, any other name attributes.<name>; name and status are structural). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
       404: {
         headers: {
@@ -33533,6 +34679,16 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description Forbidden: the route permission lifecycle:transition (https://reticora.io/problems/403, ProblemDetail) or the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` lifecycle:transition and empty `fields`) on the type and scope of the CI, checked before the model and the guards. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
       };
       404: components['responses']['NotFound'];
       /** @description from_state is not the current state; current_state names it. */
@@ -35118,13 +36274,14 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read). */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read) (ProblemDetail), or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (as attributes.tags), a sort key, a column or, for CIs, asset.<field>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
       /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */
@@ -35600,7 +36757,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ci_instance_attribute:manage, ProblemDetail) or the field permissions of _instance.<key> (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The attributes changed since the If-Match version, or another active CI holds the value of a unique attribute (MET-15) */
       409: {
@@ -35660,7 +36826,16 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ci_instance_attribute:manage, ProblemDetail) or the field permissions of _instance.<key> (RBA-07, WP-265; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The attributes changed since the If-Match version */
       409: {
@@ -35884,6 +37059,228 @@ export interface operations {
       422: components['responses']['UnprocessableEntity'];
     };
   };
+  listContracts: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contracts, sorted by number unless sort says otherwise */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ContractListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields): a filter or a date sort on a field the caller cannot read in every client scope of its role assignments. No list and no total are answered. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateContractRequest'];
+      };
+    };
+    responses: {
+      /** @description Contract created */
+      201: {
+        headers: {
+          /** @description The version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission, the client scope (E-09) or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contract */
+      200: {
+        headers: {
+          /** @description The version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contract deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  updateContract: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateContractRequest'];
+      };
+    };
+    responses: {
+      /** @description Contract updated */
+      200: {
+        headers: {
+          /** @description The new version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match missing although required, or not the current version of the contract */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listTags: {
     parameters: {
       query?: {
@@ -36003,7 +37400,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The tag is assigned to CIs or is a system tag. */
+      /** @description The tag is assigned to CIs or tickets, or is a system tag. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -37121,12 +38518,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the object links of a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-764. */
+      /** @description The object links of the ticket */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TicketLinkListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -37144,19 +38543,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTicketLinkRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-764. */
+      /** @description Object linked */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TicketLink'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -37209,12 +38615,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the documents attached to a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-765. */
+      /** @description The documents attached to the ticket */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

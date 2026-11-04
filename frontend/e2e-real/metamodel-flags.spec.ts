@@ -20,18 +20,23 @@ import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
  * One organization is created through the self-signup UI; its administrator creates a CI
  * type through the API.
  *
+ * Since WP-313 the attribute editor creates a field with its flags in one
+ * POST /attribute-definitions and edits it with PATCH; the attribute list shows the index
+ * status of each definition (index_status, WP-796) in IndexStatus.
+ *
  * Test → requirement IDs proven:
- *  F1 a new field saved with "Eindeutig" in the UI: PUT and PATCH succeed, the field list
- *     shows the index job, the job succeeds (idx_attr_<id>_u, E-04), and a second CI with
- *     the value of the first is refused in the CMDB form with 409 at the attribute
- *     ................................................... MET-15, DB-04 (WP-142, WP-511)
+ *  F1 a new field saved with "Eindeutig" in the UI: one POST /attribute-definitions with
+ *     unique:true (no PUT /ci-types/{id}/fields), the attribute list shows the index
+ *     status until the job succeeds (idx_attr_<id>_u, E-04), and a second CI with the
+ *     value of the first is refused in the CMDB form with 409 at the attribute
+ *     .......................................... MET-15, DB-04 (WP-142, WP-511, WP-313)
  *  F2 an existing attribute whose value two CIs share: "Bearbeiten" shows its flags,
  *     "Eindeutig" is refused with the reason in the dialog (409, the attribute stays
- *     non-unique); "Durchsuchbar" saves with PATCH and the field list shows the queued
- *     index job with its status ................. MET-15, DB-04 (WP-142, WP-511, F-325)
+ *     non-unique); "Durchsuchbar" saves with the PATCH of the attribute dialog and the
+ *     attribute list shows the index status ..... MET-15, DB-04 (WP-142, WP-511, WP-313)
  *
  * A failing test is a product finding: the assertions encode MET-15 and DB-04 in
- * docs/spec/katalog-v3 and the acceptance criteria of WP-511.
+ * docs/spec/katalog-v3 and the acceptance criteria of WP-511 and WP-313.
  */
 
 interface List<T> {
@@ -102,17 +107,17 @@ async function indexJobs(definitionId: string): Promise<Job[]> {
   );
 }
 
-/** openType opens the CI type admin on the type of this run. */
+/** openType opens the CI type admin on the type of this run (a node of the type tree). */
 async function openType(page: Page) {
   await page.goto('/ci-types');
   await page
     .locator('#main-content')
-    .getByRole('button', { name: new RegExp(`^${w.typeName}`) })
+    .getByRole('treeitem', { name: new RegExp(`^${w.typeName}`) })
     .click();
   await expect(page.getByRole('button', { name: 'Feld hinzufügen' })).toBeVisible();
 }
 
-/** fieldRow is the entry of a field in the field list of the type. */
+/** fieldRow is the entry of a field in the attribute list of the type. */
 function fieldRow(page: Page, name: string) {
   return page.locator('#main-content li').filter({ hasText: name });
 }
@@ -149,27 +154,34 @@ test.describe('CI type admin: index flags of attributes with visible refusals an
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Feldname').fill(key);
     await dialog.getByLabel('Eindeutig', { exact: true }).check();
-    const put = waitFor(page, new RegExp(`/api/v1/ci-types/${w.typeId}/fields$`), 'PUT');
-    const patch = waitFor(page, /\/api\/v1\/attribute-definitions\/[^/]+$/, 'PATCH');
+    const fieldWrites: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'PUT' && /\/ci-types\/[^/]+\/fields/.test(r.url())) {
+        fieldWrites.push(r.url());
+      }
+    });
+    const post = waitFor(page, /^\/api\/v1\/attribute-definitions$/, 'POST');
     await dialog.getByRole('button', { name: 'Speichern' }).click();
-    expect((await put).status(), 'PUT field').toBe(200);
-    const patched = await patch;
-    expect(patched.status(), `PATCH flags: ${await patched.text()}`).toBe(200);
-    expect(patched.request().postDataJSON()).toEqual({
+    const created = await post;
+    expect(created.status(), `POST attribute: ${await created.text()}`).toBe(201);
+    expect(created.request().postDataJSON()).toMatchObject({
+      ci_type_id: w.typeId,
+      key,
       searchable: false,
       unique: true,
       unique_scope: 'org',
     });
     await expect(dialog).toBeHidden();
+    expect(fieldWrites, 'no PUT /ci-types/{id}/fields').toEqual([]);
 
     // UI → API → DB: the definition is unique, its index job runs on the scheduler
-    // (every minute) and the field list follows it to the end.
+    // (every minute) and the attribute list polls its index status to the end.
     const def = await definition(key);
     expect(def).toMatchObject({ unique: true, unique_scope: 'org' });
     const row = fieldRow(page, key);
     await expect(row.getByText('eindeutig', { exact: true })).toBeVisible();
-    await expect(row.getByRole('status')).toContainText('Index-Job');
-    await expect(row.getByRole('status')).toHaveText('Index-Job: abgeschlossen', {
+    await expect(row.getByRole('status')).toContainText('Index:');
+    await expect(row.getByRole('status')).toHaveText('Index: Erfolgreich', {
       timeout: 3 * 60_000,
     });
     const jobs = await indexJobs(def.id);
@@ -232,13 +244,13 @@ test.describe('CI type admin: index flags of attributes with visible refusals an
     expect(refused.status(), `PATCH unique over duplicates: ${await refused.text()}`).toBe(409);
     await expect(dialog).toBeVisible();
     const alert = dialog.getByRole('alert');
-    await expect(alert).toContainText('Index-Einstellungen nicht gespeichert');
+    await expect(alert).toContainText('Änderungen nicht gespeichert');
     await expect(alert).toContainText('Eindeutigkeit nicht aktiviert');
     await expect(alert).toContainText('already share a value');
     expect(await definition(key)).toMatchObject({ unique: false });
     expect(await indexJobs(def.id), 'no index job for the refused flag').toHaveLength(0);
 
-    // Searchable alone is accepted: PATCH, the dialog closes, the job is shown.
+    // Searchable alone is accepted: PATCH, the dialog closes, the index status is shown.
     await dialog.getByLabel('Eindeutig', { exact: true }).uncheck();
     await dialog.getByLabel('Durchsuchbar (indiziert)').check();
     patch = waitFor(page, new RegExp(`/api/v1/attribute-definitions/${def.id}$`), 'PATCH');
@@ -253,7 +265,7 @@ test.describe('CI type admin: index flags of attributes with visible refusals an
     await expect(dialog).toBeHidden();
     const row = fieldRow(page, key);
     await expect(row.getByText('durchsuchbar', { exact: true })).toBeVisible();
-    await expect(row.getByRole('status')).toHaveText(/^Index-Job: (wartet|läuft|abgeschlossen)$/);
+    await expect(row.getByRole('status')).toHaveText(/^Index: (Wartend|Läuft|Erfolgreich)$/);
     const jobs = await indexJobs(def.id);
     expect(jobs.length, 'the index job of the definition is queued').toBe(1);
     expect(['queued', 'running', 'succeeded']).toContain(jobs[0]?.status);

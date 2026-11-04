@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -145,6 +146,7 @@ type Repositories struct {
 	MetamodelDraft    metamodel.Repository        // drafts (WP-260); nil without a database: the routes answer 503
 	Import            importer.Repository         // import mapping profiles (WP-774, IMP-IO-01)
 	Supplier          contract.SupplierRepository // suppliers (WP-736, MGT-12); nil: the routes answer 503
+	Contract          contract.ContractRepository // contracts (WP-269, MGT-12); nil: the routes answer 503
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -319,11 +321,19 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflic
 // accounts through their role assignments, the snapshots are cached in
 // opts.FieldPolicyCache.
 func newFieldResolver(repos *Repositories, opts *Options) *permission.FieldResolver {
+	return NewFieldResolver(repos, opts.FieldPolicyCache)
+}
+
+// NewFieldResolver builds the field permission resolver of the
+// repositories with the snapshot cache store (nil: per process); the
+// export worker of cmd/server resolves the policy of a job's creator with
+// it (WP-729).
+func NewFieldResolver(repos *Repositories, store cache.Store) *permission.FieldResolver {
 	var serviceAccounts identity.ServiceAccountAccessResolver
 	if repos.ServiceAccounts != nil {
 		serviceAccounts = user.ServiceAccountAccess{Repo: repos.ServiceAccounts}
 	}
-	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, opts.FieldPolicyCache)
+	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, store)
 }
 
 // operatorHandler builds the operator path; organizations are created with
@@ -418,13 +428,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	// The draft service captures metamodel writes with ?draft (WP-720)
 	// and lays a draft over the form preview (E-113).
-	protected := &authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
-		drafts: repos.MetamodelDraft}
-
 	// The field permissions (RBA-07, WP-264) resolve per principal; the
-	// handlers of WP-726 and WP-265 take this resolver.
+	// handlers of WP-726 take this resolver. Behind the route permission
+	// FieldPolicyMiddleware puts the policy source of each request into its
+	// context: permission.PolicyFrom resolves it once, on first need
+	// (WP-265), also for POST /bff/graphql.
 	fieldResolver := newFieldResolver(&repos, &opts)
-	_ = fieldResolver
+	after := append(slices.Clone(opts.RouteMiddleware), permission.FieldPolicyMiddleware(fieldResolver))
+	protected := &authorizingRouter{Router: mux, after: after, auditor: routeAuditor(&opts), modules: opts.Modules,
+		drafts: repos.MetamodelDraft}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -442,7 +454,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
-	historyHandler := history.NewHandler(repos.History)
+	// The CI history projects the field values with the policy of the
+	// caller, a queued snapshot with that of its creator (WP-727).
+	historyHandler := history.NewHandler(repos.History).WithCIs(HistoryCIs(&repos)).
+		WithCreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver))
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -467,8 +482,22 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
 	}
 	// The import runs (WP-301) get the job service in registerJobKinds; the
-	// routes serve in both profiles and answer 503 without it.
-	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
+	// routes serve in both profiles and answer 503 without it. A run
+	// (WP-775) hands its rows to the writer of the profile's entity:
+	// locations here, CIs with WP-302, assets, contracts, consumables and
+	// relationships with WP-776. Before the first row it checks module and
+	// features of the entity with the release and the org gate, and after
+	// its success it reports import.completed.
+	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs).
+		WithWriter(importer.NewLocationWriter(repos.LocationTree)).
+		WithGates(opts.Modules, importFeatureGate(&opts)).
+		WithEvents(opts.Events)
+	// The run reloads its starter from the job row: user status and
+	// current role assignments (no rights in the job parameters). Without
+	// them (in-memory user store) runs fail closed.
+	if users, ok := repos.User.(importer.UserStatus); ok && repos.Permission != nil {
+		importHandler.WithStarters(users, repos.Permission)
+	}
 	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
 	// job kind document.scan of the module documents on the job queue:
 	// clamd from opts.Documents, status, audit and event in a transaction
@@ -531,6 +560,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// queue when there is one (jobkinds.go, TEC-14).
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
+			// A queue bulk job checks its ids with the policy of its creator,
+			// reloaded from the job row (WP-728); without the user status it
+			// fails (fail-closed).
+			if users, ok := repos.User.(permission.CreatorStatus); ok {
+				opts.CIService.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
+			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
 			documentScanner)
@@ -539,6 +574,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	exportWorker.Tracker = jobTracker
 	datevGate := exportDATEVGate(&opts)
 	exportWorker.DATEV = datevGate
+	// The worker renders with the field policy of the job's creator,
+	// resolved at render time (RBA-07, WP-729).
+	exportWorker.Policies = fieldResolver
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -650,7 +688,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		location.NewHandler(repos.Location),
 		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
-		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
+		// The attachments of a ticket are its linked documents (WP-765).
+		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}).WithDocuments(repos.Document),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),
@@ -665,6 +704,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		contract.NewHandler(repos.Supplier),
+		contract.NewContractHandler(repos.Contract),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
@@ -673,20 +713,27 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
-			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
+			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
+			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}).
+			// The resolved forms follow the field permissions (WP-727).
+			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)),
+		// Administration of the field permissions (RBA-07, WP-726); a write
+		// drops the resolver's snapshot after the commit.
+		permission.NewFieldGrantHandler(repos.FieldGrants, fieldResolver),
 		draftHandler,
 		metamodelImportHandler(&repos),
 		importer.NewHandler(repos.Import),
 		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
-			repos.LifecycleResolver),
+			repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		composition.NewHandler(repos.Composition, opts.Dispatcher).
 			WithAssets(parentAssetLookup{repo: repos.Asset}),
-		override.NewHandler(repos.Override, opts.Dispatcher),
+		// The overrides follow the field permissions of the CI (WP-265).
+		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
 		credential.NewHandler(opts.Credentials),
@@ -887,6 +934,47 @@ func routeAuditor(opts *Options) middleware.RouteAuditor {
 // The production route auditor reads route snapshots (WP-505).
 var _ middleware.RouteSnapshotter = (*audit.PGRouteAuditor)(nil)
 
+// lifecycleCIScope reads the type and scope of a CI for the action grant
+// of its lifecycle transition (WP-728).
+func lifecycleCIScope(repo ci.Repository) lifecycle.CIScopeFunc {
+	return func(ctx context.Context, orgID, ciID string) (string, permission.ObjectRef, error) {
+		item, err := repo.GetByID(ctx, orgID, ciID)
+		if err != nil {
+			return "", permission.ObjectRef{}, err
+		}
+		return item.CITypeID, permission.ObjectRef{ID: item.ID, ClientID: item.ClientID, SiteID: item.SiteID}, nil
+	}
+}
+
+// overrideCILookup reads the type, scope and instance attributes of a CI
+// for the field permissions of its overrides (RBA-07, WP-265): the
+// instance attributes the CI holds and those its definitions name.
+type overrideCILookup struct {
+	repo   ci.Repository
+	fields any
+}
+
+func (l overrideCILookup) FieldScope(ctx context.Context, orgID, ciID string) (*override.CIScope, error) {
+	item, err := l.repo.GetByID(ctx, orgID, ciID)
+	if errors.Is(err, ci.ErrNotFound) {
+		return nil, override.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	keys := slices.Clone(item.InstanceKeys)
+	if lister, ok := l.fields.(ci.InstanceFieldLister); ok {
+		defs, lerr := lister.ListInstanceFields(ctx, orgID, ciID)
+		if lerr != nil {
+			return nil, lerr
+		}
+		for i := range defs {
+			keys = append(keys, defs[i].Name)
+		}
+	}
+	return &override.CIScope{TypeID: item.CITypeID, ClientID: item.ClientID, SiteID: item.SiteID, InstanceKeys: keys}, nil
+}
+
 // ciHandler builds the CI handler; without the event outbox it hands CI
 // events to the webhook dispatcher directly.
 func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
@@ -911,7 +999,13 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	return h.WithIncludes(map[string]ci.IncludeFunc{
 		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)
-			return rels, total > len(rels), err
+			if err != nil {
+				return nil, false, err
+			}
+			// The edge fields as the principal may read them (RBA-07, WP-770).
+			capped := total > len(rels)
+			rels, err = relationship.ProjectEdges(ctx, orgID, rels, repos.RelationshipType)
+			return rels, capped, err
 		},
 		"contacts": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			contacts, total, err := repos.Contact.ListForCI(ctx, orgID, ciID, page)
@@ -981,6 +1075,15 @@ func exportLifecycleModel(d *lifecycle.Definition) citype.ExportLifecycleModelV2
 	return citype.ExportLifecycleModelV2{ID: d.ID, Key: d.Key, IsSystem: d.IsSystem, ExportLifecycleModelBody: body}
 }
 
+// importFeatureGate is the org gate of an import run (WP-775): the
+// entitlements; nil without them, so a run checks no feature.
+func importFeatureGate(opts *Options) importer.FeatureGate {
+	if opts.Entitlements == nil {
+		return nil
+	}
+	return opts.Entitlements
+}
+
 // metamodelImportHandler serves POST /api/v1/metamodel/import (WP-722) in
 // both profiles: it reads the target with the export v2 builder (the
 // readers of the export, the relationship types) and captures its items
@@ -1001,6 +1104,36 @@ func metamodelImportHandler(repos *Repositories) *metamodel.ImportHandler {
 
 // roleExport reads the role names for the layouts of the metamodel export
 // v2: the union of role (builtin, kind "role") and custom_role.
+// fieldGrantExport adapts the field permission repository to the
+// metamodel export v2 (WP-726): grants and sensitive fields with keys
+// instead of ids, read in the export's snapshot transaction.
+type fieldGrantExport struct {
+	repo permission.FieldGrantRepository
+}
+
+func (a fieldGrantExport) ExportFieldPermissions(ctx context.Context, orgID string) (*citype.FieldPermissionsExportV2, error) {
+	e, err := a.repo.Export(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := &citype.FieldPermissionsExportV2{
+		FieldGrants: make([]citype.ExportFieldGrantV2, 0, len(e.FieldGrants)),
+		Sensitivity: make([]citype.ExportSensitiveFieldV2, 0, len(e.Sensitivity)),
+	}
+	for i := range e.FieldGrants {
+		g := &e.FieldGrants[i]
+		out.FieldGrants = append(out.FieldGrants, citype.ExportFieldGrantV2{Role: g.Role, RoleKind: g.RoleKind,
+			ObjectKind: string(g.ObjectKind), CIType: g.CIType, FieldKey: g.FieldKey, RelationshipType: g.RelationshipType,
+			Action: g.Action, Level: string(g.Level)})
+	}
+	for i := range e.Sensitivity {
+		s := &e.Sensitivity[i]
+		out.Sensitivity = append(out.Sensitivity, citype.ExportSensitiveFieldV2{ObjectKind: string(s.ObjectKind), CIType: s.CIType,
+			FieldKey: s.FieldKey})
+	}
+	return out, nil
+}
+
 type roleExport struct{ repo user.Repository }
 
 func (a roleExport) ExportRoles(ctx context.Context, orgID string) ([]citype.ExportRole, error) {

@@ -153,7 +153,21 @@ const ROUTES: A11yRoute[] = [
   { path: '/inventory', url: '/inventory', ready: text('a11y-move') },
   { path: '/locations', url: '/locations', ready: text(M.location) },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
-  { path: '/ci-types', url: '/ci-types', ready: text(M.ciType) },
+  {
+    path: '/ci-types',
+    url: '/ci-types',
+    // WP-313: the type tree with parent and child; the child is selected, so
+    // its attribute catalog (own, inherited, global; index states none,
+    // queued and failed; the sensitive mark) is checked too.
+    prepare: async (page) => {
+      await page.getByRole('treeitem', { name: M.ciTypeChild }).click();
+      await expect(page.getByRole('treeitem', { name: M.ciTypeChild })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    },
+    ready: (page) => page.locator('#main-content li').filter({ hasText: 'a11y_inventory' }),
+  },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   { path: '/documents', url: '/documents', ready: text(M.document) },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
@@ -341,7 +355,7 @@ async function checkPage(
 }
 
 // The dialogs of the CI type administration on the data of the a11y fixtures
-// (organisation type M.ciType, one template). Radix portals a dialog under
+// (organisation type M.ciType with the child M.ciTypeChild, one template). Radix portals a dialog under
 // <body>, outside the App shell that gives the pages their text colour: the
 // unclassed checkbox labels of the field editor were black on the dark
 // dialog (1.18:1). The page behind an open dialog is hidden (aria-hidden),
@@ -355,7 +369,7 @@ const DIALOGS: {
   {
     name: 'CI type field editor',
     prepare: async (page) => {
-      await page.getByRole('button', { name: M.ciType }).click();
+      await page.getByRole('treeitem', { name: M.ciType }).click();
       await page.getByRole('button', { name: /^(feld hinzufügen|add field)$/i }).click();
       await page
         .getByRole('dialog')
@@ -374,7 +388,7 @@ const DIALOGS: {
   {
     name: 'CI type templates',
     prepare: async (page) => {
-      await page.getByRole('button', { name: /^(aus vorlage|from template)$/i }).click();
+      await page.getByRole('button', { name: /^(aus typvorlage|from type template)$/i }).click();
       await expect(page.getByRole('dialog').getByRole('button', { name: /server/i })).toBeVisible();
     },
     plainText: (page) =>

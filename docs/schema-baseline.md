@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000226_field_grants
+Stand: Migration 000232_relationship_metadata_schema
 
 ## Prüfung
 
@@ -439,6 +439,13 @@ DDL-Jobs (`citype.IndexStatement`, `citype.KeyIndexStatement`). Die Gründe
 je Eintrag stehen in `known_gaps.go`; die Tabelle wird mit
 `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run TestLeakyIndexesDocumented
 ./internal/tenant/rls/` neu erzeugt.
+
+Die Feldzeilen der Volltextsuche (`search_document_field`, 000228, RBA-07,
+WP-266) haben keinen GIN-Index auf `vector`: `tsvector_ops` hat keinen
+leakproof Operator, die Liste oben würde wachsen. Die Suche filtert mit
+eingeschränkten Feldrechten über `search_document.search_vector` vor und
+liest die Feldzeilen ihrer Kandidaten über den Primärschlüssel
+`(document_id, field)`.
 
 <!-- rls-leaky-indexes:begin -->
 
@@ -1057,6 +1064,121 @@ für Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope,
 E-09) und die RESTRICTIVE-Policies `supplier_scoped_update` und
 `supplier_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
 
+Verträge (MGT-12, API-06, WP-269, E-41, E-119, Migration 000227): `contract`
+hält die Verträge der Organisation oder eines Clients (`client_id` NULL ist
+org-weit): `number` (`contract_number_check`: nicht leer), optional
+`supplier_id`, `kind` (`contract_kind_check`: `maintenance`, `support`,
+`lease`, `license`, `purchase`, `service`, `other`), `start_date`, `end_date`
+(`contract_dates_check`: `end_date >= start_date`), `notice_period_days`
+(`contract_notice_period_days_check`: `>= 0`), `value` (`numeric`),
+`currency` (NOT NULL, `contract_currency_check`: `^[A-Z]{3}$`; der Service
+setzt fehlende Werte aus `organization.currency`), `status` (Standard
+`active`, `contract_status_check`: `draft`, `active`, `terminated`, `ended`),
+`notes`, `version` (Standard 1, ETag), `created_at`, `updated_at` (Trigger
+`trg_contract_updated_at`). Schlüssel `contract_organization_id_number_key`
+(`organization_id`, `number`) und `contract_id_organization_key` (`id`,
+`organization_id`) als Ziel für `asset.contract_id` (WP-271). Verweise mit
+Organisation (K19) ohne CASCADE: `contract_client_id_fkey` (`client_id`,
+`organization_id`) → `client` und `contract_supplier_id_fkey`
+(`supplier_id`, `organization_id`) → `supplier`. Indizes
+`idx_contract_end_date` (`organization_id`, `end_date`),
+`idx_contract_supplier` (`supplier_id`, `organization_id`),
+`idx_contract_client` (`organization_id`, `client_id`) und
+`idx_contract_created` (`organization_id`, `created_at`, `id`). Der
+AFTER-DELETE-Trigger `contract_object_grants` ruft
+`delete_object_grants('contract')` (000226) und entfernt die
+`object_grant`-Zeilen eines gelöschten Vertrags. RLS mit ENABLE/FORCE:
+`contract_isolation` (FOR ALL; USING lässt org-weite Verträge für
+Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
+und die RESTRICTIVE-Policies `contract_scoped_update` und
+`contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
+
+Attributschema der Beziehungstypen (REL-07, WP-295, Migration 000232):
+`relationship_type` erhält `metadata_schema` (jsonb NOT NULL DEFAULT `'[]'`,
+CHECK `relationship_type_metadata_schema_array`: `jsonb_typeof` = `array`),
+die Liste der Definitionen für `ci_relationship.attributes`. Systemzeilen
+und bestehende Mandantentypen erhalten `[]` über den Default; RLS bleibt
+unverändert (Policies `relationship_type_isolation_*` aus 000059).
+
+Objektbezug und Tags von Tickets (TKT-01, WP-764, E-39, E-127, Migration
+000230): `ticket` und `review_item` erhalten `ticket_id_organization_key` bzw.
+`review_item_id_organization_key` (`id`, `organization_id`) als Ziel der
+zusammengesetzten Verweise (K19). `ticket_link` (`id`, `organization_id`,
+`ticket_id`, `entity_type`, `ci_id`, `asset_id`, `location_id`,
+`contract_id`, `review_item_id`, `client_id`, `site_id`, `team_id`,
+`created_at`) nimmt neben dem Primärobjekt (`related_ci_id`,
+`related_asset_id`, Scope-Anker unverändert) weitere Objekte auf:
+`ticket_link_entity_type_check` (`ci`, `asset`, `location`, `contract`,
+`review_item`), `ticket_link_target_check` (genau eine Zielspalte, passend
+zu `entity_type`), `ticket_link_ticket_fkey` (`ticket_id`,
+`organization_id`) → `ticket` und je Ziel `ticket_link_ci_fkey`,
+`ticket_link_asset_fkey`, `ticket_link_location_fkey`,
+`ticket_link_contract_fkey`, `ticket_link_review_item_fkey` (Spalte,
+`organization_id`) → Ziel (`id`, `organization_id`), alle ON DELETE
+CASCADE; je Zielspalte `UNIQUE (ticket_id, <spalte>)`
+(`ticket_link_ticket_id_<spalte>_key`) und Teilindex
+`idx_ticket_link_<ziel>` (`<spalte>`) WHERE `<spalte>` IS NOT NULL, Index
+`idx_ticket_link_ticket` (`ticket_id`, `created_at`, `id`). `ticket_tag`
+(`ticket_id`, `tag_id`, `organization_id`, `client_id`, `site_id`,
+`team_id`, `created_at`; `ticket_tag_pkey` (`ticket_id`, `tag_id`)) ordnet
+Tickets Tags des Katalogs zu: `ticket_tag_ticket_fkey` → `ticket` ON DELETE
+CASCADE, `ticket_tag_tag_fkey` → `tag` ohne ON-DELETE-Aktion, Index
+`idx_ticket_tag_org_tag` (`organization_id`, `tag_id`). `client_id`,
+`site_id` und `team_id` beider Tabellen leiten `derive_ticket_link_scope`
+(`ticket_link_scope`) und `derive_ticket_tag_scope` (`ticket_tag_scope`,
+BEFORE INSERT OR UPDATE) aus dem Ticket ab; `propagate_ticket_scope()`
+(Rumpf aus 000064) zieht beide Tabellen nach. RLS mit ENABLE/FORCE:
+`ticket_link_tenant_isolation` bzw. `ticket_tag_tenant_isolation` mit Org-,
+Client-, Site- und Team-Prädikat wie `ticket_tenant_isolation` (USING mit
+NULL-Ausnahme, WITH CHECK ohne) und die RESTRICTIVE-Policies
+`*_scoped_update` und `*_scoped_delete`, TRUNCATE-Schutz
+`reticora_truncate_guard`. Die Datenmigration übernimmt `ticket.tags` je
+Organisation in `tag` (Schlüssel nach `tag_normalize_key`, leere Schlüssel
+entfallen, `display_name` de/en = Originalwert, bestehende Schlüssel
+bleiben) und `ticket_tag`; danach entfällt die Spalte `ticket.tags`.
+
+Asset-Kern nach AST-01 (WP-271, E-41, E-120, E-124, Migration 000229):
+`asset` erhält `manufacturer`, `model`, `cost_center`, `supplier_id`,
+`contract_id`, `owner_user_id` und `owner_team_id`. Verweise mit
+Organisation (K19): `asset_supplier_id_fkey` (`supplier_id`,
+`organization_id`) → `supplier`, `asset_contract_id_fkey` (`contract_id`,
+`organization_id`) → `contract`, `asset_owner_user_id_fkey`
+(`owner_user_id`, `organization_id`) → `app_user` ohne Löschaktion (E-124;
+das Löschen des Nutzers ergibt 409) und `asset_owner_team_id_fkey`
+(`owner_team_id`, `organization_id`) → `team` ON DELETE SET NULL
+(`owner_team_id`); die Fremdschlüssel sind Rückfallebene, Scope und Client
+prüft das Repository. Indizes `idx_asset_supplier`, `idx_asset_contract`,
+`idx_asset_owner_user`, `idx_asset_owner_team` (je Spalte mit
+`organization_id`, partiell auf NOT NULL). `barcode` ist je Organisation
+eindeutig (`idx_asset_barcode_org` auf `organization_id`, `barcode` WHERE
+`barcode IS NOT NULL`); Bestandsdubletten behält die älteste Zeile, die
+übrigen stehen mit Grund `duplicate_barcode` in `migration_quarantine`.
+`currency` hat keinen Standard mehr: der Trigger `asset_default_currency`
+(BEFORE INSERT OR UPDATE OF `currency`, Funktion `asset_default_currency()`)
+setzt bei NULL oder leerem Wert `organization.currency`. Datenmigration:
+Lieferanten aus dem Freitext `supplier` (org-weit, gleichnamige Zeilen
+werden wiederverwendet), `lifecycle_state` aus `status` (E-120 (a); ohne
+Zustand, z. B. `lost`, als Kopie in `migration_quarantine`) und
+`location_id` aus `custom_fields.location_id`.
+
+Asset-Spaltennamen nach AST-01 (WP-738, E-41, E-120, Migration 000231):
+`asset.asset_tag` heißt `inventory_no`, `purchase_cost` heißt
+`purchase_price` (jetzt NUMERIC(14,2)) und `warranty_end` heißt
+`warranty_until`; `NOT NULL` und der Index `idx_asset_tag_org` (Name
+unverändert, jetzt auf `organization_id`, `inventory_no`) gehen mit. Die
+Altnamen bestehen als abgekündigte Spiegelspalten `asset_tag` (TEXT),
+`purchase_cost` (NUMERIC(14,2)) und `warranty_end` (DATE); der Trigger
+`asset_mirror_legacy_columns` (BEFORE INSERT OR UPDATE, Funktion
+`asset_mirror_legacy_columns()`) hält beide Seiten gleich und setzt
+`supplier` auf `supplier.name` des gesetzten `supplier_id`;
+`supplier_name_asset_mirror` (AFTER UPDATE OF `name` ON `supplier`) zieht
+den Spiegel nach einer Umbenennung nach. `asset_status_from_lifecycle`
+(BEFORE INSERT OR UPDATE OF `lifecycle_state`) leitet `status` aus
+`lifecycle_state` ab (`deployed` → `assigned`, `repair` → `maintenance`,
+`retired`, `disposed`, sonst `in_stock`; bei NULL unverändert).
+Datenmigration: `saved_view.filter_spec` (`where`, `sort`, `columns`) und
+`attribute_definition.computed` verwenden die neuen Namen.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1107,6 +1229,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `composition` | ja | ja | composition_isolation (ALL) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
+| `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
 | `credential` | ja | ja | credential_isolation (ALL), credential_scoped_delete (DELETE), credential_scoped_update (UPDATE) |
 | `custom_role` | ja | ja | custom_role_tenant_isolation (ALL) |
 | `desk` | ja | ja | desk_isolation (ALL), desk_scoped_delete (DELETE), desk_scoped_update (UPDATE) |
@@ -1188,6 +1311,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
+| `search_document_field` | ja | ja | search_document_field_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |
 | `service_account_role` | ja | ja | service_account_role_isolation (ALL) |
@@ -1208,8 +1332,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `template_version_item` | ja | ja | template_version_item_isolation_delete (DELETE), template_version_item_isolation_insert (INSERT), template_version_item_isolation_select (SELECT), template_version_item_isolation_update (UPDATE) |
 | `ticket` | ja | ja | ticket_scoped_delete (DELETE), ticket_scoped_update (UPDATE), ticket_tenant_isolation (ALL) |
 | `ticket_comment` | ja | ja | ticket_comment_scoped_delete (DELETE), ticket_comment_scoped_update (UPDATE), ticket_comment_tenant_isolation (ALL) |
+| `ticket_link` | ja | ja | ticket_link_scoped_delete (DELETE), ticket_link_scoped_update (UPDATE), ticket_link_tenant_isolation (ALL) |
 | `ticket_number_counter` | ja | ja | ticket_number_counter_isolation (ALL) |
 | `ticket_sla` | ja | ja | ticket_sla_tenant_isolation (ALL) |
+| `ticket_tag` | ja | ja | ticket_tag_scoped_delete (DELETE), ticket_tag_scoped_update (UPDATE), ticket_tag_tenant_isolation (ALL) |
 | `training` | ja | ja | training_isolation (ALL) |
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |

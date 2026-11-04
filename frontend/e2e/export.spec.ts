@@ -32,7 +32,7 @@ function exportJobs() {
         manifest: {
           format: job.format,
           fields: ['id', 'name', 'status'],
-          omitted: [{ field: 'serial_number', reason: 'pii' }],
+          omitted: [{ field: 'serial_number', reason: 'field_permission' }],
         },
       });
     }

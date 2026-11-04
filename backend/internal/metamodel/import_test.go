@@ -541,3 +541,68 @@ func TestImportPlanNewRuleNeedsNewVersion(t *testing.T) {
 		t.Errorf("the copied rule r_v3 = %q", action(&plan.report, KindRule, "r_v3"))
 	}
 }
+
+// TestImportAcceptsFieldPermissionSections covers WP-726 (E-115): a v2 file
+// with entries in field_grants and field_sensitivity, as the export of a
+// caller with field_permission:manage holds them, is accepted (no 400 of
+// the strict decoding); the report names both sections as
+// field-permissions-skipped and the draft holds the items of the other
+// sections only. Empty sections give no note and leave an unchanged file
+// unchanged.
+func TestImportAcceptsFieldPermissionSections(t *testing.T) {
+	withGrants := func() *citype.MetamodelExportV2 {
+		f := importFile()
+		f.FieldGrants = &[]citype.ExportFieldGrantV2{
+			{Role: "engineer", RoleKind: "role", ObjectKind: "ci", CIType: "app_x", FieldKey: "core.serial_number", Level: "none"},
+			{Role: "Operators", RoleKind: "custom_role", ObjectKind: "ci", Action: "ci:delete", Level: "none"},
+		}
+		f.FieldSensitivity = &[]citype.ExportSensitiveFieldV2{{ObjectKind: "asset", FieldKey: "core.purchase_cost"}}
+		return f
+	}
+	store := &fakeStore{}
+	w := postImport(NewImportHandler(fakeTarget{target: emptyTarget()}, store), fileBody(t, withGrants()), nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("import with field permissions = %d %s", w.Code, w.Body.String())
+	}
+	var res ImportResult
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	skipped := map[string]string{}
+	for _, n := range res.Report.Notes {
+		if n.Code == NoteFieldPermissionsSkipped {
+			skipped[n.Kind] = n.Detail
+		}
+	}
+	if len(skipped) != 2 || !strings.HasPrefix(skipped[citype.SectionFieldGrants], "2 field grant(s)") ||
+		!strings.HasPrefix(skipped[citype.SectionFieldSensitivity], "1 sensitive field(s)") {
+		t.Errorf("notes = %+v, want field-permissions-skipped for both sections", res.Report.Notes)
+	}
+	// The same 14 items as the file without the sections (TestImportHandler).
+	if store.calls != 1 || len(store.items) != 14 {
+		t.Fatalf("store got %d calls with %d items, want the 14 items of the other sections", store.calls, len(store.items))
+	}
+	for _, it := range store.items {
+		if strings.Contains(it.Kind, "field") || strings.Contains(it.Kind, "grant") {
+			t.Errorf("item of kind %s from a field permission section", it.Kind)
+		}
+	}
+
+	// Against a target holding the file: unchanged despite the notes.
+	plan := planImport(withGrants(), targetOf(importFile()))
+	if !plan.report.Unchanged || len(plan.items) != 0 || noteCount(&plan.report, NoteFieldPermissionsSkipped) != 2 {
+		t.Errorf("unchanged file with field permissions: unchanged %v, items %v, notes %+v", plan.report.Unchanged,
+			steps(plan.items), plan.report.Notes)
+	}
+	// Empty sections (no field permissions in the source) give no note.
+	empty := importFile()
+	empty.FieldGrants, empty.FieldSensitivity = &[]citype.ExportFieldGrantV2{}, &[]citype.ExportSensitiveFieldV2{}
+	if plan = planImport(empty, targetOf(importFile())); noteCount(&plan.report, NoteFieldPermissionsSkipped) != 0 || !plan.report.Unchanged {
+		t.Errorf("empty sections: notes %+v", plan.report.Notes)
+	}
+	// An unknown field inside a section is still refused (strict decoding).
+	body := strings.Replace(fileBody(t, withGrants()), `"role_kind":"role"`, `"role_kind":"role","role_id":"x"`, 1)
+	if w = postImport(NewImportHandler(fakeTarget{target: emptyTarget()}, &fakeStore{}), body, nil); w.Code != http.StatusBadRequest {
+		t.Errorf("unknown field in field_grants = %d %s", w.Code, w.Body.String())
+	}
+}

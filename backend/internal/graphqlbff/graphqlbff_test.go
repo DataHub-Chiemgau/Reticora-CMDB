@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -77,6 +78,10 @@ func runAs(t *testing.T, h *Handler, principalType identity.PrincipalType, perms
 	if perms != nil {
 		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", OrganizationID: "org-1",
 			Permissions: perms, Type: principalType})
+		// The policy source the router puts in front of the BFF
+		// (permission.FieldPolicyMiddleware): an organization without
+		// field permissions (WP-727).
+		ctx = permission.WithPolicy(ctx, permission.UnrestrictedPolicy(perms))
 	}
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req.WithContext(ctx))

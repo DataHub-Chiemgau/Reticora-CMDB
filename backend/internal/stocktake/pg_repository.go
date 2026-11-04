@@ -399,7 +399,10 @@ func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string,
 }
 
 // Difference returns the deviating scans of a stocktake joined with the
-// referenced asset (when present), oldest scan first.
+// referenced asset (when present), oldest scan first. The asset carries
+// its inventory number (inventory_no), lifecycle_state and location_id
+// (E-120 (b), WP-738); status and the free text location stay as
+// deprecated fields.
 func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]DifferenceEntry, int, error) {
 	entries := []DifferenceEntry{}
 	var total int
@@ -426,7 +429,7 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 			       COALESCE(s.asset_id::text, ''), COALESCE(s.ci_id::text, ''),
 			       s.scanned_by::text, s.scan_method, s.scan_result,
 			       COALESCE(s.location_found, ''), COALESCE(s.notes, ''), s.scanned_at,
-			       a.id::text, a.asset_tag, a.name, a.status, COALESCE(a.location, '')
+			       a.id::text, a.inventory_no, a.name, a.lifecycle_state, a.location_id::text, a.status, a.location
 			FROM stock_scan s
 			LEFT JOIN asset a ON a.id = s.asset_id
 			WHERE s.stocktake_id = $1
@@ -441,23 +444,25 @@ func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string
 
 		for rows.Next() {
 			var entry DifferenceEntry
-			var assetID, assetTag, assetName, assetStatus, assetLocation sql.NullString
+			var assetID, assetTag, assetName, assetState, assetLocationID, assetStatus, assetLocation sql.NullString
 			if err := rows.Scan(
 				&entry.Scan.ID, &entry.Scan.OrganizationID, &entry.Scan.StocktakeID,
 				&entry.Scan.AssetID, &entry.Scan.CIID, &entry.Scan.ScannedBy,
 				&entry.Scan.ScanMethod, &entry.Scan.ScanResult,
 				&entry.Scan.LocationFound, &entry.Scan.Notes, &entry.Scan.ScannedAt,
-				&assetID, &assetTag, &assetName, &assetStatus, &assetLocation,
+				&assetID, &assetTag, &assetName, &assetState, &assetLocationID, &assetStatus, &assetLocation,
 			); err != nil {
 				return fmt.Errorf("scan difference row: %w", err)
 			}
 			if assetID.Valid {
 				entry.Asset = &asset.Asset{
-					ID:       assetID.String,
-					AssetTag: assetTag.String,
-					Name:     assetName.String,
-					Status:   assetStatus.String,
-					Location: assetLocation.String,
+					ID:             assetID.String,
+					AssetTag:       assetTag.String,
+					Name:           assetName.String,
+					LifecycleState: assetState.String,
+					LocationID:     assetLocationID.String,
+					Status:         assetStatus.String,
+					Location:       assetLocation.String,
 				}
 			}
 			entries = append(entries, entry)
@@ -495,9 +500,11 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 		}
 
 		if applyCorrections {
+			// The corrections report the status and free text location
+			// they overwrite; WP-287 moves them onto movements.
 			rows, queryErr := tx.Query(ctx, `
 				SELECT s.id::text, s.scan_result, COALESCE(s.location_found, ''),
-				       a.id::text, a.asset_tag, a.status, COALESCE(a.location, '')
+				       a.id::text, a.inventory_no, a.status, COALESCE(a.location, '')
 				FROM stock_scan s
 				JOIN asset a ON a.id = s.asset_id
 				WHERE s.stocktake_id = $1

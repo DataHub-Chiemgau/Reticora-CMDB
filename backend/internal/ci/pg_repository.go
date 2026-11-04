@@ -2183,6 +2183,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 	}
 
 	item.Overridden = overridden(item.Attributes)
+	item.InstanceKeys = instanceKeys(item.Attributes)
 	item.Attributes = presentAttributes(item.Attributes)
 	if firstSeen.Valid {
 		t := firstSeen.Time.UTC()
@@ -2485,8 +2486,26 @@ func locationError(err error) error {
 // to an asset (DB-05).
 const locationOwnedByAsset = "the location of a CI linked to an asset is the asset's location"
 
+// instanceKeys returns the sorted keys of the instance attributes of stored
+// attributes (attributes._instance, MET-14); nil without any.
+func instanceKeys(stored map[string]any) []string {
+	instance, _ := stored[NamespaceInstance].(map[string]any)
+	if len(instance) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(instance))
+	for k := range instance {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 // loadAssetFacts shows the canonical data of each linked asset on its CIs
-// (DB-05). Assets the principal cannot see are left out.
+// (DB-05). Assets the principal cannot see are left out. The AST-01
+// columns (inventory_no, warranty_until; WP-738) also fill the deprecated
+// names; status is derived from lifecycle_state (asset_status_from_lifecycle,
+// E-120 (b)).
 func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 	byAsset := map[string][]*Item{}
 	ids := make([]string, 0, len(items))
@@ -2503,10 +2522,14 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, asset_tag, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
+		SELECT id::text, inventory_no, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
 		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
-		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_end, 'YYYY-MM-DD'), ''),
-		       COALESCE(supplier, ''), COALESCE(invoice_number, '')
+		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_until, 'YYYY-MM-DD'), ''),
+		       COALESCE(supplier, ''), COALESCE(invoice_number, ''), COALESCE(asset_type_id::text, ''),
+		       COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
+		       COALESCE(manufacturer, ''), COALESCE(model, ''), COALESCE(cost_center, ''),
+		       COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, ''),
+		       COALESCE(supplier_id::text, ''), COALESCE(contract_id::text, '')
 		FROM asset WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return fmt.Errorf("load asset facts: %w", err)
@@ -2514,10 +2537,13 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 	defer rows.Close()
 	for rows.Next() {
 		var a AssetFacts
-		if err := rows.Scan(&a.ID, &a.AssetTag, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
-			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber); err != nil {
+		if err := rows.Scan(&a.ID, &a.InventoryNo, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
+			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyUntil, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
+			&a.ClientID, &a.SiteID, &a.Manufacturer, &a.Model, &a.CostCenter, &a.OwnerUserID, &a.OwnerTeamID,
+			&a.SupplierID, &a.ContractID); err != nil {
 			return fmt.Errorf("scan asset facts: %w", err)
 		}
+		a.AssetTag, a.WarrantyEnd = a.InventoryNo, a.WarrantyUntil
 		for _, item := range byAsset[a.ID] {
 			facts := a
 			item.Asset = &facts
@@ -3449,13 +3475,15 @@ func (r *PGRepository) UpdateTag(ctx context.Context, orgID, id string, req *Upd
 	return tag, err
 }
 
-// tagInUse reports ErrTagInUse when tag id is assigned to a CI (409). The
-// repository checks it itself: the foreign key violation of ci_tag would be
-// 422 through api.ClassifyDBError. Rows outside the tenant scope are
-// invisible; the foreign key catches them at the DELETE (deleteTagRow).
+// tagInUse reports ErrTagInUse when tag id is assigned to a CI or a ticket
+// (ticket_tag, WP-764) (409). The repository checks it itself: the foreign
+// key violation of ci_tag or ticket_tag would be 422 through
+// api.ClassifyDBError. Rows outside the tenant scope are invisible; the
+// foreign key catches them at the DELETE (deleteTagRow).
 func tagInUse(ctx context.Context, tx pgx.Tx, id string) error {
 	var used bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_tag WHERE tag_id = $1)`, id).Scan(&used); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_tag WHERE tag_id = $1)
+		OR EXISTS (SELECT 1 FROM ticket_tag WHERE tag_id = $1)`, id).Scan(&used); err != nil {
 		return fmt.Errorf("check tag use: %w", err)
 	}
 	if used {
@@ -3540,6 +3568,56 @@ func (r *PGRepository) ReplaceCITags(ctx context.Context, orgID, ciID string, ke
 	return item, err
 }
 
+// ticketTagEvent is the data of the ticket.updated of a tag merge (WP-764):
+// the frame of the ticket (id, client_id, site_id) and the changed field
+// tags, like the events of ticket.PGRepository.
+type ticketTagEvent struct {
+	ID            string   `json:"id"`
+	ClientID      string   `json:"client_id,omitempty"`
+	SiteID        string   `json:"site_id,omitempty"`
+	Change        string   `json:"change"`
+	ChangedFields []string `json:"changed_fields"`
+}
+
+// mergeTicketTags moves the ticket assignments of tag sourceID to tag
+// intoID (ticket_tag, WP-764): a duplicate drops; every ticket concerned
+// gets updated_at and one ticket.updated with changed_fields ["tags"]. It
+// returns the number of tickets.
+func (r *PGRepository) mergeTicketTags(ctx context.Context, tx pgx.Tx, orgID, sourceID, intoID string) (int, error) {
+	rows, err := tx.Query(ctx, `UPDATE ticket SET updated_at = NOW()
+		WHERE organization_id = $1 AND id IN (SELECT ticket_id FROM ticket_tag WHERE tag_id = $2)
+		RETURNING id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')`, orgID, sourceID)
+	if err != nil {
+		return 0, fmt.Errorf("read tagged tickets: %w", err)
+	}
+	tickets, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (ticketTagEvent, error) {
+		ev := ticketTagEvent{Change: "updated", ChangedFields: []string{"tags"}}
+		return ev, row.Scan(&ev.ID, &ev.ClientID, &ev.SiteID)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("read tagged tickets: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE ticket_tag SET tag_id = $2 WHERE tag_id = $1
+		AND NOT EXISTS (SELECT 1 FROM ticket_tag d WHERE d.ticket_id = ticket_tag.ticket_id AND d.tag_id = $2)`, sourceID, intoID); err != nil {
+		return 0, fmt.Errorf("move ticket tag assignments: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM ticket_tag WHERE tag_id = $1`, sourceID); err != nil {
+		return 0, fmt.Errorf("drop duplicate ticket tag assignments: %w", err)
+	}
+	if r.outbox == nil || len(tickets) == 0 {
+		return len(tickets), nil
+	}
+	slices.SortFunc(tickets, func(a, b ticketTagEvent) int { return strings.Compare(a.ID, b.ID) })
+	es := make([]*events.Event, len(tickets))
+	for i := range tickets {
+		es[i] = &events.Event{OrgID: orgID, Type: events.TicketUpdated, EntityID: tickets[i].ID, Data: &tickets[i]}
+	}
+	return len(tickets), lastInTx(ctx, func() error {
+		_, appendErr := r.outbox.AppendMany(ctx, tx, es)
+		return appendErr
+	})
+}
+
 // taggedCI is a CI of a tag merge with its tag keys.
 type taggedCI struct {
 	id   string
@@ -3613,12 +3691,16 @@ func (r *PGRepository) MergeTag(ctx context.Context, orgID, sourceID, intoID str
 		if _, err = tx.Exec(ctx, `DELETE FROM ci_tag WHERE tag_id = $1`, sourceID); err != nil {
 			return fmt.Errorf("drop duplicate tag assignments: %w", err)
 		}
+		tickets, err := r.mergeTicketTags(ctx, tx, orgID, sourceID, intoID)
+		if err != nil {
+			return err
+		}
 		if delErr := deleteTagRow(ctx, tx, orgID, sourceID); delErr != nil {
 			return delErr
 		}
 		result.Tag = into
 		return r.recordTagAudit(ctx, tx, orgID, "tag.merged", sourceID, map[string]any{
-			"source": source, "into": into, "cis": result.Moved,
+			"source": source, "into": into, "cis": result.Moved, "tickets": tickets,
 		})
 	})
 	if err != nil {

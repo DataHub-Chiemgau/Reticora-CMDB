@@ -48,6 +48,10 @@ func validCurrency(code string) error {
 	return nil
 }
 
+// ValidCurrency checks an active ISO 4217 alphabetic code for other
+// packages (asset, WP-271): nil or a 400 field error on currency.
+func ValidCurrency(code string) error { return validCurrency(code) }
+
 // canonicalLocale checks a BCP 47 language tag and returns its canonical
 // form ("de-de" → "de-DE"; LOC-01).
 func canonicalLocale(tag string) (string, error) {

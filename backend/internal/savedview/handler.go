@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
+	"sort"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -263,6 +267,20 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
+	// Field permissions (RBA-07, WP-729): every field the spec reads must be
+	// readable for the queried types before any SQL runs, otherwise 403
+	// with the fields and without a total; the rows are projected.
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if ferr := h.checkFields(r.Context(), t.OrganizationID, policy, &spec); ferr != nil {
+		if !api.WriteFieldError(w, ferr) {
+			api.WriteRepoError(w, ferr)
+		}
+		return
+	}
 	items, total, err := h.query.Query(r.Context(), t.OrganizationID, &spec, page)
 	if err != nil {
 		// A validated spec compiles to SQL whose casts cannot fail; any
@@ -271,10 +289,77 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	ProjectResults(policy, spec.entityKind(), items)
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[QueryResult]{
 		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// TypeResolver resolves ci_type of a filter spec (a type key or name) to
+// type ids (*PGQueryEngine).
+type TypeResolver interface {
+	TypeIDs(ctx context.Context, orgID, keyOrName string) ([]string, error)
+}
+
+// checkFields refuses a spec that reads a field the principal may not read
+// for one of the queried types in every scope of its role assignments
+// (RBA-07, WP-729; the rule of the list filters of WP-265, which sort keys
+// and columns share: a sort is an order oracle, a column returns values).
+// The fields are those of FilterSpec.ReferencedFields; structural fields
+// pass. The queried types are the types of ci_type for a CI query (without
+// it, or when the engine cannot resolve it, every type), for asset.<field>
+// and for an asset query every asset type (ci_type of an asset query also
+// matches assets through their CI). The error is an *api.FieldForbiddenError
+// naming the fields as the request names them.
+func (h *Handler) checkFields(ctx context.Context, orgID string, policy *permission.FieldPolicy, spec *FilterSpec) error {
+	entityKind := spec.entityKind()
+	refs := spec.ReferencedFields(entityKind)
+	if len(refs) == 0 || (!policy.Restricted(permission.KindCI) && !policy.Restricted(permission.KindAsset)) {
+		return nil
+	}
+	var ciTypes []string
+	if resolver, ok := h.query.(TypeResolver); ok && entityKind == "ci" && spec.CIType != "" {
+		ids, err := resolver.TypeIDs(ctx, orgID, spec.CIType)
+		if err != nil {
+			return err
+		}
+		ciTypes = ids
+	}
+	names := map[string][]string{} // by entity kind and field key
+	var refused []string
+	for _, ref := range refs {
+		key, checked, known := fieldKey(ref.EntityKind, ref.Path)
+		switch {
+		case !known:
+			if policy.Restricted(objectKinds[ref.EntityKind]) {
+				refused = append(refused, ref.Name)
+			}
+		case checked:
+			id := ref.EntityKind + "\x00" + key
+			names[id] = append(names[id], ref.Name)
+		}
+	}
+	for _, entity := range []string{"ci", "asset"} {
+		var keys []string
+		for id := range names {
+			if kind, key, _ := strings.Cut(id, "\x00"); kind == entity {
+				keys = append(keys, key)
+			}
+		}
+		var types []string
+		if entity == "ci" {
+			types = ciTypes
+		}
+		for _, key := range permission.UnreadableKeys(policy, objectKinds[entity], types, keys) {
+			refused = append(refused, names[entity+"\x00"+key]...)
+		}
+	}
+	if len(refused) == 0 {
+		return nil
+	}
+	sort.Strings(refused)
+	return &api.FieldForbiddenError{Fields: slices.Compact(refused)}
 }
 
 // readPermissions maps each queryable entity kind to its read permission.

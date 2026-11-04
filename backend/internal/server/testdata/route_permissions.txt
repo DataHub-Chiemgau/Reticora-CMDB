@@ -18,11 +18,15 @@ DELETE /api/v1/compliance/rules/{id} compliance:write
 DELETE /api/v1/compositions/{id} asset:write
 DELETE /api/v1/consumables/{id} stock:write
 DELETE /api/v1/contacts/{id} contact:write
+DELETE /api/v1/contracts/{id} contract:write
 DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
 DELETE /api/v1/documents/{id} document:write
 DELETE /api/v1/documents/{id}/links/{link_id} document:write
+DELETE /api/v1/field-permissions/object-grants/{id} field_permission:manage
+DELETE /api/v1/field-permissions/sensitive-fields/{id} field_permission:manage
+DELETE /api/v1/field-permissions/{id} field_permission:manage
 DELETE /api/v1/forms/{id} form:write
 DELETE /api/v1/iga/connectors/{id} iga:write
 DELETE /api/v1/import-profiles/{id} import:manage
@@ -67,6 +71,7 @@ DELETE /api/v1/teams/{id} team:manage
 DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
 DELETE /api/v1/templates/{id} citype:manage
 DELETE /api/v1/tickets/{id} ticket:write
+DELETE /api/v1/tickets/{id}/links/{link_id} ticket:write
 DELETE /api/v1/trainings/{id} training:write
 DELETE /api/v1/users/{id} user:manage
 DELETE /api/v1/vlans/{id} ipam:write
@@ -150,6 +155,8 @@ GET /api/v1/consumables/{id} stock:read
 GET /api/v1/consumables/{id}/movements stock:read
 GET /api/v1/contacts contact:read
 GET /api/v1/contacts/{id} contact:read
+GET /api/v1/contracts contract:read
+GET /api/v1/contracts/{id} contract:read
 GET /api/v1/credentials/ credential:read
 GET /api/v1/credentials/{id} credential:read
 GET /api/v1/desks desk:read
@@ -175,6 +182,9 @@ GET /api/v1/export/jobs job:read
 GET /api/v1/export/jobs/{id} job:read
 GET /api/v1/exports job:read
 GET /api/v1/exports/{id} job:read
+GET /api/v1/field-permissions field_permission:manage
+GET /api/v1/field-permissions/object-grants field_permission:manage
+GET /api/v1/field-permissions/sensitive-fields field_permission:manage
 GET /api/v1/form-submissions form:read
 GET /api/v1/form-submissions/{id} form:read
 GET /api/v1/forms form:read
@@ -304,7 +314,9 @@ GET /api/v1/templates/{id}/versions ci:read
 GET /api/v1/templates/{id}/versions/{version} ci:read
 GET /api/v1/tickets ticket:read
 GET /api/v1/tickets/{id} ticket:read
+GET /api/v1/tickets/{id}/attachments document:read
 GET /api/v1/tickets/{id}/comments ticket:read
+GET /api/v1/tickets/{id}/links ticket:read
 GET /api/v1/tickets/{id}/sla ticket:read
 GET /api/v1/topology topology:read
 GET /api/v1/topology/cis/{id}/impact topology:read
@@ -348,9 +360,11 @@ PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/compositions/{id} asset:write
 PATCH /api/v1/consumables/{id} stock:write
 PATCH /api/v1/contacts/{id} contact:write
+PATCH /api/v1/contracts/{id} contract:write
 PATCH /api/v1/desks/{id} desk:write
 PATCH /api/v1/discovery-scopes/{id} discovery:manage
 PATCH /api/v1/documents/{id} document:write
+PATCH /api/v1/field-permissions/{id} field_permission:manage
 PATCH /api/v1/forms/{id} form:write
 PATCH /api/v1/iga/connectors/{id} iga:write
 PATCH /api/v1/import-profiles/{id} import:manage
@@ -451,6 +465,7 @@ POST /api/v1/compositions asset:write
 POST /api/v1/consumables stock:write
 POST /api/v1/consumables/{id}/movements stock:write
 POST /api/v1/contacts contact:write
+POST /api/v1/contracts contract:write
 POST /api/v1/credentials/ credential:manage
 POST /api/v1/credentials/rotate-keys credential:manage
 POST /api/v1/desk-bookings/{id}/cancel desk:write
@@ -466,6 +481,9 @@ POST /api/v1/documents/{id}/links document:write
 POST /api/v1/documents/{id}/versions document:write
 POST /api/v1/export/jobs export:run
 POST /api/v1/exports export:run
+POST /api/v1/field-permissions field_permission:manage
+POST /api/v1/field-permissions/object-grants field_permission:manage
+POST /api/v1/field-permissions/sensitive-fields field_permission:manage
 POST /api/v1/forms form:write
 POST /api/v1/forms/{id}/submissions form:write
 POST /api/v1/history/snapshots audit:read
@@ -559,6 +577,7 @@ POST /api/v1/templates/{id}/versions citype:manage
 POST /api/v1/templates/{id}/versions/{version}/publish metamodel:publish
 POST /api/v1/tickets ticket:write
 POST /api/v1/tickets/{id}/comments ticket:write
+POST /api/v1/tickets/{id}/links ticket:write
 POST /api/v1/tickets/{id}/sla ticket:write
 POST /api/v1/training-assignments/{id}/complete training:write
 POST /api/v1/trainings training:write

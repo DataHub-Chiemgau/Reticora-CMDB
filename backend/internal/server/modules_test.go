@@ -303,7 +303,8 @@ var e38Register = []e38Resource{
 	// The drafts (WP-260) and their test run (WP-721) under the prefix
 	// /api/v1/metamodel.
 	{path: "/api/v1/metamodel/drafts", module: ModuleMetamodel},
-	{path: "/api/v1/field-permissions", module: ModuleMetamodel, owner: "WP-726"},
+	// Field permissions (WP-726).
+	{path: "/api/v1/field-permissions", module: ModuleMetamodel},
 	// New prefixes of existing modules, set with their first route.
 	{path: "/api/v1/suppliers", module: ModuleInventory, owner: "WP-736"},
 	{path: "/api/v1/contracts", module: ModuleInventory, owner: "WP-269"},

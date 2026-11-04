@@ -114,8 +114,8 @@ type TagStore interface {
 // Errors of the tag catalog.
 var (
 	ErrTagNotFound = errors.New("tag not found")
-	// ErrTagInUse: the tag is assigned to CIs (409).
-	ErrTagInUse = errors.New("the tag is assigned to CIs")
+	// ErrTagInUse: the tag is assigned to CIs or tickets (409).
+	ErrTagInUse = errors.New("the tag is assigned to CIs or tickets")
 	// ErrSystemTag: a system tag is neither deleted nor merged away (409).
 	ErrSystemTag = errors.New("a system tag cannot be deleted or merged into another tag")
 	// ErrTagsUnsupported: the repository keeps no tag catalog.

@@ -43,6 +43,15 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
+	// The hits match and show the fields the caller may read (RBA-07,
+	// WP-266); a policy that cannot be resolved answers 500 (fail-closed).
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "search: field permissions could not be resolved", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the field permissions could not be resolved")
+		return
+	}
+	q.Policy = policy
 	res, err := h.backend.Query(r.Context(), &q)
 	if err != nil {
 		// A checked query leaves backend failures only; their text goes to

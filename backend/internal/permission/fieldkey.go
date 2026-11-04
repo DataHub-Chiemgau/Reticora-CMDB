@@ -52,7 +52,7 @@ var ErrUnknownFieldKey = errors.New("unknown field key")
 // coreFields are the grantable typed columns per object kind. Structural
 // fields (id, version, type, name or title, client_id, site_id and the
 // timestamps) are not grantable: lists, routing and the tenant scope need
-// them. contract gets its columns with its table (WP-269).
+// them; for a contract also number (WP-269).
 var coreFields = map[ObjectKind][]string{
 	KindCI: {
 		"asset_id", "discovery_source", "firmware_version", "fqdn", "hardware_uuid", "health", "hostname",
@@ -60,9 +60,13 @@ var coreFields = map[ObjectKind][]string{
 		"parent_ci_id", "primary_mac", "room_id", "serial_number", "status", "sys_object_id",
 	},
 	KindAsset: {
-		"asset_tag", "barcode", "category", "ci_id", "currency", "invoice_number", "lifecycle_state", "location",
-		"location_id", "notes", "parent_asset_id", "purchase_cost", "purchase_date", "rfid_tag", "serial_number",
-		"status", "supplier", "warranty_end",
+		"asset_tag", "barcode", "category", "ci_id", "contract_id", "cost_center", "currency", "invoice_number",
+		"lifecycle_state", "location", "location_id", "manufacturer", "model", "notes", "owner_team_id",
+		"owner_user_id", "parent_asset_id", "purchase_cost", "purchase_date", "rfid_tag", "serial_number", "status",
+		"supplier", "supplier_id", "warranty_end",
+	},
+	KindContract: {
+		"currency", "end_date", "kind", "notes", "notice_period_days", "start_date", "status", "supplier_id", "value",
 	},
 	KindTicket: {
 		"assignee_id", "category", "description", "due_date", "priority", "related_asset_id", "related_ci_id",

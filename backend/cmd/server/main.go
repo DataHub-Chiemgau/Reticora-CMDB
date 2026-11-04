@@ -442,11 +442,17 @@ func main() {
 	}
 	webhookDispatcher := webhook.NewDispatcher(repos.Webhook, egress.NewClient(egressPolicy), webhook.DispatcherOptions{
 		// Subscriptions bound to a service account receive only events whose
-		// object the account may read (RBA-08).
-		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts},
+		// object the account may read (RBA-08), with the payload projected
+		// by the field policy of the account, unbound ones by the default
+		// policy without role (RBA-07, WP-730). The policy shares the cache
+		// of the API, so a change of the grants reaches the dispatcher.
+		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts, Fields: server.NewFieldResolver(&repos, cacheStore)},
 		// Events without client_id/site_id in the payload are scoped by
 		// the CIs and assets they reference.
-		Objects:    objectResolverOf(auditPool),
+		Objects: objectResolverOf(auditPool),
+		// The CI of override.changed: its type and scope decide whether
+		// the field is readable (WP-730).
+		CIs:        webhookCIs{repos: &repos},
 		Deliveries: repos.WebhookDeliveries,
 		// The retry worker runs under its operator switch below (OPS-02).
 		PollInterval: -1,
@@ -602,7 +608,7 @@ func main() {
 	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
 		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
 		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
-		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules})
+		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules, fieldPolicyCache: cacheStore})
 	if err != nil {
 		slog.Error("failed to set up the workers", "error", err)
 		os.Exit(1)
@@ -1115,6 +1121,19 @@ func objectResolverOf(pool *pgxpool.Pool) webhook.ObjectResolver {
 		return nil
 	}
 	return webhook.NewPGObjectResolver(pool)
+}
+
+// webhookCIs reads the type, scope and instance attribute keys of a CI
+// for the field permissions of webhook payloads (webhook.CIFieldScopes,
+// WP-730), like the CI history (server.HistoryCIs).
+type webhookCIs struct{ repos *server.Repositories }
+
+func (w webhookCIs) CIFieldScope(ctx context.Context, orgID, ciID string) (*webhook.CIFieldScope, error) {
+	facts, err := server.HistoryCIs(w.repos).CIFacts(ctx, orgID, ciID)
+	if err != nil || facts == nil {
+		return nil, err
+	}
+	return &webhook.CIFieldScope{TypeID: facts.TypeID, ClientID: facts.ClientID, SiteID: facts.SiteID, InstanceKeys: facts.InstanceKeys}, nil
 }
 
 // collectorCA is the internal CA of the collector certificates (COL-04);

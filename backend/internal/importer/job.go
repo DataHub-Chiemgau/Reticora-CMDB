@@ -1,22 +1,23 @@
 package importer
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"regexp"
-	"strconv"
+	"slices"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // JobKind is the job kind of an import run (API-09, JOB-04).
@@ -26,17 +27,17 @@ const JobKind = "import.run"
 // job after the timeout of its kind.
 const RunTimeout = 30 * time.Minute
 
-// progressEvery is the number of rows after which a run reports its
-// progress (and notices a cancel).
-const progressEvery = 1000
-
 // runSlots lets at most two runs of this instance parse at the same time;
-// further runs wait with their job queued.
+// further runs wait (in process: with their job queued).
 var runSlots = make(chan struct{}, 2)
 
 // JobParams are the parameters of an import job: the document version it
 // reads (a later version is not read), the profile, the write mode, the
-// dry run flag and the sheet of an XLSX file (empty: the first).
+// dry run flag, the sheet of an XLSX file (empty: the first) and the
+// request facts of the audit (jobs.ScopeParams). They hold no rights,
+// scopes or IdP groups of the starter: every reader of the job sees its
+// parameters (GET /api/v1/jobs, job:read), and the run reloads the
+// starter's current rights instead (jobContext).
 type JobParams struct {
 	DocumentID      string `json:"document_id"`
 	DocumentVersion int    `json:"document_version"`
@@ -44,14 +45,31 @@ type JobParams struct {
 	Mode            string `json:"mode"`
 	DryRun          bool   `json:"dry_run"`
 	Sheet           string `json:"sheet,omitempty"`
+	jobs.ScopeParams
 }
 
-// JobResult is the result of a succeeded import job: the data rows read,
-// the rows with an error and the blob key of the report.
+// UserStatus reports whether a user exists in the organization and is
+// active (user.PGRepository, as the session refresh asks it).
+type UserStatus interface {
+	UserActive(ctx context.Context, orgID, userID string) (bool, error)
+}
+
+// GrantSource reads the role and custom role assignments of a user
+// (permission.PGRepository, as login and refresh resolve them).
+type GrantSource interface {
+	AccessGrants(ctx context.Context, orgID, userID string) ([]identity.Grant, error)
+}
+
+// JobResult is the result of an import job: the blob key of the report,
+// whether it was a dry run, the data rows read and the rows per outcome.
 type JobResult struct {
-	RowsTotal  int    `json:"rows_total"`
-	RowsFailed int    `json:"rows_failed"`
-	ReportKey  string `json:"report_key"`
+	ReportKey string `json:"report_key"`
+	DryRun    bool   `json:"dry_run"`
+	Total     int    `json:"total"`
+	Created   int    `json:"created"`
+	Updated   int    `json:"updated"`
+	Skipped   int    `json:"skipped"`
+	Failed    int    `json:"failed"`
 }
 
 // ReportKey is the fixed blob key of the report of an import job in the
@@ -60,11 +78,11 @@ func ReportKey(orgID, jobID string) string {
 	return blob.OrgKey(orgID, "imports", jobID, "report.csv")
 }
 
-// errStopped ends a run that was cancelled: it records nothing further.
+// errStopped ends a run that was cancelled: it writes no further row.
 var errStopped = errors.New("import cancelled")
 
 // codePattern is the form of an error code at the start of job.error.
-var codePattern = regexp.MustCompile(`^([a-z][a-z-]*[a-z]): `)
+var codePattern = regexp.MustCompile(`^([a-z][a-z_-]*[a-z]): `)
 
 // errorCode returns the code of a job error "<code>: <message>"; empty for
 // an error without one (the reaper's timeout).
@@ -82,41 +100,97 @@ func visible(ctx context.Context, job *jobs.Job) bool {
 	return ok && job.VisibleTo(&scope)
 }
 
-// report collects the errors of a run (line, column, code, message).
-type report struct {
-	buf bytes.Buffer
-	w   *csv.Writer
-}
-
-func newReport() *report {
-	r := &report{}
-	r.w = csv.NewWriter(&r.buf)
-	_ = r.w.Write([]string{"line", "column", "code", "message"})
-	return r
-}
-
-func (r *report) add(e *ParseError) {
-	cell := func(n int) string {
-		if n <= 0 {
-			return ""
-		}
-		return strconv.Itoa(n)
+// jobContext restores the starter of a job in ctx (fail-closed): the
+// creator of the job row must be an active user of the organization, the
+// job must have been started by a session (source ui of its request
+// facts) and hold a scope snapshot. The principal is rebuilt from the
+// creator's current role assignments (GrantSource, identity.ResolveAccess
+// as at login and refresh), so a right revoked after the start takes
+// effect; its scope and the tenant scope of the run are the current scope
+// narrowed to the snapshot of the job row (jobs.CreatorContext), so the run
+// never reaches beyond the request that started it. Standard roles of IdP
+// groups are not part of it: the groups of the session are not stored. The
+// request info of the audit carries source import and the job as
+// correlation id (AUD-07).
+func (h *ImportHandler) jobContext(ctx context.Context, job *jobs.Job, p *JobParams) (context.Context, error) {
+	missing := &ParseError{Code: CodePrincipalMissing, Message: "the user who started the import cannot be restored", Fatal: true}
+	if job.CreatedBy == "" || job.Scope == nil || p.Source != audit.SourceUI || h.users == nil || h.grants == nil {
+		// An API key acts with the intersection of its own permissions
+		// and its owner's: neither is in the job, so it is not restored.
+		return nil, missing
 	}
-	_ = r.w.Write([]string{cell(e.Line), cell(e.Column), e.Code, e.Message})
+	active, err := h.users.UserActive(ctx, job.OrganizationID, job.CreatedBy)
+	if err != nil {
+		return nil, fmt.Errorf("read the status of the user who started the import: %w", err)
+	}
+	if !active {
+		return nil, missing
+	}
+	grants, err := h.grants.AccessGrants(ctx, job.OrganizationID, job.CreatedBy)
+	if err != nil {
+		return nil, fmt.Errorf("read the role assignments of the user who started the import: %w", err)
+	}
+	access := identity.ResolveAccess(grants)
+	scope := narrowScope(&access.Scope, job.Scope)
+	var permScopes map[identity.Permission]identity.Scope
+	for perm := range access.PermissionScopes {
+		if permScopes == nil {
+			permScopes = make(map[identity.Permission]identity.Scope, len(access.PermissionScopes))
+		}
+		held := access.PermissionScopes[perm]
+		permScopes[perm] = narrowScope(&held, job.Scope)
+	}
+	request := jobs.ScopeParams{RequestID: p.RequestID, Source: audit.SourceImport}
+	runCtx, err := request.Context(ctx, job)
+	if err != nil {
+		return nil, missing
+	}
+	tenantScope := database.OrgWideScope(job.OrganizationID, job.CreatedBy)
+	tenantScope.Clients, tenantScope.Sites, tenantScope.Teams = dbSet(scope.Clients), dbSet(scope.Sites), dbSet(scope.Teams)
+	runCtx = tenant.WithTenant(runCtx, tenant.TenantInfo{OrganizationID: job.OrganizationID, ClientID: scope.LegacyClientScope(),
+		UserID: job.CreatedBy})
+	runCtx = database.ContextWithTenantScope(runCtx, &tenantScope)
+	principal := identity.Principal{Subject: job.CreatedBy, OrganizationID: job.OrganizationID, Type: identity.PrincipalTypeUser,
+		ClientScope: scope.LegacyClientScope(), Scope: &scope, PermissionScopes: permScopes, Permissions: access.Permissions}
+	runCtx = identity.WithPrincipal(runCtx, principal)
+	return identity.WithPermissions(runCtx, principal.Permissions), nil
 }
 
-func (r *report) bytes() []byte {
-	r.w.Flush()
-	return r.buf.Bytes()
+// narrowScope is held limited to the scope snapshot of a job row: a
+// dimension without snapshot ids (nil) stays as held, otherwise it keeps
+// the snapshot ids held covers.
+func narrowScope(held *identity.Scope, snap *jobs.Scope) identity.Scope {
+	return identity.Scope{Clients: narrowSet(held.Clients, snap.Clients), Sites: narrowSet(held.Sites, snap.Sites),
+		Teams: narrowSet(held.Teams, snap.Teams)}
 }
 
-// run executes an import job in this process: it waits for a parse slot
-// (the job stays queued), claims the job and reads the file. ctx carries
-// the tenant and the scope of the caller (context.WithoutCancel of the
-// request), so documents, versions and profiles are read under the
-// caller's row level security (database.WithRequestTenant of the
-// repositories), never with WithSystem.
-func (h *ImportHandler) run(ctx context.Context, orgID, jobID string, p *JobParams) {
+func narrowSet(held identity.ScopeSet, snap []string) identity.ScopeSet {
+	if snap == nil {
+		return identity.ScopeSet{All: held.All, IDs: append([]string(nil), held.IDs...)}
+	}
+	out := identity.ScopeSet{IDs: []string{}}
+	for _, id := range snap {
+		if held.All || slices.Contains(held.IDs, id) {
+			out.IDs = append(out.IDs, id)
+		}
+	}
+	return out
+}
+
+// dbSet is the database form of a scope dimension.
+func dbSet(s identity.ScopeSet) database.ScopeSet {
+	if s.All {
+		return database.AllScopes()
+	}
+	return database.ScopeIDs(s.IDs...)
+}
+
+// run executes an import job in this process (without job queue): it
+// waits for a parse slot (the job stays queued) and claims the job. The
+// run restores its starter from the job (jobContext), so it reads and
+// writes under the starter's row level security
+// (database.WithRequestTenant of the repositories), never with WithSystem.
+func (h *ImportHandler) run(ctx context.Context, orgID, jobID string) {
 	runSlots <- struct{}{}
 	defer func() { <-runSlots }()
 	claimed, err := h.jobs.ClaimJob(ctx, orgID, jobID)
@@ -127,115 +201,117 @@ func (h *ImportHandler) run(ctx context.Context, orgID, jobID string, p *JobPara
 		}
 		return
 	}
-	// A panic of the parser on a hostile file fails the job instead of the
-	// process.
+	if ferr := h.perform(ctx, claimed); ferr != nil {
+		if _, err = h.jobs.Fail(ctx, orgID, jobID, ferr); err != nil && !errors.Is(err, jobs.ErrTransition) {
+			slog.ErrorContext(ctx, "import: record failure", "job", jobID, "error", err)
+		}
+	}
+}
+
+// RunJob runs an import job of the job queue (handler of import.run,
+// TEC-14). It records success, cancel and report itself; a fatal error is
+// returned and fails the job (MaxAttempts 1: no second attempt, job.failed
+// from the job repository, WP-550). The success is recorded already when
+// it returns, so the queue's second record is refused as a transition and
+// ignored.
+func (h *ImportHandler) RunJob(ctx context.Context, job *jobs.Job) (any, error) {
+	if h.jobs == nil || h.blobs == nil {
+		return nil, &ParseError{Code: "import-failed", Message: "imports require the job service and blob storage", Fatal: true}
+	}
+	runSlots <- struct{}{}
+	defer func() { <-runSlots }()
+	if err := h.perform(ctx, job); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// perform runs a claimed job and records its outcome except a failure,
+// which it returns: the report is stored first (outside any transaction,
+// K20), then a success and import.completed after it, or a cancel with the
+// counters of the rows processed so far (their report is kept). A panic of
+// the parser on a hostile file fails the job instead of the process.
+func (h *ImportHandler) perform(ctx context.Context, job *jobs.Job) (failure error) {
+	orgID, jobID := job.OrganizationID, job.ID
+	rep := newReport()
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.ErrorContext(ctx, "import: run panicked", "job", jobID, "panic", rec)
-			_, _ = h.jobs.Fail(ctx, orgID, jobID, &ParseError{Code: "import-failed", Message: "the import could not be completed", Fatal: true})
+			failure = &ParseError{Code: "import-failed", Message: "the import could not be completed", Fatal: true}
 		}
 	}()
-	runCtx, cancel := context.WithTimeout(ctx, RunTimeout)
-	defer cancel()
-	result, rep, runErr := h.execute(runCtx, orgID, jobID, p)
-	if errors.Is(runErr, errStopped) {
-		return
+	var p JobParams
+	var run *RunInfo
+	var result JobResult
+	var err error
+	if json.Unmarshal(job.Params, &p) != nil {
+		err = &ParseError{Code: "import-failed", Message: "the import job has malformed parameters", Fatal: true}
 	}
-	if cancelled, cerr := h.jobs.IsCancelled(ctx, orgID, jobID); cerr == nil && cancelled {
-		return
+	result.DryRun = p.DryRun
+	var runCtx context.Context
+	if err == nil {
+		runCtx, err = h.jobContext(ctx, job, &p)
 	}
-	if errors.Is(runErr, context.DeadlineExceeded) || (runErr == nil && runCtx.Err() != nil) {
-		runErr = &ParseError{Code: "import-timeout", Message: fmt.Sprintf("the import did not end within %s", RunTimeout), Fatal: true}
+	if err == nil {
+		timed, cancel := context.WithTimeout(runCtx, RunTimeout)
+		run, result, err = h.execute(timed, job, &p, rep)
+		if errors.Is(err, context.DeadlineExceeded) || (err == nil && errors.Is(timed.Err(), context.DeadlineExceeded)) {
+			err = &ParseError{Code: "import-timeout", Message: fmt.Sprintf("the import did not end within %s", RunTimeout), Fatal: true}
+		}
+		cancel()
 	}
-	if runErr != nil {
+	// The records go with a context detached from the run: a cancel of the
+	// queue's run context must not stop them.
+	rec := context.WithoutCancel(ctx)
+	cancelled := errors.Is(err, errStopped)
+	if !cancelled {
+		if c, cerr := h.jobs.IsCancelled(rec, orgID, jobID); cerr == nil && c {
+			cancelled = true
+		}
+	}
+	if cancelled {
+		key, serr := h.storeReport(rec, orgID, jobID, rep)
+		if serr != nil {
+			slog.ErrorContext(ctx, "import: write report", "job", jobID, "error", serr)
+		}
+		result.ReportKey = key
+		if _, serr = h.jobs.SaveCancelledResult(rec, orgID, jobID, result); serr != nil && !errors.Is(serr, jobs.ErrTransition) {
+			slog.ErrorContext(ctx, "import: record cancelled result", "job", jobID, "error", serr)
+		}
+		return nil
+	}
+	if err != nil {
 		var pe *ParseError
-		if !errors.As(runErr, &pe) {
-			slog.ErrorContext(ctx, "import: run failed", "job", jobID, "error", runErr)
+		if !errors.As(err, &pe) {
+			slog.ErrorContext(ctx, "import: run failed", "job", jobID, "error", err)
 			pe = &ParseError{Code: "import-failed", Message: "the import could not be completed", Fatal: true}
-			runErr = pe
+			err = pe
 		}
 		rep.add(pe)
 	}
-	// The report is written before the status, outside any transaction
-	// (K20).
-	key := ReportKey(orgID, jobID)
-	content := rep.bytes()
-	if perr := h.blobs.Put(ctx, export.ExportBucket, key, bytes.NewReader(content), int64(len(content)), "text/csv"); perr != nil {
+	key, perr := h.storeReport(rec, orgID, jobID, rep)
+	if perr != nil {
 		slog.ErrorContext(ctx, "import: write report", "job", jobID, "error", perr)
-		if runErr == nil {
-			runErr = &ParseError{Code: "import-failed", Message: "the import report could not be stored", Fatal: true}
+		if err == nil {
+			err = &ParseError{Code: "import-failed", Message: "the import report could not be stored", Fatal: true}
 		}
 	}
-	if runErr != nil {
-		if _, ferr := h.jobs.Fail(ctx, orgID, jobID, runErr); ferr != nil && !errors.Is(ferr, jobs.ErrTransition) {
-			slog.ErrorContext(ctx, "import: record failure", "job", jobID, "error", ferr)
-		}
-		return
+	if err != nil {
+		return err
 	}
 	result.ReportKey = key
-	if _, serr := h.jobs.Succeed(ctx, orgID, jobID, result); serr != nil && !errors.Is(serr, jobs.ErrTransition) {
-		slog.ErrorContext(ctx, "import: record result", "job", jobID, "error", serr)
+	succeeded, serr := h.jobs.Succeed(rec, orgID, jobID, result)
+	if serr != nil {
+		if !errors.Is(serr, jobs.ErrTransition) {
+			slog.ErrorContext(ctx, "import: record result", "job", jobID, "error", serr)
+		}
+		return nil
 	}
+	h.emitCompleted(rec, succeeded, run, &result)
+	return nil
 }
 
-// execute reads the version of the job: it checks document, version and
-// profile again (clean before reading), reads the blob and parses it,
-// reporting the progress every progressEvery rows. A fatal parser error
-// ends it; a row error is reported and the run goes on. Mapping and
-// writing follow with WP-775, WP-302 and WP-776.
-func (h *ImportHandler) execute(ctx context.Context, orgID, jobID string, p *JobParams) (JobResult, *report, error) {
-	rep := newReport()
-	var result JobResult
-	src, err := h.jobSource(ctx, orgID, p)
-	if err != nil {
-		return result, rep, err
-	}
-	body, err := h.openSource(ctx, orgID, src)
-	if err != nil {
-		if errors.Is(err, errForeignKey) {
-			return result, rep, &ParseError{Code: "import-document-unavailable", Message: errForeignKey.Error(), Fatal: true}
-		}
-		return result, rep, err
-	}
-	defer func() { _ = body.Close() }()
-	counted := &countingReader{r: body}
-	rd, err := Open(src.format, counted, p.Sheet)
-	if err != nil {
-		return result, rep, err
-	}
-	defer func() { _ = rd.Close() }()
-	for {
-		if ctx.Err() != nil {
-			return result, rep, ctx.Err()
-		}
-		_, rerr := rd.Next()
-		if rerr != nil {
-			if isEOF(rerr) {
-				return result, rep, nil
-			}
-			var pe *ParseError
-			if !errors.As(rerr, &pe) || pe.Fatal {
-				return result, rep, rerr
-			}
-			result.RowsFailed++
-			rep.add(pe)
-			result.RowsTotal++
-			continue
-		}
-		result.RowsTotal++
-		if result.RowsTotal%progressEvery == 0 {
-			if perr := h.jobs.Progress(ctx, orgID, jobID, progressOf(src, counted.n, result.RowsTotal)); perr != nil {
-				if errors.Is(perr, jobs.ErrTransition) {
-					// The job is no longer running: cancelled.
-					return result, rep, errStopped
-				}
-				slog.WarnContext(ctx, "import: record progress", "job", jobID, "error", perr)
-			}
-		}
-	}
-}
-
-// progressOf is the progress of a run (0–99): the bytes read of a CSV
+// progressOf is the progress of a reading (0–99): the bytes read of a CSV
 // file, the rows read of a workbook (which is unpacked at once) against
 // MaxRows.
 func progressOf(src *source, read int64, rows int) int {
@@ -257,7 +333,8 @@ func (h *ImportHandler) jobSource(ctx context.Context, orgID string, p *JobParam
 	if err != nil {
 		return nil, unavailable("the document is not found")
 	}
-	if _, err = h.profiles.Get(ctx, orgID, p.ProfileID); err != nil {
+	profile, err := h.profiles.Get(ctx, orgID, p.ProfileID)
+	if err != nil {
 		return nil, &ParseError{Code: "import-profile-unavailable", Message: "the import profile is not found", Fatal: true}
 	}
 	v, err := h.docs.GetVersion(ctx, orgID, doc.ID, p.DocumentVersion)
@@ -278,7 +355,7 @@ func (h *ImportHandler) jobSource(ctx context.Context, orgID string, p *JobParam
 	if !ok {
 		return nil, &ParseError{Code: CodeFormatUnsupported, Message: "the document version is no CSV or XLSX file", Fatal: true}
 	}
-	return &source{doc: doc, version: v, format: format}, nil
+	return &source{doc: doc, version: v, format: format, profile: profile}, nil
 }
 
 // countingReader counts the bytes read.

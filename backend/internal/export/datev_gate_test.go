@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -60,6 +61,8 @@ func gateRequest(method, target, body, org string, perms ...identity.Permission)
 	scope := database.OrgWideScope(org, "user-1")
 	ctx = database.ContextWithTenantScope(ctx, &scope)
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", Permissions: perms})
+	// The policy source of FieldPolicyMiddleware: no field permissions.
+	ctx = permission.WithPolicy(ctx, permission.UnrestrictedPolicy(perms))
 	return r.WithContext(ctx)
 }
 

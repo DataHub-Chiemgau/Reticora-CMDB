@@ -41,6 +41,7 @@ function relationshipType(
     allowed_target_types: [],
     cardinality: 'many_to_many',
     is_system: true,
+    metadata_schema: [],
     created_at: AT,
     updated_at: AT,
   };

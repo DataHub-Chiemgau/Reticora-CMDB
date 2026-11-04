@@ -100,6 +100,11 @@ type Item struct {
 	// projected _overrides and _observed as read with the CI (REC-12).
 	// Read-only, not part of the API.
 	Overridden map[string]*Observation `json:"-"`
+	// InstanceKeys are the keys of the instance attributes the CI holds
+	// (attributes._instance, MET-14), read before presentAttributes lays
+	// them flat into Attributes: the field permissions see them as
+	// _instance.<key> (RBA-07, WP-265). Not part of the API.
+	InstanceKeys []string `json:"-"`
 }
 
 // MarshalJSON writes the item with tags [] when it has none, so every
@@ -149,7 +154,10 @@ func (i *Item) ObservationChanged(field string, value any) bool {
 // AssetFacts are the canonical data of the asset a CI is linked to, shown
 // read-only on the CI (DB-05).
 type AssetFacts struct {
-	ID             string `json:"id"`
+	ID string `json:"id"`
+	// InventoryNo and WarrantyUntil are the AST-01 names (WP-738);
+	// AssetTag, WarrantyEnd and Supplier are deprecated (API-01, E-120 (c)).
+	InventoryNo    string `json:"inventory_no"`
 	AssetTag       string `json:"asset_tag"`
 	Name           string `json:"name"`
 	SerialNumber   string `json:"serial_number,omitempty"`
@@ -159,9 +167,25 @@ type AssetFacts struct {
 	Barcode        string `json:"barcode,omitempty"`
 	RFIDTag        string `json:"rfid_tag,omitempty"`
 	PurchaseDate   string `json:"purchase_date,omitempty"`
+	WarrantyUntil  string `json:"warranty_until,omitempty"`
 	WarrantyEnd    string `json:"warranty_end,omitempty"`
 	Supplier       string `json:"supplier,omitempty"`
 	InvoiceNumber  string `json:"invoice_number,omitempty"`
+	// Manufacturer to ContractID are the AST-01 fields of the asset
+	// (WP-271), read-only on the CI (DB-05).
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	CostCenter   string `json:"cost_center,omitempty"`
+	OwnerUserID  string `json:"owner_user_id,omitempty"`
+	OwnerTeamID  string `json:"owner_team_id,omitempty"`
+	SupplierID   string `json:"supplier_id,omitempty"`
+	ContractID   string `json:"contract_id,omitempty"`
+	// AssetTypeID, ClientID and SiteID are the type and scope of the asset:
+	// the facts are projected by the asset's field permissions (RBA-07,
+	// WP-265). Not part of the API.
+	AssetTypeID string `json:"-"`
+	ClientID    string `json:"-"`
+	SiteID      string `json:"-"`
 }
 
 // CreateRequest is the payload for creating a CI.

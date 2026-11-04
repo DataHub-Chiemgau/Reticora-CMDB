@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
@@ -127,7 +128,9 @@ func newImportStack(t *testing.T) *importStack {
 	s.jobs.Register(jobs.Kind{Name: JobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true})
 	s.jobs.Register(jobs.Kind{Name: "ci.bulk", MaxAttempts: 1})
 	s.mux = chi.NewRouter()
-	NewImportHandler(s.profiles, versionKeys{Repository: s.docs, keys: s.keys}, s.blobs).WithJobs(s.jobs).RegisterRoutes(s.mux)
+	// The CI writer follows with WP-302: a writer that accepts every row.
+	NewImportHandler(s.profiles, versionKeys{Repository: s.docs, keys: s.keys}, s.blobs).WithJobs(s.jobs).WithStarters(allowStarters, allowStarters).
+		WithWriter(&fakeWriter{entity: "ci"}).RegisterRoutes(s.mux)
 	jobs.NewAPIHandler(s.jobs).WithKind(JobKind, identity.PermImportRun, nil).RegisterRoutes(s.mux)
 	t.Cleanup(func() { waitIdle(t) })
 	return s
@@ -145,16 +148,54 @@ func waitIdle(t *testing.T) {
 	}
 }
 
-// requestContext is the context of a principal of org with import:run.
+// requestContext is the context of a principal of org with import:run and
+// the write rights of CIs and locations.
 func requestContext(org, user string, scope *database.TenantScope) context.Context {
+	return requestContextWith(org, user, scope, identity.PermImportRun, identity.PermCIWrite, identity.PermLocationWrite)
+}
+
+// requestContextWith is the context of a principal of org with perms.
+func requestContextWith(org, user string, scope *database.TenantScope, perms ...identity.Permission) context.Context {
 	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: org, UserID: user})
 	if scope == nil {
 		s := database.OrgWideScope(org, user)
 		scope = &s
 	}
 	ctx = database.ContextWithTenantScope(ctx, scope)
-	return identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: org,
-		Permissions: []identity.Permission{identity.PermImportRun}})
+	// The route audit names a session's request source ui (AuditRoute).
+	ctx = audit.WithRequestInfo(ctx, audit.RequestInfo{RequestID: "req-import", Source: audit.SourceUI})
+	return identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser,
+		Permissions: perms})
+}
+
+// fakeStarters are the user status and the role assignments a run reloads
+// (WithStarters): an active user with one org-wide role of perms.
+type fakeStarters struct {
+	mu       sync.Mutex
+	perms    []identity.Permission
+	inactive bool
+}
+
+func newStarters(perms ...identity.Permission) *fakeStarters {
+	if perms == nil {
+		perms = []identity.Permission{identity.PermImportRun, identity.PermCIWrite, identity.PermLocationWrite}
+	}
+	return &fakeStarters{perms: perms}
+}
+
+// allowStarters hold every right a test import needs; never changed.
+var allowStarters = newStarters()
+
+func (f *fakeStarters) UserActive(context.Context, string, string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.inactive, nil
+}
+
+func (f *fakeStarters) AccessGrants(context.Context, string, string) ([]identity.Grant, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return []identity.Grant{{RoleID: "import-role", Permissions: append([]identity.Permission(nil), f.perms...)}}, nil
 }
 
 func (s *importStack) call(t *testing.T, ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
@@ -181,6 +222,12 @@ func (s *importStack) profile(t *testing.T, org, name, format, sheet string) str
 	if sheet != "" {
 		req.Sheet = &sheet
 	}
+	// The columns of csvRows.
+	req.Mapping = &Mapping{Columns: map[string]ColumnMapping{
+		"name":   {Target: "name", Transforms: []Transform{{Op: TransformTrim}}},
+		"serial": {Target: "attributes.serial"},
+	}}
+	req.IdentityKeys = []string{"name"}
 	p := newProfile(org, testUser, &req)
 	if err := s.profiles.Create(context.Background(), p); err != nil {
 		t.Fatalf("profile %s: %v", name, err)
@@ -403,7 +450,7 @@ func TestImportStartChecks(t *testing.T) {
 	if err := json.Unmarshal(job.Result, &result); err != nil || result.ReportKey != ReportKey(testOrg, jobID) {
 		t.Fatalf("result %s (%v)", job.Result, err)
 	}
-	if got := s.report(t, jobID); got != "line,column,code,message\n" {
+	if got := s.report(t, jobID); !strings.HasPrefix(got, "\ufeffZeile;Feld;Code;Meldung\n") || strings.Count(got, ";created;") != 3 {
 		t.Fatalf("report %q", got)
 	}
 
@@ -455,7 +502,8 @@ func TestImportRunProgressReportAndCancel(t *testing.T) {
 	s.report(t, jobID)
 
 	// A holder of import:run (not the creator) cancels a running import;
-	// the run ends at its next progress report without a report.
+	// the run ends at its next progress report and keeps the report of
+	// the rows processed so far (WP-775); the report route stays 404.
 	release = s.blobs.gate(key, 100<<10)
 	jobID = s.start(t, docID, profileID)
 	s.waitProgress(t, jobID)
@@ -465,12 +513,16 @@ func TestImportRunProgressReportAndCancel(t *testing.T) {
 	}
 	close(release)
 	waitIdle(t)
-	if done := s.wait(t, jobID); done.Status != jobs.StatusCancelled || len(done.Result) != 0 {
+	done := s.wait(t, jobID)
+	var kept JobResult
+	if done.Status != jobs.StatusCancelled || json.Unmarshal(done.Result, &kept) != nil || kept.ReportKey != ReportKey(testOrg, jobID) {
 		t.Fatalf("cancelled run: %s %s", done.Status, done.Result)
 	}
-	if _, err := s.files.Get(context.Background(), export.ExportBucket, ReportKey(testOrg, jobID)); err == nil {
-		t.Fatal("a cancelled run left a report")
+	rc, err := s.files.Get(context.Background(), export.ExportBucket, ReportKey(testOrg, jobID))
+	if err != nil {
+		t.Fatalf("a cancelled run keeps its report: %v", err)
 	}
+	_ = rc.Close()
 	wantProblem(t, s.do(t, http.MethodGet, "/api/v1/imports/"+jobID+"/report", ""), http.StatusNotFound, "")
 }
 
@@ -486,7 +538,7 @@ func TestImportRowLimitFailsWithReport(t *testing.T) {
 	if run.ErrorCode == nil || *run.ErrorCode != CodeRowLimit || run.RowsTotal != nil {
 		t.Fatalf("projection %+v", run)
 	}
-	if got := s.report(t, jobID); !strings.Contains(got, ","+CodeRowLimit+",") {
+	if got := s.report(t, jobID); !strings.Contains(got, ";"+CodeRowLimit+";") {
 		t.Fatalf("report %q", got)
 	}
 }
@@ -502,7 +554,7 @@ func TestImportRowErrorsAndXLSXSheet(t *testing.T) {
 	if run := s.run(t, jobID); *run.RowsTotal != 3 || *run.RowsFailed != 1 {
 		t.Fatalf("counters %+v", run)
 	}
-	if got := s.report(t, jobID); !strings.Contains(got, "3,4,"+CodeRowMalformed+",") {
+	if got := s.report(t, jobID); !strings.Contains(got, "3;4;"+CodeRowMalformed+";") {
 		t.Fatalf("report %q", got)
 	}
 
@@ -691,7 +743,7 @@ func TestImportDocumentOutsideClientScopePostgres(t *testing.T) {
 	jobSvc := jobs.NewService(jobs.NewMemoryRepository())
 	jobSvc.Register(jobs.Kind{Name: JobKind, MaxAttempts: 1, Cancellable: true})
 	mux := chi.NewRouter()
-	NewImportHandler(profiles, docs, files).WithJobs(jobSvc).RegisterRoutes(mux)
+	NewImportHandler(profiles, docs, files).WithJobs(jobSvc).WithStarters(allowStarters, allowStarters).WithWriter(&fakeWriter{entity: "ci"}).RegisterRoutes(mux)
 	scope := database.OrgWideScope(f.OrgA, user)
 	scope.Clients = database.ScopeIDs(f.Client1)
 	client1 := requestContext(f.OrgA, user, &scope)

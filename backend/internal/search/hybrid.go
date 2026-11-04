@@ -61,7 +61,14 @@ func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID 
 // policy uses the current client and site, together with the entity's own
 // policy (hitVisible); hits that PostgreSQL does not return are dropped, for
 // every entity type.
+//
+// With restricted field permissions the remote index cannot tell which
+// fields matched (no field mappings, TEC-12 [P5]): PostgreSQL answers the
+// query with its field rows (RBA-07, WP-266).
 func (b *HybridBackend) Query(ctx context.Context, q *Query) (Result, error) {
+	if len(q.restrictedTypes()) > 0 {
+		return b.Source.Query(ctx, q)
+	}
 	res, err := b.Remote.Query(ctx, q)
 	if err != nil || len(res.Data) == 0 {
 		return res, err

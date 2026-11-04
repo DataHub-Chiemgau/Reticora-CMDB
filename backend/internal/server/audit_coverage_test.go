@@ -476,6 +476,11 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/roles/assign", `{"user_id":"<user2>","custom_role_id":"<id:/api/v1/roles>"}`},
 	{"POST /scim/v2/Users", `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"a5-scim@example.com","active":true}`},
 	{"POST /scim/v2/Groups", `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:Group"],"displayName":"a5-group"}`},
+	// Field permissions (WP-726): a grant and an object grant of the
+	// created custom role, a sensitive field.
+	{"POST /api/v1/field-permissions", `{"custom_role_id":"<id:/api/v1/roles>","object_kind":"ci","field_key":"core.serial_number","level":"read"}`},
+	{"POST /api/v1/field-permissions/object-grants", `{"grantee_custom_role_id":"<id:/api/v1/roles>","object_kind":"ci","object_id":"<id:/api/v1/cis>","level":"write"}`},
+	{"POST /api/v1/field-permissions/sensitive-fields", `{"object_kind":"asset","field_key":"core.purchase_cost"}`},
 }
 
 // auditRouteRequests are the bodies and paths of further write routes;
@@ -501,6 +506,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PUT /api/v1/templates/{id}/versions/{version}":          {"/api/v1/templates/<id:/api/v1/templates>/versions/2", `{"items":[]}`},
 	"PATCH /api/v1/rules/{id}":                               {"", `{"kind":"readonly"}`},
 	"PATCH /api/v1/layouts/{id}":                             {"", `{"priority":1}`},
+	"PATCH /api/v1/field-permissions/{id}":                   {"", `{"level":"none"}`},
 	"POST /api/v1/cis/{id}/unmerge":                          {"/api/v1/cis/<ci4>/unmerge", `{}`},
 	"PATCH /api/v1/relationship-types/{key}":                 {"/api/v1/relationship-types/a5_rel", `{"display_name":"a5 rel renamed"}`},
 	"DELETE /api/v1/relationship-types/{key}":                {"/api/v1/relationship-types/a5_rel", ""},
@@ -547,9 +553,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/tags/{id}/merge": {"/api/v1/tags/<tag_src>/merge", `{"into_id":"<id:/api/v1/tags>"}`},
 
 	// Lifecycle transitions (WP-724): the asset has no type model, so
-	// physical_asset with the initial state ordered; <ci6> has the type
-	// application with the system model software.
-	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"ordered","reason":"a5 order"}`},
+	// physical_asset; it starts in the initial state ordered (WP-271), the
+	// transition receives it. <ci6> has the type application with the
+	// system model software.
+	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"received","reason":"a5 receive"}`},
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
 
 	// Metamodel drafts (WP-260): an item for a new type; its removal names
@@ -565,6 +572,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 		`"is_observable":true}],"attribute_definitions":[],"attribute_sets":[],"templates":[],"rules":[],"layouts":[],"lifecycle_models":[]}`},
 	// Document links (WP-267): the link the sub-create returned.
 	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
+	// Ticket links (WP-764): the created CI; the link the sub-create
+	// returned.
+	"POST /api/v1/tickets/{id}/links":             {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
+	"DELETE /api/v1/tickets/{id}/links/{link_id}": {"/api/v1/tickets/<id:/api/v1/tickets>/links/<id:/api/v1/ticket-links>", ""},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -582,6 +593,7 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
 	{"POST /api/v1/metamodel/drafts/{id}/items", "/api/v1/metamodel-draft-items"},
 	{"POST /api/v1/documents/{id}/links", "/api/v1/document-links"},
+	{"POST /api/v1/tickets/{id}/links", "/api/v1/ticket-links"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the
@@ -628,6 +640,13 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	}
 	handler := middleware.RequestID(middleware.TenantMiddleware(mux))
 	user := f.AppUser(t, f.OrgA, "audit-a5-admin")
+	// The administrator holds org_admin: once a route created a field
+	// permission row, actions resolve through the role assignments
+	// (WP-728).
+	if _, err = f.Admin.Exec(bg, `INSERT INTO role_assignment (organization_id, user_id, role_id)
+		SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, f.OrgA, user); err != nil {
+		t.Fatal(err)
+	}
 	var citype string
 	if err = f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&citype); err != nil {
 		t.Fatal(err)

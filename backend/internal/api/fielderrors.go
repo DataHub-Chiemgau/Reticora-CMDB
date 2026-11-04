@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -31,6 +32,39 @@ type ConflictError struct {
 // validation: the field and its message, as FieldError.
 func (e *ConflictError) Error() string { return e.Field + ": " + e.Message }
 
+// ProblemTypeForbidden is the problem type of a write or filter refused by
+// field permissions (RBA-07, WP-265); the value of httpx.TypeForbidden,
+// declared here because httpx imports api. The route permission answers
+// 403 with https://reticora.io/problems/403 (WriteError) instead.
+const ProblemTypeForbidden = "urn:reticora:problem:forbidden"
+
+// FieldForbiddenError refuses a request on fields the principal may not
+// read or write (field permissions, RBA-07): 403 with the DTO paths of the
+// fields (hostname, attributes.cost_center), never their values. With
+// Action it refuses the action itself (action grant none or an object
+// grant none, WP-728): the permission key of the route, Fields empty.
+type FieldForbiddenError struct {
+	Fields []string
+	Action string
+}
+
+// validation: a fixed rule text with the DTO paths of the refused fields
+// or the refused action.
+func (e *FieldForbiddenError) Error() string {
+	if e.Action != "" {
+		return "action permissions do not allow " + e.Action + " on this object"
+	}
+	return "field permissions do not allow this request on: " + strings.Join(e.Fields, ", ")
+}
+
+// FieldForbiddenProblem is the RFC 7807 body of a *FieldForbiddenError.
+type FieldForbiddenProblem struct {
+	ProblemDetail
+	Fields []string `json:"fields"`
+	// Action is the refused action (WP-728); omitted for fields.
+	Action string `json:"action,omitempty"`
+}
+
 // FieldProblem is an RFC 7807 problem that names the request field.
 type FieldProblem struct {
 	ProblemDetail
@@ -53,10 +87,24 @@ type ViolationsConflict interface {
 }
 
 // WriteFieldError answers a *FieldError (400 unless it carries another
-// status) or a *ConflictError (409) with the field named, or a
-// ViolationsConflict (409 with violations), and reports whether err was
-// one of them.
+// status) or a *ConflictError (409) with the field named, a
+// ViolationsConflict (409 with violations) or a *FieldForbiddenError (403
+// with fields), and reports whether err was one of them.
 func WriteFieldError(w http.ResponseWriter, err error) bool {
+	var ff *FieldForbiddenError
+	if errors.As(err, &ff) {
+		fields := ff.Fields
+		if fields == nil {
+			fields = []string{}
+		}
+		WriteProblemBody(w, http.StatusForbidden, FieldForbiddenProblem{
+			ProblemDetail: ProblemDetail{Type: ProblemTypeForbidden, Title: "Forbidden",
+				Status: http.StatusForbidden, Detail: ff.Error()},
+			Fields: fields,
+			Action: ff.Action,
+		})
+		return true
+	}
 	var vc ViolationsConflict
 	if errors.As(err, &vc) {
 		WriteProblemBody(w, http.StatusConflict, struct {
