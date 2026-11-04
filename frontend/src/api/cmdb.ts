@@ -4,7 +4,7 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { ApiError, fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
+import { ApiError, fetchAllPages, fetchAPI, type CI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
@@ -455,6 +455,74 @@ export const templateApi = {
    */
   publishVersion(id: string, version: number): Promise<Drafted<TemplateVersion>> {
     return fetchAPI(`/templates/${id}/versions/${version}/publish`, { method: 'POST' });
+  },
+};
+
+// ─── Templates at the CI, template migration, metamodel transfer (WP-800) ──
+
+/** A template assigned to a CI with the version it uses and its position (WP-710). */
+export type CITemplate = components['schemas']['CITemplate'];
+/** An entry of the ordered list PUT /cis/{id}/templates sends. */
+export type CITemplateRef = components['schemas']['CITemplateRef'];
+export type TemplateMigrationRequest = components['schemas']['TemplateMigrationRequest'];
+/** The result of a job template.migrate (GET /jobs/{id}/result, WP-712). */
+export type TemplateMigrationReport = components['schemas']['TemplateMigrationReport'];
+export type MetamodelImportResult = components['schemas']['MetamodelImportResult'];
+export type MetamodelImportReport = components['schemas']['MetamodelImportReport'];
+
+/** The answer of POST /templates/{id}/migrations: the job template.migrate (202). */
+export interface TemplateMigrationStart {
+  job_id: string;
+  status: string;
+  kind: 'template.migrate';
+}
+
+/** The most CIs a migration names by id (API-08). */
+export const MIGRATION_MAX_IDS = 500;
+
+export const ciTemplateApi = {
+  /** The templates of a CI in position order; complete, without cursor. */
+  list(ciId: string): Promise<{ data: CITemplate[] }> {
+    return fetchAPI(`/cis/${ciId}/templates`);
+  },
+  /**
+   * Replaces the ordered list (the position is the index) with If-Match of
+   * the CI version the page shows (API-07, 412 otherwise); needs ci:write.
+   */
+  replace(ciId: string, templates: CITemplateRef[], version: number | undefined): Promise<CI> {
+    return fetchAPI(`/cis/${ciId}/templates`, {
+      method: 'PUT',
+      headers: ifMatch(version),
+      body: JSON.stringify({ templates }),
+    });
+  },
+};
+
+export const templateMigrationApi = {
+  /** Queues the job template.migrate (no draft capture, DRAFT_EXEMPT); citype:manage. */
+  start(templateId: string, request: TemplateMigrationRequest): Promise<TemplateMigrationStart> {
+    return fetchAPI(`/templates/${templateId}/migrations`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  },
+};
+
+export const metamodelTransferApi = {
+  /**
+   * The metamodel export format 2 (WP-262) over fetchAPI, so with the bearer
+   * header of the session: a plain link would carry no token.
+   */
+  async export(): Promise<Blob> {
+    const data = await fetchAPI<unknown>('/ci-types/export?format_version=2');
+    return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  },
+  /**
+   * Sends a metamodel export as a draft (WP-722): 201 with the draft,
+   * 200 with report.unchanged and draft_id null; citype:manage.
+   */
+  import(document: string): Promise<MetamodelImportResult> {
+    return fetchAPI('/metamodel/import', { method: 'POST', body: document });
   },
 };
 

@@ -13,6 +13,7 @@ import {
 import {
   attributeDefinitionApi,
   attributeSetApi,
+  ciTemplateApi,
   ciTypeApi,
   ciFieldApi,
   relationshipTypeApi,
@@ -27,9 +28,11 @@ import {
   impactApi,
   isDraftItem,
   metamodelDraftApi,
+  metamodelTransferApi,
   savedViewApi,
   sensitiveFieldApi,
   templateApi,
+  templateMigrationApi,
   type AttributeDefinition,
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
@@ -37,6 +40,7 @@ import {
   type AttributeSetAssignment,
   type AttributeSetCreate,
   type AttributeSetPatch,
+  type CITemplateRef,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
@@ -45,6 +49,7 @@ import {
   type SavedView,
   type TemplateClone,
   type TemplateCreate,
+  type TemplateMigrationRequest,
   type TemplatePatch,
   type TemplateVersionItemsUpdate,
 } from './cmdb';
@@ -575,6 +580,62 @@ export function usePublishTemplateVersion() {
       templateApi.publishVersion(id, version),
     // current_version of the template changes as well.
     onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
+  });
+}
+
+// ─── Templates at the CI, template migration, transfer (WP-800) ─────────────
+
+/** GET /cis/{id}/templates; the CI page reads it only with citype:manage. */
+export function useCITemplates(ciId: string, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: ['ci', ciId, 'templates'],
+    queryFn: () => ciTemplateApi.list(ciId),
+    ...options,
+    enabled: !!ciId && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/**
+ * PUT /cis/{id}/templates with If-Match of the CI version; the answer is
+ * the CI with its new version, so the page takes it over.
+ */
+export function useReplaceCITemplates(ciId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ templates, version }: { templates: CITemplateRef[]; version?: number }) =>
+      ciTemplateApi.replace(ciId, templates, version),
+    onSuccess: (ci) => {
+      qc.setQueryData(['ci', ciId], ci);
+      void qc.invalidateQueries({ queryKey: ['ci', ciId, 'templates'] });
+    },
+  });
+}
+
+/** POST /templates/{id}/migrations: 202 with the job template.migrate. */
+export function useStartTemplateMigration() {
+  return useMutation({
+    mutationFn: ({
+      templateId,
+      request,
+    }: {
+      templateId: string;
+      request: TemplateMigrationRequest;
+    }) => templateMigrationApi.start(templateId, request),
+  });
+}
+
+/** GET /ci-types/export?format_version=2 as a Blob (bearer header, not a link). */
+export function useExportMetamodel() {
+  return useMutation({ mutationFn: () => metamodelTransferApi.export() });
+}
+
+/** POST /metamodel/import: the file becomes a draft (201) or is unchanged (200). */
+export function useImportMetamodel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (document: string) => metamodelTransferApi.import(document),
+    onSuccess: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
   });
 }
 

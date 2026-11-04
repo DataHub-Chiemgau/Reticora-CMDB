@@ -1958,6 +1958,9 @@
       },
       "metamodel": {
         "test": "Metamodell-Test"
+      },
+      "template": {
+        "migrate": "Template-Migration"
       }
     }
   },
@@ -2342,6 +2345,127 @@
       "save": "Version speichern",
       "saved": "Version gespeichert.",
       "notSaved": "Version nicht gespeichert. {{reason}}"
+    },
+    "ciSection": {
+      "title": "Templates",
+      "hint": "Die Templates des CI in ihrer Reihenfolge; spätere Templates gehen früheren vor. Gespeichert wird die ganze Liste.",
+      "loadError": "Die Templates des CI konnten nicht geladen werden",
+      "empty": "Dem CI ist kein Template zugeordnet.",
+      "listLabel": "Templates des CI",
+      "entryMeta": "Version {{version}} · Position {{position}}",
+      "migrate": "Auf Version {{version}} migrieren",
+      "remove": "Entfernen",
+      "removeAction": "Template entfernen: {{name}}",
+      "needsWrite": "Zum Ändern der Zuordnung fehlt das Recht ci:write.",
+      "reloaded": "Das CI wurde inzwischen geändert; die Templates wurden neu geladen.",
+      "notSaved": "Die Templates wurden nicht gespeichert",
+      "discard": "Verwerfen",
+      "save": "Templates speichern",
+      "addTemplate": "Template hinzufügen",
+      "chooseTemplate": "Template wählen",
+      "addVersion": "Version",
+      "noPublished": "Keine veröffentlichte Version",
+      "add": "Hinzufügen"
+    },
+    "migrate": {
+      "open": "Migrieren",
+      "action": "Template migrieren: {{name}}",
+      "title": "Template migrieren: {{name}}",
+      "description": "Überführt die CIs einer Template-Version auf eine andere. Overrides und Instanzattribute bleiben erhalten.",
+      "from": "Ausgangsversion",
+      "to": "Zielversion",
+      "none": "Keine Version",
+      "chooseVersions": "Wählen Sie Ausgangs- und Zielversion.",
+      "sameVersion": "Ausgangs- und Zielversion müssen sich unterscheiden.",
+      "selection": "Auswahl der CIs",
+      "modes": {
+        "all": "Alle sichtbaren CIs mit dieser Ausgangsversion",
+        "view": "Eingeschränkt durch eine gespeicherte Sicht",
+        "ids": "Bestimmte CIs (IDs)"
+      },
+      "viewLegend": "Gespeicherte Sichten auf CIs",
+      "noViews": "Keine gespeicherte Sicht auf CIs vorhanden.",
+      "viewNoWhere": "(ohne Filter, nicht wählbar)",
+      "viewMissing": "Wählen Sie eine gespeicherte Sicht mit Filter.",
+      "idsLabel": "CI-IDs, eine je Zeile (höchstens {{max}})",
+      "idsEmpty": "Geben Sie mindestens eine CI-ID an.",
+      "idsTooMany": "Höchstens {{max}} CI-IDs.",
+      "idInvalid": "Keine gültige CI-ID: {{id}}",
+      "fixedSelection": "Migriert werden nur die gewählten CIs ({{count}}).",
+      "dryRun": "Probelauf (schreibt nichts)",
+      "refused": "Die Migration wurde abgelehnt",
+      "close": "Schließen",
+      "startDryRun": "Probelauf starten",
+      "start": "Migration starten",
+      "runLabel": "Lauf der Migration",
+      "dryRunJob": "Probelauf",
+      "realJob": "Migration",
+      "jobsLink": "Zum Jobcenter",
+      "jobFailed": "Der Job ist fehlgeschlagen: {{error}}",
+      "jobCancelled": "Der Job wurde abgebrochen; ein abgebrochener Lauf hat keinen Bericht.",
+      "reportFailed": "Der Bericht konnte nicht geladen werden",
+      "report": "Bericht der Migration",
+      "reportDryRun": "Bericht des Probelaufs",
+      "totals": "Summen",
+      "totalsFields": {
+        "selected": "Ausgewählt",
+        "migrated": "Migriert",
+        "skipped": "Übersprungen",
+        "failed": "Fehlgeschlagen",
+        "with_findings": "Mit Befunden"
+      },
+      "itemsCaption": "Ergebnis je CI",
+      "columns": {
+        "ci": "CI",
+        "outcome": "Ergebnis",
+        "defaults": "Gesetzte Defaults",
+        "overridden": "Wegen Override übersprungen",
+        "findings": "Befunde",
+        "error": "Fehler"
+      },
+      "outcomes": {
+        "migrated": "Migriert",
+        "skipped": "Übersprungen",
+        "failed": "Fehlgeschlagen"
+      },
+      "errorCodes": {
+        "unique": "Eindeutigkeit verletzt",
+        "validation": "Validierung",
+        "not_found": "Nicht gefunden",
+        "internal": "Interner Fehler"
+      },
+      "errorText": "{{code}} ({{field}}): {{detail}}",
+      "noItems": "Kein CI mit Änderung, Befund oder Fehler.",
+      "truncated": "Der Bericht ist gekürzt: er nennt höchstens 10.000 CIs."
+    },
+    "transfer": {
+      "export": "Metamodell exportieren",
+      "exportFailed": "Der Export ist fehlgeschlagen",
+      "import": "Metamodell importieren",
+      "importFile": "Datei für den Metamodell-Import",
+      "importFailed": "Der Import wurde abgelehnt",
+      "notJson": "Die Datei {{name}} enthält kein gültiges JSON.",
+      "unchanged": "Die Datei weicht nicht vom Metamodell ab; es wurde kein Entwurf angelegt.",
+      "reportTitle": "Bericht des Imports",
+      "conflicts": "Konflikte",
+      "items": "Änderungen",
+      "notes": "Hinweise",
+      "actions": {
+        "create": "Neu",
+        "update": "Geändert",
+        "unchanged": "Unverändert",
+        "resolved": "Aufgelöst"
+      },
+      "conflictCodes": {
+        "datatype-conflict": "Datentyp-Konflikt",
+        "missing-reference": "Fehlender Verweis",
+        "system-key-collision": "Kollision mit Systemschlüssel"
+      },
+      "noteCodes": {
+        "history-skipped": "Historie übersprungen",
+        "not-imported": "Nicht importiert",
+        "field-permissions-skipped": "Feldrechte übersprungen"
+      }
     }
   }
 }

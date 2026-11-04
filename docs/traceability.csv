@@ -1407,3 +1407,4 @@ STK-05;[P2];B;backend/internal/order/order_integration_test.go;WP-286
 BLK-02;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
 CI-08;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
 OVR-03;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
+UI-11;[P2];C;frontend/src/components/metamodel/MigrateDialog.test.tsx;WP-800

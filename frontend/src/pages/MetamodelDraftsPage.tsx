@@ -51,6 +51,7 @@ import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ScrollRegion } from '../components/ScrollRegion';
 import { MetamodelTabs } from '../components/metamodel/MetamodelTabs';
+import { ImportReportNotice } from '../components/metamodel/MetamodelTransfer';
 import { MetamodelDiff, type DiffEntry } from '../components/metamodel/MetamodelDiff';
 import { draftItemName, payloadOf } from '../components/metamodel/DraftBanner';
 import { DRAFT_ITEM_KINDS, DRAFT_STATUSES, useMetamodelDraftStore } from '../stores/metamodelDraft';
@@ -93,7 +94,11 @@ export function MetamodelDraftsPage() {
       {moduleOff ? (
         <p className="text-sm text-gray-600 dark:text-gray-300">{t('templates.moduleOff')}</p>
       ) : id ? (
-        <DraftDetail id={id} />
+        <>
+          {/* The report of the import that created this draft (WP-800). */}
+          <ImportReportNotice />
+          <DraftDetail id={id} />
+        </>
       ) : (
         <DraftList />
       )}
