@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -76,17 +77,18 @@ func (h *Handler) WithCIs(lookup CILookup) *Handler {
 }
 
 // parentOwnedColumns are the shared inventory properties owned by the parent
-// asset in a composition (spec §5). Children inherit them read-only.
+// asset in a composition (spec §5). Children inherit them read-only. The key
+// is the API name of the field (AST-01, WP-739), the value the member of
+// UpdateRequest.
 var parentOwnedColumns = map[string]string{
 	"serial_number":  "SerialNumber",
 	"barcode":        "Barcode",
 	"rfid_tag":       "RFIDTag",
 	"purchase_date":  "PurchaseDate",
-	"purchase_cost":  "PurchaseCost",
-	"supplier":       "Supplier",
+	"purchase_price": "PurchaseCost",
 	"supplier_id":    "SupplierID",
 	"invoice_number": "InvoiceNumber",
-	"warranty_end":   "WarrantyEnd",
+	"warranty_until": "WarrantyEnd",
 	"location":       "Location",
 }
 
@@ -215,9 +217,9 @@ func listFieldPaths(filter *FilterParams) []string {
 		paths = append(paths, "category")
 	}
 	if filter.Search != "" {
-		paths = append(paths, "asset_tag")
+		paths = append(paths, "inventory_no")
 	}
-	if column, _ := NormalizeSort(filter); column == "asset_tag" || column == "category" || column == "status" {
+	if column, _ := NormalizeSort(filter); column == "inventory_no" || column == "category" || column == "status" {
 		paths = append(paths, column)
 	}
 	return paths
@@ -276,13 +278,19 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Name == "" || req.AssetTag == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and asset_tag are required")
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and inventory_no are required")
 		return
 	}
 	if err := validCurrency(req.Currency); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}
+	price, err := purchasePrice(req.PurchaseCost)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	req.PurchaseCost = price
 
 	category := req.Category
 	if category == "" {
@@ -308,7 +316,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Currency:       strings.TrimSpace(req.Currency),
 		WarrantyEnd:    req.WarrantyEnd,
 		CostCenter:     req.CostCenter,
-		Supplier:       req.Supplier,
 		SupplierID:     req.SupplierID,
 		ContractID:     req.ContractID,
 		OwnerUserID:    req.OwnerUserID,
@@ -324,12 +331,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if a.CustomFields == nil {
 		a.CustomFields = make(map[string]any)
 	}
-	if err := permission.CheckWrite(policy, permission.KindAsset, "", assetRef(a), req.SentFields()); err != nil {
+	if err = permission.CheckWrite(policy, permission.KindAsset, "", assetRef(a), req.SentFields()); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}
 
-	if err := h.repo.Create(r.Context(), a); err != nil {
+	if err = h.repo.Create(r.Context(), a); err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
@@ -352,6 +359,31 @@ func validCurrency(code string) error {
 	return tenantapi.ValidCurrency(code)
 }
 
+// purchasePriceFormat is a purchase price of NUMERIC(14,2): up to twelve
+// integer digits and two decimals, not negative.
+var purchasePriceFormat = regexp.MustCompile(`^\d{1,12}(\.\d{1,2})?$`)
+
+// purchasePrice checks a sent purchase price (a decimal string, AST-01) and
+// returns it with two decimals ("12.5" → "12.50"), so it compares equal to
+// the stored value; empty passes (no price). Anything else is 400 on
+// purchase_price.
+func purchasePrice(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if !purchasePriceFormat.MatchString(value) {
+		return "", &api.FieldError{Field: "purchase_price",
+			Message: "must be a decimal string with up to 12 integer digits and 2 decimals, e.g. \"1234.50\""}
+	}
+	whole, frac, _ := strings.Cut(value, ".")
+	whole = strings.TrimLeft(whole, "0")
+	if whole == "" {
+		whole = "0"
+	}
+	return whole + "." + frac + strings.Repeat("0", 2-len(frac)), nil
+}
+
 // ParentOwnedFieldError refuses a write to a shared inventory property of a
 // composition child (spec §5, 409): the parent asset owns Field.
 type ParentOwnedFieldError struct{ Field string }
@@ -364,7 +396,7 @@ func (e *ParentOwnedFieldError) Error() string {
 // writeAssetError answers a failed asset request: an asset that is unknown,
 // of another organization or outside the caller's scope is 404 (TEN-04), a
 // parent-owned field of a composition child 409 with its domain message, a
-// linked CI that is no UUID or not visible 422 on ci_id, a reference that is
+// linked CI that is no UUID or not visible 422 on primary_ci_id, a reference that is
 // not usable 422 on its field, a taken inventory number, barcode or RFID tag
 // 409 on its field, a field the principal may not edit 403 with the fields.
 // Database errors go through api.WriteRepoError; no table, constraint,
@@ -433,6 +465,18 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			api.WriteFieldError(w, err)
 			return
 		}
+	}
+	if req.AssetTag != nil && strings.TrimSpace(*req.AssetTag) == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "inventory_no must not be empty")
+		return
+	}
+	if req.PurchaseCost != nil {
+		price, err := purchasePrice(*req.PurchaseCost)
+		if err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+		req.PurchaseCost = &price
 	}
 
 	// Children must not duplicate the parent asset's shared inventory

@@ -8,14 +8,15 @@ import (
 )
 
 // sortColumnCasts maps the sortable columns to their PostgreSQL type. Only
-// columns in this map may be interpolated into SQL.
+// columns in this map may be interpolated into SQL; the key is the column
+// and the API name (sort_by=inventory_no, AST-01).
 var sortColumnCasts = map[string]string{
-	"asset_tag":  "text",
-	"name":       "text",
-	"category":   "text",
-	"status":     "text",
-	"created_at": "timestamptz",
-	"updated_at": "timestamptz",
+	"inventory_no": "text",
+	"name":         "text",
+	"category":     "text",
+	"status":       "text",
+	"created_at":   "timestamptz",
+	"updated_at":   "timestamptz",
 }
 
 // NormalizeSort maps the requested sort onto the supported column/direction
@@ -37,7 +38,7 @@ func NormalizeSort(filter *FilterParams) (column, direction string) {
 // interchangeable.
 func sortValue(item *Asset, column string) string {
 	switch column {
-	case "asset_tag":
+	case "inventory_no":
 		return item.AssetTag
 	case "name":
 		return item.Name

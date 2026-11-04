@@ -182,6 +182,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *Upda
 	if req.Name != nil {
 		a.Name = *req.Name
 	}
+	if req.AssetTag != nil {
+		a.AssetTag = *req.AssetTag
+	}
 	if req.Category != nil {
 		a.Category = *req.Category
 	}
@@ -202,9 +205,6 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *Upda
 	}
 	if req.WarrantyEnd != nil {
 		a.WarrantyEnd = *req.WarrantyEnd
-	}
-	if req.Supplier != nil {
-		a.Supplier = *req.Supplier
 	}
 	if req.InvoiceNumber != nil {
 		a.InvoiceNumber = *req.InvoiceNumber

@@ -11445,7 +11445,7 @@ export interface components {
       inventory_no: string;
       /**
        * @deprecated
-       * @description Deprecated name of inventory_no (API-01, E-120 (c)).
+       * @description Deprecated name of inventory_no (API-01, E-120 (c)); sunset 2028-06-30.
        */
       asset_tag: string;
       name: string;
@@ -11466,12 +11466,12 @@ export interface components {
       /**
        * Format: date
        * @deprecated
-       * @description Deprecated name of warranty_until (API-01, E-120 (c)).
+       * @description Deprecated name of warranty_until (API-01, E-120 (c)); sunset 2028-06-30.
        */
       warranty_end?: string;
       /**
        * @deprecated
-       * @description Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)).
+       * @description Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)); sunset 2028-06-30.
        */
       supplier?: string;
       invoice_number?: string;
@@ -12385,36 +12385,42 @@ export interface components {
     ModuleListResponse: {
       data: components['schemas']['ModuleStatus'][];
     };
-    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). */
+    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). The fields carry the names of AST-01 (WP-739): inventory_no, purchase_price, warranty_until and primary_ci_id; their field keys stay core.asset_tag, core.purchase_cost, core.warranty_end and core.ci_id. */
     Asset: {
       id: string;
       organization_id: string;
       client_id?: string;
-      ci_id?: string;
-      /** @description Inventory number, unique per organization. */
-      asset_tag?: string;
+      /**
+       * Format: uuid
+       * @description Primary CI of the asset (AST-01, AST-04; column asset.ci_id, E-122).
+       */
+      primary_ci_id?: string;
+      /** @description Inventory number, unique per organization (AST-01). */
+      inventory_no?: string;
       name: string;
       category?: string;
       /**
        * @deprecated
-       * @description Legacy status; the state of the asset is lifecycle_state (E-120).
+       * @description Legacy status, derived from lifecycle_state (E-120); the state of the asset is lifecycle_state. Sunset 2028-06-30 (API-01).
        */
       status?: string;
       manufacturer?: string;
       model?: string;
       /** Format: date */
       purchase_date?: string;
-      purchase_cost?: number;
+      /**
+       * @description Purchase price as a decimal string with two decimals (NUMERIC(14,2), AST-01).
+       * @example 1234.50
+       */
+      purchase_price?: string;
       /** @description ISO 4217 code; the currency of the organization unless set. */
       currency?: string;
-      /** Format: date */
-      warranty_end?: string;
-      cost_center?: string;
       /**
-       * @deprecated
-       * @description Free text of the supplier; the supplier record is supplier_id (E-41).
+       * Format: date
+       * @description End of the warranty (AST-01).
        */
-      supplier?: string;
+      warranty_until?: string;
+      cost_center?: string;
       /** Format: uuid */
       supplier_id?: string;
       /** Format: uuid */
@@ -12431,7 +12437,7 @@ export interface components {
       barcode?: string;
       /**
        * @deprecated
-       * @description Free text of the location; the location is location_id (E-120).
+       * @description Free text of the location; the location is location_id (E-120). Sunset 2028-06-30 (API-01).
        */
       location?: string;
       /** @description Node of the canonical location tree; changed through stock movements and rack placement only. */
@@ -12447,10 +12453,16 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description Names of AST-01 (WP-739); the names asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     CreateAssetRequest: {
       client_id?: string;
-      ci_id?: string;
-      asset_tag: string;
+      /**
+       * Format: uuid
+       * @description Primary CI; an unknown CI or one outside the caller's scope is 422 on primary_ci_id.
+       */
+      primary_ci_id?: string;
+      /** @description Inventory number, unique per organization (409 on inventory_no otherwise). */
+      inventory_no: string;
       name: string;
       category?: string;
       /** @deprecated */
@@ -12459,14 +12471,13 @@ export interface components {
       model?: string;
       /** Format: date */
       purchase_date?: string;
-      purchase_cost?: number;
+      /** @description Purchase price as a decimal string, up to 12 integer digits and 2 decimals (400 on purchase_price otherwise); no float rounding. */
+      purchase_price?: string;
       /** @description ISO 4217 code (400 on currency otherwise); missing or empty is the currency of the organization. */
       currency?: string;
       /** Format: date */
-      warranty_end?: string;
+      warranty_until?: string;
       cost_center?: string;
-      /** @deprecated */
-      supplier?: string;
       /**
        * Format: uuid
        * @description Org-wide supplier or one of the asset's client (422 otherwise).
@@ -12492,9 +12503,11 @@ export interface components {
         [key: string]: unknown;
       };
     };
-    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization. */
+    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization, an empty purchase_price removes the price. Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     UpdateAssetRequest: {
       name?: string;
+      /** @description Inventory number, unique per organization (409 on inventory_no otherwise; empty is 400). */
+      inventory_no?: string;
       category?: string;
       /** @deprecated */
       status?: string;
@@ -12502,13 +12515,12 @@ export interface components {
       model?: string;
       /** Format: date */
       purchase_date?: string;
-      purchase_cost?: number;
+      /** @description Purchase price as a decimal string, up to 12 integer digits and 2 decimals (400 on purchase_price otherwise); no float rounding. */
+      purchase_price?: string;
       currency?: string;
       /** Format: date */
-      warranty_end?: string;
+      warranty_until?: string;
       cost_center?: string;
-      /** @deprecated */
-      supplier?: string;
       /** Format: uuid */
       supplier_id?: string;
       /** Format: uuid */
@@ -12524,7 +12536,8 @@ export interface components {
       /** @deprecated */
       location?: string;
       notes?: string;
-      ci_id?: string;
+      /** @description Primary CI; an empty string unlinks it. An unknown CI or one outside the caller's scope is 422 on primary_ci_id. */
+      primary_ci_id?: string;
       custom_fields?: {
         [key: string]: unknown;
       };
@@ -19001,7 +19014,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (asset_tag) or a sort on asset_tag, category or status the caller cannot read in every scope. */
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (inventory_no) or a sort on inventory_no, category or status the caller cannot read in every scope. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -19048,7 +19061,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
-      /** @description The inventory number (asset_tag), the barcode or the rfid_tag is already taken in the organization; `field` names it. */
+      /** @description The inventory number (inventory_no), the barcode or the rfid_tag is already taken in the organization; `field` names it. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19057,7 +19070,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization; or supplier_id, contract_id, owner_user_id or owner_team_id is not usable: unknown, of another organization, outside the caller's scope or (supplier, contract) of another client than the asset (all alike, `field` names it). */
+      /** @description primary_ci_id or client_id is no UUID, or primary_ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization; or supplier_id, contract_id, owner_user_id or owner_team_id is not usable: unknown, of another organization, outside the caller's scope or (supplier, contract) of another client than the asset (all alike, `field` names it). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -19164,7 +19177,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a reference (supplier_id, contract_id, owner_user_id, owner_team_id) is not usable for the asset (all alike); or the body sends the read-only location_id (written through stock movements and rack placement) or lifecycle_state (written through POST /api/v1/assets/{id}/lifecycle-transitions). `field` names the field. */
+      /** @description primary_ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a reference (supplier_id, contract_id, owner_user_id, owner_team_id) is not usable for the asset (all alike); or the body sends the read-only location_id (written through stock movements and rack placement) or lifecycle_state (written through POST /api/v1/assets/{id}/lifecycle-transitions). `field` names the field. */
       422: {
         headers: {
           [name: string]: unknown;

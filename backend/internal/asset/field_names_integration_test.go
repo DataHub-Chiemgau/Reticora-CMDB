@@ -28,7 +28,7 @@ import (
 // purchase_price and warranty_until in both directions on INSERT and
 // UPDATE; purchase_price holds twelve integer digits; supplier mirrors
 // supplier.name of supplier_id, also after a rename; a taken inventory
-// number stays 409 on asset_tag (idx_asset_tag_org) and is refused by the
+// number stays 409 (on inventory_no since WP-739, idx_asset_tag_org) and is refused by the
 // database under either name.
 func TestAssetFieldNamesMirror(t *testing.T) {
 	w := newAssetWorld(t)
@@ -97,9 +97,9 @@ func TestAssetFieldNamesMirror(t *testing.T) {
 	}
 
 	// Uniqueness: idx_asset_tag_org moved with inventory_no.
-	w.create(t, `{"asset_tag":"FN-DUP","name":"first"}`)
-	w.do(t, &call{method: http.MethodPost, path: assetsPath, body: `{"asset_tag":"FN-DUP","name":"second"}`,
-		want: http.StatusConflict, wantField: "asset_tag"})
+	w.create(t, `{"inventory_no":"FN-DUP","name":"first"}`)
+	w.do(t, &call{method: http.MethodPost, path: assetsPath, body: `{"inventory_no":"FN-DUP","name":"second"}`,
+		want: http.StatusConflict, wantField: "inventory_no"})
 	for _, sql := range []string{
 		`INSERT INTO asset (organization_id, inventory_no, name) VALUES ($1, 'FN-DUP', 'x')`,
 		`INSERT INTO asset (organization_id, asset_tag, name) VALUES ($1, 'FN-DUP', 'x')`,
@@ -125,8 +125,8 @@ func TestAssetFieldNamesReaders(t *testing.T) {
 	bg := context.Background()
 	ctx := f.OrgCtx(f.OrgA)
 
-	a := w.create(t, `{"asset_tag":"FN-READ-738","name":"reader asset","warranty_end":"2027-03-31","purchase_cost":250}`)
-	other := w.create(t, `{"asset_tag":"FN-OTHER-738","name":"other asset","warranty_end":"2029-03-31","purchase_cost":10}`)
+	a := w.create(t, `{"inventory_no":"FN-READ-738","name":"reader asset","warranty_until":"2027-03-31","purchase_price":"250"}`)
+	other := w.create(t, `{"inventory_no":"FN-OTHER-738","name":"other asset","warranty_until":"2029-03-31","purchase_price":"10"}`)
 	if a.LifecycleState != "ordered" || a.Status != "in_stock" {
 		t.Fatalf("created: state %q status %q, want ordered and in_stock", a.LifecycleState, a.Status)
 	}

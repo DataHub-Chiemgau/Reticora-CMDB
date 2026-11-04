@@ -1367,3 +1367,4 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 REL-07;[P2];B;backend/internal/relationship/metadata_integration_test.go;WP-295
 UI-11;[P2];C;frontend/src/components/metamodel/AttributeSetEditor.test.tsx;WP-797
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/service_integration_test.go;WP-766
+AST-01;[P2];B;backend/internal/asset/api_names_integration_test.go;WP-739

@@ -244,7 +244,7 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 	}
 
 	// Asset: creation and update in entity_change, replayed the same way.
-	w = call(orgCtx, http.MethodPost, "/api/v1/assets", `{"asset_tag":"snap-a1","name":"snap-asset","client_id":"`+f.Client1+`","notes":"n1"}`)
+	w = call(orgCtx, http.MethodPost, "/api/v1/assets", `{"inventory_no":"snap-a1","name":"snap-asset","client_id":"`+f.Client1+`","notes":"n1"}`)
 	var a asset.Asset
 	if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &a) != nil {
 		t.Fatalf("POST /assets: %d %s", w.Code, w.Body)
@@ -282,7 +282,7 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 		t.Fatalf("asset trail: %+v, want the creation and one update of name with old and new value", rows)
 	}
 	assetMid := between(rows[0].at, rows[1].at)
-	if s := fields(snapshotJob("asset", a.ID, nil)); s.Fields["name"] != "snap-asset-renamed" || s.Fields["asset_tag"] != "snap-a1" || s.Deleted {
+	if s := fields(snapshotJob("asset", a.ID, nil)); s.Fields["name"] != "snap-asset-renamed" || s.Fields["inventory_no"] != "snap-a1" || s.Deleted {
 		t.Errorf("asset snapshot now: %+v, want the new name", s)
 	}
 	if s := fields(snapshotJob("asset", a.ID, &assetMid)); s.Fields["name"] != "snap-asset" {

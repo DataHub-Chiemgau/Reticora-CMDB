@@ -415,7 +415,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/layouts", `{"key":"a5_layout","ci_type_id":"<id:/api/v1/ci-types>","layout":{"sections":[{"key":"main","title":{"de":"Haupt","en":"Main"},"visible_when":["a5_rule"],"fields":[{"name":"a5_attr","width":6}]}]}}`},
 	{"POST /api/v1/metamodel/drafts", `{"name":"a5 draft"}`},
 	{"POST /api/v1/cis", `{"ci_type_id":"<citype>","name":"a5-ci","client_id":"<client>"}`},
-	{"POST /api/v1/assets", `{"asset_tag":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
+	{"POST /api/v1/assets", `{"inventory_no":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
 	{"POST /api/v1/contacts", `{"name":"a5 contact","email":"a5-contact@example.com"}`},
 	{"POST /api/v1/vrfs", `{"name":"a5-vrf"}`},
 	{"POST /api/v1/vlans", `{"vlan_id":305,"name":"a5-vlan"}`},

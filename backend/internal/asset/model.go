@@ -10,24 +10,31 @@ import (
 
 // Asset represents a tracked asset (hardware, software, license, cloud resource).
 type Asset struct {
-	ID             string  `json:"id"`
-	OrganizationID string  `json:"organization_id"`
-	ClientID       string  `json:"client_id,omitempty"`
-	CIID           string  `json:"ci_id,omitempty"`
-	AssetTag       string  `json:"asset_tag"`
-	Name           string  `json:"name"`
-	Category       string  `json:"category"`
-	Status         string  `json:"status"`
-	Manufacturer   string  `json:"manufacturer,omitempty"`
-	Model          string  `json:"model,omitempty"`
-	PurchaseDate   string  `json:"purchase_date,omitempty"`
-	PurchaseCost   float64 `json:"purchase_cost,omitempty"`
-	Currency       string  `json:"currency,omitempty"`
-	WarrantyEnd    string  `json:"warranty_end,omitempty"`
-	CostCenter     string  `json:"cost_center,omitempty"`
-	// Supplier is the deprecated free text of the supplier; SupplierID
-	// names the supplier record (E-41, WP-271).
-	Supplier      string `json:"supplier,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	// CIID is the primary CI (API name primary_ci_id over the column
+	// asset.ci_id, E-122).
+	CIID string `json:"primary_ci_id,omitempty"`
+	// AssetTag is the inventory number (column inventory_no, AST-01); the
+	// Go names AssetTag, PurchaseCost and WarrantyEnd stay (WP-739).
+	AssetTag     string `json:"inventory_no"`
+	Name         string `json:"name"`
+	Category     string `json:"category"`
+	Status       string `json:"status"`
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	PurchaseDate string `json:"purchase_date,omitempty"`
+	// PurchaseCost is the purchase price as a decimal string (NUMERIC(14,2),
+	// no float rounding; empty without a price).
+	PurchaseCost string `json:"purchase_price,omitempty"`
+	Currency     string `json:"currency,omitempty"`
+	WarrantyEnd  string `json:"warranty_until,omitempty"`
+	CostCenter   string `json:"cost_center,omitempty"`
+	// Supplier is the deprecated free text of the supplier, read from the
+	// mirror of supplier.name (E-41); not part of the API. SupplierID
+	// names the supplier record (WP-271, WP-739).
+	Supplier      string `json:"-"`
 	SupplierID    string `json:"supplier_id,omitempty"`
 	ContractID    string `json:"contract_id,omitempty"`
 	OwnerUserID   string `json:"owner_user_id,omitempty"`
@@ -63,19 +70,18 @@ type CreateRequest struct {
 	RFIDTag       string         `json:"rfid_tag,omitempty"`
 	Barcode       string         `json:"barcode,omitempty"`
 	ClientID      string         `json:"client_id,omitempty"`
-	CIID          string         `json:"ci_id,omitempty"`
-	AssetTag      string         `json:"asset_tag"`
+	CIID          string         `json:"primary_ci_id,omitempty"`
+	AssetTag      string         `json:"inventory_no"`
 	Name          string         `json:"name"`
 	Category      string         `json:"category,omitempty"`
 	Status        string         `json:"status,omitempty"`
 	Manufacturer  string         `json:"manufacturer,omitempty"`
 	Model         string         `json:"model,omitempty"`
 	PurchaseDate  string         `json:"purchase_date,omitempty"`
-	PurchaseCost  float64        `json:"purchase_cost,omitempty"`
+	PurchaseCost  string         `json:"purchase_price,omitempty"`
 	Currency      string         `json:"currency,omitempty"`
-	WarrantyEnd   string         `json:"warranty_end,omitempty"`
+	WarrantyEnd   string         `json:"warranty_until,omitempty"`
 	CostCenter    string         `json:"cost_center,omitempty"`
-	Supplier      string         `json:"supplier,omitempty"`
 	SupplierID    string         `json:"supplier_id,omitempty"`
 	ContractID    string         `json:"contract_id,omitempty"`
 	OwnerUserID   string         `json:"owner_user_id,omitempty"`
@@ -107,17 +113,19 @@ func (o *ReadOnly) UnmarshalJSON([]byte) error {
 
 // UpdateRequest is the payload for updating an asset.
 type UpdateRequest struct {
-	Name          *string        `json:"name,omitempty"`
+	Name *string `json:"name,omitempty"`
+	// AssetTag is the inventory number (AST-01, WP-739); it must not be
+	// empty.
+	AssetTag      *string        `json:"inventory_no,omitempty"`
 	Category      *string        `json:"category,omitempty"`
 	Status        *string        `json:"status,omitempty"`
 	Manufacturer  *string        `json:"manufacturer,omitempty"`
 	Model         *string        `json:"model,omitempty"`
 	PurchaseDate  *string        `json:"purchase_date,omitempty"`
-	PurchaseCost  *float64       `json:"purchase_cost,omitempty"`
+	PurchaseCost  *string        `json:"purchase_price,omitempty"`
 	Currency      *string        `json:"currency,omitempty"`
-	WarrantyEnd   *string        `json:"warranty_end,omitempty"`
+	WarrantyEnd   *string        `json:"warranty_until,omitempty"`
 	CostCenter    *string        `json:"cost_center,omitempty"`
-	Supplier      *string        `json:"supplier,omitempty"`
 	SupplierID    *string        `json:"supplier_id,omitempty"`
 	ContractID    *string        `json:"contract_id,omitempty"`
 	OwnerUserID   *string        `json:"owner_user_id,omitempty"`
@@ -129,7 +137,7 @@ type UpdateRequest struct {
 	Location      *string        `json:"location,omitempty"`
 	Notes         *string        `json:"notes,omitempty"`
 	CustomFields  map[string]any `json:"custom_fields,omitempty"`
-	CIID          *string        `json:"ci_id,omitempty"`
+	CIID          *string        `json:"primary_ci_id,omitempty"`
 	// LocationID and LifecycleState are read-only (E-120): a PATCH that
 	// sends them is 422 naming the canonical write path.
 	LocationID     ReadOnly `json:"location_id"`
