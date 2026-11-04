@@ -17,7 +17,8 @@ func (s *LifecycleService) Resolve(ctx context.Context, orgID string, change Ide
 		return nil, err
 	}
 	tasks := []ProvisioningTask{}
-	for _, p := range policies {
+	for i := range policies {
+		p := &policies[i]
 		if !matchConditions(p.Conditions, change.Attributes) {
 			continue
 		}
@@ -90,7 +91,7 @@ func (r *TaskRunner) RunTask(ctx context.Context, t *ProvisioningTask) error {
 		}
 		if err == nil {
 			var conn Connector
-			conn, err = r.registry.Build(*cfg, secret)
+			conn, err = r.registry.Build(cfg, secret)
 			if err == nil {
 				t.Result = JSONMap{}
 				err = executeConnectorTask(ctx, conn, t)

@@ -55,7 +55,7 @@ func TestMetricStoreUsesBarrierViews(t *testing.T) {
 
 	raw := func(ctx context.Context, orgID, ciID string) []float64 {
 		t.Helper()
-		points, err := store.Query(ctx, monitoring.MetricQuery{OrgID: orgID, CIID: ciID, Name: "cpu", From: base, To: base.Add(2 * time.Hour)})
+		points, err := store.Query(ctx, &monitoring.MetricQuery{OrgID: orgID, CIID: ciID, Name: "cpu", From: base, To: base.Add(2 * time.Hour)})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
@@ -108,21 +108,21 @@ func TestMetricStoreUsesBarrierViews(t *testing.T) {
 		base.Add(-time.Hour), base.Add(3*time.Hour)); err != nil {
 		t.Fatalf("refresh aggregate: %v", err)
 	}
-	hourly, err := store.Query(f.OrgCtx(f.OrgA), monitoring.MetricQuery{OrgID: f.OrgA, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: time.Hour})
+	hourly, err := store.Query(f.OrgCtx(f.OrgA), &monitoring.MetricQuery{OrgID: f.OrgA, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: time.Hour})
 	if err != nil {
 		t.Fatalf("hourly query: %v", err)
 	}
 	if len(hourly) != 2 || hourly[0].Value != 15 || hourly[1].Value != 40 {
 		t.Errorf("hourly points %+v, want 15 and 40", hourly)
 	}
-	twoHours, err := store.Query(f.OrgCtx(f.OrgA), monitoring.MetricQuery{OrgID: f.OrgA, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: 2 * time.Hour})
+	twoHours, err := store.Query(f.OrgCtx(f.OrgA), &monitoring.MetricQuery{OrgID: f.OrgA, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: 2 * time.Hour})
 	if err != nil {
 		t.Fatalf("two-hour query: %v", err)
 	}
 	if len(twoHours) != 1 || math.Abs(twoHours[0].Value-70.0/3.0) > 1e-9 {
 		t.Errorf("two-hour bucket %+v, want the weighted average %.4f", twoHours, 70.0/3.0)
 	}
-	if points, qErr := store.Query(f.OrgCtx(f.OrgB), monitoring.MetricQuery{OrgID: f.OrgB, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: time.Hour}); qErr != nil || len(points) != 0 {
+	if points, qErr := store.Query(f.OrgCtx(f.OrgB), &monitoring.MetricQuery{OrgID: f.OrgB, CIID: own, Name: "cpu", From: base, To: base.Add(2 * time.Hour), Step: time.Hour}); qErr != nil || len(points) != 0 {
 		t.Errorf("org B reads the org A aggregate: %+v, %v", points, qErr)
 	}
 

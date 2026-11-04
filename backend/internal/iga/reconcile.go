@@ -23,7 +23,7 @@ func (d *DriftDetector) Reconcile(ctx context.Context, orgID, connectorID string
 			return nil, err
 		}
 	}
-	conn, err := d.registry.Build(*cfg, secret)
+	conn, err := d.registry.Build(cfg, secret)
 	if err != nil {
 		return nil, err
 	}

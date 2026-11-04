@@ -38,7 +38,7 @@ type Evaluator struct {
 // used so fired alerts are at least visible in the server logs.
 func NewEvaluator(metrics MetricStore, alerts AlertStore, notifier Notifier) *Evaluator {
 	if notifier == nil {
-		notifier = NotifierFunc(func(_ context.Context, ev AlertEvent) {
+		notifier = NotifierFunc(func(_ context.Context, ev *AlertEvent) {
 			slog.Warn("alert fired",
 				"rule_id", ev.Rule.ID,
 				"rule", ev.Rule.Name,
@@ -138,10 +138,11 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 		slog.Error("alert evaluation: list rules failed", "error", err)
 		return
 	}
-	for _, rule := range rules {
+	for i := range rules {
 		if ctx.Err() != nil {
 			return
 		}
+		rule := &rules[i]
 		if err := e.evaluateRule(ctx, rule); err != nil {
 			failures++
 			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
@@ -158,7 +159,7 @@ const evaluatorWorker = "monitoring"
 //   - condition met → pending since first observed; once the condition has
 //     held for rule.Duration the alert fires exactly once per firing;
 //   - condition not met → pending cleared (duration restarts next time).
-func (e *Evaluator) evaluateRule(ctx context.Context, rule AlertRule) error {
+func (e *Evaluator) evaluateRule(ctx context.Context, rule *AlertRule) error {
 	// The evaluator runs outside a request and reads the metrics of the
 	// rule's organization org-wide (E-08; WP-022 moves it to a system
 	// principal per organization).
@@ -167,7 +168,7 @@ func (e *Evaluator) evaluateRule(ctx context.Context, rule AlertRule) error {
 	now := e.Now().UTC()
 	// Look far enough back to observe the duration plus one evaluation gap.
 	lookback := rule.Duration + 15*time.Minute
-	points, err := e.metrics.Query(ctx, MetricQuery{
+	points, err := e.metrics.Query(ctx, &MetricQuery{
 		OrgID: rule.OrgID,
 		Name:  rule.MetricName,
 		From:  now.Add(-lookback),
@@ -217,8 +218,8 @@ func (e *Evaluator) evaluateRule(ctx context.Context, rule AlertRule) error {
 		return nil // already notified for this firing
 	}
 
-	e.notifier.NotifyAlert(ctx, AlertEvent{
-		Rule:    rule,
+	e.notifier.NotifyAlert(ctx, &AlertEvent{
+		Rule:    *rule,
 		Value:   latest.Value,
 		Sample:  Metric{OrgID: rule.OrgID, Name: rule.MetricName, Value: latest.Value, Timestamp: latest.Timestamp},
 		FiredAt: now,

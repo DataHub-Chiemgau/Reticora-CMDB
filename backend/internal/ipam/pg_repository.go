@@ -203,10 +203,10 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 	})
 }
 
-func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
+func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := checkSubnetVLAN(ctx, tx, orgID, id, &req); err != nil {
+		if err := checkSubnetVLAN(ctx, tx, orgID, id, req); err != nil {
 			return err
 		}
 		sets := []string{}
@@ -627,7 +627,7 @@ func (r *PGRepository) CreateInterface(ctx context.Context, ni *NetworkInterface
 	})
 }
 
-func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
+func (r *PGRepository) UpdateInterface(ctx context.Context, orgID, id string, req *UpdateInterfaceRequest) (*NetworkInterface, error) {
 	var ni *NetworkInterface
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if req.VLANID != nil && strings.TrimSpace(*req.VLANID) != "" {

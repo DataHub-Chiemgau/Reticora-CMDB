@@ -256,7 +256,7 @@ func TestEdgeMetrics(t *testing.T) {
 	body := []byte(`[{"name":"sweep_reachable","value":1,"labels":{"target":"192.0.2.10","kind":"sweep"}},` +
 		`{"name":"sweep_reachable","value":0,"labels":{"target":"192.0.2.99","kind":"sweep"}}]`)
 	stored := func(orgID string) int {
-		points, err := store.Query(ctx, monitoring.MetricQuery{OrgID: orgID, CIID: "ci-192.0.2.10", Name: "sweep_reachable"})
+		points, err := store.Query(ctx, &monitoring.MetricQuery{OrgID: orgID, CIID: "ci-192.0.2.10", Name: "sweep_reachable"})
 		if err != nil {
 			t.Fatal(err)
 		}

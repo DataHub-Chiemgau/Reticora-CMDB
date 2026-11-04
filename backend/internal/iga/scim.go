@@ -60,10 +60,10 @@ func scimRepoErr(w http.ResponseWriter, r *http.Request, err error) {
 func scimMeta(kind, id string, t time.Time) scimResource {
 	return scimResource{"resourceType": kind, "location": "/scim/v2/" + kind + "s/" + id, "created": t, "lastModified": t}
 }
-func scimUser(u user.User) scimResource {
+func scimUser(u *user.User) scimResource {
 	return scimResource{"schemas": []string{scimUserSchema}, "id": u.ID, "userName": u.Email, "externalId": u.ExternalID, "displayName": u.DisplayName, "active": u.Status != "inactive", "emails": []scimResource{{"value": u.Email, "primary": true}}, "meta": scimMeta("User", u.ID, u.UpdatedAt)}
 }
-func scimGroup(g user.Team, members []user.TeamMember) scimResource {
+func scimGroup(g *user.Team, members []user.TeamMember) scimResource {
 	ms := []scimResource{}
 	for _, m := range members {
 		ms = append(ms, scimResource{"value": m.UserID})
@@ -74,9 +74,9 @@ func scimGroup(g user.Team, members []user.TeamMember) scimResource {
 func (h *Handler) ServiceProviderConfig(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, scimResource{"schemas": []string{"urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"}, "patch": scimResource{"supported": true}, "filter": scimResource{"supported": true, "maxResults": 100}, "bulk": scimResource{"supported": false}, "changePassword": scimResource{"supported": false}, "sort": scimResource{"supported": false}, "etag": scimResource{"supported": false}, "authenticationSchemes": []scimResource{{"type": "oauthbearertoken", "name": "Bearer"}}})
 }
-func scimPaging(r *http.Request) (int, int) {
-	start, _ := strconv.Atoi(r.URL.Query().Get("startIndex"))
-	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+func scimPaging(r *http.Request) (start, count int) {
+	start, _ = strconv.Atoi(r.URL.Query().Get("startIndex"))
+	count, _ = strconv.Atoi(r.URL.Query().Get("count"))
 	if start < 1 {
 		start = 1
 	}
@@ -102,7 +102,8 @@ func (h *Handler) SCIMListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := []scimResource{}
-	for _, u := range users {
+	for i := range users {
+		u := &users[i]
 		if filter == "" || strings.EqualFold(u.Email, filter) {
 			res = append(res, scimUser(u))
 		}
@@ -122,7 +123,7 @@ func (h *Handler) SCIMGetUser(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 404, "", "user not found")
 		return
 	}
-	api.WriteJSON(w, 200, scimUser(*u))
+	api.WriteJSON(w, 200, scimUser(u))
 }
 func readSCIM(r *http.Request) (map[string]any, error) {
 	var v map[string]any
@@ -161,7 +162,7 @@ func (h *Handler) SCIMCreateUser(w http.ResponseWriter, r *http.Request) {
 		scimRepoErr(w, r, err)
 		return
 	}
-	api.WriteJSON(w, 201, scimUser(*u))
+	api.WriteJSON(w, 201, scimUser(u))
 }
 func (h *Handler) SCIMPutUser(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -189,7 +190,7 @@ func (h *Handler) SCIMPutUser(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 404, "", "user not found")
 		return
 	}
-	api.WriteJSON(w, 200, scimUser(*u))
+	api.WriteJSON(w, 200, scimUser(u))
 }
 func (h *Handler) SCIMPatchUser(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -225,7 +226,7 @@ func (h *Handler) SCIMPatchUser(w http.ResponseWriter, r *http.Request) {
 		scimErr(w, 404, "", "user not found")
 		return
 	}
-	api.WriteJSON(w, 200, scimUser(*u))
+	api.WriteJSON(w, 200, scimUser(u))
 }
 func (h *Handler) SCIMDeleteUser(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -253,7 +254,8 @@ func (h *Handler) SCIMListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := []scimResource{}
-	for _, g := range teams {
+	for i := range teams {
+		g := &teams[i]
 		members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
 		res = append(res, scimGroup(g, members))
 	}
@@ -270,7 +272,7 @@ func (h *Handler) SCIMGetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
-	api.WriteJSON(w, 200, scimGroup(*g, members))
+	api.WriteJSON(w, 200, scimGroup(g, members))
 }
 func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -300,7 +302,7 @@ func (h *Handler) SCIMCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
-	api.WriteJSON(w, 201, scimGroup(*g, members))
+	api.WriteJSON(w, 201, scimGroup(g, members))
 }
 func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
@@ -332,7 +334,7 @@ func (h *Handler) SCIMPutGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	members, _ := h.users.ListTeamMembers(r.Context(), t.OrganizationID, g.ID)
-	api.WriteJSON(w, 200, scimGroup(*g, members))
+	api.WriteJSON(w, 200, scimGroup(g, members))
 }
 func (h *Handler) SCIMPatchGroup(w http.ResponseWriter, r *http.Request) { h.SCIMPutGroup(w, r) }
 func (h *Handler) SCIMDeleteGroup(w http.ResponseWriter, r *http.Request) {

@@ -74,7 +74,7 @@ func (r *Registry) ValidateBaseURL(connectorType, baseURL string) error {
 	return r.egress.ValidateURL(baseURL)
 }
 
-func (r *Registry) Build(cfg ConnectorConfig, secret JSONMap) (Connector, error) {
+func (r *Registry) Build(cfg *ConnectorConfig, secret JSONMap) (Connector, error) {
 	switch cfg.Type {
 	case ConnectorTypeSCIM:
 		token, _ := secret["bearer_token"].(string)
@@ -172,11 +172,11 @@ func (c *SCIMConnector) AddGroupMember(ctx context.Context, groupID, accountID s
 	return c.do(ctx, http.MethodPatch, "/Groups/"+url.PathEscape(groupID), payload, nil)
 }
 func (c *SCIMConnector) RemoveGroupMember(ctx context.Context, groupID, accountID string) error {
-	payload := JSONMap{"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}, "Operations": []JSONMap{{"op": "Remove", "path": fmt.Sprintf(`members[value eq "%s"]`, accountID)}}}
+	payload := JSONMap{"schemas": []string{"urn:ietf:params:scim:api:messages:2.0:PatchOp"}, "Operations": []JSONMap{{"op": "Remove", "path": fmt.Sprintf(`members[value eq %q]`, accountID)}}}
 	return c.do(ctx, http.MethodPatch, "/Groups/"+url.PathEscape(groupID), payload, nil)
 }
 
-func (c *SCIMConnector) do(ctx context.Context, method, path string, body any, out any) error {
+func (c *SCIMConnector) do(ctx context.Context, method, path string, body, out any) error {
 	var reader io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -238,8 +238,8 @@ type RelayConnector struct {
 	discovery discovery.Repository
 }
 
-func NewRelayConnector(cfg ConnectorConfig, discoveryRepo discovery.Repository) *RelayConnector {
-	return &RelayConnector{cfg: cfg, discovery: discoveryRepo}
+func NewRelayConnector(cfg *ConnectorConfig, discoveryRepo discovery.Repository) *RelayConnector {
+	return &RelayConnector{cfg: *cfg, discovery: discoveryRepo}
 }
 func (c *RelayConnector) Capabilities() ConnectorCapabilities {
 	return DefaultCapabilities(ConnectorTypeRelay)

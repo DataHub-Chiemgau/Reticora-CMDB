@@ -52,7 +52,7 @@ type Repository interface {
 	ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
 	GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error)
 	CreateSubnet(ctx context.Context, s *Subnet) error
-	UpdateSubnet(ctx context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error)
+	UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error)
 	DeleteSubnet(ctx context.Context, orgID, id string) error
 
 	ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
@@ -70,7 +70,7 @@ type Repository interface {
 	ListInterfacesForCI(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]NetworkInterface, int, error)
 	GetInterface(ctx context.Context, orgID, id string) (*NetworkInterface, error)
 	CreateInterface(ctx context.Context, ni *NetworkInterface) error
-	UpdateInterface(ctx context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error)
+	UpdateInterface(ctx context.Context, orgID, id string, req *UpdateInterfaceRequest) (*NetworkInterface, error)
 	DeleteInterface(ctx context.Context, orgID, id string) error
 
 	ListVLANs(ctx context.Context, orgID, siteID string, page api.PaginationParams) ([]VLAN, int, error)
@@ -108,8 +108,8 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func pageSlice[T any](items []T, page api.PaginationParams) ([]T, int) {
-	total := len(items)
+func pageSlice[T any](items []T, page api.PaginationParams) (window []T, total int) {
+	total = len(items)
 	start := page.Offset
 	if start > total {
 		start = total
@@ -175,7 +175,7 @@ func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	return nil
 }
 
-func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req UpdateSubnetRequest) (*Subnet, error) {
+func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s, ok := r.subnets[id]
@@ -360,7 +360,7 @@ func (r *MemoryRepository) CreateInterface(_ context.Context, ni *NetworkInterfa
 	return nil
 }
 
-func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, req UpdateInterfaceRequest) (*NetworkInterface, error) {
+func (r *MemoryRepository) UpdateInterface(_ context.Context, orgID, id string, req *UpdateInterfaceRequest) (*NetworkInterface, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ni, ok := r.interfaces[id]

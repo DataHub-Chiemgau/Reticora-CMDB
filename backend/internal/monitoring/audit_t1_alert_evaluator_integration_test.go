@@ -60,7 +60,7 @@ func TestAuditT1AlertEvaluatorPerOrganization(t *testing.T) {
 
 	var mu sync.Mutex
 	events := map[string]int{}
-	ev := monitoring.NewEvaluator(store, store.AlertStore(), monitoring.NotifierFunc(func(_ context.Context, e monitoring.AlertEvent) {
+	ev := monitoring.NewEvaluator(store, store.AlertStore(), monitoring.NotifierFunc(func(_ context.Context, e *monitoring.AlertEvent) {
 		mu.Lock()
 		defer mu.Unlock()
 		if rules[e.Rule.OrgID] == e.Rule.ID {
