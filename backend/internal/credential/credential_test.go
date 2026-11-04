@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
@@ -208,9 +209,9 @@ func TestService_RotateKeysKeepsSecretsDecryptable(t *testing.T) {
 		{first.ID, map[string]any{"user": "monitor", "authKey": "k1"}},
 		{second.ID, map[string]any{"user": "root", "pass": "p4ss"}},
 	} {
-		secret, err := svc.Decrypt(ctx, "org-1", tc.id)
-		if err != nil {
-			t.Fatalf("Decrypt after rotation: %v", err)
+		secret, decryptErr := svc.Decrypt(ctx, "org-1", tc.id)
+		if decryptErr != nil {
+			t.Fatalf("Decrypt after rotation: %v", decryptErr)
 		}
 		for k, v := range tc.want {
 			if secret[k] != v {
@@ -250,8 +251,8 @@ func TestService_RotateKeysWithoutCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := svc.Delete(ctx, "org-1", cred.ID); err != nil {
-		t.Fatalf("Delete: %v", err)
+	if deleteErr := svc.Delete(ctx, "org-1", cred.ID); deleteErr != nil {
+		t.Fatalf("Delete: %v", deleteErr)
 	}
 
 	result, err := svc.RotateKeys(ctx, "org-1")
@@ -295,5 +296,57 @@ func TestCredentialKindsMatchTheCollector(t *testing.T) {
 		if !listed[kind] {
 			t.Errorf("credential kind %q is missing in credential-kinds.json: the collector does not route it", kind)
 		}
+	}
+}
+
+// flakyDEKRepository fails GetOrgDEK from the given call on, as a store
+// that becomes unavailable during a rotation would.
+type flakyDEKRepository struct {
+	*MemoryRepository
+	calls, failFrom int
+}
+
+func (f *flakyDEKRepository) GetOrgDEK(ctx context.Context, orgID string) (*OrgDEK, error) {
+	f.calls++
+	if f.calls >= f.failFrom {
+		return nil, errors.New("store unavailable")
+	}
+	return f.MemoryRepository.GetOrgDEK(ctx, orgID)
+}
+
+// TestService_RotateKeysFailsWhenKeyVersionUnreadable covers F-123 (govet
+// shadow in RotateKeys): an error reading the current key version fails the
+// rotation instead of restarting the version at 1, and no credential is
+// rewritten.
+func TestService_RotateKeysFailsWhenKeyVersionUnreadable(t *testing.T) {
+	mem := NewMemoryRepository()
+	ctx := context.Background()
+	cred, err := NewService(mem, testEncryptor(t)).Create(ctx, CreateRequest{
+		OrganizationID: "org-1",
+		Name:           "switch",
+		Kind:           KindNUT,
+		Secret:         map[string]any{"pass": "x"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before, err := mem.Get(ctx, "org-1", cred.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	beforeVersion, beforeCiphertext := before.KeyVersion, string(before.Ciphertext)
+
+	// The first read (the DEK to decrypt with) succeeds, the second (the
+	// key version) fails.
+	repo := &flakyDEKRepository{MemoryRepository: mem, failFrom: 2}
+	if _, rotateErr := NewService(repo, testEncryptor(t)).RotateKeys(ctx, "org-1"); rotateErr == nil {
+		t.Fatal("RotateKeys succeeded although the key version could not be read")
+	}
+	after, err := mem.Get(ctx, "org-1", cred.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if after.KeyVersion != beforeVersion || string(after.Ciphertext) != beforeCiphertext {
+		t.Fatalf("credential rewritten by a failed rotation: key version %d -> %d", beforeVersion, after.KeyVersion)
 	}
 }

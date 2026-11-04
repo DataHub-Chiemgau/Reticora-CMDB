@@ -48,8 +48,8 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 			`DELETE FROM composition WHERE organization_id = $1`,
 			`DELETE FROM asset WHERE organization_id = $1`,
 		} {
-			if _, err := admin.Exec(ctx, stmt, cycOrg); err != nil {
-				t.Logf("cleanup %q: %v", stmt, err)
+			if _, cleanupErr := admin.Exec(ctx, stmt, cycOrg); cleanupErr != nil {
+				t.Logf("cleanup %q: %v", stmt, cleanupErr)
 			}
 		}
 		_, _ = admin.Exec(ctx, "SET session_replication_role = origin")
@@ -64,20 +64,20 @@ func setupCompositionDB(t *testing.T) *PGRepository {
 	cleanup()
 	t.Cleanup(cleanup)
 
-	if _, err := admin.Exec(ctx,
+	if _, orgErr := admin.Exec(ctx,
 		`INSERT INTO organization (id, name, slug) VALUES ($1, 'Composition Cycle Org', 'composition-cycle-org')`,
-		cycOrg); err != nil {
-		t.Fatalf("seed organization: %v", err)
+		cycOrg); orgErr != nil {
+		t.Fatalf("seed organization: %v", orgErr)
 	}
 	for _, a := range []struct{ id, name, tag string }{
 		{cycAssetA, "Chassis A", "CYC-A"},
 		{cycAssetB, "Chassis B", "CYC-B"},
 		{cycAssetC, "Chassis C", "CYC-C"},
 	} {
-		if _, err := admin.Exec(ctx,
+		if _, assetErr := admin.Exec(ctx,
 			`INSERT INTO asset (id, organization_id, name, asset_tag) VALUES ($1, $2, $3, $4)`,
-			a.id, cycOrg, a.name, a.tag); err != nil {
-			t.Fatalf("seed asset %s: %v", a.name, err)
+			a.id, cycOrg, a.name, a.tag); assetErr != nil {
+			t.Fatalf("seed asset %s: %v", a.name, assetErr)
 		}
 	}
 

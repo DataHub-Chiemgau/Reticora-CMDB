@@ -195,13 +195,13 @@ func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumabl
 		if c.StockLevel+delta < 0 {
 			return fmt.Errorf("insufficient stock")
 		}
-		if err := tx.QueryRow(ctx, `
+		if insertErr := tx.QueryRow(ctx, `
 			INSERT INTO stock_movement (organization_id, consumable_id, direction, quantity, reason, reference, actor_id)
 			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7,'')::uuid)
 			RETURNING id::text, created_at
 		`, m.OrganizationID, m.ConsumableID, m.Direction, m.Quantity, m.Reason, m.Reference, m.ActorID).
-			Scan(&m.ID, &m.CreatedAt); err != nil {
-			return err
+			Scan(&m.ID, &m.CreatedAt); insertErr != nil {
+			return insertErr
 		}
 		c, err = scanConsumable(tx.QueryRow(ctx, "UPDATE consumable SET stock_level = stock_level + $3, updated_at = now() WHERE organization_id = $1 AND id = $2 RETURNING "+consumableCols, m.OrganizationID, m.ConsumableID, delta))
 		return err

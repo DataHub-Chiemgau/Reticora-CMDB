@@ -272,30 +272,31 @@ func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult
 	reEncrypted := make([]StoredCredential, len(stored))
 	for i := range stored {
 		cred := stored[i]
-		plaintext, err := crypto.Decrypt(oldDEK, cred.Ciphertext)
-		if err != nil {
-			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		plaintext, cryptErr := crypto.Decrypt(oldDEK, cred.Ciphertext)
+		if cryptErr != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, cryptErr)
 		}
-		ciphertext, err := crypto.Encrypt(newDEK, plaintext)
-		if err != nil {
-			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		ciphertext, cryptErr := crypto.Encrypt(newDEK, plaintext)
+		if cryptErr != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, cryptErr)
 		}
 		cred.Ciphertext = ciphertext
 		reEncrypted[i] = cred
 	}
 
-	var version int
-	if current, err := s.repo.GetOrgDEK(ctx, orgID); err == nil {
-		version = current.KeyVersion + 1
-	} else {
-		version = 1
+	// The DEK was read above, so a failure here is an error of the store; it
+	// must not restart the key version at 1 (F-123).
+	current, err := s.repo.GetOrgDEK(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("read key version: %w", err)
 	}
+	version := current.KeyVersion + 1
 
 	for i := range reEncrypted {
 		cred := reEncrypted[i]
 		cred.KeyVersion = version
-		if err := s.repo.Update(ctx, &cred); err != nil {
-			return nil, fmt.Errorf("credential %s: %w", cred.ID, err)
+		if updateErr := s.repo.Update(ctx, &cred); updateErr != nil {
+			return nil, fmt.Errorf("credential %s: %w", cred.ID, updateErr)
 		}
 	}
 

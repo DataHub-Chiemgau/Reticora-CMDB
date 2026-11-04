@@ -215,7 +215,6 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
 		for _, f := range typ.Fields {
-			f.Scope = "type"
 			if _, err := upsertFieldTx(ctx, tx, typ.OrganizationID, typ.ID, &UpsertFieldRequest{
 				Scope: "type", Name: f.Name, Label: f.Label, Description: f.Description,
 				DataType: f.DataType, Required: f.Required, DefaultValue: f.DefaultValue,
@@ -407,13 +406,13 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateT
 			}
 		}
 		if len(sets) == 0 {
-			t, err := scanType(tx.QueryRow(ctx,
+			t, getErr := scanType(tx.QueryRow(ctx,
 				fmt.Sprintf("SELECT %s FROM ci_type WHERE id = $1 AND organization_id IS NOT NULL", typeSelectColumns), id))
-			if err != nil {
-				if err == pgx.ErrNoRows {
+			if getErr != nil {
+				if getErr == pgx.ErrNoRows {
 					return fmt.Errorf("not found")
 				}
-				return err
+				return getErr
 			}
 			out = t
 			return nil
@@ -594,7 +593,7 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 			return fmt.Errorf("clone ci type: %w", typeDBError(err))
 		}
 		// Copy the field definitions of the source type.
-		if _, err := tx.Exec(ctx, `
+		if _, fieldsErr := tx.Exec(ctx, `
 			INSERT INTO attribute_definition (
 				ci_type_id, scope, key, display_name, description, data_type, required,
 				default_value, enum_values, multi_value, searchable, is_unique, unique_scope,
@@ -604,8 +603,8 @@ func (r *PGRepository) Clone(ctx context.Context, orgID, id string, req CloneReq
 				default_value, enum_values, multi_value, searchable, is_unique, unique_scope,
 				inheritable, validation, conditional, reference_target, group_name, sort_order, unit
 			FROM attribute_definition
-			WHERE ci_type_id = $2`, cloneID, id); err != nil {
-			return fmt.Errorf("clone ci type fields: %w", err)
+			WHERE ci_type_id = $2`, cloneID, id); fieldsErr != nil {
+			return fmt.Errorf("clone ci type fields: %w", fieldsErr)
 		}
 		// Copy the set assignments with their positions (WP-709); the
 		// deferred trigger materializes the sets of the clone at commit.

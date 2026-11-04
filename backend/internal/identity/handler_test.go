@@ -263,8 +263,8 @@ func TestRefreshAllowsRecentlyExpiredToken(t *testing.T) {
 	var resp struct {
 		Token string `json:"token"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
+	if decodeErr := json.Unmarshal(w.Body.Bytes(), &resp); decodeErr != nil {
+		t.Fatal(decodeErr)
 	}
 	refreshed, err := sessionIssuer.Validate(resp.Token)
 	if err != nil {

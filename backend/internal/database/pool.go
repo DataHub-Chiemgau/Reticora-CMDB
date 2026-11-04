@@ -109,8 +109,8 @@ func newAppRolePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, err
 
 	role := appRole()
 	if role != "" {
-		if err := ValidateRoleName(role); err != nil {
-			return nil, err
+		if roleErr := ValidateRoleName(role); roleErr != nil {
+			return nil, roleErr
 		}
 	}
 	config.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {

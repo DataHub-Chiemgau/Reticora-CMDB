@@ -75,12 +75,12 @@ func TestHandlerScopesCredentialsToAuthenticatedTenant(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/credentials/" + created.ID,
 	} {
-		req := withTenant(httptest.NewRequest(http.MethodGet, path, nil), "org-2")
-		req.Header.Set("X-Organization-ID", "org-1")
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s as org-2: expected 404, got %d", path, rec.Code)
+		getReq := withTenant(httptest.NewRequest(http.MethodGet, path, nil), "org-2")
+		getReq.Header.Set("X-Organization-ID", "org-1")
+		getRec := httptest.NewRecorder()
+		router.ServeHTTP(getRec, getReq)
+		if getRec.Code != http.StatusNotFound {
+			t.Errorf("GET %s as org-2: expected 404, got %d", path, getRec.Code)
 		}
 	}
 
