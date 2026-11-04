@@ -542,7 +542,8 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       value: 'maintenance',
       reason: 'override',
       override_author: a.userId,
-      override_reason: 'bulk',
+      // The reason names the change set of the bulk (BLK-02, WP-305).
+      override_reason: expect.stringMatching(/^bulk:[0-9a-f-]{36}$/),
       protected: true,
     });
     const manualChange = (await changesOf(a, manual.id)).find(
@@ -968,9 +969,20 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
         await expectStatusChange(c, ci.id, 'active', 'inactive');
       }
 
-      // A finished job cannot be cancelled; phase 1 defines no bulk revert (E-25, BLK-02 [P2]).
+      // A finished job cannot be cancelled. Within 24 hours the bulk is reverted as the job
+      // bulk.revert (E-25, BLK-02, WP-305): 202 with the revert job, the CIs return to active.
       expect((await api(rq, c.token, 'DELETE', `/jobs/${accepted.job_id}`)).status).toBe(409);
-      expect((await api(rq, c.token, 'POST', `/jobs/${accepted.job_id}/revert`)).status).toBe(409);
+      const reverting = await api(rq, c.token, 'POST', `/jobs/${accepted.job_id}/revert`);
+      expect(reverting.status, JSON.stringify(reverting.body)).toBe(202);
+      const revertJob = reverting.body as Job;
+      expect(revertJob.kind).toBe('bulk.revert');
+      await expect(async () => {
+        const job = await ok<Job>(c, 'GET', `/jobs/${revertJob.id}`);
+        expect(job.status).toBe('succeeded');
+      }).toPass({ timeout: 90_000 });
+      for (const ci of [cis[0], cis[49], cis[97]]) {
+        expect((await getCI(c, ci.id)).status).toBe('active');
+      }
 
       // Job metrics (JOB-03): the duration of the finished ci.bulk job is observed.
       if (metricBefore >= 0) {
