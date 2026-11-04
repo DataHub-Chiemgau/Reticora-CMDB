@@ -86,7 +86,7 @@ func requireItem(ctx context.Context, tx pgx.Tx, res *Reservation) error {
 }
 
 // List returns reservations filtered by state.
-func (r *PGRepository) List(ctx context.Context, orgID string, state string, page api.PaginationParams) ([]Reservation, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID, state string, page api.PaginationParams) ([]Reservation, int, error) {
 	var out []Reservation
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

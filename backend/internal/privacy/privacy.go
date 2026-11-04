@@ -171,7 +171,8 @@ func (s *Service) eraseContacts(ctx context.Context, orgID string, cutoff time.T
 		if err != nil {
 			return affected, err
 		}
-		for _, c := range items {
+		for i := range items {
+			c := &items[i]
 			if c.UpdatedAt.After(cutoff) {
 				continue
 			}
@@ -213,7 +214,8 @@ func (s *Service) eraseUsers(ctx context.Context, orgID string, cutoff time.Time
 		if err != nil {
 			return affected, err
 		}
-		for _, u := range items {
+		for i := range items {
+			u := &items[i]
 			// Only accounts that are already deactivated/anonymized are
 			// expired by retention — active staff is not personal data "no
 			// longer necessary" while the employment lasts.

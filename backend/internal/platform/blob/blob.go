@@ -265,7 +265,7 @@ func (s *S3Store) EnsureBucket(ctx context.Context, bucket string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, bucketURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, bucketURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("blob: create bucket request: %w", err)
 	}

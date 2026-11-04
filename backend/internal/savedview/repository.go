@@ -26,7 +26,7 @@ type Repository interface {
 	// somebody else is not found (VIE-01).
 	GetByID(ctx context.Context, orgID, id, userID string) (*View, error)
 	Create(ctx context.Context, view *View) error
-	Update(ctx context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error)
+	Update(ctx context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error)
 	Delete(ctx context.Context, orgID, id, ownerID string) error
 }
 
@@ -107,7 +107,7 @@ func (r *MemoryRepository) Create(_ context.Context, view *View) error {
 // Update modifies a view of its owner; shared views are read-only for
 // everybody else (E-86, option 1). Role ids are not checked against roles
 // here: the memory repository keeps none.
-func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.views[id]

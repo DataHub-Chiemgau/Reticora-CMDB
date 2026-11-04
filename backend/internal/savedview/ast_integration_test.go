@@ -55,7 +55,7 @@ func TestFilterASTAgainstPostgres(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &where); err != nil {
 			t.Fatal(err)
 		}
-		results, _, err := engine.Query(f.OrgCtx(f.OrgA), f.OrgA, savedview.FilterSpec{EntityKind: "ci", Where: &where}, api.PaginationParams{Limit: 100})
+		results, _, err := engine.Query(f.OrgCtx(f.OrgA), f.OrgA, &savedview.FilterSpec{EntityKind: "ci", Where: &where}, api.PaginationParams{Limit: 100})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +197,7 @@ func TestFilterASTClientScopeAgainstPostgres(t *testing.T) {
 		{"client 1", f.ClientCtx(f.Client1), []string{own}},
 		{"org-wide", f.OrgCtx(f.OrgA), []string{own, foreign}},
 	} {
-		results, total, err := engine.Query(c.ctx, f.OrgA, savedview.FilterSpec{EntityKind: "ci", Where: &where}, api.PaginationParams{Limit: 100})
+		results, total, err := engine.Query(c.ctx, f.OrgA, &savedview.FilterSpec{EntityKind: "ci", Where: &where}, api.PaginationParams{Limit: 100})
 		var got []string
 		for _, r := range results {
 			got = append(got, r.ID)
@@ -339,7 +339,7 @@ func TestSearchQueryRejectsInvalidValues(t *testing.T) {
 // failingEngine is a QueryEngine whose queries fail with err.
 type failingEngine struct{ err error }
 
-func (e failingEngine) Query(context.Context, string, savedview.FilterSpec, api.PaginationParams) ([]savedview.QueryResult, int, error) {
+func (e failingEngine) Query(context.Context, string, *savedview.FilterSpec, api.PaginationParams) ([]savedview.QueryResult, int, error) {
 	return nil, 0, e.err
 }
 

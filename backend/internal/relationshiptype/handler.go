@@ -103,7 +103,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "key"), req)
+	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "key"), &req)
 	if err != nil {
 		writeError(w, err)
 		return

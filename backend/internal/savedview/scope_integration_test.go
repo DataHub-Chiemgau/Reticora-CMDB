@@ -66,7 +66,7 @@ func TestStructuredSearchScopeDepthAndPermission(t *testing.T) {
 	engine := savedview.NewPGQueryEngine(f.App)
 	ids := func(ctx context.Context, spec savedview.FilterSpec) map[string]bool {
 		t.Helper()
-		res, _, err := engine.Query(ctx, f.OrgA, spec, api.PaginationParams{Limit: 100})
+		res, _, err := engine.Query(ctx, f.OrgA, &spec, api.PaginationParams{Limit: 100})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}

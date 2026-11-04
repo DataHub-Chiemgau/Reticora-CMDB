@@ -22,6 +22,6 @@ type ProblemDetail = api.ProblemDetail
 
 // RespondProblem writes an RFC 7807 problem detail response through the one
 // problem writer (api.WriteProblemBody), which adds the trace_id.
-func RespondProblem(w http.ResponseWriter, p ProblemDetail) {
+func RespondProblem(w http.ResponseWriter, p *ProblemDetail) {
 	api.WriteProblemBody(w, p.Status, p)
 }

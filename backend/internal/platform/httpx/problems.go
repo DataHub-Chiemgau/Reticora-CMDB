@@ -17,7 +17,7 @@ const (
 
 // ValidationError returns a 400 validation problem.
 func ValidationError(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeValidationError,
 		Title:    "Validation Error",
 		Status:   http.StatusBadRequest,
@@ -28,7 +28,7 @@ func ValidationError(w http.ResponseWriter, r *http.Request, detail string) {
 
 // Unauthorized returns a 401 problem.
 func Unauthorized(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeUnauthorized,
 		Title:    "Unauthorized",
 		Status:   http.StatusUnauthorized,
@@ -39,7 +39,7 @@ func Unauthorized(w http.ResponseWriter, r *http.Request, detail string) {
 
 // Forbidden returns a 403 problem.
 func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeForbidden,
 		Title:    "Forbidden",
 		Status:   http.StatusForbidden,
@@ -50,7 +50,7 @@ func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
 
 // EntitlementLimit returns a 403 entitlement-limit problem.
 func EntitlementLimit(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeEntitlementLimit,
 		Title:    "Entitlement Limit Exceeded",
 		Status:   http.StatusForbidden,
@@ -61,7 +61,7 @@ func EntitlementLimit(w http.ResponseWriter, r *http.Request, detail string) {
 
 // NotFound returns a 404 problem.
 func NotFound(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeNotFound,
 		Title:    "Not Found",
 		Status:   http.StatusNotFound,
@@ -72,7 +72,7 @@ func NotFound(w http.ResponseWriter, r *http.Request, detail string) {
 
 // Conflict returns a 409 problem.
 func Conflict(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeConflict,
 		Title:    "Conflict",
 		Status:   http.StatusConflict,
@@ -83,7 +83,7 @@ func Conflict(w http.ResponseWriter, r *http.Request, detail string) {
 
 // IdempotencyMismatch returns a 409 idempotency-mismatch problem.
 func IdempotencyMismatch(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeIdempotencyMismatch,
 		Title:    "Idempotency Mismatch",
 		Status:   http.StatusConflict,
@@ -94,7 +94,7 @@ func IdempotencyMismatch(w http.ResponseWriter, r *http.Request, detail string) 
 
 // RateLimited returns a 429 problem.
 func RateLimited(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeRateLimited,
 		Title:    "Rate Limited",
 		Status:   http.StatusTooManyRequests,
@@ -105,7 +105,7 @@ func RateLimited(w http.ResponseWriter, r *http.Request, detail string) {
 
 // Internal returns a 500 problem. Detail should not expose internals to clients.
 func Internal(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, ProblemDetail{
+	RespondProblem(w, &ProblemDetail{
 		Type:     TypeInternal,
 		Title:    "Internal Server Error",
 		Status:   http.StatusInternalServerError,

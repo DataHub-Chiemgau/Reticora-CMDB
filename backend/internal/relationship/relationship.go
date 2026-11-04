@@ -279,6 +279,17 @@ type SuppressionStore interface {
 	LiftSuppression(ctx context.Context, orgID, id string, actor Actor) error
 }
 
+// MemoryRepository is an in-memory relationship store.
+type MemoryRepository struct {
+	mu    sync.RWMutex
+	items map[string]*Relationship
+	// suppressions are the suppressions of forced deletions (REL-03).
+	suppressions map[string]*Suppression
+	seq          int
+	// visible decides which CIs a traversal may pass through (IMP-07).
+	visible NodeVisibility
+}
+
 // DeleteWithPolicy implements PolicyDeleter; a forced deletion of a
 // discovery edge stores its suppression in memory.
 func (r *MemoryRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, opts DeleteOptions) error {
@@ -584,17 +595,6 @@ type HiddenEdgeReader interface {
 	// the caller does not see is empty. Nothing is returned to a caller
 	// without a client and site restriction.
 	HiddenEdgesOf(ctx context.Context, orgID string, ciIDs, relTypes []string) ([]Relationship, error)
-}
-
-// MemoryRepository is an in-memory relationship store.
-type MemoryRepository struct {
-	mu    sync.RWMutex
-	items map[string]*Relationship
-	// suppressions are the suppressions of forced deletions (REL-03).
-	suppressions map[string]*Suppression
-	seq          int
-	// visible decides which CIs a traversal may pass through (IMP-07).
-	visible NodeVisibility
 }
 
 // NodeVisibility returns which of ids are visible, not deleted CIs of the
