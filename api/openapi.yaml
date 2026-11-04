@@ -138,6 +138,8 @@ tags:
     description: Tag catalog and the tags of CIs and assets
   - name: Suppliers
     description: Supplier master data of the organization and its clients (MGT-12)
+  - name: Contracts
+    description: Contracts of the organization and its clients (MGT-12)
   - name: Import
     description: Import profiles and import runs of CSV/XLSX files
   - name: IPAM
@@ -17537,6 +17539,232 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /api/v1/contracts:
+    x-phase: P2
+    x-feature: assets_basic
+    get:
+      operationId: listContracts
+      tags: [Contracts]
+      summary: List contracts (MGT-12)
+      description: >-
+        The contracts of the organization visible under the caller's scope:
+        org-wide contracts (client_id null) and those of the caller's
+        clients (E-09). Filters `filter[status]`, `filter[kind]`,
+        `filter[supplier_id]`, `filter[client_id]` and
+        `filter[end_date][gte|lte]` (API-02); `sort` number (default),
+        start_date, end_date or created_at, a leading `-` sorts descending;
+        contracts without the sorted date come last ascending. `limit`
+        (default 50, at most 200) and the signed keyset `cursor` from
+        `next_cursor`; a forged cursor or one of another sort is 400. Each
+        contract carries only the fields the field permissions let the
+        caller read (object kind contract, RBA-07). Requires contract:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/ListFilter'
+        - $ref: '#/components/parameters/ListSort'
+      responses:
+        '200':
+          description: Contracts, sorted by number unless sort says otherwise
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContractListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission (ProblemDetail) or the field
+            permissions (type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the fields): a filter or a
+            date sort on a field the caller cannot read in every client scope
+            of its role assignments. No list and no total are answered.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createContract
+      tags: [Contracts]
+      summary: Create a contract (MGT-12)
+      description: >-
+        A contract of the organization (client_id null) or of a client.
+        number is unique per organization (409 on number). A missing
+        currency is the currency of the organization, a missing status
+        active. The supplier must be org-wide or of the contract's client;
+        a supplier of another client, another organization or outside the
+        caller's scope is 422 on supplier_id. A client of another
+        organization is 422 on client_id. end_date before start_date, a
+        negative notice_period_days, an unknown kind or status and an
+        invalid currency are 422 on the field. A caller restricted to
+        clients cannot create an org-wide contract or one of another client
+        (403, E-09). A sent field the caller may not edit is 403 with the
+        fields (RBA-07). Requires contract:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateContractRequest'
+      responses:
+        '201':
+          description: Contract created
+          headers:
+            ETag:
+              description: The version of the contract.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission, the client scope (E-09) or the
+            field permissions (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/contracts/{id}:
+    x-phase: P2
+    x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getContract
+      tags: [Contracts]
+      summary: Get a contract
+      description: >-
+        A contract visible under the caller's scope, with its version as
+        ETag; an unknown, foreign or invisible id is 404. Fields the caller
+        may not read are left out (RBA-07); the ETag does not depend on
+        them. Requires contract:read.
+      responses:
+        '200':
+          description: Contract
+          headers:
+            ETag:
+              description: The version of the contract.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateContract
+      tags: [Contracts]
+      summary: Update a contract
+      description: >-
+        Sent fields change, null clears an optional field (number, currency
+        and status cannot be null); every change raises the version by 1.
+        `client_id` cannot change (400 on client_id). A field the caller may
+        not edit is 403 with the fields (RBA-07): every sent field it cannot
+        read and every readable field whose value changes counts. If-Match
+        (API-07): 412 when the organization requires it (require_if_match)
+        and it is missing, or when it names another than the current
+        version. A taken number is 409, an incompatible supplier or a
+        violated value rule 422. An org-wide contract is 404 for a caller
+        restricted to clients and stays unchanged. Requires contract:write.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateContractRequest'
+      responses:
+        '200':
+          description: Contract updated
+          headers:
+            ETag:
+              description: The new version of the contract.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission or the field permissions
+            (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match missing although required, or not the current version of the contract
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteContract
+      tags: [Contracts]
+      summary: Delete a contract
+      description: >-
+        Deletes a contract and its object grants (RBA-07). An org-wide
+        contract is 404 for a caller restricted to clients. Requires
+        contract:write.
+      responses:
+        '204':
+          description: Contract deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /api/v1/tags:
     get:
       operationId: listTags
@@ -27002,6 +27230,154 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Supplier'
+
+    Contract:
+      type: object
+      description: >-
+        A contract of the organization or one of its clients (MGT-12,
+        WP-269). The fields id, organization_id, client_id, number, version
+        and the timestamps are always present; the others are left out when
+        the field permissions do not let the caller read them (object kind
+        contract, field keys core.<field>, RBA-07).
+      required: [id, organization_id, client_id, number, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: Client of the contract; null is org-wide.
+        supplier_id:
+          type: [string, 'null']
+          format: uuid
+          description: Supplier, org-wide or of the contract's client.
+        number:
+          type: string
+          description: Contract number, unique per organization.
+        kind:
+          type: [string, 'null']
+          enum: [maintenance, support, lease, license, purchase, service, other, null]
+        start_date:
+          type: [string, 'null']
+          format: date
+        end_date:
+          type: [string, 'null']
+          format: date
+          description: Not before start_date.
+        notice_period_days:
+          type: [integer, 'null']
+          minimum: 0
+        value:
+          type: [number, 'null']
+          description: Contract value in currency (decimal).
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 code; the currency of the organization unless set.
+        status:
+          type: string
+          enum: [draft, active, terminated, ended]
+          description: draft, active, terminated (gekündigt) or ended (beendet).
+        notes:
+          type: [string, 'null']
+        version:
+          type: integer
+          format: int64
+          description: Raised by every change; the ETag of the contract.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateContractRequest:
+      type: object
+      required: [number]
+      properties:
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Client of the contract; null or absent is org-wide. Set only at
+            creation.
+        supplier_id:
+          type: [string, 'null']
+          format: uuid
+        number:
+          type: string
+          minLength: 1
+        kind:
+          type: [string, 'null']
+          enum: [maintenance, support, lease, license, purchase, service, other, null]
+        start_date:
+          type: [string, 'null']
+          format: date
+        end_date:
+          type: [string, 'null']
+          format: date
+        notice_period_days:
+          type: [integer, 'null']
+        value:
+          type: [number, 'null']
+        currency:
+          type: [string, 'null']
+          description: ISO 4217 code; absent or null is the currency of the organization.
+        status:
+          type: [string, 'null']
+          enum: [draft, active, terminated, ended, null]
+          description: Absent or null is active.
+        notes:
+          type: [string, 'null']
+
+    UpdateContractRequest:
+      type: object
+      description: >-
+        Sent fields change, null clears an optional field. client_id cannot
+        change; sending it is 400 on client_id. number, currency and status
+        cannot be null.
+      properties:
+        supplier_id:
+          type: [string, 'null']
+          format: uuid
+        number:
+          type: string
+          minLength: 1
+        kind:
+          type: [string, 'null']
+          enum: [maintenance, support, lease, license, purchase, service, other, null]
+        start_date:
+          type: [string, 'null']
+          format: date
+        end_date:
+          type: [string, 'null']
+          format: date
+        notice_period_days:
+          type: [integer, 'null']
+        value:
+          type: [number, 'null']
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, terminated, ended]
+        notes:
+          type: [string, 'null']
+
+    ContractListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Contract'
 
     Tag:
       type: object

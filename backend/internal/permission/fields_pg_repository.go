@@ -340,10 +340,10 @@ func (r *PGFieldGrants) ListFieldGrants(ctx context.Context, orgID string, f *Fi
 	return items, next, nil
 }
 
-// objectTables names the table of each object kind with a table; contract
-// gets its table with WP-269.
+// objectTables names the table of each object kind (contract since WP-269).
 var objectTables = map[ObjectKind]string{
-	KindCI: "ci", KindAsset: "asset", KindTicket: "ticket", KindDocument: "document", KindRelationship: "ci_relationship",
+	KindCI: "ci", KindAsset: "asset", KindContract: "contract", KindTicket: "ticket", KindDocument: "document",
+	KindRelationship: "ci_relationship",
 }
 
 func (r *PGFieldGrants) CreateObjectGrant(ctx context.Context, orgID string, g *ObjectGrant) (ObjectGrant, error) {

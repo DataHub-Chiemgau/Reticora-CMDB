@@ -87,6 +87,7 @@ var resourceTables = map[string][]string{
 	"compositions":              {"composition"},
 	"consumables":               {"consumable"},
 	"contacts":                  {"contact"},
+	"contracts":                 {"contract"},
 	"credentials":               {"credential"},
 	"desk-bookings":             {"desk_booking"},
 	"desks":                     {"desk"},

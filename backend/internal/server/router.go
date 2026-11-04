@@ -146,6 +146,7 @@ type Repositories struct {
 	MetamodelDraft    metamodel.Repository        // drafts (WP-260); nil without a database: the routes answer 503
 	Import            importer.Repository         // import mapping profiles (WP-774, IMP-IO-01)
 	Supplier          contract.SupplierRepository // suppliers (WP-736, MGT-12); nil: the routes answer 503
+	Contract          contract.ContractRepository // contracts (WP-269, MGT-12); nil: the routes answer 503
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -682,6 +683,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		contract.NewHandler(repos.Supplier),
+		contract.NewContractHandler(repos.Contract),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),

@@ -18,6 +18,7 @@ DELETE /api/v1/compliance/rules/{id} compliance:write
 DELETE /api/v1/compositions/{id} asset:write
 DELETE /api/v1/consumables/{id} stock:write
 DELETE /api/v1/contacts/{id} contact:write
+DELETE /api/v1/contracts/{id} contract:write
 DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
@@ -153,6 +154,8 @@ GET /api/v1/consumables/{id} stock:read
 GET /api/v1/consumables/{id}/movements stock:read
 GET /api/v1/contacts contact:read
 GET /api/v1/contacts/{id} contact:read
+GET /api/v1/contracts contract:read
+GET /api/v1/contracts/{id} contract:read
 GET /api/v1/credentials/ credential:read
 GET /api/v1/credentials/{id} credential:read
 GET /api/v1/desks desk:read
@@ -354,6 +357,7 @@ PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/compositions/{id} asset:write
 PATCH /api/v1/consumables/{id} stock:write
 PATCH /api/v1/contacts/{id} contact:write
+PATCH /api/v1/contracts/{id} contract:write
 PATCH /api/v1/desks/{id} desk:write
 PATCH /api/v1/discovery-scopes/{id} discovery:manage
 PATCH /api/v1/documents/{id} document:write
@@ -458,6 +462,7 @@ POST /api/v1/compositions asset:write
 POST /api/v1/consumables stock:write
 POST /api/v1/consumables/{id}/movements stock:write
 POST /api/v1/contacts contact:write
+POST /api/v1/contracts contract:write
 POST /api/v1/credentials/ credential:manage
 POST /api/v1/credentials/rotate-keys credential:manage
 POST /api/v1/desk-bookings/{id}/cancel desk:write

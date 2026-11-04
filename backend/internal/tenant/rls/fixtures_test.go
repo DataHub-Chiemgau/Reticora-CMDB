@@ -102,6 +102,8 @@ var matrixOverrides = map[string]map[string]string{
 	"object_grant": {"grantee_role_id": "@uuid"},
 	// The i18n check of the tag catalog needs a de/en map (WP-281).
 	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
+	// The currency of a contract is an ISO 4217 code (WP-269).
+	"contract": {"currency": "EUR"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

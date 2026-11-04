@@ -609,6 +609,7 @@ func TestParseFieldKey(t *testing.T) {
 		{KindCI, "core.serial_number"}, {KindCI, "core.management_ip"}, {KindCI, "attributes.rack_unit"},
 		{KindCI, "_instance.owner_note"}, {KindAsset, "core.purchase_cost"}, {KindAsset, "attributes.cost-center"},
 		{KindRelationship, "core.confidence"}, {KindRelationship, "attributes.bandwidth"}, {KindTicket, "core.description"},
+		{KindContract, "core.value"}, {KindContract, "core.supplier_id"},
 	}
 	for _, c := range ok {
 		if _, err := ParseFieldKey(c.kind, c.key); err != nil {
@@ -622,7 +623,8 @@ func TestParseFieldKey(t *testing.T) {
 		{KindCI, "core.id"}, {KindCI, "core.name"}, {KindCI, "core.client_id"}, {KindCI, "core.site_id"},
 		{KindCI, "core.version"}, {KindCI, "core.ci_type_id"}, {KindCI, "core.created_at"}, {KindTicket, "core.title"},
 		{KindAsset, "_instance.x"}, {KindTicket, "attributes.x"}, {KindCI, "attributes."}, {KindCI, "attributes.a.b"},
-		{KindCI, "hostname"}, {KindCI, "other.hostname"}, {KindContract, "core.value"}, {"widget", "core.hostname"},
+		{KindCI, "hostname"}, {KindCI, "other.hostname"}, {KindContract, "core.number"}, {KindContract, "core.client_id"},
+		{KindContract, "attributes.x"}, {"widget", "core.hostname"},
 	}
 	for _, c := range refused {
 		if _, err := ParseFieldKey(c.kind, c.key); !errors.Is(err, ErrUnknownFieldKey) {

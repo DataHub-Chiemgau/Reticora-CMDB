@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000226_field_grants
+Stand: Migration 000227_contract
 
 ## Prüfung
 
@@ -1057,6 +1057,35 @@ für Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope,
 E-09) und die RESTRICTIVE-Policies `supplier_scoped_update` und
 `supplier_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
 
+Verträge (MGT-12, API-06, WP-269, E-41, E-119, Migration 000227): `contract`
+hält die Verträge der Organisation oder eines Clients (`client_id` NULL ist
+org-weit): `number` (`contract_number_check`: nicht leer), optional
+`supplier_id`, `kind` (`contract_kind_check`: `maintenance`, `support`,
+`lease`, `license`, `purchase`, `service`, `other`), `start_date`, `end_date`
+(`contract_dates_check`: `end_date >= start_date`), `notice_period_days`
+(`contract_notice_period_days_check`: `>= 0`), `value` (`numeric`),
+`currency` (NOT NULL, `contract_currency_check`: `^[A-Z]{3}$`; der Service
+setzt fehlende Werte aus `organization.currency`), `status` (Standard
+`active`, `contract_status_check`: `draft`, `active`, `terminated`, `ended`),
+`notes`, `version` (Standard 1, ETag), `created_at`, `updated_at` (Trigger
+`trg_contract_updated_at`). Schlüssel `contract_organization_id_number_key`
+(`organization_id`, `number`) und `contract_id_organization_key` (`id`,
+`organization_id`) als Ziel für `asset.contract_id` (WP-271). Verweise mit
+Organisation (K19) ohne CASCADE: `contract_client_id_fkey` (`client_id`,
+`organization_id`) → `client` und `contract_supplier_id_fkey`
+(`supplier_id`, `organization_id`) → `supplier`. Indizes
+`idx_contract_end_date` (`organization_id`, `end_date`),
+`idx_contract_supplier` (`supplier_id`, `organization_id`),
+`idx_contract_client` (`organization_id`, `client_id`) und
+`idx_contract_created` (`organization_id`, `created_at`, `id`). Der
+AFTER-DELETE-Trigger `contract_object_grants` ruft
+`delete_object_grants('contract')` (000226) und entfernt die
+`object_grant`-Zeilen eines gelöschten Vertrags. RLS mit ENABLE/FORCE:
+`contract_isolation` (FOR ALL; USING lässt org-weite Verträge für
+Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
+und die RESTRICTIVE-Policies `contract_scoped_update` und
+`contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1107,6 +1136,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `composition` | ja | ja | composition_isolation (ALL) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
+| `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
 | `credential` | ja | ja | credential_isolation (ALL), credential_scoped_delete (DELETE), credential_scoped_update (UPDATE) |
 | `custom_role` | ja | ja | custom_role_tenant_isolation (ALL) |
 | `desk` | ja | ja | desk_isolation (ALL), desk_scoped_delete (DELETE), desk_scoped_update (UPDATE) |

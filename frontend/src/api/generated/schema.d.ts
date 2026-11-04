@@ -7891,6 +7891,61 @@ export interface paths {
     patch: operations['updateSupplier'];
     trace?: never;
   };
+  '/api/v1/contracts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List contracts (MGT-12)
+     * @description The contracts of the organization visible under the caller's scope: org-wide contracts (client_id null) and those of the caller's clients (E-09). Filters `filter[status]`, `filter[kind]`, `filter[supplier_id]`, `filter[client_id]` and `filter[end_date][gte|lte]` (API-02); `sort` number (default), start_date, end_date or created_at, a leading `-` sorts descending; contracts without the sorted date come last ascending. `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor or one of another sort is 400. Each contract carries only the fields the field permissions let the caller read (object kind contract, RBA-07). Requires contract:read.
+     */
+    get: operations['listContracts'];
+    put?: never;
+    /**
+     * Create a contract (MGT-12)
+     * @description A contract of the organization (client_id null) or of a client. number is unique per organization (409 on number). A missing currency is the currency of the organization, a missing status active. The supplier must be org-wide or of the contract's client; a supplier of another client, another organization or outside the caller's scope is 422 on supplier_id. A client of another organization is 422 on client_id. end_date before start_date, a negative notice_period_days, an unknown kind or status and an invalid currency are 422 on the field. A caller restricted to clients cannot create an org-wide contract or one of another client (403, E-09). A sent field the caller may not edit is 403 with the fields (RBA-07). Requires contract:write.
+     */
+    post: operations['createContract'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/contracts/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a contract
+     * @description A contract visible under the caller's scope, with its version as ETag; an unknown, foreign or invisible id is 404. Fields the caller may not read are left out (RBA-07); the ETag does not depend on them. Requires contract:read.
+     */
+    get: operations['getContract'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a contract
+     * @description Deletes a contract and its object grants (RBA-07). An org-wide contract is 404 for a caller restricted to clients. Requires contract:write.
+     */
+    delete: operations['deleteContract'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a contract
+     * @description Sent fields change, null clears an optional field (number, currency and status cannot be null); every change raises the version by 1. `client_id` cannot change (400 on client_id). A field the caller may not edit is 403 with the fields (RBA-07): every sent field it cannot read and every readable field whose value changes counts. If-Match (API-07): 412 when the organization requires it (require_if_match) and it is missing, or when it names another than the current version. A taken number is 409, an incompatible supplier or a violated value rule 422. An org-wide contract is 404 for a caller restricted to clients and stays unchanged. Requires contract:write.
+     */
+    patch: operations['updateContract'];
+    trace?: never;
+  };
   '/api/v1/tags': {
     parameters: {
       query?: never;
@@ -13405,6 +13460,104 @@ export interface components {
     };
     SupplierListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Supplier'][];
+    };
+    /** @description A contract of the organization or one of its clients (MGT-12, WP-269). The fields id, organization_id, client_id, number, version and the timestamps are always present; the others are left out when the field permissions do not let the caller read them (object kind contract, field keys core.<field>, RBA-07). */
+    Contract: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Client of the contract; null is org-wide.
+       */
+      client_id: string | null;
+      /**
+       * Format: uuid
+       * @description Supplier, org-wide or of the contract's client.
+       */
+      supplier_id?: string | null;
+      /** @description Contract number, unique per organization. */
+      number: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /**
+       * Format: date
+       * @description Not before start_date.
+       */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      /** @description Contract value in currency (decimal). */
+      value?: number | null;
+      /** @description ISO 4217 code; the currency of the organization unless set. */
+      currency?: string;
+      /**
+       * @description draft, active, terminated (gekündigt) or ended (beendet).
+       * @enum {string}
+       */
+      status?: 'draft' | 'active' | 'terminated' | 'ended';
+      notes?: string | null;
+      /**
+       * Format: int64
+       * @description Raised by every change; the ETag of the contract.
+       */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateContractRequest: {
+      /**
+       * Format: uuid
+       * @description Client of the contract; null or absent is org-wide. Set only at creation.
+       */
+      client_id?: string | null;
+      /** Format: uuid */
+      supplier_id?: string | null;
+      number: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /** Format: date */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      value?: number | null;
+      /** @description ISO 4217 code; absent or null is the currency of the organization. */
+      currency?: string | null;
+      /**
+       * @description Absent or null is active.
+       * @enum {string|null}
+       */
+      status?: 'draft' | 'active' | 'terminated' | 'ended' | null;
+      notes?: string | null;
+    };
+    /** @description Sent fields change, null clears an optional field. client_id cannot change; sending it is 400 on client_id. number, currency and status cannot be null. */
+    UpdateContractRequest: {
+      /** Format: uuid */
+      supplier_id?: string | null;
+      number?: string;
+      /** @enum {string|null} */
+      kind?:
+        'maintenance' | 'support' | 'lease' | 'license' | 'purchase' | 'service' | 'other' | null;
+      /** Format: date */
+      start_date?: string | null;
+      /** Format: date */
+      end_date?: string | null;
+      notice_period_days?: number | null;
+      value?: number | null;
+      currency?: string;
+      /** @enum {string} */
+      status?: 'draft' | 'active' | 'terminated' | 'ended';
+      notes?: string | null;
+    };
+    ContractListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Contract'][];
     };
     /** @description A catalog tag of the organization (CI-08, WP-753). */
     Tag: {
@@ -36570,6 +36723,228 @@ export interface operations {
         };
       };
       422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listContracts: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contracts, sorted by number unless sort says otherwise */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ContractListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields): a filter or a date sort on a field the caller cannot read in every client scope of its role assignments. No list and no total are answered. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateContractRequest'];
+      };
+    };
+    responses: {
+      /** @description Contract created */
+      201: {
+        headers: {
+          /** @description The version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission, the client scope (E-09) or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contract */
+      200: {
+        headers: {
+          /** @description The version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  deleteContract: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Contract deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  updateContract: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateContractRequest'];
+      };
+    };
+    responses: {
+      /** @description Contract updated */
+      200: {
+        headers: {
+          /** @description The new version of the contract. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Contract'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match missing although required, or not the current version of the contract */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listTags: {
