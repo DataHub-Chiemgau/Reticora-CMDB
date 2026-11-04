@@ -5795,7 +5795,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Rebuild the tenant search index */
+    /**
+     * Rebuild the tenant search index
+     * @description Rebuilds the search index of the whole organization, also when a client-scoped administrator starts it (E-08), as the job `search.reindex` (SRC-02, WP-786): in batches of 1,000 entities per entity type, each in a transaction of its own, so the index stays searchable during the rebuild; a last step removes the documents of entities that are gone. The answer names the job; its state and, on success, the number of documents written (`result.indexed`) are read with GET /api/v1/jobs/{id} (search:write). A failed batch fails the job; the batches written before stay. Without the job model (profile without a database) the rebuild runs in the request and `indexed` carries the count.
+     */
     post: operations['reindexSearch'];
     delete?: never;
     options?: never;
@@ -15821,6 +15824,8 @@ export interface components {
       url: string;
       score: number;
       highlights?: string[];
+      /** @description The fields of the hit that matched the search text (SRC-02, WP-786); under field permissions only the fields the caller may read (RBA-07). Absent without a match per field, for a contact hit and with the OpenSearch backend. */
+      matched_fields?: components['schemas']['SearchMatchedField'][];
       /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {
         [key: string]: string;
@@ -15837,8 +15842,22 @@ export interface components {
       offset: number;
       has_more: boolean;
     };
+    SearchMatchedField: {
+      /** @description Key of the matched field: title, summary, core.<column>, attributes.<key>, asset.inventory_no, network.ip or network.mac. */
+      field: string;
+      /** @description For a text field its fragment with the matched words in <mark>…</mark>; for an identifier its value in canonical form (a MAC with colons, an IP address as host(), an inventory number in lower case). */
+      highlight: string;
+    };
     ReindexResponse: {
+      /**
+       * @deprecated
+       * @description Deprecated (API-01, sunset no earlier than 12 months after WP-786): 0 when the rebuild runs as a job, whose result carries the count; the count only without the job model.
+       */
       indexed: number;
+      job_id?: string;
+      status?: string;
+      /** @description search.reindex */
+      kind?: string;
     };
     AIConversation: {
       id: string;
@@ -31467,6 +31486,8 @@ export interface operations {
       /** @description Reindex accepted */
       202: {
         headers: {
+          /** @description The job of the rebuild (/api/v1/jobs/{id}); absent without the job model. */
+          Location?: string;
           [name: string]: unknown;
         };
         content: {

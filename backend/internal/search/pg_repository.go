@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -341,7 +342,7 @@ func buildPostgresQueryWithTokens(q *Query, tokens []string) (query string, args
 	// beyond api.TotalCap means more hits; offset + page < count still
 	// tells whether more follow. search_document is read once (E-133).
 	args = append(args, limit, q.Offset)
-	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, score, %s AS snippet, COUNT(*) OVER() FROM (SELECT id, organization_id, entity_type, entity_id, title, summary, url, metadata, client_id, site_id, updated_at, %s AS score FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT GREATEST(%d, $%d::bigint + $%d::bigint + 1)) AS hit ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`,
+	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, score, %s AS snippet, NULL::text AS read_fields, COUNT(*) OVER() FROM (SELECT id, organization_id, entity_type, entity_id, title, summary, url, metadata, client_id, site_id, updated_at, %s AS score FROM search_document WHERE %s ORDER BY score DESC, updated_at DESC LIMIT GREATEST(%d, $%d::bigint + $%d::bigint + 1)) AS hit ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`,
 		snippet, score, strings.Join(where, " AND "), api.TotalCountLimit, pos+1, pos, pos, pos+1)
 	return query, args, nil
 }
@@ -564,8 +565,10 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 	}
 	offsetArg, limitArg := a.add(q.Offset), a.add(limit)
 	// The count is capped like the phase 1 query (E-104).
-	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, read_summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, score, %s AS snippet, COUNT(*) OVER() FROM (SELECT id, organization_id, entity_type, entity_id, title, read_summary, url, metadata, client_id, site_id, updated_at, %s AS score FROM (%s) AS v WHERE %s ORDER BY score DESC, updated_at DESC LIMIT GREATEST(%d, $%d::bigint + $%d::bigint + 1)) AS hit ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`,
-		snippet, score, vector, match, api.TotalCountLimit, limitArg, offsetArg, limitArg, offsetArg)
+	// read_fields are the readable fields of a hit of a restricted type,
+	// for its matched fields (WP-786); NULL for the other types.
+	query = fmt.Sprintf(`SELECT id::text, organization_id::text, entity_type, entity_id::text, title, read_summary, url, metadata, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at, score, %s AS snippet, read_fields, COUNT(*) OVER() FROM (SELECT id, organization_id, entity_type, entity_id, title, read_summary, url, metadata, client_id, site_id, updated_at, %s AS score, CASE WHEN entity_type = ANY($%d::text[]) THEN read_fields END AS read_fields FROM (%s) AS v WHERE %s ORDER BY score DESC, updated_at DESC LIMIT GREATEST(%d, $%d::bigint + $%d::bigint + 1)) AS hit ORDER BY score DESC, updated_at DESC LIMIT $%d OFFSET $%d`,
+		snippet, score, restrictedArg, vector, match, api.TotalCountLimit, limitArg, offsetArg, limitArg, offsetArg)
 	return query, a.args, nil
 }
 
@@ -587,7 +590,8 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 		var sql string
 		var args []any
 		var err error
-		if restricted := q.restrictedTypes(); len(restricted) > 0 {
+		restricted := q.restrictedTypes()
+		if len(restricted) > 0 {
 			sql, args, err = restrictedQuery(ctx, tx, q, tokens, restricted)
 		} else {
 			sql, args, err = buildPostgresQueryWithTokens(q, tokens)
@@ -600,13 +604,16 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 			return err
 		}
 		defer rows.Close()
+		var readFields []*string
 		for rows.Next() {
 			var h Hit
 			var meta []byte
 			var snippet string
-			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &counted); err != nil {
+			var read *string
+			if err := rows.Scan(&h.ID, &h.OrganizationID, &h.EntityType, &h.EntityID, &h.Title, &h.Summary, &h.URL, &meta, &h.ClientID, &h.SiteID, &h.UpdatedAt, &h.Score, &snippet, &read, &counted); err != nil {
 				return err
 			}
+			readFields = append(readFields, read)
 			if err := json.Unmarshal(meta, &h.Metadata); err != nil {
 				return fmt.Errorf("unmarshal document metadata for %s: %w", h.ID, err)
 			}
@@ -618,6 +625,12 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		rows.Close()
+		if q.Highlight && strings.TrimSpace(q.Text) != "" {
+			if err := matchedFields(ctx, tx, q, restricted, res.Data, readFields); err != nil {
+				return err
+			}
+		}
 		return contactDetails(ctx, tx, q.OrganizationID, res.Data)
 	})
 	res.Limit, res.Offset = limit, q.Offset
@@ -626,55 +639,254 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 	return res, err
 }
 
-// reindexFields writes the field rows of the ci, asset, document and
-// ticket documents of the organization from the columns of their summary
-// (WP-266, backfill of migration 000228); an empty value gets no row. The
-// field rows of an asset (its summary columns and custom fields) are the
-// ones of its trigger (search_asset_fields, source 'trigger'), a CI also
-// gets its searchable attributes (search_ci_attribute_fields; WP-308,
-// migration 000233).
-const reindexFields = `INSERT INTO search_document_field (organization_id, document_id, field, content, source)
-SELECT d.organization_id, d.id, f.field, f.content, 'indexer'
+// headlineOptions are the options of the ts_headline fragments of the
+// matched fields, the ones of Hit.Highlights.
+const headlineOptions = `'StartSel=<mark>, StopSel=</mark>, MaxFragments=2'`
+
+// matchedFields sets the matched fields of the hits of a query with text
+// (SRC-02, WP-786): the title, the summary of a type without field rows,
+// the field rows (core.<column>, attributes.<key>) with their ts_headline
+// fragment, and the identifiers that meet the identifier conditions of the
+// text with their value in canonical form. A text field counts when its
+// own text matches the query or when the fragment marks a word of it, so a
+// hit matched by several fields together names each of them. read holds
+// the readable fields of a hit of a restricted type (restrictedQuery): only
+// those and the title count (RBA-07, WP-266); the identifiers of the other
+// hits are those that count for a hit (openIdentifierFields). A contact
+// hit names no field: its name, e-mail and phone are personal data of the
+// PII vault (AUD-01).
+func matchedFields(ctx context.Context, tx pgx.Tx, q *Query, restricted []string, hits []Hit, read []*string) error {
+	var at []int
+	var docIDs, types, entityIDs, identAllowed []string
+	var allowed []*string
+	open := openIdentifierFields(q, restricted)
+	for i := range hits {
+		h := &hits[i]
+		if h.EntityType == "contact" {
+			continue
+		}
+		var readable []string
+		if read[i] != nil {
+			readable = strings.Split(*read[i], ",")
+		}
+		var idents []string
+		for _, f := range identifierFields[h.EntityType] {
+			if (read[i] != nil && slices.Contains(readable, f)) || (read[i] == nil && slices.Contains(open, f)) {
+				idents = append(idents, f)
+			}
+		}
+		at = append(at, i)
+		docIDs, types, entityIDs = append(docIDs, h.ID), append(types, h.EntityType), append(entityIDs, h.EntityID)
+		allowed, identAllowed = append(allowed, read[i]), append(identAllowed, strings.Join(idents, ","))
+	}
+	if len(at) == 0 {
+		return nil
+	}
+	found := make([][]MatchedField, len(hits))
+	a := &sqlArgs{}
+	ids, typ, allow := a.add(docIDs), a.add(types), a.add(allowed)
+	tsq := fmt.Sprintf("websearch_to_tsquery('simple', $%d)", a.add(q.Text))
+	fieldTypesArg := a.add(fieldTypes)
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT h.ord, m.field, m.hl
+		FROM unnest($%[1]d::uuid[], $%[2]d::text[], $%[3]d::text[]) WITH ORDINALITY AS h(id, entity_type, allowed, ord)
+		CROSS JOIN LATERAL (
+			SELECT 'title' AS field, d.title AS content, ts_headline('simple', d.title, %[4]s, %[5]s) AS hl,
+				to_tsvector('simple', d.title) @@ %[4]s AS matched
+			FROM search_document d WHERE d.id = h.id
+			UNION ALL
+			SELECT 'summary', d.summary, ts_headline('simple', d.summary, %[4]s, %[5]s), to_tsvector('simple', d.summary) @@ %[4]s
+			FROM search_document d WHERE d.id = h.id AND h.entity_type <> ALL($%[6]d::text[])
+			UNION ALL
+			SELECT f.field, f.content, ts_headline('simple', f.content, %[4]s, %[5]s), f.vector @@ %[4]s
+			FROM search_document_field f
+			WHERE f.document_id = h.id AND (h.allowed IS NULL OR f.field = ANY(string_to_array(h.allowed, ',')))
+		) AS m
+		WHERE m.matched OR (strpos(m.hl, '<mark>') > 0 AND strpos(m.content, '<mark>') = 0)`,
+		ids, typ, allow, tsq, headlineOptions, fieldTypesArg), a.args...)
+	if err != nil {
+		return fmt.Errorf("matched fields: %w", err)
+	}
+	for rows.Next() {
+		var ord int
+		var m MatchedField
+		if err = rows.Scan(&ord, &m.Field, &m.Highlight); err != nil {
+			rows.Close()
+			return err
+		}
+		found[at[ord-1]] = append(found[at[ord-1]], m)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("matched fields: %w", err)
+	}
+	if conds, ok := ParseIdentifiers(q.Text); ok {
+		b := &sqlArgs{}
+		org, typArg, eid, fl := b.add(q.OrganizationID), b.add(types), b.add(entityIDs), b.add(identAllowed)
+		cond := identifierCond(b, &conds)
+		rows, err = tx.Query(ctx, fmt.Sprintf(`SELECT DISTINCT h.ord, si.field, si.norm
+			FROM unnest($%d::text[], $%d::uuid[], $%d::text[]) WITH ORDINALITY AS h(entity_type, entity_id, fields, ord)
+			JOIN search_identifier si ON si.organization_id = $%d AND si.entity_type = h.entity_type AND si.entity_id = h.entity_id
+				AND si.field = ANY(string_to_array(h.fields, ','))
+			WHERE %s`, typArg, eid, fl, org, cond), b.args...)
+		if err != nil {
+			return fmt.Errorf("matched identifiers: %w", err)
+		}
+		for rows.Next() {
+			var ord int
+			var m MatchedField
+			if err = rows.Scan(&ord, &m.Field, &m.Highlight); err != nil {
+				rows.Close()
+				return err
+			}
+			if slices.Contains(macFields, m.Field) {
+				m.Highlight = canonicalMAC(m.Highlight)
+			}
+			found[at[ord-1]] = append(found[at[ord-1]], m)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("matched identifiers: %w", err)
+		}
+	}
+	for i := range hits {
+		if len(found[i]) == 0 {
+			continue
+		}
+		entityType := hits[i].EntityType
+		slices.SortStableFunc(found[i], func(x, y MatchedField) int {
+			if c := fieldRank(entityType, x.Field) - fieldRank(entityType, y.Field); c != 0 {
+				return c
+			}
+			return strings.Compare(x.Field+"\x00"+x.Highlight, y.Field+"\x00"+y.Highlight)
+		})
+		hits[i].MatchedFields = found[i]
+	}
+	return nil
+}
+
+// fieldRank orders the matched fields of a hit: the title, the summary,
+// the summary fields in summary order, other columns, the custom fields,
+// the identifiers in the order of their fields.
+func fieldRank(entityType, field string) int {
+	switch field {
+	case "title":
+		return 0
+	case "summary":
+		return 1
+	}
+	if i := slices.Index(SummaryFields[entityType], field); i >= 0 {
+		return 10 + i
+	}
+	if i := slices.Index(identifierFields[entityType], field); i >= 0 {
+		return 300 + i
+	}
+	if strings.HasPrefix(field, "attributes.") {
+		return 200
+	}
+	return 100
+}
+
+// canonicalMAC writes a MAC in normal form (twelve hex digits) with colons.
+func canonicalMAC(norm string) string {
+	if len(norm) != 12 {
+		return norm
+	}
+	parts := make([]string, 0, 6)
+	for i := 0; i < 12; i += 2 {
+		parts = append(parts, norm[i:i+2])
+	}
+	return strings.Join(parts, ":")
+}
+
+// reindexSource is an entity type the rebuild of the index reads: its table
+// with the condition of a live entity, the expressions of title, summary
+// and url of its document (the ones of the index triggers and indexers) and
+// the statement of the field rows of its documents ("" for a type without).
+type reindexSource struct {
+	entityType, table, live, title, summary, url, fields string
+}
+
+// reindexSources are the indexed entity types in the order of the rebuild.
+// A location links to its node in the tree, a contact has no page and no
+// url (migration 000182, F-334; the asset summary of migration 000233). The
+// field rows of a ci, document and ticket come from the columns of their
+// summary (WP-266, backfill of migration 000228), a CI also gets its
+// searchable attributes (search_ci_attribute_fields), the field rows of an
+// asset are the ones of its trigger (search_asset_fields, source 'trigger';
+// WP-308, migration 000233); an empty value gets no row.
+var reindexSources = []reindexSource{
+	{entityType: "ci", table: "ci", live: "e.deleted_at IS NULL", title: "e.name",
+		summary: "concat_ws(' ', e.hostname, e.manufacturer, e.model, e.serial_number, e.os_name, e.os_version)", url: "'/cmdb/' || e.id",
+		fields: `SELECT d.id AS document_id, f.field, f.content, 'indexer' AS source
   FROM search_document d JOIN ci e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL (VALUES ('core.hostname', e.hostname), ('core.manufacturer', e.manufacturer), ('core.model', e.model),
        ('core.serial_number', e.serial_number), ('core.os_name', e.os_name), ('core.os_version', e.os_version)) AS f(field, content)
- WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND f.content <> ''
+ WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND d.entity_id = ANY($2::uuid[]) AND f.content <> ''
 UNION ALL
-SELECT d.organization_id, d.id, f.field, f.content, 'indexer'
+SELECT d.id, f.field, f.content, 'indexer'
   FROM search_document d JOIN ci e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL search_ci_attribute_fields(e) AS f
- WHERE d.organization_id = $1 AND d.entity_type = 'ci'
-UNION ALL
-SELECT d.organization_id, d.id, f.field, f.content, 'trigger'
+ WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND d.entity_id = ANY($2::uuid[])`},
+	{entityType: "asset", table: "asset", live: "true", title: "e.name", summary: "search_asset_summary(e)", url: "'/assets'",
+		fields: `SELECT d.id AS document_id, f.field, f.content, 'trigger' AS source
   FROM search_document d JOIN asset e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL search_asset_fields(e) AS f
- WHERE d.organization_id = $1 AND d.entity_type = 'asset'
-UNION ALL
-SELECT d.organization_id, d.id, f.field, f.content, 'indexer'
+ WHERE d.organization_id = $1 AND d.entity_type = 'asset' AND d.entity_id = ANY($2::uuid[])`},
+	{entityType: "document", table: "document", live: "e.deleted_at IS NULL", title: "e.title",
+		summary: "concat_ws(' ', e.description, e.file_name, e.category, array_to_string(e.tags, ' '))", url: "'/documents'",
+		fields: `SELECT d.id AS document_id, f.field, f.content, 'indexer' AS source
   FROM search_document d JOIN document e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL (VALUES ('core.description', e.description), ('core.file_name', e.file_name), ('core.category', e.category),
        ('core.tags', array_to_string(e.tags, ' '))) AS f(field, content)
- WHERE d.organization_id = $1 AND d.entity_type = 'document' AND f.content <> ''
-UNION ALL
-SELECT d.organization_id, d.id, f.field, f.content, 'indexer'
+ WHERE d.organization_id = $1 AND d.entity_type = 'document' AND d.entity_id = ANY($2::uuid[]) AND f.content <> ''`},
+	{entityType: "ticket", table: "ticket", live: "true", title: "e.title",
+		summary: `concat_ws(' ', e.description, e.status, e.priority, e.category, (SELECT string_agg(tg.key, ' ' ORDER BY tg.key)
+			FROM ticket_tag tt JOIN tag tg ON tg.id = tt.tag_id WHERE tt.ticket_id = e.id))`, url: "'/tickets'",
+		fields: `SELECT d.id AS document_id, f.field, f.content, 'indexer' AS source
   FROM search_document d JOIN ticket e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL (VALUES ('core.description', e.description), ('core.status', e.status), ('core.priority', e.priority),
        ('core.category', e.category),
        ('core.tags', (SELECT string_agg(tg.key, ' ' ORDER BY tg.key) FROM ticket_tag tt JOIN tag tg ON tg.id = tt.tag_id
                        WHERE tt.ticket_id = e.id))) AS f(field, content)
- WHERE d.organization_id = $1 AND d.entity_type = 'ticket' AND f.content <> ''`
+ WHERE d.organization_id = $1 AND d.entity_type = 'ticket' AND d.entity_id = ANY($2::uuid[]) AND f.content <> ''`},
+	{entityType: "contact", table: "contact", live: "true", title: "COALESCE(e.display_name, '')",
+		summary: "concat_ws(' ', e.email, e.phone, e.role, e.department, e.notes)", url: "''"},
+	{entityType: "location", table: "location", live: "true", title: "e.name", summary: "e.kind", url: "'/locations?node=' || e.id"},
+	{entityType: "reservation", table: "reservation", live: "true", title: "COALESCE(e.project_ref, e.reason, 'reservation')",
+		summary: "concat_ws(' ', e.state, e.reason, e.project_ref)", url: "'/reservations'"},
+}
 
-// ReindexTenant rebuilds the index of the whole organization. The index must
-// stay complete for every principal, so the rebuild runs org-wide even when a
-// client-scoped administrator triggers it; it returns only a count (E-08).
-// The expressions are the ones of the index triggers: a location links to
-// its node in the tree, a contact has no page and no url (migration 000182,
-// F-334; the asset summary of migration 000233). The field rows of the old
-// documents go with them (cascade), the new ones are written in the same
-// transaction (WP-266), and so are all identifier rows of the organization,
-// including network.* (search_identifier_rows, WP-308).
+// reindexLive is the condition that the entity of a row d of
+// search_document is live for the rebuild (reindexSources); the document
+// of another type has none.
+func reindexLive() string {
+	var b strings.Builder
+	b.WriteString("CASE d.entity_type")
+	for i := range reindexSources {
+		src := &reindexSources[i]
+		fmt.Fprintf(&b, " WHEN '%s' THEN EXISTS (SELECT 1 FROM %s e WHERE e.id = d.entity_id AND e.organization_id = d.organization_id AND %s)",
+			src.entityType, src.table, src.live)
+	}
+	b.WriteString(" ELSE false END")
+	return b.String()
+}
+
+// ReindexTenant rebuilds the index of the whole organization (SRC-02,
+// WP-786). The index must stay complete for every principal, so the
+// rebuild runs org-wide even when a client-scoped administrator triggers
+// it; it returns only a count (E-08). It reads every entity type
+// (reindexSources) in batches of ReindexBatchSize entities ordered by id,
+// each in a transaction of its own: the batch upserts the documents of its
+// entities, their field rows (WP-266, WP-308) and their identifier rows,
+// including network.* (search_identifier_rows, migration 000233). So no
+// transaction holds the locks of the whole index, and every search during
+// the rebuild finds the documents of the entities it can see. A last
+// transaction deletes the documents the run did not touch (updated_at
+// before its start) whose entity is gone, with their field rows (cascade)
+// and their identifier rows without source_id (the others are the rows of
+// the triggers of their source). A failed batch ends the rebuild with its
+// error; the batches written before stay.
 func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
-	var count int64
 	scope, ok := database.TenantScopeFromContext(ctx)
 	if !ok {
 		return ReindexResult{}, database.ErrNoTenantScope
@@ -683,31 +895,103 @@ func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (Reindex
 		return ReindexResult{}, database.ErrTenantMismatch
 	}
 	orgWide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	var start time.Time
+	if err := database.WithTenant(ctx, r.pool, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&start)
+	}); err != nil {
+		return ReindexResult{}, err
+	}
+	count := 0
+	for i := range reindexSources {
+		src := &reindexSources[i]
+		after := "00000000-0000-0000-0000-000000000000"
+		for {
+			n, last, err := r.reindexBatch(ctx, &orgWide, src, after)
+			if err != nil {
+				return ReindexResult{Indexed: count}, fmt.Errorf("reindex %s: %w", src.entityType, err)
+			}
+			count += n
+			if n < ReindexBatchSize {
+				break
+			}
+			after = last
+		}
+	}
 	err := database.WithTenant(ctx, r.pool, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `WITH ident AS (DELETE FROM search_identifier WHERE organization_id=$1)
-			DELETE FROM search_document WHERE organization_id=$1`, orgID); err != nil {
-			return err
-		}
-		cmd, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata)
-SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,serial_number,os_name,os_version),'/cmdb/'||id,'{}'::jsonb FROM ci WHERE organization_id=$1 AND deleted_at IS NULL
-UNION ALL SELECT organization_id,'asset',id,name,search_asset_summary(asset),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
-UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1 AND deleted_at IS NULL
-UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,(SELECT string_agg(tg.key,' ' ORDER BY tg.key) FROM ticket_tag tt JOIN tag tg ON tg.id=tt.tag_id WHERE tt.ticket_id=ticket.id)),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
-UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'','{}'::jsonb FROM contact WHERE organization_id=$1
-UNION ALL SELECT organization_id,'location',id,name,kind,'/locations?node='||id,'{}'::jsonb FROM location WHERE organization_id=$1
-UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)
-		if err != nil {
-			return err
-		}
-		count = cmd.RowsAffected()
-		if _, err = tx.Exec(ctx, reindexFields, orgID); err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `INSERT INTO search_identifier (organization_id, entity_type, entity_id, field, source_id, norm, addr)
-			SELECT $1, r.entity_type, r.entity_id, r.field, r.source_id, r.norm, r.addr FROM search_identifier_rows($1) AS r`, orgID)
+		_, err := tx.Exec(ctx, `WITH gone AS (
+			DELETE FROM search_document d WHERE d.organization_id = $1 AND d.updated_at < $2 AND NOT (`+reindexLive()+`)
+			RETURNING d.entity_type, d.entity_id
+		)
+		DELETE FROM search_identifier s USING gone
+		WHERE s.organization_id = $1 AND s.entity_type = gone.entity_type AND s.entity_id = gone.entity_id AND s.source_id IS NULL`,
+			orgID, start)
 		return err
 	})
-	return ReindexResult{Indexed: int(count)}, err
+	if err != nil {
+		return ReindexResult{Indexed: count}, fmt.Errorf("reindex cleanup: %w", err)
+	}
+	return ReindexResult{Indexed: count}, nil
+}
+
+// reindexBatch rebuilds the documents of the next ReindexBatchSize live
+// entities of the source after the id in one transaction: the documents
+// (upsert, updated_at = now()), their field rows (stale rows deleted, the
+// others upserted) and their identifier rows (replaced). It returns the
+// number of entities and the last id.
+func (r *PGRepository) reindexBatch(ctx context.Context, scope *database.TenantScope, src *reindexSource, after string) (n int, last string, err error) {
+	err = database.WithTenant(ctx, r.pool, scope, func(ctx context.Context, tx pgx.Tx) error {
+		orgID := scope.OrgID
+		rows, qerr := tx.Query(ctx, fmt.Sprintf(`SELECT e.id::text FROM %s e WHERE e.organization_id = $1 AND e.id > $2::uuid AND %s
+			ORDER BY e.id LIMIT $3`, src.table, src.live), orgID, after, ReindexBatchSize)
+		if qerr != nil {
+			return qerr
+		}
+		ids, qerr := pgx.CollectRows(rows, pgx.RowTo[string])
+		if qerr != nil || len(ids) == 0 {
+			return qerr
+		}
+		if _, qerr = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata)
+			SELECT e.organization_id, '%s', e.id, %s, %s, %s, '{}'::jsonb FROM %s e
+			WHERE e.organization_id = $1 AND e.id = ANY($2::uuid[]) ORDER BY e.id
+			ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
+				url = EXCLUDED.url, metadata = EXCLUDED.metadata, updated_at = now()`,
+			src.entityType, src.title, src.summary, src.url, src.table), orgID, ids); qerr != nil {
+			return qerr
+		}
+		if src.fields != "" {
+			if _, qerr = tx.Exec(ctx, `WITH fresh AS (`+src.fields+`), stale AS (
+				DELETE FROM search_document_field s USING search_document d
+				WHERE d.id = s.document_id AND d.organization_id = $1 AND d.entity_type = $3 AND d.entity_id = ANY($2::uuid[])
+				  AND s.organization_id = $1
+				  AND NOT EXISTS (SELECT 1 FROM fresh WHERE fresh.document_id = s.document_id AND fresh.field = s.field)
+			)
+			INSERT INTO search_document_field (organization_id, document_id, field, content, source)
+			SELECT $1, fresh.document_id, fresh.field, fresh.content, fresh.source FROM fresh
+			ON CONFLICT (document_id, field) DO UPDATE SET content = EXCLUDED.content, source = EXCLUDED.source
+				WHERE search_document_field.content <> EXCLUDED.content OR search_document_field.source <> EXCLUDED.source`,
+				orgID, ids, src.entityType); qerr != nil {
+				return qerr
+			}
+		}
+		if _, ok := identifierFields[src.entityType]; ok {
+			if _, qerr = tx.Exec(ctx, `DELETE FROM search_identifier WHERE organization_id = $1 AND entity_type = $2 AND entity_id = ANY($3::uuid[])`,
+				orgID, src.entityType, ids); qerr != nil {
+				return qerr
+			}
+			if _, qerr = tx.Exec(ctx, `INSERT INTO search_identifier (organization_id, entity_type, entity_id, field, source_id, norm, addr)
+				SELECT $1, r.entity_type, r.entity_id, r.field, r.source_id, r.norm, r.addr FROM search_identifier_rows($1) AS r
+				WHERE r.entity_type = $2 AND r.entity_id = ANY($3::uuid[])
+				ON CONFLICT (source_id, field, entity_id) WHERE source_id IS NOT NULL DO NOTHING`, orgID, src.entityType, ids); qerr != nil {
+				return qerr
+			}
+		}
+		n, last = len(ids), ids[len(ids)-1]
+		return nil
+	})
+	if err != nil {
+		return 0, after, err
+	}
+	return n, last, nil
 }
 
 // contactDetails completes contact hits for the contact card of the command

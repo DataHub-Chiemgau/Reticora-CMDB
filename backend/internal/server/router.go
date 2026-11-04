@@ -458,6 +458,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// caller, a queued snapshot with that of its creator (WP-727).
 	historyHandler := history.NewHandler(repos.History).WithCIs(HistoryCIs(&repos)).
 		WithCreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver))
+	// The rebuild of the search index is the job search.reindex (WP-786),
+	// wired in registerJobKinds; without the job model it runs in the
+	// request.
+	searchHandler := search.NewHandler(repos.Search, repos.Permission)
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -529,6 +533,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running import is cancelled with import:run like its
 			// start (WP-301, WP-514).
 			WithKind(importer.JobKind, identity.PermImportRun, nil).
+			// The rebuild of the search index is read with search:write
+			// like its start (WP-786).
+			WithKind(search.ReindexJobKind, identity.PermSearchWrite, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -568,7 +575,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
-			documentScanner)
+			documentScanner, searchHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -700,7 +707,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ticket.NewHandler(tickets).WithDocuments(repos.Document),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
-		search.NewHandler(repos.Search, repos.Permission),
+		searchHandler,
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflowRuns),

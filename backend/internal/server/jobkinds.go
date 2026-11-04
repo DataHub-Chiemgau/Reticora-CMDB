@@ -9,6 +9,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
 
 // The job kinds the application submits (JOB-01, TEC-14), registered in one
@@ -57,6 +58,11 @@ var (
 	// ends without job.failed. It is not cancellable while running.
 	documentScanJobKind = jobs.Kind{Name: document.ScanJobKind, MaxAttempts: 5, Timeout: 2 * time.Minute,
 		Backoff: jobs.ExponentialBackoff(30*time.Second, 15*time.Minute)}
+	// searchReindexJobKind (WP-786): the rebuild of the search index of an
+	// organization writes in batches; a failed run keeps the batches written
+	// and is not repeated (a new POST /search/reindex starts over). It is
+	// not cancellable while running.
+	searchReindexJobKind = jobs.Kind{Name: search.ReindexJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -71,12 +77,15 @@ type jobKind struct {
 // of documents its scanner (nil while the module documents is off). The
 // test run of a draft runs on the draft handler (without a database its
 // handler fails, the route answers 503 before), an import run on the
-// import handler (WP-775).
+// import handler (WP-775), the rebuild of the search index on the search
+// handler (WP-786).
 func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs,
-	draftHandler *metamodel.Handler, importHandler *importer.ImportHandler, scanner *document.Scanner) []jobKind {
+	draftHandler *metamodel.Handler, importHandler *importer.ImportHandler, scanner *document.Scanner,
+	searchHandler *search.Handler) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
-		{kind: importJobKind, handler: importHandler.RunJob}}
+		{kind: importJobKind, handler: importHandler.RunJob},
+		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -102,14 +111,14 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 // wired and new versions stay pending_scan (fail-closed, E-42).
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
-	scanner *document.Scanner) {
+	scanner *document.Scanner, searchHandler *search.Handler) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}
 	draftHandler.WithJobs(svc)
-	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, importHandler, scanner) {
+	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, importHandler, scanner, searchHandler) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -117,6 +126,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	}
 	if queue != nil {
 		historyHandler.WithQueue(queue)
+		searchHandler.WithQueue(queue)
 		draftHandler.WithQueue(queue)
 		importHandler.WithQueue(queue)
 		if templateJobs != nil {
@@ -128,6 +138,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		return
 	}
 	historyHandler.WithJobs(svc)
+	searchHandler.WithJobs(svc)
 	if ciService != nil {
 		ciService.WithBulkJobs(svc)
 	}

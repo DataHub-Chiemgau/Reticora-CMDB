@@ -183,6 +183,21 @@ type Hit struct {
 	Document
 	Score      float64  `json:"score"`
 	Highlights []string `json:"highlights,omitempty"`
+	// MatchedFields are the fields that matched the search text (SRC-02,
+	// WP-786), with field permissions only the readable ones (RBA-07,
+	// WP-266). Only the PostgreSQL index fills them, for a query with
+	// highlighting.
+	MatchedFields []MatchedField `json:"matched_fields,omitempty"`
+}
+
+// MatchedField is a field of a hit that matched the search text: the key of
+// the field row or identifier (title, summary, core.<column>,
+// attributes.<key>, asset.inventory_no, network.ip, network.mac) and its
+// highlight, the ts_headline fragment of a text field or the value of an
+// identifier in canonical form (a MAC with colons, an IP as host()).
+type MatchedField struct {
+	Field     string `json:"field"`
+	Highlight string `json:"highlight"`
 }
 
 type Result struct {
@@ -200,9 +215,19 @@ type Result struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
+// ReindexResult is the result of a rebuild of the index: the number of
+// documents written. It is the result of the job search.reindex.
 type ReindexResult struct {
 	Indexed int `json:"indexed"`
 }
+
+// ReindexJobKind is the job kind of the rebuild of the index of an
+// organization (SRC-02, WP-786).
+const ReindexJobKind = "search.reindex"
+
+// ReindexBatchSize is the number of entities of one transaction of
+// PGRepository.ReindexTenant (WP-786).
+const ReindexBatchSize = 1000
 
 type Backend interface {
 	Ping(ctx context.Context) error
