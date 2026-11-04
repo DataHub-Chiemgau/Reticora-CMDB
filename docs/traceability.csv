@@ -1341,3 +1341,4 @@ MET-54;B/G1, Teil P2/G2;B;backend/internal/metamodel/import_roundtrip_integratio
 JOB-02;[B], Zusätze [P2], [P3];B;backend/internal/ci/computed_refresh_integration_test.go;WP-718
 RBA-07;[P2];B;backend/internal/permission/fields_test.go;WP-264
 MET-10;B/G1, Teil P2/G2;B;backend/internal/permission/fields_integration_test.go;WP-264
+SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-325

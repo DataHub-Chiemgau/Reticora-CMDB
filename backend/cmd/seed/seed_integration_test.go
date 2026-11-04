@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -526,6 +527,7 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		{Objects: 40, RelationshipsPerCI: -1, At: at}, {Objects: 40, RelationshipsPerCI: 1, At: at},
 		{Objects: 40, RelationshipsPerCI: MaxRelationshipsPerCI + 1, At: at},
 		{Objects: 40, Orgs: -1, At: at}, {Objects: 40, Orgs: MaxOrgs + 1, At: at},
+		{Objects: 40, At: at, APIKey: true, APIKeyRole: "auditor"}, {Objects: 40, At: at, APIKeyRole: "Viewer"},
 	} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("options %+v accepted", o)
@@ -542,6 +544,8 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		"the largest seed": {Objects: MaxObjects, Metrics: 2000, InterfacesPerCI: MaxInterfacesPerCI, IPsPerCI: MaxIPsPerCI,
 			RelationshipsPerCI: MaxRelationshipsPerCI, Orgs: MaxOrgs, At: at},
 		"one per CI and two relationships": {Objects: 40, InterfacesPerCI: 1, IPsPerCI: 1, RelationshipsPerCI: 2, At: at},
+		"the key of viewer":                {Objects: 40, At: at, APIKey: true, APIKeyRole: "viewer"},
+		"the key of client_technician":     {Objects: 40, At: at, APIKey: true, APIKeyRole: "client_technician"},
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s is refused: %v", name, err)
@@ -561,7 +565,240 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 			t.Errorf("%d objects: dependency distance %d reaches the %d servers", objects, farthest, servers)
 		}
 	}
+	// An empty APIKeyRole is org_admin (WP-325).
+	empty := Options{Objects: 40, At: at, APIKey: true}
+	if err := empty.Validate(); err != nil || empty.keyRole() != "org_admin" || APIKeyName(empty.keyRole()) != "load-test" ||
+		APIKeyName("viewer") != "load-test-viewer" {
+		t.Errorf("empty APIKeyRole: %v, role %q, names %q, %q", err, empty.keyRole(), APIKeyName(empty.keyRole()), APIKeyName("viewer"))
+	}
 	if got := ID("demo", "ci", "1"); len(got) != 36 || got != ID("demo", "ci", "1") {
 		t.Errorf("ID = %q", got)
 	}
+}
+
+// phase2Counts reads the Phase-2 rows of one organization (WP-325) through
+// the maintenance pool.
+func phase2Counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	for name, query := range map[string]string{
+		"derived_type": `SELECT count(*) FROM ci_type c JOIN ci_type p ON p.id = c.parent_type_id
+			WHERE c.organization_id = $1 AND p.organization_id IS NULL AND p.key = '` + ParentTypeKey + `'
+			AND c.key IN ('` + ChassisTypeKey + `', '` + BladeTypeKey + `')`,
+		"type_attribute": `SELECT count(*) FROM attribute_definition WHERE organization_id = $1 AND scope = 'type'`,
+		"attribute_set":  `SELECT count(*) FROM attribute_set WHERE organization_id = $1`,
+		"set_attribute":  `SELECT count(*) FROM attribute_definition WHERE organization_id = $1 AND scope = 'set'`,
+		"type_attribute_set": `SELECT count(*) FROM ci_type_attribute_set a JOIN ci_type c ON c.id = a.ci_type_id
+			WHERE c.organization_id = $1`,
+		"template": `SELECT count(*) FROM template WHERE organization_id = $1`,
+		"template_published": `SELECT count(*) FROM template_version v JOIN template t ON t.id = v.template_id
+			WHERE t.organization_id = $1 AND v.status = 'published' AND v.published_at IS NOT NULL`,
+		"template_version": `SELECT count(*) FROM template_version v JOIN template t ON t.id = v.template_id
+			WHERE t.organization_id = $1`,
+		"template_current": `SELECT count(*) FROM template t WHERE t.organization_id = $1
+			AND t.current_version = (SELECT max(v.version) FROM template_version v WHERE v.template_id = t.id)`,
+		"template_computed": `SELECT count(*) FROM template_version_item i JOIN template_version v ON v.id = i.template_version_id
+			JOIN template t ON t.id = v.template_id JOIN attribute_definition d ON d.id = i.attribute_definition_id
+			WHERE t.organization_id = $1 AND d.organization_id IS NULL AND d.key = '` + ComputedKey + `'`,
+		"computed_definition": `SELECT count(*) FROM attribute_definition WHERE organization_id = $1 AND key = '` + ComputedKey + `'`,
+		"validation_rule": `SELECT count(*) FROM metamodel_rule WHERE organization_id = $1 AND kind = 'validation'
+			AND ast IS NOT NULL AND ci_type_id IS NOT NULL`,
+		"conditional_rule": `SELECT count(*) FROM metamodel_rule WHERE organization_id = $1 AND kind = 'required'
+			AND condition IS NOT NULL AND ci_type_id IS NOT NULL`,
+		"layout_engineer": `SELECT count(*) FROM form_layout l JOIN role r ON r.id = l.role_id
+			WHERE l.organization_id = $1 AND r.name = 'engineer' AND l.template_id IS NOT NULL`,
+		"layout_viewer": `SELECT count(*) FROM form_layout l JOIN role r ON r.id = l.role_id
+			WHERE l.organization_id = $1 AND r.name = 'viewer' AND l.template_id IS NOT NULL`,
+		"grant_none": `SELECT count(*) FROM field_grant g JOIN role r ON r.id = g.role_id
+			WHERE g.organization_id = $1 AND r.name = 'viewer' AND g.object_kind = 'ci' AND g.level = 'none'
+			AND g.field_key LIKE 'attributes.%'`,
+		"grant_read": `SELECT count(*) FROM field_grant g JOIN role r ON r.id = g.role_id
+			WHERE g.organization_id = $1 AND r.name = 'viewer' AND g.object_kind = 'ci' AND g.level = 'read'
+			AND g.field_key LIKE 'attributes.%'`,
+		"sensitive_without_grant": `SELECT count(*) FROM field_sensitivity s WHERE s.organization_id = $1 AND s.object_kind = 'ci'
+			AND NOT EXISTS (SELECT 1 FROM field_grant g WHERE g.organization_id = s.organization_id AND g.field_key = s.field_key)`,
+		"searchable": `SELECT count(*) FROM attribute_definition WHERE organization_id = $1 AND searchable`,
+		"user":       `SELECT count(*) FROM app_user WHERE organization_id = $1`,
+		"engineer": `SELECT count(*) FROM role_assignment a JOIN role r ON r.id = a.role_id JOIN app_user u ON u.id = a.user_id
+			WHERE a.organization_id = $1 AND r.name = 'engineer' AND u.email LIKE 'engineer@%' AND a.scope_client_id IS NULL`,
+		"viewer": `SELECT count(*) FROM role_assignment a JOIN role r ON r.id = a.role_id JOIN app_user u ON u.id = a.user_id
+			WHERE a.organization_id = $1 AND r.name = 'viewer' AND u.email LIKE 'viewer@%' AND a.scope_client_id IS NULL`,
+		"client_technician": `SELECT count(*) FROM role_assignment a JOIN role r ON r.id = a.role_id
+			JOIN app_user u ON u.id = a.user_id JOIN client c ON c.id = a.scope_client_id
+			WHERE a.organization_id = $1 AND r.name = 'client_technician' AND u.email LIKE 'client_technician@%' AND c.slug = 'hq'`,
+		"metamodel_audit": `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND resource_type IN
+			('ci_type', 'attribute_definition', 'attribute_set', 'template', 'template_version', 'metamodel_rule', 'form_layout')`,
+	} {
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, orgID).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// TestSeedSIM01Phase2 covers the Phase-2 part of SIM-01 (WP-325): through
+// the services of the metamodel WPs the demo organization holds two types
+// derived from server, two attribute sets assigned to them, two templates
+// with two published versions each that use the computed system attribute
+// warranty_days_left, a validation and a conditional rule, layouts of each
+// template for engineer and viewer, field grants of viewer, a sensitive
+// attribute without a grant and the users of the standard roles, the client
+// technician scoped to the client hq; acme holds a derived type, a template
+// with one published version and the user viewer. The seed defines no
+// further searchable attribute and keeps the SIM-01 data set. The load-test
+// key of APIKeyRole viewer belongs to the user viewer with the permissions
+// of the role; a run for org_admin issues load-test and leaves
+// load-test-viewer active. A further run changes no count and writes no
+// metamodel audit entry.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedSIM01Phase2(t *testing.T) {
+	f := scopetest.Seed(t, "07")
+	ctx := context.Background()
+	opts := Options{Prefix: "seedp2-", Objects: baseObjects, Metrics: 0, At: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
+		APIKey: true, APIKeyRole: "viewer"}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
+
+	summary, err := Run(ctx, f.App, opts)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	demo, acme := summary.Orgs[0].ID, summary.Orgs[1].ID
+	admin := ID("seedp2-demo", "user", "admin")
+	expected := map[string]map[string]int{
+		demo: {
+			"derived_type": 2, "type_attribute": 5, "attribute_set": 2, "set_attribute": 3, "type_attribute_set": 3,
+			"template": 2, "template_published": 4, "template_version": 4, "template_current": 2, "template_computed": 4,
+			"computed_definition": 0, "validation_rule": 1, "conditional_rule": 1, "layout_engineer": 2, "layout_viewer": 2,
+			"grant_none": 1, "grant_read": 1, "sensitive_without_grant": 1, "searchable": 1,
+			"user": 4, "engineer": 1, "viewer": 1, "client_technician": 1,
+		},
+		acme: {
+			"derived_type": 1, "type_attribute": 3, "attribute_set": 0, "set_attribute": 0, "type_attribute_set": 0,
+			"template": 1, "template_published": 1, "template_version": 1, "template_current": 1, "template_computed": 1,
+			"computed_definition": 0, "validation_rule": 0, "conditional_rule": 0, "layout_engineer": 0, "layout_viewer": 0,
+			"grant_none": 0, "grant_read": 0, "sensitive_without_grant": 0, "searchable": 1,
+			"user": 2, "engineer": 0, "viewer": 1, "client_technician": 0,
+		},
+	}
+	audits := map[string]int{}
+	check := func(round string) {
+		t.Helper()
+		for org, want := range expected {
+			got := phase2Counts(t, f, org)
+			for name, n := range want {
+				if got[name] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, name, got[name], n)
+				}
+			}
+			if before, ok := audits[org]; !ok {
+				audits[org] = got["metamodel_audit"]
+			} else if got["metamodel_audit"] != before {
+				t.Errorf("%s, org %s: %d metamodel audit entries, %d after the first run", round, org, got["metamodel_audit"], before)
+			}
+			// The SIM-01 data set stays as it is.
+			metrics := 0
+			if org == acme {
+				metrics = baseObjects
+			}
+			base := counts(t, f, org)
+			for table, n := range seedCounts(baseObjects, metrics) {
+				if base[table] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, table, base[table], n)
+				}
+			}
+		}
+	}
+	check("first run")
+
+	// The administrator publishes the versions and is the actor of the
+	// metamodel audit entries.
+	var byAdmin, byOthers int
+	if err = f.Admin.QueryRow(ctx, `SELECT count(*) FILTER (WHERE v.published_by = $2),
+			count(*) FILTER (WHERE v.published_by IS DISTINCT FROM $2)
+		FROM template_version v JOIN template t ON t.id = v.template_id WHERE t.organization_id = $1`,
+		demo, admin).Scan(&byAdmin, &byOthers); err != nil || byAdmin != 4 || byOthers != 0 {
+		t.Errorf("publishers: %d versions by the administrator, %d others (err %v)", byAdmin, byOthers, err)
+	}
+	var otherActors int
+	if err = f.Admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE organization_id = $1
+		AND resource_type IN ('ci_type', 'template_version', 'form_layout') AND actor_id IS DISTINCT FROM $2`,
+		demo, admin).Scan(&otherActors); err != nil || otherActors != 0 {
+		t.Errorf("metamodel audit entries of another actor: %d (err %v)", otherActors, err)
+	}
+
+	// The load-test key of viewer belongs to the user viewer and holds the
+	// permissions of the role (AUT-04).
+	type apiKey struct {
+		owner       string
+		permissions []string
+	}
+	keyOf := func(name string) (key apiKey, active int) {
+		t.Helper()
+		if countErr := f.Admin.QueryRow(ctx, `SELECT count(*) FROM api_key WHERE organization_id = $1 AND name = $2
+			AND revoked_at IS NULL`, demo, name).Scan(&active); countErr != nil {
+			t.Fatal(countErr)
+		}
+		if keyErr := f.Admin.QueryRow(ctx, `SELECT created_by::text, permissions FROM api_key
+			WHERE organization_id = $1 AND name = $2 AND revoked_at IS NULL LIMIT 1`, demo, name).
+			Scan(&key.owner, &key.permissions); keyErr != nil {
+			t.Fatalf("api key %s: %v", name, keyErr)
+		}
+		return key, active
+	}
+	viewerPermissions, _ := permission.StandardRolePermissions("viewer")
+	if key, active := keyOf("load-test-viewer"); key.owner != ID("seedp2-demo", "user", "viewer") || active != 1 ||
+		!sameKeys(key.permissions, viewerPermissions) || summary.Orgs[0].APIKey == "" {
+		t.Errorf("load-test-viewer: %+v, %d active; want the user viewer with %v", key, active, viewerPermissions)
+	}
+
+	// A run for org_admin issues load-test and keeps load-test-viewer.
+	adminOpts := opts
+	adminOpts.APIKeyRole = "org_admin"
+	if _, err = Run(ctx, f.App, adminOpts); err != nil {
+		t.Fatalf("seed for org_admin: %v", err)
+	}
+	adminPermissions, _ := permission.StandardRolePermissions("org_admin")
+	if key, active := keyOf("load-test"); key.owner != admin || active != 1 || !sameKeys(key.permissions, adminPermissions) {
+		t.Errorf("load-test: %+v, %d active; want the administrator", key, active)
+	}
+	if _, active := keyOf("load-test-viewer"); active != 1 {
+		t.Errorf("load-test-viewer after the org_admin run: %d active", active)
+	}
+	check("second run")
+
+	// A further run for viewer replaces load-test-viewer only.
+	if _, err = Run(ctx, f.App, opts); err != nil {
+		t.Fatalf("third seed: %v", err)
+	}
+	for _, name := range []string{"load-test-viewer", "load-test"} {
+		if _, active := keyOf(name); active != 1 {
+			t.Errorf("%s after the third run: %d active", name, active)
+		}
+	}
+	check("third run")
+}
+
+// sameKeys reports whether a and b hold the same keys.
+func sameKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := map[string]int{}
+	for _, k := range a {
+		seen[k]++
+	}
+	for _, k := range b {
+		seen[k]--
+	}
+	for _, n := range seen {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }

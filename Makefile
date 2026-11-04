@@ -155,8 +155,13 @@ down:
 # admin@demo.local) and "acme", each with two clients, racks, CIs with LLDP,
 # mounts, metrics, a collector with scopes, reviews, an echo webhook and a VRF
 # example (cmd/seed). SEED_OBJECTS scales the demo organization for the load
-# test of NFR-10 (10000; at most 50000). The seed is deterministic and
-# idempotent; any error fails the target.
+# test of NFR-10 (10000; at most 50000). Phase 2 (WP-325): through the
+# metamodel services the demo organization also gets derived types
+# (blade_chassis, blade_server), two attribute sets, two templates with two
+# published versions, rules, form layouts for engineer and viewer, field
+# grants and the users engineer@, viewer@ and client_technician@; acme gets a
+# derived type, a template with one published version and viewer@. The seed
+# is deterministic and idempotent; any error fails the target.
 SEED_OBJECTS ?= 40
 SEED_METRICS ?= 2000
 seed:

@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -53,10 +54,36 @@ type Options struct {
 	Orgs int
 	// At anchors every timestamp, so a seed is reproducible.
 	At time.Time
-	// APIKey issues a test API key of the demo administrator for the load
-	// test (NFR-10); an earlier load-test key is revoked. The key is the
-	// only random part of a seed.
+	// APIKey issues a test API key of the demo organization for the load
+	// test (NFR-10); an earlier active key of the same name is revoked. The
+	// key is the only random part of a seed.
 	APIKey bool
+	// APIKeyRole is the standard role whose user owns the key (WP-325):
+	// the key holds the permissions of the role and acts with the rights,
+	// scope and field permissions of that user (AUT-04). Empty is
+	// org_admin, the administrator; the key is named load-test for
+	// org_admin and load-test-<role> for any other role, so the keys of
+	// several roles stay valid side by side (WP-822).
+	APIKeyRole string
+}
+
+// DefaultAPIKeyRole is the role of the load-test key without APIKeyRole.
+const DefaultAPIKeyRole = "org_admin"
+
+// keyRole is the role of the load-test key.
+func (o *Options) keyRole() string {
+	if o.APIKeyRole == "" {
+		return DefaultAPIKeyRole
+	}
+	return o.APIKeyRole
+}
+
+// APIKeyName is the name of the load-test key of a standard role.
+func APIKeyName(role string) string {
+	if role == "" || role == DefaultAPIKeyRole {
+		return "load-test"
+	}
+	return "load-test-" + role
 }
 
 // MaxObjects is the headroom of NFR-01.
@@ -145,6 +172,9 @@ func (o *Options) Validate() error {
 	if o.At.IsZero() {
 		return fmt.Errorf("an anchor time is required")
 	}
+	if _, ok := permission.StandardRolePermissions(o.keyRole()); !ok {
+		return fmt.Errorf("api key role %q is not a standard role", o.APIKeyRole)
+	}
 	return nil
 }
 
@@ -155,6 +185,8 @@ type orgSpec struct {
 	objects, metrics  int
 	// The volumes of NFR-01; 0 is the SIM-01 data set.
 	interfaces, ips, relationships int
+	// phase2 is the Phase-2 content (WP-325).
+	phase2 phase2Level
 }
 
 // orgSpecs lists the organizations of the seed: the demo organization with
@@ -163,12 +195,12 @@ type orgSpec struct {
 // share 10.12.0.0/16: every organization has VRFs of its own.
 func (o *Options) orgSpecs() []orgSpec {
 	specs := []orgSpec{
-		{"demo", "Demo", "demo.local", 10, o.Objects, o.Metrics, o.InterfacesPerCI, o.IPsPerCI, o.RelationshipsPerCI},
-		{"acme", "acme", "acme.local", 11, baseObjects, baseObjects, 0, 0, 0},
+		{"demo", "Demo", "demo.local", 10, o.Objects, o.Metrics, o.InterfacesPerCI, o.IPsPerCI, o.RelationshipsPerCI, phase2Full},
+		{"acme", "acme", "acme.local", 11, baseObjects, baseObjects, 0, 0, 0, phase2Subset},
 	}
 	for k := 1; k <= o.Orgs; k++ {
 		key := fmt.Sprintf("org-%04d", k)
-		specs = append(specs, orgSpec{key, fmt.Sprintf("Org %04d", k), key + ".local", 12, baseObjects, baseObjects, 0, 0, 0})
+		specs = append(specs, orgSpec{key, fmt.Sprintf("Org %04d", k), key + ".local", 12, baseObjects, baseObjects, 0, 0, 0, phase2None})
 	}
 	return specs
 }
@@ -177,10 +209,11 @@ func (o *Options) orgSpecs() []orgSpec {
 // organization "acme" for isolation tests (SIM-01) and Options.Orgs small
 // organizations like acme (NFR-01). Every row has a deterministic id and is
 // inserted only if missing, so a second run with the same options changes
-// nothing. After the seed transaction of an organization its CIs are indexed
-// for the search (index) and the index of its searchable attribute is built
-// (attributeIndex). At the end the statistics of the grown tables are
-// refreshed (database.AnalyzeAfterBulk).
+// nothing. After the seed transaction of an organization the Phase-2 steps
+// run in a transaction of their own through the services (phase2Steps,
+// WP-325), its CIs are indexed for the search (index) and the index of its
+// searchable attribute is built (attributeIndex). At the end the statistics
+// of the grown tables are refreshed (database.AnalyzeAfterBulk).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
 		return Summary{}, err
@@ -190,12 +223,16 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 		slug := opts.Prefix + spec.key
 		o := orgSeed{
 			id: ID(opts.Prefix, "org", spec.key), slug: slug, name: spec.name, admin: "admin@" + spec.domain,
-			prefix: opts.Prefix + spec.key, octet: spec.octet, objects: spec.objects, metrics: spec.metrics, at: opts.At,
-			ifacesPerCI: max(spec.interfaces, 1), ipsPerCI: max(spec.ips, 1), relsPerCI: spec.relationships,
+			domain: spec.domain, prefix: opts.Prefix + spec.key, octet: spec.octet, objects: spec.objects,
+			metrics: spec.metrics, at: opts.At, ifacesPerCI: max(spec.interfaces, 1), ipsPerCI: max(spec.ips, 1),
+			relsPerCI: spec.relationships, phase2: spec.phase2, keyRole: opts.keyRole(),
 		}
 		o.issueKey = opts.APIKey && n == 0
 		if err := database.WithOrganizationSetup(ctx, pool, o.id, o.seed); err != nil {
 			return Summary{}, fmt.Errorf("seed %s: %w", slug, err)
+		}
+		if err := o.phase2Steps(ctx, pool); err != nil {
+			return Summary{}, fmt.Errorf("phase 2 %s: %w", slug, err)
 		}
 		if err := o.index(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("index %s: %w", slug, err)
@@ -214,7 +251,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 }
 
 type orgSeed struct {
-	id, slug, name, admin, prefix string
+	id, slug, name, admin, domain, prefix string
 	// octet is the second octet of the organization's 10.x.0.0/16.
 	octet            int
 	objects, metrics int
@@ -224,6 +261,9 @@ type orgSeed struct {
 	at                               time.Time
 	issueKey                         bool
 	apiKey                           string
+	// phase2 is the Phase-2 content, keyRole the role of the load-test key.
+	phase2  phase2Level
+	keyRole string
 }
 
 func (o *orgSeed) uid(parts ...string) string {
@@ -237,6 +277,7 @@ func (o *orgSeed) seed(ctx context.Context, tx pgx.Tx) error {
 	}{
 		{"organization", o.organization},
 		{"locations", o.locations},
+		{"users", o.users},
 		{"attributes", o.attributes},
 		{"cis", o.cis},
 		{"network", o.network},
@@ -549,8 +590,11 @@ func (o *orgSeed) webhook(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-// loadTestKey issues the API key of the load test with the permissions of
-// org_admin; the key acts as the administrator (AUT-04).
+// loadTestKey issues the API key of the load test for the user of the
+// role keyRole (the administrator for org_admin) with the permissions of
+// that role; the key acts as that user (AUT-04). It revokes only earlier
+// active keys of its name (APIKeyName), so the keys of other roles stay
+// valid.
 func (o *orgSeed) loadTestKey(ctx context.Context, tx pgx.Tx) error {
 	if !o.issueKey {
 		return nil
@@ -559,15 +603,24 @@ func (o *orgSeed) loadTestKey(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
+	name, owner := APIKeyName(o.keyRole), o.uid("user", "admin")
+	if o.keyRole != DefaultAPIKeyRole {
+		owner = o.uid("user", o.keyRole)
+	}
 	if _, err = tx.Exec(ctx, `UPDATE api_key SET revoked_at = now()
-		WHERE organization_id = $1 AND name = 'load-test' AND revoked_at IS NULL`, o.id); err != nil {
+		WHERE organization_id = $1 AND name = $2 AND revoked_at IS NULL`, o.id, name); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by)
-		SELECT $1, 'load-test', $2, $3, $4, ARRAY(SELECT jsonb_array_elements_text(r.permissions)), $5
-		FROM role r WHERE r.organization_id = $1 AND r.name = 'org_admin'`,
-		o.id, key.KeyHash, key.KeyPrefix, key.Environment, o.uid("user", "admin")); err != nil {
+	tag, err := tx.Exec(ctx, `INSERT INTO api_key (organization_id, name, key_hash, key_prefix, environment, permissions, created_by)
+		SELECT $1, $6, $2, $3, $4, ARRAY(SELECT jsonb_array_elements_text(r.permissions)), u.id
+		FROM role r JOIN app_user u ON u.id = $5 AND u.organization_id = $1
+		WHERE r.organization_id = $1 AND r.name = $7`,
+		o.id, key.KeyHash, key.KeyPrefix, key.Environment, owner, name, o.keyRole)
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return fmt.Errorf("no user of the role %s for the load-test key", o.keyRole)
 	}
 	o.apiKey = key.Plaintext
 	return nil
