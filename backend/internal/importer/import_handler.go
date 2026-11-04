@@ -49,6 +49,8 @@ type ImportHandler struct {
 	// them every run fails with import-principal-missing.
 	users  UserStatus
 	grants GrantSource
+	// keys reloads the API key of a run started with one (WP-779).
+	keys KeyReloader
 }
 
 // NewImportHandler returns the handler of the import runs over the
@@ -251,8 +253,9 @@ var errForeignKey = errors.New("the document content is stored outside the organ
 // Start handles POST /api/v1/imports: it checks document scope (404),
 // profile (404), the write right of the profile's entity (403), scan
 // status (409), size (422) and format (422) in this order, queues a job of
-// kind import.run with the caller as creator (the run reloads their
-// rights, jobContext) and answers 202 with the job. With a job queue the job is
+// kind import.run with the caller as creator and their identity
+// reference (StarterRef; the run reloads their rights, jobContext) and
+// answers 202 with the job. With a job queue the job is
 // submitted there, otherwise it runs in this process.
 func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
@@ -311,7 +314,7 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params := JobParams{DocumentID: doc.ID, DocumentVersion: src.version.Version, ProfileID: profile.ID,
-		Mode: profile.Mode, DryRun: req.DryRun, ScopeParams: jobs.CaptureScope(ctx)}
+		Mode: profile.Mode, DryRun: req.DryRun, Starter: captureStarter(ctx), ScopeParams: jobs.CaptureScope(ctx)}
 	if req.Mode != "" {
 		params.Mode = req.Mode
 	}

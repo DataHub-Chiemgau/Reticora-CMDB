@@ -503,6 +503,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// them (in-memory user store) runs fail closed.
 	if users, ok := repos.User.(importer.UserStatus); ok && repos.Permission != nil {
 		importHandler.WithStarters(users, repos.Permission)
+		// A run started with an API key reloads the key like the auth
+		// middleware (cmd/server): revoked or expired fails it, its rights
+		// are the intersection with the owner's current ones (AUT-04,
+		// WP-779, E-145).
+		if repos.APIKeys != nil {
+			keys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission)
+			if repos.ServiceAccounts != nil {
+				keys.WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+			}
+			importHandler.WithAPIKeys(keys)
+		}
 	}
 	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
 	// job kind document.scan of the module documents on the job queue:

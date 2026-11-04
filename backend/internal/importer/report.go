@@ -44,10 +44,10 @@ const (
 	// CodeForbidden: the user who started the run no longer holds the
 	// write right of the entity (current role assignments, jobContext).
 	CodeForbidden = "import-forbidden"
-	// CodePrincipalMissing: the user who started the job cannot be
-	// restored: no active user of the organization (deactivated, deleted,
-	// a service account), no session start (an API key) or no scope
-	// snapshot (fail-closed).
+	// CodePrincipalMissing: the principal who started the job cannot be
+	// restored: no identity reference (StarterRef) or scope snapshot, no
+	// active user of the organization (deactivated, deleted) or an API key
+	// that no longer acts as the creator of the job (fail-closed).
 	CodePrincipalMissing = "import-principal-missing"
 	// CodeDryRunUnavailable: the profile store cannot roll a row back
 	// (in-memory profile without database), so no dry run.

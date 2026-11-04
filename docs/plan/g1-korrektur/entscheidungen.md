@@ -4,7 +4,7 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Nachtrag vom 2026-10-28:** Der Auftraggeber hat alle bis dahin offenen Entscheidungen (31: E-59, E-60, E-61, E-65, E-66, E-67, E-68, E-70, E-73, E-74, E-75, E-77, E-78, E-79, E-80, E-81, E-82, E-83, E-84, E-85, E-86, E-87, E-88, E-89, E-90, E-91, E-92, E-93, E-94, E-95, E-100) nach der jeweiligen Empfehlung entschieden („Setze alle Entscheidungen wie empfohlen um“). Die Übergangsregeln, nach denen die betroffenen WPs bereits umgesetzt sind, gelten damit als Festlegung; Folge-WPs für andere Optionen entfallen.
 
-**Nachtrag vom 2026-11-03:** E-Nummern sind über alle drei Entscheidungsdateien eindeutig, und E-103 bis E-143 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md). Die neue Entscheidung dieser Datei zum SMTP-Szenario der Ausfallsuite erhält deshalb E-144; die nächste freie Nummer ist E-145.
+**Nachtrag vom 2026-11-03:** E-Nummern sind über alle drei Entscheidungsdateien eindeutig, und E-103 bis E-143 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md). Die neue Entscheidung dieser Datei zum SMTP-Szenario der Ausfallsuite erhält deshalb E-144; die nächste freie Nummer ist E-146 (E-145 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md), WP-779).
 
 ## Übersicht
 

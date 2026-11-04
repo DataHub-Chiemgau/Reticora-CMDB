@@ -1384,3 +1384,5 @@ EXP-01;[B], DATEV [P2];C;backend/internal/export/datev_test.go;WP-310
 TST-01;[B], Teilumfang [P2];C;backend/internal/export/datev_test.go;WP-310
 EXP-01;[B], DATEV [P2];C;frontend/src/pages/ExportPage.test.tsx;WP-791
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/discovery/review_ticket_integration_test.go;WP-767
+IMP-IO-01;[P2];C;backend/internal/importer/apikey_integration_test.go;WP-779
+AUT-04;[B];C;backend/internal/importer/apikey_integration_test.go;WP-779

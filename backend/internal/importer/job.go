@@ -33,18 +33,20 @@ var runSlots = make(chan struct{}, 2)
 
 // JobParams are the parameters of an import job: the document version it
 // reads (a later version is not read), the profile, the write mode, the
-// dry run flag, the sheet of an XLSX file (empty: the first) and the
-// request facts of the audit (jobs.ScopeParams). They hold no rights,
-// scopes or IdP groups of the starter: every reader of the job sees its
-// parameters (GET /api/v1/jobs, job:read), and the run reloads the
-// starter's current rights instead (jobContext).
+// dry run flag, the sheet of an XLSX file (empty: the first), the request
+// facts of the audit (jobs.ScopeParams) and the identity reference of the
+// starter (StarterRef, E-145). They hold no rights, scopes or IdP groups
+// of the starter: every reader of the job sees its parameters (GET
+// /api/v1/jobs, job:read), and the run reloads the starter's current
+// rights instead (jobContext).
 type JobParams struct {
-	DocumentID      string `json:"document_id"`
-	DocumentVersion int    `json:"document_version"`
-	ProfileID       string `json:"profile_id"`
-	Mode            string `json:"mode"`
-	DryRun          bool   `json:"dry_run"`
-	Sheet           string `json:"sheet,omitempty"`
+	DocumentID      string      `json:"document_id"`
+	DocumentVersion int         `json:"document_version"`
+	ProfileID       string      `json:"profile_id"`
+	Mode            string      `json:"mode"`
+	DryRun          bool        `json:"dry_run"`
+	Sheet           string      `json:"sheet,omitempty"`
+	Starter         *StarterRef `json:"starter,omitempty"`
 	jobs.ScopeParams
 }
 
@@ -100,44 +102,37 @@ func visible(ctx context.Context, job *jobs.Job) bool {
 	return ok && job.VisibleTo(&scope)
 }
 
-// jobContext restores the starter of a job in ctx (fail-closed): the
-// creator of the job row must be an active user of the organization, the
-// job must have been started by a session (source ui of its request
-// facts) and hold a scope snapshot. The principal is rebuilt from the
-// creator's current role assignments (GrantSource, identity.ResolveAccess
-// as at login and refresh), so a right revoked after the start takes
-// effect; its scope and the tenant scope of the run are the current scope
-// narrowed to the snapshot of the job row (jobs.CreatorContext), so the run
-// never reaches beyond the request that started it. Standard roles of IdP
-// groups are not part of it: the groups of the session are not stored. The
-// request info of the audit carries source import and the job as
-// correlation id (AUD-07).
+// jobContext restores the starter of a job in ctx (fail-closed): the job
+// must reference its starter (StarterRef, the subject being the creator of
+// the job row) and hold a scope snapshot. The principal is reloaded from
+// the reference (reloadStarter, E-145): a user from their status and
+// current role assignments (identity.ResolveAccess as at login and
+// refresh), an API key from the key store with the rights it grants now
+// (AUT-04), so a right or a key revoked after the start takes effect; it
+// runs before every attempt. Its scope and the tenant scope of the run are
+// the reloaded scope narrowed to the snapshot of the job row
+// (jobs.CreatorContext), so the run never reaches beyond the request that
+// started it. Standard roles of IdP groups are not part of it: the groups
+// of the session are not stored. A run of an API key needs the feature
+// api_access like every request with a key (WP-471). The request info of
+// the audit carries source import, the request id of the start and the job
+// as correlation id (AUD-07), also for a start with an API key.
 func (h *ImportHandler) jobContext(ctx context.Context, job *jobs.Job, p *JobParams) (context.Context, error) {
-	missing := &ParseError{Code: CodePrincipalMissing, Message: "the user who started the import cannot be restored", Fatal: true}
-	if job.CreatedBy == "" || job.Scope == nil || p.Source != audit.SourceUI || h.users == nil || h.grants == nil {
-		// An API key acts with the intersection of its own permissions
-		// and its owner's: neither is in the job, so it is not restored.
+	missing := &ParseError{Code: CodePrincipalMissing, Message: "the principal who started the import cannot be restored", Fatal: true}
+	if job.Scope == nil {
 		return nil, missing
 	}
-	active, err := h.users.UserActive(ctx, job.OrganizationID, job.CreatedBy)
+	st, err := h.reloadStarter(ctx, job, p.Starter)
 	if err != nil {
-		return nil, fmt.Errorf("read the status of the user who started the import: %w", err)
+		return nil, err
 	}
-	if !active {
-		return nil, missing
-	}
-	grants, err := h.grants.AccessGrants(ctx, job.OrganizationID, job.CreatedBy)
-	if err != nil {
-		return nil, fmt.Errorf("read the role assignments of the user who started the import: %w", err)
-	}
-	access := identity.ResolveAccess(grants)
-	scope := narrowScope(&access.Scope, job.Scope)
+	scope := narrowScope(&st.access.Scope, job.Scope)
 	var permScopes map[identity.Permission]identity.Scope
-	for perm := range access.PermissionScopes {
+	for perm := range st.access.PermissionScopes {
 		if permScopes == nil {
-			permScopes = make(map[identity.Permission]identity.Scope, len(access.PermissionScopes))
+			permScopes = make(map[identity.Permission]identity.Scope, len(st.access.PermissionScopes))
 		}
-		held := access.PermissionScopes[perm]
+		held := st.access.PermissionScopes[perm]
 		permScopes[perm] = narrowScope(&held, job.Scope)
 	}
 	request := jobs.ScopeParams{RequestID: p.RequestID, Source: audit.SourceImport}
@@ -150,9 +145,15 @@ func (h *ImportHandler) jobContext(ctx context.Context, job *jobs.Job, p *JobPar
 	runCtx = tenant.WithTenant(runCtx, tenant.TenantInfo{OrganizationID: job.OrganizationID, ClientID: scope.LegacyClientScope(),
 		UserID: job.CreatedBy})
 	runCtx = database.ContextWithTenantScope(runCtx, &tenantScope)
-	principal := identity.Principal{Subject: job.CreatedBy, OrganizationID: job.OrganizationID, Type: identity.PrincipalTypeUser,
-		ClientScope: scope.LegacyClientScope(), Scope: &scope, PermissionScopes: permScopes, Permissions: access.Permissions}
+	principal := identity.Principal{Subject: job.CreatedBy, OrganizationID: job.OrganizationID, Type: p.Starter.Type,
+		ClientScope: scope.LegacyClientScope(), Scope: &scope, PermissionScopes: permScopes, Permissions: st.access.Permissions,
+		Credential: st.credential, ServiceAccountID: st.serviceAccountID}
 	runCtx = identity.WithPrincipal(runCtx, principal)
+	if principal.Type == identity.PrincipalTypeAPIKey {
+		if gateErr := h.checkAPIAccess(runCtx, job.OrganizationID); gateErr != nil {
+			return nil, gateErr
+		}
+	}
 	return identity.WithPermissions(runCtx, principal.Permissions), nil
 }
 
