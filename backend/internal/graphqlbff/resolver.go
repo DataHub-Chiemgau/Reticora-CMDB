@@ -79,8 +79,12 @@ type (
 	topologyNodeResolver struct{ *Resolver }
 )
 
-// errUnavailable answers a query whose source is not configured.
-var errUnavailable = gqlError("UNAVAILABLE", "this query is not available on this server")
+// errUnavailable answers a query whose source is not configured. It is a
+// new error per call: gqlgen sets the path on the returned error, so a
+// shared value would be written by concurrently resolved fields.
+func errUnavailable() *gqlerror.Error {
+	return gqlError("UNAVAILABLE", "this query is not available on this server")
+}
 
 func gqlError(code, message string) *gqlerror.Error {
 	return &gqlerror.Error{Message: message, Extensions: map[string]any{"code": code}}
@@ -250,7 +254,7 @@ func (q *queryResolver) Topology(ctx context.Context, rootCiID *string, depth *i
 		return nil, err
 	}
 	if q.sources.Topology == nil {
-		return nil, errUnavailable
+		return nil, errUnavailable()
 	}
 	d := topology.DefaultDepth
 	if depth != nil {
@@ -282,7 +286,7 @@ func (q *queryResolver) RackLayout(ctx context.Context, rackID string) (*generat
 		return nil, err
 	}
 	if q.sources.Racks == nil {
-		return nil, errUnavailable
+		return nil, errUnavailable()
 	}
 	rk, err := q.sources.Racks.GetRack(ctx, orgID, rackID)
 	if err != nil {
@@ -310,7 +314,7 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 		return nil, err
 	}
 	if q.sources.Search == nil {
-		return nil, errUnavailable
+		return nil, errUnavailable()
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
 	// WP-266).
@@ -346,7 +350,7 @@ func (q *queryResolver) ReviewInbox(ctx context.Context, status, kind *string, f
 		return nil, err
 	}
 	if q.sources.Reviews == nil {
-		return nil, errUnavailable
+		return nil, errUnavailable()
 	}
 	items, _, err := q.sources.Reviews.ListReviewItems(ctx, orgID, reviews.Filter{Status: value(status), Kind: value(kind)},
 		api.PaginationParams{Limit: pageSize(first, defaultPage, maxPage)})
@@ -369,7 +373,7 @@ func (q *queryResolver) Jobs(ctx context.Context, kind, status *string, first *i
 		return nil, err
 	}
 	if q.sources.Jobs == nil {
-		return nil, errUnavailable
+		return nil, errUnavailable()
 	}
 	list, _, err := q.sources.Jobs.List(ctx, orgID, jobs.Filter{Kind: value(kind), Status: jobs.Status(value(status))},
 		api.PaginationParams{Limit: pageSize(first, defaultPage, maxPage)})
@@ -438,14 +442,17 @@ func value(p *string) string {
 // fields stay as they are. A policy that cannot be resolved fails the
 // field (fail-closed).
 
-// errNoPolicy answers a field whose policy cannot be resolved.
-var errNoPolicy = gqlError(codeInternal, "the field permissions could not be resolved")
+// errNoPolicy answers a field whose policy cannot be resolved (a new error
+// per call, see errUnavailable).
+func errNoPolicy() *gqlerror.Error {
+	return gqlError(codeInternal, "the field permissions could not be resolved")
+}
 
 // policy returns the field policy of the request.
 func policy(ctx context.Context) (*permission.FieldPolicy, error) {
 	p, err := permission.PolicyFrom(ctx)
 	if err != nil {
-		return nil, errNoPolicy
+		return nil, errNoPolicy()
 	}
 	return p, nil
 }
