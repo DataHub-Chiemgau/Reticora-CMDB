@@ -1378,3 +1378,4 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/
 IMP-IO-01;[P2];C;backend/internal/importer/ci_integration_test.go;WP-302
 AST-01;[P2];B;backend/internal/asset/concurrency_integration_test.go;WP-740
 EVT-03;[P2–P3];B;backend/internal/asset/concurrency_integration_test.go;WP-740
+UI-11;[P2];C;frontend/src/pages/TemplatesPage.test.tsx;WP-314

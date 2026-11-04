@@ -54,6 +54,7 @@ import {
 import { IndexStatus } from '../components/metamodel/IndexStatus';
 import { AttributeSetEditor } from '../components/metamodel/AttributeSetEditor';
 import { TypeSetAssignment } from '../components/metamodel/TypeSetAssignment';
+import { MetamodelTabs } from '../components/metamodel/MetamodelTabs';
 
 // Data types of MET-11 (the catalog test labels each of them).
 export { FIELD_TYPES } from '../components/metamodel/AttributeEditor';
@@ -229,6 +230,7 @@ export function CITypeAdminPage() {
           </Button>
         </div>
       </div>
+      <MetamodelTabs />
 
       <Card>
         <div className="flex flex-wrap items-center gap-3">

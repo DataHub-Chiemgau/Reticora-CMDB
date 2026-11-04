@@ -44,6 +44,8 @@ export const A11Y_MARKERS = {
   ciType: 'a11y-org-type',
   ciTypeChild: 'a11y-child-type',
   attributeSet: 'a11y-attribute-set',
+  template: 'a11y-template',
+  systemTemplate: 'a11y-system-template',
   consumable: 'a11y-toner',
   order: 'a11y-order-title',
   maintenance: 'a11y-maintenance-window',
@@ -379,6 +381,81 @@ const SET_ATTRIBUTES = [
     index_status: indexStatus('succeeded'),
   }),
 ];
+
+// The templates of WP-314 (MET-16): an own template of the child with a
+// published and a draft version and a read-only system template. The draft
+// holds the attributes of the child with overrides, so the editor, the
+// comparison and the publish action are checked.
+export const TEMPLATE_ID = '7e000000-0000-4000-8000-000000000001';
+const TEMPLATE = {
+  id: TEMPLATE_ID,
+  organization_id: ORG,
+  key: 'a11y_template',
+  ci_type_id: CHILD_TYPE.id,
+  display_name: { de: M.template, en: M.template },
+  description: 'a11y template',
+  is_system: false,
+  is_active: true,
+  current_version: 1,
+  created_at: AT,
+  updated_at: AT,
+};
+const SYSTEM_TEMPLATE = {
+  ...TEMPLATE,
+  id: '7e000000-0000-4000-8000-000000000002',
+  organization_id: '',
+  key: 'a11y_system_template',
+  display_name: { de: M.systemTemplate, en: M.systemTemplate },
+  is_system: true,
+};
+
+function templateVersion(version: number, status: string, items: unknown[]) {
+  return {
+    id: `7e100000-0000-4000-8000-00000000000${version}`,
+    organization_id: ORG,
+    template_id: TEMPLATE_ID,
+    version,
+    status,
+    created_at: AT,
+    updated_at: AT,
+    ...(status === 'published' ? { published_at: AT, published_by: USER } : {}),
+    items,
+  };
+}
+
+const TEMPLATE_VERSIONS = [
+  templateVersion(2, 'draft', [
+    {
+      attribute_definition_id: 'ad000000-0000-4000-8000-000000000001',
+      key: 'a11y_plain',
+      position: 0,
+      default_override: 'a11y default',
+    },
+    {
+      attribute_definition_id: 'ad000000-0000-4000-8000-000000000002',
+      key: 'a11y_serial',
+      position: 1,
+      required_override: true,
+      validation_override: { op: 'all', rules: [{ op: 'range', of: 'length', max: 32 }] },
+    },
+  ]),
+  templateVersion(1, 'published', [
+    {
+      attribute_definition_id: 'ad000000-0000-4000-8000-000000000001',
+      key: 'a11y_plain',
+      position: 0,
+    },
+  ]),
+];
+
+/** GET /me/permissions of the template routes: the editor and the publish action are on. */
+export const TEMPLATE_PERMISSIONS: Handler = {
+  path: '/me/permissions',
+  reply: fixed({
+    user_id: USER,
+    permissions: ['ci:read', 'citype:manage', 'ci_attribute:manage', 'metamodel:publish'],
+  }),
+};
 
 /** GET /ci-types/{id}/attribute-sets: the child carries the set. */
 function typeAttributeSets(_request: Request, url: URL): Reply {
@@ -1139,6 +1216,18 @@ export const A11Y_HANDLERS: Handler[] = [
   // The attribute sets of WP-797 and the assignment of the child.
   { path: '/attribute-sets', reply: fixed({ data: [ATTRIBUTE_SET] }) },
   { path: /^\/ci-types\/[^/]+\/attribute-sets$/, reply: typeAttributeSets },
+  // The templates of WP-314 with their versions.
+  { path: '/templates', reply: fixed({ data: [TEMPLATE, SYSTEM_TEMPLATE], has_more: false }) },
+  {
+    path: /^\/templates\/[^/]+$/,
+    reply: (_request, url) => ({
+      body: url.pathname.endsWith(SYSTEM_TEMPLATE.id) ? SYSTEM_TEMPLATE : TEMPLATE,
+    }),
+  },
+  {
+    path: /^\/templates\/[^/]+\/versions$/,
+    reply: fixed({ data: TEMPLATE_VERSIONS, has_more: false }),
+  },
   // The sensitive fields of WP-726: one attribute of the child is marked.
   {
     path: '/field-permissions/sensitive-fields',

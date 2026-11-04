@@ -224,6 +224,66 @@ export const attributeSetApi = {
   },
 };
 
+// ─── Templates (MET-16, WP-251, WP-314) ──────────────────────────────────────
+
+/**
+ * A versioned, ordered bundle of attribute definitions of one CI type
+ * (MET-16); no type template of GET /ci-types/templates. A system template
+ * (is_system) is read-only.
+ */
+export type Template = components['schemas']['Template'];
+export type TemplateCreate = components['schemas']['TemplateCreate'];
+export type TemplatePatch = components['schemas']['TemplatePatch'];
+export type TemplateClone = components['schemas']['TemplateClone'];
+export type TemplateVersion = components['schemas']['TemplateVersion'];
+export type TemplateVersionItem = components['schemas']['TemplateVersionItem'];
+export type TemplateVersionItemsUpdate = components['schemas']['TemplateVersionItemsUpdate'];
+
+export const templateApi = {
+  /** Every template of the filter: all pages of 200 over next_cursor (API-02). */
+  async list(params: { ci_type_id?: string } = {}): Promise<{ data: Template[] }> {
+    return { data: await fetchAllPages<Template>('/templates', params) };
+  },
+  get(id: string): Promise<Template> {
+    return fetchAPI(`/templates/${id}`);
+  },
+  /** Version 1 is created as an empty draft. */
+  create(data: TemplateCreate): Promise<Template> {
+    return fetchAPI('/templates', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** Display name, description and is_active; key and ci_type_id are immutable. */
+  update(id: string, data: TemplatePatch): Promise<Template> {
+    return fetchAPI(`/templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** Copies a template, a system template as well, under a new key. */
+  clone(id: string, data: TemplateClone): Promise<Template> {
+    return fetchAPI(`/templates/${id}/clone`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** Every version, newest first, each with its items. */
+  async versions(id: string): Promise<{ data: TemplateVersion[] }> {
+    return { data: await fetchAllPages<TemplateVersion>(`/templates/${id}/versions`) };
+  },
+  /** The next version as a draft copy of the current one. */
+  createVersion(id: string): Promise<TemplateVersion> {
+    return fetchAPI(`/templates/${id}/versions`, { method: 'POST' });
+  },
+  /** Replaces the items of a draft version as a whole. */
+  saveVersion(
+    id: string,
+    version: number,
+    data: TemplateVersionItemsUpdate,
+  ): Promise<TemplateVersion> {
+    return fetchAPI(`/templates/${id}/versions/${version}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+  /** Publishes a draft directly (MET-04, MET-53); needs metamodel:publish. */
+  publishVersion(id: string, version: number): Promise<TemplateVersion> {
+    return fetchAPI(`/templates/${id}/versions/${version}/publish`, { method: 'POST' });
+  },
+};
+
 // ─── Sensitive fields (RBA-07, E-43, WP-726) ─────────────────────────────────
 
 export type SensitiveField = components['schemas']['SensitiveField'];

@@ -26,6 +26,7 @@ import {
   impactApi,
   savedViewApi,
   sensitiveFieldApi,
+  templateApi,
   type AttributeDefinition,
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
@@ -37,6 +38,10 @@ import {
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
   type SavedView,
+  type TemplateClone,
+  type TemplateCreate,
+  type TemplatePatch,
+  type TemplateVersionItemsUpdate,
 } from './cmdb';
 import { ApiError } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
@@ -328,6 +333,103 @@ export function useReplaceCITypeAttributeSets() {
       qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
       invalidateAttributes(qc);
     },
+  });
+}
+
+// ─── Templates (MET-16, WP-251, WP-314) ──────────────────────────────────────
+
+const TEMPLATES_KEY = ['templates'];
+
+/** The templates of the organization and the system templates, optionally of one CI type. */
+export function useTemplates(params: { ci_type_id?: string } = {}, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...TEMPLATES_KEY, 'list', params],
+    queryFn: () => templateApi.list(params),
+    ...options,
+    // A 404 is the switched-off module (E-105): no retry.
+    retry: false,
+  });
+}
+
+export function useTemplate(id: string | undefined) {
+  return useQuery({
+    queryKey: [...TEMPLATES_KEY, id],
+    queryFn: () => templateApi.get(id!),
+    enabled: !!id,
+    retry: false,
+  });
+}
+
+export function useCreateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: TemplateCreate) => templateApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
+  });
+}
+
+/** PATCH /templates/{id}: labels, description and is_active. */
+export function useUpdateTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: TemplatePatch }) =>
+      templateApi.update(id, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
+  });
+}
+
+export function useCloneTemplate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: TemplateClone & { id: string }) => templateApi.clone(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
+  });
+}
+
+/** The versions of a template with their items, newest first. */
+export function useTemplateVersions(id: string | undefined) {
+  return useQuery({
+    queryKey: [...TEMPLATES_KEY, id, 'versions'],
+    queryFn: () => templateApi.versions(id!),
+    enabled: !!id,
+    retry: false,
+  });
+}
+
+/** POST /templates/{id}/versions: a draft copy of the current version. */
+export function useCreateTemplateVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => templateApi.createVersion(id),
+    onSuccess: (_saved, id) => qc.invalidateQueries({ queryKey: [...TEMPLATES_KEY, id] }),
+  });
+}
+
+/** PUT /templates/{id}/versions/{version}: the item list of a draft. */
+export function useSaveTemplateVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      data,
+    }: {
+      id: string;
+      version: number;
+      data: TemplateVersionItemsUpdate;
+    }) => templateApi.saveVersion(id, version, data),
+    onSuccess: (_saved, { id }) => qc.invalidateQueries({ queryKey: [...TEMPLATES_KEY, id] }),
+  });
+}
+
+/** POST /templates/{id}/versions/{version}/publish (metamodel:publish). */
+export function usePublishTemplateVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version: number }) =>
+      templateApi.publishVersion(id, version),
+    // current_version of the template changes as well.
+    onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
   });
 }
 

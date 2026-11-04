@@ -7,6 +7,8 @@ import {
   A11Y_HANDLERS,
   A11Y_MARKERS as M,
   CI_ID,
+  TEMPLATE_ID,
+  TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
 } from './support/a11y-fixtures';
 import { EMPTY_LIST, mockBackend, signIn } from './support/backend';
@@ -172,6 +174,24 @@ const ROUTES: A11yRoute[] = [
       await expect(editor.getByText('a11y_set_speed')).toBeVisible();
     },
     ready: (page) => page.locator('#main-content li').filter({ hasText: 'a11y_inventory' }),
+  },
+  {
+    // WP-314: own and system template, with the rights to edit and publish.
+    path: '/ci-types/templates',
+    url: '/ci-types/templates',
+    handlers: [TEMPLATE_PERMISSIONS],
+    ready: (page) => page.getByRole('link', { name: M.systemTemplate }),
+  },
+  {
+    // WP-314: the draft in the editor with its overrides and the comparison
+    // of the two versions.
+    path: '/ci-types/templates/:id',
+    url: `/ci-types/templates/${TEMPLATE_ID}`,
+    handlers: [TEMPLATE_PERMISSIONS],
+    prepare: async (page) => {
+      await expect(page.locator('[data-item-key="a11y_serial"]')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content table'),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   { path: '/documents', url: '/documents', ready: text(M.document) },
