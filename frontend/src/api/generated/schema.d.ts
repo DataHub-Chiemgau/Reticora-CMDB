@@ -1756,6 +1756,14 @@ export interface paths {
      *     audit entry disposal_record.created is written in the same transaction.
      *     An asset, CI, supplier or evidence document the caller cannot see
      *     answers 404 without a record.
+     *
+     *     The disposal runs in one transaction (MGT-02, WP-278): the asset or
+     *     CI is locked, the record is written, an asset books the stock
+     *     movement disposal (event stock.movement), and the asset or CI enters
+     *     the lifecycle state disposed with the context disposal_record and
+     *     disposal_date (event lifecycle.changed). A CI whose type has no
+     *     lifecycle model gets the record only. Any error rolls back record,
+     *     movement, state change, audit entries and events.
      */
     post: operations['createDisposalRecord'];
     delete?: never;
@@ -11265,6 +11273,11 @@ export interface components {
         message: string;
       }[];
     };
+    /** @description A refused disposal (422, WP-278): the lifecycle transition of the asset or CI to disposed is not allowed from its current state (invalid-transition) or fails its guard (lifecycle-guard). */
+    DisposalTransitionProblem: components['schemas']['LifecycleGuardProblem'] & {
+      /** @description States of the lifecycle model with a transition to disposed (invalid-transition only). */
+      allowed_from_states?: string[];
+    };
     /** @description from_state is not the current state (409, type urn:reticora:problem:conflict). */
     LifecycleTransitionConflictProblem: components['schemas']['ProblemDetail'] & {
       /** @description The current lifecycle state; empty without one. */
@@ -20551,6 +20564,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The current lifecycle state of the asset or CI has no transition to disposed, or it has no state (invalid-transition, field asset_id or ci_id, with from_state and the allowed source states of its model, e.g. retired and repair), or the transition fails its guard (lifecycle-guard with violations). Nothing is recorded. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DisposalTransitionProblem'];
+        };
+      };
     };
   };
   getDisposalRecord: {

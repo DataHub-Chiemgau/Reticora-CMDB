@@ -685,6 +685,11 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET ci_type_id = $2 WHERE id = $1`, fixed["<ci6>"], citype2); err != nil {
 		t.Fatal(err)
 	}
+	// A disposal needs a lifecycle state with a transition to disposed
+	// (WP-278).
+	if _, err = f.Admin.Exec(bg, `UPDATE asset SET lifecycle_state = 'retired' WHERE id = $1`, fixed["<asset2>"]); err != nil {
+		t.Fatal(err)
+	}
 	// A soft-deleted CI for POST /cis/{id}/restore.
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, fixed["<ci5>"]); err != nil {
 		t.Fatal(err)

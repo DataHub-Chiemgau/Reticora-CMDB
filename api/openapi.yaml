@@ -4041,6 +4041,14 @@ paths:
         audit entry disposal_record.created is written in the same transaction.
         An asset, CI, supplier or evidence document the caller cannot see
         answers 404 without a record.
+
+        The disposal runs in one transaction (MGT-02, WP-278): the asset or
+        CI is locked, the record is written, an asset books the stock
+        movement disposal (event stock.movement), and the asset or CI enters
+        the lifecycle state disposed with the context disposal_record and
+        disposal_date (event lifecycle.changed). A CI whose type has no
+        lifecycle model gets the record only. Any error rolls back record,
+        movement, state change, audit entries and events.
       requestBody:
         required: true
         content:
@@ -4060,6 +4068,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            The current lifecycle state of the asset or CI has no transition
+            to disposed, or it has no state (invalid-transition, field
+            asset_id or ci_id, with from_state and the allowed source states
+            of its model, e.g. retired and repair), or the transition fails
+            its guard (lifecycle-guard with violations). Nothing is recorded.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/DisposalTransitionProblem' }
 
   /api/v1/disposal-records/{id}:
     x-phase: P2
@@ -24081,6 +24099,21 @@ components:
                     type: string
                     description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
                   message: { type: string }
+    DisposalTransitionProblem:
+      description: >-
+        A refused disposal (422, WP-278): the lifecycle transition of the
+        asset or CI to disposed is not allowed from its current state
+        (invalid-transition) or fails its guard (lifecycle-guard).
+      allOf:
+        - $ref: '#/components/schemas/LifecycleGuardProblem'
+        - type: object
+          properties:
+            allowed_from_states:
+              type: array
+              items: { type: string }
+              description: >-
+                States of the lifecycle model with a transition to disposed
+                (invalid-transition only).
     LifecycleTransitionConflictProblem:
       description: >-
         from_state is not the current state (409, type

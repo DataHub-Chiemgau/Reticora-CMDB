@@ -726,10 +726,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
-	// The one writer of the ledger stock_movement (WP-274): the route and
-	// the best-effort bookings of assignment and disposal (until WP-275,
-	// WP-278) lock, check and write stock.movement to the outbox.
+	// The one writer of the ledger stock_movement (WP-274): the route, the
+	// best-effort booking of assignment (until WP-275) and the disposal in
+	// its transaction (WP-278) lock, check and write stock.movement to the
+	// outbox.
 	movements := movement.NewService(repos.Movement)
+	// One lifecycle service for the transition routes and the disposal
+	// (WP-278).
+	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History))
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -757,7 +761,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
-		disposal.NewHandler(repos.Disposal).WithMovements(movements),
+		disposal.NewHandler(repos.Disposal).WithLifecycle(movements, lifecycleService, repos.LifecycleResolver, repos.Lifecycle),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
@@ -800,9 +804,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		metamodelImportHandler(&repos),
 		importer.NewHandler(repos.Import),
 		importHandler,
-		lifecycle.NewHandler(repos.Lifecycle,
-			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
-			repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
+		lifecycle.NewHandler(repos.Lifecycle, lifecycleService, repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
