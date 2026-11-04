@@ -474,6 +474,48 @@ func (r *PGRepository) MarkResolved(ctx context.Context, orgID, ticketID string,
 	})
 }
 
+// ReapplyForTicket chooses the policy again after a change of the ticket's
+// priority or object (WP-769), unless the state names its policy
+// explicitly (sla_explicit): ApplyForTicket computes the due times from the
+// ticket's creation with the calendar of the chain then valid and clears
+// the breach notifications; first response and resolution stay.
+func (r *PGRepository) ReapplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	var explicit bool
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT sla_explicit FROM ticket_sla WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2`,
+			orgID, t.ID).Scan(&explicit)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("read ticket sla: %w", err)
+	}
+	if explicit {
+		return nil
+	}
+	_, err = r.ApplyForTicket(ctx, orgID, t, "")
+	return err
+}
+
+// MarkReopened clears the resolution of a resolved ticket's state after a
+// reopen (WP-769): resolved_at and resolution_breach_notified_at become
+// NULL and resolution_breached is computed at the moment of the reopen;
+// the due time stays, so an overdue one is reported again by the next
+// sla.check run. A state without resolution is unchanged.
+func (r *PGRepository) MarkReopened(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE ticket_sla SET resolved_at = NULL, resolution_breach_notified_at = NULL,
+			resolution_breached = $3 > resolution_due_at, updated_at = now()
+			WHERE `+ticketSLAVisible+` AND organization_id = $1 AND ticket_id = $2 AND resolved_at IS NOT NULL`, orgID, ticketID, at.UTC())
+		if err != nil {
+			return fmt.Errorf("mark reopened: %w", err)
+		}
+		return nil
+	})
+}
+
 func (r *PGRepository) ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error) {
 	items := make([]TicketSLA, 0)
 	var total int

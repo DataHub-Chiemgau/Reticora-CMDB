@@ -57,6 +57,14 @@ func (h *countingHooks) MarkResolved(ctx context.Context, orgID, ticketID string
 	return h.inner.MarkResolved(ctx, orgID, ticketID, at)
 }
 
+func (h *countingHooks) ReapplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	return h.inner.ReapplyForTicket(ctx, orgID, t)
+}
+
+func (h *countingHooks) MarkReopened(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	return h.inner.MarkReopened(ctx, orgID, ticketID, at)
+}
+
 // serviceWorld is one backend of the service tests.
 type serviceWorld struct {
 	ctx   context.Context // org-wide request of organization A

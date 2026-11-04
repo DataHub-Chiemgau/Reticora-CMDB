@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -384,6 +385,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// SLA breaches: every minute each missed due time once as
+		// ticket.sla_breached, the escalation to assignee and team lead
+		// (TKT-01, WP-769); module ticketing, ticketing_standard only.
+		if d.modules.Enabled("ticketing") {
+			slaCheck := sla.NewBreachCheck(pool)
+			slaCheck.Licensed = func(ctx context.Context, orgID string) (bool, error) {
+				_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureTicketingStandard)
+				return status == entitlement.StatusActive, serr
+			}
+			systemJobs = append(systemJobs, slaCheck.Schedule())
+		}
 		// Ad-hoc discovery jobs without a report from their collector within
 		// discovery.JobDeadline fail with cause timeout (JOB-01, F-358).
 		if reaper := discovery.NewJobReaper(pool, d.repos.Discovery); reaper != nil {

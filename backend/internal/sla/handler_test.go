@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -215,5 +216,114 @@ func TestBusinessCalendarPagingMemory(t *testing.T) {
 	}
 	if got, _ := repo.GetPolicy(context.Background(), "org-1", p.ID); got.CalendarID != nil {
 		t.Fatalf("policy calendar after delete: %v", *got.CalendarID)
+	}
+}
+
+// featureSet is an entitlement.Checker with fixed features.
+type featureSet map[string]bool
+
+func (f featureSet) IsEnabled(_ context.Context, _, key string) bool { return f[key] }
+
+// TestTicketHooksStandardMemory covers TKT-01 (E-39, WP-769) over the
+// memory repository: without ticketing_standard the hooks apply no SLA,
+// choose none again and reset none; with it a new priority chooses the
+// policy again (from the ticket's creation, first response kept), a named
+// policy stays, and a reopen clears the resolution of a resolved ticket
+// only.
+func TestTicketHooksStandardMemory(t *testing.T) {
+	ctx := context.Background()
+	slaRepo, ticketRepo, _ := setupSLA()
+	medium := &Policy{OrganizationID: "org-1", Name: "Medium", Priority: "medium", ResponseTargetMinutes: 60, ResolutionTargetMinutes: 480}
+	high := &Policy{OrganizationID: "org-1", Name: "High", Priority: "high", ResponseTargetMinutes: 15, ResolutionTargetMinutes: 120}
+	for _, p := range []*Policy{medium, high} {
+		if err := slaRepo.CreatePolicy(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	created := time.Now().UTC().Add(-3 * time.Hour).Truncate(time.Second)
+	newTicket := func(title string) *ticket.Ticket {
+		t.Helper()
+		tk := &ticket.Ticket{OrganizationID: "org-1", Title: title, Status: "open", Priority: "medium", Category: "incident", ReporterID: "user-1"}
+		if err := ticketRepo.Create(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+		tk.CreatedAt = created
+		return tk
+	}
+
+	essential := TicketHooks{Repo: slaRepo, Features: featureSet{}}
+	tk := newTicket("essential")
+	if err := essential.ApplyForTicket(ctx, "org-1", tk); err != nil {
+		t.Fatal(err)
+	}
+	if err := essential.ReapplyForTicket(ctx, "org-1", tk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := slaRepo.GetForTicket(ctx, "org-1", tk.ID); !errors.Is(err, ErrTicketSLANotFound) {
+		t.Fatalf("SLA state without ticketing_standard: %v, want none", err)
+	}
+
+	standard := TicketHooks{Repo: slaRepo, Features: featureSet{"ticketing_standard": true}}
+	tk = newTicket("standard")
+	if err := standard.ApplyForTicket(ctx, "org-1", tk); err != nil {
+		t.Fatal(err)
+	}
+	if err := standard.MarkFirstResponse(ctx, "org-1", tk.ID, created.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	tk.Priority = "high"
+	if err := standard.ReapplyForTicket(ctx, "org-1", tk); err != nil {
+		t.Fatal(err)
+	}
+	state, err := slaRepo.GetForTicket(ctx, "org-1", tk.ID)
+	if err != nil || state.SLAID != high.ID || !state.ResolutionDueAt.Equal(created.Add(120*time.Minute)) ||
+		state.FirstResponseAt == nil || !state.ResolutionBreached {
+		t.Fatalf("after the new priority: %+v err=%v, want the high policy from the creation, first response kept", state, err)
+	}
+	// Without a policy for the new priority the state stays.
+	tk.Priority = "low"
+	if err = standard.ReapplyForTicket(ctx, "org-1", tk); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ = slaRepo.GetForTicket(ctx, "org-1", tk.ID); state.SLAID != high.ID {
+		t.Fatalf("without a policy of the priority: %s, want the high policy kept", state.SLAID)
+	}
+
+	// A named policy stays.
+	named := newTicket("named")
+	if _, err = slaRepo.ApplyForTicket(ctx, "org-1", named, medium.ID); err != nil {
+		t.Fatal(err)
+	}
+	named.Priority = "high"
+	if err = standard.ReapplyForTicket(ctx, "org-1", named); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ = slaRepo.GetForTicket(ctx, "org-1", named.ID); state.SLAID != medium.ID {
+		t.Fatalf("named policy: %s, want %s", state.SLAID, medium.ID)
+	}
+
+	// Reopen: only a resolved state changes; without the feature none.
+	if err = standard.MarkReopened(ctx, "org-1", tk.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ = slaRepo.GetForTicket(ctx, "org-1", tk.ID); state.ResolvedAt != nil {
+		t.Fatal("reopen of an unresolved state set resolved_at")
+	}
+	resolvedAt := created.Add(30 * time.Minute)
+	if err = standard.MarkResolved(ctx, "org-1", tk.ID, resolvedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err = essential.MarkReopened(ctx, "org-1", tk.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ = slaRepo.GetForTicket(ctx, "org-1", tk.ID); state.ResolvedAt == nil || state.ResolutionBreached {
+		t.Fatalf("reopen without ticketing_standard changed the state: %+v", state)
+	}
+	if err = standard.MarkReopened(ctx, "org-1", tk.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ = slaRepo.GetForTicket(ctx, "org-1", tk.ID); state.ResolvedAt != nil || !state.ResolutionBreached ||
+		!state.ResolutionDueAt.Equal(created.Add(120*time.Minute)) {
+		t.Fatalf("after the reopen: %+v, want no resolution, the overdue due time kept", state)
 	}
 }

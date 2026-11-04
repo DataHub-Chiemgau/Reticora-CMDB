@@ -32,6 +32,19 @@ type Repository interface {
 	GetForTicket(ctx context.Context, orgID, ticketID string) (*TicketSLA, error)
 	MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error
 	MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error
+	// ReapplyForTicket chooses the policy of the ticket again after a
+	// change of its priority or object (WP-769): unless the policy was
+	// named (sla_explicit), the due times are computed anew from the
+	// ticket's creation like ApplyForTicket, which clears the breach
+	// notifications; first response and resolution stay. A ticket without
+	// SLA state gets one like at its creation. ErrNotFound: no policy
+	// matches (the state stays).
+	ReapplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error
+	// MarkReopened clears the resolution of a resolved ticket's SLA state
+	// after a reopen (WP-769): resolved_at and the resolution breach
+	// notification become NULL, resolution_breached is computed anew, the
+	// due time stays. A state without resolution is unchanged.
+	MarkReopened(ctx context.Context, orgID, ticketID string, at time.Time) error
 	ListBreaches(ctx context.Context, orgID string, filter BreachFilter, page api.PaginationParams) ([]TicketSLA, int, error)
 	// Business calendars (TKT-02, WP-768). ListCalendars returns at most
 	// one row more than the page limit, sorted by name and id, and the
@@ -63,7 +76,9 @@ type MemoryRepository struct {
 	// schedule each ticket's due times were computed with (nil: elapsed).
 	calendars map[string]*memoryCalendar
 	schedules map[string]*Schedule
-	nextID    int
+	// explicit marks the tickets whose policy was named (sla_explicit).
+	explicit map[string]bool
+	nextID   int
 }
 
 // memoryCalendar is a stored business calendar of the memory repository.
@@ -218,7 +233,7 @@ func (r *MemoryRepository) DeleteCalendar(_ context.Context, orgID, id string) e
 // NewMemoryRepository creates a memory SLA repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{policies: make(map[string]*Policy), states: make(map[string]*TicketSLA),
-		calendars: make(map[string]*memoryCalendar), schedules: make(map[string]*Schedule)}
+		calendars: make(map[string]*memoryCalendar), schedules: make(map[string]*Schedule), explicit: make(map[string]bool)}
 }
 
 // checkCalendarLocked mirrors checkCalendarBinding of the PostgreSQL
@@ -337,14 +352,29 @@ func (r *MemoryRepository) ApplyForTicket(_ context.Context, orgID string, t *ti
 		return nil, ErrNotFound
 	}
 	calendarID, sched := r.scheduleLocked(orgID, policy)
-	r.nextID++
-	state, err := buildState(fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID), orgID, t, policy, sched)
+	previous, recompute := r.states[t.ID]
+	recompute = recompute && previous.OrganizationID == orgID
+	id := ""
+	if recompute {
+		id = previous.ID
+	} else {
+		r.nextID++
+		id = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.nextID)
+	}
+	state, err := buildState(id, orgID, t, policy, sched)
 	if err != nil {
 		return nil, err
+	}
+	if recompute {
+		// A new computation keeps first response and resolution, like the
+		// upsert of the PostgreSQL repository.
+		state.FirstResponseAt, state.ResolvedAt, state.CreatedAt = previous.FirstResponseAt, previous.ResolvedAt, previous.CreatedAt
+		refreshState(state, time.Now().UTC())
 	}
 	state.CalendarID = calendarID
 	r.states[t.ID] = state
 	r.schedules[t.ID] = sched
+	r.explicit[t.ID] = slaID != ""
 	cp := *state
 	fillRemaining(&cp, sched, time.Now().UTC())
 	return &cp, nil
@@ -382,6 +412,31 @@ func (r *MemoryRepository) MarkResolved(_ context.Context, orgID, ticketID strin
 		v := at.UTC()
 		state.ResolvedAt = &v
 		refreshState(state, v)
+	}
+	return nil
+}
+
+// ReapplyForTicket mirrors the PostgreSQL repository: a named policy
+// stays, otherwise the policy is chosen again.
+func (r *MemoryRepository) ReapplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	r.mu.RLock()
+	state, ok := r.states[t.ID]
+	explicit := ok && state.OrganizationID == orgID && r.explicit[t.ID]
+	r.mu.RUnlock()
+	if explicit {
+		return nil
+	}
+	_, err := r.ApplyForTicket(ctx, orgID, t, "")
+	return err
+}
+
+// MarkReopened clears the resolution of a resolved state.
+func (r *MemoryRepository) MarkReopened(_ context.Context, orgID, ticketID string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if state, ok := r.states[ticketID]; ok && state.OrganizationID == orgID && state.ResolvedAt != nil {
+		state.ResolvedAt = nil
+		refreshState(state, at.UTC())
 	}
 	return nil
 }

@@ -21316,7 +21316,7 @@ components:
             the named categories win over `muted_categories`; the response
             lists every category.
           propertyNames:
-            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, webhook]
+            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, ticket, webhook]
           additionalProperties:
             type: string
             enum: [subscribed, muted]
@@ -21327,12 +21327,12 @@ components:
             Categories whose e-mails are bundled into one digest per window
             (NTF-04): category → hourly (ends at the full hour) or daily (ends
             at midnight in time_zone). Allowed are the categories with a
-            non-critical event (entitlement, export, job, review, webhook);
+            non-critical event (entitlement, export, job, review, ticket, webhook);
             critical notifications, the in-app center and webhooks are never
             bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every
             e-mail on its own.
           propertyNames:
-            enum: [entitlement, export, job, review, webhook]
+            enum: [entitlement, export, job, review, ticket, webhook]
           additionalProperties:
             type: string
             enum: [hourly, daily]

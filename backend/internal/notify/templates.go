@@ -195,6 +195,27 @@ var Templates = map[string]map[string]render{
 				"Certificate " + str(d, "name") + " expires on " + str(d, "expires_at") + "."}
 		},
 	},
+	events.TicketSLABreached: {
+		// The missed due time of a ticket (WP-769): number, kind, due time.
+		LocaleDE: func(d map[string]any) Text {
+			kind := "Reaktionsfrist"
+			if str(d, "kind") == "resolution" {
+				kind = "Lösungsfrist"
+			}
+			return Text{"SLA verletzt: Ticket #" + fmt.Sprint(d["ticket_number"]) + " (" + kind + ")",
+				"Die " + kind + " von Ticket #" + fmt.Sprint(d["ticket_number"]) + " (Priorität " + str(d, "priority") +
+					") war am " + str(d, "due_at") + " fällig und ist überschritten."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			kind := "response time"
+			if str(d, "kind") == "resolution" {
+				kind = "resolution time"
+			}
+			return Text{"SLA breached: ticket #" + fmt.Sprint(d["ticket_number"]) + " (" + kind + ")",
+				"The " + kind + " of ticket #" + fmt.Sprint(d["ticket_number"]) + " (priority " + str(d, "priority") +
+					") was due at " + str(d, "due_at") + " and has passed."}
+		},
+	},
 	events.APIKeyCreatorDeactivated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Service-Account-Keys rotieren: Ersteller deaktiviert",

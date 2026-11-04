@@ -656,7 +656,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	// Tickets and comments are created through one service (WP-766).
-	tickets := ticket.NewService(repos.Ticket, sla.TicketHooks{Repo: repos.SLA})
+	// SLAs are ticketing_standard (E-39, WP-769): the hooks apply, choose
+	// again and reset them only with the feature.
+	slaHooks := sla.TicketHooks{Repo: repos.SLA}
+	if opts.Entitlements != nil {
+		slaHooks.Features = opts.Entitlements
+	}
+	tickets := ticket.NewService(repos.Ticket, slaHooks)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
