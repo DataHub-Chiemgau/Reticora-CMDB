@@ -580,6 +580,9 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// returned.
 	"POST /api/v1/tickets/{id}/links":             {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
 	"DELETE /api/v1/tickets/{id}/links/{link_id}": {"/api/v1/tickets/<id:/api/v1/tickets>/links/<id:/api/v1/ticket-links>", ""},
+
+	// Asset tags (WP-755): the system tag archived for the asset.
+	"PUT /api/v1/assets/{id}/tags": {"", `{"tags":["archived"]}`},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first

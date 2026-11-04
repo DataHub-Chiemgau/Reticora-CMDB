@@ -59,8 +59,12 @@ type Asset struct {
 	LifecycleState string         `json:"lifecycle_state,omitempty"`
 	Notes          string         `json:"notes,omitempty"`
 	CustomFields   map[string]any `json:"custom_fields"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// Tags are the keys of the catalog tags of the asset (asset_tag_link,
+	// WP-755), sorted, [] without tags; written by PUT
+	// /api/v1/assets/{id}/tags only.
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// AssetTypeID and SiteID are the type and scope of the asset for its
 	// field permissions (RBA-07). Not part of the API.
 	AssetTypeID string `json:"-"`

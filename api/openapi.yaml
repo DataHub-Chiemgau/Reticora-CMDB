@@ -18436,7 +18436,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The tag is assigned to CIs or tickets, or is a system tag.
+          description: The tag is assigned to CIs, tickets or assets, or is a system tag.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -18990,17 +18990,47 @@ paths:
   /api/v1/assets/{id}/tags:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     put:
       operationId: replaceAssetTags
       tags: [Tags]
-      summary: Replace the tags of an asset
-      description: Planned (E-38); WP-755 implements the operation.
+      summary: Replace the tags of an asset (API-06)
+      description: >-
+        Replaces the tags of the asset with the catalog tags `tags` (keys) in
+        one transaction; an empty list removes every tag. Unknown keys are
+        422 with the entries (tags[i]); tags are not created implicitly
+        (POST /api/v1/tags). A changed list raises the version by 1, writes
+        the history row of the field tags and the event asset.changed with
+        changed_fields ["tags"]; an unchanged list changes nothing. If-Match
+        as with PATCH /api/v1/assets/{id} (API-07, WP-740): 412 when it is
+        required but missing or names no version of the asset, 409 with the
+        fields when the tags changed since. An asset outside the caller's
+        scope is 404. custom_fields.tags of POST and PATCH /api/v1/assets is
+        refused with 400. Requires asset:write.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceAssetTagsRequest'
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-755.
+          description: Tags replaced; the asset
+          headers:
+            ETag:
+              description: The new asset version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19009,8 +19039,24 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The tags changed since the If-Match version
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the asset
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: tags is missing or names unknown tags; `violations` names the entries.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
 
   /api/v1/reservations/{id}/convert:
     x-phase: P2
@@ -26518,6 +26564,14 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: >-
+            Keys of the catalog tags of the asset (WP-755), sorted; [] without
+            tags. Written by PUT /api/v1/assets/{id}/tags only.
         created_at:
           type: string
           format: date-time
@@ -26654,6 +26708,9 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+          description: >-
+            Custom fields; the key tags is refused with 400 (tags are catalog
+            tags, PUT /api/v1/assets/{id}/tags, WP-755).
 
     UpdateAssetRequest:
       type: object
@@ -26733,6 +26790,9 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+          description: >-
+            Custom fields; the key tags is refused with 400 (tags are catalog
+            tags, PUT /api/v1/assets/{id}/tags, WP-755).
 
     LinkAssetCIRequest:
       type: object
@@ -29001,6 +29061,17 @@ components:
         moved:
           type: integer
           description: Number of live CIs whose assignment moved to the tag.
+
+    ReplaceAssetTagsRequest:
+      type: object
+      required: [tags]
+      additionalProperties: false
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+          description: Keys of catalog tags; duplicates count once, [] removes every tag.
 
     ReplaceCITagsRequest:
       type: object

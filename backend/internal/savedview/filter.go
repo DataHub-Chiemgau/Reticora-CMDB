@@ -169,14 +169,14 @@ func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (whe
 			AND fv.override_value IS NOT NULL AND fv.discovered_value IS NOT NULL
 			AND fv.override_value IS DISTINCT FROM fv.discovered_value)`)
 	}
-	// Each tag is required (AND). CIs carry the keys of the tag catalog
-	// (ci_tag, WP-281); assets keep the array in custom_fields until WP-755.
+	// Each tag is required (AND). CIs and assets carry the keys of the tag
+	// catalog (ci_tag, WP-281; asset_tag_link, WP-755).
 	for _, tag := range f.Tags {
 		p := next()
 		if table == "ci" {
 			add(fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = %s)`, p), tag)
 		} else {
-			add(fmt.Sprintf(`%s->'tags' ? %s`, jsonbCol, p), tag)
+			add(fmt.Sprintf(`EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = %s)`, p), tag)
 		}
 	}
 	for k, v := range f.Attributes {

@@ -8408,8 +8408,8 @@ export interface paths {
     };
     get?: never;
     /**
-     * Replace the tags of an asset
-     * @description Planned (E-38); WP-755 implements the operation.
+     * Replace the tags of an asset (API-06)
+     * @description Replaces the tags of the asset with the catalog tags `tags` (keys) in one transaction; an empty list removes every tag. Unknown keys are 422 with the entries (tags[i]); tags are not created implicitly (POST /api/v1/tags). A changed list raises the version by 1, writes the history row of the field tags and the event asset.changed with changed_fields ["tags"]; an unchanged list changes nothing. If-Match as with PATCH /api/v1/assets/{id} (API-07, WP-740): 412 when it is required but missing or names no version of the asset, 409 with the fields when the tags changed since. An asset outside the caller's scope is 404. custom_fields.tags of POST and PATCH /api/v1/assets is refused with 400. Requires asset:write.
      */
     put: operations['replaceAssetTags'];
     post?: never;
@@ -12661,6 +12661,8 @@ export interface components {
       custom_fields: {
         [key: string]: unknown;
       };
+      /** @description Keys of the catalog tags of the asset (WP-755), sorted; [] without tags. Written by PUT /api/v1/assets/{id}/tags only. */
+      readonly tags?: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -12735,6 +12737,7 @@ export interface components {
       /** @deprecated */
       location?: string;
       notes?: string;
+      /** @description Custom fields; the key tags is refused with 400 (tags are catalog tags, PUT /api/v1/assets/{id}/tags, WP-755). */
       custom_fields?: {
         [key: string]: unknown;
       };
@@ -12774,6 +12777,7 @@ export interface components {
       notes?: string;
       /** @description Primary CI; linked in the same transaction as a manual change of the CI (version, history, ci.changed; requires ci:write); the previous primary CI stays linked. An empty string clears the primary CI, the CI stays linked (DELETE /api/v1/assets/{id}/cis/{ci_id} unlinks it). An unknown CI or one outside the caller's scope, or a CI of another client than the asset, is 422 on primary_ci_id. */
       primary_ci_id?: string;
+      /** @description Custom fields; the key tags is refused with 400 (tags are catalog tags, PUT /api/v1/assets/{id}/tags, WP-755). */
       custom_fields?: {
         [key: string]: unknown;
       };
@@ -14187,6 +14191,10 @@ export interface components {
       tag: components['schemas']['Tag'];
       /** @description Number of live CIs whose assignment moved to the tag. */
       moved: number;
+    };
+    ReplaceAssetTagsRequest: {
+      /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
+      tags: string[];
     };
     ReplaceCITagsRequest: {
       /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
@@ -37824,7 +37832,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The tag is assigned to CIs or tickets, or is a system tag. */
+      /** @description The tag is assigned to CIs, tickets or assets, or is a system tag. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -38453,27 +38461,66 @@ export interface operations {
   replaceAssetTags: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceAssetTagsRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-755. */
+      /** @description Tags replaced; the asset */
       200: {
         headers: {
+          /** @description The new asset version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Asset'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tags changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the asset */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description tags is missing or names unknown tags; `violations` names the entries. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   convertReservation: {

@@ -3625,15 +3625,17 @@ func (r *PGRepository) UpdateTag(ctx context.Context, orgID, id string, req *Upd
 	return tag, err
 }
 
-// tagInUse reports ErrTagInUse when tag id is assigned to a CI or a ticket
-// (ticket_tag, WP-764) (409). The repository checks it itself: the foreign
-// key violation of ci_tag or ticket_tag would be 422 through
-// api.ClassifyDBError. Rows outside the tenant scope are invisible; the
-// foreign key catches them at the DELETE (deleteTagRow).
+// tagInUse reports ErrTagInUse when tag id is assigned to a CI, a ticket
+// (ticket_tag, WP-764) or an asset (asset_tag_link, WP-755) (409). The
+// repository checks it itself: the foreign key violation of ci_tag,
+// ticket_tag or asset_tag_link would be 422 through api.ClassifyDBError.
+// Rows outside the tenant scope are invisible; the foreign key catches them
+// at the DELETE (deleteTagRow).
 func tagInUse(ctx context.Context, tx pgx.Tx, id string) error {
 	var used bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci_tag WHERE tag_id = $1)
-		OR EXISTS (SELECT 1 FROM ticket_tag WHERE tag_id = $1)`, id).Scan(&used); err != nil {
+		OR EXISTS (SELECT 1 FROM ticket_tag WHERE tag_id = $1)
+		OR EXISTS (SELECT 1 FROM asset_tag_link WHERE tag_id = $1)`, id).Scan(&used); err != nil {
 		return fmt.Errorf("check tag use: %w", err)
 	}
 	if used {
@@ -3655,8 +3657,8 @@ func deleteTagRow(ctx context.Context, tx pgx.Tx, orgID, id string) error {
 	return nil
 }
 
-// DeleteTag implements TagStore: a tag no CI carries and that is no
-// system tag, with the audit entry tag.deleted.
+// DeleteTag implements TagStore: a tag no CI, ticket or asset carries and
+// that is no system tag, with the audit entry tag.deleted.
 func (r *PGRepository) DeleteTag(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := lockTag(ctx, tx, orgID, id)
@@ -3768,6 +3770,117 @@ func (r *PGRepository) mergeTicketTags(ctx context.Context, tx pgx.Tx, orgID, so
 	})
 }
 
+// taggedAsset is an asset of a tag merge: its frame, its tag keys before
+// and after the merge and its version after it.
+type taggedAsset struct {
+	id, clientID, siteID string
+	before, after        []string
+	version              int64
+}
+
+// mergeAssetTags moves the asset assignments of tag sourceID (key
+// sourceKey) to tag intoID (key intoKey) (asset_tag_link, WP-755): a
+// duplicate drops; every asset concerned is locked, gets version + 1
+// (app.asset_version_touch, migration 000249) and updated_at, the trail
+// row of tags in entity_change and one asset.changed with changed_fields
+// ["tags"]. It returns the number of assets.
+func (r *PGRepository) mergeAssetTags(ctx context.Context, tx pgx.Tx, orgID, sourceID, sourceKey, intoID, intoKey string) (int, error) {
+	rows, err := tx.Query(ctx, `SELECT a.id::text, COALESCE(a.client_id::text, ''), COALESCE(a.site_id::text, ''),
+			COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM asset_tag_link x JOIN tag t ON t.id = x.tag_id
+				WHERE x.asset_id = a.id), '{}')
+		FROM asset a WHERE a.organization_id = $1
+			AND EXISTS (SELECT 1 FROM asset_tag_link l WHERE l.asset_id = a.id AND l.tag_id = $2)
+		ORDER BY a.id FOR UPDATE OF a`, orgID, sourceID)
+	if err != nil {
+		return 0, fmt.Errorf("read tagged assets: %w", err)
+	}
+	assets, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (taggedAsset, error) {
+		var a taggedAsset
+		return a, row.Scan(&a.id, &a.clientID, &a.siteID, &a.before)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("read tagged assets: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE asset_tag_link SET tag_id = $2 WHERE tag_id = $1
+		AND NOT EXISTS (SELECT 1 FROM asset_tag_link d WHERE d.asset_id = asset_tag_link.asset_id AND d.tag_id = $2)`, sourceID, intoID); err != nil {
+		return 0, fmt.Errorf("move asset tag assignments: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM asset_tag_link WHERE tag_id = $1`, sourceID); err != nil {
+		return 0, fmt.Errorf("drop duplicate asset tag assignments: %w", err)
+	}
+	if len(assets) == 0 {
+		return 0, nil
+	}
+	ids := make([]string, len(assets))
+	for i := range assets {
+		ids[i] = assets[i].id
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('app.asset_version_touch', 'on', true)`); err != nil {
+		return 0, fmt.Errorf("touch tagged assets: %w", err)
+	}
+	vrows, err := tx.Query(ctx, `UPDATE asset SET updated_at = NOW() WHERE organization_id = $1 AND id = ANY($2::uuid[])
+		RETURNING id::text, version`, orgID, ids)
+	if err != nil {
+		return 0, fmt.Errorf("touch tagged assets: %w", err)
+	}
+	versions := map[string]int64{}
+	var vid string
+	var version int64
+	if _, err = pgx.ForEachRow(vrows, []any{&vid, &version}, func() error {
+		versions[vid] = version
+		return nil
+	}); err != nil {
+		return 0, fmt.Errorf("touch tagged assets: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('app.asset_version_touch', '', true)`); err != nil {
+		return 0, fmt.Errorf("touch tagged assets: %w", err)
+	}
+	olds, news, vers := make([]string, len(assets)), make([]string, len(assets)), make([]int64, len(assets))
+	for i := range assets {
+		a := &assets[i]
+		a.after = slices.DeleteFunc(slices.Clone(a.before), func(k string) bool { return k == sourceKey })
+		if !slices.Contains(a.after, intoKey) {
+			a.after = append(a.after, intoKey)
+		}
+		slices.Sort(a.after)
+		a.version = versions[a.id]
+		oldJSON, encErr := json.Marshal(a.before)
+		if encErr != nil {
+			return 0, fmt.Errorf("encode asset tags: %w", encErr)
+		}
+		newJSON, encErr := json.Marshal(a.after)
+		if encErr != nil {
+			return 0, fmt.Errorf("encode asset tags: %w", encErr)
+		}
+		olds[i], news[i], vers[i] = string(oldJSON), string(newJSON), a.version
+	}
+	var actor any
+	if user := tenant.FromContext(ctx).UserID; api.IsUUID(user) {
+		actor = user
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO entity_change (organization_id, entity_type, entity_id, actor_id, change_type,
+			field_name, old_value, new_value, entity_version)
+		SELECT $1, 'asset', u.id, $2, 'update', 'tags', u.old::jsonb, u.new::jsonb, u.version
+		FROM unnest($3::uuid[], $4::text[], $5::text[], $6::bigint[]) AS u(id, old, new, version)`,
+		orgID, actor, ids, olds, news, vers); err != nil {
+		return 0, fmt.Errorf("record asset tag changes: %w", err)
+	}
+	if r.outbox == nil {
+		return len(assets), nil
+	}
+	es := make([]*events.Event, len(assets))
+	for i := range assets {
+		a := &assets[i]
+		es[i] = &events.Event{OrgID: orgID, Type: events.AssetChanged, EntityID: a.id, Data: &events.AssetChangedData{
+			ID: a.id, ClientID: a.clientID, SiteID: a.siteID, ChangedFields: []string{"tags"},
+		}}
+	}
+	return len(assets), lastInTx(ctx, func() error {
+		_, appendErr := r.outbox.AppendMany(ctx, tx, es)
+		return appendErr
+	})
+}
+
 // taggedCI is a CI of a tag merge with its tag keys.
 type taggedCI struct {
 	id   string
@@ -3778,8 +3891,9 @@ type taggedCI struct {
 // every live CI with the source tag gets the target tag instead, as a
 // manual update with history, audit entry ci.updated and event ci.changed
 // (version + 1); the assignments of deleted CIs move without history; a
-// duplicate drops. The source tag is deleted, the audit entry tag.merged
-// records both tags. A system tag is no source (409).
+// duplicate drops. The assignments of tickets and assets move as well
+// (mergeTicketTags, mergeAssetTags). The source tag is deleted, the audit
+// entry tag.merged records both tags. A system tag is no source (409).
 func (r *PGRepository) MergeTag(ctx context.Context, orgID, sourceID, intoID string) (*TagMergeResult, error) {
 	result := &TagMergeResult{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -3845,12 +3959,16 @@ func (r *PGRepository) MergeTag(ctx context.Context, orgID, sourceID, intoID str
 		if err != nil {
 			return err
 		}
+		assets, err := r.mergeAssetTags(ctx, tx, orgID, sourceID, source.Key, intoID, into.Key)
+		if err != nil {
+			return err
+		}
 		if delErr := deleteTagRow(ctx, tx, orgID, sourceID); delErr != nil {
 			return delErr
 		}
 		result.Tag = into
 		return r.recordTagAudit(ctx, tx, orgID, "tag.merged", sourceID, map[string]any{
-			"source": source, "into": into, "cis": result.Moved, "tickets": tickets,
+			"source": source, "into": into, "cis": result.Moved, "tickets": tickets, "assets": assets,
 		})
 	})
 	if err != nil {

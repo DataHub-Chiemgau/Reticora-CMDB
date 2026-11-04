@@ -109,6 +109,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// GET /api/v1/cis?filter[asset_id]=.
 	r.Post("/api/v1/assets/{id}/cis", h.LinkCI)
 	r.Delete("/api/v1/assets/{id}/cis/{ci_id}", h.UnlinkCI)
+	// Tags from the tag catalog (API-06, WP-755).
+	r.Put("/api/v1/assets/{id}/tags", h.ReplaceTags)
 }
 
 // requestContext returns the organization and the field policy of the
@@ -341,6 +343,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and inventory_no are required")
 		return
 	}
+	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	if err := validCurrency(req.Currency); err != nil {
 		api.WriteFieldError(w, err)
 		return
@@ -387,6 +393,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Location:       req.Location,
 		Notes:          req.Notes,
 		CustomFields:   req.CustomFields,
+		Tags:           []string{},
 	}
 	if a.CustomFields == nil {
 		a.CustomFields = make(map[string]any)
@@ -574,6 +581,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		req.IfMatch = &version
 	}
 	if err := rejectReadOnly(&req); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}

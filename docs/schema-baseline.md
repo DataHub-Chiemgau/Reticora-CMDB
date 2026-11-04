@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000248_composition_to_parent_ci
+Stand: Migration 000249_asset_tags
 
 ## Prüfung
 
@@ -1404,6 +1404,34 @@ Teilindex `idx_internal_order_target_location` (`target_location_id`,
 `organization_id`) WHERE NOT NULL. Art `bin` und Client der Bestellung
 prüft das Order-Repository; RLS und Policies bleiben unverändert.
 
+Asset-Tags (API-06, WP-755, E-38, Migration 000249): `asset_tag_link`
+ordnet Assets Tags des Katalogs zu (`id` PRIMARY KEY, `organization_id`
+→ `organization` ON DELETE CASCADE, `asset_id`, `tag_id`, `client_id`,
+`site_id`, `created_by` ohne Fremdschlüssel, `created_at`):
+`asset_tag_link_asset_fkey` (`asset_id`, `organization_id`) → `asset`
+(`id`, `organization_id`) ON DELETE CASCADE (K19),
+`asset_tag_link_tag_fkey` (`tag_id`, `organization_id`) → `tag` (`id`,
+`organization_id`) ohne ON-DELETE-Aktion (zugeordnete Tags lassen sich
+nicht löschen), `asset_tag_link_asset_id_tag_id_key` (`asset_id`,
+`tag_id`), Index `idx_asset_tag_link_org_tag` (`organization_id`,
+`tag_id`). `client_id` und `site_id` setzt `derive_asset_tag_link_scope`
+(`asset_tag_link_scope`, BEFORE INSERT OR UPDATE) aus dem Asset;
+`propagate_asset_module_scope()` (Fassung aus 000217 plus
+`asset_tag_link`, erweiterter Scope) zieht sie bei Client- oder
+Standortwechsel des Assets nach. RLS mit ENABLE/FORCE und den Policies
+wie `ci_tag` (`asset_tag_link_isolation`, `asset_tag_link_scoped_update`,
+`asset_tag_link_scoped_delete`), TRUNCATE-Schutz
+`reticora_truncate_guard`. `asset_version_bump()` (Fassung aus 000241)
+erhöht die Version zusätzlich, wenn die Transaktion
+`app.asset_version_touch` auf `on` setzt (Tag-Änderung ohne geänderte
+Spalte). Die Datenmigration übernimmt die String-Elemente von
+`asset.custom_fields.tags` (nur Arrays, Schlüssel nach
+`tag_normalize_key`, leere entfallen, fehlende Tags legt sie mit
+`display_name` de/en = erstem Originalwert an), entfernt `tags` aus
+`custom_fields` ohne Änderung von `updated_at` und `version` und
+normalisiert `saved_view.filter_spec.tags` der Sichten mit `entity_kind =
+'asset'`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1422,6 +1450,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
+| `asset_tag_link` | ja | ja | asset_tag_link_isolation (ALL), asset_tag_link_scoped_delete (DELETE), asset_tag_link_scoped_update (UPDATE) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |

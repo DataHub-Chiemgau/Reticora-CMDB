@@ -57,7 +57,9 @@ const assetSelectColumns = `
 	updated_at,
 	COALESCE(asset_type_id::text, ''),
 	COALESCE(site_id::text, ''),
-	version
+	version,
+	COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM asset_tag_link l JOIN tag t ON t.id = l.tag_id
+		WHERE l.asset_id = asset.id), '{}')
 `
 
 // physicalAssetModelID is the system lifecycle model physical_asset
@@ -624,7 +626,13 @@ func appendOnly(err error) bool {
 // trigger asset_version_bump), which counts as a change of every field of
 // the request.
 func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *Asset, req *UpdateRequest) error {
-	if req.IfMatch == nil {
+	return checkIfMatch(ctx, tx, orgID, current, req.IfMatch, req.requestedFields())
+}
+
+// checkIfMatch is checkPrecondition for the If-Match version ifMatch (nil
+// without the header) of a write of the fields requested.
+func checkIfMatch(ctx context.Context, tx pgx.Tx, orgID string, current *Asset, ifMatch *int64, requested []string) error {
+	if ifMatch == nil {
 		var required bool
 		if err := tx.QueryRow(ctx, `SELECT COALESCE((settings->>'require_if_match')::boolean, false) FROM organization WHERE id = $1`,
 			orgID).Scan(&required); err != nil {
@@ -636,12 +644,11 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *As
 		return nil
 	}
 	switch {
-	case *req.IfMatch == current.Version, *req.IfMatch == api.IfMatchAny:
+	case *ifMatch == current.Version, *ifMatch == api.IfMatchAny:
 		return nil
-	case *req.IfMatch > current.Version || *req.IfMatch < 1:
+	case *ifMatch > current.Version || *ifMatch < 1:
 		return ErrPreconditionFailed
 	}
-	requested := req.requestedFields()
 	if len(requested) == 0 {
 		return nil
 	}
@@ -651,10 +658,10 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *As
 			COALESCE(array_agg(DISTINCT field_name ORDER BY field_name) FILTER (WHERE field_name = ANY($4)), '{}')
 		FROM entity_change
 		WHERE entity_type = 'asset' AND entity_id = $1 AND entity_version > $2 AND entity_version <= $3`,
-		current.ID, *req.IfMatch, current.Version, requested).Scan(&traced, &fields); err != nil {
+		current.ID, *ifMatch, current.Version, requested).Scan(&traced, &fields); err != nil {
 		return fmt.Errorf("read changes since if-match: %w", err)
 	}
-	if traced < current.Version-*req.IfMatch {
+	if traced < current.Version-*ifMatch {
 		fields = requested
 	}
 	if len(fields) > 0 {
@@ -854,11 +861,15 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.AssetTypeID,
 		&item.SiteID,
 		&item.Version,
+		&item.Tags,
 	); err != nil {
 		return nil, err
 	}
 	if item.CustomFields == nil {
 		item.CustomFields = make(map[string]any)
+	}
+	if item.Tags == nil {
+		item.Tags = []string{}
 	}
 	if purchaseDate.Valid {
 		item.PurchaseDate = purchaseDate.Time.UTC().Format("2006-01-02")

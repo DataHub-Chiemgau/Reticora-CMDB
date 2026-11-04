@@ -518,6 +518,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	m["POST /api/v1/metamodel/drafts/{id}/test"] = RouteSnapshot{Table: "metamodel_draft", Keys: []SnapshotKey{{"id", "id"}},
 		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
+	// The tags of an asset are its rows of asset_tag_link (WP-755).
+	m["PUT /api/v1/assets/{id}/tags"] = RouteSnapshot{Table: "asset", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'tags',
+			(SELECT COALESCE(jsonb_agg(g.key ORDER BY g.key), '[]'::jsonb) FROM asset_tag_link l
+			  JOIN tag g ON g.id = l.tag_id WHERE l.asset_id = t.id))`}
 	// Relationship types are addressed by key; the organization's own type,
 	// not the built-in one of the same key.
 	for _, method := range []string{"PATCH", "DELETE"} {
