@@ -317,18 +317,19 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 		return nil, errUnavailable()
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
-	// WP-266).
-	fields, err := policy(ctx)
-	if err != nil {
-		return nil, err
+	// WP-266), the addresses and MACs of the interfaces with ipam:read
+	// (WP-308).
+	principal, _ := identity.PrincipalFromContext(ctx)
+	sq := &search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
+		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage)}
+	if err = search.ApplyPrincipal(ctx, sq, func(perm string) bool { return principal.Has(identity.Permission(perm)) }); err != nil {
+		return nil, errNoPolicy()
 	}
-	res, err := q.sources.Search.Query(ctx, &search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
-		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage), Policy: fields})
+	res, err := q.sources.Search.Query(ctx, sq)
 	if err != nil {
 		return nil, gqlError(codeBadInput, err.Error())
 	}
 	// Only the entity types the caller may read (SRC-01).
-	principal, _ := identity.PrincipalFromContext(ctx)
 	out := &generated.SearchResult{Hits: []*search.Hit{}}
 	for i := range res.Data {
 		perm, known := search.ReadPermission[res.Data[i].EntityType]

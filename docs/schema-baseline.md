@@ -447,6 +447,21 @@ eingeschränkten Feldrechten über `search_document.search_vector` vor und
 liest die Feldzeilen ihrer Kandidaten über den Primärschlüssel
 `(document_id, field)`.
 
+Inventarnummer, IP und MAC (SRC-02, WP-308, Migration 000233) liegen in
+Normalform in `search_identifier` (MAC zwölf Hex-Ziffern ohne Trenner, IP
+als `host()`-Text und Hostadresse in `addr`, Inventarnummer
+`lower(btrim())`). Gleichheit und Bereiche auf `norm` (`text_pattern_ops`:
+`=`, `~>=~`, `~<~`) und `addr` (`inet`-Vergleiche) sind leakproof; die
+Indizes `idx_search_identifier_norm` und `idx_search_identifier_addr`
+bedienen die Suche deshalb auch für die App-Rolle
+(`TestSearchFieldsPlanUnderRLS`). Die Policy prüft nur die Organisation,
+gelesen wird die Tabelle nur im Join mit `search_document`. Gepflegt wird
+sie vom Indexer (`core.management_ip`, `core.primary_mac`,
+`asset.inventory_no`) und von den Triggern `trg_asset_sync_search_index`,
+`search_identifier_interface_*` und `search_identifier_ip_*`. Feldzeilen
+haben die Spalte `source` (`indexer`, `trigger`); die Asset-Dokumente mit
+ihren Feldzeilen pflegt der Trigger.
+
 <!-- rls-leaky-indexes:begin -->
 
 | Index | Tabelle | Nicht leakproof |
@@ -1323,6 +1338,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
 | `search_document_field` | ja | ja | search_document_field_tenant_isolation (ALL) |
+| `search_identifier` | ja | ja | search_identifier_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |
 | `service_account_role` | ja | ja | service_account_role_isolation (ALL) |

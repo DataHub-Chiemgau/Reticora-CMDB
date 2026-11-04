@@ -328,10 +328,16 @@ func TestAssetAST01Migration(t *testing.T) {
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		if name == "down" {
-			return string(names) + "\n" + string(b)
+		// 000233 (WP-308) has a trigger on asset columns of 000229: it
+		// goes down first and up last as well.
+		search, readErr := os.ReadFile("../../migrations/000233_search_fields." + name + ".sql")
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		return string(b) + "\n" + string(names)
+		if name == "down" {
+			return string(search) + "\n" + string(names) + "\n" + string(b)
+		}
+		return string(b) + "\n" + string(names) + "\n" + string(search)
 	}
 	tx, err := f.Admin.Begin(bg)
 	if err != nil {

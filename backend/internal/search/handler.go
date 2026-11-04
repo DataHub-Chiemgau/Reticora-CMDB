@@ -44,14 +44,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
-	// WP-266); a policy that cannot be resolved answers 500 (fail-closed).
-	policy, err := permission.PolicyFrom(r.Context())
-	if err != nil {
+	// WP-266), the addresses and MACs of the interfaces with ipam:read
+	// (WP-308); a policy that cannot be resolved answers 500 (fail-closed).
+	if err := ApplyPrincipal(r.Context(), &q, func(perm string) bool { return h.allowed(r.Context(), t, perm) }); err != nil {
 		slog.ErrorContext(r.Context(), "search: field permissions could not be resolved", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the field permissions could not be resolved")
 		return
 	}
-	q.Policy = policy
 	res, err := h.backend.Query(r.Context(), &q)
 	if err != nil {
 		// A checked query leaves backend failures only; their text goes to
@@ -118,6 +117,16 @@ func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits [
 		}
 	}
 	return out
+}
+
+// allowed reports whether the caller holds the permission; without a
+// permission repository or a user never (fail-closed).
+func (h *Handler) allowed(ctx context.Context, t tenant.TenantInfo, perm string) bool {
+	if h.permissions == nil || t.UserID == "" {
+		return false
+	}
+	ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, perm)
+	return err == nil && ok
 }
 
 // validateRequest checks the search text and the type filter: a 400 field
