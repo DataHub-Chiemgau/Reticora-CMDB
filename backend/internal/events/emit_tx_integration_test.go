@@ -217,7 +217,7 @@ END $$`); err != nil {
 			t.Fatal(err)
 		}
 		due := time.Now().Add(-time.Minute)
-		rec, err := store.Enqueue(f.OrgCtx(f.OrgA), webhook.DeliveryRecord{OrganizationID: f.OrgA, SubscriptionID: sub.ID,
+		rec, err := store.Enqueue(f.OrgCtx(f.OrgA), &webhook.DeliveryRecord{OrganizationID: f.OrgA, SubscriptionID: sub.ID,
 			Event: "ci.created", Payload: []byte(`{"id":"wp550"}`), MaxAttempts: 1, NextRetryAt: &due})
 		if err != nil {
 			t.Fatal(err)

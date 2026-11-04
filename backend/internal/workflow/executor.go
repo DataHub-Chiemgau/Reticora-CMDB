@@ -355,7 +355,7 @@ func conditionsMet(conditions []JSONMap, ctx JSONMap) bool {
 	}
 	return true
 }
-func eval(cond JSONMap, ctx JSONMap) bool {
+func eval(cond, ctx JSONMap) bool {
 	field := str(cond, "field", "")
 	op := str(cond, "op", "eq")
 	want := cond["value"]

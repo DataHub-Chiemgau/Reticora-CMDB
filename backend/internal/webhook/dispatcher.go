@@ -237,6 +237,24 @@ func (s *Scope) covers(objects []ObjectScope) bool {
 	return true
 }
 
+// Dispatcher performs background webhook deliveries. Every dispatched event is
+// persisted through the DeliveryStore before the first HTTP attempt, so pending
+// retries survive a restart and can be picked up by any replica.
+type Dispatcher struct {
+	repo       Repository
+	client     *http.Client
+	store      DeliveryStore
+	opts       DispatcherOptions
+	queue      chan deliveryJob
+	wg         sync.WaitGroup
+	stop       chan struct{}
+	stopOnce   sync.Once
+	seq        uint64
+	mu         sync.RWMutex
+	deliveries []Delivery
+	now        func() time.Time
+}
+
 // mayDeliver reports whether a subscription receives the event: the objects
 // of the event must lie in the scope snapshot of the subscription (covers,
 // E-98); then unbound subscriptions receive the event, bound ones only when
@@ -260,24 +278,6 @@ func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body [
 		return false
 	}
 	return ok
-}
-
-// Dispatcher performs background webhook deliveries. Every dispatched event is
-// persisted through the DeliveryStore before the first HTTP attempt, so pending
-// retries survive a restart and can be picked up by any replica.
-type Dispatcher struct {
-	repo       Repository
-	client     *http.Client
-	store      DeliveryStore
-	opts       DispatcherOptions
-	queue      chan deliveryJob
-	wg         sync.WaitGroup
-	stop       chan struct{}
-	stopOnce   sync.Once
-	seq        uint64
-	mu         sync.RWMutex
-	deliveries []Delivery
-	now        func() time.Time
 }
 
 // NewDispatcher creates a dispatcher with a background worker.
@@ -332,7 +332,7 @@ func NewDispatcher(repo Repository, client *http.Client, opts ...DispatcherOptio
 	go func() {
 		defer d.wg.Done()
 		for job := range d.queue {
-			d.attempt(job)
+			d.attempt(&job)
 		}
 	}()
 
@@ -450,8 +450,9 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 	}
 
 	var failed []error
-	for _, sub := range subs {
-		if !d.mayDeliver(ctx, orgID, event, body, objects, &sub) {
+	for i := range subs {
+		sub := &subs[i]
+		if !d.mayDeliver(ctx, orgID, event, body, objects, sub) {
 			continue
 		}
 		job := deliveryJob{
@@ -460,7 +461,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			event:      event,
 			payload:    body,
 			maxAttempt: d.opts.MaxAttempts,
-			sub:        sub,
+			sub:        *sub,
 			origin:     origin,
 		}
 		rec := DeliveryRecord{
@@ -483,7 +484,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			// over only when this process dies before recording the attempt.
 			leased := d.now().Add(defaultClaimLease)
 			rec.NextRetryAt = &leased
-			stored, err := d.store.Enqueue(ctx, rec)
+			stored, err := d.store.Enqueue(ctx, &rec)
 			if errors.Is(err, ErrDeliveryExists) {
 				// An earlier hand-off of the event stored the delivery; it
 				// is sent by that one or by the retry worker (WP-506).
@@ -502,12 +503,12 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			job.deliveryID = stored.ID
 		}
 
-		d.enqueueJob(job)
+		d.enqueueJob(&job)
 	}
 	return errors.Join(failed...)
 }
 
-func (d *Dispatcher) enqueueJob(job deliveryJob) {
+func (d *Dispatcher) enqueueJob(job *deliveryJob) {
 	select {
 	case <-d.stop:
 		return
@@ -515,7 +516,7 @@ func (d *Dispatcher) enqueueJob(job deliveryJob) {
 	}
 
 	select {
-	case d.queue <- job:
+	case d.queue <- *job:
 	case <-d.stop:
 	default:
 		// The in-process queue is saturated. Persisted deliveries are picked up
@@ -523,7 +524,7 @@ func (d *Dispatcher) enqueueJob(job deliveryJob) {
 		// mode needs to block.
 		if d.store == nil {
 			select {
-			case d.queue <- job:
+			case d.queue <- *job:
 			case <-d.stop:
 			}
 		}
@@ -534,7 +535,7 @@ func (d *Dispatcher) enqueueJob(job deliveryJob) {
 // subscription and returns the recorded attempt. It is used by the webhook test
 // endpoint, where the caller wants immediate feedback instead of a queued retry
 // sequence.
-func (d *Dispatcher) DeliverOnce(sub Subscription, event string, payload any) (Delivery, error) {
+func (d *Dispatcher) DeliverOnce(sub *Subscription, event string, payload any) (Delivery, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return Delivery{}, fmt.Errorf("marshal webhook payload: %w", err)
@@ -546,11 +547,11 @@ func (d *Dispatcher) DeliverOnce(sub Subscription, event string, payload any) (D
 		event:      event,
 		payload:    body,
 		maxAttempt: 1,
-		sub:        sub,
+		sub:        *sub,
 	}
 
-	statusCode, _, sendErr := d.send(job)
-	return d.recordAttempt(job, 1, statusCode, sendErr), nil
+	statusCode, _, sendErr := d.send(&job)
+	return d.recordAttempt(&job, 1, statusCode, sendErr), nil
 }
 
 // Deliveries returns a snapshot of the delivery attempts made by this process.
@@ -684,7 +685,8 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 		observability.ObserveWorkerRun("webhook_dispatcher", 0)
 	}
 
-	for _, rec := range records {
+	for i := range records {
+		rec := &records[i]
 		sub, err := d.repo.GetByID(orgScoped(ctx, rec.OrganizationID), rec.OrganizationID, rec.SubscriptionID)
 		if err != nil {
 			rec.Attempt++
@@ -697,7 +699,7 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 			continue
 		}
 
-		d.attempt(deliveryJob{
+		d.attempt(&deliveryJob{
 			deliveryID: rec.ID,
 			orgID:      rec.OrganizationID,
 			event:      rec.Event,
@@ -705,7 +707,7 @@ func (d *Dispatcher) ProcessDue(ctx context.Context) {
 			attempt:    rec.Attempt,
 			maxAttempt: maxAttemptsOrDefault(rec.MaxAttempts),
 			sub:        *sub,
-			origin:     originOf(&rec),
+			origin:     originOf(rec),
 		})
 	}
 }
@@ -720,7 +722,7 @@ func claimFailures(err error) int {
 }
 
 // attempt performs a single delivery attempt and schedules the next one.
-func (d *Dispatcher) attempt(job deliveryJob) {
+func (d *Dispatcher) attempt(job *deliveryJob) {
 	statusCode, duration, err := d.send(job)
 	attempt := job.attempt + 1
 	d.recordAttempt(job, attempt, statusCode, err)
@@ -739,7 +741,7 @@ func (d *Dispatcher) attempt(job deliveryJob) {
 	}
 
 	// background worker: no request context
-	d.finalize(context.Background(), DeliveryRecord{
+	d.finalize(context.Background(), &DeliveryRecord{
 		ID:             job.deliveryID,
 		OrganizationID: job.orgID,
 		SubscriptionID: job.sub.ID,
@@ -751,7 +753,7 @@ func (d *Dispatcher) attempt(job deliveryJob) {
 
 // finalize persists the outcome of an attempt, scheduling a retry when the
 // delivery still has attempts left.
-func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCode int, duration time.Duration, err error, exhausted bool) {
+func (d *Dispatcher) finalize(ctx context.Context, rec *DeliveryRecord, statusCode int, duration time.Duration, err error, exhausted bool) {
 	if d.store == nil {
 		return
 	}
@@ -782,7 +784,7 @@ func (d *Dispatcher) finalize(ctx context.Context, rec DeliveryRecord, statusCod
 	// is preserved in the dead-letter queue for operator inspection/replay;
 	// webhook.dead is recorded with it (NTF-05, WP-550).
 	if rec.Status == StatusDead {
-		disabled, dlqErr := d.store.MoveToDeadLetter(ctx, &rec, now.Add(-deadWindow))
+		disabled, dlqErr := d.store.MoveToDeadLetter(ctx, rec, now.Add(-deadWindow))
 		if dlqErr == nil {
 			if disabled {
 				slog.Warn("webhook subscription deactivated", "event", "webhook.subscription.disabled",
@@ -832,7 +834,7 @@ func (d *Dispatcher) backoff(attempt int) time.Duration {
 	return delay
 }
 
-func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
+func (d *Dispatcher) send(job *deliveryJob) (int, time.Duration, error) {
 	start := time.Now()
 
 	req, err := http.NewRequest(http.MethodPost, job.sub.URL, bytes.NewReader(job.payload))
@@ -884,7 +886,7 @@ func (d *Dispatcher) send(job deliveryJob) (int, time.Duration, error) {
 	return resp.StatusCode, duration, fmt.Errorf("unexpected status %d", resp.StatusCode)
 }
 
-func (d *Dispatcher) recordAttempt(job deliveryJob, attempt, statusCode int, err error) Delivery {
+func (d *Dispatcher) recordAttempt(job *deliveryJob, attempt, statusCode int, err error) Delivery {
 	delivery := Delivery{
 		ID:             job.deliveryID,
 		OrganizationID: job.orgID,

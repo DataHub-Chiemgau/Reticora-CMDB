@@ -128,7 +128,7 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, req)
+	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return

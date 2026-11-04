@@ -84,7 +84,7 @@ func newClaimFixture(t *testing.T, url func(org string) string) *claimFixture {
 // enqueue stores a pending delivery of org that is due at due.
 func (c *claimFixture) enqueue(t *testing.T, org string, due time.Time) string {
 	t.Helper()
-	rec, err := c.store.Enqueue(context.Background(), webhook.DeliveryRecord{OrganizationID: org, SubscriptionID: c.subs[org],
+	rec, err := c.store.Enqueue(context.Background(), &webhook.DeliveryRecord{OrganizationID: org, SubscriptionID: c.subs[org],
 		Event: events.CICreated, Payload: []byte(`{"id":"wp562"}`), Status: webhook.StatusPending, NextRetryAt: &due})
 	if err != nil {
 		t.Fatalf("enqueue delivery: %v", err)

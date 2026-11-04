@@ -168,7 +168,7 @@ func nodeFromCI(n *ci.Node) Node {
 	}
 }
 
-func nodeFromItem(item ci.Item) Node {
+func nodeFromItem(item *ci.Item) Node {
 	return Node{
 		ID:           item.ID,
 		Name:         item.Name,
@@ -324,7 +324,8 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter *ci.Filter
 	nodeSet := make(map[string]struct{}, len(items))
 	nodes := make([]Node, 0, len(items))
 	ids := make([]string, 0, len(items))
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		nodeSet[item.ID] = struct{}{}
 		nodes = append(nodes, nodeFromItem(item))
 		ids = append(ids, item.ID)
@@ -488,7 +489,7 @@ func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relations
 	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
 		edges: make([]ciEdge, len(walk.Edges)), truncated: walk.Truncated}
 	for n := range roots {
-		g.nodes[n], g.known[n] = nodeFromItem(roots[n]), true
+		g.nodes[n], g.known[n] = nodeFromItem(&roots[n]), true
 	}
 	types := map[string]int32{}
 	for i := range walk.Edges {
@@ -528,7 +529,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 		return nil, nil, err
 	}
 
-	nodes := map[string]Node{root.ID: nodeFromItem(*root)}
+	nodes := map[string]Node{root.ID: nodeFromItem(root)}
 	edges := make([]Edge, 0, len(rels))
 	var ids []string
 	for i := range rels {
@@ -550,7 +551,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 // iterativeGraph performs a breadth-first traversal from root up to depth
 // hops, querying relationships one frontier at a time.
 func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
-	nodes := map[string]Node{root.ID: nodeFromItem(*root)}
+	nodes := map[string]Node{root.ID: nodeFromItem(root)}
 	edgeSet := make(map[string]Edge)
 	visited := map[string]bool{}
 	frontier := []string{root.ID}
@@ -653,14 +654,14 @@ func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]
 		}
 		nodes := make([]Node, len(items))
 		for i := range items {
-			nodes[i] = nodeFromItem(items[i])
+			nodes[i] = nodeFromItem(&items[i])
 		}
 		return nodes, nil
 	}
 	var nodes []Node
 	for _, id := range ids {
 		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
-			nodes = append(nodes, nodeFromItem(*item))
+			nodes = append(nodes, nodeFromItem(item))
 		}
 	}
 	return nodes, nil

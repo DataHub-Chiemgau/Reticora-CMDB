@@ -83,9 +83,9 @@ type DeliveryStore interface {
 	// kept. It is idempotent per event and subscription: a delivery of an
 	// event (EventID) the subscription already has is not stored again,
 	// Enqueue returns ErrDeliveryExists.
-	Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error)
+	Enqueue(ctx context.Context, rec *DeliveryRecord) (DeliveryRecord, error)
 	// Update persists the outcome of one delivery attempt.
-	Update(ctx context.Context, rec DeliveryRecord) error
+	Update(ctx context.Context, rec *DeliveryRecord) error
 	// ClaimDue atomically leases deliveries whose retry time has come. The
 	// implementation must be safe to run from multiple server replicas.
 	// With an error it may still return leased deliveries, which the
@@ -138,9 +138,10 @@ func NewMemoryDeliveryStore() *MemoryDeliveryStore {
 }
 
 // Enqueue stores a new pending delivery.
-func (s *MemoryDeliveryStore) Enqueue(_ context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
+func (s *MemoryDeliveryStore) Enqueue(_ context.Context, in *DeliveryRecord) (DeliveryRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rec := *in
 
 	if rec.EventID != "" {
 		for id := range s.items {
@@ -164,9 +165,10 @@ func (s *MemoryDeliveryStore) Enqueue(_ context.Context, rec DeliveryRecord) (De
 }
 
 // Update persists the outcome of one attempt.
-func (s *MemoryDeliveryStore) Update(_ context.Context, rec DeliveryRecord) error {
+func (s *MemoryDeliveryStore) Update(_ context.Context, in *DeliveryRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rec := *in
 
 	existing, ok := s.items[rec.ID]
 	if !ok || existing.OrganizationID != rec.OrganizationID {
@@ -185,7 +187,8 @@ func (s *MemoryDeliveryStore) ClaimDue(_ context.Context, now time.Time, limit i
 	defer s.mu.Unlock()
 
 	due := make([]DeliveryRecord, 0, limit)
-	for id, rec := range s.items {
+	for id := range s.items {
+		rec := s.items[id]
 		// A delivering record whose lease ran out is due again.
 		if rec.Status != StatusPending && rec.Status != StatusFailed && rec.Status != StatusDelivering {
 			continue
@@ -213,11 +216,11 @@ func (s *MemoryDeliveryStore) ListBySubscription(_ context.Context, orgID, subsc
 	defer s.mu.RUnlock()
 
 	var all []DeliveryRecord
-	for _, rec := range s.items {
-		if rec.OrganizationID != orgID || rec.SubscriptionID != subscriptionID {
+	for id := range s.items {
+		if s.items[id].OrganizationID != orgID || s.items[id].SubscriptionID != subscriptionID {
 			continue
 		}
-		all = append(all, rec)
+		all = append(all, s.items[id])
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
 
@@ -290,11 +293,11 @@ func (s *MemoryDeliveryStore) ListDeadLetters(_ context.Context, orgID string, p
 func (s *MemoryDeliveryStore) listDeadLetters(orgID string, page api.PaginationParams, keep func(subscriptionID string) bool) ([]DeadLetter, int, error) {
 	s.mu.RLock()
 	var all []DeadLetter
-	for _, dl := range s.deadLetters {
-		if dl.OrganizationID != orgID {
+	for id := range s.deadLetters {
+		if s.deadLetters[id].OrganizationID != orgID {
 			continue
 		}
-		all = append(all, dl)
+		all = append(all, s.deadLetters[id])
 	}
 	s.mu.RUnlock()
 	if keep != nil {

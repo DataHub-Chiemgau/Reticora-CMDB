@@ -73,8 +73,8 @@ func (r *MemoryRepository) nextID(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, r.seq)
 }
 
-func paginate[T any](items []T, page api.PaginationParams) ([]T, int) {
-	total := len(items)
+func paginate[T any](items []T, page api.PaginationParams) (window []T, total int) {
+	total = len(items)
 	start := page.Offset
 	if start > total {
 		start = total

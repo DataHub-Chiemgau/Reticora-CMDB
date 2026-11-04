@@ -402,7 +402,7 @@ func TestHandlerHidesSubscriptionsOutsideTheScope(t *testing.T) {
 	if strings.Contains(body, "c1\"]") || strings.Contains(body, "scope") {
 		t.Errorf("the response shows the snapshot: %s", body)
 	}
-	rec, err := store.Enqueue(context.Background(), DeliveryRecord{OrganizationID: "org-1", SubscriptionID: created.ID, Event: "ci.created", Status: StatusFailed})
+	rec, err := store.Enqueue(context.Background(), &DeliveryRecord{OrganizationID: "org-1", SubscriptionID: created.ID, Event: "ci.created", Status: StatusFailed})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ type recordLister struct {
 	letters []DeadLetter
 }
 
-func (l *recordLister) DeliverOnce(Subscription, string, any) (Delivery, error) {
+func (l *recordLister) DeliverOnce(*Subscription, string, any) (Delivery, error) {
 	return Delivery{}, nil
 }
 

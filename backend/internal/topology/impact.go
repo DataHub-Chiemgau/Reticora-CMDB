@@ -824,7 +824,7 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 	var distinct []ci.Item
 	seen := map[string]bool{}
 	for i := range items {
-		failed[i] = nodeFromItem(items[i])
+		failed[i] = nodeFromItem(&items[i])
 		if !seen[items[i].ID] {
 			seen[items[i].ID] = true
 			distinct = append(distinct, items[i])

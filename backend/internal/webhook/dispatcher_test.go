@@ -226,7 +226,7 @@ func TestDispatcherDefaultClientBlocksInternalDestinations(t *testing.T) {
 
 	dispatcher := NewDispatcher(NewMemoryRepository(), nil)
 	defer func() { _ = dispatcher.Shutdown(context.Background()) }()
-	delivery, err := dispatcher.DeliverOnce(Subscription{ID: "s", OrganizationID: "org-1", URL: server.URL, Secret: "k", Events: []string{"ci.created"}, IsActive: true}, "ci.created", map[string]string{"x": "y"})
+	delivery, err := dispatcher.DeliverOnce(&Subscription{ID: "s", OrganizationID: "org-1", URL: server.URL, Secret: "k", Events: []string{"ci.created"}, IsActive: true}, "ci.created", map[string]string{"x": "y"})
 	if err == nil && delivery.Success {
 		t.Fatalf("delivery to a loopback subscriber succeeded: %+v", delivery)
 	}
@@ -379,7 +379,7 @@ func TestDispatcherClaimsTheFirstAttempt(t *testing.T) {
 	// A process died after storing a delivery: it is due once its lease
 	// has ended.
 	leased := time.Now().UTC().Add(defaultClaimLease)
-	if _, err := store.Enqueue(context.Background(), DeliveryRecord{
+	if _, err := store.Enqueue(context.Background(), &DeliveryRecord{
 		OrganizationID: "org-1", SubscriptionID: subscriptionID(t, repo), Event: "ci.created",
 		Payload: []byte(`{"id":"ci-2"}`), Status: StatusPending, MaxAttempts: 3, NextRetryAt: &leased,
 	}); err != nil {
@@ -708,7 +708,7 @@ func TestDispatcherDeliversOutboxEventsIdempotently(t *testing.T) {
 // failingDeliveries fails every Enqueue.
 type failingDeliveries struct{ *MemoryDeliveryStore }
 
-func (failingDeliveries) Enqueue(context.Context, DeliveryRecord) (DeliveryRecord, error) {
+func (failingDeliveries) Enqueue(context.Context, *DeliveryRecord) (DeliveryRecord, error) {
 	return DeliveryRecord{}, fmt.Errorf("delivery store down")
 }
 

@@ -365,7 +365,7 @@ func TestTicketUpdatedEvents(t *testing.T) {
 	errRollback := errors.New("rollback")
 	err := database.WithRequestTenantTx(f.OrgCtx(f.OrgA), f.App, f.OrgA, func(ctx context.Context) error {
 		title := "nie"
-		if _, updErr := e.repo.Update(ctx, f.OrgA, tk2.ID, ticket.UpdateRequest{Title: &title}); updErr != nil {
+		if _, updErr := e.repo.Update(ctx, f.OrgA, tk2.ID, &ticket.UpdateRequest{Title: &title}); updErr != nil {
 			return updErr
 		}
 		return errRollback

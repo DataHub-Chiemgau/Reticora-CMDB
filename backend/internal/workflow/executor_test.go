@@ -38,7 +38,7 @@ func TestExecutorApprovalFlow(t *testing.T) {
 	if run.Status != StatusSucceeded {
 		t.Fatalf("want succeeded, got %s", run.Status)
 	}
-	list, total, err := tickets.List(context.Background(), "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	list, total, err := tickets.List(context.Background(), "org-1", &ticket.FilterParams{}, api.PaginationParams{Limit: 10})
 	_ = list
 	_ = total
 	_ = err
@@ -209,7 +209,7 @@ func TestExecutorStartThenExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps, _ := repo.ListSteps(ctx, "org-1", run.ID)
-	_, created, _ := tickets.List(ctx, "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	_, created, _ := tickets.List(ctx, "org-1", &ticket.FilterParams{}, api.PaginationParams{Limit: 10})
 	if run.ID == "" || run.Status != StatusPending || run.Trigger != "iga.access_request" || len(steps) != 0 || created != 0 {
 		t.Fatalf("started run %+v with %d steps and %d tickets, want a stored pending run without action", run, len(steps), created)
 	}
@@ -217,7 +217,7 @@ func TestExecutorStartThenExecute(t *testing.T) {
 		t.Fatal(err)
 	}
 	steps, _ = repo.ListSteps(ctx, "org-1", run.ID)
-	_, created, _ = tickets.List(ctx, "org-1", ticket.FilterParams{}, api.PaginationParams{Limit: 10})
+	_, created, _ = tickets.List(ctx, "org-1", &ticket.FilterParams{}, api.PaginationParams{Limit: 10})
 	if run.Status != StatusSucceeded || len(steps) != 1 || created != 1 || run.Context["subject_user_id"] != "u-2" {
 		t.Fatalf("executed run %+v with %d steps and %d tickets, want succeeded with one ticket", run, len(steps), created)
 	}

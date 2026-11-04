@@ -29,7 +29,7 @@ type ContactLister interface {
 // TicketActivityLister gathers the tickets a person reported or is assigned
 // to for the GDPR data export (implemented by ticket.Repository).
 type TicketActivityLister interface {
-	List(ctx context.Context, orgID string, filter ticket.FilterParams, page api.PaginationParams) ([]ticket.Ticket, int, error)
+	List(ctx context.Context, orgID string, filter *ticket.FilterParams, page api.PaginationParams) ([]ticket.Ticket, int, error)
 }
 
 // AssignmentLister gathers the assignments a person received or issued for
@@ -387,11 +387,11 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	reported := []ticket.Ticket{}
 	assignedTickets := []ticket.Ticket{}
 	if h.tickets != nil {
-		if reported, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{ReporterID: id}, all); err != nil {
+		if reported, _, err = h.tickets.List(r.Context(), t.OrganizationID, &ticket.FilterParams{ReporterID: id}, all); err != nil {
 			api.WriteRepoError(w, err)
 			return
 		}
-		if assignedTickets, _, err = h.tickets.List(r.Context(), t.OrganizationID, ticket.FilterParams{AssigneeID: id}, all); err != nil {
+		if assignedTickets, _, err = h.tickets.List(r.Context(), t.OrganizationID, &ticket.FilterParams{AssigneeID: id}, all); err != nil {
 			api.WriteRepoError(w, err)
 			return
 		}
@@ -916,7 +916,7 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	assignment := &UserRoleAssignment{
+	grant := &UserRoleAssignment{
 		UserID:       req.UserID,
 		CustomRoleID: req.CustomRoleID,
 		RoleID:       req.RoleID,
@@ -925,12 +925,12 @@ func (h *Handler) AssignRole(w http.ResponseWriter, r *http.Request) {
 		GrantedBy:    t.UserID,
 	}
 
-	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, &p, assignment); err != nil {
+	if err := h.repo.AssignRole(r.Context(), t.OrganizationID, &p, grant); err != nil {
 		writeAssignmentError(w, r, "user_id", req.UserID, err)
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, assignment)
+	api.WriteJSON(w, http.StatusCreated, grant)
 }
 
 // RevokeRoleAssignment handles DELETE /api/v1/role-assignments/{id} (API-05,

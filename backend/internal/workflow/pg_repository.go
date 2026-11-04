@@ -74,7 +74,7 @@ func (r *PGRepository) CreateDefinition(ctx context.Context, d *Definition) erro
 		return tx.QueryRow(ctx, `INSERT INTO workflow_def (organization_id,name,description,trigger,conditions,actions,active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`, d.OrganizationID, d.Name, d.Description, d.Trigger, d.Conditions, d.Actions, d.Active).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
+func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error) {
 	var d *Definition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
