@@ -8545,8 +8545,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Start an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * Start an import run (IMP-IO-01)
+     * @description Starts the import of the current version of a document with a mapping profile as a job of kind import.run (API-09, JOB-04). Before the job is created the request is checked in this order: the document lies in the caller's scope (404), the profile belongs to the organization (404), the version is scanned clean (409 document-pending-scan for pending_scan and scan_failed, 409 document-quarantined for infected; E-42), the version is at most 50 MB = 52428800 bytes (422 import-file-too-large, E-49) and its verified type fits the profile format (CSV: text/csv or text/plain, XLSX: the OOXML spreadsheet type; .xls, .ods, any other type and the profile format json are 422 import-format-unsupported). `mode` defaults to the mode of the profile, `dry_run` to false. The job reads exactly the checked version and checks it clean again before reading; at most 50000 data rows (more: the job fails with import-row-limit), 500 columns and 1 MiB per row (more: import-file-too-complex). Progress and status are in the job (/api/v1/jobs/{id}), which a holder of import:run cancels while it runs. Without job service or blob storage 503. Requires import:run.
      */
     post: operations['createImport'];
     delete?: never;
@@ -8565,8 +8565,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Preview the columns of an import file
-     * @description Planned (E-38); WP-301 implements the operation.
+     * Preview the columns of an import file (IMP-IO-01)
+     * @description Checks the document like POST /api/v1/imports (scope 404, scan status 409, size and type 422) without a profile: the format follows from the verified type of the current version. Reads synchronously the header and at most 20 data rows with the parser and the limits of the import; import-format-unsupported, import-sheet-not-found and import-file-too-complex are 422 with that problem type. No job is created. Without blob storage 503. Requires import:run.
      */
     post: operations['previewImport'];
     delete?: never;
@@ -8587,7 +8587,7 @@ export interface paths {
     };
     /**
      * Get an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * @description The projection of an import job: profile, document and version, mode, status, progress, the counters of the result and the error code of a failed run. A job of another kind, one outside the caller's scope and one whose document the caller does not see are 404. The runs are listed by the job list with kind=import.run. Without job service 503. Requires import:run.
      */
     get: operations['getImport'];
     put?: never;
@@ -8610,7 +8610,7 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description Planned (E-38); WP-301 implements the operation.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file with line, column, code and message of every parse and limit error. While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
     put?: never;
@@ -12845,6 +12845,69 @@ export interface components {
     };
     ImportProfileListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ImportProfile'][];
+    };
+    ImportStartRequest: {
+      document_id: string;
+      profile_id: string;
+      /**
+       * @description Defaults to the mode of the profile.
+       * @enum {string}
+       */
+      mode?: 'create_missing' | 'update_existing' | 'both';
+      /** @default false */
+      dry_run: boolean;
+    };
+    ImportJobAccepted: {
+      job_id: string;
+      status: string;
+      kind: string;
+    };
+    ImportPreviewRequest: {
+      document_id: string;
+      /** @description The sheet of an XLSX file; the first when omitted. */
+      sheet?: string;
+    };
+    ImportPreview: {
+      /** @enum {string} */
+      format: 'csv' | 'xlsx';
+      /** @description The sheets of an XLSX file; empty for CSV. */
+      sheets: string[];
+      /** @description The header row. */
+      columns: string[];
+      sample_rows: string[][];
+    };
+    ImportRun: {
+      id: string;
+      /** @enum {string} */
+      kind: 'import.run';
+      /** @enum {string} */
+      status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+      progress: number;
+      document_id: string;
+      document_version: number;
+      profile_id: string;
+      /** @enum {string} */
+      mode: 'create_missing' | 'update_existing' | 'both';
+      dry_run: boolean;
+      sheet: string | null;
+      /** @description Data rows read; null until the run succeeded. */
+      rows_total: number | null;
+      /** @description Rows with an error; null until the run succeeded. */
+      rows_failed: number | null;
+      /** @description The code of a failed run, e.g. import-row-limit, import-file-too-complex, import-format-unsupported, import-sheet-not-found, document-pending-scan. */
+      error_code: string | null;
+      error: string | null;
+      cancellable: boolean;
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      started_at: string | null;
+      /** Format: date-time */
+      finished_at: string | null;
+    };
+    ImportReportLink: {
+      download_url: string;
     };
     /** @description A catalog tag of the organization (CI-08, WP-753). */
     Tag: {
@@ -36805,19 +36868,29 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ImportStartRequest'];
+      };
+    };
     responses: {
-      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-301. */
+      /** @description The import runs as a job; the Location header names it. */
       202: {
         headers: {
+          Location?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportJobAccepted'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   previewImport: {
@@ -36827,19 +36900,28 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ImportPreviewRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-301. */
+      /** @description Format, sheets, header and sample rows of the file */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportPreview'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getImport: {
@@ -36854,16 +36936,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an import run. The response schema comes with WP-301. */
+      /** @description The import run */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportRun'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getImportReport: {
@@ -36878,16 +36963,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the report of an import run. The response schema comes with WP-301. */
+      /** @description Download link of the report */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ImportReportLink'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
 }

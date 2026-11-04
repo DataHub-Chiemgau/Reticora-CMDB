@@ -193,6 +193,8 @@ GET /api/v1/impact topology:read
 GET /api/v1/impact/{ci_id} topology:read
 GET /api/v1/import-profiles import:run
 GET /api/v1/import-profiles/{id} import:run
+GET /api/v1/imports/{id} import:run
+GET /api/v1/imports/{id}/report import:run
 GET /api/v1/inventory/availability stock:read
 GET /api/v1/inventory/items stock:read
 GET /api/v1/inventory/items/{id} stock:read
@@ -477,6 +479,8 @@ POST /api/v1/iga/jml-policies iga:write
 POST /api/v1/iga/jml/resolve iga:write
 POST /api/v1/iga/tasks/{id}/retry iga:write
 POST /api/v1/import-profiles import:manage
+POST /api/v1/imports import:run
+POST /api/v1/imports/preview import:run
 POST /api/v1/ingest/bulk discovery:ingest
 POST /api/v1/inventory/items stock:write
 POST /api/v1/inventory/items/{id}/convert stock:write

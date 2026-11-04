@@ -149,8 +149,12 @@ func writeScanRefusal(w http.ResponseWriter, status string) bool {
 	return true
 }
 
-// documentBucket is the blob bucket document content is stored in.
-const documentBucket = "reticora-documents"
+// Bucket is the blob bucket document content is stored in; the import
+// (WP-301) reads document versions from it.
+const Bucket = "reticora-documents"
+
+// documentBucket is the bucket of this package's handler, Bucket.
+const documentBucket = Bucket
 
 // RegisterRoutes registers document routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -559,6 +563,14 @@ func (h *Handler) GetLinks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, api.Page(links, page))
+}
+
+// OwnsStorageKey reports whether key is an object of document docID of
+// organization orgID, the check of the download (ownsStorageKey) for
+// readers outside the package such as the import (WP-301): the legacy keys
+// documents/<org>/<doc>/… are accepted, unlike blob.CheckOrgKey.
+func OwnsStorageKey(orgID, docID, key string) bool {
+	return ownsStorageKey(orgID, docID, key)
 }
 
 // ownsStorageKey reports whether key is an object of document docID of

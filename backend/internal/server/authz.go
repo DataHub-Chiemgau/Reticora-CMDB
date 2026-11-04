@@ -55,6 +55,7 @@ var readPermissionFor = map[string]identity.Permission{
 	"slas":                 identity.PermSLARead,
 	"business-calendars":   identity.PermSLARead,   // business calendars of the SLA clock (WP-768); writes sla:write
 	"import-profiles":      identity.PermImportRun, // import mapping profiles (WP-774, E-106); writes import:manage
+	"imports":              identity.PermImportRun, // import runs (WP-301): read, start and preview need import:run
 	"tags":                 identity.PermCIRead,    // tag catalog (CI-08, WP-753, E-106); writes tag:manage
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,

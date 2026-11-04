@@ -431,6 +431,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.Modules.Enabled(ModuleMetamodel) {
 		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
 	}
+	// The import runs (WP-301) get the job service in registerJobKinds; the
+	// routes serve in both profiles and answer 503 without it.
+	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -445,6 +448,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running test of a metamodel draft is cancelled with
 			// metamodel:publish like its start (WP-721, E-106).
 			WithKind(metamodel.TestJobKind, identity.PermMetamodelPublish, nil).
+			// A running import is cancelled with import:run like its
+			// start (WP-301, WP-514).
+			WithKind(importer.JobKind, identity.PermImportRun, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -477,7 +483,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -619,6 +625,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}),
 		draftHandler,
 		importer.NewHandler(repos.Import),
+		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle,
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver),

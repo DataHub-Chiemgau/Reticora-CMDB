@@ -1313,3 +1313,7 @@ API-01;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 SEC-09;[P2];B;backend/internal/document/sniff_test.go;WP-268
 SEC-09;[P2];B;backend/internal/document/scan_status_integration_test.go;WP-733
 MGT-01;[P2];B;backend/internal/document/scan_status_integration_test.go;WP-733
+IMP-IO-01;[P2];C;backend/internal/importer/parse_test.go;WP-301
+API-09;[B];C;backend/internal/importer/job_test.go;WP-301
+JOB-04;[B];C;backend/internal/importer/job_test.go;WP-301
+API-06;[P2]/[P3]/[P4]/[A];C;backend/internal/importer/job_test.go;WP-301
