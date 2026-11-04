@@ -59,11 +59,22 @@ type PGRepository struct {
 	// indexes starts the index job of a definition whose searchable or
 	// unique flag changed (DB-04); optional.
 	indexes IndexScheduler
+	// computed queues the backfill of computed values after a change of a
+	// computed definition (WP-718); optional.
+	computed ComputedScheduler
 }
 
 // WithIndexScheduler starts the attribute index jobs through s.
 func (r *PGRepository) WithIndexScheduler(s IndexScheduler) *PGRepository {
 	r.indexes = s
+	return r
+}
+
+// WithComputedScheduler queues the backfill of computed values through s
+// (WP-718) when a computed definition is created, its expression changes
+// or it is deleted, also through DeleteField.
+func (r *PGRepository) WithComputedScheduler(s ComputedScheduler) *PGRepository {
+	r.computed = s
 	return r
 }
 
@@ -1237,7 +1248,8 @@ func findAttributeTx(ctx context.Context, tx pgx.Tx, typeID, key string) (*Attri
 // fall back to a global field of the same name, which applies to other
 // types as well). After the commit the index job drops the indexes of the
 // definition, as DeleteAttributeDefinition does (DB-04); the key index of
-// WP-607 goes only when no definition uses the key any more.
+// WP-607 goes only when no definition uses the key any more. A computed
+// definition queues the backfill that removes its values (WP-718).
 func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name string) error {
 	var deleted *AttributeDefinition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1260,6 +1272,7 @@ func (r *PGRepository) DeleteField(ctx context.Context, orgID, typeID, name stri
 	})
 	if err == nil {
 		r.scheduleIndex(ctx, orgID, deleted, nil)
+		r.scheduleComputed(ctx, orgID, deleted, nil)
 	}
 	return err
 }

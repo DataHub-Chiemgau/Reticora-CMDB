@@ -62,13 +62,22 @@ func CheckUpsertField(req *UpsertFieldRequest) error {
 // CheckNewAttributeDefinition checks the request of POST
 // /api/v1/attribute-definitions like CreateAttributeDefinition and the
 // repository before it writes: the patch applied to a new definition and
-// AttributeDefinition.Validate.
+// AttributeDefinition.Validate with the scope the repository derives from
+// the owner (a restricted global definition is valid, WP-722).
 // validation: the field errors of AttributeDefinitionPatch.apply and
 // AttributeDefinition.Validate.
 func CheckNewAttributeDefinition(patch *AttributeDefinitionPatch, ciTypeID, attributeSetID, key string) error {
 	d := &AttributeDefinition{CITypeID: ciTypeID, AttributeSetID: attributeSetID, Key: key, UniqueScope: "org", Inheritable: true}
 	if err := patch.apply(d); err != nil {
 		return err
+	}
+	switch {
+	case attributeSetID != "":
+		d.Scope = ScopeSet
+	case ciTypeID != "":
+		d.Scope = "type"
+	default:
+		d.Scope = "global"
 	}
 	return d.Validate()
 }

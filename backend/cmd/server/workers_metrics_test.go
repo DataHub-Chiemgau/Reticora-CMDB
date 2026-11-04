@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"gopkg.in/yaml.v3"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -33,7 +34,8 @@ import (
 
 // scheduledWorkers are the registered workers that run as a system job of
 // the scheduler (systemJobs): name and job kind.
-var scheduledWorkers = map[string]string{config.WorkerOfflineDetector: lifecycle.OfflineDetectorKind}
+var scheduledWorkers = map[string]string{config.WorkerOfflineDetector: lifecycle.OfflineDetectorKind,
+	config.WorkerComputedRefresh: ci.RefreshJobKind}
 
 // testCycle is the interval of the polling workers and of the passes in
 // these tests.
@@ -44,7 +46,8 @@ var errForced = errors.New("wp-447: forced failure")
 
 // TestEveryWorkerExportsRunAndErrorMetrics covers WP-447 (OPS-05, F-133):
 // for every name of config.WorkerNames buildWorkers builds the worker (the
-// offline detector runs as the system job ci.offline_detector); a name
+// offline detector and the computed refresh run as the system jobs
+// ci.offline_detector and attribute.computed_refresh); a name
 // without a worker fails the check. Started with fakes, every worker
 // records a cycle in reticora_worker_runs_total{worker=<name>} of /metrics;
 // the workers whose cycle needs no database here also record it without
@@ -52,7 +55,8 @@ var errForced = errors.New("wp-447: forced failure")
 // database that does not answer, a closed NATS connection — every worker
 // increases reticora_worker_errors_total{worker=<name>}. The database of the
 // fakes never answers (127.0.0.1:1), so the workers events, nats_edge,
-// credential_bundles, discovery_scopes and offline_detector record failed
+// credential_bundles, discovery_scopes, offline_detector and
+// computed_refresh record failed
 // cycles in both runs, and no test data is touched. The workers that answer
 // requests (credential_bundles, discovery_scopes) succeed while idle only
 // as long as NATS answers. NATS is TEST_NATS_URL: ingest and jobs run on

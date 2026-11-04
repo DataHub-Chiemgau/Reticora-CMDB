@@ -74,6 +74,9 @@ type PGRepository struct {
 	pool     *pgxpool.Pool
 	recorder audit.TxRecorder
 	outbox   *events.Outbox
+	// computed resolves the computed attribute definitions (WithComputed,
+	// WP-717); nil computes nothing.
+	computed FieldResolver
 }
 
 // WithEvents makes every CI mutation write its domain event into the
@@ -860,6 +863,12 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 		if err := checkParents(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
 			return err
 		}
+		// The computed attributes take their values before the row is
+		// written (WP-717).
+		computed, env, computeErr := r.computedOfNew(ctx, tx, item.OrganizationID, []*Item{item})
+		if computeErr != nil {
+			return computeErr
+		}
 
 		var createdAt time.Time
 		var updatedAt time.Time
@@ -899,6 +908,12 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		if len(computed) > 0 {
+			if err := writeComputedProvenance(ctx, tx, item.OrganizationID, env.now,
+				computedValuesOf(item.ID, nonEmpty(computed[0]))); err != nil {
+				return err
+			}
+		}
 		if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 			return err
 		}
@@ -970,6 +985,16 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		}
 		if err := checkParents(ctx, tx, orgID, items); err != nil {
 			return err
+		}
+		// The computed attributes take their values before the rows are
+		// written (WP-717); the caller records their provenance with that
+		// of the batch (CreateManyResult.Computed).
+		computed, env, computeErr := r.computedOfNew(ctx, tx, orgID, items)
+		if computeErr != nil {
+			return computeErr
+		}
+		if env != nil {
+			res.Computed, res.ComputedAt = computed, env.now
 		}
 		created, refused, err := insertCIs(ctx, tx, orgID, items)
 		if errors.Is(err, ErrTypeInactive) {
@@ -1524,6 +1549,19 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	addStringField("sys_object_id", req.SysObjectID)
 	addStringField("discovery_source", req.DiscoverySource)
 
+	// The computed attributes follow the state the update leaves (WP-717):
+	// their values are part of this row write, an update that writes
+	// nothing computes nothing.
+	var computedKeys map[string]bool
+	var computedChanged map[string]any
+	var computedAt time.Time
+	if len(setClauses) > 0 || req.Attributes != nil || req.LastSeenAt != nil || templates != nil || tagsChanged {
+		var computeErr error
+		if computedKeys, computedChanged, computedAt, computeErr = r.computedUpdate(ctx, tx, orgID, before, &req); computeErr != nil {
+			return nil, computeErr
+		}
+	}
+
 	if req.Attributes != nil {
 		// RFC 7396: nested objects merge, null removes a member (CI-04).
 		// Instance attributes are stored under _instance; the projected
@@ -1586,9 +1624,12 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
 		return nil, err
 	}
+	if err := writeComputedProvenance(ctx, tx, orgID, computedAt, computedValuesOf(id, computedChanged)); err != nil {
+		return nil, err
+	}
 	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item), templates: templates}
 	if len(w.changes) > 0 && req.Manual != nil {
-		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req); err != nil {
+		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req, computedKeys); err != nil {
 			return nil, err
 		}
 	}
@@ -2497,7 +2538,9 @@ var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attribute
 // (a removed member is recorded with a null value). Instance attributes of
 // the CI get no override (MET-14, CI-04, WP-714): automation never writes
 // them, the central write decision refuses them (ReasonInstanceAttribute).
-func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest) error {
+// Nor do the computed attributes (computed, WP-717): their values follow
+// their inputs.
+func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest, computed map[string]bool) error {
 	reason := strings.TrimSpace(req.ChangeReason)
 	if reason == "" {
 		reason = DefaultChangeReason
@@ -2529,7 +2572,9 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 		instance[name] = true
 	}
 	for _, key := range keys {
-		if instance[key] {
+		// A computed value is no manual value (WP-717): it follows its
+		// inputs, an override would freeze it.
+		if instance[key] || computed[key] {
 			continue
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
@@ -2865,7 +2910,7 @@ func (r *PGRepository) ChangeType(ctx context.Context, orgID, ciID, typeID, mode
 			return auditErr
 		}
 		// EVT-02 has no own type event: ci.changed names ci_type_id.
-		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, []string{"ci_type_id"})
+		return r.recordEvent(ctx, tx, events.CIChanged, tc.result.CI, tc.changedFields())
 	})
 	if err != nil {
 		// A concurrent write the check could not see: the index names the
@@ -2882,6 +2927,9 @@ type typeChange struct {
 	fromTypeID     string
 	fromKey, toKey string
 	mode           string
+	// attributes is the change of the computed values the target type
+	// brought (WP-717); nil when they stayed.
+	attributes *ciFieldChange
 }
 
 // changeTypeRow changes the type of CI ciID to typeID in tx (CI-11); it
@@ -2950,12 +2998,20 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 			return nil, err
 		}
 	}
+	// The definitions of the target type compute the values (WP-717);
+	// computed values without a definition there go with their provenance.
+	if _, err = r.recomputeRow(ctx, tx, orgID, ciID); err != nil {
+		return nil, err
+	}
 	after, err := scanCIWithTemplates(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2",
 		ciSelectColumns, ciTemplatesColumn), ciID, orgID))
 	if err != nil {
 		return nil, fmt.Errorf("get changed ci: %w", err)
 	}
 	tc.result.CI, tc.result.Changed = after, true
+	if !reflect.DeepEqual(before.Attributes, after.Attributes) {
+		tc.attributes = &ciFieldChange{Field: "attributes", Old: before.Attributes, New: after.Attributes}
+	}
 	return tc, nil
 }
 
@@ -2989,8 +3045,24 @@ func dropForeignTemplates(ctx context.Context, tx pgx.Tx, ciID, typeID string) (
 func (r *PGRepository) recordTypeChange(ctx context.Context, tx pgx.Tx, set changeSet, orgID string, tc *typeChange) error {
 	after := tc.result.CI
 	change := map[string]any{"ci_type_id": after.CITypeID, "type": tc.toKey, "mode": tc.mode, "findings": tc.result.Findings}
-	return r.recordCIChange(ctx, tx, set, orgID, after.ID, after.Version, "type_changed", "ci_type_id",
-		map[string]any{"ci_type_id": tc.fromTypeID, "type": tc.fromKey}, change)
+	if err := r.recordCIChange(ctx, tx, set, orgID, after.ID, after.Version, "type_changed", "ci_type_id",
+		map[string]any{"ci_type_id": tc.fromTypeID, "type": tc.fromKey}, change); err != nil {
+		return err
+	}
+	if tc.attributes == nil {
+		return nil
+	}
+	// The computed values of the target type belong to the type change.
+	return r.recordFieldChanges(ctx, tx, set, orgID, after.ID, after.Version, []ciFieldChange{*tc.attributes})
+}
+
+// changedFields names the fields of a type change for ci.changed:
+// ci_type_id and, when the computed values changed, attributes.
+func (tc *typeChange) changedFields() []string {
+	if tc.attributes != nil {
+		return []string{"ci_type_id", "attributes"}
+	}
+	return []string{"ci_type_id"}
 }
 
 // recordTypeChangeAudit writes the audit entry ci.type_changed.
@@ -3058,7 +3130,11 @@ func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *
 			if typeErr := r.recordTypeChange(ctx, tx, set, orgID, tc); typeErr != nil {
 				return typeErr
 			}
-			changed = append(changed, "ci_type_id")
+			for _, field := range tc.changedFields() {
+				if !slices.Contains(changed, field) {
+					changed = append(changed, field)
+				}
+			}
 		}
 		if len(w.changes) > 0 {
 			if auditErr := r.recordUpdateAudit(ctx, tx, w); auditErr != nil {

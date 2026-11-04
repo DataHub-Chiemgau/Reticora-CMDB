@@ -14,6 +14,68 @@ Datenresidenz und Subprozessoren). Umsetzung: WP-105.
 Alle Anforderungen gelten für alle Modelle, sofern der Katalog sie nicht als
 „nur SaaS“ oder „nur Air-Gapped“ kennzeichnet (PRI-11).
 
+## Uploads und Malware-Scan (SEC-09, E-42)
+
+Dokumente und Importdateien (Module `documents` und `import`, im
+Standard abgeschaltet) werden vor dem ersten Download mit ClamAV geprüft
+(Jobart `document.scan`, WP-734). Der Dienst `clamd` ist optional wie die
+Module; ohne erreichbaren clamd bleiben neue Versionen `pending_scan`
+(fail-closed), der Sweep `document.scan_sweep` scannt sie nach, sobald clamd
+wieder antwortet. Außerhalb von `development` startet der Server mit dem
+Modul `documents` nur mit `RETICORA_CLAMD_ADDR` und der Job-Queue
+(`RETICORA_NATS_URL`).
+
+| Profil | clamd | Signaturen |
+|---|---|---|
+| Entwicklung (Root-`docker-compose.yml`) | Dienst `clamd`, Port `localhost:3310` (Default von `RETICORA_CLAMD_ADDR` in `development`) | freshclam im Container |
+| Compose-Betriebsstack (`deploy/docker-compose`) | Dienst `clamd` mit Profil `documents` (`COMPOSE_PROFILES=documents` in `.env`); der Server hat `RETICORA_CLAMD_ADDR=clamd:3310`; Port nicht veröffentlicht | freshclam im Container, Volume `clamdata` |
+| Kubernetes (`deploy/k8s`) | Komponente `base/components/clamav` (Deployment und Service `clamd`, setzt `RETICORA_CLAMD_ADDR` am Server), eingebunden im Overlay `prod` | freshclam im Container, PVC `clamd-signatures` |
+| Air-Gapped On-Prem | wie Compose bzw. Kubernetes | kein freshclam (`RETICORA_CLAMAV_NO_FRESHCLAMD=true` in `.env` bzw. `CLAMAV_NO_FRESHCLAMD=true` per Overlay); Offline-Signaturbundle |
+
+**Offline-Signaturbundle (Air-Gapped):** Auf einem Rechner mit Internetzugang
+lädt `freshclam --datadir=<verzeichnis>` (oder `cvdupdate`) die Dateien
+`main.cvd`, `daily.cvd` und `bytecode.cvd`. Das Verzeichnis wird mit
+`sha256sum` dokumentiert, auf das Zielsystem übertragen und in das
+Signatur-Volume kopiert; anschließend clamd neu starten. Compose: `docker
+compose cp <verzeichnis>/. clamd:/var/lib/clamav/`; das Volume `clamdata`
+erhält beim ersten Start die Signaturen, die das Image mitbringt. Kubernetes:
+Das PVC `clamd-signatures` ist anfangs leer, und ohne `main.cvd` versucht der
+Container einen ersten Download. Das Bundle wird deshalb vor dem ersten Start
+in das PVC kopiert (z. B. über einen Hilfs-Pod mit dem PVC und `kubectl cp`),
+spätere Bundles mit `kubectl cp` in den Pod `clamd`. Ohne Aktualisierung
+veralten die Signaturen; das Bundle sollte mindestens wöchentlich erneuert
+werden.
+
+**Größenlimits:** Das Uploadlimit setzt `RETICORA_DOCUMENT_MAX_UPLOAD_MB`
+(Standard 50 MiB, WP-268). Davor stehen:
+
+- nginx des Frontends: `client_max_body_size 51m` im `http`-Block von
+  `frontend/nginx.conf` (Limit + 1 MiB), gilt auch für den TLS-Server. Wird
+  `RETICORA_DOCUMENT_MAX_UPLOAD_MB` erhöht, muss der Wert mitwachsen (eigenes
+  Frontend-Image oder vorgeschalteter Proxy), sonst antwortet nginx mit einem
+  HTML-413, bevor der Server die Anfrage sieht.
+- clamd: `StreamMaxLength` und `MaxFileSize` (Standard `51M`, Compose:
+  `RETICORA_CLAMD_STREAM_MAX_LENGTH`) und `MaxScanSize` (`200M`,
+  `RETICORA_CLAMD_MAX_SCAN_SIZE`) mindestens so groß wie das Uploadlimit. Ein
+  größerer Stream wird von clamd abgewiesen und nie als `clean` gewertet.
+- **Kubernetes-Ingress:** Das Repository liefert keinen Ingress
+  (`deploy/k8s/base/service.yaml`: ClusterIP). Ein vorgeschalteter Ingress
+  muss große Uploads durchlassen, für ingress-nginx z. B.:
+  `nginx.ingress.kubernetes.io/proxy-body-size: "51m"` (Body-Size),
+  `nginx.ingress.kubernetes.io/proxy-request-buffering: "on"` (der Body wird
+  vor der Weitergabe vollständig gepuffert; `off` reicht ihn gestreamt weiter
+  und spart Plattenplatz am Ingress) sowie die Timeouts
+  `nginx.ingress.kubernetes.io/proxy-read-timeout` und
+  `nginx.ingress.kubernetes.io/proxy-send-timeout` (Annotationen) und
+  `client-body-timeout` (ConfigMap des Controllers) von mindestens `300`
+  Sekunden, passend zu `RETICORA_DOCUMENT_UPLOAD_TIMEOUT` (Standard 5 min). Andere
+  Ingress-Controller brauchen die entsprechenden Einstellungen.
+
+Rückstau und Fehlerrate des Scans melden die Alarme
+`ReticoraDocumentScanBacklog` und `ReticoraDocumentScanFailing`
+(`deploy/monitoring/worker-rules.yaml`, `docs/ops/workers.md`); den
+Speicherbedarf nennt [`docs/ops/sizing.md`](../ops/sizing.md).
+
 ## Datenresidenz (NFR-09)
 
 Im SaaS-Betrieb liegen alle Kundendaten in der EU. Die Tabelle nennt jeden

@@ -136,7 +136,8 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 	for _, d := range resolved {
 		names = append(names, d.Name)
 	}
-	if strings.Join(names, ",") != "cost_center,mgmt_ip,port_count" {
+	// The system base first: warranty_days_left (000225, WP-718).
+	if strings.Join(names, ",") != "warranty_days_left,cost_center,mgmt_ip,port_count" {
 		t.Errorf("resolved fields = %v", names)
 	}
 

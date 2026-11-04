@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000224_metamodel_publish_regeneration
+Stand: Migration 000226_field_grants
 
 ## Prüfung
 
@@ -1124,6 +1124,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `event_outbox` | ja | ja | event_outbox_isolation (ALL), event_outbox_system_select (SELECT) |
 | `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
+| `field_grant` | ja | ja | field_grant_isolation (ALL) |
+| `field_sensitivity` | ja | ja | field_sensitivity_isolation (ALL) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
 | `form_layout` | ja | ja | form_layout_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
@@ -1163,6 +1165,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `notification_digest_item` | ja | ja | notification_digest_item_isolation (ALL), notification_digest_item_system_select (SELECT) |
 | `notification_inbox` | ja | ja | notification_inbox_isolation (ALL) |
 | `notification_preference` | ja | ja | notification_preference_isolation (ALL) |
+| `object_grant` | ja | ja | object_grant_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |

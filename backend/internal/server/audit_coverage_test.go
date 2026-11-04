@@ -559,6 +559,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}": {"/api/v1/metamodel/drafts/<id:/api/v1/metamodel/drafts>/items/<id:/api/v1/metamodel-draft-items>", ""},
 	// The publication (WP-261) of the tested draft of the fixture.
 	"POST /api/v1/metamodel/drafts/{id}/publish": {"/api/v1/metamodel/drafts/<publish_draft>/publish", `{}`},
+	// The import (WP-722): a file with a new type, so a draft is created.
+	"POST /api/v1/metamodel/import": {"", `{"format_version":2,"exported_at":"2026-01-01T00:00:00Z","organization_id":"a5",` +
+		`"omitted_sections":[],"ci_types":[{"key":"a5_import_type","is_system":false,"name":"a5 import type","is_active":true,` +
+		`"is_observable":true}],"attribute_definitions":[],"attribute_sets":[],"templates":[],"rules":[],"layouts":[],"lifecycle_models":[]}`},
 	// Document links (WP-267): the link the sub-create returned.
 	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
 }

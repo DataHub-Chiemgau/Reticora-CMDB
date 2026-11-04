@@ -136,6 +136,7 @@ func MemoryRepositories() Repositories {
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Permission:        permission.NewMemoryRepository(),
+		FieldGrants:       permission.NewMemoryFieldGrants(),
 		APIKeys:           identity.NewMemoryAPIKeyStore(),
 		ServiceAccounts:   serviceAccounts,
 		SLA:               sla.NewMemoryRepository(),
@@ -156,8 +157,13 @@ func MemoryRepositories() Repositories {
 // the same transaction as the mutation; CI and relationship mutations write
 // their domain events into the outbox of their transaction (EVT-02).
 func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Repositories {
+	// The CI repository computes the computed attributes in its write
+	// transactions from the definitions of the CI type repository, and an
+	// override recomputes them in its own (WP-717).
+	types := citype.NewPGRepository(pool)
+	cis := ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()).WithComputed(types)
 	return Repositories{
-		CI:                ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()),
+		CI:                cis,
 		EventOutbox:       true,
 		Relationship:      relationship.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Webhook:           webhook.NewPGRepository(pool),
@@ -187,6 +193,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		IPAM:              ipam.NewPGRepository(pool),
 		Metrics:           monitoring.NewPGMetricStore(pool),
 		Permission:        permission.NewPGRepository(pool),
+		FieldGrants:       permission.NewPGFieldGrants(pool),
 		APIKeys:           identity.NewPGAPIKeyStore(pool),
 		ServiceAccounts:   user.NewPGServiceAccounts(pool),
 		Invitations:       user.NewPGInvitations(pool),
@@ -200,7 +207,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		ExportJobs:        export.NewPGJobRepository(pool),
 		Jobs:              jobs.NewPGRepository(pool),
 		Privacy:           privacy.NewPGRepository(pool),
-		CIType:            citype.NewPGRepository(pool),
+		CIType:            types,
 		MetamodelDraft:    metamodel.NewPGRepository(pool),
 		Import:            importer.NewPGRepository(pool),
 		Supplier:          contract.NewPGRepository(pool),
@@ -210,7 +217,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Movement:          movement.NewPGRepository(pool),
 		Reservation:       reservation.NewPGRepository(pool),
 		Composition:       composition.NewPGRepository(pool),
-		Override:          override.NewPGRepository(pool),
+		Override:          override.NewPGRepository(pool).WithRecompute(cis),
 		History:           history.NewPGRepository(pool),
 		SavedView:         savedview.NewPGRepository(pool),
 		FilterQuery:       savedview.NewPGQueryEngine(pool),

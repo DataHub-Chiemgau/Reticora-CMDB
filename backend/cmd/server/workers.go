@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -403,6 +404,24 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			typeRepo.WithIndexScheduler(ddlJob)
 			systemJobs = append(systemJobs, ddlJob.Schedule())
 		}
+		// Computed attributes (WP-718, JOB-02 [P2]): the backfill after a
+		// change of a computed definition, queued by the type repository
+		// and run every minute like the index jobs, and the hourly refresh
+		// of the values with today or asset fields, the worker
+		// computed_refresh under RETICORA_WORKER_COMPUTED_REFRESH_ENABLED.
+		// Both run without a module condition (E-105: computed lies on the
+		// G1 path attribute-definitions).
+		if typeRepo, ok := d.repos.CIType.(*citype.PGRepository); ok {
+			computed := ci.NewComputedRefresh(pool, typeRepo)
+			if d.repos.Jobs != nil {
+				computed.WithJobs(jobs.NewService(d.repos.Jobs))
+				typeRepo.WithComputedScheduler(computed)
+				systemJobs = append(systemJobs, computed.BackfillSchedule())
+			}
+			if d.cfg.WorkerEnabled(config.WorkerComputedRefresh) {
+				systemJobs = append(systemJobs, workerJob(config.WorkerComputedRefresh, computed.Schedule()))
+			}
+		}
 		// Expiry warnings of the entitlements (ENT-07) and expiring
 		// collector certificates (COL-04), each notice once (WP-425).
 		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
@@ -428,12 +447,12 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 // jobRequeues reports the job kinds the reaper puts back into the queue
 // after a lost worker, those with an executor that runs queued jobs again:
 // the kinds of the job queue on NATS and the attribute index jobs of the
-// scheduler. The other kinds fail, among them the in-process jobs without
-// NATS.
+// scheduler and the backfill of computed attributes (WP-718). The other
+// kinds fail, among them the in-process jobs without NATS.
 func jobRequeues(queue *jobs.Queue) func(kind string) bool {
 	return func(kind string) bool {
 		switch kind {
-		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind:
+		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind, ci.BackfillJobKind:
 			return true
 		}
 		return queue != nil && queue.Handles(kind)

@@ -252,6 +252,44 @@ jobs:
           sleep 5
           ./tests/install-smoke-health.sh deploy/docker-compose .env
 
+      # INS-01, SEC-09 (WP-735, E-42): the optional clamd of the module
+      # documents. After the default run (profile off) the compose profile
+      # documents starts the service clamd, and the strict health check runs
+      # again over every service of the active profiles, clamd included.
+      # Then a POST of 10 MiB to /api/ through the frontend port must reach
+      # the server (its JSON problem answer, not the HTML 413 of nginx,
+      # client_max_body_size of frontend/nginx.conf). clamd is removed
+      # afterwards: the default installation keeps the module off.
+      - name: Compose profile documents, clamd healthy and 10 MiB through the frontend (INS-01, SEC-09)
+        run: |
+          set -euo pipefail
+          cd deploy/docker-compose
+          export COMPOSE_PROFILES=documents
+          docker compose --env-file .env up -d --wait --wait-timeout 600 clamd \
+            || { docker compose --env-file .env logs --tail 80 clamd; exit 1; }
+          cd ../..
+          ./tests/install-smoke-health.sh deploy/docker-compose .env
+          grep -qx 'clamd' <(cd deploy/docker-compose && docker compose --env-file .env config --services) \
+            || { echo "FAIL: the profile documents does not list clamd"; exit 1; }
+          port=$(grep -E '^RETICORA_FRONTEND_PORT=' deploy/docker-compose/.env | cut -d= -f2)
+          port="${port:-3000}"
+          body="$RUNNER_TEMP/upload-10mib.bin"
+          head -c $((10 * 1024 * 1024)) /dev/zero > "$body"
+          meta=$(curl -sS -o "$RUNNER_TEMP/upload-10mib.out" -w '%{http_code} %{content_type}' -H 'Expect:' \
+            -H 'Content-Type: application/octet-stream' --data-binary "@$body" "http://localhost:${port}/api/v1/documents")
+          status=${meta%% *}
+          ctype=${meta#* }
+          echo "POST 10 MiB /api/v1/documents through the frontend: $status ($ctype)"
+          # The server answers every request with JSON (application/problem+json
+          # for an error); the 413 of nginx is an HTML page.
+          if ! [[ $ctype =~ ^application/(problem\+)?json ]]; then
+            echo "FAIL: the 10 MiB request did not reach the server (answer $status, $ctype: nginx)"
+            head -c 400 "$RUNNER_TEMP/upload-10mib.out"; echo
+            exit 1
+          fi
+          cd deploy/docker-compose
+          docker compose --env-file .env rm -sfv clamd
+
       # NFR-06 (WP-458, E-77): the installer chose the log retention of the
       # platform — on the runners (systemd) journald with the 30-day drop-in,
       # in the debian:12 container (no systemd) the json-file rotation through
@@ -1020,6 +1058,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same JetStream reservation as in tls-domain-pebble: free the runner
+      # before the stack starts.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
@@ -1160,6 +1206,14 @@ jobs:
       REGISTRY: ghcr.io/datahub-chiemgau
     steps:
       - uses: actions/checkout@v4
+
+      # Same JetStream reservation as in tls-domain-pebble: free the runner
+      # before the stack starts.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
 
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh

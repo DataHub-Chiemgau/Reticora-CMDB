@@ -30,6 +30,63 @@ const selectColumns = `
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// recompute follows a changed value with the computed attributes of
+	// the CI (WithRecompute, WP-717); nil computes nothing.
+	recompute Recomputer
+}
+
+// Recomputer recomputes the computed attributes of a CI in the caller's
+// transaction (WP-717, MET-10 computed). The CI repository implements it;
+// this package cannot import it (the CI package imports this one).
+type Recomputer interface {
+	RecomputeTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) error
+}
+
+// WithRecompute makes SetOverride and ClearOverride recompute the computed
+// attributes of the CI after they changed one of its values, in their
+// transaction: the new values belong to the version step of the override
+// (no second version, no second ci_change row).
+func (r *PGRepository) WithRecompute(recompute Recomputer) *PGRepository {
+	r.recompute = recompute
+	return r
+}
+
+// errComputed refuses an override of a computed attribute (WP-717): its
+// value follows its expression.
+var errComputed = fmt.Errorf("%w: the attribute is computed", ErrNotOverridable)
+
+// checkNotComputed refuses fieldName when it is a computed attribute of the
+// CI (attribute_definition.computed, WP-258): a global definition, one of
+// the type chain of the CI or of an attribute set of that chain. A layer
+// cannot remove an expression (MET-16), so one computed definition makes
+// the attribute computed.
+func checkNotComputed(ctx context.Context, tx pgx.Tx, ciID, fieldName string) error {
+	if isColumn(fieldName) {
+		return nil
+	}
+	var computed bool
+	if err := tx.QueryRow(ctx, `
+		WITH chain AS (SELECT c.id FROM ci JOIN LATERAL ci_type_ancestors(ci.ci_type_id) c ON true WHERE ci.id = $1)
+		SELECT EXISTS (SELECT 1 FROM attribute_definition a
+			WHERE a.key = $2 AND a.computed IS NOT NULL AND (
+				a.scope = 'global'
+				OR a.ci_type_id IN (SELECT id FROM chain)
+				OR a.attribute_set_id IN (SELECT s.attribute_set_id FROM ci_type_attribute_set s WHERE s.ci_type_id IN (SELECT id FROM chain))))`,
+		ciID, fieldName).Scan(&computed); err != nil {
+		return fmt.Errorf("read computed attribute %s: %w", fieldName, err)
+	}
+	if computed {
+		return errComputed
+	}
+	return nil
+}
+
+// recomputeTx recomputes the computed attributes of the CI (WithRecompute).
+func (r *PGRepository) recomputeTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
+	if r.recompute == nil {
+		return nil
+	}
+	return r.recompute.RecomputeTx(ctx, tx, orgID, ciID)
 }
 
 // NewPGRepository creates a PostgreSQL-backed override repository.
@@ -337,6 +394,10 @@ type DiscoveredValues struct {
 	Values     map[string]any
 	Source     string
 	ObservedAt time.Time
+	// Rank is the rank stored with the values; 0 is SourceRank(Source).
+	// The computed attributes of a new CI (source computed, WP-717) carry
+	// 100, which SourceRanks (REC-03) does not know.
+	Rank int
 }
 
 // recordDiscoveredBatchSQL upserts the discovered values of the fields of
@@ -364,9 +425,11 @@ const recordDiscoveredBatchSQL = `
 		observed_at = EXCLUDED.observed_at`
 
 // RecordDiscoveredBatch upserts the discovered columns of the fields of
-// several CIs, each at most once in batch, with one statement, each CI like
-// RecordDiscoveredMany (NFR-03, WP-333); the override columns stay
-// untouched. The visibility check is
+// several CIs, each field at most once in batch, with one statement, each CI
+// like RecordDiscoveredMany (NFR-03, WP-333); the override columns stay
+// untouched. A CI may come in several entries with different sources and
+// fields, e.g. its discovered fields and its computed attributes (rank
+// 100, WP-717). The visibility check is
 // part of the statement: the fields of a CI the tenant scope does not show
 // are not written, and the call reports "not found". It reads each CI once
 // by its key (WP-334): a semi join of the values with the CIs of the
@@ -401,8 +464,12 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 			if v, ok := jsonValue(b.Values[name]).(string); ok {
 				value = &v
 			}
+			rank := b.Rank
+			if rank == 0 {
+				rank = SourceRank(b.Source)
+			}
 			ids, names, raw = append(ids, b.CIID), append(names, name), append(raw, value)
-			sources, ranks, observed = append(sources, source), append(ranks, int32(SourceRank(b.Source))), append(observed, observedAt.UTC())
+			sources, ranks, observed = append(sources, source), append(ranks, int32(rank)), append(observed, observedAt.UTC())
 		}
 	}
 	if len(ids) == 0 {
@@ -449,6 +516,9 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 		if instance {
 			return ErrNotOverridable
 		}
+		if computedErr := checkNotComputed(ctx, tx, ciID, fieldName); computedErr != nil {
+			return computedErr
+		}
 		before, err := ciFieldValue(ctx, tx, ciID, fieldName)
 		if err != nil {
 			return err
@@ -470,9 +540,13 @@ func (r *PGRepository) SetOverride(ctx context.Context, orgID, ciID, fieldName s
 		if err != nil {
 			return fmt.Errorf("set override: %w", err)
 		}
-		// The CI shows the override at once (OVR-01, CI-10).
+		// The CI shows the override at once (OVR-01, CI-10), its computed
+		// attributes follow (WP-717).
 		if syncErr := syncCIField(ctx, tx, ciID, fieldName, value); syncErr != nil {
 			return syncErr
+		}
+		if recomputeErr := r.recomputeTx(ctx, tx, orgID, ciID); recomputeErr != nil {
+			return recomputeErr
 		}
 		version, err := raiseVersion(ctx, tx, orgID, ciID, fieldName, before, value)
 		if err != nil {
@@ -558,6 +632,9 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 		if !live {
 			return ErrNotFound
 		}
+		if computedErr := checkNotComputed(ctx, tx, ciID, fieldName); computedErr != nil {
+			return computedErr
+		}
 		var overridden bool
 		if err = tx.QueryRow(ctx, `SELECT override_at IS NOT NULL OR override_value IS NOT NULL
 			FROM ci_field_value WHERE ci_id = $1 AND field_name = $2`, ciID, fieldName).Scan(&overridden); err != nil {
@@ -597,6 +674,9 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 		if fv.DiscoveredAt != nil && !structuralFields[fieldName] && !instance {
 			if syncErr := syncCIField(ctx, tx, ciID, fieldName, fv.DiscoveredValue); syncErr != nil {
 				return syncErr
+			}
+			if recomputeErr := r.recomputeTx(ctx, tx, orgID, ciID); recomputeErr != nil {
+				return recomputeErr
 			}
 			changes["restored_value"] = fv.DiscoveredValue
 			changes["restored_source"] = fv.DiscoveredSource

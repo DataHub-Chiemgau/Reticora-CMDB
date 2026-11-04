@@ -5,7 +5,22 @@
 // collector with scopes, three reviews, an echo webhook and a VRF example.
 // -objects scales the demo organization up to 50.000 CIs for the load test;
 // -interfaces-per-ci, -ips-per-ci, -relationships-per-ci and -orgs add the
-// volumes of NFR-01 (WP-439). It is never deployed.
+// volumes of NFR-01 (WP-439).
+//
+// Phase 2 (WP-325): after the setup transaction of each organization the
+// metamodel is seeded through the services of the metamodel WPs. The demo
+// organization gets the derived types blade_chassis and blade_server of
+// server, two attribute sets, two templates with two published versions
+// each (using the computed system attribute warranty_days_left), a
+// validation rule and a conditional rule, form layouts per template for
+// the roles engineer and viewer, field grants of viewer and a sensitive
+// attribute, and the users engineer@, viewer@ and client_technician@ (scoped
+// to the client hq) beside the administrator. acme gets the type
+// blade_server, a template with one published version and the user viewer;
+// the small organizations of -orgs get no Phase-2 content. -api-key-role
+// issues the load-test key of -api-key-file for the user of a standard role
+// (load-test for org_admin, load-test-<role> otherwise). It is never
+// deployed.
 package main
 
 import (
@@ -30,7 +45,9 @@ func main() {
 	orgs := flag.Int("orgs", 0, fmt.Sprintf("small organizations with the SIM-01 data set besides demo and acme (0-%d; NFR-01: 500)", MaxOrgs))
 	at := flag.String("at", "", "anchor time of every timestamp (RFC 3339; default: the current hour)")
 	prefix := flag.String("prefix", "", "prefix of the organization slugs and ids")
-	keyFile := flag.String("api-key-file", "", "issue a load-test API key of the demo administrator and write it to this file")
+	keyFile := flag.String("api-key-file", "", "issue a load-test API key of the demo organization and write it to this file")
+	keyRole := flag.String("api-key-role", DefaultAPIKeyRole,
+		"standard role whose demo user owns the load-test key (org_admin: load-test, otherwise load-test-<role>)")
 	flag.Parse()
 	if *dsn == "" {
 		fmt.Fprintln(os.Stderr, "seed: database URL is required")
@@ -57,7 +74,7 @@ func main() {
 	start := time.Now()
 	summary, err := Run(ctx, pool, Options{Prefix: *prefix, Objects: *objects, Metrics: *metrics,
 		InterfacesPerCI: *interfaces, IPsPerCI: *ips, RelationshipsPerCI: *relationships, Orgs: *orgs, At: anchor,
-		APIKey: *keyFile != ""})
+		APIKey: *keyFile != "", APIKeyRole: *keyRole})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)
 		os.Exit(1)

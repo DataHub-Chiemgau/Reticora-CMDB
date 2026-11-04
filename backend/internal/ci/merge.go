@@ -430,6 +430,11 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			return err
 		}
 		result.OverrideConflicts = conflicts
+		// The survivor's computed attributes follow its merged values
+		// (WP-717), as part of the merge.
+		if _, err = r.recomputeRow(ctx, tx, orgID, survivorID); err != nil {
+			return err
+		}
 
 		merged, err := scanCI(tx.QueryRow(ctx, fmt.Sprintf("SELECT %s FROM ci WHERE id = $1", ciSelectColumns), survivorID))
 		if err != nil {

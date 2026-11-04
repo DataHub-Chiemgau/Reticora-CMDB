@@ -81,15 +81,24 @@ jobs:
       - name: Verify the source chain before backup
         run: /tmp/audit-verify -database-url "$DATABASE_URL" -org "$ORG_ID"
 
+      # pg_dump and pg_restore come from the image of the service container:
+      # the client tools of the runner are newer than PostgreSQL 16 and write
+      # settings it rejects (SET transaction_timeout, PostgreSQL 17).
       - name: Dump the database (logical backup)
-        run: pg_dump --format=custom --file=/tmp/reticora.dump "$DATABASE_URL"
+        run: >-
+          docker run --rm --network host -e PGPASSWORD -v /tmp:/tmp
+          timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+          pg_dump --format=custom --file=/tmp/reticora.dump "$DATABASE_URL"
 
       - name: Create the restore target database
         # PGPASSWORD authenticates; the DSN carries user + host.
         run: psql "host=localhost port=5432 user=reticora dbname=postgres" -c "CREATE DATABASE reticora_restored"
 
       - name: Restore into the fresh database
-        run: pg_restore --dbname="$RESTORE_DATABASE_URL" /tmp/reticora.dump
+        run: >-
+          docker run --rm --network host -e PGPASSWORD -v /tmp:/tmp
+          timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+          pg_restore --dbname="$RESTORE_DATABASE_URL" /tmp/reticora.dump
 
       - name: "Integrity check: row counts match"
         run: |

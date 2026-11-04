@@ -28,6 +28,26 @@ documents, backups before off-site transfer) and the container images.
 Metric samples (monitoring) grow with the number of polled CIs and the
 retention; plan an extra 1 GB per 1,000 polled CIs and 30 days of retention.
 
+## Document uploads and malware scan (SEC-09, E-42)
+
+Only with the module `documents` (off by default) and its clamd (compose
+profile `documents`, Kubernetes component `clamav`):
+
+- **Uploads:** an upload occupies up to twice the upload limit
+  (`RETICORA_DOCUMENT_MAX_UPLOAD_MB`, default 50 MiB) at once: the request
+  body the frontend nginx buffers (temp files under `/tmp`, a tmpfs in
+  Compose, so RAM) and the copy the server checks and stores. Plan
+  *concurrent uploads × 2 × upload limit* of extra RAM, e.g. 10 concurrent
+  uploads × 2 × 50 MiB = 1 GB.
+- **clamd:** the signature database is held in RAM, about 1–1.5 GB today and
+  growing; while clamd reloads after a signature update it holds the old and
+  the new database at once, so plan **twice** that (3 GB, the limit of the
+  Kubernetes component is 4 Gi). The volume of the signatures needs about
+  1 GB of disk. A scan streams the version from the object store, its
+  memory is bounded by `StreamMaxLength`/`MaxScanSize`.
+
+With the module on, add 4 GB of RAM to the rows of the central cloud.
+
 ## Discovery collector VM
 
 | Profile | vCPU | RAM | Disk |

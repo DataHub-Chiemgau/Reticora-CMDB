@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -196,15 +197,22 @@ func publishTx(ctx context.Context, tx pgx.Tx, orgID, id string, apply Applier) 
 // routes. An item references only items added before it (checkRefs), so
 // the order of the draft is an order of the dependencies; the reference
 // {"$item": "<item id>"} is replaced by the id the referenced item
-// created (E-112). The first refusal stops the publication.
+// created (E-112), as are the placeholders of a route whose target the
+// draft creates (the import, WP-722: {$item:<item id>} for the id,
+// {$version:<item id>} for the number of a created template version). The
+// first refusal stops the publication.
 func applyItems(ctx context.Context, items []Item, apply Applier) (map[string]int, error) {
 	counts := map[string]int{}
-	created := map[string]string{}
+	created, versions := map[string]string{}, map[string]string{}
 	for i := range items {
 		it := &items[i]
 		method, path, ok := strings.Cut(it.Route, " ")
 		if !ok {
 			return nil, fmt.Errorf("item %s has no route", it.ID)
+		}
+		path, err := resolveRoute(path, created, versions)
+		if err != nil {
+			return nil, fieldError("route", errUnresolvedRoute.Error())
 		}
 		payload, err := resolveRefs(it.Payload, created)
 		if err != nil {
@@ -222,10 +230,14 @@ func applyItems(ctx context.Context, items []Item, apply Applier) (map[string]in
 		}
 		if it.Op == OpCreate || it.Op == OpClone {
 			var obj struct {
-				ID string `json:"id"`
+				ID      string `json:"id"`
+				Version *int   `json:"version"`
 			}
 			if json.Unmarshal(body, &obj) == nil && obj.ID != "" {
 				created[it.ID] = obj.ID
+				if it.Kind == KindTemplateVersion && obj.Version != nil {
+					versions[it.ID] = strconv.Itoa(*obj.Version)
+				}
 			}
 		}
 		counts[it.Kind]++

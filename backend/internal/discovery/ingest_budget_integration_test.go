@@ -28,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
@@ -228,10 +229,17 @@ func TestIngestStatementBudget(t *testing.T) {
 	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
 
 	// Every repository on the counting pool: a join runs on the
-	// transaction's connection whatever pool the callee holds.
+	// transaction's connection whatever pool the callee holds. computed
+	// wires the computation of computed attributes as the server does
+	// (WP-717).
+	computed := false
 	build := func(production, batch bool, lanes ...int) *discovery.Handler {
 		var indexer ci.Indexer = search.NewCIIndexer(search.NewPGRepository(pool))
-		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()), indexer)
+		base := ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
+		if computed {
+			base = base.WithComputed(citype.NewPGRepository(pool))
+		}
+		cis := ci.NewIndexingRepository(base, indexer)
 		if production {
 			cis = ci.NewIndexingRepository(cis, ai.NewCIChunkIndexer(ai.NewPGRepository(pool), nil))
 		}
@@ -698,6 +706,51 @@ func TestIngestStatementBudget(t *testing.T) {
 		if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
 			t.Errorf("audit chain: %+v, %v", result, err)
 		}
+	})
+
+	// A computed attribute of the type server (WP-717): the new devices of
+	// a batch get its value in the CI rows and its provenance in the one
+	// RecordDiscoveredBatch statement; the definitions come from the
+	// observed-value check of the same transaction (ci.WithFieldsMemo), so
+	// the batch stays within its budget.
+	t.Run("computed definition", func(t *testing.T) {
+		types := citype.NewPGRepository(f.App)
+		var serverID string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverID); err != nil {
+			t.Fatal(err)
+		}
+		label, err := rules.ParseExpr([]byte(`{"op":"upper","args":[{"op":"field","field":"hostname"}]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		def := &citype.AttributeDefinition{Key: "budget_label", DataType: "text", Computed: &label,
+			AppliesTo: citype.AppliesToTypes, AppliesToTypeIDs: []string{serverID}}
+		if err = types.CreateAttributeDefinition(ctx, f.OrgA, def); err != nil {
+			t.Fatalf("computed definition: %v", err)
+		}
+		t.Cleanup(func() { _ = types.DeleteAttributeDefinition(ctx, f.OrgA, def.ID) })
+		computed = true
+		t.Cleanup(func() { computed = false })
+		mux := handler(true, true)
+		ingest(t, mux, 1)
+		b := ingest(t, mux, 20)
+		tx := checkBatch(t, &b, 20, true)
+		checkChain(t)
+		serials := make([]string, len(last))
+		for i := range last {
+			serials[i] = last[i].Identity.SerialNumber
+		}
+		var values, rows int
+		if err = f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE c.attributes ->> 'budget_label' = upper(c.hostname)),
+				count(v.ci_id) FROM ci c LEFT JOIN ci_field_value v ON v.ci_id = c.id AND v.field_name = 'budget_label'
+					AND v.discovered_source = 'computed' AND v.discovered_rank = 100
+				WHERE c.organization_id = $1 AND c.serial_number = ANY($2)`, f.OrgA, serials).Scan(&values, &rows); err != nil {
+			t.Fatal(err)
+		}
+		if values != 20 || rows != 20 {
+			t.Errorf("%d of 20 new devices carry the computed value, %d its provenance; want 20 each", values, rows)
+		}
+		t.Logf("with a computed definition: 20 new devices in one transaction of %d statements", len(tx))
 	})
 }
 

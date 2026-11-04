@@ -98,6 +98,9 @@ func resolveWithRules(ctx context.Context, fields FieldResolver, catalog RuleRes
 	if err != nil {
 		return nil, nil, templateViolation(err)
 	}
+	// The computation of the write reads them from the context's memo
+	// (WithFieldsMemo, WP-717).
+	rememberFields(ctx, ciTypeID, ciID, defs)
 	return defs, found, nil
 }
 
@@ -716,7 +719,8 @@ func InvalidTypedColumns(values map[string]any) []string {
 // InvalidObserved returns the fields whose observed values (typed columns
 // and attributes, by field name) violate the field metadata of the CI
 // type or, for a typed column, its own data type: the same value rules as
-// a manual write (CI-03, MET-11). The catalog rules of kind validation
+// a manual write (CI-03, MET-11). An observed value of a computed
+// attribute is always invalid (WP-717): the write path computes it. The catalog rules of kind validation
 // apply as well (WP-257), their condition evaluated against the observed
 // values; required, readonly and visible do not apply to an observation,
 // nor do required fields, an observation may lack them. The rules are
@@ -774,6 +778,12 @@ func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.C
 	for i := range defs {
 		def := &defs[i]
 		value, ok := values[def.Name]
+		// A computed attribute is never observed (WP-717): the write path
+		// computes it.
+		if ok && def.Computed != nil {
+			invalid[def.Name] = true
+			continue
+		}
 		if !ok || isBlank(value) || invalid[def.Name] {
 			continue
 		}

@@ -28,6 +28,10 @@ const (
 	ReasonAsset = "asset"
 	// ReasonRecord: the value of the CI record, written by its source.
 	ReasonRecord = "record"
+	// ReasonComputed: the value of a computed attribute, computed from the
+	// CI's values by its expression (MET-10, WP-717; source computed, rank
+	// 100).
+	ReasonComputed = "computed"
 )
 
 // ProvenanceSource reads the provenance rows of a CI (override.Repository).
@@ -41,8 +45,8 @@ type FieldProvenance struct {
 	Value  any    `json:"value"`
 	Source string `json:"source"`
 	Rank   int    `json:"rank"`
-	// Reason is why the value is shown: override, source_rank, asset or
-	// record.
+	// Reason is why the value is shown: override, source_rank, asset,
+	// record or computed.
 	Reason     string     `json:"reason"`
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 	ObservedAt *time.Time `json:"observed_at,omitempty"`
@@ -165,6 +169,9 @@ func fromRecord(rec *override.FieldValue) FieldProvenance {
 		return p
 	}
 	p.Source, p.Reason, p.Rank = rec.DiscoveredSource, ReasonSourceRank, rec.DiscoveredRank
+	if rec.DiscoveredSource == SourceComputed {
+		p.Reason = ReasonComputed
+	}
 	if p.Rank == 0 {
 		p.Rank = override.SourceRank(rec.DiscoveredSource)
 	}

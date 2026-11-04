@@ -8,6 +8,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/jackc/pgx/v5"
 )
 
 // indexingRepository decorates a Repository with best-effort search-index
@@ -19,7 +20,8 @@ import (
 // The decorator lives at the repository boundary so that every write path
 // (REST handler, collector bulk ingest, workflow executor) keeps the index
 // in sync, not only the CI service. It offers every exported method of the
-// PostgreSQL repository (except WithEvents): callers find the optional
+// PostgreSQL repository (except WithEvents and WithComputed, which
+// construct it): callers find the optional
 // interfaces by type assertion, and a method the decorator hides is lost
 // in production, where the repository is always decorated (SR-11, F-037).
 type indexingRepository struct {
@@ -302,6 +304,20 @@ func (r *indexingRepository) MergedInto(ctx context.Context, orgID, victimID str
 		return "", false, nil
 	}
 	return reader.MergedInto(ctx, orgID, victimID)
+}
+
+// RecomputeTx forwards the recomputation of the computed attributes after
+// an override (override.Recomputer, WP-717) when the wrapped repository
+// offers it; the values are attributes, which the search document does not
+// carry.
+func (r *indexingRepository) RecomputeTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
+	recomputer, ok := r.Repository.(interface {
+		RecomputeTx(ctx context.Context, tx pgx.Tx, orgID, ciID string) error
+	})
+	if !ok {
+		return nil
+	}
+	return recomputer.RecomputeTx(ctx, tx, orgID, ciID)
 }
 
 // ListChanges forwards change-history reads when the wrapped repository

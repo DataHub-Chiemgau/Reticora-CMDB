@@ -134,8 +134,9 @@ func (h *Handler) SetOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 // ClearOverride handles DELETE /api/v1/cis/{id}/fields/{name}/override. An
-// unknown CI or field is 404, a reserved namespace as name 400 (GLO-13),
-// any other failure goes through api.WriteRepoError (F-232).
+// unknown CI or field is 404, a reserved namespace as name 400 (GLO-13), a
+// computed attribute 422 (ErrNotOverridable, WP-717), any other failure
+// goes through api.WriteRepoError (F-232).
 func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -152,6 +153,12 @@ func (h *Handler) ClearOverride(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, ErrReservedName) {
 		writeReservedName(w)
+		return
+	}
+	// A computed attribute has no override to clear (WP-717): 422 as for
+	// PUT.
+	if errors.Is(err, ErrNotOverridable) {
+		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity", "the field is a computed attribute and has no override")
 		return
 	}
 	if err != nil {

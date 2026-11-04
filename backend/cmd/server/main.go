@@ -528,6 +528,7 @@ func main() {
 		Modules:            modules,
 		MetricsTenantLabel: cfg.MetricsTenantLabel,
 		Entitlements:       entitlementSvc,
+		FieldPolicyCache:   cacheStore,
 		Dispatcher:         webhookDispatcher,
 		CIService:          ciService,
 		Credentials:        credentialService,

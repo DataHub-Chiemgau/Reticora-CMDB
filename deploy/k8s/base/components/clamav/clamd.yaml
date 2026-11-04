@@ -1,0 +1,95 @@
+# clamd of the component clamav (SEC-09, E-42, WP-735). The image ships a
+# signature database; freshclam in the same container updates it in the
+# volume signatures. Air-gapped clusters set CLAMAV_NO_FRESHCLAMD=true in an
+# overlay and fill the volume from an offline signature bundle
+# (docs/betrieb/referenzmodell.md). The stream and scan limits are at least
+# the upload limit RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB) of the
+# server; raise them together. clamd holds the signature database in memory,
+# twice while it reloads after an update (docs/ops/sizing.md).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: clamd
+spec:
+  replicas: 1
+  # One pod at a time: a second one would update the signatures in the same
+  # volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: clamd
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: clamd
+    spec:
+      containers:
+        - name: clamd
+          image: clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a
+          ports:
+            - containerPort: 3310
+              name: clamd
+          env:
+            - name: CLAMD_CONF_StreamMaxLength
+              value: "51M"
+            - name: CLAMD_CONF_MaxFileSize
+              value: "51M"
+            - name: CLAMD_CONF_MaxScanSize
+              value: "200M"
+          # Loading the signatures takes about a minute; clamdcheck.sh of
+          # the image sends PING and expects PONG.
+          startupProbe:
+            exec:
+              command: ["clamdcheck.sh"]
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["clamdcheck.sh"]
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["clamdcheck.sh"]
+            periodSeconds: 60
+            timeoutSeconds: 10
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 2Gi
+            limits:
+              cpu: "1"
+              memory: 4Gi
+          volumeMounts:
+            - name: signatures
+              mountPath: /var/lib/clamav
+      volumes:
+        - name: signatures
+          persistentVolumeClaim:
+            claimName: clamd-signatures
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clamd-signatures
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clamd
+spec:
+  ports:
+    - port: 3310
+      targetPort: clamd
+      protocol: TCP
+      name: clamd
+  selector:
+    app.kubernetes.io/component: clamd

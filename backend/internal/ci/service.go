@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -36,9 +37,19 @@ type BatchCreator interface {
 	CreateMany(ctx context.Context, orgID string, items []*Item) (CreateManyResult, error)
 }
 
-// CreateManyResult lists the positions of the items a unique index refused.
+// CreateManyResult lists the positions of the items a unique index refused
+// and the values of their computed attributes (WP-717).
 type CreateManyResult struct {
 	Refused []int
+	// Computed holds per item position the computed attributes the item
+	// got (key → value, nil for an empty value; nil when its type computes
+	// nothing), ComputedAt the time of the computation. The values are in
+	// the items' attributes; the caller records their provenance (source
+	// SourceComputed, rank RankComputed, observed at ComputedAt) with the
+	// provenance of the batch (NFR-03), the discovery in its
+	// RecordDiscoveredBatch call.
+	Computed   []map[string]any
+	ComputedAt time.Time
 }
 
 // BatchIndexer is the batch form of Indexer (NFR-03, WP-333): the documents
@@ -321,23 +332,58 @@ type writeScope struct {
 // schema composed with it. The active catalog rules of the CI (type chain,
 // sets, template versions; WP-257) apply with the attribute rules; their
 // conditions see the values after the write, typed columns included.
+// Computed attributes are not written (WP-717): on a creation (existing
+// nil) any computed key of the patch is a violation; on an update a
+// computed key with the stored value is no change and returned in drop,
+// any other value a violation (attributes.<key>, computed).
 func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any,
-	templates *[]citype.CITemplate) error {
+	templates *[]citype.CITemplate) (drop []string, err error) {
 	if s.fields == nil {
 		if templates != nil {
-			return ErrTemplatesUnavailable
+			return nil, ErrTemplatesUnavailable
 		}
-		return nil
+		return nil, nil
 	}
 	defs, catalog, err := resolveWithRules(ctx, s.fields, s.catalog, orgID, ciTypeID, ciID, templates)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	drop, violations := computedWriteViolations(defs, patch, existing, existing == nil)
+	if len(violations) > 0 {
+		return nil, &ValidationError{Violations: violations}
+	}
+	if len(drop) > 0 {
+		rest := make(map[string]any, len(patch))
+		for k, v := range patch {
+			if !slices.Contains(drop, k) {
+				rest[k] = v
+			}
+		}
+		patch = rest
 	}
 	values := MergePatch(existing, patch)
 	if verr := validateWithRules(defs, catalog, values, patch, existing); verr != nil {
-		return verr
+		return nil, verr
 	}
-	return checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
+	return drop, checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
+}
+
+// withoutKeys returns attrs without the keys drop; nil when nothing is
+// left, so a patch of computed keys alone writes no attributes.
+func withoutKeys(attrs map[string]any, drop []string) map[string]any {
+	if len(drop) == 0 {
+		return attrs
+	}
+	out := make(map[string]any, len(attrs))
+	for k, v := range attrs {
+		if !slices.Contains(drop, k) {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // LegacyTagsKey is the deprecated attribute that writes the tag assignment
@@ -444,6 +490,9 @@ func (s *Service) GetByID(ctx context.Context, orgID, id string) (*Item, error) 
 // The type is the writer's choice (ChosenType): an ID that is no UUID is
 // refused here, the repository reads the type in the writing transaction.
 func (s *Service) Create(ctx context.Context, item *Item) error {
+	// The definitions the validation resolves are those the repository
+	// computes with (WP-717).
+	ctx = WithFieldsMemo(ctx)
 	return s.activating(ctx, item.OrganizationID, func(ctx context.Context) error {
 		return s.create(ctx, item)
 	})
@@ -486,7 +535,7 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 		}
 		templates = &item.Templates
 	}
-	if err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", writeScope{clientID: item.ClientID},
+	if _, err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", writeScope{clientID: item.ClientID},
 		nil, withTyped(item.Attributes, typed), templates); err != nil {
 		return err
 	}
@@ -544,6 +593,9 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 	if err := req.nullViolations(); err != nil {
 		return nil, err
 	}
+	// The definitions the validation resolves are those the repository
+	// computes with (WP-717).
+	ctx = WithFieldsMemo(ctx)
 	// attributes.tags replaces the tag assignment (E-125, merge patch: null
 	// removes it).
 	rest, legacy, tagsErr := ExtractLegacyTags(req.Attributes)
@@ -583,10 +635,13 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 			clientID = *req.ClientID
 		}
 		scope := writeScope{clientID: clientID, clientChanged: !strings.EqualFold(clientID, before.ClientID)}
-		if err := s.validate(ctx, orgID, before.CITypeID, id, scope,
-			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed), req.Templates); err != nil {
-			return nil, err
+		drop, validateErr := s.validate(ctx, orgID, before.CITypeID, id, scope,
+			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed), req.Templates)
+		if validateErr != nil {
+			return nil, validateErr
 		}
+		// A computed key with its stored value is no change (WP-717).
+		req.Attributes = withoutKeys(req.Attributes, drop)
 		if err := checkAssetOwnedFields(before, &req); err != nil {
 			return nil, err
 		}

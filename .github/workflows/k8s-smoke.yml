@@ -69,6 +69,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The event stream RETICORA_EVENTS reserves 10 GiB of JetStream file
+      # storage, and NATS grants at most 75 % of the free disk (see
+      # install-smoke.yml, job tls-domain-pebble): free the runner before the
+      # cluster starts, or the server stays in CrashLoopBackOff.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Prepare the protocol directory
         run: |
           mkdir -p "$RUNNER_TEMP/k8s-smoke" "$RUNNER_TEMP/bin"

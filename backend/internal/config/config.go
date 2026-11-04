@@ -484,6 +484,10 @@ const (
 	// WorkerOfflineDetector runs as the system job ci.offline_detector of
 	// the scheduler (REC-09, LCY-05, F-289).
 	WorkerOfflineDetector = "offline_detector"
+	// WorkerComputedRefresh runs as the system job
+	// attribute.computed_refresh of the scheduler: the hourly refresh of
+	// computed attributes (JOB-02 [P2], WP-718).
+	WorkerComputedRefresh = "computed_refresh"
 )
 
 // WorkerNames lists every registered worker.
@@ -501,6 +505,7 @@ var WorkerNames = []string{
 	WorkerCredentialBundles,
 	WorkerDiscoveryScopes,
 	WorkerOfflineDetector,
+	WorkerComputedRefresh,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).
