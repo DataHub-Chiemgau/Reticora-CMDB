@@ -9542,7 +9542,13 @@ paths:
       summary: Get a time-limited download URL for the document content
       description: >-
         The URL of the current version, or with `version` of that version;
-        a version the document does not have answers 404.
+        a version the document does not have answers 404. Only a version
+        whose malware scan is clean is presigned (SEC-09, E-42, fail-closed):
+        pending_scan and scan_failed answer 409 with type
+        https://reticora.io/problems/document-pending-scan, infected
+        (quarantine) 409 with type
+        https://reticora.io/problems/document-quarantined. Content whose
+        object key lies outside the document answers 409 as well.
       parameters:
         - name: version
           in: query
@@ -9569,6 +9575,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The version is not scanned clean: type
+            https://reticora.io/problems/document-pending-scan (pending_scan,
+            scan_failed) or https://reticora.io/problems/document-quarantined
+            (infected); or the stored object key lies outside the document.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '503':
           description: Blob storage is not configured
           content:
@@ -9619,7 +9635,10 @@ paths:
         document answers 403 (E-09), and so does a link whose target lies
         outside its write scope, e.g. an org-wide object or, for a
         team-restricted principal, a target without a team of its scope
-        (E-11). The audit log records document.linked with link_id,
+        (E-11). A document whose current version is infected (quarantine,
+        SEC-09) takes no new link: 409 with type
+        https://reticora.io/problems/document-quarantined; its existing
+        links stay. The audit log records document.linked with link_id,
         entity_type and entity_id.
       requestBody:
         required: true
@@ -9642,6 +9661,17 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is quarantined (type
+            https://reticora.io/problems/document-quarantined); a document
+            whose scan is pending (type
+            https://reticora.io/problems/document-pending-scan) is linked
+            normally.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -24031,6 +24061,19 @@ components:
         updated_at:
           type: string
           format: date-time
+        scan_status:
+          type: string
+          enum: [pending_scan, clean, infected, scan_failed]
+          readOnly: true
+          description: >-
+            Malware scan status of the current version (SEC-09); absent
+            without stored content. Only clean content is downloadable,
+            infected is the quarantine.
+        scanned_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Time of the last scan result of the current version; absent while pending_scan.
 
     CreateDocumentRequest:
       type: object
@@ -28797,10 +28840,13 @@ components:
         scan_status:
           type: string
           enum: [pending_scan, clean, infected, scan_failed]
-          description: Malware scan status (SEC-09); a new version is pending_scan.
+          description: >-
+            Malware scan status (SEC-09); a new version is pending_scan. Only
+            a clean version is downloadable, infected is the quarantine.
         scanned_at:
           type: string
           format: date-time
+          description: Time of the last scan result; absent while pending_scan.
         uploaded_by:
           type: string
         created_at:

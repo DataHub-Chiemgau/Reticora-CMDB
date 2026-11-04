@@ -144,6 +144,12 @@ func TestDocumentVersions(t *testing.T) {
 		t.Fatalf("blobs %d, want 2", n)
 	}
 
+	// Only versions scanned clean are downloadable (WP-733).
+	for n := 1; n <= 2; n++ {
+		if err := w.repo.SetScanResult(w.orgCtx, f.OrgA, d, n, document.ScanClean, ""); err != nil {
+			t.Fatalf("scan result of version %d: %v", n, err)
+		}
+	}
 	for query, key := range map[string]string{"?version=1": keys[0], "?version=2": keys[1], "": keys[1]} {
 		rec := w.call(w.orgScope(), http.MethodGet, base+"/content"+query, "", "")
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), key) {
@@ -177,7 +183,7 @@ func TestDocumentVersions(t *testing.T) {
 	}
 	sha := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	for _, v := range got {
-		if v.ScanStatus != document.ScanPending || v.ChecksumSHA256 == nil || !sha.MatchString(*v.ChecksumSHA256) ||
+		if v.ScanStatus != document.ScanClean || v.ScannedAt == nil || v.ChecksumSHA256 == nil || !sha.MatchString(*v.ChecksumSHA256) ||
 			v.MimeType != "application/pdf" || v.DocumentID != d {
 			t.Fatalf("version %+v", v)
 		}
@@ -274,8 +280,15 @@ func TestDocumentVersionBackfill(t *testing.T) {
 	if u := w.usage(t); u.StorageBytes != 1234 {
 		t.Fatalf("usage %+v, want 1234", u)
 	}
-	// The legacy version stays downloadable.
+	// The legacy version stays downloadable once scanned clean (WP-733).
 	rec := w.call(w.orgScope(), http.MethodGet, "/api/v1/documents/"+id+"/content?version=1", "", "")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), document.ProblemPendingScan) {
+		t.Fatalf("download of the unscanned legacy version: %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	if err := w.repo.SetScanResult(w.orgCtx, f.OrgA, id, 1, document.ScanClean, ""); err != nil {
+		t.Fatal(err)
+	}
+	rec = w.call(w.orgScope(), http.MethodGet, "/api/v1/documents/"+id+"/content?version=1", "", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), legacy) {
 		t.Fatalf("download of the legacy version: %d %s", rec.Code, rec.Body.String())
 	}

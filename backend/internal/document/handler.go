@@ -123,6 +123,32 @@ func (h *Handler) readUpload(w http.ResponseWriter, r *http.Request) (mimeType s
 	return "", nil, false
 }
 
+// Problem types of a refused download or link (WP-733, SEC-09, E-42): a
+// version not (yet) scanned clean, i.e. pending_scan or scan_failed, and
+// a quarantined (infected) one. Both answer 409.
+const (
+	ProblemPendingScan = "https://reticora.io/problems/document-pending-scan"
+	ProblemQuarantined = "https://reticora.io/problems/document-quarantined"
+)
+
+// writeScanRefusal answers a download of a version that is not clean with
+// 409 (fail-closed, E-42): document-quarantined for infected,
+// document-pending-scan for every other status, an unknown or missing one
+// included. It reports whether it answered.
+func writeScanRefusal(w http.ResponseWriter, status string) bool {
+	switch status {
+	case ScanClean:
+		return false
+	case ScanInfected:
+		api.WriteProblem(w, http.StatusConflict, ProblemQuarantined, "Document Quarantined",
+			"the document content was found infected and is quarantined")
+	default:
+		api.WriteProblem(w, http.StatusConflict, ProblemPendingScan, "Document Pending Scan",
+			"the document content has not been scanned clean yet")
+	}
+	return true
+}
+
 // documentBucket is the blob bucket document content is stored in.
 const documentBucket = "reticora-documents"
 
@@ -380,7 +406,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 // DownloadContent handles GET /api/v1/documents/{id}/content and answers with
 // a time-limited presigned URL for the stored object: of version n with
 // ?version=n (404 when the document has no such version), else of the
-// current version.
+// current version. Only a version scanned clean is presigned (WP-733,
+// fail-closed after E-42); any other answers 409 (writeScanRefusal).
 func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -403,7 +430,7 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
 	}
-	key := doc.StorageKey
+	key, scanStatus := doc.StorageKey, doc.ScanStatus
 	if version > 0 {
 		v, verr := h.repo.GetVersion(r.Context(), t.OrganizationID, doc.ID, version)
 		if verr != nil {
@@ -414,7 +441,7 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 			api.WriteRepoError(w, verr)
 			return
 		}
-		key = v.StorageKey
+		key, scanStatus = v.StorageKey, v.ScanStatus
 	}
 	if key == "" {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document has no stored content")
@@ -422,6 +449,9 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ownsStorageKey(t.OrganizationID, doc.ID, key) {
 		api.WriteError(w, http.StatusConflict, "Conflict", "document content is stored outside the organization")
+		return
+	}
+	if writeScanRefusal(w, scanStatus) {
 		return
 	}
 
@@ -467,8 +497,13 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// An unknown entity type answers 422, a target outside the scope or
-	// missing 404 (WP-267).
+	// missing 404 (WP-267), a quarantined document 409 (WP-733).
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
+		if errors.Is(err, ErrQuarantined) {
+			api.WriteProblem(w, http.StatusConflict, ProblemQuarantined, "Document Quarantined",
+				"the document is quarantined and cannot be linked")
+			return
+		}
 		if errors.Is(err, api.ErrNotFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "document or linked object not found")
 			return

@@ -2,6 +2,7 @@ package document
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -54,10 +55,24 @@ type Repository interface {
 	// StorageUsage returns the stored bytes of the whole organization,
 	// whatever the scope of the caller.
 	StorageUsage(ctx context.Context, orgID string) (int64, error)
+	// SetScanResult stores the scan result of version n of the document
+	// (WP-733, SEC-09): status (one of the four scan states, else
+	// errInvalidScanStatus), scanned_at (now; NULL again for pending_scan)
+	// and the signature name of a finding (empty: none). It joins a
+	// transaction of the context (database.ContextWithTx), so the scan job
+	// (WP-734) writes status, audit and event together. A missing version
+	// fails with api.ErrNotFound.
+	SetScanResult(ctx context.Context, orgID, documentID string, version int, status, signature string) error
+	// PendingScans returns up to limit versions of the organization whose
+	// scan is open (pending_scan or scan_failed), oldest first, through the
+	// partial index idx_document_version_scan_open; versions of
+	// soft-deleted documents are left out.
+	PendingScans(ctx context.Context, orgID string, limit int) ([]Version, error)
 	Delete(ctx context.Context, orgID, id string) error
 	// LinkDocument creates a link. An entity type outside the registry
 	// (links.go) fails with a 422 field error, an invisible or missing
-	// target with api.ErrNotFound.
+	// target with api.ErrNotFound, a document whose current version is
+	// infected with ErrQuarantined (WP-733).
 	LinkDocument(ctx context.Context, link *DocumentLink) error
 	// UnlinkDocument removes a link of the document that the caller sees
 	// and may delete; otherwise it fails with api.ErrNotFound (WP-267).
@@ -65,6 +80,14 @@ type Repository interface {
 	GetLinks(ctx context.Context, orgID, docID string) ([]DocumentLink, error)
 	GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string) ([]Document, error)
 }
+
+// ErrQuarantined is the refusal of a new link to a document whose current
+// version is infected (WP-733, E-42: 409 document-quarantined).
+var ErrQuarantined = errors.New("document is quarantined")
+
+// errInvalidScanStatus is the refusal of a scan status outside the four
+// states of document_version.scan_status.
+var errInvalidScanStatus = errors.New("invalid document scan status")
 
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
@@ -104,6 +127,20 @@ func (r *MemoryRepository) live(orgID, id string) (*Document, bool) {
 	return d, true
 }
 
+// view returns a copy of d with the scan status of its current version;
+// the caller holds the lock.
+func (r *MemoryRepository) view(d *Document) *Document {
+	cp := *d
+	cp.ScanStatus, cp.ScannedAt = "", nil
+	versions := r.versions[d.ID]
+	for i := range versions {
+		if versions[i].Version == d.Version {
+			cp.ScanStatus, cp.ScannedAt = versions[i].ScanStatus, versions[i].ScannedAt
+		}
+	}
+	return &cp
+}
+
 func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -136,7 +173,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			!strings.Contains(strings.ToLower(d.FileName), strings.ToLower(filter.Search)) {
 			continue
 		}
-		result = append(result, *d)
+		result = append(result, *r.view(d))
 	}
 
 	total := len(result)
@@ -191,7 +228,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Docume
 	if !ok {
 		return nil, fmt.Errorf("document not found")
 	}
-	return d, nil
+	return r.view(d), nil
 }
 
 func (r *MemoryRepository) Create(_ context.Context, d *Document) error {
@@ -258,7 +295,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 		d.Tags = req.Tags
 	}
 	d.UpdatedAt = time.Now().UTC()
-	return d, nil
+	return r.view(d), nil
 }
 
 // GetWritable equals GetByID: the memory repository has no tenant scope.
@@ -278,8 +315,7 @@ func (r *MemoryRepository) SetStorage(_ context.Context, orgID, id, storageKey, 
 	d.MimeType = mimeType
 	d.FileSize = size
 	d.UpdatedAt = time.Now().UTC()
-	cp := *d
-	return &cp, nil
+	return r.view(d), nil
 }
 
 // CreateVersion numbers v after the highest version of the document, adds
@@ -315,8 +351,7 @@ func (r *MemoryRepository) CreateVersion(_ context.Context, v *Version, limit *i
 
 	d.Version, d.StorageKey, d.FileSize, d.MimeType = v.Version, v.StorageKey, v.Size, v.MimeType
 	d.UpdatedAt = v.CreatedAt
-	cp := *d
-	return &cp, nil
+	return r.view(d), nil
 }
 
 // ListVersions returns the versions of the document, highest first, after
@@ -375,6 +410,59 @@ func (r *MemoryRepository) StorageUsage(_ context.Context, orgID string) (int64,
 	return r.usage[orgID], nil
 }
 
+// SetScanResult stores the scan result of version n like PGRepository.
+func (r *MemoryRepository) SetScanResult(_ context.Context, orgID, documentID string, n int, status, _ string) error {
+	if !validScanStatus(status) {
+		return errInvalidScanStatus
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	d, ok := r.docs[documentID]
+	if !ok || d.OrganizationID != orgID {
+		return api.ErrNotFound
+	}
+	versions := r.versions[documentID]
+	for i := range versions {
+		if versions[i].Version != n {
+			continue
+		}
+		versions[i].ScanStatus, versions[i].ScannedAt = status, nil
+		if status != ScanPending {
+			now := time.Now().UTC()
+			versions[i].ScannedAt = &now
+		}
+		return nil
+	}
+	return api.ErrNotFound
+}
+
+// PendingScans returns the open versions of the organization, oldest
+// first, without those of soft-deleted documents.
+func (r *MemoryRepository) PendingScans(_ context.Context, orgID string, limit int) ([]Version, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var out []Version
+	for docID, versions := range r.versions {
+		if _, ok := r.live(orgID, docID); !ok {
+			continue
+		}
+		for i := range versions {
+			if versions[i].ScanStatus == ScanPending || versions[i].ScanStatus == ScanFailed {
+				out = append(out, versions[i])
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out[:min(max(limit, 0), len(out))], nil
+}
+
 // Delete soft-deletes the document like PGRepository: versions, links and
 // usage stay; a second call fails with "not found".
 func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
@@ -400,6 +488,9 @@ func (r *MemoryRepository) LinkDocument(_ context.Context, link *DocumentLink) e
 
 	if _, gone := r.deleted[link.DocumentID]; gone {
 		return api.ErrNotFound
+	}
+	if d, ok := r.docs[link.DocumentID]; ok && r.view(d).ScanStatus == ScanInfected {
+		return ErrQuarantined
 	}
 
 	r.nextLink++
@@ -462,7 +553,7 @@ func (r *MemoryRepository) GetLinksForEntity(_ context.Context, orgID, entityTyp
 	for _, l := range r.links {
 		if l.OrganizationID == orgID && l.EntityType == entityType && l.EntityID == entityID {
 			if d, ok := r.live(orgID, l.DocumentID); ok {
-				result = append(result, *d)
+				result = append(result, *r.view(d))
 			}
 		}
 	}

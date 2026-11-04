@@ -1303,3 +1303,5 @@ ENT-02;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 ENT-05;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 API-01;[B];C;backend/internal/export/datev_gate_test.go;WP-790
 SEC-09;[P2];B;backend/internal/document/sniff_test.go;WP-268
+SEC-09;[P2];B;backend/internal/document/scan_status_integration_test.go;WP-733
+MGT-01;[P2];B;backend/internal/document/scan_status_integration_test.go;WP-733

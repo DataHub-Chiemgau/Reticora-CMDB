@@ -28,7 +28,9 @@ const documentSelectColumns = `
 	COALESCE(tags, '{}'),
 	uploaded_by::text,
 	created_at,
-	updated_at
+	updated_at,
+	(SELECT dv.scan_status FROM document_version dv WHERE dv.document_id = document.id AND dv.version = document.version),
+	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = document.id AND dv.version = document.version)
 `
 
 const documentSelectColumnsWithAlias = `
@@ -45,7 +47,9 @@ const documentSelectColumnsWithAlias = `
 	COALESCE(d.tags, '{}'),
 	d.uploaded_by::text,
 	d.created_at,
-	d.updated_at
+	d.updated_at,
+	(SELECT dv.scan_status FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version),
+	(SELECT dv.scanned_at FROM document_version dv WHERE dv.document_id = d.id AND dv.version = d.version)
 `
 
 const documentLinkSelectColumns = `
@@ -637,6 +641,71 @@ func (r *PGRepository) StorageUsage(ctx context.Context, orgID string) (int64, e
 	return used, err
 }
 
+// SetScanResult stores the scan result of version n of the document
+// (WP-733): status, scanned_at (now, NULL for pending_scan) and the
+// signature name of a finding in scan_signature. It joins a transaction of
+// the context (database.WithRequestTenant), so the scan job (WP-734) writes
+// status, audit and event in one transaction. The document is not checked
+// for visibility beyond the policies of document_version: the job runs
+// org-wide. A missing version fails with api.ErrNotFound.
+func (r *PGRepository) SetScanResult(ctx context.Context, orgID, documentID string, n int, status, signature string) error {
+	if !validScanStatus(status) {
+		return errInvalidScanStatus
+	}
+	if !api.IsUUID(documentID) {
+		return api.ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE document_version
+			   SET scan_status = $4,
+			       scanned_at = CASE WHEN $4 = 'pending_scan' THEN NULL ELSE now() END,
+			       scan_signature = NULLIF($5, '')
+			 WHERE organization_id = $1 AND document_id = $2 AND version = $3`,
+			orgID, documentID, n, status, signature)
+		if err != nil {
+			return fmt.Errorf("set document scan result: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return api.ErrNotFound
+		}
+		return nil
+	})
+}
+
+// PendingScans returns up to limit open versions (pending_scan,
+// scan_failed) of the organization, oldest first. The predicate
+// scan_status <> 'clean' lets the planner use the partial index
+// idx_document_version_scan_open (migration 000222); versions of
+// soft-deleted documents are left out.
+func (r *PGRepository) PendingScans(ctx context.Context, orgID string, limit int) ([]Version, error) {
+	var out []Version
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT "+documentVersionSelectColumns+` FROM document_version
+			WHERE organization_id = $1 AND scan_status <> 'clean' AND scan_status IN ('pending_scan', 'scan_failed')
+			  AND NOT EXISTS (SELECT 1 FROM document WHERE document.id = document_version.document_id AND document.deleted_at IS NOT NULL)
+			ORDER BY created_at, id LIMIT $2`, orgID, max(limit, 0))
+		if err != nil {
+			return fmt.Errorf("list pending document scans: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Version, error) {
+			v, scanErr := scanVersion(row)
+			if scanErr != nil {
+				return Version{}, scanErr
+			}
+			return *v, nil
+		})
+		if err != nil {
+			return fmt.Errorf("scan pending document scans: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func scanVersion(scanner documentScanner) (*Version, error) {
 	v := &Version{}
 	if err := scanner.Scan(&v.ID, &v.OrganizationID, &v.DocumentID, &v.Version, &v.StorageKey, &v.Size, &v.MimeType,
@@ -707,11 +776,31 @@ func (r *PGRepository) LinkDocument(ctx context.Context, link *DocumentLink) err
 		if err := requireVisible(ctx, tx, "document", documentVisible, link.DocumentID); err != nil {
 			return err
 		}
+		if err := refuseQuarantined(ctx, tx, link.DocumentID); err != nil {
+			return err
+		}
 		if err := requireVisible(ctx, tx, "document_link", linkVisible, link.ID); err != nil {
 			return err
 		}
 		return recordLinkAudit(ctx, tx, ActionLinked, link)
 	})
+}
+
+// refuseQuarantined fails with ErrQuarantined when the current version of
+// the document is infected (WP-733, E-42): a quarantined document gets no
+// new link; its existing links stay, since removing them would widen its
+// visibility to the whole organization (000064, 000139).
+func refuseQuarantined(ctx context.Context, tx pgx.Tx, docID string) error {
+	var infected bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM document d JOIN document_version dv
+		  ON dv.document_id = d.id AND dv.version = d.version
+		 WHERE d.id = $1 AND dv.scan_status = 'infected')`, docID).Scan(&infected); err != nil {
+		return fmt.Errorf("check document quarantine: %w", err)
+	}
+	if infected {
+		return ErrQuarantined
+	}
+	return nil
 }
 
 // UnlinkDocument removes link linkID of document docID when the link is
@@ -813,8 +902,11 @@ type documentScanner interface {
 	Scan(dest ...any) error
 }
 
+// scanDocument scans the columns of documentSelectColumns; scan status and
+// scanned_at are those of the current version (WP-733), NULL without one.
 func scanDocument(scanner documentScanner) (*Document, error) {
 	item := &Document{}
+	var scanStatus *string
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
@@ -830,14 +922,23 @@ func scanDocument(scanner documentScanner) (*Document, error) {
 		&item.UploadedBy,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&scanStatus,
+		&item.ScannedAt,
 	); err != nil {
 		return nil, err
 	}
 	if item.Tags == nil {
 		item.Tags = []string{}
 	}
+	if scanStatus != nil {
+		item.ScanStatus = *scanStatus
+	}
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()
+	if item.ScannedAt != nil {
+		at := item.ScannedAt.UTC()
+		item.ScannedAt = &at
+	}
 	return item, nil
 }
 

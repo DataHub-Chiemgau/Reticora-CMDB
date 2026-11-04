@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000221_document_soft_delete
+Stand: Migration 000222_document_scan_status
 
 ## Prüfung
 
@@ -283,6 +283,18 @@ gelöschte Dokumente aus, damit `retention.soft_deleted` sie unter
 `organization_usage` bleiben bis zum Purge; erst dieser löscht das Dokument
 (Versionen und Links per `ON DELETE CASCADE`) und verringert
 `storage_bytes`.
+
+### Scanstatus von Dokumentversionen (WP-733)
+
+`document_version.scan_signature` (Migration 000222) hält den
+Signaturnamen eines Malware-Befunds (NULL ohne Befund). Der Teilindex
+`idx_document_version_scan_open` auf `(organization_id, scan_status)
+WHERE scan_status <> 'clean'` dient den offenen Scans (`pending_scan`,
+`scan_failed`) je Organisation (`PendingScans`, Sweep aus WP-734); er
+folgt der Konvention „Indizes ohne lange Sperren“. Der Backfill setzt jede
+Version ohne `scanned_at` auf `pending_scan` (fail-closed nach E-42).
+Quarantäne ist der Status `infected`: Blob und `document_link` bleiben, die
+Policies sind unverändert. Abrufbar ist nur eine Version mit `clean`.
 
 ### Standort von Assets und Mengenartikeln (WP-392)
 

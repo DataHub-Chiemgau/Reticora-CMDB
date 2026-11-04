@@ -119,6 +119,17 @@ func TestUploadAndDownloadContent(t *testing.T) {
 	if updated.StorageKey == "" || updated.FileSize != int64(len("%PDF-fake")) {
 		t.Fatalf("storage metadata not updated: %+v", updated)
 	}
+	if updated.ScanStatus != ScanPending || updated.ScannedAt != nil {
+		t.Fatalf("scan status after the upload: %q %v, want pending_scan", updated.ScanStatus, updated.ScannedAt)
+	}
+
+	// Right after the upload the content is not scanned: 409 (WP-733).
+	w = contentRequest(t, mux, "GET", "/api/v1/documents/"+id+"/content", "", "")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), ProblemPendingScan) ||
+		strings.Contains(w.Body.String(), "download_url") {
+		t.Fatalf("download before the scan: got %d %s, want 409 document-pending-scan", w.Code, w.Body.String())
+	}
+	markClean(t, repo, id, 1)
 
 	w = contentRequest(t, mux, "GET", "/api/v1/documents/"+id+"/content", "", "")
 	if w.Code != http.StatusOK {
@@ -132,6 +143,92 @@ func TestUploadAndDownloadContent(t *testing.T) {
 	}
 	if !strings.Contains(payload.DownloadURL, updated.StorageKey) {
 		t.Fatalf("download URL %q does not reference %q", payload.DownloadURL, updated.StorageKey)
+	}
+}
+
+// markClean sets version n of the document to clean, as the malware scan
+// of WP-734 will.
+func markClean(t *testing.T, repo Repository, id string, n int) {
+	t.Helper()
+	if err := repo.SetScanResult(context.Background(), "org-1", id, n, ScanClean, ""); err != nil {
+		t.Fatalf("SetScanResult(%s, %d, clean): %v", id, n, err)
+	}
+}
+
+// TestDownloadRequiresCleanScan (WP-733, SEC-09, E-42): only a version
+// scanned clean is presigned; pending_scan and scan_failed answer 409
+// document-pending-scan, infected 409 document-quarantined, with and
+// without ?version=. A quarantined document takes no new link, its
+// existing links stay.
+func TestDownloadRequiresCleanScan(t *testing.T) {
+	repo, mux := newDocumentFixture(t)
+	id := documentID(t, repo)
+	const target = "11111111-1111-4111-8111-111111111111"
+	if err := repo.LinkDocument(context.Background(), &DocumentLink{OrganizationID: "org-1", DocumentID: id, EntityType: "ci", EntityID: target}); err != nil {
+		t.Fatal(err)
+	}
+	if w := contentRequest(t, mux, http.MethodPut, "/api/v1/documents/"+id+"/content", "text/plain", "content"); w.Code != http.StatusOK {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	for _, c := range []struct {
+		status, problem string
+		code            int
+	}{
+		{ScanPending, ProblemPendingScan, http.StatusConflict},
+		{ScanFailed, ProblemPendingScan, http.StatusConflict},
+		{ScanInfected, ProblemQuarantined, http.StatusConflict},
+		{ScanClean, "download_url", http.StatusOK},
+	} {
+		if err := repo.SetScanResult(context.Background(), "org-1", id, 1, c.status, "Eicar-Signature"); err != nil {
+			t.Fatal(err)
+		}
+		for _, query := range []string{"", "?version=1"} {
+			w := contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+id+"/content"+query, "", "")
+			if w.Code != c.code || !strings.Contains(w.Body.String(), c.problem) {
+				t.Fatalf("download%s at %s: got %d %s, want %d %s", query, c.status, w.Code, w.Body.String(), c.code, c.problem)
+			}
+		}
+		d, err := repo.GetByID(context.Background(), "org-1", id)
+		if err != nil || d.ScanStatus != c.status || (d.ScannedAt == nil) != (c.status == ScanPending) {
+			t.Fatalf("document at %s: %+v %v", c.status, d, err)
+		}
+	}
+
+	if err := repo.SetScanResult(context.Background(), "org-1", id, 1, ScanInfected, "Eicar-Signature"); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"entity_type":"ci","entity_id":"22222222-2222-4222-8222-222222222222"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/documents/"+id+"/links", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), ProblemQuarantined) {
+		t.Fatalf("link to a quarantined document: got %d %s, want 409 document-quarantined", w.Code, w.Body.String())
+	}
+	if links, err := repo.GetLinks(context.Background(), "org-1", id); err != nil || len(links) != 1 || links[0].EntityID != target {
+		t.Fatalf("links of the quarantined document: %+v %v, want the one link", links, err)
+	}
+
+	// A new version starts pending again; the infected one stays blocked.
+	if w := contentRequest(t, mux, http.MethodPost, "/api/v1/documents/"+id+"/versions", "text/plain", "second"); w.Code != http.StatusCreated {
+		t.Fatalf("second version: %d %s", w.Code, w.Body.String())
+	}
+	if w := contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+id+"/content", "", ""); !strings.Contains(w.Body.String(), ProblemPendingScan) {
+		t.Fatalf("download of the new version: %d %s, want document-pending-scan", w.Code, w.Body.String())
+	}
+	if w := contentRequest(t, mux, http.MethodGet, "/api/v1/documents/"+id+"/content?version=1", "", ""); !strings.Contains(w.Body.String(), ProblemQuarantined) {
+		t.Fatalf("download of the infected version: %d %s, want document-quarantined", w.Code, w.Body.String())
+	}
+	if err := repo.SetScanResult(context.Background(), "org-1", id, 3, ScanClean, ""); err == nil {
+		t.Fatal("SetScanResult of a missing version succeeded")
+	}
+	if err := repo.SetScanResult(context.Background(), "org-1", id, 2, "unknown", ""); err == nil {
+		t.Fatal("SetScanResult with an unknown status succeeded")
+	}
+	pending, err := repo.PendingScans(context.Background(), "org-1", 10)
+	if err != nil || len(pending) != 1 || pending[0].Version != 2 {
+		t.Fatalf("PendingScans: %+v %v, want version 2", pending, err)
 	}
 }
 
@@ -159,6 +256,8 @@ func TestUploadContentCreatesVersions(t *testing.T) {
 		keys = append(keys, d.StorageKey)
 	}
 
+	markClean(t, repo, id, 1)
+	markClean(t, repo, id, 2)
 	for n, key := range map[string]string{"1": keys[0], "2": keys[1], "": keys[1]} {
 		url := "/api/v1/documents/" + id + "/content"
 		if n != "" {

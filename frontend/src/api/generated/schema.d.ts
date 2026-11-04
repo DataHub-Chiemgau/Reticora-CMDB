@@ -4297,7 +4297,7 @@ export interface paths {
     };
     /**
      * Get a time-limited download URL for the document content
-     * @description The URL of the current version, or with `version` of that version; a version the document does not have answers 404.
+     * @description The URL of the current version, or with `version` of that version; a version the document does not have answers 404. Only a version whose malware scan is clean is presigned (SEC-09, E-42, fail-closed): pending_scan and scan_failed answer 409 with type https://reticora.io/problems/document-pending-scan, infected (quarantine) 409 with type https://reticora.io/problems/document-quarantined. Content whose object key lies outside the document answers 409 as well.
      */
     get: operations['downloadDocumentContent'];
     /**
@@ -4330,7 +4330,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record and stocktake; any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -11921,6 +11921,16 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /**
+       * @description Malware scan status of the current version (SEC-09); absent without stored content. Only clean content is downloadable, infected is the quarantine.
+       * @enum {string}
+       */
+      readonly scan_status?: 'pending_scan' | 'clean' | 'infected' | 'scan_failed';
+      /**
+       * Format: date-time
+       * @description Time of the last scan result of the current version; absent while pending_scan.
+       */
+      readonly scanned_at?: string;
     };
     CreateDocumentRequest: {
       title: string;
@@ -14712,11 +14722,14 @@ export interface components {
       /** @description Hex sha256 of the content; null only for versions stored before versioning. */
       checksum_sha256: string | null;
       /**
-       * @description Malware scan status (SEC-09); a new version is pending_scan.
+       * @description Malware scan status (SEC-09); a new version is pending_scan. Only a clean version is downloadable, infected is the quarantine.
        * @enum {string}
        */
       scan_status: 'pending_scan' | 'clean' | 'infected' | 'scan_failed';
-      /** Format: date-time */
+      /**
+       * Format: date-time
+       * @description Time of the last scan result; absent while pending_scan.
+       */
       scanned_at?: string;
       uploaded_by?: string;
       /** Format: date-time */
@@ -25612,6 +25625,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The version is not scanned clean: type https://reticora.io/problems/document-pending-scan (pending_scan, scan_failed) or https://reticora.io/problems/document-quarantined (infected); or the stored object key lies outside the document. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Blob storage is not configured */
       503: {
         headers: {
@@ -25779,6 +25801,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };

@@ -313,6 +313,13 @@ func TestDocumentContentClientScope(t *testing.T) {
 	if got := storedKey(ownDoc.ID); !strings.HasPrefix(got, ownKey) || len(got) != len(ownKey)+36 {
 		t.Fatalf("storage key after the upload: %q, want %q<version id>", got, ownKey)
 	}
+	// Downloadable only once scanned clean (WP-733).
+	if w := callAs(client1, http.MethodGet, content(ownDoc.ID), ""); w.Code != http.StatusConflict || strings.Contains(w.Body.String(), "download_url") {
+		t.Fatalf("client-1 download before the scan: %d %s, want 409", w.Code, w.Body.String())
+	}
+	if err := repo.SetScanResult(orgCtx, f.OrgA, ownDoc.ID, 1, document.ScanClean, ""); err != nil {
+		t.Fatalf("scan result: %v", err)
+	}
 	dl := callAs(client1, http.MethodGet, content(ownDoc.ID), "")
 	if dl.Code != http.StatusOK {
 		t.Fatalf("client-1 download: %d %s", dl.Code, dl.Body.String())

@@ -19,6 +19,10 @@ type Document struct {
 	UploadedBy     string    `json:"uploaded_by"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// ScanStatus and ScannedAt are those of the current version (WP-733,
+	// SEC-09); both are empty for a document without stored content.
+	ScanStatus string     `json:"scan_status,omitempty"`
+	ScannedAt  *time.Time `json:"scanned_at,omitempty"`
 }
 
 // DocumentLink links a document to another entity (CI, asset, ticket, etc.).
@@ -73,10 +77,26 @@ type FilterParams struct {
 	EntityID   string
 }
 
-// ScanPending is the scan status of a new document version (SEC-09). This
-// package stores it only; WP-733 and WP-734 evaluate and change the status
-// (clean, infected, scan_failed).
-const ScanPending = "pending_scan"
+// Scan status of a document version (SEC-09, E-42). Every new version
+// starts with ScanPending; only a ScanClean version is downloadable
+// (WP-733), the malware scan (WP-734) sets the result with SetScanResult.
+// ScanInfected is the quarantine: blob and links stay, the download and new
+// links answer 409 document-quarantined.
+const (
+	ScanPending  = "pending_scan"
+	ScanClean    = "clean"
+	ScanInfected = "infected"
+	ScanFailed   = "scan_failed"
+)
+
+// validScanStatus reports whether status is one of the four scan states.
+func validScanStatus(status string) bool {
+	switch status {
+	case ScanPending, ScanClean, ScanInfected, ScanFailed:
+		return true
+	}
+	return false
+}
 
 // Version is one stored content of a document (WP-731, MGT-01). The
 // document mirrors its highest version in version, storage_key, file_size

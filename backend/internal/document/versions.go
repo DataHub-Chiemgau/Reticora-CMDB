@@ -270,8 +270,9 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 }
 
 // ListVersions handles GET /api/v1/documents/{id}/versions: the versions of
-// a visible document with size, MIME type, checksum and scan status,
-// highest first, paged with limit and the signed cursor (API-02).
+// a visible document with size, MIME type, checksum, scan status and
+// scanned_at (WP-733), highest first, paged with limit and the signed
+// cursor (API-02).
 func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
