@@ -586,6 +586,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The worker renders with the field policy of the job's creator,
 	// resolved at render time (RBA-07, WP-729).
 	exportWorker.Policies = fieldResolver
+	// DATEV jobs read assets and the mapping override (WP-310); the memory
+	// profile has no asset source and fails them.
+	exportWorker.Assets, _ = repos.Asset.(export.AssetSource)
+	exportWorker.Orgs = repos.TenantHierarchy
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).

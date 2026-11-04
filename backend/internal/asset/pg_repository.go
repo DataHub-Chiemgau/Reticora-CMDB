@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -869,4 +870,107 @@ func nilIfEmpty(value string) any {
 		return nil
 	}
 	return value
+}
+
+// DATEVRow is an asset as the DATEV export of the asset accounting reads it
+// (EXP-01, WP-310): the canonical asset columns with the names of its
+// supplier and location (and the number of its contract when asked for).
+// The purchase price is the numeric text of the column (no float
+// rounding), the dates are YYYY-MM-DD; empty means no value.
+type DATEVRow struct {
+	ID             string
+	ClientID       string
+	SiteID         string
+	AssetTypeID    string
+	InventoryNo    string
+	Name           string
+	Manufacturer   string
+	Model          string
+	SerialNumber   string
+	InvoiceNumber  string
+	PurchaseDate   string
+	PurchasePrice  string
+	Currency       string
+	Supplier       string
+	CostCenter     string
+	WarrantyUntil  string
+	Location       string
+	LifecycleState string
+	Contract       string
+	CreatedAt      time.Time
+}
+
+// DATEVQuery is one batch of the DATEV export: the filters of the job,
+// whether the contract number is joined, and the keyset position after
+// which the batch starts (empty AfterID: the first batch).
+type DATEVQuery struct {
+	ClientID       string
+	LifecycleState string
+	WithContract   bool
+	AfterCreatedAt time.Time
+	AfterID        string
+	Limit          int
+}
+
+// datevSelect reads the columns of DATEVRow; %s is the contract column.
+const datevSelect = `SELECT a.id::text, COALESCE(a.client_id::text, ''), COALESCE(a.site_id::text, ''),
+	COALESCE(a.asset_type_id::text, ''), a.inventory_no, a.name, COALESCE(a.manufacturer, ''),
+	COALESCE(a.model, ''), COALESCE(a.serial_number, ''), COALESCE(a.invoice_number, ''),
+	COALESCE(to_char(a.purchase_date, 'YYYY-MM-DD'), ''), COALESCE(a.purchase_price::text, ''),
+	COALESCE(a.currency, ''), COALESCE(s.name, ''), COALESCE(a.cost_center, ''),
+	COALESCE(to_char(a.warranty_until, 'YYYY-MM-DD'), ''), COALESCE(l.name, ''),
+	COALESCE(a.lifecycle_state, ''), %s, a.created_at
+	FROM asset a
+	LEFT JOIN supplier s ON s.id = a.supplier_id AND s.organization_id = a.organization_id
+	LEFT JOIN location l ON l.id = a.location_id AND l.organization_id = a.organization_id`
+
+// ListDATEV returns one batch of assets for the DATEV export in the order
+// (created_at, id), read in database.WithRequestTenant with the scope of
+// ctx (the scope snapshot of the job) and without count(*) (E-17).
+// supplier and location are joined for their names under RLS (a row the
+// scope does not see stays empty), contract only for WithContract. It is
+// not part of Repository; only the export reads it (export.AssetSource).
+func (r *PGRepository) ListDATEV(ctx context.Context, orgID string, q *DATEVQuery) ([]DATEVRow, error) {
+	var out []DATEVRow
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		where := []string{"a.organization_id = $1"}
+		args := []any{orgID}
+		if q.ClientID != "" {
+			args = append(args, q.ClientID)
+			where = append(where, fmt.Sprintf("a.client_id = $%d", len(args)))
+		}
+		if q.LifecycleState != "" {
+			args = append(args, q.LifecycleState)
+			where = append(where, fmt.Sprintf("a.lifecycle_state = $%d", len(args)))
+		}
+		if q.AfterID != "" {
+			args = append(args, q.AfterCreatedAt, q.AfterID)
+			where = append(where, fmt.Sprintf("(a.created_at, a.id) > ($%d, $%d::uuid)", len(args)-1, len(args)))
+		}
+		contractCol, contractJoin := "''", ""
+		if q.WithContract {
+			contractCol = "COALESCE(c.number, '')"
+			contractJoin = "\n\tLEFT JOIN contract c ON c.id = a.contract_id AND c.organization_id = a.organization_id"
+		}
+		args = append(args, q.Limit)
+		query := fmt.Sprintf(datevSelect, contractCol) + contractJoin + "\n\tWHERE " + strings.Join(where, " AND ") +
+			fmt.Sprintf("\n\tORDER BY a.created_at, a.id LIMIT $%d", len(args))
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list assets for datev: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row DATEVRow
+			if serr := rows.Scan(&row.ID, &row.ClientID, &row.SiteID, &row.AssetTypeID, &row.InventoryNo, &row.Name,
+				&row.Manufacturer, &row.Model, &row.SerialNumber, &row.InvoiceNumber, &row.PurchaseDate, &row.PurchasePrice,
+				&row.Currency, &row.Supplier, &row.CostCenter, &row.WarrantyUntil, &row.Location, &row.LifecycleState,
+				&row.Contract, &row.CreatedAt); serr != nil {
+				return fmt.Errorf("scan asset for datev: %w", serr)
+			}
+			out = append(out, row)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

@@ -1,0 +1,4 @@
+Inventarnummer;Bezeichnung;Hersteller;Modell;Anschaffungsdatum;Anschaffungskosten;Währung;Lieferant;Kostenstelle;Garantie bis;Standort;Status
+INV-001;Bürostuhl Müller;Grüße AG;X-1;15.03.2024;1234,50;EUR;Lieferant & Söhne;4711;14.03.2027;Lager Süd;in_use
+INV-002;"'=HYPERLINK(""x"")";'-Minus;Preis 5 €;01.12.2023;-12,00;EUR;;;;;retired
+INV-006;Großrechner;;;31.12.2020;123456789,99;CHF;;'+49;;;in_stock

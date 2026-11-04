@@ -131,6 +131,9 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// with the role assignments of then (RBA-07, WP-729); the snapshots
 		// share the cache of the API, so an invalidation reaches the worker.
 		exportWorker.Policies = server.NewFieldResolver(d.repos, d.fieldPolicyCache)
+		// DATEV jobs read assets and the mapping override (WP-310).
+		exportWorker.Assets, _ = d.repos.Asset.(export.AssetSource)
+		exportWorker.Orgs = d.repos.TenantHierarchy
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },

@@ -12214,15 +12214,18 @@ export interface components {
       data: components['schemas']['CI'][];
       total: number;
     };
+    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id); datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. */
     ExportJobFilters: {
       status?: string;
       /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
       client_id?: string;
+      /** @description Lifecycle state of the assets of a datev export (E-120); datev only. */
+      lifecycle_state?: string;
     };
     CreateExportJobRequest: {
       /**
-       * @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
+       * @description Output format. csv and json export CIs. datev exports the canonical asset data of the creator's scope for the asset accounting (EXP-01, E-50, WP-310): Windows-1252, semicolons, CRLF, columns of the mapping (the default mapping or the override organization.settings.datev_mapping; an invalid override fails the job), amounts with a decimal comma, dates DD.MM.YYYY. Rows with a missing required field or characters Windows-1252 cannot encode are left out and listed in the error report (error_report_url); row_count counts the written rows. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
        * @default json
        * @enum {string}
        */
@@ -12274,7 +12277,7 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
-    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. */
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. For a datev job (assets, WP-310) fields are the source fields of the mapping's columns (inventory_no, purchase_price, …): a source the creator may not read by the asset field permissions stays an empty column and is listed with reason field_permission, the source fields the mapping does not name with reason layout; the preview of an open datev job uses the effective mapping. */
     ExportManifest: {
       format: string;
       fields: string[];
@@ -12310,6 +12313,8 @@ export interface components {
       expires_at?: string;
       /** @description Time-limited signed URL; only present on completed, unexpired jobs. */
       download_url?: string;
+      /** @description Time-limited signed URL (15 minutes) of the error report of a datev job (<org>/<job>.errors.csv, UTF-8 with BOM, semicolons; per rejected row and column the inventory number or asset id, the column and the reason); only present on completed, unexpired datev jobs (WP-310). */
+      error_report_url?: string;
       scope?: components['schemas']['ExportJobScope'];
       /** Format: date-time */
       created_at: string;
