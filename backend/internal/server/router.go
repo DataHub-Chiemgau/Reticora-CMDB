@@ -37,6 +37,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
@@ -633,6 +634,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Discovered values pass the field rules of manual writes (CI-03).
 	if opts.CIService != nil {
 		discoveryHandler.WithObservedValidator(opts.CIService)
+		// Reference attributes may name contracts (MET-12, WP-737).
+		if resolver := contract.NewReferenceResolver(repos.Contract); resolver != nil {
+			opts.CIService.WithReferenceTarget(fieldmeta.TargetContract, resolver)
+		}
 	}
 	// Discovered interfaces and addresses are kept in IPAM (REC-07).
 	if syncer, ok := repos.IPAM.(discovery.InterfaceSyncer); ok {

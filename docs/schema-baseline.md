@@ -247,9 +247,9 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
 ### Linkziele von Dokumenten (WP-267)
 
 `document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
-`ticket`, `location`, `disposal_record` und `stocktake`
-(`doc_link_entity_type_check`, Migration 000217); die Registry in
-`backend/internal/document/links.go` hält dieselben Werte.
+`ticket`, `location`, `disposal_record`, `stocktake` und `contract`
+(`doc_link_entity_type_check`, Migrationen 000217 und 000238); die Registry
+in `backend/internal/document/links.go` hält dieselben Werte.
 `derive_document_link_scope` leitet `client_id`/`site_id` auch aus
 Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
 `team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
@@ -1117,6 +1117,17 @@ AFTER-DELETE-Trigger `contract_object_grants` ruft
 Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
 und die RESTRICTIVE-Policies `contract_scoped_update` und
 `contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
+
+Verträge als Linkziel von Dokumenten (MGT-12, WP-737, Migration 000238):
+`derive_document_link_scope` übernimmt für `entity_type = 'contract'` den
+`client_id` des Vertrags (org-weit bei NULL; kein Standort, kein Team). Der
+AFTER-UPDATE-Trigger `contract_scope_propagation` (bei geändertem
+`client_id`) ruft `propagate_contract_scope()` und leitet die Links neu ab;
+der AFTER-DELETE-Trigger `contract_document_links` ruft
+`delete_contract_document_links()` und entfernt die Links eines gelöschten
+Vertrags in derselben Transaktion (`document.link_count` folgt über
+`count_document_links`, die Dokumente bleiben). Beide Funktionen laufen mit
+erweitertem Scope (`app_scope_widen`) und festem `search_path`.
 
 Attributschema der Beziehungstypen (REL-07, WP-295, Migration 000232):
 `relationship_type` erhält `metadata_schema` (jsonb NOT NULL DEFAULT `'[]'`,

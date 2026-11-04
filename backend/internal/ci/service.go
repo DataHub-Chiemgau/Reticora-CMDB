@@ -374,7 +374,10 @@ type Service struct {
 	// references checks reference values against their targets (MET-12);
 	// nil: form only.
 	references fieldmeta.ReferenceLookup
-	jobs       jobs.Tracker
+	// targets are the existence checks of targets of other modules
+	// (WithReferenceTarget, WP-737).
+	targets map[string]fieldmeta.ReferenceLookup
+	jobs    jobs.Tracker
 	// bulkJobs runs bulk operations from 100 ids on (API-08); with
 	// bulkQueue they run on the job queue (TEC-14).
 	bulkJobs  BulkJobs
@@ -466,7 +469,7 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, sc
 	if verr := validateWithRules(defs, catalog, values, patch, existing); verr != nil {
 		return nil, verr
 	}
-	return drop, checkReferences(ctx, s.references, orgID, defs, scope, values, patch, existing)
+	return drop, checkReferences(ctx, s.referenceLookup(), orgID, defs, scope, values, patch, existing)
 }
 
 // withoutKeys returns attrs without the keys drop; nil when nothing is

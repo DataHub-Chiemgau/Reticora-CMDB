@@ -3437,8 +3437,8 @@ paths:
           in: query
           description: >-
             Only documents linked to this target (WP-811); requires entity_id.
-            One of ci, asset, assignment, ticket, location, disposal_record and
-            stocktake; any other value answers 422.
+            One of ci, asset, assignment, ticket, location, disposal_record,
+            stocktake and contract; any other value answers 422.
           schema:
             type: string
         - name: entity_id
@@ -10092,7 +10092,8 @@ paths:
       summary: Link a document to another entity
       description: >-
         entity_type is one of ci, asset, assignment, ticket, location,
-        disposal_record and stocktake; any other value answers 422. A target
+        disposal_record, stocktake and contract (WP-737); any other value
+        answers 422. A target
         that does not exist or lies outside the caller's scope answers 404.
         The link takes client, site and team of its target (MGT-01). A
         principal restricted to some clients, sites or teams may link only
@@ -31768,6 +31769,10 @@ components:
           type: string
         entity_type:
           type: string
+          description: >-
+            ci, asset, assignment, ticket, location, disposal_record, stocktake
+            or contract. A link to a contract takes the client of the contract
+            and goes when the contract is deleted (WP-737).
         entity_id:
           type: string
         created_at:
@@ -31852,7 +31857,7 @@ components:
       properties:
         entity_type:
           type: string
-          description: ci, asset, assignment, ticket, location, disposal_record or stocktake.
+          description: ci, asset, assignment, ticket, location, disposal_record, stocktake or contract.
         entity_id:
           type: string
 

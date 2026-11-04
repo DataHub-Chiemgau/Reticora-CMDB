@@ -2,6 +2,7 @@ package fieldmeta
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 )
 
@@ -33,8 +34,11 @@ type referenceTarget struct {
 	// the core (G1).
 	module string
 	// resolvable: the existence check (ReferenceLookup) knows the target.
-	// contract stays known but unavailable until WP-269 registers it.
 	resolvable bool
+	// registered: the existence check of the target comes from its own
+	// module, which registers it at startup (RegisterReferenceTarget);
+	// until then the target is known but not available. contract: WP-737.
+	registered bool
 }
 
 // referenceRegistry lists every reference target with its availability.
@@ -44,7 +48,7 @@ var referenceRegistry = map[string]referenceTarget{
 	TargetLocation: {resolvable: true},
 	TargetCI:       {resolvable: true},
 	TargetAsset:    {module: moduleInventory, resolvable: true},
-	TargetContract: {},
+	TargetContract: {module: moduleInventory, registered: true},
 	TargetDocument: {module: moduleDocuments, resolvable: true},
 }
 
@@ -97,11 +101,32 @@ func SetReferenceModules(enabled func(module string) bool) {
 	moduleSwitch.Store(&enabled)
 }
 
+// registeredTargets holds the targets whose module registered their
+// existence check (RegisterReferenceTarget).
+var registeredTargets sync.Map
+
+// RegisterReferenceTarget makes a target with a registered existence check
+// (contract, WP-737) resolvable: the module of the target calls it when it
+// hangs its resolver on the CI service. A target outside the registry or
+// with a built-in check is ignored.
+func RegisterReferenceTarget(target string) {
+	if entry, ok := referenceRegistry[target]; ok && entry.registered {
+		registeredTargets.Store(target, true)
+	}
+}
+
 // ReferenceTargetAvailable reports whether a target can be used: it is
 // known, the existence check resolves it and its module is on.
 func ReferenceTargetAvailable(target string) bool {
 	entry, ok := referenceRegistry[target]
-	if !ok || !entry.resolvable {
+	if !ok {
+		return false
+	}
+	if entry.registered {
+		if _, done := registeredTargets.Load(target); !done {
+			return false
+		}
+	} else if !entry.resolvable {
 		return false
 	}
 	if entry.module == "" {

@@ -91,6 +91,7 @@ var referenceReadPermission = map[string]identity.Permission{
 	fieldmeta.TargetTeam:     identity.PermUserRead,
 	fieldmeta.TargetLocation: identity.PermLocationRead,
 	fieldmeta.TargetDocument: identity.PermDocumentRead,
+	fieldmeta.TargetContract: identity.PermContractRead,
 }
 
 // referenceNameQueries select, per target, the present targets among $2
@@ -203,7 +204,7 @@ func (s *Service) References(ctx context.Context, orgID, ciID string) (map[strin
 	if err != nil {
 		return nil, err
 	}
-	namer, _ := s.references.(ReferenceNamer)
+	namer := s.referenceNamer()
 	perms, _ := identity.PermissionsFromContext(ctx)
 
 	type use struct {
