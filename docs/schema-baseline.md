@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000227_contract
+Stand: Migration 000230_ticket_links
 
 ## Prüfung
 
@@ -1086,6 +1086,43 @@ Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
 und die RESTRICTIVE-Policies `contract_scoped_update` und
 `contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
 
+Objektbezug und Tags von Tickets (TKT-01, WP-764, E-39, E-127, Migration
+000230): `ticket` und `review_item` erhalten `ticket_id_organization_key` bzw.
+`review_item_id_organization_key` (`id`, `organization_id`) als Ziel der
+zusammengesetzten Verweise (K19). `ticket_link` (`id`, `organization_id`,
+`ticket_id`, `entity_type`, `ci_id`, `asset_id`, `location_id`,
+`contract_id`, `review_item_id`, `client_id`, `site_id`, `team_id`,
+`created_at`) nimmt neben dem Primärobjekt (`related_ci_id`,
+`related_asset_id`, Scope-Anker unverändert) weitere Objekte auf:
+`ticket_link_entity_type_check` (`ci`, `asset`, `location`, `contract`,
+`review_item`), `ticket_link_target_check` (genau eine Zielspalte, passend
+zu `entity_type`), `ticket_link_ticket_fkey` (`ticket_id`,
+`organization_id`) → `ticket` und je Ziel `ticket_link_ci_fkey`,
+`ticket_link_asset_fkey`, `ticket_link_location_fkey`,
+`ticket_link_contract_fkey`, `ticket_link_review_item_fkey` (Spalte,
+`organization_id`) → Ziel (`id`, `organization_id`), alle ON DELETE
+CASCADE; je Zielspalte `UNIQUE (ticket_id, <spalte>)`
+(`ticket_link_ticket_id_<spalte>_key`) und Teilindex
+`idx_ticket_link_<ziel>` (`<spalte>`) WHERE `<spalte>` IS NOT NULL, Index
+`idx_ticket_link_ticket` (`ticket_id`, `created_at`, `id`). `ticket_tag`
+(`ticket_id`, `tag_id`, `organization_id`, `client_id`, `site_id`,
+`team_id`, `created_at`; `ticket_tag_pkey` (`ticket_id`, `tag_id`)) ordnet
+Tickets Tags des Katalogs zu: `ticket_tag_ticket_fkey` → `ticket` ON DELETE
+CASCADE, `ticket_tag_tag_fkey` → `tag` ohne ON-DELETE-Aktion, Index
+`idx_ticket_tag_org_tag` (`organization_id`, `tag_id`). `client_id`,
+`site_id` und `team_id` beider Tabellen leiten `derive_ticket_link_scope`
+(`ticket_link_scope`) und `derive_ticket_tag_scope` (`ticket_tag_scope`,
+BEFORE INSERT OR UPDATE) aus dem Ticket ab; `propagate_ticket_scope()`
+(Rumpf aus 000064) zieht beide Tabellen nach. RLS mit ENABLE/FORCE:
+`ticket_link_tenant_isolation` bzw. `ticket_tag_tenant_isolation` mit Org-,
+Client-, Site- und Team-Prädikat wie `ticket_tenant_isolation` (USING mit
+NULL-Ausnahme, WITH CHECK ohne) und die RESTRICTIVE-Policies
+`*_scoped_update` und `*_scoped_delete`, TRUNCATE-Schutz
+`reticora_truncate_guard`. Die Datenmigration übernimmt `ticket.tags` je
+Organisation in `tag` (Schlüssel nach `tag_normalize_key`, leere Schlüssel
+entfallen, `display_name` de/en = Originalwert, bestehende Schlüssel
+bleiben) und `ticket_tag`; danach entfällt die Spalte `ticket.tags`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1238,8 +1275,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `template_version_item` | ja | ja | template_version_item_isolation_delete (DELETE), template_version_item_isolation_insert (INSERT), template_version_item_isolation_select (SELECT), template_version_item_isolation_update (UPDATE) |
 | `ticket` | ja | ja | ticket_scoped_delete (DELETE), ticket_scoped_update (UPDATE), ticket_tenant_isolation (ALL) |
 | `ticket_comment` | ja | ja | ticket_comment_scoped_delete (DELETE), ticket_comment_scoped_update (UPDATE), ticket_comment_tenant_isolation (ALL) |
+| `ticket_link` | ja | ja | ticket_link_scoped_delete (DELETE), ticket_link_scoped_update (UPDATE), ticket_link_tenant_isolation (ALL) |
 | `ticket_number_counter` | ja | ja | ticket_number_counter_isolation (ALL) |
 | `ticket_sla` | ja | ja | ticket_sla_tenant_isolation (ALL) |
+| `ticket_tag` | ja | ja | ticket_tag_scoped_delete (DELETE), ticket_tag_scoped_update (UPDATE), ticket_tag_tenant_isolation (ALL) |
 | `training` | ja | ja | training_isolation (ALL) |
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |

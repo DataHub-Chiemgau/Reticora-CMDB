@@ -231,7 +231,7 @@ func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (Reindex
 SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,serial_number,os_name,os_version),'/cmdb/'||id,'{}'::jsonb FROM ci WHERE organization_id=$1 AND deleted_at IS NULL
 UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1 AND deleted_at IS NULL
-UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,array_to_string(tags,' ')),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
+UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,(SELECT string_agg(tg.key,' ' ORDER BY tg.key) FROM ticket_tag tt JOIN tag tg ON tg.id=tt.tag_id WHERE tt.ticket_id=ticket.id)),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
 UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'','{}'::jsonb FROM contact WHERE organization_id=$1
 UNION ALL SELECT organization_id,'location',id,name,kind,'/locations?node='||id,'{}'::jsonb FROM location WHERE organization_id=$1
 UNION ALL SELECT organization_id,'reservation',id,COALESCE(project_ref, reason, 'reservation'),concat_ws(' ',state, reason, project_ref),'/reservations','{}'::jsonb FROM reservation WHERE organization_id=$1`, orgID)

@@ -571,6 +571,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 		`"is_observable":true}],"attribute_definitions":[],"attribute_sets":[],"templates":[],"rules":[],"layouts":[],"lifecycle_models":[]}`},
 	// Document links (WP-267): the link the sub-create returned.
 	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
+	// Ticket links (WP-764): the created CI; the link the sub-create
+	// returned.
+	"POST /api/v1/tickets/{id}/links":             {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
+	"DELETE /api/v1/tickets/{id}/links/{link_id}": {"/api/v1/tickets/<id:/api/v1/tickets>/links/<id:/api/v1/ticket-links>", ""},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -588,6 +592,7 @@ var auditRouteSubCreates = []struct{ route, collection string }{
 	{"POST /api/v1/subnets/{id}/reservations", "/api/v1/ip-reservations"},
 	{"POST /api/v1/metamodel/drafts/{id}/items", "/api/v1/metamodel-draft-items"},
 	{"POST /api/v1/documents/{id}/links", "/api/v1/document-links"},
+	{"POST /api/v1/tickets/{id}/links", "/api/v1/ticket-links"},
 }
 
 // TestEveryWriteRouteAuditedOnPostgreSQL runs every write route of the

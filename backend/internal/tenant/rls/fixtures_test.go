@@ -104,6 +104,9 @@ var matrixOverrides = map[string]map[string]string{
 	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
 	// The currency of a contract is an ISO 4217 code (WP-269).
 	"contract": {"currency": "EUR"},
+	// A ticket link has exactly one target column, the one of its
+	// entity_type (ticket_link_target_check, WP-764).
+	"ticket_link": {"entity_type": "ci", "ci_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

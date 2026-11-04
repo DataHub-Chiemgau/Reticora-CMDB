@@ -71,6 +71,7 @@ DELETE /api/v1/teams/{id} team:manage
 DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
 DELETE /api/v1/templates/{id} citype:manage
 DELETE /api/v1/tickets/{id} ticket:write
+DELETE /api/v1/tickets/{id}/links/{link_id} ticket:write
 DELETE /api/v1/trainings/{id} training:write
 DELETE /api/v1/users/{id} user:manage
 DELETE /api/v1/vlans/{id} ipam:write
@@ -314,6 +315,7 @@ GET /api/v1/templates/{id}/versions/{version} ci:read
 GET /api/v1/tickets ticket:read
 GET /api/v1/tickets/{id} ticket:read
 GET /api/v1/tickets/{id}/comments ticket:read
+GET /api/v1/tickets/{id}/links ticket:read
 GET /api/v1/tickets/{id}/sla ticket:read
 GET /api/v1/topology topology:read
 GET /api/v1/topology/cis/{id}/impact topology:read
@@ -574,6 +576,7 @@ POST /api/v1/templates/{id}/versions citype:manage
 POST /api/v1/templates/{id}/versions/{version}/publish metamodel:publish
 POST /api/v1/tickets ticket:write
 POST /api/v1/tickets/{id}/comments ticket:write
+POST /api/v1/tickets/{id}/links ticket:write
 POST /api/v1/tickets/{id}/sla ticket:write
 POST /api/v1/training-assignments/{id}/complete training:write
 POST /api/v1/trainings training:write

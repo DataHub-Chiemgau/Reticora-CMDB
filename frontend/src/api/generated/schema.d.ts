@@ -8722,13 +8722,13 @@ export interface paths {
     };
     /**
      * List the object links of a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description The objects linked to the ticket besides its primary object (related_ci_id, related_asset_id; TKT-01, WP-764), oldest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02). A link appears only when the ticket and its target are visible under the caller's scope; a ticket that does not exist or lies outside the scope answers 404.
      */
     get: operations['listTicketLinks'];
     put?: never;
     /**
      * Link an object to a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description entity_type is one of asset, ci, contract, location and review_item; any other value answers 422. A ticket or target that does not exist or lies outside the caller's scope answers 404 (a review item is visible when all its candidate CIs are, one without candidates when its client and site lie in the scope), a second link of the same object 409. The link takes client, site and team of the ticket; a hard delete of the target or the ticket removes it. The transaction writes ticket.updated with change link, link_id, entity_type and entity_id.
      */
     post: operations['createTicketLink'];
     delete?: never;
@@ -8754,7 +8754,7 @@ export interface paths {
     post?: never;
     /**
      * Remove an object link of a ticket
-     * @description Planned (E-38); WP-764 implements the operation.
+     * @description Removes one link of the ticket (WP-764). Only a link the caller sees (ticket and target visible) and may write is removed; any other link, also one of another ticket, answers 404. The transaction writes ticket.updated with change unlink, link_id, entity_type and entity_id.
      */
     delete: operations['deleteTicketLink'];
     options?: never;
@@ -12585,6 +12585,7 @@ export interface components {
       resolved_at?: string;
       /** Format: date-time */
       closed_at?: string;
+      /** @description Sorted keys of the catalog tags of the ticket (ticket_tag, E-127); [] without tags. */
       tags: string[];
       /** Format: date-time */
       created_at: string;
@@ -12603,6 +12604,7 @@ export interface components {
       related_asset_id?: string;
       /** Format: date-time */
       due_date?: string;
+      /** @description Keys of catalog tags (E-127); a key the catalog lacks answers 422 naming the unknown keys. */
       tags?: string[];
     };
     /**
@@ -12624,10 +12626,30 @@ export interface components {
       related_asset_id?: string;
       /** Format: date-time */
       due_date?: string;
+      /** @description Keys of catalog tags (E-127); they replace the tags of the ticket, [] removes all. A key the catalog lacks answers 422 naming the unknown keys. */
       tags?: string[];
     };
     TicketListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Ticket'][];
+    };
+    /** @description An object linked to a ticket besides its primary object (WP-764). */
+    TicketLink: {
+      id: string;
+      organization_id: string;
+      ticket_id: string;
+      /** @enum {string} */
+      entity_type: 'asset' | 'ci' | 'contract' | 'location' | 'review_item';
+      entity_id: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    TicketLinkListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['TicketLink'][];
+    };
+    CreateTicketLinkRequest: {
+      /** @description asset, ci, contract, location or review_item; any other value answers 422. */
+      entity_type: string;
+      entity_id: string;
     };
     TicketComment: {
       id: string;
@@ -21506,6 +21528,8 @@ export interface operations {
         assignee_id?: string;
         /** @description Tickets of one team (UUID), or `mine` for the tickets of every team the caller is a member of (`team_member`, E-143), with cursor, sort and `total` like a team id; without team membership the list is empty. */
         team_id?: string;
+        /** @description Tag keys of the catalog, comma separated: a ticket must carry every one of them (WP-764, E-127). */
+        tags?: string;
       };
       header?: never;
       path?: never;
@@ -37147,7 +37171,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The tag is assigned to CIs or is a system tag. */
+      /** @description The tag is assigned to CIs or tickets, or is a system tag. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -38265,12 +38289,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the object links of a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-764. */
+      /** @description The object links of the ticket */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TicketLinkListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -38288,19 +38314,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateTicketLinkRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-764. */
+      /** @description Object linked */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['TicketLink'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

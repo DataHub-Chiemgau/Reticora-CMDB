@@ -21,7 +21,7 @@ type Ticket struct {
 	DueDate        string    `json:"due_date,omitempty"`
 	ResolvedAt     string    `json:"resolved_at,omitempty"`
 	ClosedAt       string    `json:"closed_at,omitempty"`
-	Tags           []string  `json:"tags"`
+	Tags           []string  `json:"tags"` // keys of the catalog tags (ticket_tag, E-127)
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -85,7 +85,37 @@ type FilterParams struct {
 	// team_id=mine: tickets of every team the user is a member of
 	// (team_member, E-143). It replaces TeamID.
 	TeamMemberOf string
+	Tags         []string // tags: every key (catalog tags, WP-764)
 	Search       string
 	SortBy       string
 	SortDir      string
+}
+
+// Entity types of a ticket link (WP-764): the targets of ticket_link
+// besides the primary object (related_ci_id, related_asset_id).
+const (
+	LinkCI         = "ci"
+	LinkAsset      = "asset"
+	LinkLocation   = "location"
+	LinkContract   = "contract"
+	LinkReviewItem = "review_item"
+)
+
+// LinkEntityTypes are the entity types of a ticket link, sorted.
+var LinkEntityTypes = []string{LinkAsset, LinkCI, LinkContract, LinkLocation, LinkReviewItem}
+
+// Link is an object linked to a ticket (ticket_link, WP-764).
+type Link struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	TicketID       string    `json:"ticket_id"`
+	EntityType     string    `json:"entity_type"`
+	EntityID       string    `json:"entity_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// LinkRequest is the payload of POST /api/v1/tickets/{id}/links.
+type LinkRequest struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
 }

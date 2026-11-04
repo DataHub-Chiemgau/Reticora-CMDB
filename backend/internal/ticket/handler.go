@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -43,6 +44,17 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/tickets/{id}", h.Delete)
 	r.Post("/api/v1/tickets/{id}/comments", h.AddComment)
 	r.Get("/api/v1/tickets/{id}/comments", h.ListComments)
+	r.Get("/api/v1/tickets/{id}/links", h.ListLinks)
+	r.Post("/api/v1/tickets/{id}/links", h.CreateLink)
+	r.Delete("/api/v1/tickets/{id}/links/{link_id}", h.DeleteLink)
+}
+
+// parseTagFilter splits the filter tags (comma separated) into keys.
+func parseTagFilter(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return NormalizeTags(strings.Split(raw, ","))
 }
 
 // List handles GET /api/v1/tickets
@@ -64,6 +76,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Category:   r.URL.Query().Get("category"),
 		AssigneeID: r.URL.Query().Get("assignee_id"),
 		TeamID:     r.URL.Query().Get("team_id"),
+		Tags:       parseTagFilter(r.URL.Query().Get("tags")),
 		Search:     r.URL.Query().Get("search"),
 		SortBy:     r.URL.Query().Get("sort_by"),
 		SortDir:    r.URL.Query().Get("sort_dir"),
@@ -161,6 +174,8 @@ func writeTicketError(w http.ResponseWriter, r *http.Request, err error) {
 			detail = te.Error()
 		}
 		api.WriteError(w, http.StatusConflict, "Conflict", detail)
+	case errors.Is(err, ErrLinkExists):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrLinkExists.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "ticket request failed", "error", err)
@@ -361,4 +376,102 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// ListLinks handles GET /api/v1/tickets/{id}/links (WP-764): the links in
+// the order created_at, id, paged with limit and the keyset cursor.
+func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	ticketID, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
+	links, total, err := h.repo.ListLinks(r.Context(), t.OrganizationID, ticketID, page)
+	if err != nil {
+		if errors.Is(err, api.ErrInvalidCursor) {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", api.ErrInvalidCursor.Error())
+			return
+		}
+		writeTicketError(w, r, err)
+		return
+	}
+	next := LinkNextCursor(links, page.Limit)
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Link]{
+		Data:       links,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    next != "",
+		NextCursor: next,
+	})
+}
+
+// CreateLink handles POST /api/v1/tickets/{id}/links (WP-764): an unknown
+// entity_type is 422, a ticket or target that does not exist or lies
+// outside the caller's scope 404, a second link of the same object 409.
+func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	ticketID, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	var req LinkRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.EntityType == "" || req.EntityID == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "entity_type and entity_id are required")
+		return
+	}
+	if !ValidLinkEntityType(req.EntityType) {
+		api.WriteFieldError(w, &api.FieldError{Field: "entity_type", Status: http.StatusUnprocessableEntity,
+			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")})
+		return
+	}
+	if !api.IsUUID(req.EntityID) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "linked object not found")
+		return
+	}
+	link := &Link{OrganizationID: t.OrganizationID, TicketID: ticketID, EntityType: req.EntityType, EntityID: req.EntityID}
+	if err := h.repo.CreateLink(r.Context(), link); err != nil {
+		writeTicketError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, link)
+}
+
+// DeleteLink handles DELETE /api/v1/tickets/{id}/links/{link_id} (WP-764).
+func (h *Handler) DeleteLink(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	ticketID, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	linkID, ok := api.ParseUUIDParam(w, r, "link_id", "ticket link not found")
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteLink(r.Context(), t.OrganizationID, ticketID, linkID); err != nil {
+		writeTicketError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

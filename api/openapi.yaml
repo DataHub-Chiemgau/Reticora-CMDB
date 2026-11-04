@@ -5128,6 +5128,13 @@ paths:
             the list is empty.
           schema:
             type: string
+        - name: tags
+          in: query
+          description: >-
+            Tag keys of the catalog, comma separated: a ticket must carry
+            every one of them (WP-764, E-127).
+          schema:
+            type: string
       responses:
         '200':
           description: Paginated list of tickets
@@ -18036,7 +18043,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The tag is assigned to CIs or is a system tag.
+          description: The tag is assigned to CIs or tickets, or is a system tag.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -19071,20 +19078,29 @@ paths:
   /api/v1/tickets/{id}/links:
     x-phase: P2
     x-feature: ticketing_essential
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listTicketLinks
       tags: [Tickets]
       summary: List the object links of a ticket
-      description: Planned (E-38); WP-764 implements the operation.
+      description: >-
+        The objects linked to the ticket besides its primary object
+        (related_ci_id, related_asset_id; TKT-01, WP-764), oldest first
+        (created_at, id), paged with `limit` (at most 200) and the signed
+        `cursor` from `next_cursor` (API-02). A link appears only when the
+        ticket and its target are visible under the caller's scope; a ticket
+        that does not exist or lies outside the scope answers 404.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the object links of a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-764.
+          description: The object links of the ticket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketLinkListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19097,10 +19113,29 @@ paths:
       operationId: createTicketLink
       tags: [Tickets]
       summary: Link an object to a ticket
-      description: Planned (E-38); WP-764 implements the operation.
+      description: >-
+        entity_type is one of asset, ci, contract, location and review_item;
+        any other value answers 422. A ticket or target that does not exist
+        or lies outside the caller's scope answers 404 (a review item is
+        visible when all its candidate CIs are, one without candidates when
+        its client and site lie in the scope), a second link of the same
+        object 409. The link takes client, site and team of the ticket; a
+        hard delete of the target or the ticket removes it. The transaction
+        writes ticket.updated with change link, link_id, entity_type and
+        entity_id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTicketLinkRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-764.
+          description: Object linked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketLink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19109,13 +19144,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/tickets/{id}/links/{link_id}:
     x-phase: P2
     x-feature: ticketing_essential
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: link_id
@@ -19128,7 +19164,12 @@ paths:
       operationId: deleteTicketLink
       tags: [Tickets]
       summary: Remove an object link of a ticket
-      description: Planned (E-38); WP-764 implements the operation.
+      description: >-
+        Removes one link of the ticket (WP-764). Only a link the caller sees
+        (ticket and target visible) and may write is removed; any other link,
+        also one of another ticket, answers 404. The transaction writes
+        ticket.updated with change unlink, link_id, entity_type and
+        entity_id.
       responses:
         '204':
           description: Deleted.
@@ -26020,6 +26061,9 @@ components:
           type: string
           format: date-time
         tags:
+          description: >-
+            Sorted keys of the catalog tags of the ticket (ticket_tag,
+            E-127); [] without tags.
           type: array
           items:
             type: string
@@ -26055,6 +26099,9 @@ components:
           type: string
           format: date-time
         tags:
+          description: >-
+            Keys of catalog tags (E-127); a key the catalog lacks answers 422
+            naming the unknown keys.
           type: array
           items:
             type: string
@@ -26097,6 +26144,10 @@ components:
           type: string
           format: date-time
         tags:
+          description: >-
+            Keys of catalog tags (E-127); they replace the tags of the
+            ticket, [] removes all. A key the catalog lacks answers 422
+            naming the unknown keys.
           type: array
           items:
             type: string
@@ -26111,6 +26162,47 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Ticket'
+
+    TicketLink:
+      type: object
+      required: [id, organization_id, ticket_id, entity_type, entity_id, created_at]
+      description: An object linked to a ticket besides its primary object (WP-764).
+      properties:
+        id:
+          type: string
+        organization_id:
+          type: string
+        ticket_id:
+          type: string
+        entity_type:
+          type: string
+          enum: [asset, ci, contract, location, review_item]
+        entity_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TicketLinkListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/TicketLink'
+
+    CreateTicketLinkRequest:
+      type: object
+      required: [entity_type, entity_id]
+      properties:
+        entity_type:
+          type: string
+          description: asset, ci, contract, location or review_item; any other value answers 422.
+        entity_id:
+          type: string
 
     TicketComment:
       type: object
