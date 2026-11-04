@@ -24,7 +24,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
@@ -155,7 +154,6 @@ type Repositories struct {
 	LocationTree      locations.Repository
 	Movement          movement.Repository
 	Reservation       reservation.Repository
-	Composition       composition.Repository
 	Override          override.Repository
 	History           history.Repository
 	SavedView         savedview.Repository
@@ -750,7 +748,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
-			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
@@ -1047,8 +1044,6 @@ func validate(repos *Repositories, opts *Options) error {
 		return fmt.Errorf("server: movement repository is required")
 	case repos.Reservation == nil:
 		return fmt.Errorf("server: reservation repository is required")
-	case repos.Composition == nil:
-		return fmt.Errorf("server: composition repository is required")
 	case repos.Override == nil:
 		return fmt.Errorf("server: override repository is required")
 	case repos.History == nil:

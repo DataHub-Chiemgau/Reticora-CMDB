@@ -11,7 +11,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contract"
@@ -96,7 +95,6 @@ func MemoryRepositories() Repositories {
 		LocationTree:      locations.NewMemoryRepository(),
 		Movement:          movement.NewMemoryRepository(),
 		Reservation:       reservation.NewMemoryRepository(),
-		Composition:       composition.NewMemoryRepository(),
 		// The provenance names override authors as PostgreSQL does from
 		// app_user and service_account (UI-15, WP-850).
 		Override: override.NewMemoryRepository().WithAuthorNames(func(ctx context.Context, orgID, id string) (string, bool) {
@@ -218,7 +216,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LocationTree:      locations.NewPGRepository(pool),
 		Movement:          movement.NewPGRepository(pool),
 		Reservation:       reservation.NewPGRepository(pool),
-		Composition:       composition.NewPGRepository(pool),
 		Override:          override.NewPGRepository(pool).WithRecompute(cis),
 		History:           history.NewPGRepository(pool),
 		SavedView:         savedview.NewPGRepository(pool),

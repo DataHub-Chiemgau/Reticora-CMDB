@@ -22,6 +22,9 @@
 //   - TestCompositionLegacyAssetChildren: GET /api/v1/assets/{id}/children
 //     lists the children of every CI of the asset with child_mode, over two
 //     cursor pages.
+//   - TestCompositionLegacyChildAssetWritable: without the field lock over
+//     composition (WP-841) PATCH /api/v1/assets/{id} on a former child
+//     asset writes a formerly parent-owned field (200 instead of 409).
 //
 // Retest:
 //
@@ -36,6 +39,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -494,5 +498,36 @@ func TestCompositionLegacyAssetChildren(t *testing.T) {
 	var empty page
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &empty) != nil || len(empty.Data) != 0 {
 		t.Errorf("children of an unknown asset: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCompositionLegacyChildAssetWritable(t *testing.T) {
+	w := newCompWorld(t)
+	f := w.f
+	parent := w.asset(t, "LEG-LOCK-PARENT", "SN-LEG-LOCK-PARENT", f.Client1, w.room1)
+	child := w.asset(t, "LEG-LOCK-CHILD", "", f.Client1, "")
+	// A legacy row naming the asset as composition child; before WP-841 the
+	// asset handler answered 409 for the parent-owned fields of such an asset.
+	if _, err := f.Admin.Exec(w.bg, `INSERT INTO composition (organization_id, parent_asset_id, child_asset_id, configuration_only)
+		VALUES ($1, $2, $3, true)`, f.OrgA, parent, child); err != nil {
+		t.Fatal(err)
+	}
+	repo := asset.NewPGRepository(f.App)
+	mux := chi.NewRouter()
+	asset.NewHandler(repo).RegisterRoutes(mux)
+	r := httptest.NewRequest(http.MethodPatch, "/api/v1/assets/"+child,
+		strings.NewReader(`{"serial_number": "SN-LEG-LOCK-CHILD", "invoice_number": "INV-LEG-LOCK"}`)).WithContext(w.ctx)
+	r.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH former child asset: %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	got, err := repo.GetByID(w.ctx, f.OrgA, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SerialNumber != "SN-LEG-LOCK-CHILD" || got.InvoiceNumber != "INV-LEG-LOCK" {
+		t.Errorf("asset serial %q, invoice %q after the PATCH", got.SerialNumber, got.InvoiceNumber)
 	}
 }

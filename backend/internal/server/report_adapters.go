@@ -9,7 +9,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
@@ -79,17 +78,6 @@ func (c assetCreator) Create(ctx context.Context, ref *movement.AssetRef) (strin
 		return "", err
 	}
 	return a.ID, nil
-}
-
-// compositionParentLookup adapts composition.Repository to the
-// asset.ParentLookup port (spec §5: child assets inherit shared inventory
-// fields from the parent read-only).
-type compositionParentLookup struct {
-	repo composition.Repository
-}
-
-func (l compositionParentLookup) ParentOfAsset(ctx context.Context, orgID, assetID string) (bool, error) {
-	return composition.ParentOfAsset(ctx, l.repo, orgID, assetID)
 }
 
 // overrideProvenance adapts override.Repository to the

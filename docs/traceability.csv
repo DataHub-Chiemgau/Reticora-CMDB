@@ -1426,3 +1426,4 @@ STK-04;[P2];B;backend/internal/movement/service_integration_test.go;WP-274
 AST-07;[P2];B;backend/internal/movement/service_integration_test.go;WP-274
 EVT-03;[P2–P3];B;backend/internal/movement/service_integration_test.go;WP-274
 AUD-08;[P2];C;backend/internal/asset/history_integration_test.go;WP-794
+AST-05;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-841
