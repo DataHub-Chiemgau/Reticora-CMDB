@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -12,33 +13,26 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// EventDispatcher publishes movement events to webhook subscribers.
-type EventDispatcher interface {
-	Dispatch(ctx context.Context, orgID, event string, payload any)
-}
-
 // Recorder is the minimal interface other modules (assignment, disposal,
 // order, stocktake) use to emit auditable movements into the ledger (spec §9:
-// every inventory movement is a transaction). It matches the Repository's
-// Record method so both the PG and in-memory repositories satisfy it.
+// every inventory movement is a transaction). The Service satisfies it, and
+// so do the PG and in-memory repositories.
 type Recorder interface {
 	Record(ctx context.Context, m *Movement) error
 }
 
 // Handler provides HTTP handlers for the movement ledger and quantity items.
+// Bookings go through the movement service, which writes stock.movement to
+// the outbox (WP-274).
 type Handler struct {
-	repo       Repository
-	dispatcher EventDispatcher
-	assets     AssetCreator
+	repo   Repository
+	assets AssetCreator
 }
 
-// NewHandler creates a new movement handler.
-func NewHandler(repo Repository, dispatcher ...EventDispatcher) *Handler {
-	h := &Handler{repo: repo}
-	if len(dispatcher) > 0 {
-		h.dispatcher = dispatcher[0]
-	}
-	return h
+// NewHandler creates a new movement handler over the movement service (or
+// a repository).
+func NewHandler(repo Repository) *Handler {
+	return &Handler{repo: repo}
 }
 
 // RegisterRoutes registers movement routes on the given mux. The ledger is
@@ -55,18 +49,36 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/inventory/items/{id}/convert", h.ConvertToAsset)
 }
 
-func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
-	if h.dispatcher != nil {
-		h.dispatcher.Dispatch(r.Context(), orgID, event, payload)
-	}
+// dependencyProblem is the 409 of a delete refused by dependent objects
+// (pattern of locations.WriteDependencyConflict).
+type dependencyProblem struct {
+	api.ProblemDetail
+	Dependencies []string `json:"dependencies"`
+}
+
+// WriteLedgerDependency answers the delete of an object the ledger keeps
+// with 409 and dependencies ["stock_movement"] (WP-274).
+func WriteLedgerDependency(w http.ResponseWriter, r *http.Request) {
+	api.WriteProblemBody(w, http.StatusConflict, dependencyProblem{
+		ProblemDetail: api.ProblemDetail{
+			Type:     "https://reticora.io/problems/409",
+			Title:    "Conflict",
+			Status:   http.StatusConflict,
+			Detail:   "the object has stock movements, which are kept; it cannot be deleted",
+			Instance: r.URL.Path,
+		},
+		Dependencies: []string{"stock_movement"},
+	})
 }
 
 // writeMovementError answers a failed movement or quantity-item request: an
 // asset or quantity item that is unknown, of another organization or outside
-// the caller's scope is 404 with a fixed text (TEN-04), a location likewise
-// 422 on its field, a taken SKU 409. Database errors go through
-// api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
-// the client (API-03, F-047), the log keeps it.
+// the caller's scope is 404 with a fixed text (TEN-04), a location or
+// reference likewise 422 on its field, a taken SKU 409, a shortfall 409
+// insufficient-stock, a delete kept by movements 409 with dependencies.
+// Database errors go through api.WriteRepoError; no table, constraint,
+// policy or SQLSTATE text reaches the client (API-03, F-047), the log keeps
+// it.
 func writeMovementError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrItemNotFound):
@@ -75,6 +87,12 @@ func writeMovementError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrAssetNotFound.Error())
 	case errors.Is(err, ErrConflict):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrInsufficientStock):
+		api.WriteProblem(w, http.StatusConflict, ProblemInsufficientStock, "Insufficient Stock", ErrInsufficientStock.Error())
+	case errors.Is(err, ErrHasMovements):
+		WriteLedgerDependency(w, r)
+	case errors.Is(err, api.ErrInvalidCursor):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "inventory movement request failed", "error", err)
@@ -98,32 +116,94 @@ func requireUUIDs(w http.ResponseWriter, fields ...string) bool {
 	return true
 }
 
-// ListMovements handles GET /api/v1/stock-movements
+// writeField answers 422 with field and its fixed message.
+func writeField(w http.ResponseWriter, field, message string) {
+	api.WriteFieldError(w, &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity})
+}
+
+// parseOccurred reads the RFC 3339 time of the query parameter name; an
+// invalid value is answered with 422 and ok false.
+func parseOccurred(w http.ResponseWriter, r *http.Request, name string) (at *time.Time, ok bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		writeField(w, name, "must be an RFC 3339 date-time")
+		return nil, false
+	}
+	return &parsed, true
+}
+
+// parseMovementPage reads limit, offset and cursor of a movement list; a
+// malformed cursor or one of another order is answered with 400.
+func parseMovementPage(w http.ResponseWriter, r *http.Request) (api.PaginationParams, bool) {
+	page := api.ParsePagination(r)
+	err := page.CursorError
+	if err == nil && page.Cursor != nil {
+		_, _, err = movementPosition(*page.Cursor)
+	}
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return page, false
+	}
+	return page, true
+}
+
+// listMovements answers a movement list with filter.
+func (h *Handler) listMovements(w http.ResponseWriter, r *http.Request, orgID string, filter *MovementFilter, page api.PaginationParams) {
+	rows, total, err := h.repo.ListMovements(r.Context(), orgID, filter, page)
+	if err != nil {
+		writeMovementError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, MovementPage(rows, total, page))
+}
+
+// ListMovements handles GET /api/v1/stock-movements: the movements of
+// every object kind, filtered by asset_id, consumable_id,
+// quantity_item_id, movement_type (STK-04 type, else 422), location_id
+// (source or target) and occurred_from/occurred_to (RFC 3339, else 422),
+// newest first on (occurred_at, id) with a keyset cursor.
 func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	page := api.ParsePagination(r)
+	q := r.URL.Query()
 	filter := MovementFilter{
-		AssetID:        r.URL.Query().Get("asset_id"),
-		QuantityItemID: r.URL.Query().Get("quantity_item_id"),
-		MovementType:   r.URL.Query().Get("movement_type"),
-		LocationID:     r.URL.Query().Get("location_id"),
+		AssetID:        q.Get("asset_id"),
+		ConsumableID:   q.Get("consumable_id"),
+		QuantityItemID: q.Get("quantity_item_id"),
+		MovementType:   q.Get("movement_type"),
+		LocationID:     q.Get("location_id"),
 	}
-	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID, filter, page)
-	if err != nil {
-		api.WriteRepoError(w, err)
+	if !requireUUIDs(w, "asset_id", filter.AssetID, "consumable_id", filter.ConsumableID,
+		"quantity_item_id", filter.QuantityItemID, "location_id", filter.LocationID) {
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
-		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total,
-	})
+	if filter.MovementType != "" && !MovementTypes[filter.MovementType] {
+		writeField(w, "movement_type", "unknown movement_type")
+		return
+	}
+	var ok bool
+	if filter.OccurredFrom, ok = parseOccurred(w, r, "occurred_from"); !ok {
+		return
+	}
+	if filter.OccurredTo, ok = parseOccurred(w, r, "occurred_to"); !ok {
+		return
+	}
+	page, ok := parseMovementPage(w, r)
+	if !ok {
+		return
+	}
+	h.listMovements(w, r, t.OrganizationID, &filter, page)
 }
 
-// ListAssetMovements handles GET /api/v1/assets/{id}/movements
+// ListAssetMovements handles GET /api/v1/assets/{id}/movements, the
+// deprecated reading of GET /api/v1/stock-movements?asset_id= (WP-247).
 func (h *Handler) ListAssetMovements(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -134,20 +214,51 @@ func (h *Handler) ListAssetMovements(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID,
-		MovementFilter{AssetID: assetID}, page)
-	if err != nil {
-		writeMovementError(w, r, err)
+	page, ok := parseMovementPage(w, r)
+	if !ok {
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
-		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total,
-	})
+	h.listMovements(w, r, t.OrganizationID, &MovementFilter{AssetID: assetID}, page)
 }
 
-// Record handles POST /api/v1/stock-movements
+// checkCreateRequest answers a booking POST /api/v1/stock-movements does
+// not take and reports whether req passed (E-38, WP-274): only physical
+// movements, for an asset receipt, transfer, deployment, retrieval, repair
+// and correction without quantity, for a quantity item receipt, retrieval,
+// correction and transfer with quantity > 0. The types of the domain paths
+// are 422 movement-type-reserved; legacy names, consumable_id and unknown
+// types are 422 on their field.
+func checkCreateRequest(w http.ResponseWriter, req *CreateMovementRequest) bool {
+	switch {
+	case req.ConsumableID != "":
+		writeField(w, "consumable_id", "consumables book through POST /api/v1/consumables/{id}/movements")
+	case ReservedMovementTypes[req.MovementType]:
+		api.WriteProblem(w, http.StatusUnprocessableEntity, ProblemMovementTypeReserved, "Movement Type Reserved",
+			"this movement type is booked only by its domain operation")
+	case !MovementTypes[req.MovementType]:
+		writeField(w, "movement_type", "unknown movement_type")
+	case (req.AssetID == "") == (req.QuantityItemID == ""):
+		writeField(w, "asset_id", "exactly one of asset_id and quantity_item_id is required")
+	case req.AssetID != "" && req.ItemKind != "" && req.ItemKind != "asset",
+		req.QuantityItemID != "" && req.ItemKind != "" && req.ItemKind != "quantity_item":
+		writeField(w, "item_kind", "item_kind does not match the moved object")
+	case req.AssetID != "" && !AssetMovementTypes[req.MovementType]:
+		writeField(w, "movement_type", "movement_type is not booked for an asset")
+	case req.AssetID != "" && req.Quantity != nil:
+		writeField(w, "quantity", "an asset movement has no quantity")
+	case req.QuantityItemID != "" && !QuantityMovementTypes[req.MovementType]:
+		writeField(w, "movement_type", "movement_type is not booked for a quantity item")
+	case req.QuantityItemID != "" && (req.Quantity == nil || *req.Quantity <= 0):
+		writeField(w, "quantity", "quantity must be greater than 0")
+	default:
+		return true
+	}
+	return false
+}
+
+// Record handles POST /api/v1/stock-movements: it books a physical
+// movement through the movement service (lock, checks, stock.movement in
+// the outbox).
 func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -159,16 +270,7 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if !MovementTypes[req.MovementType] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid movement_type")
-		return
-	}
-	if req.AssetID == "" && req.QuantityItemID == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "asset_id or quantity_item_id is required")
-		return
-	}
-	if req.QuantityItemID != "" && req.Quantity == nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "quantity is required for quantity items")
+	if !checkCreateRequest(w, &req) {
 		return
 	}
 	if !requireUUIDs(w, "asset_id", req.AssetID, "quantity_item_id", req.QuantityItemID, "from_location_id", req.FromLocationID,
@@ -201,7 +303,6 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 		writeMovementError(w, r, err)
 		return
 	}
-	h.dispatch(r, t.OrganizationID, "inventory.movement", m)
 	api.WriteJSON(w, http.StatusCreated, m)
 }
 

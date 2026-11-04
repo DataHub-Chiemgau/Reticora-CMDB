@@ -728,6 +728,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// The one writer of the ledger stock_movement (WP-274): the route and
+	// the best-effort bookings of assignment and disposal (until WP-275,
+	// WP-278) lock, check and write stock.movement to the outbox.
+	movements := movement.NewService(repos.Movement)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -750,13 +754,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithCIs(ciLookup{repo: repos.CI}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
-		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
+		assignment.NewHandler(repos.Assignment).WithMovements(movements),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
-		disposal.NewHandler(repos.Disposal).WithMovements(repos.Movement),
+		disposal.NewHandler(repos.Disposal).WithMovements(movements),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
@@ -803,7 +807,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
 			repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
-		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
+		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		// The overrides follow the field permissions of the CI (WP-265).
 		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),

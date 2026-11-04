@@ -7649,10 +7649,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List and record inventory movements (append-only ledger) */
+    /**
+     * List the movements of the ledger (append-only)
+     * @description The movements of assets, consumables and quantity items under the caller's scope, newest first on (occurred_at, id) with a keyset cursor (WP-274). location_id matches the source or the target; occurred_from and occurred_to bound occurred_at inclusively.
+     */
     get: operations['listStockMovements'];
     put?: never;
-    /** List and record inventory movements (append-only ledger) */
+    /**
+     * Book a physical movement
+     * @description Books through the movement service (WP-274): the asset or quantity item is locked, the locations and references are checked, an asset with to_location_id moves there, a quantity item changes its stock level (receipt and correction add, transfer keeps, retrieval takes away), and stock.movement is written to the outbox in the same transaction.
+     */
     post: operations['createStockMovements'];
     delete?: never;
     options?: never;
@@ -13210,7 +13216,8 @@ export interface components {
       location?: string;
       notes?: string;
     };
-    StockMovement: {
+    /** @description A stock movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (direction and reference are derived from movement_type and notes of the ledger, WP-744). */
+    ConsumableMovement: {
       id: string;
       organization_id: string;
       consumable_id: string;
@@ -13223,7 +13230,7 @@ export interface components {
       /** Format: date-time */
       created_at: string;
     };
-    CreateStockMovementRequest: {
+    CreateConsumableMovementRequest: {
       /** @enum {string} */
       direction: 'in' | 'out';
       quantity: number;
@@ -13232,6 +13239,95 @@ export interface components {
     };
     ConsumableListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Consumable'][];
+    };
+    ConsumableMovementListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableMovement'][];
+    };
+    /**
+     * @description Movement type of the ledger stock_movement (STK-04). assignment, return, reservation, release and disposal arise only in their domain paths (WP-274).
+     * @enum {string}
+     */
+    MovementType:
+      | 'receipt'
+      | 'transfer'
+      | 'assignment'
+      | 'return'
+      | 'deployment'
+      | 'retrieval'
+      | 'reservation'
+      | 'release'
+      | 'repair'
+      | 'disposal'
+      | 'correction';
+    /** @description One row of the append-only ledger stock_movement (STK-04, AST-07, WP-744, WP-274). client_id and site_id are derived from the moved object and the locations at booking time. User and team ids are surrogates (SEC-05). */
+    StockMovement: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      movement_type: components['schemas']['MovementType'];
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      /** @description Moved quantity; absent for an asset. */
+      quantity?: number;
+      actor_id?: string;
+      assignee_user_id?: string;
+      assignee_team_id?: string;
+      reason?: string;
+      notes?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      workflow_run_id?: string;
+      /** Format: uuid */
+      document_id?: string;
+      /** @description Hash of the signature (WP-276); absent until then. */
+      signature_hash?: string;
+      /** Format: date-time */
+      occurred_at: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    /** @description A physical movement (E-38, WP-274). For an asset (asset_id) receipt, transfer, deployment, retrieval, repair and correction without quantity; for a quantity item (quantity_item_id, until the merge into consumable, E-40) receipt, retrieval, correction and transfer with quantity > 0. Consumables book through POST /api/v1/consumables/{id}/movements (consumable_id is 422). */
+    CreateStockMovementRequest: {
+      /** @enum {string} */
+      item_kind?: 'asset' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      movement_type: components['schemas']['MovementType'];
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      quantity?: number;
+      reason?: string;
+      notes?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      workflow_run_id?: string;
+      /** Format: uuid */
+      document_id?: string;
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -21769,6 +21865,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The consumable has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DependencyProblem'];
+        };
+      };
     };
   };
   updateConsumable: {
@@ -21835,7 +21940,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['StockMovementListResponse'];
+          'application/json': components['schemas']['ConsumableMovementListResponse'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -21853,7 +21958,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreateStockMovementRequest'];
+        'application/json': components['schemas']['CreateConsumableMovementRequest'];
       };
     };
     responses: {
@@ -32225,15 +32330,40 @@ export interface operations {
   };
   listAssetsIdMovements: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List the movement ledger of an asset */
+      /** @description The movements of the asset, newest first. */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockMovementListResponse'];
+        };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -35634,6 +35764,15 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The item has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DependencyProblem'];
+        };
+      };
     };
   };
   updateInventoryItemsId: {
@@ -36556,15 +36695,47 @@ export interface operations {
   };
   listStockMovements: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        asset_id?: string;
+        consumable_id?: string;
+        quantity_item_id?: string;
+        movement_type?: components['schemas']['MovementType'];
+        location_id?: string;
+        occurred_from?: string;
+        occurred_to?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List and record inventory movements (append-only ledger) */
+      /** @description The movements of one page. */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockMovementListResponse'];
+        };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -36572,6 +36743,13 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id filter is no UUID, movement_type is unknown, or occurred_from/occurred_to is no RFC 3339 date-time; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -36586,16 +36764,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateStockMovementRequest'];
+      };
+    };
     responses: {
-      /** @description List and record inventory movements (append-only ledger) */
+      /** @description The booked movement. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StockMovement'];
+        };
       };
-      /** @description movement_type is invalid or the item or quantity is missing. */
+      /** @description The body is no valid JSON. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -36616,7 +36800,14 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description An id field is no UUID, or from_location_id/to_location_id names a location that is unknown, of another organization or outside the caller's scope; `field` names it. */
+      /** @description The withdrawal exceeds the stock level of the quantity item (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object, consumable_id, quantity on an asset or missing for a quantity item, an id that is no UUID, a location that is not visible or of another client, or a ticket, order, workflow run or document that is not visible. */
       422: {
         headers: {
           [name: string]: unknown;

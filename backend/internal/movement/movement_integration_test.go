@@ -638,7 +638,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		page := api.PaginationParams{Limit: 200}
 		listed := func(ctx context.Context, filter movement.MovementFilter) []string {
 			t.Helper()
-			list, _, err := repo.ListMovements(ctx, f.OrgA, filter, page)
+			list, _, err := repo.ListMovements(ctx, f.OrgA, &filter, page)
 			if err != nil {
 				t.Fatalf("list movements: %v", err)
 			}

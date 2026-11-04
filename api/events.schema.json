@@ -968,6 +968,16 @@
         "quantity": {
           "type": "number",
           "description": "Moved quantity of a quantity item."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the movement, derived from the moved object at booking time; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the movement, derived from the target, else the source location, else the object; absent without site."
         }
       },
       "examples": [
@@ -975,8 +985,9 @@
           "id": "66666666-6666-4666-8666-666666666666",
           "item_kind": "quantity_item",
           "quantity_item_id": "55555555-5555-4555-8555-555555555555",
-          "movement_type": "issue",
-          "quantity": 5
+          "movement_type": "retrieval",
+          "quantity": 5,
+          "client_id": "77777777-7777-4777-8777-777777777777"
         }
       ]
     },

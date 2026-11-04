@@ -549,6 +549,10 @@ func TestRackPlacementInAColocationRackKeepsTheLocation(t *testing.T) {
 	if got := assetLocation(t, f, assetID); got != own.rack1 {
 		t.Errorf("asset location after the colocation move: %q, want %q", got, own.rack1)
 	}
+	// Only the own mount booked a movement (WP-274).
+	if got := movementsOf(t, f, assetID); !equalStrings(got, []string{"transfer:rack_mount:->" + own.rack1}) {
+		t.Errorf("movements after the colocation move: %v, want only the own mount", got)
+	}
 	var mountRack string
 	if err := f.Admin.QueryRow(bg, `SELECT rack_id::text FROM rack_mount WHERE id = $1`, m.ID).Scan(&mountRack); err != nil || mountRack != foreign.rack2 {
 		t.Errorf("placement after the colocation move: rack %q err %v, want %q", mountRack, err, foreign.rack2)
@@ -568,5 +572,119 @@ func TestRackPlacementInAColocationRackKeepsTheLocation(t *testing.T) {
 	keeps("mixed-client asset, sibling Q", q, bq, "")
 	if got := assetLocation(t, f, mixed); got != "" {
 		t.Errorf("asset location of the mixed-client asset: %q, want none", got)
+	}
+	if got := movementsOf(t, f, mixed); len(got) != 0 {
+		t.Errorf("movements of the mixed-client asset: %v, want none", got)
+	}
+}
+
+// movementsOf returns the movements of the asset in the ledger as
+// "type:reason:from->to" in booking order.
+func movementsOf(t *testing.T, f *scopetest.Fixture, assetID string) []string {
+	t.Helper()
+	rows, err := f.Admin.Query(context.Background(), `SELECT movement_type || ':' || COALESCE(reason, '') || ':' ||
+			COALESCE(from_location_id::text, '') || '->' || COALESCE(to_location_id::text, '')
+		FROM stock_movement WHERE asset_id = $1 ORDER BY created_at, occurred_at`, assetID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var m string
+		if err = rows.Scan(&m); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, m)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestRackPlacementBooksTransfer covers WP-274 (STK-04, AST-07) against
+// PostgreSQL as the runtime role: mount, move and unmount of a CI with an
+// asset each book exactly one movement transfer of the asset through the
+// movement service, with reason rack_mount, rack_move and rack_unmount and
+// the old and new location; repositioning within the rack books none. The
+// asset's location follows, and every booking writes one stock.movement
+// with the asset as entity. A CI without an asset and a placement in a rack
+// of another client (the location stays) book no movement; the
+// colocation case is also checked in
+// TestRackPlacementInAColocationRackKeepsTheLocation.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRackPlacementBooksTransfer(t *testing.T) {
+	f := scopetest.Seed(t, "69")
+	bg := context.Background()
+	ctx := f.OrgCtx(f.OrgA)
+	loc := newPlacementTree(t, f, f.Client1, "mvt")
+	foreign := newPlacementTree(t, f, f.Client2, "mvt-foreign")
+	repo := rack.NewPGRepository(f.App)
+	ledgerSize := func() int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM stock_movement WHERE organization_id = $1`, f.OrgA).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	x := f.CI(t, f.OrgA, f.Client1, "mvt-x")
+	assetID := sharedAsset(t, f, "MVT-A", x)
+	m := &rack.RackMount{OrganizationID: f.OrgA, RackID: loc.rack1, CIID: x, PositionU: 1, HeightU: 1, Face: "front"}
+	if err := repo.CreateMount(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	pos := 7
+	if _, err := repo.UpdateMount(ctx, f.OrgA, m.ID, rack.UpdateMountRequest{PositionU: &pos}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateMount(ctx, f.OrgA, m.ID, rack.UpdateMountRequest{RackID: &loc.rack2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteMount(ctx, f.OrgA, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"transfer:rack_mount:->" + loc.rack1,
+		"transfer:rack_move:" + loc.rack1 + "->" + loc.rack2,
+		"transfer:rack_unmount:" + loc.rack2 + "->" + loc.room,
+	}
+	if got := movementsOf(t, f, assetID); !equalStrings(got, want) {
+		t.Errorf("movements of the placed asset %v, want %v", got, want)
+	}
+	if got := assetLocation(t, f, assetID); got != loc.room {
+		t.Errorf("asset location after unmount: %q, want the room %q", got, loc.room)
+	}
+	var events int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM event_outbox o JOIN stock_movement s ON s.id::text = o.data->>'id'
+		WHERE o.type = 'stock.movement' AND o.entity_id = $1 AND s.asset_id = $1::uuid`, assetID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != len(want) {
+		t.Errorf("stock.movement events of the asset: %d, want %d", events, len(want))
+	}
+
+	// A CI without an asset and a CI with an asset in a rack of client 2:
+	// the placement is stored, no movement is booked.
+	before := ledgerSize()
+	z := f.CI(t, f.OrgA, f.Client1, "mvt-z")
+	if err := repo.CreateMount(ctx, &rack.RackMount{OrganizationID: f.OrgA, RackID: loc.rack1, CIID: z,
+		PositionU: 20, HeightU: 1, Face: "front"}); err != nil {
+		t.Fatal(err)
+	}
+	w := f.CI(t, f.OrgA, f.Client1, "mvt-w")
+	foreignAsset := sharedAsset(t, f, "MVT-W", w)
+	if err := repo.CreateMount(ctx, &rack.RackMount{OrganizationID: f.OrgA, RackID: foreign.rack1, CIID: w,
+		PositionU: 1, HeightU: 1, Face: "front"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ledgerSize(); got != before {
+		t.Errorf("ledger after placing a CI without asset and a CI in a foreign rack: %d movements, want %d", got, before)
+	}
+	if got := assetLocation(t, f, foreignAsset); got != "" {
+		t.Errorf("asset location after the colocation mount: %q, want none", got)
 	}
 }

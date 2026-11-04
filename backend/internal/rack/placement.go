@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -37,9 +39,11 @@ type placedCI struct {
 // recordPlacement applies a mount, move or unmount to the location of the
 // CI and records it (RCK-03, DB-05), in the transaction of the change:
 //   - the location becomes the rack (mount, move) or the rack's room
-//     (unmount); for a CI linked to an asset the asset's location is set
-//     and mirrored to every CI of the asset (trg_asset_propagate_location),
-//     otherwise the CI's;
+//     (unmount); for a CI linked to an asset the movement service books a
+//     transfer of the asset (movement.RecordTx, reason rack_mount,
+//     rack_move or rack_unmount, WP-274), which sets the asset's location,
+//     mirrored to every CI of the asset (trg_asset_propagate_location),
+//     and writes stock.movement; otherwise the CI's location is set;
 //   - every CI whose location changed, the placed CI and the other CIs of
 //     its asset, gets ci.version + 1, a location_change row in ci_change
 //     with that version and an audit entry (F-240, F-241);
@@ -48,9 +52,14 @@ type placedCI struct {
 //     another CI of the asset or the CI itself may not be updated under its
 //     row level security, the placement is refused with ErrConflict (409)
 //     and the transaction stores nothing (F-379, F-380); the asset update
-//     reports a CI it could not move (asset_location_ci_scope, 000181).
+//     reports a CI it could not move (asset_location_ci_scope, 000181),
+//     the service an asset it cannot see or lock.
 //     A placement that changes no location (repositioning, colocation) is
-//     not refused.
+//     not refused and books no movement.
+//
+// The versions are raised before the location is set, for every CI whose
+// location differs from the new one; the movement follows the ci_change
+// rows and precedes the audit, so event and audit come last (K20).
 func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string, before, after *RackMount) error {
 	var location string
 	if after != nil {
@@ -71,31 +80,24 @@ func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string,
 	if foreignClient {
 		location = cis[0].oldLocation
 	}
-	// raised holds the new version of every CI whose location changed.
+	// raised holds the new version of every CI whose location changes.
 	raised := map[string]int64{}
-	if cis[0].oldLocation != location {
-		var tag pgconn.CommandTag
-		if assetID != "" {
-			tag, err = tx.Exec(ctx, `UPDATE asset SET location_id = $3, updated_at = now()
-				WHERE organization_id = $1 AND id = $2`, orgID, assetID, location)
-		} else {
-			tag, err = tx.Exec(ctx, `UPDATE ci SET location_id = $3, updated_at = now()
-				WHERE organization_id = $1 AND id = $2`, orgID, ciID, location)
-		}
-		var pgErr *pgconn.PgError
-		switch {
-		case errors.As(err, &pgErr) && pgErr.ConstraintName == "asset_location_ci_scope":
-			// Another CI of the asset is invisible or may not be updated.
-			return ruleError(ErrConflict, placementOutsideScope)
-		case err != nil:
-			return fmt.Errorf("set location from rack placement: %w", err)
-		case tag.RowsAffected() == 0:
-			// The update policies (asset_scoped_update, ci_scoped_update)
-			// hide the row: no client, or a client or site outside the scope.
-			return ruleError(ErrConflict, placementOutsideScope)
-		}
-		if raised, err = raiseMovedVersions(ctx, tx, orgID, cis); err != nil {
+	relocated := cis[0].oldLocation != location
+	if relocated {
+		if raised, err = raiseMovedVersions(ctx, tx, orgID, cis, location); err != nil {
 			return err
+		}
+		if assetID == "" {
+			tag, updErr := tx.Exec(ctx, `UPDATE ci SET location_id = $3, updated_at = now()
+				WHERE organization_id = $1 AND id = $2`, orgID, ciID, location)
+			switch {
+			case updErr != nil:
+				return fmt.Errorf("set location from rack placement: %w", updErr)
+			case tag.RowsAffected() == 0:
+				// The update policy (ci_scoped_update) hides the row: a
+				// client or site outside the scope.
+				return ruleError(ErrConflict, placementOutsideScope)
+			}
 		}
 	}
 
@@ -144,6 +146,16 @@ func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string,
 				return err
 			}
 		}
+	}
+	// The asset's location follows through the movement service, after the
+	// ci_change rows and before the audit entries (K20).
+	if relocated && assetID != "" {
+		if err := bookTransfer(ctx, tx, orgID, assetID, userID, action, cis[0].oldLocation, location); err != nil {
+			return err
+		}
+	}
+	for i, c := range cis {
+		_, moved := raised[c.id]
 		to := c.oldLocation
 		if moved {
 			to = location
@@ -170,6 +182,37 @@ func recordPlacement(ctx context.Context, tx pgx.Tx, orgID, ciID, action string,
 		}
 	}
 	return nil
+}
+
+// movementReasons are the reasons of the transfer a placement books.
+var movementReasons = map[string]string{
+	"ci.rack_mounted":   "rack_mount",
+	"ci.rack_moved":     "rack_move",
+	"ci.rack_unmounted": "rack_unmount",
+}
+
+// bookTransfer books the location change of the asset of a placement as a
+// transfer through the movement service in tx (WP-274). An asset the
+// service cannot see or lock, a location it refuses and a CI of the asset
+// outside the scope (asset_location_ci_scope) refuse the placement with
+// ErrConflict (409, WP-650).
+func bookTransfer(ctx context.Context, tx pgx.Tx, orgID, assetID, actorID, action, from, to string) error {
+	err := movement.RecordTx(ctx, tx, &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: assetID,
+		MovementType: "transfer", FromLocationID: from, ToLocationID: to, ActorID: actorID, Reason: movementReasons[action]})
+	var pgErr *pgconn.PgError
+	var fieldErr *api.FieldError
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, movement.ErrAssetNotFound),
+		errors.As(err, &fieldErr),
+		errors.As(err, &pgErr) && pgErr.ConstraintName == "asset_location_ci_scope":
+		// The asset or another CI of the asset is invisible or may not be
+		// updated.
+		return ruleError(ErrConflict, placementOutsideScope)
+	default:
+		return fmt.Errorf("book rack placement movement: %w", err)
+	}
 }
 
 // placedCIs reads the asset of the placed CI and the CIs the placement sets
@@ -210,18 +253,19 @@ func placedCIs(ctx context.Context, tx pgx.Tx, orgID, ciID, location string) (
 }
 
 // raiseMovedVersions raises ci.version by 1 for every CI of cis whose
-// location differs from its location before the placement and returns the
-// new versions by CI.
-func raiseMovedVersions(ctx context.Context, tx pgx.Tx, orgID string, cis []placedCI) (map[string]int64, error) {
-	ids, olds := make([]string, len(cis)), make([]string, len(cis))
+// location differs from location, the location the placement sets, and
+// returns the new versions by CI. It runs before the location is set: the
+// placed CI, or every CI of its asset through the mirror of the asset
+// location, takes location afterwards.
+func raiseMovedVersions(ctx context.Context, tx pgx.Tx, orgID string, cis []placedCI, location string) (map[string]int64, error) {
+	ids := make([]string, len(cis))
 	for i, c := range cis {
-		ids[i], olds[i] = c.id, c.oldLocation
+		ids[i] = c.id
 	}
 	rows, err := tx.Query(ctx, `UPDATE ci c SET version = c.version + 1, updated_at = now()
-		FROM unnest($2::uuid[], $3::text[]) AS b(id, old_location)
-		WHERE c.organization_id = $1 AND c.id = b.id
-		  AND c.location_id IS DISTINCT FROM NULLIF(b.old_location, '')::uuid
-		RETURNING c.id::text, c.version`, orgID, ids, olds)
+		WHERE c.organization_id = $1 AND c.id = ANY($2::uuid[])
+		  AND c.location_id IS DISTINCT FROM NULLIF($3, '')::uuid
+		RETURNING c.id::text, c.version`, orgID, ids, location)
 	if err != nil {
 		return nil, fmt.Errorf("raise ci version: %w", err)
 	}

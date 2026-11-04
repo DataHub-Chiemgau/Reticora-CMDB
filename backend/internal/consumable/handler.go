@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -128,6 +129,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
+		// Movements of the ledger keep the consumable (RESTRICT, WP-744):
+		// 409 with dependencies ["stock_movement"] (WP-274).
+		if movement.IsLedgerReference(err) {
+			movement.WriteLedgerDependency(w, r)
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
 		return
 	}

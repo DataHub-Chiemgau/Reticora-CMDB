@@ -1596,7 +1596,9 @@
     "record": "Bewegung erfassen",
     "total": "Gesamt",
     "available": "Verfügbar",
-    "subtitle": "Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit."
+    "subtitle": "Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit.",
+    "objectKind": "Objektart",
+    "kindAsset": "Asset (serialisiert)"
   },
   "impact": {
     "affectedList": "Betroffen:",

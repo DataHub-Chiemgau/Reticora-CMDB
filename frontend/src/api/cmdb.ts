@@ -770,6 +770,7 @@ export interface StockMovement {
   id: string;
   item_kind: string;
   asset_id?: string;
+  consumable_id?: string;
   quantity_item_id?: string;
   movement_type: string;
   from_location_id?: string;
@@ -777,6 +778,8 @@ export interface StockMovement {
   quantity?: number;
   actor_id?: string;
   reason?: string;
+  /** When the movement happened; the list sorts newest first on it (WP-274). */
+  occurred_at: string;
   created_at: string;
 }
 
@@ -795,8 +798,12 @@ export const inventoryApi = {
   listMovements(
     params: {
       asset_id?: string;
+      consumable_id?: string;
       movement_type?: string;
       location_id?: string;
+      /** RFC 3339 bounds of occurred_at, inclusive. */
+      occurred_from?: string;
+      occurred_to?: string;
       limit?: number;
       offset?: number;
     } = {},

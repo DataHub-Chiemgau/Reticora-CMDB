@@ -1596,7 +1596,9 @@
     "record": "Record movement",
     "total": "Total",
     "available": "Available",
-    "subtitle": "Movement ledger, quantity items, reservations and availability."
+    "subtitle": "Movement ledger, quantity items, reservations and availability.",
+    "objectKind": "Object kind",
+    "kindAsset": "Asset (serialized)"
   },
   "impact": {
     "affectedList": "Affected:",

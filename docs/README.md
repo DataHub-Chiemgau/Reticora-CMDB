@@ -980,9 +980,11 @@ unchanged in their list.
   `relationship.deleted` → `relationship.removed`, `lifecycle.transitioned` →
   `lifecycle.changed`, `inventory.movement` and `asset.movement` →
   `stock.movement`. A subscription on a former name receives the event of the
-  new type once, under the new name. `inventory.movement` is still dispatched
-  directly by `POST /stock-movements` until WP-274 writes `stock.movement`;
-  `reservation.created`/`reservation.released` likewise until WP-277.
+  new type once, under the new name. Since WP-274 the movement service writes
+  `stock.movement` to the outbox (with `client_id` and `site_id` of the
+  movement); `inventory.movement` is no longer dispatched directly.
+  `reservation.created`/`reservation.released` are dispatched directly until
+  WP-277.
 - **Deprecated names without an event contract** (`deprecatedEvents`):
   `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`,
   `ci_attribute.changed`, `composition.created`, `composition.updated`,

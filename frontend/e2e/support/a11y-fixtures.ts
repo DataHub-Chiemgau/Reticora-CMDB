@@ -1035,6 +1035,7 @@ export const A11Y_HANDLERS: Handler[] = [
       list([
         {
           id: 'dd000000-0000-4000-8000-000000000001',
+          organization_id: ORG,
           item_kind: 'asset',
           asset_id: ASSET,
           movement_type: 'transfer',
@@ -1042,6 +1043,7 @@ export const A11Y_HANDLERS: Handler[] = [
           to_location_id: BUILDING,
           actor_id: USER,
           reason: 'a11y-move',
+          occurred_at: AT,
           created_at: AT,
         },
       ]),
