@@ -740,6 +740,49 @@ func (r *PGRepository) LockCI(ctx context.Context, orgID, ciID string) error {
 	})
 }
 
+var _ SerialMismatchReader = (*PGRepository)(nil)
+
+// OpenedSerialMismatch implements SerialMismatchReader (WP-741): one
+// statement reads the open serial_mismatch item of the CI that the context
+// transaction opened (created_at is the transaction's now(), index
+// review_item_open_age); nil without one. Its review.created is written
+// last in the transaction as the review repository writes that of an item
+// it inserts (NTF-05, EVT-01).
+func (r *PGRepository) OpenedSerialMismatch(ctx context.Context, orgID, ciID string) (*ReviewItem, error) {
+	var item *ReviewItem
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		found := &ReviewItem{OrganizationID: orgID, Kind: ReviewKindSerialMismatch, Status: ReviewStatusOpen}
+		var candidates []string
+		var createdAt time.Time
+		err := tx.QueryRow(ctx, `SELECT id::text, payload, COALESCE(candidate_ci_ids::text[], ARRAY[]::text[]),
+				COALESCE(object_key, ''), COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), created_at
+			FROM review_item
+			WHERE organization_id = $1 AND status = 'open' AND created_at = now() AND kind = 'serial_mismatch'
+			  AND payload ->> 'ci_id' = $2::text`, orgID, ciID).
+			Scan(&found.ID, &found.Payload, &candidates, &found.ObjectKey, &found.ClientID, &found.SiteID, &createdAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("opened serial_mismatch: %w", err)
+		}
+		if len(candidates) > 0 {
+			found.CandidateCIIDs = candidates
+		}
+		found.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
+		found.UpdatedAt = found.CreatedAt
+		item = found
+		data := map[string]any{"id": found.ID, "kind": found.Kind, "object_key": found.ObjectKey,
+			"candidate_ci_ids": found.CandidateCIIDs, "client_id": found.ClientID, "site_id": found.SiteID}
+		return database.BeforeCommit(ctx, func() error {
+			_, appendErr := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.ReviewCreated,
+				EntityID: found.ID, Data: data})
+			return appendErr
+		})
+	})
+	return item, err
+}
+
 // The identity locks of the ingest lanes (WP-334); the record and batch
 // transactions find them by type assertion.
 var _ IdentityLocker = (*PGRepository)(nil)

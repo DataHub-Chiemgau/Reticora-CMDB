@@ -606,6 +606,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
+	// The ingest links CIs to the asset with their serial number (WP-741),
+	// not while the module inventory is off (WP-214).
+	if links, ok := repos.Asset.(discovery.AssetLinks); ok && opts.Modules.Enabled(ModuleInventory) {
+		discoveryHandler.WithAssetLinks(links)
+	}
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
 	// The collectors' edge data path checks the discovery license like the
 	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).

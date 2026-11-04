@@ -87,9 +87,11 @@ func discoveredAttributes(item *IngestItem) map[string]any {
 }
 
 // createDiscoveredCI creates the CI of a discovered device and records the
-// provenance of every discovered field (spec §13).
-func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source string) (ci.Item, error) {
+// provenance of every discovered field (spec §13). A non-empty assetID
+// links the CI to that asset with the insert (WP-741).
+func (h *Handler) createDiscoveredCI(ctx context.Context, orgID string, item *IngestItem, typeID, source, assetID string) (ci.Item, error) {
 	newItem := discoveredCI(orgID, item, typeID, source)
+	newItem.AssetID = assetID
 	if err := h.ciRepo.Create(ctx, &newItem); err != nil {
 		return ci.Item{}, err
 	}
@@ -436,7 +438,7 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 	if uerr := ci.CheckUnique(ctx, h.ciRepo, orgID, typeID, device.ClientID, "", discoveredAttributes(&device)); uerr != nil {
 		return "", uerr
 	}
-	created, err := h.createDiscoveredCI(ctx, orgID, &device, typeID, payloadString(item.Payload, "source"))
+	created, err := h.createDiscoveredCI(ctx, orgID, &device, typeID, payloadString(item.Payload, "source"), "")
 	if err != nil {
 		if ve, ok := ci.AsValidationError(err); ok && len(ve.Violations) > 0 {
 			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: ve.Violations[0].Field,

@@ -355,13 +355,7 @@ func (r *PGRepository) SetPrimaryCI(ctx context.Context, orgID, assetID, ciID st
 // (database.BeforeCommit); source and request come from the request.
 func (r *PGRepository) RecordLink(ctx context.Context, orgID, action, assetID, ciID string, primary bool) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		actorID, actorType := "", "system"
-		if user := strings.TrimSpace(tenant.FromContext(ctx).UserID); user != "" {
-			actorType = "user"
-			if api.IsUUID(user) {
-				actorID = user
-			}
-		}
+		actorID, actorType := linkActor(ctx)
 		entry := audit.Entry{
 			OrganizationID: orgID,
 			ActorID:        actorID,
@@ -378,4 +372,57 @@ func (r *PGRepository) RecordLink(ctx context.Context, orgID, action, assetID, c
 			return nil
 		})
 	})
+}
+
+// linkActor is the actor of a link's audit entry: the user of the request,
+// else the system.
+func linkActor(ctx context.Context) (actorID, actorType string) {
+	actorType = "system"
+	if user := strings.TrimSpace(tenant.FromContext(ctx).UserID); user != "" {
+		actorType = "user"
+		if api.IsUUID(user) {
+			actorID = user
+		}
+	}
+	return actorID, actorType
+}
+
+// The automatic link of the ingest (AST-03, AST-04, WP-741): discovery
+// links a new or matched CI without asset to the one asset of its
+// organization that carries its serial number in normal form
+// (asset.serial_number_norm, lower(btrim()) as review_serial_mismatch
+// compares it). Discovery never creates an asset and changes no asset
+// data: it writes ci.asset_id through the CI domain (ci_change, ci.created
+// or ci.changed), the primary CI only while the asset has none, and the
+// audit entry asset.linked (SerialMatches, RecordSerialLinks).
+
+// MatchSerial is the match of an automatic link in its audit entry.
+const MatchSerial = "serial"
+
+// SerialMatch is an asset whose normalized serial number a discovered CI
+// carries, read and locked by SerialMatches.
+type SerialMatch struct {
+	AssetID string
+	// SerialNorm is the normal form of the asset's serial number.
+	SerialNorm string
+	// ClientID is the asset's client, LocationClientID the client of its
+	// location; "" for none.
+	ClientID         string
+	LocationClientID string
+	// Linked: the asset has a primary CI or a live CI linked to it.
+	Linked bool
+}
+
+// SerialLink is an automatic link of the ingest: the CI CIID, created or
+// matched with the serial number SerialNumber, is linked to AssetID.
+type SerialLink struct {
+	AssetID      string
+	CIID         string
+	SerialNumber string
+}
+
+// NormalizeSerial is the normal form of a serial number as
+// asset.serial_number_norm stores it: lower(btrim()), "" for none.
+func NormalizeSerial(serial string) string {
+	return strings.ToLower(strings.Trim(serial, " "))
 }

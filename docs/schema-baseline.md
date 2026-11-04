@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000240_internal_order_states
+Stand: Migration 000241_asset_serial_norm
 
 ## Prüfung
 
@@ -103,6 +103,17 @@ wird):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_entity_change_version ON entity_change (entity_type, entity_id, entity_version);
+```
+
+Ebenso der Seriennummernindex der automatischen Verknüpfung im Ingest
+(WP-741, Migration 000241; die gespeicherte Spalte `serial_number_norm`
+muss dafür vorab angelegt sein, `ALTER TABLE asset ADD COLUMN IF NOT EXISTS
+serial_number_norm TEXT GENERATED ALWAYS AS (NULLIF(lower(btrim(serial_number)), '')) STORED`,
+was die Tabelle neu schreibt; ohne Vorbau legt die Migration Spalte und Index
+selbst an):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_org_serial_norm ON asset (organization_id, serial_number_norm) WHERE serial_number_norm IS NOT NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein

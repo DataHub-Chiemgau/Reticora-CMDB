@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -543,6 +544,106 @@ type Handler struct {
 	// the batch path per organization since its last run.
 	analyzer    BulkAnalyzer
 	bulkCreated sync.Map
+	// assets links new and matched CIs to the asset with their serial
+	// number (WithAssetLinks, WP-741); nil links none.
+	assets AssetLinks
+}
+
+// AssetLinks is the asset port of the automatic serial link of the ingest
+// (AST-03, AST-04, WP-741); asset.PGRepository implements it. Both calls
+// join the context transaction.
+type AssetLinks interface {
+	// SerialMatches reads and locks (FOR UPDATE OF asset) the assets of
+	// the organization with one of the normalized serial numbers.
+	SerialMatches(ctx context.Context, orgID string, serials []string) ([]asset.SerialMatch, error)
+	// RecordSerialLinks sets the primary CI of the linked assets that have
+	// none and writes the audit entries asset.linked last.
+	RecordSerialLinks(ctx context.Context, orgID string, links []asset.SerialLink) error
+}
+
+// WithAssetLinks makes the ingest link a new or matched CI without asset to
+// the asset that carries its serial number (WP-741). The server attaches it
+// only with the module inventory (WP-214); without it nothing is linked and
+// no statement is added.
+func (h *Handler) WithAssetLinks(links AssetLinks) *Handler {
+	h.assets = links
+	return h
+}
+
+// serialTarget is a CI the ingest may link by its serial number: the
+// serial number it has after the write and its client.
+type serialTarget struct {
+	serial, clientID string
+}
+
+// serialAssets returns per target the asset to link it to, "" for none
+// (WP-741): the one asset of the organization whose normalized serial
+// number is the target's and that has no linked CI, if its client and the
+// client of its location are each empty or the CI's, or the CI has no
+// client (ci_asset_client, ci_location_client: a violation would roll the
+// batch back). Several assets with that serial number, a linked asset or
+// another client leave the target unlinked, without a review. One
+// statement reads and locks the assets of all targets with a serial number
+// after the identity locks; targets without one cost none. Every asset
+// goes to one target at most.
+func (h *Handler) serialAssets(ctx context.Context, orgID string, targets []serialTarget) ([]string, error) {
+	out := make([]string, len(targets))
+	if h.assets == nil {
+		return out, nil
+	}
+	seen := map[string]bool{}
+	var norms []string
+	for i := range targets {
+		if n := asset.NormalizeSerial(targets[i].serial); n != "" && !seen[n] {
+			seen[n] = true
+			norms = append(norms, n)
+		}
+	}
+	if len(norms) == 0 {
+		return out, nil
+	}
+	matches, err := h.assets.SerialMatches(ctx, orgID, norms)
+	if err != nil {
+		return nil, err
+	}
+	byNorm := make(map[string][]int, len(matches))
+	for m := range matches {
+		byNorm[matches[m].SerialNorm] = append(byNorm[matches[m].SerialNorm], m)
+	}
+	used := map[string]bool{}
+	for i := range targets {
+		found := byNorm[asset.NormalizeSerial(targets[i].serial)]
+		if len(found) != 1 {
+			continue
+		}
+		m := &matches[found[0]]
+		if m.Linked || used[m.AssetID] || !clientCompatible(targets[i].clientID, m) {
+			continue
+		}
+		used[m.AssetID] = true
+		out[i] = m.AssetID
+	}
+	return out, nil
+}
+
+// clientCompatible reports whether a CI of client clientID may be linked to
+// the asset m: without a client always, else when the asset's client and
+// that of its location are each empty or the CI's.
+func clientCompatible(clientID string, m *asset.SerialMatch) bool {
+	if clientID == "" {
+		return true
+	}
+	return (m.ClientID == "" || strings.EqualFold(m.ClientID, clientID)) &&
+		(m.LocationClientID == "" || strings.EqualFold(m.LocationClientID, clientID))
+}
+
+// recordSerialLinks completes the automatic links once their CIs carry the
+// asset (asset.PGRepository.RecordSerialLinks).
+func (h *Handler) recordSerialLinks(ctx context.Context, orgID string, links []asset.SerialLink) error {
+	if h.assets == nil || len(links) == 0 {
+		return nil
+	}
+	return h.assets.RecordSerialLinks(ctx, orgID, links)
 }
 
 // BulkAnalyzer refreshes the planner statistics after a mass creation
@@ -1638,12 +1739,24 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			return takenErr
 		}
 		resp.InvalidValues += takenDropped
+		// The asset with the device's serial number is linked with the
+		// insert (WP-741).
+		assetIDs, assetErr := h.serialAssets(ctx, orgID, []serialTarget{{serial: item.SerialNumber, clientID: item.ClientID}})
+		if assetErr != nil {
+			return assetErr
+		}
 		if h.beforeCreate != nil {
 			h.beforeCreate(ctx)
 		}
-		newItem, err := h.createDiscoveredCI(ctx, orgID, &item, createType, source)
+		newItem, err := h.createDiscoveredCI(ctx, orgID, &item, createType, source, assetIDs[0])
 		if err != nil {
 			return err
+		}
+		if assetIDs[0] != "" {
+			if linkErr := h.recordSerialLinks(ctx, orgID, []asset.SerialLink{{AssetID: assetIDs[0], CIID: newItem.ID,
+				SerialNumber: item.SerialNumber}}); linkErr != nil {
+				return linkErr
+			}
 		}
 		out.created = true
 		out.ciID = newItem.ID
@@ -1817,6 +1930,25 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			resp.ProtectedInstanceFields++
 		}
 		update.Attributes = writes
+		// A CI without asset is linked to the asset with its serial number
+		// in this update (WP-741), after its lock (CI → asset). A CI with a
+		// location of its own is not: the link would replace it or hand it
+		// to the asset (E-81), and discovery changes no asset data.
+		var link []asset.SerialLink
+		if matched.AssetID == "" && matched.LocationID == "" {
+			serial := matched.SerialNumber
+			if update.SerialNumber != nil {
+				serial = *update.SerialNumber
+			}
+			assetIDs, assetErr := h.serialAssets(ctx, orgID, []serialTarget{{serial: serial, clientID: matched.ClientID}})
+			if assetErr != nil {
+				return assetErr
+			}
+			if assetIDs[0] != "" {
+				update.AssetID = &assetIDs[0]
+				link = []asset.SerialLink{{AssetID: assetIDs[0], CIID: matched.ID, SerialNumber: serial}}
+			}
+		}
 		// The fields, the status and the reclassification of a
 		// generic_device classified now (CI-11) are one change of the
 		// record in one transaction: one change set with the record's
@@ -1829,6 +1961,21 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			return err
 		}
 		updated := changed.CI
+		if linkErr := h.recordSerialLinks(ctx, orgID, link); linkErr != nil {
+			return linkErr
+		}
+		// A serial number written on a linked CI that differs from the
+		// asset's opened serial_mismatch by trigger (WP-077): announced as
+		// review.created like the other types (NTF-05).
+		if matched.AssetID != "" && update.SerialNumber != nil {
+			opened, reviewErr := h.announceSerialMismatch(ctx, orgID, matched.ID)
+			if reviewErr != nil {
+				return reviewErr
+			}
+			if opened {
+				resp.ReviewItems++
+			}
+		}
 		if conflict {
 			resp.ProtectedOverrides++
 		}
@@ -2182,8 +2329,19 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 		return nil
 	}
 
+	// The new devices with the serial number of an asset are linked to it
+	// with the insert (WP-741): one query for the window.
+	targets := make([]serialTarget, len(pending))
+	for p := range pending {
+		targets[p] = serialTarget{serial: pending[p].ci.SerialNumber, clientID: pending[p].ci.ClientID}
+	}
+	assetIDs, assetErr := h.serialAssets(ctx, orgID, targets)
+	if assetErr != nil {
+		return assetErr
+	}
 	items := make([]*ci.Item, len(pending))
 	for p := range pending {
+		pending[p].ci.AssetID = assetIDs[p]
 		items[p] = &pending[p].ci
 	}
 	if h.beforeCreate != nil {
@@ -2218,6 +2376,15 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 		return err
 	}
 	h.noteBulkCreated(ctx, orgID, len(pending)-len(refused))
+	var links []asset.SerialLink
+	for p := range pending {
+		if !refused[p] && assetIDs[p] != "" {
+			links = append(links, asset.SerialLink{AssetID: assetIDs[p], CIID: pending[p].ci.ID, SerialNumber: pending[p].ci.SerialNumber})
+		}
+	}
+	if err := h.recordSerialLinks(ctx, orgID, links); err != nil {
+		return err
+	}
 	for p := range pending {
 		if refused[p] {
 			continue
