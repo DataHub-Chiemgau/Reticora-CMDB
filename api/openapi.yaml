@@ -26550,7 +26550,7 @@ components:
 
     TicketComment:
       type: object
-      required: [id, organization_id, ticket_id, author_id, content, is_internal, created_at, updated_at]
+      required: [id, organization_id, ticket_id, author_id, author_type, content, is_internal, created_at, updated_at]
       properties:
         id:
           type: string
@@ -26559,7 +26559,12 @@ components:
         ticket_id:
           type: string
         author_id:
+          type: [string, 'null']
+          description: The user who wrote the comment; null exactly for a system comment (author_type system, WP-766).
+        author_type:
           type: string
+          enum: [user, system]
+          description: user for a comment of a user, system for a comment the system writes (internal, without author_id).
         content:
           type: string
         is_internal:

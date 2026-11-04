@@ -655,6 +655,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// Tickets and comments are created through one service (WP-766).
+	tickets := ticket.NewService(repos.Ticket, sla.TicketHooks{Repo: repos.SLA})
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -689,7 +691,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		// The attachments of a ticket are its linked documents (WP-765).
-		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}).WithDocuments(repos.Document),
+		ticket.NewHandler(tickets).WithDocuments(repos.Document),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),

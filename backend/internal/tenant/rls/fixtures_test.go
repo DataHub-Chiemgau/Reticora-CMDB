@@ -96,6 +96,10 @@ var matrixOverrides = map[string]map[string]string{
 	// The number is unique per organization and assigned by a trigger the
 	// matrix skips (WP-290, 000214).
 	"ticket": {"ticket_number": "@seq"},
+	// A user comment (author_type default user) carries its author; the
+	// matrix fills only NOT NULL columns (ticket_comment_author_check,
+	// WP-766, 000234).
+	"ticket_comment": {"author_id": "@uuid"},
 	// A field permission names exactly one role, an object grant exactly
 	// one grantee (WP-264).
 	"field_grant":  {"role_id": "@uuid"},

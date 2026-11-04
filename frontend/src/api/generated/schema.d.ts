@@ -12823,7 +12823,13 @@ export interface components {
       id: string;
       organization_id: string;
       ticket_id: string;
-      author_id: string;
+      /** @description The user who wrote the comment; null exactly for a system comment (author_type system, WP-766). */
+      author_id: string | null;
+      /**
+       * @description user for a comment of a user, system for a comment the system writes (internal, without author_id).
+       * @enum {string}
+       */
+      author_type: 'user' | 'system';
       content: string;
       is_internal: boolean;
       /** Format: date-time */

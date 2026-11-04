@@ -32,18 +32,16 @@ type AttachmentReader interface {
 
 // Handler provides HTTP handlers for ticket endpoints.
 type Handler struct {
+	svc  *Service
 	repo Repository
 	sla  SLAHooks
 	docs AttachmentReader
 }
 
-// NewHandler creates a new ticket handler.
-func NewHandler(repo Repository, hooks ...SLAHooks) *Handler {
-	h := &Handler{repo: repo}
-	if len(hooks) > 0 {
-		h.sla = hooks[0]
-	}
-	return h
+// NewHandler creates a new ticket handler; tickets and comments are created
+// through svc only (WP-766), reads and changes go to its repository.
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc, repo: svc.repo, sla: svc.sla}
 }
 
 // WithDocuments gives the handler the document repository the attachments
@@ -256,7 +254,10 @@ func validateEnums(w http.ResponseWriter, status, priority *string) bool {
 // constraint, policy or SQLSTATE text reaches the client (API-03, F-047),
 // the log keeps it.
 func writeTicketError(w http.ResponseWriter, r *http.Request, err error) {
+	var open *ErrOpenTicketExists
 	switch {
+	case errors.As(err, &open):
+		api.WriteError(w, http.StatusConflict, "Conflict", "an open ticket is already linked to the object")
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrInvalidTransition):
@@ -296,23 +297,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	priority := req.Priority
 	if priority == "" {
-		priority = "medium"
+		priority = DefaultPriority
 	}
 	if !validateEnums(w, nil, &priority) {
 		return
 	}
-	category := req.Category
-	if category == "" {
-		category = "incident"
-	}
 
+	// The service applies the defaults (category incident, status new).
 	ticket := &Ticket{
 		OrganizationID: t.OrganizationID,
 		Title:          req.Title,
 		Description:    req.Description,
 		Status:         StatusNew,
 		Priority:       priority,
-		Category:       category,
+		Category:       req.Category,
 		ReporterID:     t.UserID,
 		AssigneeID:     req.AssigneeID,
 		TeamID:         req.TeamID,
@@ -320,9 +318,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		RelatedAssetID: req.RelatedAssetID,
 		DueDate:        req.DueDate,
 		Tags:           req.Tags,
-	}
-	if ticket.Tags == nil {
-		ticket.Tags = []string{}
 	}
 	// Every field the request sets must be editable (WP-765); the server
 	// defaults of priority and category are no field of the request.
@@ -337,12 +332,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.Create(r.Context(), ticket); err != nil {
+	if err := h.svc.Create(r.Context(), ticket, nil, CreateOptions{}); err != nil {
 		writeTicketError(w, r, err)
 		return
-	}
-	if h.sla != nil {
-		_ = h.sla.ApplyForTicket(r.Context(), t.OrganizationID, ticket)
 	}
 
 	writeTicket(w, r, http.StatusCreated, ticket)
@@ -546,16 +538,14 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: t.OrganizationID,
 		TicketID:       ticketID,
 		AuthorID:       t.UserID,
+		AuthorType:     AuthorUser,
 		Content:        req.Content,
 		IsInternal:     req.IsInternal,
 	}
 
-	if err := h.repo.AddComment(r.Context(), comment); err != nil {
+	if err := h.svc.AddComment(r.Context(), comment); err != nil {
 		writeTicketError(w, r, err)
 		return
-	}
-	if h.sla != nil && !comment.IsInternal {
-		_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, ticketID, time.Now().UTC())
 	}
 
 	api.WriteJSON(w, http.StatusCreated, comment)

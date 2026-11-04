@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -50,7 +52,8 @@ const ticketCommentSelectColumns = `
 	id::text,
 	organization_id::text,
 	ticket_id::text,
-	author_id::text,
+	COALESCE(author_id::text, ''),
+	author_type,
 	content,
 	is_internal,
 	created_at,
@@ -555,15 +558,22 @@ func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 				organization_id,
 				ticket_id,
 				author_id,
+				author_type,
 				content,
 				is_internal
-			) VALUES ($1, $2, $3, $4, $5)
+			) VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id::text, created_at, updated_at
 		`
+		if c.AuthorType == "" {
+			c.AuthorType = AuthorUser
+		}
+		// author_id is set exactly for a user comment
+		// (ticket_comment_author_check, 000234).
 		if err = tx.QueryRow(ctx, query,
 			c.OrganizationID,
 			c.TicketID,
-			c.AuthorID,
+			nilIfEmpty(c.AuthorID),
+			c.AuthorType,
 			c.Content,
 			c.IsInternal,
 		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt); err != nil {
@@ -868,6 +878,133 @@ func (r *PGRepository) DeleteLink(ctx context.Context, orgID, ticketID, linkID s
 	})
 }
 
+// ─── Service support (WP-766) ──────────────────────────────────────────────────
+
+// RunInTx implements Repository (pattern discovery.(*PGRepository).RunInTx):
+// fn runs in one transaction of the context's tenant scope.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// LockOpenTicket implements Repository: pg_advisory_xact_lock on the target
+// serializes the exclusive creations for it until the commit; the open
+// ticket is read under the ticket RLS, so a ticket the caller does not see
+// does not count and is not disclosed.
+func (r *PGRepository) LockOpenTicket(ctx context.Context, orgID string, target Target) (*LinkedTicket, error) {
+	lt, ok := linkTargets[target.EntityType]
+	if !ok || !api.IsUUID(target.EntityID) {
+		return nil, ErrNotFound
+	}
+	var found *LinkedTicket
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('ticket_exclusive:' || $1::uuid::text || ':' || $2 || ':' || $3::uuid::text, 0))`,
+			orgID, target.EntityType, target.EntityID); err != nil {
+			return fmt.Errorf("lock ticket target: %w", err)
+		}
+		var t LinkedTicket
+		err := tx.QueryRow(ctx, `SELECT ticket.id::text, ticket.ticket_number, ticket.status
+			FROM ticket_link JOIN ticket ON ticket.id = ticket_link.ticket_id
+			WHERE ticket_link.organization_id = $1 AND ticket_link.entity_type = $2 AND ticket_link.`+lt.column+` = $3
+			  AND ticket.status <> '`+StatusClosed+`' AND `+ticketVisible+`
+			ORDER BY ticket.ticket_number LIMIT 1`, orgID, target.EntityType, target.EntityID).Scan(&t.ID, &t.TicketNumber, &t.Status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read open ticket of target: %w", err)
+		}
+		found = &t
+		return nil
+	})
+	return found, err
+}
+
+// LinkedTickets implements Repository: one query over ticket_link joined
+// with ticket under the ticket RLS for all ids (= ANY).
+func (r *PGRepository) LinkedTickets(ctx context.Context, orgID, entityType string, ids []string) (map[string][]LinkedTicket, error) {
+	out := map[string][]LinkedTicket{}
+	lt, ok := linkTargets[entityType]
+	if !ok {
+		return out, nil
+	}
+	// The ids reach SQL only as UUIDs; the result keys are the ids as given.
+	byLower := make(map[string]string, len(ids))
+	uuids := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if api.IsUUID(id) {
+			byLower[strings.ToLower(id)] = id
+			uuids = append(uuids, id)
+		}
+	}
+	if len(uuids) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT ticket_link.`+lt.column+`::text, ticket.id::text, ticket.ticket_number, ticket.status
+			FROM ticket_link JOIN ticket ON ticket.id = ticket_link.ticket_id
+			WHERE ticket_link.organization_id = $1 AND ticket_link.entity_type = $2 AND ticket_link.`+lt.column+` = ANY($3::uuid[])
+			  AND `+ticketVisible+`
+			ORDER BY ticket.ticket_number`, orgID, entityType, uuids)
+		if err != nil {
+			return fmt.Errorf("list linked tickets: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var entityID string
+			var t LinkedTicket
+			if err = rows.Scan(&entityID, &t.ID, &t.TicketNumber, &t.Status); err != nil {
+				return fmt.Errorf("scan linked ticket: %w", err)
+			}
+			key := byLower[strings.ToLower(entityID)]
+			out[key] = append(out[key], t)
+		}
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("iterate linked tickets: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RecordOrigin implements Repository: the audit entry ticket.create with
+// origin_type, origin_id and ticket_number, written as the last write of
+// the transaction (database.BeforeCommit, pattern lastInTx of the CI
+// repository, K20); it marks the request as audited (audit.Recorded), so
+// the route audit writes none.
+func (r *PGRepository) RecordOrigin(ctx context.Context, t *Ticket, origin Target) error {
+	actor := strings.TrimSpace(tenant.FromContext(ctx).UserID)
+	actorType := "user"
+	if actor == "" {
+		actorType = "system"
+	}
+	entry := audit.Entry{
+		OrganizationID: t.OrganizationID,
+		ActorID:        actor,
+		ActorType:      actorType,
+		Action:         "ticket.create",
+		ResourceType:   "ticket",
+		ResourceID:     t.ID,
+		Changes: map[string]interface{}{
+			"origin_type": origin.EntityType, "origin_id": origin.EntityID, "ticket_number": t.TicketNumber,
+		},
+	}
+	return database.WithRequestTenant(ctx, r.pool, t.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		write := func() error {
+			if _, err := audit.NewPGRecorder().Record(ctx, tx, entry); err != nil {
+				return fmt.Errorf("record ticket origin: %w", err)
+			}
+			return nil
+		}
+		if !database.InTx(ctx) {
+			return write()
+		}
+		return database.BeforeCommit(ctx, write)
+	})
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -926,6 +1063,7 @@ func scanComment(scanner scanner) (*Comment, error) {
 		&item.OrganizationID,
 		&item.TicketID,
 		&item.AuthorID,
+		&item.AuthorType,
 		&item.Content,
 		&item.IsInternal,
 		&item.CreatedAt,

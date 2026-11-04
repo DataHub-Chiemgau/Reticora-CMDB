@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000232_relationship_metadata_schema
+Stand: Migration 000234_ticket_comment_system_author
 
 ## Prüfung
 
@@ -1178,6 +1178,17 @@ den Spiegel nach einer Umbenennung nach. `asset_status_from_lifecycle`
 `retired`, `disposed`, sonst `in_stock`; bei NULL unverändert).
 Datenmigration: `saved_view.filter_spec` (`where`, `sort`, `columns`) und
 `attribute_definition.computed` verwenden die neuen Namen.
+
+Systemkommentare von Tickets (TKT-01, WP-766, Migration 000234):
+`ticket_comment.author_id` ist nullable, dazu kommt `author_type` (TEXT NOT
+NULL DEFAULT `user`, `ticket_comment_author_type_check`: `user`, `system`);
+`ticket_comment_author_check` verlangt `author_id` genau bei `user`
+(`(author_type = 'user') = (author_id IS NOT NULL)`). Bestandskommentare
+erhalten `user` über den Default. Der Fremdschlüssel
+`ticket_comment_author_id_fkey`, RLS (`ticket_comment_tenant_isolation` und
+die scoped Policies) und `derive_ticket_comment_scope` bleiben unverändert.
+Die Down-Migration löscht die Systemkommentare und stellt NOT NULL wieder
+her.
 
 ## Tabellen, RLS und Policies
 
