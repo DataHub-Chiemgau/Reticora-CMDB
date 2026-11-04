@@ -3,7 +3,10 @@ package search
 
 import (
 	"context"
+	"slices"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
 const MaxQueryLength = 512
@@ -23,6 +26,10 @@ type Document struct {
 	ClientID  string    `json:"client_id,omitempty"`
 	SiteID    string    `json:"site_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
+	// Fields are the summary columns by field key (SummaryFields, RBA-07,
+	// WP-266). The PostgreSQL index stores them as field rows; they are
+	// never serialized, so neither a hit nor a remote index carries them.
+	Fields map[string]string `json:"-"`
 }
 
 type Query struct {
@@ -33,6 +40,60 @@ type Query struct {
 	Limit          int
 	Offset         int
 	Highlight      bool
+	// Policy is the field policy of the principal (RBA-07, WP-266): with a
+	// restriction of ci, asset, document or ticket, a hit of that type
+	// matches, ranks and shows only its title and the summary fields
+	// readable for its type and scope. The REST handler and the GraphQL
+	// resolver always set it. nil is reserved for internal callers (the
+	// copy of HybridBackend.ReindexTenant, the AI retriever) and answers
+	// without field permissions.
+	Policy *permission.FieldPolicy
+}
+
+// SummaryFields are the field keys of the summary columns per entity type,
+// in the order of the summary (WP-266). The title (name or title) is a
+// structural field and no field row. Other entity types have no field
+// permissions: their summary is their only hit basis.
+var SummaryFields = map[string][]string{
+	"ci": {"core.hostname", "core.manufacturer", "core.model", "core.serial_number", "core.os_name", "core.os_version"},
+	"asset": {"core.asset_tag", "core.category", "core.status", "core.supplier", "core.serial_number", "core.location",
+		"core.notes"},
+	"document": {"core.description", "core.file_name", "core.category", "core.tags"},
+	"ticket":   {"core.description", "core.status", "core.priority", "core.category", "core.tags"},
+}
+
+// fieldTypes are the entity types with field rows, in a fixed order.
+var fieldTypes = []string{"ci", "asset", "document", "ticket"}
+
+// restrictedTypes returns the queried entity types with field rows whose
+// fields the policy restricts; none without a policy.
+func (q *Query) restrictedTypes() []string {
+	if q.Policy == nil {
+		return nil
+	}
+	var out []string
+	for _, t := range fieldTypes {
+		if len(q.EntityTypes) > 0 && !slices.Contains(q.EntityTypes, t) {
+			continue
+		}
+		if q.Policy.Restricted(permission.ObjectKind(t)) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// readableFields returns the summary fields of the entity type that the
+// policy lets the principal read for an object of the type and scope, in
+// summary order.
+func readableFields(policy *permission.FieldPolicy, entityType, typeID string, ref *permission.ObjectRef) []string {
+	var out []string
+	for _, key := range SummaryFields[entityType] {
+		if policy.Level(permission.ObjectKind(entityType), typeID, key, *ref).Readable() {
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 type Hit struct {

@@ -188,6 +188,12 @@ type Document struct {
 	Metadata       map[string]string
 	ClientID       string
 	SiteID         string
+	// Fields are the summary columns by field key (core.<column>, RBA-07,
+	// WP-266): the PostgreSQL index stores them as field rows, so a search
+	// with restricted field permissions matches the readable ones only.
+	// They are never serialized: neither a hit nor a remote index carries
+	// them.
+	Fields map[string]string `json:"-"`
 }
 
 // EntityTypeCI is the search entity type under which CIs are indexed.
@@ -205,7 +211,23 @@ func IndexDocumentFor(item *Item) Document {
 		URL:            "/cmdb/" + item.ID,
 		ClientID:       item.ClientID,
 		SiteID:         item.SiteID,
+		Fields:         ciSummaryFields(item),
 	}
+}
+
+// ciSummaryFields are the summary columns of the CI by field key (the
+// columns of ciSummary); empty values are left out.
+func ciSummaryFields(item *Item) map[string]string {
+	fields := make(map[string]string, 6)
+	for _, f := range [...]struct{ key, value string }{
+		{"core.hostname", item.Hostname}, {"core.manufacturer", item.Manufacturer}, {"core.model", item.Model},
+		{"core.serial_number", item.SerialNumber}, {"core.os_name", item.OSName}, {"core.os_version", item.OSVersion},
+	} {
+		if f.value != "" {
+			fields[f.key] = f.value
+		}
+	}
+	return fields
 }
 
 func ciSummary(item *Item) string {

@@ -212,10 +212,23 @@ func buildOpenSearchQuery(q *Query, scope *database.TenantScope) (map[string]any
 	}
 	return body, nil
 }
+
+// Query searches the remote index under the tenant scope of ctx.
+//
+// The index has no field mappings (TEC-12 [P5]): with restricted field
+// permissions it cannot tell which fields matched, so it answers no hits
+// (fail-closed, RBA-07, WP-266); HybridBackend answers such a query from
+// PostgreSQL.
 func (b *OpenSearchBackend) Query(ctx context.Context, q *Query) (Result, error) {
 	scope, ok := database.TenantScopeFromContext(ctx)
 	if !ok {
 		return Result{}, database.ErrNoTenantScope
+	}
+	if len(q.restrictedTypes()) > 0 {
+		if err := validateQuery(q.Text); err != nil {
+			return Result{}, err
+		}
+		return Result{Data: []Hit{}, Limit: q.Limit, Offset: q.Offset}, nil
 	}
 	body, err := buildOpenSearchQuery(q, &scope)
 	if err != nil {

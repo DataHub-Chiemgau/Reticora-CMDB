@@ -24,7 +24,8 @@ func NewCIIndexer(backend Backend) *CIIndexer {
 }
 
 // IndexDocument upserts a CI document into the search index. Client and site
-// of the CI travel along so remote indexes can filter on them (TEC-12).
+// of the CI travel along so remote indexes can filter on them (TEC-12), its
+// summary fields so the PostgreSQL index writes its field rows (WP-266).
 func (a *CIIndexer) IndexDocument(ctx context.Context, doc *ci.Document) error {
 	sdoc := searchDocument(doc)
 	return a.Backend.IndexDocument(ctx, &sdoc)
@@ -67,6 +68,7 @@ func searchDocument(doc *ci.Document) Document {
 		Metadata:       doc.Metadata,
 		ClientID:       doc.ClientID,
 		SiteID:         doc.SiteID,
+		Fields:         doc.Fields,
 	}
 }
 

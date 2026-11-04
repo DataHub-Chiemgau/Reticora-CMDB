@@ -440,6 +440,13 @@ je Eintrag stehen in `known_gaps.go`; die Tabelle wird mit
 `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run TestLeakyIndexesDocumented
 ./internal/tenant/rls/` neu erzeugt.
 
+Die Feldzeilen der Volltextsuche (`search_document_field`, 000228, RBA-07,
+WP-266) haben keinen GIN-Index auf `vector`: `tsvector_ops` hat keinen
+leakproof Operator, die Liste oben würde wachsen. Die Suche filtert mit
+eingeschränkten Feldrechten über `search_document.search_vector` vor und
+liest die Feldzeilen ihrer Kandidaten über den Primärschlüssel
+`(document_id, field)`.
+
 <!-- rls-leaky-indexes:begin -->
 
 | Index | Tabelle | Nicht leakproof |
@@ -1279,6 +1286,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
+| `search_document_field` | ja | ja | search_document_field_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |
 | `service_account_role` | ja | ja | service_account_role_isolation (ALL) |

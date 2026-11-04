@@ -135,3 +135,33 @@ func sortedUnique(keys []string) []string {
 	sort.Strings(out)
 	return slices.Compact(out)
 }
+
+// ObjectGrantIDs returns the ids of the objects of the kind with an object
+// grant for a role or team of the principal, lower case and sorted: only
+// for them does the level of a field depend on the object id (the
+// full-text search, WP-266, resolves the other objects per type and
+// scope). Without a restriction it is empty.
+func (p *FieldPolicy) ObjectGrantIDs(kind ObjectKind) []string {
+	if p == nil || p.unrestricted {
+		return nil
+	}
+	var out []string
+	for id, grants := range p.idx.object[kind] {
+		for _, g := range grants {
+			applies := g.GranteeTeamID != nil && p.teams[*g.GranteeTeamID]
+			if key := roleKey(g.GranteeRoleID, g.GranteeCustomRoleID); !applies && key != "" {
+				for i := range p.roles {
+					if p.roles[i].key == key {
+						applies = true
+						break
+					}
+				}
+			}
+			if applies {
+				out = append(out, strings.ToLower(id))
+				break
+			}
+		}
+	}
+	return sortedUnique(out)
+}

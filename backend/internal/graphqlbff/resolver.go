@@ -312,8 +312,14 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 	if q.sources.Search == nil {
 		return nil, errUnavailable
 	}
+	// The hits match and show the fields the caller may read (RBA-07,
+	// WP-266).
+	fields, err := policy(ctx)
+	if err != nil {
+		return nil, err
+	}
 	res, err := q.sources.Search.Query(ctx, &search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
-		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage)})
+		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage), Policy: fields})
 	if err != nil {
 		return nil, gqlError(codeBadInput, err.Error())
 	}
