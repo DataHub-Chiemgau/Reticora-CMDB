@@ -1373,7 +1373,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assets */
+    /**
+     * List assets
+     * @description The assets visible under the caller's scope (API-02, WP-740). `filter[field][op]` on inventory_no, barcode, rfid_tag, serial_number, manufacturer, model, cost_center, supplier_id, contract_id, owner_user_id, owner_team_id, lifecycle_state, location_id, client_id, purchase_date and warranty_until; `sort` (or sort_by/sort_dir) on created_at (default, descending), updated_at, name, inventory_no, category, status, manufacturer, model, serial_number, lifecycle_state, purchase_date and warranty_until; `fields` selects members of Asset after the field-permission projection (a field the caller cannot read stays missing). An unknown filter, sort or response field is 422. status, category, client_id and search (or q) remain as aliases. total is the count of the filtered list in the caller's scope.
+     */
     get: operations['listAssets'];
     put?: never;
     /**
@@ -1397,15 +1400,24 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get an asset */
+    /**
+     * Get an asset
+     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id).
+     */
     get: operations['getAsset'];
     put?: never;
     post?: never;
-    /** Delete an asset */
+    /**
+     * Delete an asset
+     * @description Deletes the asset for good and writes asset.deleted (WP-740). An asset with stock movements or a disposal record (both append-only) cannot be deleted (409, E-121); its end is a lifecycle state (retired, disposed).
+     */
     delete: operations['deleteAsset'];
     options?: never;
     head?: never;
-    /** Update an asset */
+    /**
+     * Update an asset
+     * @description Optimistic concurrency (API-07, WP-740): If-Match names the version the editor read (ETag of GET, POST or PATCH). A stale version is refused with 409 only when a field of the request changed since; a version written outside the asset API (stock movement, rack placement, lifecycle transition, stocktake, CI merge, delete or restore of a linked CI) counts as a change of every field of the request. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     */
     patch: operations['updateAsset'];
     trace?: never;
   };
@@ -2839,6 +2851,29 @@ export interface paths {
      * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss: an item of a reservation conflict (payload reservation_ip_id) is accepted by releasing the reservation, 422 when it is already released or the item names none; an item of duplicate observations carries payload address, vrf_id, holders (every ip_address row of the address in the VRF with ip_address_id, interface_id, ci_id and type) and side_keys, and accept chooses a side: the address at the CI ci_id is stale and all its rows of the address are removed, with one CI involved that CI is the side, with several ci_id from candidate_ci_ids is required (400 otherwise, like merge), 422 when that CI no longer holds the address next to another side; dismiss keeps every side; 501 without IPAM; serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/review-items/{id}/ticket': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open a ticket for a review item
+     * @description Opens a ticket for an open review item through the ticket service (TKT-01, WP-291); the item stays open. Requires ticket:write (route) and review:resolve (403 otherwise), the module ticketing (404 while it is off) and the feature ticketing_essential (403 feature-not-entitled). The ticket is linked to the item (ticket_link review_item), to every candidate CI (ci) and, for serial_mismatch, to the asset of payload.asset_id (asset, also related_asset_id). The first candidate CI (else payload.ci_id or payload.matched_ci_id) is related_ci_id, so the ticket takes its client and site; an item without candidates opens an organization-wide ticket, which a client- or site-restricted caller cannot create (403), and a team-restricted caller must name a team_id of its scope (403 otherwise). Title "<kind>: <payload.name | payload.cidr | CI name>", the description names object_key and the payload fields without raw_data and fingerprint, category task, status as POST /tickets. The priority follows the type (high: ambiguous_identity, probable_duplicate, resurrected_device, duplicate_ip, serial_mismatch, unlicensed_ci; medium: conflicting_values, override_conflict, unclassified_device, unknown_relationship; low: scope_suggested); priority of the body takes precedence. At most one ticket that is not closed is linked to an item: a second one is 409 naming the id and ticket_number of the open ticket (a ticket the caller does not see does not count and is not named). One audit entry ticket.create names the ticket and the review item. The endpoint is idempotent per item, so the inbox can open tickets for many items with one request each.
+     */
+    post: operations['createReviewItemTicket'];
     delete?: never;
     options?: never;
     head?: never;
@@ -11350,6 +11385,16 @@ export interface components {
       asset?: components['schemas']['CIAssetFacts'];
       /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
+      /**
+       * Format: uuid
+       * @description User responsible for the CI in the system (CI-07): the ID of the user (app_user.id), no personal data; clients resolve the name. Separate from the contact role owner (GET /api/v1/cis/{id}/contacts). For a CI linked to an asset it mirrors the asset's owner (DB-05). Subject to the field permissions (core.owner_user_id).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Team responsible for the CI (CI-07). A team-scoped principal sees the CIs of its teams and those without a team and writes only those of its teams (TEN-05). For a CI linked to an asset it mirrors the asset's owner (DB-05). Deleting the team clears it. Subject to the field permissions (core.owner_team_id).
+       */
+      owner_team_id?: string;
       /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
       readonly lifecycle_state?: string;
       /**
@@ -11518,6 +11563,16 @@ export interface components {
       asset_id?: string;
       /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning user (WP-280). An unknown user or one of another organization is rejected (422 on owner_user_id). With asset_id the CI takes the asset's owner; another owner is rejected (422).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning team (WP-280). An unknown team or one of another organization is rejected (422 on owner_team_id). A team-scoped principal must name a team of its scope (403 otherwise, TEN-05). With asset_id the CI takes the asset's owner; another owner is rejected (422).
+       */
+      owner_team_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -11561,6 +11616,10 @@ export interface components {
       asset_id?: string | null;
       /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
       parent_ci_id?: string | null;
+      /** @description Owning user (empty string or null clears it, WP-280). An unknown user or one of another organization is rejected (422). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_user_id). */
+      owner_user_id?: string | null;
+      /** @description Owning team (empty string or null clears it, WP-280). An unknown team or one of another organization is rejected (422); a team outside the scope of a team-scoped principal is refused (403, TEN-05). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_team_id). */
+      owner_team_id?: string | null;
       manufacturer?: string | null;
       model?: string | null;
       serial_number?: string | null;
@@ -12179,15 +12238,18 @@ export interface components {
       data: components['schemas']['CI'][];
       total: number;
     };
+    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id); datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. */
     ExportJobFilters: {
       status?: string;
       /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
       client_id?: string;
+      /** @description Lifecycle state of the assets of a datev export (E-120); datev only. */
+      lifecycle_state?: string;
     };
     CreateExportJobRequest: {
       /**
-       * @description Output format. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
+       * @description Output format. csv and json export CIs. datev exports the canonical asset data of the creator's scope for the asset accounting (EXP-01, E-50, WP-310): Windows-1252, semicolons, CRLF, columns of the mapping (the default mapping or the override organization.settings.datev_mapping; an invalid override fails the job), amounts with a decimal comma, dates DD.MM.YYYY. Rows with a missing required field or characters Windows-1252 cannot encode are left out and listed in the error report (error_report_url); row_count counts the written rows. datev requires the module inventory, the entitlements export_datev and assets_basic and the permission asset:read (WP-790).
        * @default json
        * @enum {string}
        */
@@ -12239,7 +12301,7 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
-    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. */
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. For a datev job (assets, WP-310) fields are the source fields of the mapping's columns (inventory_no, purchase_price, …): a source the creator may not read by the asset field permissions stays an empty column and is listed with reason field_permission, the source fields the mapping does not name with reason layout; the preview of an open datev job uses the effective mapping. */
     ExportManifest: {
       format: string;
       fields: string[];
@@ -12275,6 +12337,8 @@ export interface components {
       expires_at?: string;
       /** @description Time-limited signed URL; only present on completed, unexpired jobs. */
       download_url?: string;
+      /** @description Time-limited signed URL (15 minutes) of the error report of a datev job (<org>/<job>.errors.csv, UTF-8 with BOM, semicolons; per rejected row and column the inventory number or asset id, the column and the reason); only present on completed, unexpired datev jobs (WP-310). */
+      error_report_url?: string;
       scope?: components['schemas']['ExportJobScope'];
       /** Format: date-time */
       created_at: string;
@@ -12388,7 +12452,7 @@ export interface components {
     ModuleListResponse: {
       data: components['schemas']['ModuleStatus'][];
     };
-    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). The fields carry the names of AST-01 (WP-739): inventory_no, purchase_price, warranty_until and primary_ci_id; their field keys stay core.asset_tag, core.purchase_cost, core.warranty_end and core.ci_id. */
+    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields, version and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). The fields carry the names of AST-01 (WP-739): inventory_no, purchase_price, warranty_until and primary_ci_id; their field keys stay core.asset_tag, core.purchase_cost, core.warranty_end and core.ci_id. */
     Asset: {
       id: string;
       organization_id: string;
@@ -12455,6 +12519,29 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /**
+       * Format: int64
+       * @description Version of the asset (API-07, WP-740), also the ETag: it rises with every change of the asset, also through stock movements, rack placement, lifecycle transitions and the CI domain. Always present.
+       */
+      readonly version?: number;
+      /** @description Read-only technical identity of the primary CI; only in GET /api/v1/assets/{id}, left out when the caller cannot read primary_ci_id. Under restricted CI field permissions only id, name and status. */
+      readonly primary_ci?: components['schemas']['CIRef'];
+    };
+    /** @description The read-only technical identity of a CI linked to an asset (spec §4, WP-740); the CI stays the source of truth. */
+    CIRef: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      status: string;
+      hostname?: string;
+      fqdn?: string;
+      management_ip?: string;
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      os_name?: string;
+      os_version?: string;
+      discovery_source?: string;
     };
     /** @description Names of AST-01 (WP-739); the names asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     CreateAssetRequest: {
@@ -14767,10 +14854,22 @@ export interface components {
       action?: 'merge' | 'new' | 'dismiss' | 'accept';
       /** @description Open longer than 14 days (REC-08). */
       escalated?: boolean;
+      /** @description The tickets linked to the item that the caller sees (WP-291); absent without ticket:read, without the module ticketing or without the feature ticketing_essential. */
+      tickets?: components['schemas']['ReviewItemTicketRef'][];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    ReviewItemTicketRef: {
+      id: string;
+      ticket_number: number;
+      status: components['schemas']['TicketStatus'];
+    };
+    ReviewItemTicketRequest: {
+      priority?: components['schemas']['TicketPriority'];
+      assignee_id?: string;
+      team_id?: string;
     };
     ReviewItemListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ReviewItem'][];
@@ -15839,7 +15938,7 @@ export interface components {
       url: string;
       score: number;
       highlights?: string[];
-      /** @description The fields of the hit that matched the search text (SRC-02, WP-786); under field permissions only the fields the caller may read (RBA-07). Absent without a match per field, for a contact hit and with the OpenSearch backend. */
+      /** @description The fields of the hit that matched the search text (SRC-02, WP-786); under field permissions only the fields the caller may read (RBA-07). Absent without a match per field and for a contact hit; an OpenSearch backend without PostgreSQL names only title and summary (WP-787). */
       matched_fields?: components['schemas']['SearchMatchedField'][];
       /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {
@@ -19030,6 +19129,30 @@ export interface operations {
         status?: string;
         category?: string;
         client_id?: components['parameters']['ClientID'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+        /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+        fields?: components['parameters']['ListFields'];
+        /** @description Free-text search. */
+        q?: components['parameters']['ListQ'];
       };
       header?: never;
       path?: never;
@@ -19048,7 +19171,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (inventory_no) or a sort on inventory_no, category or status the caller cannot read in every scope. */
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter (status, category, filter[...]), a search (inventory_no) or a sort on a field the caller cannot read in every scope. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -19058,6 +19181,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19077,6 +19201,8 @@ export interface operations {
       /** @description Asset created */
       201: {
         headers: {
+          /** @description The asset version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19131,6 +19257,8 @@ export interface operations {
       /** @description Asset details */
       200: {
         headers: {
+          /** @description The asset version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19162,12 +19290,24 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The asset has stock movements or a disposal record. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateAsset: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -19183,6 +19323,8 @@ export interface operations {
       /** @description Asset updated */
       200: {
         headers: {
+          /** @description The new asset version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19202,8 +19344,19 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
+      /** @description Fields of the request changed since the If-Match version (VersionConflictProblem: `fields`, `current_version`), the field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the asset */
+      412: {
         headers: {
           [name: string]: unknown;
         };
@@ -22693,6 +22846,56 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       /** @description The action does not resolve items of this type, new cannot tell the client of the device, new has no CI type (field ci_type_id), or the effect refuses a value of the item (the field it names, e.g. collector_id or target of a suggested scope) */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  createReviewItemTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['ReviewItemTicketRequest'];
+      };
+    };
+    responses: {
+      /** @description Ticket created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Ticket'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      /** @description The item is no longer open, or an open ticket is already linked to it (the detail names its id and ticket_number) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description priority is no ticket priority, or assignee_id or team_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;

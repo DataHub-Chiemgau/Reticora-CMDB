@@ -2,10 +2,14 @@
 package asset
 
 import (
+	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // Asset represents a tracked asset (hardware, software, license, cloud resource).
@@ -61,6 +65,13 @@ type Asset struct {
 	// field permissions (RBA-07). Not part of the API.
 	AssetTypeID string `json:"-"`
 	SiteID      string `json:"-"`
+	// Version counts the changes of the asset (API-07, WP-740): the
+	// trigger asset_version_bump raises it on every change of a column,
+	// also by the writers outside this package; it is the ETag.
+	Version int64 `json:"version"`
+	// PrimaryCI is the read-only technical identity of the primary CI,
+	// set by GET /api/v1/assets/{id} only (WP-740).
+	PrimaryCI *CIRef `json:"primary_ci,omitempty"`
 }
 
 // CreateRequest is the payload for creating an asset. A missing currency is
@@ -145,6 +156,9 @@ type UpdateRequest struct {
 	// Check runs on the locked current asset before the write (the field
 	// permissions of the handler); nil passes.
 	Check func(current *Asset) error `json:"-"`
+	// IfMatch is the version of the If-Match header (api.IfMatchAny for
+	// "*"); nil without the header (API-07, WP-740).
+	IfMatch *int64 `json:"-"`
 }
 
 // SentFields are the DTO paths of the fields the request sends; a custom
@@ -216,7 +230,10 @@ type CILink struct {
 	Primary bool   `json:"primary"`
 }
 
-// FilterParams holds filter parameters for listing assets.
+// FilterParams holds filter parameters for listing assets. Status,
+// Category, ClientID, Search, SortBy and SortDir are the former single
+// query parameters, kept as aliases; Filters are the filter[field][op]
+// conditions of API-02 on the fields of ListFields (WP-740).
 type FilterParams struct {
 	Status   string
 	Category string
@@ -224,4 +241,54 @@ type FilterParams struct {
 	Search   string
 	SortBy   string
 	SortDir  string
+	Filters  []api.Filter
+}
+
+// requestedFields are the trail field names (entity_change.field_name) a
+// PATCH writes: the sent members, name included, and custom_fields for
+// any custom field.
+func (req *UpdateRequest) requestedFields() []string {
+	out := sentPaths(reflect.ValueOf(req).Elem(), func(f reflect.Value) bool {
+		return f.Kind() == reflect.Pointer && !f.IsNil()
+	})
+	if req.Name != nil {
+		out = append(out, "name")
+	}
+	if len(req.CustomFields) > 0 {
+		out = append(out, customFieldsMember)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// customFieldsMember is the DTO member and trail field of the custom
+// fields.
+const customFieldsMember = "custom_fields"
+
+// Errors of the optimistic concurrency check (API-07, API-03, WP-740).
+var (
+	// ErrPreconditionRequired: the organization requires If-Match
+	// (settings.require_if_match) and the request carried none (412).
+	ErrPreconditionRequired = errors.New("If-Match is required for asset changes")
+	// ErrPreconditionFailed: the If-Match version is no version of the
+	// asset (412).
+	ErrPreconditionFailed = errors.New("If-Match does not name a version of the asset")
+	// ErrDeleteBlocked: the asset has stock movements or a disposal
+	// record, both append-only; its end is a lifecycle state (retired,
+	// disposed) instead of a delete (E-121, 409).
+	ErrDeleteBlocked = errors.New("the asset has stock movements or a disposal record; end its lifecycle instead")
+)
+
+// ConflictError reports fields of a PATCH that changed since the If-Match
+// version (409): the fields of the trail rows of the later versions, or
+// every field of the request when a later version has no trail row (a
+// writer outside the asset package).
+type ConflictError struct {
+	Fields  []string
+	Current int64
+}
+
+// validation: a fixed rule text with the names of the changed fields.
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("fields changed since the If-Match version: %s", strings.Join(e.Fields, ", "))
 }

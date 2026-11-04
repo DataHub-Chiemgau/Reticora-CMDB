@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,27 +23,121 @@ type HybridBackend struct {
 
 func (b *HybridBackend) Ping(ctx context.Context) error { return b.Remote.Ping(ctx) }
 
-// IndexDocument writes the document to the PostgreSQL index and sends it to
-// the remote index. In a context transaction the PostgreSQL write runs under
-// a savepoint, so its failure does not abort the transaction, and the HTTP
-// call waits for the commit, so the transaction never holds its locks while
-// the remote index answers (NFR-03); a remote failure is then logged, the
-// index can be rebuilt with POST /api/v1/search/reindex.
+// FullDocumentIndexer is a remote index that takes the full documents of
+// the PostgreSQL index, with field rows and identifiers (SRC-02, WP-787);
+// OpenSearchBackend implements it. A remote index without it gets the
+// documents alone.
+type FullDocumentIndexer interface {
+	IndexFullDocument(ctx context.Context, doc *FullDocument) error
+}
+
+// IndexDocument writes the document to the PostgreSQL index and sends its
+// full document to the remote index, like IndexDocuments.
 func (b *HybridBackend) IndexDocument(ctx context.Context, in *Document) error {
-	// The remote write after the commit uses this copy, not the caller's
-	// document.
-	doc := *in
-	pgErr := database.Savepoint(ctx, func(ctx context.Context) error { return b.Source.IndexDocument(ctx, &doc) })
-	if !database.InTx(ctx) {
-		return errors.Join(pgErr, b.Remote.IndexDocument(ctx, &doc))
+	return b.IndexDocuments(ctx, []Document{*in})
+}
+
+// remoteCopyKey is the AfterCommitBatch key of the documents of a
+// transaction that go to the remote index of the backend.
+type remoteCopyKey struct{ backend *HybridBackend }
+
+// remoteCopyItem is a document of a transaction to copy to the remote index.
+type remoteCopyItem struct {
+	orgID string
+	ref   DocumentRef
+}
+
+// IndexDocuments writes the documents of one organization to the PostgreSQL
+// index and then sends their full documents to the remote index: read back
+// from PostgreSQL (FullDocuments) with the field rows of both sources and
+// the identifiers, so the rows the triggers keep reach the remote index as
+// well (SRC-02, WP-787). In a context transaction the PostgreSQL write runs
+// under a savepoint, so its failure does not abort the transaction, and the
+// read and the HTTP calls wait for the commit, so the transaction never
+// holds its locks while the remote index answers (NFR-03, K20); all
+// documents a transaction writes are read with one statement then
+// (AfterCommitBatch). A remote failure is then logged, the index can be
+// rebuilt with POST /api/v1/search/reindex.
+func (b *HybridBackend) IndexDocuments(ctx context.Context, in []Document) error {
+	if len(in) == 0 {
+		return nil
 	}
-	database.AfterCommit(ctx, func(ctx context.Context) {
-		if err := b.Remote.IndexDocument(ctx, &doc); err != nil {
-			slog.WarnContext(ctx, "remote search index update failed; rebuild via POST /api/v1/search/reindex",
-				"entity_id", doc.EntityID, "error", err)
-		}
-	})
+	docs := append([]Document(nil), in...)
+	pgErr := database.Savepoint(ctx, func(ctx context.Context) error { return b.Source.IndexDocuments(ctx, docs) })
+	orgID := docs[0].OrganizationID
+	refs := make([]DocumentRef, len(docs))
+	for i := range docs {
+		refs[i] = DocumentRef{EntityType: docs[i].EntityType, EntityID: docs[i].EntityID}
+	}
+	if !database.InTx(ctx) {
+		return errors.Join(pgErr, b.copyToRemote(ctx, orgID, refs))
+	}
+	for i := range refs {
+		database.AfterCommitBatch(ctx, remoteCopyKey{b}, remoteCopyItem{orgID: orgID, ref: refs[i]}, func(ctx context.Context, items []any) {
+			byOrg := map[string][]DocumentRef{}
+			var orgs []string
+			for _, item := range items {
+				it, ok := item.(remoteCopyItem)
+				if !ok {
+					continue
+				}
+				if _, seen := byOrg[it.orgID]; !seen {
+					orgs = append(orgs, it.orgID)
+				}
+				byOrg[it.orgID] = append(byOrg[it.orgID], it.ref)
+			}
+			for _, org := range orgs {
+				if err := b.copyToRemote(ctx, org, byOrg[org]); err != nil {
+					slog.WarnContext(ctx, "remote search index update failed; rebuild via POST /api/v1/search/reindex",
+						"documents", len(byOrg[org]), "error", err)
+				}
+			}
+		})
+	}
 	return pgErr
+}
+
+// copyToRemote reads the full documents of the entities from PostgreSQL
+// with one statement and sends them to the remote index.
+func (b *HybridBackend) copyToRemote(ctx context.Context, orgID string, refs []DocumentRef) error {
+	docs, err := b.Source.FullDocuments(ctx, orgID, dedupeRefs(refs))
+	if err != nil {
+		return err
+	}
+	return b.sendFull(ctx, docs)
+}
+
+// dedupeRefs drops repeated entities, keeping the first.
+func dedupeRefs(refs []DocumentRef) []DocumentRef {
+	seen := make(map[string]bool, len(refs))
+	out := refs[:0:0]
+	for _, ref := range refs {
+		if k := hitKey(ref.EntityType, ref.EntityID); !seen[k] {
+			seen[k] = true
+			out = append(out, ref)
+		}
+	}
+	return out
+}
+
+// sendFull sends the full documents to the remote index, the documents
+// alone to a remote index that is no FullDocumentIndexer. Every document is
+// sent; the errors are joined.
+func (b *HybridBackend) sendFull(ctx context.Context, docs []FullDocument) error {
+	full, _ := b.Remote.(FullDocumentIndexer)
+	var errs []error
+	for i := range docs {
+		var err error
+		if full != nil {
+			err = full.IndexFullDocument(ctx, &docs[i])
+		} else {
+			err = b.Remote.IndexDocument(ctx, &docs[i].Document)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s %s: %w", docs[i].EntityType, docs[i].EntityID, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Delete removes the document from both indexes.
@@ -62,9 +155,9 @@ func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID 
 // policy (hitVisible); hits that PostgreSQL does not return are dropped, for
 // every entity type.
 //
-// With restricted field permissions the remote index cannot tell which
-// fields matched (no field mappings, TEC-12 [P5]): PostgreSQL answers the
-// query with its field rows (RBA-07, WP-266).
+// The remote index holds the field rows and identifiers (WP-787) but no
+// field permissions (TEC-12 [P5]): with restricted field permissions
+// PostgreSQL answers the query with its field rows (RBA-07, WP-266).
 func (b *HybridBackend) Query(ctx context.Context, q *Query) (Result, error) {
 	if len(q.restrictedTypes()) > 0 {
 		return b.Source.Query(ctx, q)
@@ -132,66 +225,32 @@ func (b *HybridBackend) visibleHits(ctx context.Context, orgID string, hits []Hi
 	return visible, nil
 }
 
-// ReindexPlacement implements rack.Indexer: it copies the PostgreSQL
+// ReindexPlacement implements rack.Indexer: it copies the full PostgreSQL
 // documents of the placed CI and, for a CI bound to an asset, of the asset
-// and all its CIs to the remote index. Their client and site are current
-// there (migration 000067). Like ReindexTenant it reads organization-wide:
-// the CIs of the asset may lie outside the caller's scope, and nothing read
-// here is returned to the caller.
+// and all its CIs to the remote index, with their field rows and
+// identifiers (WP-787). Their client and site are current there (migration
+// 000067). Like ReindexTenant it reads organization-wide: the CIs of the
+// asset may lie outside the caller's scope, and nothing read here is
+// returned to the caller.
 func (b *HybridBackend) ReindexPlacement(ctx context.Context, orgID, ciID string) error {
-	scope, ok := database.TenantScopeFromContext(ctx)
-	if !ok {
-		return database.ErrNoTenantScope
-	}
-	if !strings.EqualFold(scope.OrgID, orgID) {
-		return database.ErrTenantMismatch
-	}
-	orgWide := database.OrgWideScope(scope.OrgID, scope.UserID)
-	var docs []Document
-	err := database.WithTenant(ctx, b.Source.pool, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `WITH placed AS (SELECT id, asset_id FROM ci WHERE organization_id = $1 AND id::text = $2)
-			SELECT id::text, organization_id::text, entity_type, entity_id::text, title, summary, url, metadata,
-			       COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), updated_at
-			FROM search_document
-			WHERE organization_id = $1 AND (
-			      (entity_type = 'ci' AND entity_id IN (SELECT id FROM placed
-			                                            UNION SELECT c.id FROM ci c JOIN placed p ON c.asset_id = p.asset_id
-			                                            WHERE c.organization_id = $1))
-			   OR (entity_type = 'asset' AND entity_id IN (SELECT asset_id FROM placed)))`, orgID, ciID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var d Document
-			var meta []byte
-			if err := rows.Scan(&d.ID, &d.OrganizationID, &d.EntityType, &d.EntityID, &d.Title, &d.Summary, &d.URL, &meta,
-				&d.ClientID, &d.SiteID, &d.UpdatedAt); err != nil {
-				return err
-			}
-			if err := json.Unmarshal(meta, &d.Metadata); err != nil {
-				return fmt.Errorf("unmarshal document metadata for %s: %w", d.ID, err)
-			}
-			docs = append(docs, d)
-		}
-		return rows.Err()
-	})
+	docs, err := b.Source.placementDocuments(ctx, orgID, ciID)
 	if err != nil {
 		return fmt.Errorf("read placed search documents: %w", err)
 	}
-	var errs []error
-	for i := range docs {
-		if err := b.Remote.IndexDocument(ctx, &docs[i]); err != nil {
-			errs = append(errs, fmt.Errorf("%s %s: %w", docs[i].EntityType, docs[i].EntityID, err))
-		}
-	}
-	return errors.Join(errs...)
+	return b.sendFull(ctx, docs)
 }
 
+// remoteCopyPage is the number of full documents one read of the copy of
+// ReindexTenant takes.
+const remoteCopyPage = 500
+
 // ReindexTenant rebuilds the PostgreSQL index and copies it to the remote
-// index. Like the PostgreSQL rebuild, the copy covers the whole organization
-// even when a restricted administrator triggers it; each document carries its
-// client and site, on which every remote query filters.
+// index: the full documents with their field rows and identifiers
+// (WP-787), read page by page by id (FullDocumentPage). Like the
+// PostgreSQL rebuild, the copy covers the whole organization even when a
+// restricted administrator triggers it; each document carries its client
+// and site, on which every remote query filters. The first remote error
+// ends the copy; the documents sent before stay.
 func (b *HybridBackend) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	scope, ok := database.TenantScopeFromContext(ctx)
 	if !ok {
@@ -203,23 +262,21 @@ func (b *HybridBackend) ReindexTenant(ctx context.Context, orgID string) (Reinde
 	if _, err := b.Source.ReindexTenant(ctx, orgID); err != nil {
 		return ReindexResult{}, err
 	}
-	orgWide := database.OrgWideScope(scope.OrgID, scope.UserID)
-	ctx = database.ContextWithTenantScope(ctx, &orgWide)
-	indexed := 0
-	for offset := 0; ; offset += 100 {
-		res, err := b.Source.Query(ctx, &Query{OrganizationID: orgID, Limit: 100, Offset: offset})
+	indexed, after := 0, ""
+	for {
+		docs, err := b.Source.FullDocumentPage(ctx, orgID, after, remoteCopyPage)
 		if err != nil {
 			return ReindexResult{Indexed: indexed}, err
 		}
-		for i := range res.Data {
-			if err := b.Remote.IndexDocument(ctx, &res.Data[i].Document); err != nil {
+		for i := range docs {
+			if err := b.sendFull(ctx, docs[i:i+1]); err != nil {
 				return ReindexResult{Indexed: indexed}, err
 			}
 			indexed++
 		}
-		if !res.HasMore {
-			break
+		if len(docs) < remoteCopyPage {
+			return ReindexResult{Indexed: indexed}, nil
 		}
+		after = docs[len(docs)-1].ID
 	}
-	return ReindexResult{Indexed: indexed}, nil
 }

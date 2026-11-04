@@ -651,7 +651,9 @@ jobs:
   # artifact per project (playwright-report-<project>, also when green); the
   # previous browser versions run in e2e-prev.yml (E-88).
   e2e:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, for which `playwright install
+    # --with-deps` finds no font packages (fonts-freefont-ttf, xfonts-*).
+    runs-on: ubuntu-24.04
     needs: [frontend]
     strategy:
       fail-fast: false

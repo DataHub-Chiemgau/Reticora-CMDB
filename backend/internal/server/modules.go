@@ -69,8 +69,9 @@ var LateModules = []Module{
 	{Key: "import", Phase: "P2", Prefixes: []string{"/api/v1/imports", "/api/v1/import-profiles"}, Nav: []string{"import"}},
 	{Key: "stocktake", Phase: "P2", Prefixes: []string{"/api/v1/stocktakes", "/api/v1/consumables", "/api/v1/orders"},
 		Nav: []string{"stocktake", "consumables", "orders"}},
-	{Key: "ticketing", Phase: "P2", Prefixes: []string{"/api/v1/tickets", "/api/v1/slas", "/api/v1/business-calendars"},
-		Nav: []string{"tickets", "slas"}},
+	// Tickets from review items (WP-291): the queue itself stays core.
+	{Key: "ticketing", Phase: "P2", Prefixes: []string{"/api/v1/tickets", "/api/v1/slas", "/api/v1/business-calendars",
+		"/api/v1/review-items/{id}/ticket"}, Nav: []string{"tickets", "slas"}},
 	// Disposal is MGT-02 [P2] (E-38, E-44; formerly P4).
 	{Key: "disposal", Phase: "P2", Prefixes: []string{"/api/v1/disposal-records"}, Nav: []string{"disposal"}},
 	{Key: "maintenance", Phase: "P3", Prefixes: []string{"/api/v1/maintenance-windows"}, Nav: []string{"maintenance"}},

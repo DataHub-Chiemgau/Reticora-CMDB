@@ -429,6 +429,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		m[route] = created(table)
 	}
+	// The ticket a review item opens (WP-291).
+	m["POST /api/v1/review-items/{id}/ticket"] = created("ticket")
 	// The snapshot job: the answer names it as job_id.
 	m["POST /api/v1/history/snapshots"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	// The index job of a definition (WP-796): the answer names the queued

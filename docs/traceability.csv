@@ -1371,6 +1371,23 @@ AST-01;[P2];B;backend/internal/asset/api_names_integration_test.go;WP-739
 SRC-02;[P2];C;backend/internal/search/fields_integration_test.go;WP-308
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/sla/check_integration_test.go;WP-769
 SRC-02;[P2];C;backend/internal/search/hits_integration_test.go;WP-786
+SRC-02;[P2];C;backend/internal/search/hybrid_fields_integration_test.go;WP-787
 AST-04;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-03;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-01;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/reviews/ticket_integration_test.go;WP-291
+IMP-IO-01;[P2];C;backend/internal/importer/ci_integration_test.go;WP-302
+AST-01;[P2];B;backend/internal/asset/concurrency_integration_test.go;WP-740
+EVT-03;[P2–P3];B;backend/internal/asset/concurrency_integration_test.go;WP-740
+UI-11;[P2];C;frontend/src/pages/TemplatesPage.test.tsx;WP-314
+EXP-01;[B], DATEV [P2];C;backend/internal/export/datev_test.go;WP-310
+TST-01;[B], Teilumfang [P2];C;backend/internal/export/datev_test.go;WP-310
+EXP-01;[B], DATEV [P2];C;frontend/src/pages/ExportPage.test.tsx;WP-791
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/discovery/review_ticket_integration_test.go;WP-767
+IMP-IO-01;[P2];C;backend/internal/importer/apikey_integration_test.go;WP-779
+AUT-04;[B];C;backend/internal/importer/apikey_integration_test.go;WP-779
+CI-07;[P2];B;backend/internal/ci/owner_integration_test.go;WP-280
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/owner_integration_test.go;WP-280
+TEN-05;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/owner_integration_test.go;WP-280
+TLC-04;[B];B;backend/internal/ci/owner_integration_test.go;WP-280

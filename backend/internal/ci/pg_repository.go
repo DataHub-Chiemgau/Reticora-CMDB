@@ -66,6 +66,8 @@ const ciSelectColumns = `
 	health_updated_at,
 	schema_version,
 	COALESCE(merged_into_id::text, ''),
+	COALESCE(owner_user_id::text, ''),
+	COALESCE(owner_team_id::text, ''),
 	COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id), '{}')
 `
 
@@ -844,18 +846,26 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				last_seen_at,
 				is_manual,
 				asset_id,
-				parent_ci_id
+				parent_ci_id,
+				owner_user_id,
+				owner_team_id
 			)
 			SELECT
 				$1, $2, $3, $4, $5,
 				$6, $7, $8, $9, $10,
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
-				$21, $22, $23, $24, $25
+				$21, $22, $23, $24, $25,
+				$26, $27
 			WHERE NOT EXISTS (SELECT 1 FROM ci_type WHERE id = $4 AND NOT is_active)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
-				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at
+				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at,
+				COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, '')
 		`
+
+		if err := checkOwnerIDs(item.OwnerUserID, item.OwnerTeamID); err != nil {
+			return err
+		}
 
 		if err := checkCITypes(ctx, tx, item.OrganizationID, []*Item{item}); err != nil {
 			return err
@@ -898,7 +908,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			item.IsManual,
 			nilIfEmpty(item.AssetID),
 			nilIfEmpty(item.ParentCIID),
-		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt); err != nil {
+			nilIfEmpty(item.OwnerUserID),
+			nilIfEmpty(item.OwnerTeamID),
+		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt,
+			&item.OwnerUserID, &item.OwnerTeamID); err != nil {
 			// No row: the type is deactivated (MET-05).
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrTypeInactive
@@ -1090,11 +1103,13 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 			ORDER BY serial_number, hardware_uuid, primary_mac, ord
 			ON CONFLICT DO NOTHING
 			RETURNING id, COALESCE(site_id::text, '') AS site_id, COALESCE(room_id::text, '') AS room_id,
-				COALESCE(location_id::text, '') AS location_id, health, version, schema_version, created_at, updated_at
+				COALESCE(location_id::text, '') AS location_id, health, version, schema_version, created_at, updated_at,
+				COALESCE(owner_user_id::text, '') AS owner_user_id, COALESCE(owner_team_id::text, '') AS owner_team_id
 		)
 		SELECT input.ord, COALESCE(ins.id::text, ''), COALESCE(ins.site_id, ''), COALESCE(ins.room_id, ''),
 			COALESCE(ins.location_id, ''), COALESCE(ins.health, ''), COALESCE(ins.version, 0),
-			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at, input.type_inactive
+			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at, input.type_inactive,
+			COALESCE(ins.owner_user_id, ''), COALESCE(ins.owner_team_id, '')
 		FROM input LEFT JOIN ins ON ins.id = input.id
 		ORDER BY input.ord`, args...)
 	if err != nil {
@@ -1104,12 +1119,12 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 	inactive := false
 	for rows.Next() {
 		var ord int64
-		var id, siteID, roomID, locationID, health string
+		var id, siteID, roomID, locationID, health, ownerUser, ownerTeam string
 		var version, schemaVersion int64
 		var createdAt, updatedAt *time.Time
 		var typeInactive bool
 		if err := rows.Scan(&ord, &id, &siteID, &roomID, &locationID, &health, &version, &schemaVersion,
-			&createdAt, &updatedAt, &typeInactive); err != nil {
+			&createdAt, &updatedAt, &typeInactive, &ownerUser, &ownerTeam); err != nil {
 			return nil, nil, err
 		}
 		i := int(ord) - 1
@@ -1123,6 +1138,9 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		}
 		item := items[i]
 		item.ID, item.SiteID, item.RoomID, item.LocationID, item.Health = id, siteID, roomID, locationID, health
+		// Ingest and discovery never set the owner; a linked asset gives
+		// its own (ci_mirror_asset_owner, WP-280).
+		item.OwnerUserID, item.OwnerTeamID = ownerUser, ownerTeam
 		item.Version, item.SchemaVersion = version, int(schemaVersion)
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
@@ -1477,6 +1495,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	} else if dropErr := dropOverriddenFields(ctx, tx, id, &req); dropErr != nil {
 		return nil, dropErr
 	}
+	if ownerErr := checkOwnerPatch(&req); ownerErr != nil {
+		return nil, ownerErr
+	}
 	if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
 		return nil, scopeErr
 	}
@@ -1534,6 +1555,8 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	addStringField("client_id", req.ClientID)
 	addStringField("asset_id", req.AssetID)
 	addStringField("parent_ci_id", req.ParentCIID)
+	addStringField("owner_user_id", req.OwnerUserID)
+	addStringField("owner_team_id", req.OwnerTeamID)
 	addStringField("location_id", req.LocationID)
 	addStringField("manufacturer", req.Manufacturer)
 	addStringField("model", req.Model)
@@ -2174,6 +2197,8 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&healthUpdated,
 		&item.SchemaVersion,
 		&item.MergedIntoID,
+		&item.OwnerUserID,
+		&item.OwnerTeamID,
 		&item.Tags,
 	); err != nil {
 		return nil, err
@@ -2398,6 +2423,8 @@ func diffCI(before, after *Item) []ciFieldChange {
 		{"client_id", before.ClientID, after.ClientID},
 		{"asset_id", before.AssetID, after.AssetID},
 		{"parent_ci_id", before.ParentCIID, after.ParentCIID},
+		{"owner_user_id", before.OwnerUserID, after.OwnerUserID},
+		{"owner_team_id", before.OwnerTeamID, after.OwnerTeamID},
 		{"location_id", before.LocationID, after.LocationID},
 		{"site_id", before.SiteID, after.SiteID},
 		{"room_id", before.RoomID, after.RoomID},
@@ -2482,8 +2509,52 @@ func locationError(err error) error {
 		return ciTypeViolation(ciTypeNotFound)
 	case "ci_location_from_asset":
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
+	case "ci_owner_user_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "owner_user_id", Detail: "user not found"}}}
+	case "ci_owner_team_fkey":
+		return &ValidationError{Violations: []Violation{{Field: "owner_team_id", Detail: "team not found"}}}
+	case "ci_owner_from_asset":
+		// The trigger ci_mirror_asset_owner names the field (WP-280).
+		field := "owner_user_id"
+		if pgErr.ColumnName == "owner_team_id" {
+			field = "owner_team_id"
+		}
+		return &ValidationError{Violations: []Violation{{Field: field, Detail: ownerOwnedByAsset}}}
 	}
 	return err
+}
+
+// ownerOwnedByAsset is the violation of an owner write on a CI linked to an
+// asset (DB-05, WP-280).
+const ownerOwnedByAsset = "the owner of a CI linked to an asset is the asset's owner"
+
+// checkOwnerIDs refuses an owner that is no UUID before any statement
+// (WP-280); an unknown user or team, or one of another organization, fails
+// its foreign key (ci_owner_user_fkey, ci_owner_team_fkey).
+func checkOwnerIDs(userID, teamID string) error {
+	var violations []Violation
+	if userID = strings.TrimSpace(userID); userID != "" && !api.IsUUID(userID) {
+		violations = append(violations, Violation{Field: "owner_user_id", Detail: "user not found"})
+	}
+	if teamID = strings.TrimSpace(teamID); teamID != "" && !api.IsUUID(teamID) {
+		violations = append(violations, Violation{Field: "owner_team_id", Detail: "team not found"})
+	}
+	if len(violations) > 0 {
+		return &ValidationError{Violations: violations}
+	}
+	return nil
+}
+
+// checkOwnerPatch is checkOwnerIDs for the owner fields an update sets.
+func checkOwnerPatch(req *UpdateRequest) error {
+	var userID, teamID string
+	if req.OwnerUserID != nil {
+		userID = *req.OwnerUserID
+	}
+	if req.OwnerTeamID != nil {
+		teamID = *req.OwnerTeamID
+	}
+	return checkOwnerIDs(userID, teamID)
 }
 
 // assetOfAnotherClient is the violation of a link between a CI and an asset
@@ -2561,10 +2632,11 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 }
 
 // derivedFields are set by the database, not by the writer of a change.
-// The asset link is structural, not an observed value. Tags are no field
-// value (ci_tag, CHECK ci_field_value_no_tags; WP-281).
+// The asset link and the owner (WP-280) are structural, not observed
+// values. Tags are no field value (ci_tag, CHECK ci_field_value_no_tags;
+// WP-281).
 var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true,
-	"tags": true}
+	"owner_user_id": true, "owner_team_id": true, "tags": true}
 
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
@@ -2640,7 +2712,7 @@ var (
 	}
 	structuralFields = map[string]bool{
 		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "site_id": true,
-		"room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
+		"owner_user_id": true, "owner_team_id": true, "room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
 		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
 	}
 )
@@ -2792,7 +2864,7 @@ func requestedFields(req *UpdateRequest) []string {
 		"fqdn": req.FQDN != nil, "os_name": req.OSName != nil, "os_version": req.OSVersion != nil,
 		"firmware_version": req.FirmwareVersion != nil, "sys_object_id": req.SysObjectID != nil,
 		"attributes": req.Attributes != nil, "discovery_source": req.DiscoverySource != nil,
-		"tags": req.LegacyTags != nil,
+		"tags": req.LegacyTags != nil, "owner_user_id": req.OwnerUserID != nil, "owner_team_id": req.OwnerTeamID != nil,
 	} {
 		if set {
 			out = append(out, name)

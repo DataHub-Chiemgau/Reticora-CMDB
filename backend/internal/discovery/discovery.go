@@ -514,6 +514,9 @@ type Handler struct {
 	// (REC-01, WP-334).
 	serial     sync.Map
 	reviewJobs jobs.Tracker
+	// reviewTickets opens tickets from review items (WP-291); nil while
+	// the module ticketing is off.
+	reviewTickets reviews.TicketCreator
 	// merger carries out the resolution merge of probable_duplicate items
 	// as the CI-12 merge (WithMerger).
 	merger CIMerger
@@ -739,12 +742,13 @@ func (h *Handler) decide(ctx context.Context, w *override.Write) override.Decisi
 	return h.provenance.Decide(ctx, w)
 }
 
-// queueOverrideConflict opens an override_conflict review for a field unless
+// QueueOverrideConflict opens an override_conflict review for a field unless
 // one is open already or the value was dismissed (REC-12, deduplicated per
-// field; the call of workflow and agent as well). device is the CI as read
+// field; the call of workflow and agent as well; the import, WP-302, with
+// source import). device is the CI as read
 // before the report: it holds the value reported before this one. A failure
 // does not fail the ingest: the override stays in place either way.
-func (h *Handler) queueOverrideConflict(ctx context.Context, orgID string, device *ci.Item, field string, value any, source string) bool {
+func (h *Handler) QueueOverrideConflict(ctx context.Context, orgID string, device *ci.Item, field string, value any, source string) bool {
 	previous, hasPrevious := device.ObservedUnderOverride(field)
 	// One open item per field; a dismissed value stays suppressed until the
 	// source reports another one (REC-12, F-248). The service's savepoint
@@ -1650,7 +1654,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		// A hostname or FQDN hit is never merged (CH29): the new CI is
 		// reviewed as a probable duplicate.
 		if len(result.ProbableDuplicates) > 0 {
-			review := probableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
+			review := ProbableDuplicateReview(orgID, newItem.ID, &item, result.ProbableDuplicates)
 			if _, reviewErr := h.openReview(ctx, review); reviewErr != nil {
 				return reviewErr
 			}
@@ -1722,7 +1726,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			}
 			if d.Conflict {
 				conflict = true
-				if h.queueOverrideConflict(ctx, orgID, matched, field, value, source) {
+				if h.QueueOverrideConflict(ctx, orgID, matched, field, value, source) {
 					resp.ReviewItems++
 				}
 			}
@@ -2225,7 +2229,7 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 		// A hostname or FQDN hit is never merged (CH29): the new CI is
 		// reviewed as a probable duplicate.
 		if len(rec.result.ProbableDuplicates) > 0 {
-			review := probableDuplicateReview(orgID, rec.ci.ID, &rec.item, rec.result.ProbableDuplicates)
+			review := ProbableDuplicateReview(orgID, rec.ci.ID, &rec.item, rec.result.ProbableDuplicates)
 			if _, err := h.openReview(ctx, review); err != nil {
 				return err
 			}

@@ -57,7 +57,8 @@ var coreFields = map[ObjectKind][]string{
 	KindCI: {
 		"asset_id", "discovery_source", "firmware_version", "fqdn", "hardware_uuid", "health", "hostname",
 		"lifecycle_state", "location_id", "management_ip", "manufacturer", "model", "os_name", "os_version",
-		"parent_ci_id", "primary_mac", "room_id", "serial_number", "status", "sys_object_id",
+		"owner_team_id", "owner_user_id", "parent_ci_id", "primary_mac", "room_id", "serial_number", "status",
+		"sys_object_id",
 	},
 	KindAsset: {
 		"asset_tag", "barcode", "category", "ci_id", "contract_id", "cost_center", "currency", "invoice_number",

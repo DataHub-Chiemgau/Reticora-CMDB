@@ -48,6 +48,30 @@ profile `documents`, Kubernetes component `clamav`):
 
 With the module on, add 4 GB of RAM to the rows of the central cloud.
 
+## OpenSearch for search (TEC-12 [P5])
+
+With `RETICORA_SEARCH_BACKEND=opensearch` PostgreSQL stays the source of the
+search index; OpenSearch answers queries without field restrictions and
+gets the full documents of PostgreSQL: title, summary, the field rows
+(`fields.<key>`: columns and searchable custom fields) and the identifiers
+(`identifiers`: inventory number, IP and MAC addresses; SRC-02, WP-787).
+Queries with restricted field permissions are always answered by
+PostgreSQL.
+
+- **After switching to OpenSearch and after each upgrade** that extends the
+  mapping, run the reindex job (`POST /api/v1/search/reindex`, job
+  `search.reindex`). The server adds new fields to the mapping of the
+  existing index on startup (additive), but only the job fills them.
+- **After mass changes** that only database triggers apply (assets, network
+  interfaces, IP addresses imported or changed in bulk), run the job again.
+  OpenSearch learns of such changes only with the next reindex job or the
+  next indexing of the document (e.g. an edit of the CI); until then it may
+  miss hits by the changed identifiers. PostgreSQL itself is current at
+  once, and every OpenSearch hit is checked against it.
+- An OpenSearch backend without PostgreSQL (no database profile) keeps the
+  fields of phase 1 (title, summary, metadata) and finds nothing by field
+  rows or identifiers.
+
 ## Discovery collector VM
 
 | Profile | vCPU | RAM | Disk |

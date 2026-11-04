@@ -75,11 +75,14 @@ func (s *JobScope) TenantScope(orgID, userID string) database.TenantScope {
 	return database.TenantScope{OrgID: orgID, UserID: userID, Clients: set(s.Clients), Sites: set(s.Sites), Teams: set(s.Teams)}
 }
 
-// JobFilters narrows an export job to a subset of the tenant's CIs.
+// JobFilters narrows an export job to a subset of the tenant's CIs (csv,
+// json: status, ci_type_id, client_id) or assets (datev: client_id,
+// lifecycle_state, WP-310).
 type JobFilters struct {
-	Status   string `json:"status,omitempty"`
-	CITypeID string `json:"ci_type_id,omitempty"`
-	ClientID string `json:"client_id,omitempty"`
+	Status         string `json:"status,omitempty"`
+	CITypeID       string `json:"ci_type_id,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	LifecycleState string `json:"lifecycle_state,omitempty"`
 }
 
 // CreateJobRequest is the payload for POST /api/v1/export/jobs.
@@ -115,6 +118,18 @@ func (r *CreateJobRequest) Validate() error {
 	case "csv", "datev", "json":
 	default:
 		return fmt.Errorf("format must be 'csv', 'datev' or 'json'")
+	}
+	// DATEV exports assets (WP-310): the CI filters do not apply to it,
+	// lifecycle_state applies to it only.
+	if r.Format == FormatDATEV {
+		if r.Filters.Status != "" {
+			return fmt.Errorf("filters.status does not apply to the format datev; use filters.lifecycle_state")
+		}
+		if r.Filters.CITypeID != "" {
+			return fmt.Errorf("filters.ci_type_id does not apply to the format datev")
+		}
+	} else if r.Filters.LifecycleState != "" {
+		return fmt.Errorf("filters.lifecycle_state applies to the format datev only")
 	}
 	return nil
 }

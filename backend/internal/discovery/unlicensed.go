@@ -450,15 +450,22 @@ func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *Re
 		}
 	}
 	if _, err = h.repo.ResolveReviewItem(ctx, orgID, item.ID, &Resolution{Status: ReviewStatusResolved, Action: reviews.ActionNew,
-		ResolvedBy: actorID, Note: "created CI " + created.ID + " within max_cis"}); err != nil {
+		ResolvedBy: actorID, Note: adoptedNote(created.ID)}); err != nil {
 		return "", err
 	}
 	return created.ID, nil
 }
 
+// adoptedNote is the note of an unlicensed_ci item whose CI was created.
+func adoptedNote(ciID string) string { return "created CI " + ciID + " within max_cis" }
+
 // AdoptUnlicensed creates the CIs of open unlicensed_ci items, oldest first,
 // as long as max_cis allows (ENT-03: raising the limit creates the CIs). It
-// returns the number adopted; the remaining items stay open.
+// returns the number adopted; the remaining items stay open. The open
+// tickets of every adopted item get a system comment (WP-767), whoever the
+// context names: the adoption has no actor. adoptUnlicensed itself does
+// not comment, so that the resolution new through the review service (its
+// effect) is commented once.
 func (h *Handler) AdoptUnlicensed(ctx context.Context, orgID string) (int, error) {
 	items, err := h.openUnlicensed(ctx, orgID)
 	if err != nil {
@@ -466,7 +473,8 @@ func (h *Handler) AdoptUnlicensed(ctx context.Context, orgID string) (int, error
 	}
 	adopted := 0
 	for i := range items {
-		if _, err = h.adoptUnlicensed(ctx, orgID, "", &items[i]); err != nil {
+		var created string
+		if created, err = h.adoptUnlicensed(ctx, orgID, "", &items[i]); err != nil {
 			if errors.Is(err, reviews.ErrAlreadyResolved) {
 				// Resolved meanwhile by a principal or another replica.
 				continue
@@ -487,6 +495,9 @@ func (h *Handler) AdoptUnlicensed(ctx context.Context, orgID string) (int, error
 			return adopted, err
 		}
 		adopted++
+		resolved := items[i]
+		resolved.Status, resolved.Action, resolved.Resolution = ReviewStatusResolved, reviews.ActionNew, adoptedNote(created)
+		h.ReviewService().CommentResolved(ctx, &resolved, "")
 	}
 	if adopted > 0 {
 		slog.InfoContext(ctx, "unlicensed_ci items adopted", "organization_id", orgID, "adopted", adopted,

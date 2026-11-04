@@ -147,3 +147,52 @@ func TestCIIndexerCarriesScope(t *testing.T) {
 		t.Errorf("indexed document client %q site %q, want the CI's", indexed.ClientID, indexed.SiteID)
 	}
 }
+
+// TestOpenSearchScopeCoversFieldsAndIdentifiers covers WP-787 (TEC-12,
+// SRC-02): the client and site filters stay in the filter of the query, so
+// they apply to a hit that matched by a field row (fields.*) or an
+// identifier (nested identifiers) as much as to a title hit; a hit outside
+// the scope that the index returns with its matched identifier is dropped.
+func TestOpenSearchScopeCoversFieldsAndIdentifiers(t *testing.T) {
+	scope := restricted([]string{osClient1}, []string{osSite1})
+	body, err := buildOpenSearchQuery(&Query{OrganizationID: osOrg, Text: "10.0.0.7", NetworkReadable: true, Highlight: true}, scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := body["query"].(map[string]any)["bool"].(map[string]any)
+	filters, _ := json.Marshal(query["filter"])
+	must, _ := json.Marshal(query["must"])
+	for _, want := range []string{`{"terms":{"client_id":["` + osClient1 + `"]}}`, `{"terms":{"site_id":["` + osSite1 + `"]}}`,
+		`{"term":{"organization_id":"` + osOrg + `"}}`} {
+		if !strings.Contains(string(filters), want) {
+			t.Errorf("filter lacks %s: %s", want, filters)
+		}
+	}
+	for _, want := range []string{`"fields.*"`, `"nested":{"inner_hits"`, `{"term":{"identifiers.addr":"10.0.0.7"}}`} {
+		if !strings.Contains(string(must), want) {
+			t.Errorf("match lacks %s: %s", want, must)
+		}
+	}
+	if strings.Contains(string(must), "client_id") || len(query) != 2 {
+		t.Errorf("the scope filter is not a filter of every match: %v", query)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit := func(id, client string) string {
+			return `{"_score":1,"_source":{"organization_id":"` + osOrg + `","entity_type":"ci","entity_id":"` + id +
+				`","title":"x","url":"/","client_id":"` + client + `"},"highlight":{"fields.core.hostname":["<mark>x</mark>"]},` +
+				`"inner_hits":{"identifiers":{"hits":{"hits":[{"fields":{"identifiers.field":["network.ip"],"identifiers.norm":["10.0.0.7"]}}]}}}}`
+		}
+		_, _ = w.Write([]byte(`{"hits":{"total":{"value":2},"hits":[` + hit("own", osClient1) + `,` + hit("foreign", osClient2) + `]}}`))
+	}))
+	defer srv.Close()
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
+	ctx := database.ContextWithTenantScope(context.Background(), restricted([]string{osClient1}, nil))
+	res, err := b.Query(ctx, &Query{OrganizationID: osOrg, Text: "10.0.0.7", NetworkReadable: true, Highlight: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Data) != 1 || res.Data[0].EntityID != "own" || len(res.Data[0].MatchedFields) != 2 {
+		t.Errorf("hits %+v, want only the own CI with its field row and IP", res.Data)
+	}
+}

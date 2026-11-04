@@ -71,6 +71,9 @@ func (h *Handler) ReviewService() *reviews.Service {
 		if h.reviewJobs != nil {
 			svc.WithJobs(h.reviewJobs)
 		}
+		if h.reviewTickets != nil {
+			svc.WithTickets(h.reviewTickets)
+		}
 		h.reviews = svc
 	})
 	return h.reviews
@@ -80,6 +83,14 @@ func (h *Handler) ReviewService() *reviews.Service {
 // (JOB-04).
 func (h *Handler) WithReviewJobs(tracker jobs.Tracker) *Handler {
 	h.reviewJobs = tracker
+	return h
+}
+
+// WithReviewTickets opens tickets from review items and names them on the
+// items (TKT-01, WP-291); it must be attached before ReviewService is
+// first called.
+func (h *Handler) WithReviewTickets(tickets reviews.TicketCreator) *Handler {
+	h.reviewTickets = tickets
 	return h
 }
 
@@ -674,7 +685,7 @@ type OverrideClearer interface {
 // resolveOverrideConflict accepts the observed value of an override_conflict
 // item: the override is removed and the CI takes the observed value
 // (REC-12). Dismissing keeps the override; the dismissed value is then
-// suppressed until the source reports another (queueOverrideConflict).
+// suppressed until the source reports another (QueueOverrideConflict).
 func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept {
 		res.Note = "override kept"

@@ -2193,6 +2193,8 @@ export interface ExportJobFilters {
   status?: string;
   ci_type_id?: string;
   client_id?: string;
+  /** Lifecycle state of the assets of a datev export (E-120); datev only. */
+  lifecycle_state?: string;
 }
 
 export interface ExportJob {
@@ -2210,11 +2212,16 @@ export interface ExportJob {
   completed_at?: string;
   expires_at?: string;
   download_url?: string;
-  /** Fields of the file and the visible CI fields it leaves out (EXP-01). */
+  /**
+   * Signed URL of the error report of a completed, unexpired datev job: the
+   * asset rows the file leaves out and why (EXP-01, WP-310).
+   */
+  error_report_url?: string;
+  /** Fields of the file and the visible fields it leaves out (EXP-01). */
   manifest?: {
     format: string;
     fields: string[];
-    omitted: { field: string; reason: string }[];
+    omitted: { field: string; reason: 'layout' | 'field_permission' }[];
   };
   created_at: string;
   updated_at: string;

@@ -451,7 +451,7 @@ func loadCatalog(ctx context.Context, t *testing.T, pool *pgxpool.Pool) map[stri
 	rows, err := pool.Query(ctx, `
 		SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
 		       bool_or(a.attname = 'organization_id'), bool_or(a.attname = 'client_id'),
-		       bool_or(a.attname = 'site_id'), bool_or(a.attname = 'team_id'),
+		       bool_or(a.attname = 'site_id'), bool_or(a.attname IN ('team_id', 'owner_team_id')),
 		       has_table_privilege('reticora_app', c.oid, 'INSERT, UPDATE, DELETE'),
 		       has_table_privilege('reticora_app', c.oid, 'SELECT, INSERT, UPDATE, DELETE'),
 		       has_table_privilege('reticora_app', c.oid, 'DELETE, TRUNCATE'),

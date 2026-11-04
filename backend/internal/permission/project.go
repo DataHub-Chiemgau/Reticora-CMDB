@@ -35,18 +35,21 @@ var ciStructural = map[string]bool{
 }
 
 // ciProjected are the typed columns of a CI the projection covers
-// (core.<column>): the typed fields of the CI except name and status.
+// (core.<column>): the typed fields of the CI except name and status, and
+// the owner (WP-280).
 var ciProjected = map[string]bool{
 	"manufacturer": true, "model": true, "serial_number": true, "hardware_uuid": true,
 	"management_ip": true, "primary_mac": true, "hostname": true, "fqdn": true, "os_name": true,
 	"os_version": true, "firmware_version": true, "sys_object_id": true,
+	"owner_user_id": true, "owner_team_id": true,
 }
 
 // assetStructural are the members of the asset DTO and of the embedded
-// asset facts the asset policy does not cover: identity, name, client scope
-// and the timestamps (WP-271).
+// asset facts the asset policy does not cover: identity, name, client scope,
+// the timestamps (WP-271) and the version (ETag, WP-740).
 var assetStructural = map[string]bool{
 	"id": true, "organization_id": true, "client_id": true, "name": true, "created_at": true, "updated_at": true,
+	"version": true,
 }
 
 // assetFieldAliases are the AST-01 names of asset fields (WP-738, WP-739)

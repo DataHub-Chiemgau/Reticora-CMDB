@@ -366,12 +366,16 @@ func recordUserAudit(ctx context.Context, tx pgx.Tx, orgID, id, action string, c
 }
 
 // openOwnershipQuery counts the open objects a user is responsible for: open
-// tickets assigned to them, active asset/CI assignments and keys not returned.
+// tickets assigned to them, active asset/CI assignments, keys not returned
+// and the CIs they own that are neither deleted nor decommissioned (WP-280).
+// Any other CI they own keeps the user through ci_owner_user_fkey
+// (ErrUserReferenced).
 const openOwnershipQuery = `
 	SELECT
 		(SELECT count(*) FROM ticket WHERE assignee_id = $1 AND status NOT IN ('resolved', 'closed')) +
 		(SELECT count(*) FROM assignment WHERE assigned_to = $1 AND status IN ('active', 'overdue')) +
-		(SELECT count(*) FROM key_assignment WHERE assigned_to = $1 AND returned_at IS NULL)
+		(SELECT count(*) FROM key_assignment WHERE assigned_to = $1 AND returned_at IS NULL) +
+		(SELECT count(*) FROM ci WHERE owner_user_id = $1 AND deleted_at IS NULL AND status <> 'decommissioned')
 `
 
 // DeleteUser removes a user that owns no open objects (TLC-04): open objects

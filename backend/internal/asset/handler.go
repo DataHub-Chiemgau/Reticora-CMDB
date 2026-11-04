@@ -154,8 +154,11 @@ func projectCIRef(policy *permission.FieldPolicy, ref *CIRef) any {
 	return map[string]string{"id": ref.ID, "name": ref.Name, "status": ref.Status}
 }
 
-// List handles GET /api/v1/assets. A filter, search or sort on a field the
-// principal cannot read in every scope is 403 with the fields.
+// List handles GET /api/v1/assets (API-02, WP-740): filter[field][op],
+// sort (or sort_by/sort_dir), fields and q through api.ParseListQuery; an
+// unknown field is 422. status, category, client_id and search stay as
+// aliases. A filter, search or sort on a field the principal cannot read
+// in every scope is 403 with the fields.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	orgID, policy, ok := requestContext(w, r)
 	if !ok {
@@ -167,13 +170,22 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
+	lq, err := api.ParseListQuery(r, ListFields)
+	if err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	filter := FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		Category: r.URL.Query().Get("category"),
 		ClientID: r.URL.Query().Get("client_id"),
 		Search:   r.URL.Query().Get("search"),
-		SortBy:   r.URL.Query().Get("sort_by"),
-		SortDir:  r.URL.Query().Get("sort_dir"),
+		SortBy:   lq.SortBy,
+		SortDir:  lq.SortDir,
+		Filters:  lq.Filters,
+	}
+	if lq.Q != "" {
+		filter.Search = lq.Q
 	}
 	if filterErr := permission.CheckListFilter(policy, permission.KindAsset, nil, listFieldPaths(&filter)); filterErr != nil {
 		api.WriteFieldError(w, filterErr)
@@ -186,6 +198,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteRepoError(w, err)
 		return
 	}
@@ -195,12 +210,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		hasMore = len(items) == page.Limit
 	}
 	nextCursor := NextCursor(items, &filter, page.Limit)
-	if !permission.NeedsProjection(policy, permission.KindAsset) {
+	if !permission.NeedsProjection(policy, permission.KindAsset) && len(lq.Fields) == 0 {
 		api.WriteJSON(w, http.StatusOK, api.ListResponse[Asset]{
 			Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: nextCursor,
 		})
 		return
 	}
+	// The projection first, then the selection: a field the principal
+	// cannot read is missing per asset, also when fields= names it.
 	data := make([]any, len(items))
 	for i := range items {
 		if data[i], err = project(policy, &items[i]); err != nil {
@@ -208,13 +225,25 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if len(lq.Fields) > 0 {
+		selected, selErr := api.SelectFields(data, lq.Fields)
+		if selErr != nil {
+			api.WriteRepoError(w, selErr)
+			return
+		}
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[map[string]json.RawMessage]{
+			Data: selected, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: nextCursor,
+		})
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[any]{
 		Data: data, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: nextCursor,
 	})
 }
 
 // listFieldPaths are the DTO paths the list reads: its filters, the search
-// over the inventory number and a sort on a field column.
+// over the inventory number and the sort field; structural members (name,
+// client_id, the timestamps) pass the check.
 func listFieldPaths(filter *FilterParams) []string {
 	var paths []string
 	if filter.Status != "" {
@@ -226,10 +255,11 @@ func listFieldPaths(filter *FilterParams) []string {
 	if filter.Search != "" {
 		paths = append(paths, "inventory_no")
 	}
-	if column, _ := NormalizeSort(filter); column == "inventory_no" || column == "category" || column == "status" {
-		paths = append(paths, column)
+	for _, f := range filter.Filters {
+		paths = append(paths, f.Field)
 	}
-	return paths
+	column, _ := NormalizeSort(filter)
+	return append(paths, column)
 }
 
 // Get handles GET /api/v1/assets/{id}
@@ -248,25 +278,48 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		writeAssetError(w, r, err)
 		return
 	}
-	body, err := project(policy, item)
+	// The linked CI's read-only technical identity (spec §4) in
+	// primary_ci; the CI stays the source of truth for technical data.
+	var linked *CIRef
+	if h.cis != nil && item.CIID != "" {
+		if ref, lookupErr := h.cis.GetByID(r.Context(), orgID, item.CIID); lookupErr == nil {
+			linked = ref
+		}
+	}
+	body, err := projectWithCI(policy, item, linked)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-
-	// Enrich with the linked CI's read-only technical identity (spec §4); the
-	// CI stays the source of truth for technical data.
-	if h.cis != nil && item.CIID != "" {
-		if linked, err := h.cis.GetByID(r.Context(), orgID, item.CIID); err == nil && linked != nil {
-			api.WriteJSON(w, http.StatusOK, map[string]any{
-				"asset": body,
-				"ci":    projectCIRef(policy, linked),
-			})
-			return
-		}
-	}
-
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, body)
+}
+
+// projectWithCI returns the asset of GET /api/v1/assets/{id} with the
+// primary CI's identity in primary_ci (WP-740): the asset projected by
+// the asset policy, primary_ci only while primary_ci_id stays readable and
+// then projected by the CI policy (projectCIRef).
+func projectWithCI(policy *permission.FieldPolicy, a *Asset, ref *CIRef) (any, error) {
+	if ref == nil {
+		return project(policy, a)
+	}
+	if !permission.NeedsProjection(policy, permission.KindAsset) && !permission.NeedsProjection(policy, permission.KindCI) {
+		out := *a
+		out.PrimaryCI = ref
+		return &out, nil
+	}
+	body, err := permission.Project(policy, permission.KindAsset, a.AssetTypeID, assetRef(a), a)
+	if err != nil {
+		return nil, err
+	}
+	if _, readable := body[fieldPrimaryCI]; readable {
+		raw, encErr := json.Marshal(projectCIRef(policy, ref))
+		if encErr != nil {
+			return nil, encErr
+		}
+		body["primary_ci"] = raw
+	}
+	return body, nil
 }
 
 // Create handles POST /api/v1/assets. A missing or empty currency is the
@@ -363,6 +416,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(a.Version))
 	api.WriteJSON(w, http.StatusCreated, body)
 }
 
@@ -423,6 +477,9 @@ func (e *ParentOwnedFieldError) Error() string {
 func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 	var owned *ParentOwnedFieldError
 	switch {
+	case writeConcurrencyError(w, err):
+	case errors.Is(err, ErrDeleteBlocked):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrDeleteBlocked.Error())
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrCINotFound):
@@ -436,6 +493,36 @@ func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 		slog.WarnContext(r.Context(), "asset request failed", "error", err)
 		api.WriteRepoError(w, err)
 	}
+}
+
+// writeConcurrencyError maps the If-Match outcomes of API-07/API-03 (as
+// the CI, WP-061): 412 for a missing (when required) or unknown version,
+// 409 with the fields changed since and the current version. It reports
+// whether err was one of them.
+func writeConcurrencyError(w http.ResponseWriter, err error) bool {
+	var conflict *ConflictError
+	switch {
+	case errors.Is(err, ErrPreconditionRequired):
+		api.WritePreconditionFailed(w, ErrPreconditionRequired.Error())
+	case errors.Is(err, ErrPreconditionFailed):
+		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
+	case errors.As(err, &conflict):
+		w.Header().Set("ETag", api.ETag(conflict.Current))
+		api.WriteProblemBody(w, http.StatusConflict, struct {
+			api.ProblemDetail
+			Fields         []string `json:"fields"`
+			CurrentVersion int64    `json:"current_version"`
+		}{
+			ProblemDetail: api.ProblemDetail{
+				Type: "urn:reticora:problem:conflict", Title: "Conflict", Status: http.StatusConflict,
+				Detail: conflict.Error(),
+			},
+			Fields: conflict.Fields, CurrentVersion: conflict.Current,
+		})
+	default:
+		return false
+	}
+	return true
 }
 
 // readOnlyPaths name the canonical write path of each read-only member of
@@ -477,6 +564,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
+	}
+	// If-Match names the version the change is based on (API-07, WP-740);
+	// the repository checks it on the locked row.
+	if version, sent, parseErr := api.ParseIfMatch(r); parseErr != nil {
+		api.WritePreconditionFailed(w, parseErr.Error())
+		return
+	} else if sent {
+		req.IfMatch = &version
 	}
 	if err := rejectReadOnly(&req); err != nil {
 		api.WriteFieldError(w, err)
@@ -527,6 +622,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, body)
 }
 

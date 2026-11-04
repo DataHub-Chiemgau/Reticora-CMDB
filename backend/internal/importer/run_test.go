@@ -307,9 +307,9 @@ func TestStartNeedsEntityWriteRight(t *testing.T) {
 // TestRunReloadsStarter: the run rebuilds its starter from the creator of
 // the job and their current role assignments (WP-775): a write right
 // revoked after the start ends the run with import-forbidden; a
-// deactivated or deleted user, a start by an API key and a handler
-// without starter sources with import-principal-missing. No row is
-// written.
+// deactivated or deleted user, a start by an API key without key reload
+// and a handler without starter sources with import-principal-missing. No
+// row is written.
 func TestRunReloadsStarter(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -332,7 +332,11 @@ func TestRunReloadsStarter(t *testing.T) {
 			profileID := s.profile(t, testOrg, "csv", FormatCSV, "")
 			docID := s.document(t, testOrg, "text/csv", csvRows(2), document.ScanClean, 0)
 			params := JobParams{DocumentID: docID, DocumentVersion: 1, ProfileID: profileID, Mode: "both",
+				Starter:     &StarterRef{Type: identity.PrincipalTypeUser, Subject: testUser},
 				ScopeParams: jobs.ScopeParams{RequestID: "req-775", Source: tc.source}}
+			if tc.source == audit.SourceAPI {
+				params.Starter = &StarterRef{Type: identity.PrincipalTypeAPIKey, Subject: testUser, KeyPrefix: "k779"}
+			}
 			job, _, err := s.jobs.Enqueue(requestContext(testOrg, testUser, nil), testOrg, JobKind, params,
 				jobs.EnqueueOptions{CreatedBy: testUser})
 			if err != nil {

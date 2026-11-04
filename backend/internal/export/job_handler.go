@@ -22,6 +22,9 @@ import (
 type jobResponse struct {
 	Job
 	DownloadURL string `json:"download_url,omitempty"`
+	// ErrorReportURL is the signed URL of the error report of a completed,
+	// unexpired DATEV job (WP-310).
+	ErrorReportURL string `json:"error_report_url,omitempty"`
 	// Manifest lists the fields of the file and the omitted ones (EXP-01).
 	Manifest Manifest `json:"manifest"`
 }
@@ -116,7 +119,7 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := h.toResponse(r, job)
+	resp, err := h.toResponse(r, job, &datevPreview{})
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -141,8 +144,10 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := make([]jobResponse, 0, len(jobs))
+	// The mapping override is read once for the page (WP-310).
+	preview := &datevPreview{}
 	for i := range jobs {
-		resp, rerr := h.toResponse(r, &jobs[i])
+		resp, rerr := h.toResponse(r, &jobs[i], preview)
 		if rerr != nil {
 			api.WriteRepoError(w, rerr)
 			return
@@ -172,7 +177,7 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "export job not found")
 		return
 	}
-	resp, err := h.toResponse(r, job)
+	resp, err := h.toResponse(r, job, &datevPreview{})
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -181,13 +186,14 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // toResponse attaches the manifest and, to completed, unexpired jobs, a
-// fresh signed URL. An expired or failed job never exposes its object key
-// as a URL. The manifest of a completed job is the one its worker stored
-// with the file (WP-729); any other job shows the preview with the field
-// permissions of the caller (GetJob and ListJobs return its own jobs
-// only). A policy that cannot be resolved is an error (fail-closed).
-func (h *JobHandler) toResponse(r *http.Request, job *Job) (jobResponse, error) {
-	manifest, err := h.manifest(r, job)
+// fresh signed URL (and for DATEV one of the error report, WP-310). An
+// expired or failed job never exposes its object key as a URL. The
+// manifest of a completed job is the one its worker stored with the file
+// (WP-729); any other job shows the preview with the field permissions of
+// the caller (GetJob and ListJobs return its own jobs only). A policy that
+// cannot be resolved is an error (fail-closed).
+func (h *JobHandler) toResponse(r *http.Request, job *Job, preview *datevPreview) (jobResponse, error) {
+	manifest, err := h.manifest(r, job, preview)
 	if err != nil {
 		return jobResponse{}, err
 	}
@@ -203,13 +209,18 @@ func (h *JobHandler) toResponse(r *http.Request, job *Job) (jobResponse, error) 
 		return resp, nil
 	}
 	resp.DownloadURL = url
+	if job.Format == FormatDATEV {
+		if reportURL, rerr := h.blobs.PresignedGetURL(r.Context(), h.bucket, ErrorReportKey(job)); rerr == nil {
+			resp.ErrorReportURL = reportURL
+		}
+	}
 	return resp, nil
 }
 
 // manifest returns the stored manifest of a completed job or the preview
 // for the caller. A completed job without a readable manifest (rendered
 // before WP-729) shows the preview as well.
-func (h *JobHandler) manifest(r *http.Request, job *Job) (Manifest, error) {
+func (h *JobHandler) manifest(r *http.Request, job *Job, preview *datevPreview) (Manifest, error) {
 	if job.Status == JobStatusCompleted && job.ObjectKey != "" && h.blobs != nil {
 		if m, ok := h.storedManifest(r.Context(), job); ok {
 			return m, nil
@@ -219,7 +230,41 @@ func (h *JobHandler) manifest(r *http.Request, job *Job) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	if job.Format == FormatDATEV {
+		return h.datevPreviewManifest(r, job.OrganizationID, preview, policy)
+	}
 	return ManifestForPolicy(job.Format, policy, typeFilter(job.Filters.CITypeID)), nil
+}
+
+// datevPreview holds the effective DATEV mapping of the organization,
+// read at most once per request (WP-310).
+type datevPreview struct {
+	read    bool
+	mapping *DATEVMapping
+	err     error
+}
+
+// datevPreviewManifest is the manifest of an open DATEV job: the effective
+// mapping with the policy of the caller, its creator. An invalid override
+// (the job will fail) shows no fields.
+func (h *JobHandler) datevPreviewManifest(r *http.Request, orgID string, preview *datevPreview,
+	policy *permission.FieldPolicy) (Manifest, error) {
+	if !preview.read {
+		preview.read = true
+		var orgs OrganizationReader
+		if h.worker != nil {
+			orgs = h.worker.Orgs
+		}
+		preview.mapping, _, preview.err = datevSettings(r.Context(), orgs, orgID)
+	}
+	switch {
+	case preview.err == nil:
+		return DATEVManifest(preview.mapping, policy), nil
+	case isDATEVMappingError(preview.err):
+		return Manifest{Format: FormatDATEV, Fields: []string{}, Omitted: []OmittedField{}}, nil
+	default:
+		return Manifest{}, preview.err
+	}
 }
 
 // maxManifestBytes bounds the stored manifest read back.

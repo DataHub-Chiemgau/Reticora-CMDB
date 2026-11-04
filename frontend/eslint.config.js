@@ -54,7 +54,11 @@ export default tseslint.config(
       // WP-818: the impact panel and the topology page.
       'src/pages/TopologyPage.tsx',
       'src/components/graph/ImpactPanel.tsx',
+      // WP-314: the template page and the metamodel components (WP-313).
+      'src/pages/TemplatesPage.tsx',
+      'src/components/metamodel/**/*.tsx',
     ],
+    ignores: ['src/components/metamodel/**/*.test.tsx'],
     rules: {
       'no-restricted-syntax': [
         'error',

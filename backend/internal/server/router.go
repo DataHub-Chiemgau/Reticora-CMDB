@@ -67,12 +67,14 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/signup"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
@@ -488,7 +490,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The import runs (WP-301) get the job service in registerJobKinds; the
 	// routes serve in both profiles and answer 503 without it. A run
 	// (WP-775) hands its rows to the writer of the profile's entity:
-	// locations here, CIs with WP-302, assets, contracts, consumables and
+	// locations here, CIs below the discovery handler (WP-302), assets, contracts, consumables and
 	// relationships with WP-776. Before the first row it checks module and
 	// features of the entity with the release and the org gate, and after
 	// its success it reports import.completed.
@@ -501,6 +503,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// them (in-memory user store) runs fail closed.
 	if users, ok := repos.User.(importer.UserStatus); ok && repos.Permission != nil {
 		importHandler.WithStarters(users, repos.Permission)
+		// A run started with an API key reloads the key like the auth
+		// middleware (cmd/server): revoked or expired fails it, its rights
+		// are the intersection with the owner's current ones (AUT-04,
+		// WP-779, E-145).
+		if repos.APIKeys != nil {
+			keys := identity.NewAPIKeyServiceWithStore(repos.APIKeys).WithOwnerAccess(repos.Permission)
+			if repos.ServiceAccounts != nil {
+				keys.WithServiceAccountAccess(user.ServiceAccountAccess{Repo: repos.ServiceAccounts})
+			}
+			importHandler.WithAPIKeys(keys)
+		}
 	}
 	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
 	// job kind document.scan of the module documents on the job queue:
@@ -584,6 +597,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The worker renders with the field policy of the job's creator,
 	// resolved at render time (RBA-07, WP-729).
 	exportWorker.Policies = fieldResolver
+	// DATEV jobs read assets and the mapping override (WP-310); the memory
+	// profile has no asset source and fails them.
+	exportWorker.Assets, _ = repos.Asset.(export.AssetSource)
+	exportWorker.Orgs = repos.TenantHierarchy
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -635,6 +652,18 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)
 	}
+	// CI rows of an import (WP-302) resolve their identity with the ingest's
+	// implementation under its identity locks, decide every field with
+	// source import (rank 95) and open the ingest's reviews; the policy of
+	// the starter is resolved like a request's.
+	if opts.CIService != nil && repos.Override != nil {
+		ciWriter := importer.NewCIWriter(opts.CIService, discoveryHandler, repos.Override, fieldResolver).
+			WithInstanceFields(repos.CIType).WithFields(repos.CIType).WithLocations(repos.LocationTree)
+		if analyzer, ok := repos.Discovery.(discovery.BulkAnalyzer); ok {
+			ciWriter.WithAnalyzer(analyzer)
+		}
+		importHandler.WithWriter(ciWriter)
+	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType).
 		WithCITypes(repos.CIType)
 	// The type filter of a walk from a root includes the subtypes (WP-708).
@@ -657,11 +686,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// queue of discovery, deduplicated with its items (REC-12). Both modules
 	// stay switched off in G1 (E-03); the protection holds once they are on.
 	// The queue is built here, after the last option of the handler.
-	conflictReviews := discoveryHandler.ReviewService()
-	// One executor runs the runs of the workflow API and the run an IGA
-	// access request starts (WFL-04).
-	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	// Tickets and comments are created through one service (WP-766).
 	// SLAs are ticketing_standard (E-39, WP-769): the hooks apply, choose
 	// again and reset them only with the feature.
@@ -670,6 +694,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		slaHooks.Features = opts.Entitlements
 	}
 	tickets := ticket.NewService(repos.Ticket, slaHooks)
+	// Review items open tickets only while the module ticketing is on
+	// (WP-291); before the queue is built.
+	if opts.Modules.Enabled("ticketing") {
+		discoveryHandler.WithReviewTickets(reviewTickets{svc: tickets, cis: repos.CI, features: opts.Entitlements})
+	}
+	conflictReviews := discoveryHandler.ReviewService()
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04).
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -795,6 +829,134 @@ func alertStoreFor(store monitoring.MetricStore) monitoring.AlertStore {
 		return evaluating.AlertStore()
 	}
 	return nil
+}
+
+// reviewTickets is the ticket side of the review queue (TKT-01, WP-291)
+// over the ticket service: package reviews does not import package ticket.
+type reviewTickets struct {
+	svc *ticket.Service
+	cis ci.Repository
+	// features gates the tickets of an item on ticketing_essential; nil
+	// checks none.
+	features *entitlement.Service
+}
+
+// CreateTicket creates the ticket with its links in one transaction,
+// exclusive for the item (at most one ticket that is not closed) and with
+// the item as origin of the audit entry ticket.create. The fields the body
+// sets must be editable (field permissions, WP-765); the answer is the
+// ticket as the caller may read it.
+func (a reviewTickets) CreateTicket(ctx context.Context, nt *reviews.NewTicket) (any, error) {
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if writeErr := permission.CheckWrite(policy, permission.KindTicket, "", permission.ObjectRef{TeamID: nt.TeamID},
+		nt.RequestFields); writeErr != nil {
+		return nil, writeErr
+	}
+	t := &ticket.Ticket{
+		OrganizationID: nt.OrganizationID, Title: nt.Title, Description: nt.Description,
+		Status: ticket.StatusNew, Priority: nt.Priority, Category: nt.Category,
+		ReporterID: tenant.FromContext(ctx).UserID, AssigneeID: nt.AssigneeID, TeamID: nt.TeamID,
+		RelatedCIID: nt.RelatedCIID, RelatedAssetID: nt.RelatedAssetID,
+	}
+	links := make([]ticket.Link, 0, len(nt.CIIDs)+1)
+	for _, id := range nt.CIIDs {
+		links = append(links, ticket.Link{EntityType: ticket.LinkCI, EntityID: id})
+	}
+	if nt.AssetID != "" {
+		links = append(links, ticket.Link{EntityType: ticket.LinkAsset, EntityID: nt.AssetID})
+	}
+	item := &ticket.Target{EntityType: ticket.LinkReviewItem, EntityID: nt.ReviewItemID}
+	err = a.svc.Create(ctx, t, links, ticket.CreateOptions{Exclusive: item, Origin: item})
+	var open *ticket.ErrOpenTicketExists
+	switch {
+	case errors.As(err, &open):
+		return nil, reviews.TicketConflict(open.ID, open.TicketNumber)
+	case errors.Is(err, ticket.ErrNotFound):
+		return nil, reviews.ErrNotFound
+	case err != nil:
+		return nil, err
+	}
+	return permission.ProjectValue(policy, permission.KindTicket, "",
+		permission.ObjectRef{ID: t.ID, ClientID: t.ClientID, SiteID: t.SiteID, TeamID: t.TeamID}, t)
+}
+
+// LinkedTickets names the tickets of the items the caller sees, with one
+// query; none without ticket:read or without ticketing_essential.
+func (a reviewTickets) LinkedTickets(ctx context.Context, orgID string, itemIDs []string) (map[string][]reviews.TicketRef, error) {
+	if p, ok := identity.PrincipalFromContext(ctx); !ok || !p.Has(identity.PermTicketRead) {
+		return nil, nil
+	}
+	if a.features != nil && !a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential) {
+		return nil, nil
+	}
+	linked, err := a.svc.LinkedTickets(ctx, orgID, ticket.LinkReviewItem, itemIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]reviews.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]reviews.TicketRef, len(list))
+		for i := range list {
+			refs[i] = reviews.TicketRef{ID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// The resolution of an item is commented on its open tickets (WP-767).
+var _ reviews.ResolutionCommenter = reviewTickets{}
+
+// OpenTickets names the tickets of the item that are not closed and that
+// the caller sees under ticket RLS (WP-767).
+func (a reviewTickets) OpenTickets(ctx context.Context, orgID, itemID string) ([]reviews.TicketRef, error) {
+	linked, err := a.svc.LinkedTickets(ctx, orgID, ticket.LinkReviewItem, []string{itemID})
+	if err != nil {
+		return nil, err
+	}
+	var out []reviews.TicketRef
+	for _, list := range linked {
+		for i := range list {
+			if list[i].Status != ticket.StatusClosed {
+				out = append(out, reviews.TicketRef{ID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status})
+			}
+		}
+	}
+	return out, nil
+}
+
+// CommentTicket adds the internal comment on the resolution of an item: by
+// the resolver, or a system comment when the resolution has no actor or the
+// actor is a service account (its API key acts as the account, which is no
+// app_user and cannot author a user comment).
+func (a reviewTickets) CommentTicket(ctx context.Context, orgID, ticketID, authorID, content string) error {
+	if p, ok := identity.PrincipalFromContext(ctx); ok && p.ServiceAccountID != "" && p.Subject == authorID {
+		authorID = ""
+	}
+	if authorID == "" {
+		_, err := a.svc.AddSystemComment(ctx, orgID, ticketID, content)
+		return err
+	}
+	return a.svc.AddComment(ctx, &ticket.Comment{OrganizationID: orgID, TicketID: ticketID, AuthorID: authorID,
+		AuthorType: ticket.AuthorUser, Content: content, IsInternal: true})
+}
+
+// CIName returns the name of a CI the caller sees, "" for none.
+func (a reviewTickets) CIName(ctx context.Context, orgID, ciID string) (string, error) {
+	item, err := a.cis.GetByID(ctx, orgID, ciID)
+	switch {
+	case errors.Is(err, ci.ErrNotFound) || errors.Is(err, api.ErrNotFound):
+		// A CI that is gone leaves the title without its name.
+		return "", nil
+	case err != nil:
+		return "", err
+	case item == nil:
+		return "", nil
+	}
+	return item.Name, nil
 }
 
 // accessRequestRuns is the executor that starts the workflow run of an IGA

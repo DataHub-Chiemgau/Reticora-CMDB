@@ -77,6 +77,8 @@ func gateMux(t *testing.T, gate *DATEVGate) (chi.Router, *JobWorker, *MemoryJobR
 	blobs := blob.NewFileStore(t.TempDir())
 	worker := NewJobWorker(jobs, cis, blobs)
 	worker.DATEV = gate
+	// DATEV jobs read assets (WP-310).
+	worker.Assets = &fakeAssets{}
 	mux := chi.NewRouter()
 	NewHandler(cis).WithDATEVGate(gate).RegisterRoutes(mux)
 	NewJobHandler(jobs, worker, blobs).WithDATEVGate(gate).RegisterRoutes(mux)

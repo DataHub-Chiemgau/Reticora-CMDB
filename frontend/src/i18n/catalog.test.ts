@@ -9,6 +9,9 @@ import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
+import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
+import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
+import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
@@ -30,6 +33,12 @@ const pageSources = import.meta.glob('../pages/*.tsx', {
   import: 'default',
   eager: true,
 }) as Record<string, string>;
+
+// WP-314: the components of the metamodel administration, without tests.
+const metamodelSources = import.meta.glob(
+  ['../components/metamodel/**/*.tsx', '!../components/metamodel/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
 
 const COLLECTOR_STATUSES = ['pending', 'active', 'offline', 'disabled', 'paused'];
 
@@ -148,6 +157,13 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
   ['citypes.dataTypes', FIELD_TYPES],
+  // WP-314: template versions, the changes of MetamodelDiff, the job states
+  // and the index state none of WP-313.
+  ['templates.versionStatuses', TEMPLATE_VERSION_STATUSES],
+  ['templates.versionStatuses', specEnum('TemplateVersion', 'status')],
+  ['templates.diff.changes', DIFF_CHANGES],
+  ['jobs.statuses', JOB_STATUSES],
+  ['citypes.indexStatus', ['none']],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
@@ -237,6 +253,12 @@ describe('i18n catalog', () => {
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
   });
 
+  it('offers exactly the template version states of the OpenAPI types (WP-314)', () => {
+    expect([...TEMPLATE_VERSION_STATUSES]).toEqual(specEnum('TemplateVersion', 'status'));
+    expect(Object.keys(metamodelSources)).toContain('../components/metamodel/MetamodelDiff.tsx');
+    expect(Object.keys(metamodelSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
@@ -260,8 +282,10 @@ describe('i18n catalog', () => {
     '../pages/StocktakeListPage.tsx',
     '../pages/CITypeAdminPage.tsx',
     '../pages/TopologyPage.tsx',
+    '../pages/TemplatesPage.tsx',
+    ...Object.keys(metamodelSources),
   ])('%s has no literal option labels', (file) => {
-    const source = pageSources[file];
+    const source = pageSources[file] ?? metamodelSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

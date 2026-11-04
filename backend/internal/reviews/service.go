@@ -32,6 +32,8 @@ type Service struct {
 	notifier Notifier
 	// jobs records every merge resolution as a job (JOB-04).
 	jobs jobs.Tracker
+	// tickets opens the tickets of items and names them (WP-291).
+	tickets TicketCreator
 }
 
 // MergeJobKind is the job kind of a review merge (JOB-04).
@@ -270,10 +272,16 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 		}
 		if resolved {
 			out, err = s.repo.GetReviewItem(ctx, orgID, id)
+		} else {
+			out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
+		}
+		if err != nil {
 			return err
 		}
-		out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
-		return err
+		// The open tickets of the item are commented once the resolution
+		// has committed, also when the effect stored it (WP-767).
+		s.CommentResolved(ctx, out, res.ResolvedBy)
+		return nil
 	})
 	if tracked {
 		s.finishMerge(ctx, item, err)

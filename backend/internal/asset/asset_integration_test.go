@@ -223,10 +223,14 @@ func TestAssetAST01References(t *testing.T) {
 		t.Fatalf("asset facts on the CI: %+v", item.Asset)
 	}
 
-	// Deleting the owner user is refused; deleting the owner team clears
-	// the reference and keeps the asset in its organization.
-	if err = user.NewPGRepository(f.App).DeleteUser(ctx, f.OrgA, userA); !errors.Is(err, user.ErrUserReferenced) {
-		t.Fatalf("delete owner user: %v, want ErrUserReferenced", err)
+	// Deleting the owner user is refused: the linked CI mirrors the owner
+	// of its asset and is open (TLC-04, WP-280). Deleting the owner team
+	// clears the reference and keeps the asset in its organization.
+	if item.OwnerUserID != userA || item.OwnerTeamID != ids["teamA"] {
+		t.Fatalf("owner of the linked CI: %q %q", item.OwnerUserID, item.OwnerTeamID)
+	}
+	if err = user.NewPGRepository(f.App).DeleteUser(ctx, f.OrgA, userA); !errors.Is(err, user.ErrUserOwnsOpenObjects) {
+		t.Fatalf("delete owner user: %v, want ErrUserOwnsOpenObjects", err)
 	}
 	w.admin(t, `DELETE FROM team WHERE id = $1`, ids["teamA"])
 	var team, org string
@@ -269,7 +273,7 @@ func TestAssetAST01FieldRights(t *testing.T) {
 	hidden := func(rec *httptest.ResponseRecorder) {
 		t.Helper()
 		s := rec.Body.String()
-		if strings.Contains(s, "4711") || strings.Contains(s, "x-geheim") || !strings.Contains(s, `"public":"offen"`) ||
+		if strings.Contains(s, `"purchase_price"`) || strings.Contains(s, `"4711`) || strings.Contains(s, "x-geheim") || !strings.Contains(s, `"public":"offen"`) ||
 			!strings.Contains(s, `"organization_id"`) || !strings.Contains(s, `"created_at"`) {
 			t.Fatalf("not projected: %s", s)
 		}
@@ -328,16 +332,21 @@ func TestAssetAST01Migration(t *testing.T) {
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		// 000233 (WP-308) has a trigger on asset columns of 000229: it
-		// goes down first and up last as well.
+		// 000233 (WP-308) has a trigger on asset columns of 000229, the
+		// policies of 000237 (WP-280) read asset.owner_team_id: they go
+		// down first and up last as well.
 		search, readErr := os.ReadFile("../../migrations/000233_search_fields." + name + ".sql")
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		if name == "down" {
-			return string(search) + "\n" + string(names) + "\n" + string(b)
+		owner, readErr := os.ReadFile("../../migrations/000237_ci_owner." + name + ".sql")
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		return string(b) + "\n" + string(names) + "\n" + string(search)
+		if name == "down" {
+			return string(owner) + "\n" + string(search) + "\n" + string(names) + "\n" + string(b)
+		}
+		return string(b) + "\n" + string(names) + "\n" + string(search) + "\n" + string(owner)
 	}
 	tx, err := f.Admin.Begin(bg)
 	if err != nil {

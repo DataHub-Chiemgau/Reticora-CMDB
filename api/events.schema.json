@@ -630,7 +630,7 @@
       ]
     },
     "asset.created": {
-      "description": "Data frame of asset.created. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of asset.created. entity_id: the asset. Origin: EVT-03. Producer: WP-740. Besides the frame the data carries the asset as GET /api/v1/assets/{id} returns it (version included, without primary_ci), projected per webhook subscription (additionalProperties).",
       "type": "object",
       "required": ["id"],
       "additionalProperties": true,
@@ -660,9 +660,9 @@
       ]
     },
     "asset.changed": {
-      "description": "Data frame of asset.changed. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of asset.changed. entity_id: the asset. Origin: EVT-03. Producer: WP-740. Besides the frame the data carries the asset as GET /api/v1/assets/{id} returns it (version included, without primary_ci), projected per webhook subscription (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "changed_fields"],
       "additionalProperties": true,
       "properties": {
         "id": {
@@ -679,18 +679,24 @@
           "type": "string",
           "format": "uuid",
           "description": "Site of the object; absent without site."
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The members of the asset DTO the change wrote (inventory_no, custom_fields, …), sorted. A webhook delivery names only the fields its subscription may read."
         }
       },
       "examples": [
         {
           "id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
-          "site_id": "44444444-4444-4444-8444-444444444444"
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "changed_fields": ["cost_center", "serial_number"]
         }
       ]
     },
     "asset.deleted": {
-      "description": "Data frame of asset.deleted. entity_id: the asset. Origin: EVT-03. Producer: WP-740. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of asset.deleted. entity_id: the asset. Origin: EVT-03. Producer: WP-740. Besides the frame the data carries the asset as it was before the delete (version included, without primary_ci), projected per webhook subscription (additionalProperties).",
       "type": "object",
       "required": ["id"],
       "additionalProperties": true,

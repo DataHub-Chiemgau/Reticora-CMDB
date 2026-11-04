@@ -30,7 +30,7 @@ const ExportBucket = "exports"
 
 var exportContentTypes = map[string]string{
 	"csv":   "text/csv",
-	"datev": "text/csv",
+	"datev": "text/csv; charset=windows-1252",
 	"json":  "application/json",
 }
 
@@ -87,6 +87,12 @@ type JobWorker struct {
 	// stored with the job. Without it the export reads no field with field
 	// permissions (fail-closed).
 	Policies permission.PolicyResolver
+	// Assets reads the assets of a DATEV job (WP-310); without it (memory
+	// profile) a DATEV job fails with ErrDATEVUnavailable.
+	Assets AssetSource
+	// Orgs reads the currency and the mapping override of the job's
+	// organization for a DATEV job; without it the default mapping applies.
+	Orgs OrganizationReader
 }
 
 // ManifestKey returns the blob key of the manifest of a rendered job, next
@@ -148,11 +154,21 @@ func (w *JobWorker) cancelled(ctx context.Context, job *Job) bool {
 func (w *JobWorker) stop(ctx context.Context, job *Job, key string) {
 	slog.Info("export job cancelled", "job", job.ID)
 	if key != "" {
-		w.deleteObjects(ctx, job, key, ManifestKey(job))
+		w.deleteObjects(ctx, job, objectKeys(job, key)...)
 	}
 	if err := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, CancelledByUser, w.Now()); err != nil {
 		w.report(job.ID, fmt.Errorf("mark export job cancelled: %w", err))
 	}
+}
+
+// objectKeys are the stored objects of a rendered job: the export, its
+// manifest and, for DATEV, its error report (WP-310).
+func objectKeys(job *Job, key string) []string {
+	keys := []string{key, ManifestKey(job)}
+	if job.Format == FormatDATEV {
+		keys = append(keys, ErrorReportKey(job))
+	}
+	return keys
 }
 
 // deleteObjects deletes the stored objects (export, manifest) of a job
@@ -283,8 +299,18 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		w.fail(ctx, job, fmt.Errorf("resolve field permissions of the export: %w", err))
 		return
 	}
+	// DATEV renders assets with the mapping of the organization and an
+	// error report (WP-310); CSV and JSON render CIs (render.go).
 	var buf bytes.Buffer
-	rowCount, manifest, err := RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
+	var report *bytes.Buffer
+	var rowCount int
+	var manifest Manifest
+	if job.Format == FormatDATEV {
+		report = &bytes.Buffer{}
+		rowCount, manifest, err = w.renderDATEV(renderCtx, job, policy, &buf, report)
+	} else {
+		rowCount, manifest, err = RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
+	}
 	if err != nil {
 		w.fail(ctx, job, err)
 		return
@@ -299,6 +325,14 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		w.fail(ctx, job, fmt.Errorf("store export object: %w", perr))
 		return
 	}
+	if report != nil {
+		if rerr := w.Blobs.Put(ctx, w.Bucket, ErrorReportKey(job), bytes.NewReader(report.Bytes()), int64(report.Len()),
+			errorReportContentType); rerr != nil {
+			w.deleteObjects(ctx, job, key)
+			w.fail(ctx, job, fmt.Errorf("store datev error report: %w", rerr))
+			return
+		}
+	}
 	// The manifest of the file lies next to it (WP-729): GET
 	// /api/v1/exports/{id} answers it for the completed job.
 	rawManifest, err := json.Marshal(&manifest)
@@ -307,7 +341,11 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		return
 	}
 	if merr := w.Blobs.Put(ctx, w.Bucket, ManifestKey(job), bytes.NewReader(rawManifest), int64(len(rawManifest)), "application/json"); merr != nil {
-		w.deleteObjects(ctx, job, key)
+		stored := []string{key}
+		if report != nil {
+			stored = append(stored, ErrorReportKey(job))
+		}
+		w.deleteObjects(ctx, job, stored...)
 		w.fail(ctx, job, fmt.Errorf("store export manifest: %w", merr))
 		return
 	}

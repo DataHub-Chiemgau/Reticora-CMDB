@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {"header": "Inventarnummer", "source": "inventory_no", "required": true, "format": "text"},
+    {"header": "Bezeichnung", "source": "name", "required": true, "format": "text"},
+    {"header": "Hersteller", "source": "manufacturer", "required": false, "format": "text"},
+    {"header": "Modell", "source": "model", "required": false, "format": "text"},
+    {"header": "Anschaffungsdatum", "source": "purchase_date", "required": true, "format": "date"},
+    {"header": "Anschaffungskosten", "source": "purchase_price", "required": true, "format": "amount"},
+    {"header": "Währung", "source": "currency", "required": true, "format": "text"},
+    {"header": "Lieferant", "source": "supplier", "required": false, "format": "text"},
+    {"header": "Kostenstelle", "source": "cost_center", "required": false, "format": "text"},
+    {"header": "Garantie bis", "source": "warranty_until", "required": false, "format": "date"},
+    {"header": "Standort", "source": "location", "required": false, "format": "text"},
+    {"header": "Status", "source": "lifecycle_state", "required": false, "format": "text"}
+  ]
+}

@@ -214,6 +214,50 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 	if stored.Environment != "" && stored.Environment != environment {
 		return nil, errors.New("identity: invalid API key")
 	}
+	info, err := s.grant(ctx, stored, environment)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update last used timestamp (best effort)
+	_ = s.store.MarkUsed(ctx, stored.OrganizationID, stored.ID)
+
+	return info, nil
+}
+
+// ErrAPIKeyInvalid: the key of a reload (Reload) is unknown, revoked or
+// expired.
+var ErrAPIKeyInvalid = errors.New("identity: API key is unknown, revoked or expired")
+
+// Reload identifies a stored key by its public prefix without its secret,
+// for work a request with the key queued earlier (an import job, E-145):
+// it checks revocation and expiry like Validate and returns the rights the
+// key grants now, resolved like Validate (the intersection with the
+// owner's current rights, a bound key within its creator's scope). An
+// unknown, revoked or expired key is ErrAPIKeyInvalid; a store or rights
+// lookup that fails is ErrAPIKeyUnavailable. It does not mark the key as
+// used.
+func (s *APIKeyService) Reload(ctx context.Context, prefix string) (*APIKeyInfo, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("identity: API key store not configured")
+	}
+	stored, err := s.store.LookupByPrefix(ctx, prefix)
+	if err != nil {
+		return nil, fmt.Errorf("%w: lookup API key: %w", ErrAPIKeyUnavailable, err)
+	}
+	if stored == nil || stored.KeyPrefix != prefix {
+		return nil, ErrAPIKeyInvalid
+	}
+	info, err := s.grant(ctx, stored, stored.Environment)
+	if err != nil && !errors.Is(err, ErrAPIKeyUnavailable) {
+		return nil, fmt.Errorf("%w: %w", ErrAPIKeyInvalid, err)
+	}
+	return info, err
+}
+
+// grant checks revocation and expiry of a stored key and resolves the
+// rights it grants now (Validate, Reload).
+func (s *APIKeyService) grant(ctx context.Context, stored *StoredAPIKey, environment string) (*APIKeyInfo, error) {
 	if stored.RevokedAt != nil {
 		return nil, errors.New("identity: API key has been revoked")
 	}
@@ -268,10 +312,6 @@ func (s *APIKeyService) Validate(ctx context.Context, rawKey string) (*APIKeyInf
 			}
 		}
 	}
-
-	// Update last used timestamp (best effort)
-	_ = s.store.MarkUsed(ctx, stored.OrganizationID, stored.ID)
-
 	return info, nil
 }
 

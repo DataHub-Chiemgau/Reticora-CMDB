@@ -82,6 +82,7 @@ const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderList
 const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
 const CITypeAdminPage = lazyPage(() => import('./pages/CITypeAdminPage'), 'CITypeAdminPage');
+const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
@@ -331,6 +332,8 @@ function App() {
               <Route path="/locations" element={<LocationTreePage />} />
               <Route path="/saved-views" element={<SavedViewsPage />} />
               <Route path="/ci-types" element={<CITypeAdminPage />} />
+              <Route path="/ci-types/templates" element={<TemplatesPage />} />
+              <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
               <Route path="/assignments" element={<AssignmentListPage />} />
               <Route path="/documents" element={<DocumentListPage />} />
               <Route path="/stocktake" element={<StocktakeListPage />} />

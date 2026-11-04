@@ -3059,6 +3059,20 @@ paths:
       operationId: listAssets
       tags: [Assets]
       summary: List assets
+      description: >-
+        The assets visible under the caller's scope (API-02, WP-740).
+        `filter[field][op]` on inventory_no, barcode, rfid_tag,
+        serial_number, manufacturer, model, cost_center, supplier_id,
+        contract_id, owner_user_id, owner_team_id, lifecycle_state,
+        location_id, client_id, purchase_date and warranty_until; `sort`
+        (or sort_by/sort_dir) on created_at (default, descending),
+        updated_at, name, inventory_no, category, status, manufacturer,
+        model, serial_number, lifecycle_state, purchase_date and
+        warranty_until; `fields` selects members of Asset after the
+        field-permission projection (a field the caller cannot read stays
+        missing). An unknown filter, sort or response field is 422. status,
+        category, client_id and search (or q) remain as aliases. total is
+        the count of the filtered list in the caller's scope.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -3075,6 +3089,10 @@ paths:
           schema:
             type: string
         - $ref: '#/components/parameters/ClientID'
+        - $ref: '#/components/parameters/ListFilter'
+        - $ref: '#/components/parameters/ListSort'
+        - $ref: '#/components/parameters/ListFields'
+        - $ref: '#/components/parameters/ListQ'
       responses:
         '200':
           description: Paginated list of assets
@@ -3090,15 +3108,17 @@ paths:
           description: >-
             Forbidden: the route permission (ProblemDetail) or the field
             permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden,
-            FieldForbiddenProblem: `fields` names the DTO paths): a status or
-            category filter, a search (inventory_no) or a sort on inventory_no,
-            category or status the caller cannot read in every scope.
+            FieldForbiddenProblem: `fields` names the DTO paths): a filter
+            (status, category, filter[...]), a search (inventory_no) or a sort
+            on a field the caller cannot read in every scope.
           content:
             application/problem+json:
               schema:
                 oneOf:
                   - { $ref: '#/components/schemas/ProblemDetail' }
                   - { $ref: '#/components/schemas/FieldForbiddenProblem' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -3119,6 +3139,10 @@ paths:
       responses:
         '201':
           description: Asset created
+          headers:
+            ETag:
+              description: The asset version (API-07); send it as If-Match with a PATCH.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -3169,9 +3193,18 @@ paths:
       operationId: getAsset
       tags: [Assets]
       summary: Get an asset
+      description: >-
+        Always the schema Asset (WP-740). With a primary CI, primary_ci
+        carries its read-only technical identity (field permissions of the
+        CI apply; it is left out when the caller cannot read
+        primary_ci_id).
       responses:
         '200':
           description: Asset details
+          headers:
+            ETag:
+              description: The asset version (API-07); send it as If-Match with a PATCH.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -3184,6 +3217,22 @@ paths:
       operationId: updateAsset
       tags: [Assets]
       summary: Update an asset
+      description: >-
+        Optimistic concurrency (API-07, WP-740): If-Match names the version
+        the editor read (ETag of GET, POST or PATCH). A stale version is
+        refused with 409 only when a field of the request changed since; a
+        version written outside the asset API (stock movement, rack
+        placement, lifecycle transition, stocktake, CI merge, delete or
+        restore of a linked CI) counts as a change of every field of the
+        request. An organization can require If-Match
+        (settings.require_if_match); then a request without it is 412, like
+        an unknown version.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -3193,6 +3242,10 @@ paths:
       responses:
         '200':
           description: Asset updated
+          headers:
+            ETag:
+              description: The new asset version.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -3216,9 +3269,19 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: >-
-            The field is owned by the parent asset of a composition (spec §5),
-            or the inventory number, barcode or rfid_tag is already taken in
-            the organization (`field` names it).
+            Fields of the request changed since the If-Match version
+            (VersionConflictProblem: `fields`, `current_version`), the field
+            is owned by the parent asset of a composition (spec §5), or the
+            inventory number, barcode or rfid_tag is already taken in the
+            organization (`field` names it).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the asset
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -3239,6 +3302,11 @@ paths:
       operationId: deleteAsset
       tags: [Assets]
       summary: Delete an asset
+      description: >-
+        Deletes the asset for good and writes asset.deleted (WP-740). An
+        asset with stock movements or a disposal record (both append-only)
+        cannot be deleted (409, E-121); its end is a lifecycle state
+        (retired, disposed).
       responses:
         '204':
           description: Asset deleted
@@ -3246,6 +3314,11 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The asset has stock movements or a disposal record.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assignments:
     x-phase: P2
@@ -6154,6 +6227,81 @@ paths:
             ci_type_id), or the effect refuses a value of the item (the
             field it names, e.g. collector_id or target of a suggested
             scope)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/review-items/{id}/ticket:
+    x-phase: P2
+    x-feature: ticketing_essential
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: createReviewItemTicket
+      tags: [Reviews]
+      summary: Open a ticket for a review item
+      description: >-
+        Opens a ticket for an open review item through the ticket service
+        (TKT-01, WP-291); the item stays open. Requires ticket:write (route)
+        and review:resolve (403 otherwise), the module ticketing (404 while
+        it is off) and the feature ticketing_essential (403
+        feature-not-entitled). The ticket is linked to the item (ticket_link
+        review_item), to every candidate CI (ci) and, for serial_mismatch,
+        to the asset of payload.asset_id (asset, also related_asset_id). The
+        first candidate CI (else payload.ci_id or payload.matched_ci_id) is
+        related_ci_id, so the ticket takes its client and site; an item
+        without candidates opens an organization-wide ticket, which a
+        client- or site-restricted caller cannot create (403), and a
+        team-restricted caller must name a team_id of its scope (403
+        otherwise). Title "<kind>: <payload.name | payload.cidr | CI name>",
+        the description names object_key and the payload fields without
+        raw_data and fingerprint, category task, status as POST /tickets.
+        The priority follows the type (high: ambiguous_identity,
+        probable_duplicate, resurrected_device, duplicate_ip,
+        serial_mismatch, unlicensed_ci; medium: conflicting_values,
+        override_conflict, unclassified_device, unknown_relationship; low:
+        scope_suggested); priority of the body takes precedence. At most one
+        ticket that is not closed is linked to an item: a second one is 409
+        naming the id and ticket_number of the open ticket (a ticket the
+        caller does not see does not count and is not named). One audit
+        entry ticket.create names the ticket and the review item. The
+        endpoint is idempotent per item, so the inbox can open tickets for
+        many items with one request each.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewItemTicketRequest'
+      responses:
+        '201':
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The item is no longer open, or an open ticket is already linked
+            to it (the detail names its id and ticket_number)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            priority is no ticket priority, or assignee_id or team_id is no
+            UUID or names an object that is unknown, of another
+            organization or outside the caller's scope; `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -23925,6 +24073,25 @@ components:
             relationship contains is projected from it. Cycles are rejected
             (422). The parent is a CI of the same client or an org-wide CI
             (TEN-05).
+        owner_user_id:
+          type: string
+          format: uuid
+          description: >-
+            User responsible for the CI in the system (CI-07): the ID of the
+            user (app_user.id), no personal data; clients resolve the name.
+            Separate from the contact role owner (GET
+            /api/v1/cis/{id}/contacts). For a CI linked to an asset it
+            mirrors the asset's owner (DB-05). Subject to the field
+            permissions (core.owner_user_id).
+        owner_team_id:
+          type: string
+          format: uuid
+          description: >-
+            Team responsible for the CI (CI-07). A team-scoped principal sees
+            the CIs of its teams and those without a team and writes only
+            those of its teams (TEN-05). For a CI linked to an asset it
+            mirrors the asset's owner (DB-05). Deleting the team clears it.
+            Subject to the field permissions (core.owner_team_id).
         lifecycle_state:
           type: string
           readOnly: true
@@ -24216,6 +24383,22 @@ components:
             (TEN-05). A CI the principal cannot see, a deleted or unknown CI
             is rejected (422 "parent CI not found"), so is a CI of another
             client (422) and a cycle (422).
+        owner_user_id:
+          type: string
+          format: uuid
+          description: >-
+            Owning user (WP-280). An unknown user or one of another
+            organization is rejected (422 on owner_user_id). With asset_id
+            the CI takes the asset's owner; another owner is rejected (422).
+        owner_team_id:
+          type: string
+          format: uuid
+          description: >-
+            Owning team (WP-280). An unknown team or one of another
+            organization is rejected (422 on owner_team_id). A team-scoped
+            principal must name a team of its scope (403 otherwise, TEN-05).
+            With asset_id the CI takes the asset's owner; another owner is
+            rejected (422).
         name:
           type: string
         status:
@@ -24325,6 +24508,21 @@ components:
             a deleted or unknown CI is rejected (422 "parent CI not found"),
             so is a CI of another client (422) and a cycle (422); the parent
             is checked again when client_id changes.
+        owner_user_id:
+          type: [string, 'null']
+          description: >-
+            Owning user (empty string or null clears it, WP-280). An unknown
+            user or one of another organization is rejected (422). A CI
+            linked to an asset has the asset's owner: another value is
+            rejected (422 on owner_user_id).
+        owner_team_id:
+          type: [string, 'null']
+          description: >-
+            Owning team (empty string or null clears it, WP-280). An unknown
+            team or one of another organization is rejected (422); a team
+            outside the scope of a team-scoped principal is refused (403,
+            TEN-05). A CI linked to an asset has the asset's owner: another
+            value is rejected (422 on owner_team_id).
         manufacturer:
           type: [string, 'null']
         model:
@@ -25445,6 +25643,11 @@ components:
 
     ExportJobFilters:
       type: object
+      description: >-
+        Filters of the export. csv and json export CIs (status, ci_type_id,
+        client_id); datev exports assets (client_id, lifecycle_state), and
+        status or ci_type_id with datev, lifecycle_state with csv or json
+        are 400.
       properties:
         status:
           type: string
@@ -25453,6 +25656,9 @@ components:
           description: CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list.
         client_id:
           type: string
+        lifecycle_state:
+          type: string
+          description: Lifecycle state of the assets of a datev export (E-120); datev only.
 
     CreateExportJobRequest:
       type: object
@@ -25460,9 +25666,19 @@ components:
       properties:
         format:
           type: string
-          description: Output format. datev requires the module inventory,
-            the entitlements export_datev and assets_basic and the
-            permission asset:read (WP-790).
+          description: >-
+            Output format. csv and json export CIs. datev exports the
+            canonical asset data of the creator's scope for the asset
+            accounting (EXP-01, E-50, WP-310): Windows-1252, semicolons,
+            CRLF, columns of the mapping (the default mapping or the
+            override organization.settings.datev_mapping; an invalid
+            override fails the job), amounts with a decimal comma, dates
+            DD.MM.YYYY. Rows with a missing required field or characters
+            Windows-1252 cannot encode are left out and listed in the error
+            report (error_report_url); row_count counts the written rows.
+            datev requires the module inventory, the entitlements
+            export_datev and assets_basic and the permission asset:read
+            (WP-790).
           enum: [csv, json, datev]
           default: json
         filters:
@@ -25530,7 +25746,12 @@ components:
         completed job answers the manifest stored with its file, any other
         job the preview with the caller's field permissions.
         X-Export-Omitted-Fields of the streaming export lists the same
-        fields.
+        fields. For a datev job (assets, WP-310) fields are the source
+        fields of the mapping's columns (inventory_no, purchase_price, …):
+        a source the creator may not read by the asset field permissions
+        stays an empty column and is listed with reason field_permission,
+        the source fields the mapping does not name with reason layout;
+        the preview of an open datev job uses the effective mapping.
       required: [format, fields, omitted]
       properties:
         format: { type: string }
@@ -25592,6 +25813,14 @@ components:
         download_url:
           type: string
           description: Time-limited signed URL; only present on completed, unexpired jobs.
+        error_report_url:
+          type: string
+          description: >-
+            Time-limited signed URL (15 minutes) of the error report of a
+            datev job (<org>/<job>.errors.csv, UTF-8 with BOM, semicolons;
+            per rejected row and column the inventory number or asset id,
+            the column and the reason); only present on completed,
+            unexpired datev jobs (WP-310).
         scope:
           $ref: '#/components/schemas/ExportJobScope'
         created_at:
@@ -25819,8 +26048,8 @@ components:
       type: object
       description: >-
         An asset after AST-01 (WP-271). The fields id, organization_id,
-        client_id, name, custom_fields and the timestamps are always present
-        (client_id when set); the others are left out when the field
+        client_id, name, custom_fields, version and the timestamps are
+        always present (client_id when set); the others are left out when the field
         permissions do not let the caller read them (object kind asset,
         field keys core.<field>, custom fields attributes.<key>, RBA-07).
         The fields carry the names of AST-01 (WP-739): inventory_no,
@@ -25928,6 +26157,57 @@ components:
         updated_at:
           type: string
           format: date-time
+        version:
+          type: integer
+          format: int64
+          readOnly: true
+          description: >-
+            Version of the asset (API-07, WP-740), also the ETag: it rises
+            with every change of the asset, also through stock movements,
+            rack placement, lifecycle transitions and the CI domain. Always
+            present.
+        primary_ci:
+          allOf:
+            - $ref: '#/components/schemas/CIRef'
+          readOnly: true
+          description: >-
+            Read-only technical identity of the primary CI; only in GET
+            /api/v1/assets/{id}, left out when the caller cannot read
+            primary_ci_id. Under restricted CI field permissions only id,
+            name and status.
+
+    CIRef:
+      type: object
+      description: >-
+        The read-only technical identity of a CI linked to an asset (spec
+        §4, WP-740); the CI stays the source of truth.
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+        hostname:
+          type: string
+        fqdn:
+          type: string
+        management_ip:
+          type: string
+        manufacturer:
+          type: string
+        model:
+          type: string
+        serial_number:
+          type: string
+        os_name:
+          type: string
+        os_version:
+          type: string
+        discovery_source:
+          type: string
 
     CreateAssetRequest:
       type: object
@@ -29706,12 +29986,42 @@ components:
         escalated:
           type: boolean
           description: Open longer than 14 days (REC-08).
+        tickets:
+          type: array
+          description: >-
+            The tickets linked to the item that the caller sees (WP-291);
+            absent without ticket:read, without the module ticketing or
+            without the feature ticketing_essential.
+          items:
+            $ref: '#/components/schemas/ReviewItemTicketRef'
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    ReviewItemTicketRef:
+      type: object
+      required: [id, ticket_number, status]
+      properties:
+        id:
+          type: string
+        ticket_number:
+          type: integer
+        status:
+          $ref: '#/components/schemas/TicketStatus'
+
+    ReviewItemTicketRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        priority:
+          $ref: '#/components/schemas/TicketPriority'
+        assignee_id:
+          type: string
+        team_id:
+          type: string
 
     ReviewItemListResponse:
       allOf:
@@ -31783,8 +32093,9 @@ components:
           description: >-
             The fields of the hit that matched the search text (SRC-02,
             WP-786); under field permissions only the fields the caller may
-            read (RBA-07). Absent without a match per field, for a contact
-            hit and with the OpenSearch backend.
+            read (RBA-07). Absent without a match per field and for a
+            contact hit; an OpenSearch backend without PostgreSQL names only
+            title and summary (WP-787).
         metadata:
           type: object
           additionalProperties: { type: string }

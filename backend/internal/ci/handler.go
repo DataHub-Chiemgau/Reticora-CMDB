@@ -669,6 +669,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		LocationID:      req.LocationID,
 		AssetID:         req.AssetID,
 		ParentCIID:      req.ParentCIID,
+		OwnerUserID:     req.OwnerUserID,
+		OwnerTeamID:     req.OwnerTeamID,
 		CITypeID:        req.CITypeID,
 		Name:            req.Name,
 		Status:          status,
@@ -1168,6 +1170,9 @@ func unreadableValues(policy *permission.FieldPolicy, item *Item) []string {
 		if permission.IsProjectedCIField(name) {
 			check(name)
 		}
+	}
+	for name := range ownerValues(item) {
+		check(name)
 	}
 	for key, value := range item.Attributes {
 		if value != nil {
