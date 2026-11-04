@@ -36,7 +36,9 @@ const ticketSelectColumns = `
 	closed_at,
 	` + ticketTagsColumn + `,
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, '')
 `
 
 // ticketTagsColumn are the sorted keys of the catalog tags of a ticket
@@ -377,6 +379,7 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 			return err
 		}
 		t.Tags = tags
+		t.ClientID, t.SiteID = clientID, siteID
 		return r.recordEvent(ctx, tx, t.OrganizationID, &ticketEvent{ID: t.ID, ClientID: clientID, SiteID: siteID, Change: changeCreated})
 	})
 }
@@ -472,12 +475,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 
 		setClauses = append(setClauses, "updated_at = NOW()")
 		query := fmt.Sprintf(
-			"UPDATE ticket SET %s WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2 RETURNING %s, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')",
+			"UPDATE ticket SET %s WHERE "+ticketVisible+" AND id = $1 AND organization_id = $2 RETURNING %s",
 			strings.Join(setClauses, ", "),
 			ticketSelectColumns,
 		)
-		var clientID, siteID string
-		item, err = scanTicket(tx.QueryRow(ctx, query, args...), &clientID, &siteID)
+		item, err = scanTicket(tx.QueryRow(ctx, query, args...))
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -487,7 +489,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 		if visErr := requireVisible(ctx, tx, "ticket", ticketVisible, id); visErr != nil {
 			return visErr
 		}
-		ev := &ticketEvent{ID: id, ClientID: clientID, SiteID: siteID, Change: changeUpdated, ChangedFields: changedFields(before, item, req)}
+		ev := &ticketEvent{ID: id, ClientID: item.ClientID, SiteID: item.SiteID, Change: changeUpdated, ChangedFields: changedFields(before, item, req)}
 		if statusChange {
 			ev.Change, ev.StatusFrom, ev.StatusTo = changeStatus, before.Status, item.Status
 		}
@@ -870,9 +872,8 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-// scanTicket reads the columns of ticketSelectColumns, followed by extra
-// columns into extra.
-func scanTicket(scanner scanner, extra ...any) (*Ticket, error) {
+// scanTicket reads the columns of ticketSelectColumns.
+func scanTicket(scanner scanner) (*Ticket, error) {
 	item := &Ticket{}
 	var dueDate sql.NullTime
 	var resolvedAt sql.NullTime
@@ -897,8 +898,10 @@ func scanTicket(scanner scanner, extra ...any) (*Ticket, error) {
 		&item.Tags,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.ClientID,
+		&item.SiteID,
 	}
-	if err := scanner.Scan(append(dest, extra...)...); err != nil {
+	if err := scanner.Scan(dest...); err != nil {
 		return nil, err
 	}
 	if item.Tags == nil {

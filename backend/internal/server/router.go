@@ -688,7 +688,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		location.NewHandler(repos.Location),
 		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
-		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}),
+		// The attachments of a ticket are its linked documents (WP-765).
+		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}).WithDocuments(repos.Document),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		search.NewHandler(repos.Search, repos.Permission),

@@ -71,6 +71,14 @@ var contractStructural = map[string]bool{
 	"created_at": true, "updated_at": true,
 }
 
+// ticketStructural are the members of the ticket DTO field permissions do
+// not cover (WP-765): identity, number, title and the timestamps; the
+// other members are the core fields of the kind ticket.
+var ticketStructural = map[string]bool{
+	"id": true, "organization_id": true, "ticket_number": true, "title": true, "resolved_at": true,
+	"closed_at": true, "created_at": true, "updated_at": true,
+}
+
 // Members of the CI DTO with a projection of their own.
 const (
 	memberAttributes = "attributes"
@@ -79,7 +87,7 @@ const (
 )
 
 // ErrUnsupportedKind refuses a projection of an object kind without a DTO
-// mapping (ci, asset and contract have one).
+// mapping (ci, asset, contract and ticket have one).
 var ErrUnsupportedKind = errors.New("field projection: unsupported object kind")
 
 // ErrNoPolicySource is the error of PolicyFrom for a request with a
@@ -167,6 +175,13 @@ func (c *projectConfig) fieldKey(kind ObjectKind, path string) (key string, stru
 		case contractStructural[path]:
 			return "", true, true
 		case slices.Contains(coreFields[KindContract], path):
+			return NamespaceCore + "." + path, false, true
+		}
+	case KindTicket:
+		switch {
+		case ticketStructural[path]:
+			return "", true, true
+		case slices.Contains(coreFields[KindTicket], path):
 			return NamespaceCore + "." + path, false, true
 		}
 	}
@@ -272,14 +287,14 @@ func ProjectValue(policy *FieldPolicy, kind ObjectKind, typeID string, ref Objec
 }
 
 // Project encodes v, a DTO of the kind (a CI with its asset facts, asset
-// facts or a contract), as an object without the members the principal may not read
+// facts, a contract or a ticket), as an object without the members the principal may not read
 // (pattern of api.SelectFields): structural members always stay, a typed
 // column or attribute the policy does not let it read is left out, the
 // embedded asset facts follow the asset policy (WithAsset). A member
 // without mapping is left out while the kind is restricted (fail-closed).
 // The projection reads nothing from the database.
 func Project(policy *FieldPolicy, kind ObjectKind, typeID string, ref ObjectRef, v any, opts ...ProjectOption) (map[string]json.RawMessage, error) { //nolint:gocritic // ObjectRef by value like FieldPolicy.Level
-	if kind != KindCI && kind != KindAsset && kind != KindContract {
+	if kind != KindCI && kind != KindAsset && kind != KindContract && kind != KindTicket {
 		return nil, ErrUnsupportedKind
 	}
 	body, err := toObject(v)

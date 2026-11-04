@@ -100,7 +100,7 @@ func TestDocumentSoftDelete(t *testing.T) {
 	if listed[d] || !listed[kept] {
 		t.Errorf("list: deleted %v, kept %v", listed[d], listed[kept])
 	}
-	docs, err := w.repo.GetLinksForEntity(w.orgCtx, f.OrgA, "asset", w.asset1)
+	docs, _, err := w.repo.GetLinksForEntity(w.orgCtx, f.OrgA, "asset", w.asset1, api.PaginationParams{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -148,8 +148,8 @@ func TestProjectUnrestrictedPassThrough(t *testing.T) {
 	if _, ok := got["name"]; !ok {
 		t.Errorf("nil policy must keep structural name")
 	}
-	if _, err := Project(policy, KindTicket, "", ObjectRef{}, in); !errors.Is(err, ErrUnsupportedKind) {
-		t.Errorf("ticket projection: %v, want ErrUnsupportedKind", err)
+	if _, err := Project(policy, KindDocument, "", ObjectRef{}, in); !errors.Is(err, ErrUnsupportedKind) {
+		t.Errorf("document projection: %v, want ErrUnsupportedKind", err)
 	}
 }
 
@@ -379,5 +379,37 @@ func BenchmarkProject(b *testing.B) {
 				b.Fatal(err)
 			}
 		}
+	}
+}
+
+// TestProjectTicket covers the ticket DTO (WP-765): a core field the role
+// may not read is left out, structural members stay, a read-only field is
+// refused on write with its DTO path.
+func TestProjectTicket(t *testing.T) {
+	repo, _ := fixture(t)
+	role := ptr(tRoleA)
+	addField(t, repo, FieldGrant{RoleID: role, ObjectKind: KindTicket, FieldKey: ptr("core.description"), Level: LevelNone})
+	addField(t, repo, FieldGrant{RoleID: role, ObjectKind: KindTicket, FieldKey: ptr("core.priority"), Level: LevelRead})
+	policy := policyFor(t, repo, []identity.Grant{roleGrant(tRoleA, "ticket:read", "ticket:write")}, nil)
+	ticket := map[string]any{
+		"id": tObject, "organization_id": tOrg, "ticket_number": 7, "title": "Drucker", "description": "geheim",
+		"status": "open", "priority": "high", "tags": []string{}, "created_at": "2026-01-01T00:00:00Z",
+	}
+	got, err := Project(policy, KindTicket, "", ObjectRef{ID: tObject}, ticket)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	if _, ok := got["description"]; ok {
+		t.Errorf("description must be left out: %v", got)
+	}
+	for _, member := range []string{"id", "ticket_number", "title", "status", "priority", "tags", "created_at"} {
+		if _, ok := got[member]; !ok {
+			t.Errorf("member %s missing: %v", member, got)
+		}
+	}
+	err = CheckWrite(policy, KindTicket, "", ObjectRef{ID: tObject}, []string{"title", "status", "priority", "description"})
+	var forbiddenErr *api.FieldForbiddenError
+	if !errors.As(err, &forbiddenErr) || !slices.Equal(forbiddenErr.Fields, []string{"description", "priority"}) {
+		t.Fatalf("check write: %v, want description and priority refused", err)
 	}
 }

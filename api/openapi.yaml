@@ -5151,6 +5151,12 @@ paths:
       operationId: listTickets
       tags: [Tickets]
       summary: List tickets
+      description: >-
+        Each ticket carries only the fields the caller may read (field
+        permissions of the object kind ticket, RBA-07, WP-765; see Ticket).
+        A filter, the search (title and description) or a sort on a field
+        the caller cannot read in every scope of its role assignments is 403
+        with the fields.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -5201,12 +5207,29 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission (ProblemDetail) or the field
+            permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the DTO paths): a filter, the search or a sort on a
+            field the caller cannot read in every scope.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createTicket
       tags: [Tickets]
       summary: Create a ticket
+      description: >-
+        Every field the request sets must be editable for the caller (field
+        permissions of the object kind ticket, RBA-07, WP-765), otherwise
+        403 with the fields; the answer carries only the fields the caller
+        may read.
       requestBody:
         required: true
         content:
@@ -5225,7 +5248,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (ProblemDetail) or the field
+            permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may
+            not edit.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '422':
           description: >-
             priority is no ticket priority, or assignee_id, team_id,
@@ -5247,6 +5280,9 @@ paths:
       operationId: getTicket
       tags: [Tickets]
       summary: Get a ticket
+      description: >-
+        The ticket with the fields the caller may read (field permissions of
+        the object kind ticket, RBA-07, WP-765; see Ticket).
       responses:
         '200':
           description: Ticket details
@@ -5262,6 +5298,12 @@ paths:
       operationId: updateTicket
       tags: [Tickets]
       summary: Update a ticket
+      description: >-
+        A field the caller may not edit is 403 with the fields (RBA-07,
+        WP-765): every sent field it cannot read counts, whatever its value,
+        and every readable field whose value changes. The answer carries
+        only the fields the caller may read; ticket.updated names changed
+        fields without values.
       requestBody:
         required: true
         content:
@@ -5280,7 +5322,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission (ProblemDetail) or the field
+            permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may
+            not edit.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -19238,20 +19290,31 @@ paths:
   /api/v1/tickets/{id}/attachments:
     x-phase: P2
     x-feature: ticketing_essential
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listTicketAttachments
       tags: [Tickets]
       summary: List the documents attached to a ticket
-      description: Planned (E-38); WP-765 implements the operation.
+      description: >-
+        The documents linked to the ticket (document_link with entity_type
+        ticket; TKT-01, WP-765), newest first (created_at, id), paged with
+        `limit` (at most 200) and the signed `cursor` from `next_cursor`
+        (API-02); a forged cursor is 400. A ticket that does not exist or
+        lies outside the caller's scope answers 404; of its documents the
+        caller sees those whose link to the ticket it sees. Upload, scan and
+        linking stay with the documents (POST /api/v1/documents/{id}/links
+        with entity_type ticket). Requires document:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the documents attached to a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-765.
+          description: The documents attached to the ticket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -26198,7 +26261,13 @@ components:
 
     Ticket:
       type: object
-      required: [id, organization_id, ticket_number, title, status, priority, category, reporter_id, tags, created_at, updated_at]
+      description: >-
+        A ticket (TKT-01). The fields id, organization_id, ticket_number,
+        title, resolved_at, closed_at and the timestamps are present (the
+        optional ones when set); the others are left out when the field
+        permissions do not let the caller read them (object kind ticket,
+        field keys core.<field>, RBA-07, WP-765).
+      required: [id, organization_id, ticket_number, title, created_at, updated_at]
       properties:
         id:
           type: string

@@ -24,6 +24,11 @@ type Ticket struct {
 	Tags           []string  `json:"tags"` // keys of the catalog tags (ticket_tag, E-127)
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// ClientID and SiteID are the scope of the ticket (000064) for its
+	// field permissions (WP-765); they are no members of the DTO. The
+	// memory repository knows no scope.
+	ClientID string `json:"-"`
+	SiteID   string `json:"-"`
 }
 
 // Comment represents a comment on a ticket.

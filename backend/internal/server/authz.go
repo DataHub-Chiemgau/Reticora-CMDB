@@ -296,6 +296,9 @@ var routeRules = []routeRule{
 	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
 	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
 	{http.MethodGet, "cis/*/blast-radius", identity.PermTopologyRead},
+	// The attachments of a ticket are documents (WP-765); linking them
+	// stays POST /documents/{id}/links.
+	{http.MethodGet, "tickets/*/attachments", identity.PermDocumentRead},
 	// Completing a stocktake is its own action (E-106); holders of
 	// stocktake:write received stocktake:complete with migration 000192.
 	{http.MethodPost, "stocktakes/*/complete", identity.PermStocktakeComplete},

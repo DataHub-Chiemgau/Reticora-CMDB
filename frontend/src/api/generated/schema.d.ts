@@ -2480,10 +2480,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List tickets */
+    /**
+     * List tickets
+     * @description Each ticket carries only the fields the caller may read (field permissions of the object kind ticket, RBA-07, WP-765; see Ticket). A filter, the search (title and description) or a sort on a field the caller cannot read in every scope of its role assignments is 403 with the fields.
+     */
     get: operations['listTickets'];
     put?: never;
-    /** Create a ticket */
+    /**
+     * Create a ticket
+     * @description Every field the request sets must be editable for the caller (field permissions of the object kind ticket, RBA-07, WP-765), otherwise 403 with the fields; the answer carries only the fields the caller may read.
+     */
     post: operations['createTicket'];
     delete?: never;
     options?: never;
@@ -2501,7 +2507,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a ticket */
+    /**
+     * Get a ticket
+     * @description The ticket with the fields the caller may read (field permissions of the object kind ticket, RBA-07, WP-765; see Ticket).
+     */
     get: operations['getTicket'];
     put?: never;
     post?: never;
@@ -2509,7 +2518,10 @@ export interface paths {
     delete: operations['deleteTicket'];
     options?: never;
     head?: never;
-    /** Update a ticket */
+    /**
+     * Update a ticket
+     * @description A field the caller may not edit is 403 with the fields (RBA-07, WP-765): every sent field it cannot read counts, whatever its value, and every readable field whose value changes. The answer carries only the fields the caller may read; ticket.updated names changed fields without values.
+     */
     patch: operations['updateTicket'];
     trace?: never;
   };
@@ -8777,7 +8789,7 @@ export interface paths {
     };
     /**
      * List the documents attached to a ticket
-     * @description Planned (E-38); WP-765 implements the operation.
+     * @description The documents linked to the ticket (document_link with entity_type ticket; TKT-01, WP-765), newest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02); a forged cursor is 400. A ticket that does not exist or lies outside the caller's scope answers 404; of its documents the caller sees those whose link to the ticket it sees. Upload, scan and linking stay with the documents (POST /api/v1/documents/{id}/links with entity_type ticket). Requires document:read.
      */
     get: operations['listTicketAttachments'];
     put?: never;
@@ -12680,6 +12692,7 @@ export interface components {
       corrections_applied: number;
       corrections: components['schemas']['StocktakeCorrection'][];
     };
+    /** @description A ticket (TKT-01). The fields id, organization_id, ticket_number, title, resolved_at, closed_at and the timestamps are present (the optional ones when set); the others are left out when the field permissions do not let the caller read them (object kind ticket, field keys core.<field>, RBA-07, WP-765). */
     Ticket: {
       id: string;
       organization_id: string;
@@ -12687,10 +12700,10 @@ export interface components {
       ticket_number: number;
       title: string;
       description?: string;
-      status: components['schemas']['TicketStatus'];
-      priority: components['schemas']['TicketPriority'];
-      category: string;
-      reporter_id: string;
+      status?: components['schemas']['TicketStatus'];
+      priority?: components['schemas']['TicketPriority'];
+      category?: string;
+      reporter_id?: string;
       assignee_id?: string;
       team_id?: string;
       related_ci_id?: string;
@@ -12702,7 +12715,7 @@ export interface components {
       /** Format: date-time */
       closed_at?: string;
       /** @description Sorted keys of the catalog tags of the ticket (ticket_tag, E-127); [] without tags. */
-      tags: string[];
+      tags?: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -21697,6 +21710,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter, the search or a sort on a field the caller cannot read in every scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -21724,7 +21747,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may not edit. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description priority is no ticket priority, or assignee_id, team_id, related_ci_id or related_asset_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); `field` names it. */
       422: {
         headers: {
@@ -21812,7 +21844,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-765; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a field of the request the caller may not edit. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The status change is no transition of the ticket state machine (TKT-01, e.g. new to waiting); the ticket is unchanged and the detail names both states. */
       409: {
@@ -38535,12 +38576,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the documents attached to a ticket. The page follows the cursor contract (API-02); the item schema comes with WP-765. */
+      /** @description The documents attached to the ticket */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['DocumentListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

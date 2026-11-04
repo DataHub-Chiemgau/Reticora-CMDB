@@ -314,6 +314,7 @@ GET /api/v1/templates/{id}/versions ci:read
 GET /api/v1/templates/{id}/versions/{version} ci:read
 GET /api/v1/tickets ticket:read
 GET /api/v1/tickets/{id} ticket:read
+GET /api/v1/tickets/{id}/attachments document:read
 GET /api/v1/tickets/{id}/comments ticket:read
 GET /api/v1/tickets/{id}/links ticket:read
 GET /api/v1/tickets/{id}/sla ticket:read
