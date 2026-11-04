@@ -1250,7 +1250,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return err
 		}
 		item = w.after
-		return r.recordUpdate(ctx, tx, orgID, id, w)
+		if err := r.recordUpdate(ctx, tx, orgID, id, w); err != nil {
+			return err
+		}
+		// A bulk revert records which rows of the change set it reverted
+		// and which it skipped, also when no field is left (WP-305).
+		return markRevertTx(ctx, tx, orgID)
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
@@ -1269,6 +1274,10 @@ func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID, id st
 		return err
 	}
 	if err := r.recordTemplatesHistory(ctx, tx, item, w.templates); err != nil {
+		return err
+	}
+	// The change set of a bulk job (WP-305), before audit and outbox (K20).
+	if err := w.bulk.record(ctx, tx, orgID, item); err != nil {
 		return err
 	}
 	if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
@@ -1295,6 +1304,9 @@ type rowUpdate struct {
 	before, after *Item
 	changes       []ciFieldChange
 	templates     *templatesChange
+	// bulk is the change set row capture of a write under a bulk job
+	// (WP-305); nil otherwise.
+	bulk *bulkCapture
 }
 
 // templatesChange is a change of the template list of a CI (WP-710).
@@ -1474,6 +1486,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 		return nil, fmt.Errorf("get ci before update: %w", err)
 	}
+	// A bulk revert leaves every field whose value changed since the bulk
+	// (WP-305), decided on the locked row.
+	applyRevertExpectation(ctx, before, &req)
 	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
 		return nil, reviveErr
 	}
@@ -1651,10 +1666,19 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		return nil, err
 	}
 	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item), templates: templates}
+	// Under a bulk job the change set takes the state of the overrides of
+	// the changed fields before recordManualOverrides (WP-305).
+	capture, captureErr := captureBulkChanges(ctx, tx, w, &req, computedKeys)
+	if captureErr != nil {
+		return nil, captureErr
+	}
+	w.bulk = capture
 	if len(w.changes) > 0 && req.Manual != nil {
-		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req, computedKeys); err != nil {
-			return nil, err
+		written, overrideErr := recordManualOverrides(ctx, tx, orgID, before, item, &req, computedKeys)
+		if overrideErr != nil {
+			return nil, overrideErr
 		}
+		w.bulk.overridden(written)
 	}
 	return w, nil
 }
@@ -2645,12 +2669,12 @@ var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attribute
 // the CI get no override (MET-14, CI-04, WP-714): automation never writes
 // them, the central write decision refuses them (ReasonInstanceAttribute).
 // Nor do the computed attributes (computed, WP-717): their values follow
-// their inputs.
-func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest, computed map[string]bool) error {
-	reason := strings.TrimSpace(req.ChangeReason)
-	if reason == "" {
-		reason = DefaultChangeReason
-	}
+// their inputs. It returns the fields it gave an override with their
+// values (the change set of a bulk job, WP-305).
+func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest,
+	computed map[string]bool) (map[string]any, error) {
+	reason := manualReason(req)
+	written := map[string]any{}
 	for _, change := range diffCI(before, after) {
 		if derivedFields[change.Field] || (change.Field == "location_id" && after.AssetID != "") {
 			// The location of a linked CI is the asset's (DB-05).
@@ -2662,16 +2686,17 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			value = nil
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, value, req.Manual.Author, reason, true); err != nil {
-			return err
+			return nil, err
 		}
+		written[change.Field] = value
 	}
 	keys := changedKeys(before.Attributes, after.Attributes)
 	if len(keys) == 0 {
-		return nil
+		return written, nil
 	}
 	names, err := instanceFieldNames(ctx, tx, after.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	instance := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -2684,10 +2709,19 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			continue
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
-			return err
+			return nil, err
 		}
+		written[key] = after.Attributes[key]
 	}
-	return nil
+	return written, nil
+}
+
+// manualReason is the override reason of a manual change.
+func manualReason(req *UpdateRequest) string {
+	if reason := strings.TrimSpace(req.ChangeReason); reason != "" {
+		return reason
+	}
+	return DefaultChangeReason
 }
 
 // overrideColumns are CI columns a manual override replaces in the effective

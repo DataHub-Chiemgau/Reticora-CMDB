@@ -2837,14 +2837,23 @@ paths:
       tags: [Jobs]
       summary: Revert a succeeded job where the revert is defined (E-25)
       description: >-
-        Phase 1 defines the revert of ci.merge (the unmerge within 30 days,
-        CI-12); every other kind, and a job that did not succeed, is 409.
-        The bulk revert follows with BLK-02. A successful revert is recorded
-        on the job (reverted_at, reverted_by); a second revert is 409
-        "the job is already reverted" (F-329). The revert of ci.merge makes
-        the merged CI active again: with max_cis reached it is 403
-        entitlement-limit like POST /cis/{id}/unmerge and the merge stays
-        (ENT-03).
+        The revert is defined for ci.merge (the unmerge within 30 days,
+        CI-12, answered 200) and for the bulk kind ci.bulk of the CI field
+        operations set_status, set_fields and set_location (BLK-02, WP-305)
+        within 24 hours of the end of the bulk job. A bulk revert answers 202
+        with the revert job bulk.revert (Location: its job), which writes
+        the old values back per CI as a manual change, leaves every field
+        changed since the bulk (reported as skipped in its result) and
+        records the revert on the bulk job when it ends; a repeated POST
+        while it runs answers the same revert job. It needs ci:write, also
+        from the creator of the bulk job. Every other kind (bulk.revert and
+        export among them), a bulk job of another action, a bulk job without
+        change set rows the caller sees and a job that did not succeed are
+        409. A revert is recorded on the job (reverted_at, reverted_by); a
+        further revert is 409 "the job is already reverted" (F-329). The
+        revert of ci.merge makes the merged CI active again: with max_cis
+        reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and
+        the merge stays (ENT-03).
       responses:
         '200':
           description: The job was reverted
@@ -2858,12 +2867,26 @@ paths:
                   reverted: { type: boolean }
                   reverted_at: { type: string, format: date-time }
                   reverted_by: { type: string }
+        '202':
+          description: >-
+            The revert of a bulk job runs as the job bulk.revert; its result
+            reports each CI as reverted, skipped (with the fields changed
+            since the bulk, or 404/403 for a CI no longer visible or
+            refused) or error, each with its RFC 7807 code.
+          headers:
+            Location:
+              description: The revert job, /api/v1/jobs/{revert_id}.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
             Forbidden: neither the creator of the job nor a holder of the
-            permission of its kind, a missing permission or the quota
+            permission of its kind (for a bulk kind only a holder of its
+            permission, ci:write for ci.bulk), a missing permission or the quota
             (ProblemDetail, see EntitlementLimit: entitlement-limit for
             max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge,
             the action grants (RBA-07, WP-728; type
@@ -2882,7 +2905,11 @@ paths:
         '409':
           description: >-
             The kind defines no revert, the job did not succeed, the job is
-            already reverted, or the reverter refused it: the merge snapshot expired, the merge
+            already reverted, the bulk job finished more than 24 hours ago
+            (type https://reticora.io/problems/revert-expired), the bulk job
+            is not revertible (an action other than set_status, set_fields
+            or set_location, or no change set row the caller sees), or the
+            reverter refused it: the merge snapshot expired, the merge
             conflicts with later changes (one of the CIs is locked, or the
             survivor changed after the merge: the revert is an unmerge
             without force, E-80), the survivor is part of a later open merge
@@ -23253,6 +23280,12 @@ components:
         (API-08, BLK-01): one item per id, in the order of the ids.
       required: [action, total, succeeded, failed, items]
       properties:
+        bulk_job_id:
+          type: string
+          description: >-
+            The job ci.bulk of a bulk on CIs that ran in the request (below
+            100 ids, WP-305); POST /jobs/{id}/revert undoes it within 24
+            hours. Absent without a job service.
         action: { type: string }
         total: { type: integer }
         succeeded: { type: integer }

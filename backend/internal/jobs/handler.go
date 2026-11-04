@@ -20,12 +20,16 @@ import (
 // kind defines a revert (E-25). Reading needs job:read and covers the jobs
 // whose scope snapshot lies in the caller's scope (TEN-09); every route
 // answers 404 for any other job. Cancelling and reverting a job needs the
-// permission of its kind, or being its creator.
+// permission of its kind, or being its creator; reverting a job of a bulk
+// kind needs the permission of the kind (WithBulkKind, WP-305).
 
-// Reverter undoes a finished job of one kind. A refusal with a domain text
-// (409) is a *RevertRefusedError; any other error is a repository error and
-// reaches the client sanitized (API-03).
-type Reverter func(ctx context.Context, job *Job) error
+// Reverter undoes a finished job of one kind. A nil job means it reverted
+// the job synchronously (200); a job is the revert job that undoes it in
+// the background (202, a bulk revert, WP-305). A refusal with a problem
+// type (api.TypedProblem, e.g. ErrRevertExpired) is 409 with that type, a
+// refusal with a domain text (409) is a *RevertRefusedError; any other
+// error is a repository error and reaches the client sanitized (API-03).
+type Reverter func(ctx context.Context, job *Job) (*Job, error)
 
 // RevertRefusedError is a reverter's refusal, e.g. an expired merge
 // snapshot (409).
@@ -47,11 +51,26 @@ type APIHandler struct {
 	// kind; a kind without one is controlled by its creator only.
 	kindPermissions map[string]identity.Permission
 	reverters       map[string]Reverter
+	// bulkKinds are the kinds whose revert needs the permission of the
+	// kind, also from the creator, within RevertWindow (WP-305).
+	bulkKinds map[string]bool
+	now       func() time.Time
 }
 
 // NewAPIHandler creates the job API on svc.
 func NewAPIHandler(svc *Service) *APIHandler {
-	return &APIHandler{svc: svc, kindPermissions: map[string]identity.Permission{}, reverters: map[string]Reverter{}}
+	return &APIHandler{svc: svc, kindPermissions: map[string]identity.Permission{}, reverters: map[string]Reverter{},
+		bulkKinds: map[string]bool{}, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithBulkKind marks kind as a bulk kind (BLK-02, WP-305): its revert
+// needs the permission of the kind (identity.Principal.Has), the creator
+// without it is refused (403), and it is refused after RevertWindow from
+// the end of the job (409 revert-expired). Cancelling it stays as for every
+// kind.
+func (h *APIHandler) WithBulkKind(kind string) *APIHandler {
+	h.bulkKinds[kind] = true
+	return h
 }
 
 // WithKind sets the permission that controls the jobs of kind and its
@@ -180,12 +199,15 @@ func (h *APIHandler) Result(w http.ResponseWriter, r *http.Request) {
 // mayControl decides whether the caller may cancel or revert the job: a job
 // outside the caller's scope is not found (404, before 403 and 409,
 // F-163); otherwise its creator and a principal with the permission of its
-// kind may (0), anyone else is refused (403).
-func (h *APIHandler) mayControl(r *http.Request, job *Job) int {
+// kind may (0), anyone else is refused (403). The revert of a bulk kind
+// needs the permission of the kind also from the creator (WP-305): a
+// creator whose right was withdrawn changes no CI through it.
+func (h *APIHandler) mayControl(r *http.Request, job *Job, revert bool) int {
 	if !visibleTo(r, job) {
 		return http.StatusNotFound
 	}
-	if user := tenant.FromContext(r.Context()).UserID; user != "" && user == job.CreatedBy {
+	creatorMay := !revert || !h.bulkKinds[job.Kind]
+	if user := tenant.FromContext(r.Context()).UserID; creatorMay && user != "" && user == job.CreatedBy {
 		return 0
 	}
 	if perm, ok := h.kindPermissions[job.Kind]; ok && perm != "" {
@@ -209,7 +231,7 @@ func (h *APIHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	switch h.mayControl(r, job) {
+	switch h.mayControl(r, job, false) {
 	case http.StatusNotFound:
 		notFound(w)
 		return
@@ -242,9 +264,13 @@ type revertResponse struct {
 }
 
 // Revert handles POST /api/v1/jobs/{id}/revert: only for kinds with a
-// defined revert (E-25) and succeeded jobs; otherwise 409. A successful
-// revert is recorded on the job (reverted_at, reverted_by); a job reverted
-// already is 409 (F-329).
+// defined revert (E-25) and succeeded jobs; otherwise 409. A synchronous
+// revert is recorded on the job (reverted_at, reverted_by) and answers 200;
+// a job reverted already is 409 (F-329). The revert of a bulk kind is 409
+// revert-expired after RevertWindow; otherwise its reverter queues the
+// revert job (202 with the job and Location), which records the revert on
+// the bulk job when it ends; a repeated POST meanwhile answers the same
+// revert job (WP-305).
 func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := orgOf(w, r)
 	if !ok {
@@ -254,7 +280,7 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	control := h.mayControl(r, job)
+	control := h.mayControl(r, job, true)
 	if control == http.StatusNotFound {
 		notFound(w)
 		return
@@ -269,22 +295,41 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if control == http.StatusForbidden {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "only the creator or a holder of the permission of the job kind may revert it")
+		msg := "only the creator or a holder of the permission of the job kind may revert it"
+		if h.bulkKinds[job.Kind] {
+			msg = "only a holder of the permission of the job kind may revert it"
+		}
+		api.WriteError(w, http.StatusForbidden, "Forbidden", msg)
 		return
 	}
-	if err := revert(r.Context(), job); err != nil {
+	if h.bulkKinds[job.Kind] && RevertExpired(job.FinishedAt, h.now()) {
+		api.WriteTypedProblem(w, http.StatusConflict, ErrRevertExpired)
+		return
+	}
+	revertJob, err := revert(r.Context(), job)
+	if err != nil {
 		var refused *RevertRefusedError
 		switch {
 		case api.WriteFieldError(w, err):
-		case errors.As(err, &refused):
-			api.WriteError(w, http.StatusConflict, "Conflict", refused.Error())
 		case api.WriteEntitlementError(w, err):
 			// A quota of the revert is reached, e.g. max_cis for the unmerge
 			// (ENT-03); the job stays succeeded and not reverted.
+		case api.WriteTypedProblem(w, http.StatusConflict, err):
+			// A refusal with its problem type, e.g. revert-expired.
+		case errors.As(err, &refused):
+			api.WriteError(w, http.StatusConflict, "Conflict", refused.Error())
 		default:
 			slog.WarnContext(r.Context(), "job revert failed", "job_id", job.ID, "error", err)
 			api.WriteRepoError(w, err)
 		}
+		return
+	}
+	if revertJob != nil {
+		// The revert runs as a job; it records the revert on this job when
+		// it ends.
+		revertJob.Cancellable = h.svc.Cancellable(revertJob)
+		w.Header().Set("Location", "/api/v1/jobs/"+revertJob.ID)
+		api.WriteJSON(w, http.StatusAccepted, revertJob)
 		return
 	}
 	reverted, err := h.svc.MarkReverted(r.Context(), orgID, job.ID, tenant.FromContext(r.Context()).UserID)
