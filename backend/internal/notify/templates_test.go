@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
@@ -28,6 +31,39 @@ var templateData = map[string]map[string]any{
 	events.CertificateExpiring: {"name": "www.acme.example", "expires_at": "2026-12-18T09:30:00Z"},
 	events.APIKeyCreatorDeactivated: {"user_id": "u-9", "keys": []any{map[string]any{"key_prefix": "rk_ab",
 		"name": "ci-sync", "service_account_name": "sync", "service_account_id": "sa-1"}}},
+	events.DocumentScanned: {"document_id": "d-1", "version": float64(2), "result": "infected",
+		"scan_signature": "Win.Test.EICAR_HDB-1", "uploaded_by": "u-7"},
+}
+
+// TestDocumentScannedAudience covers SEC-09 (WP-734, E-42): a finding
+// notifies the uploader and the org_admins with document:read in the
+// placement of the document, critical in the category security; a clean
+// or failed scan notifies nobody, with an empty audience, never nil.
+func TestDocumentScannedAudience(t *testing.T) {
+	sub := Subscriptions[events.DocumentScanned]
+	if sub.Category != "security" || !sub.Critical || sub.Personal {
+		t.Fatalf("subscription %+v, want critical category security", sub)
+	}
+	data := map[string]any{"result": "infected", "uploaded_by": "u-7", "client_id": "c-1", "site_id": "s-1"}
+	a := sub.Audience(data)
+	if a == nil || !slices.Equal(a.DirectUserIDs, []string{"u-7"}) || !slices.Equal(a.Roles, []string{"org_admin"}) ||
+		a.Permission != identity.PermDocumentRead || a.ClientID != "c-1" || a.SiteID != "s-1" || a.AllWithPermission {
+		t.Fatalf("infected: audience %+v", a)
+	}
+	delete(data, "uploaded_by")
+	if a = sub.Audience(data); a == nil || len(a.DirectUserIDs) != 0 || !slices.Equal(a.Roles, []string{"org_admin"}) {
+		t.Fatalf("infected without uploader: audience %+v", a)
+	}
+	for _, result := range []string{"clean", "scan_failed"} {
+		a = sub.Audience(map[string]any{"result": result, "uploaded_by": "u-7"})
+		if a == nil || !reflect.DeepEqual(*a, Audience{}) {
+			t.Errorf("%s: audience %+v, want an empty audience", result, a)
+		}
+	}
+	if text := Render(events.DocumentScanned, LocaleDE, templateData[events.DocumentScanned]); !strings.Contains(text.Body, "Win.Test.EICAR_HDB-1") ||
+		!strings.Contains(text.Body, "Version 2 ") {
+		t.Errorf("German text %+v", text)
+	}
 }
 
 // germanWords and englishWords are words only a text of that language

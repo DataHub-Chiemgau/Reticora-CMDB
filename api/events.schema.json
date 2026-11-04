@@ -1136,18 +1136,58 @@
     "document.scanned": {
       "description": "Data frame of document.scanned. entity_id: the document. Origin: plan addition. Producer: WP-734. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "document_id", "version", "result"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The document."
+        },
+        "document_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The document (same as id)."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The scanned version of the document."
+        },
+        "result": {
+          "type": "string",
+          "enum": ["clean", "infected", "scan_failed"],
+          "description": "Scan result: clean (downloadable), infected (quarantined) or scan_failed (no result after the last attempt; the sweep retries)."
+        },
+        "scan_signature": {
+          "type": "string",
+          "description": "Signature name reported by the scanner for an infected version; absent otherwise."
+        },
+        "uploaded_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "User who uploaded the version; absent for versions without uploader."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client shared by every link of the document; absent otherwise (organization-wide)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site shared by every link of the document; absent otherwise (organization-wide)."
         }
       },
       "examples": [
         {
-          "id": "66666666-6666-4666-8666-666666666666"
+          "id": "66666666-6666-4666-8666-666666666666",
+          "document_id": "66666666-6666-4666-8666-666666666666",
+          "version": 2,
+          "result": "infected",
+          "scan_signature": "Win.Test.EICAR_HDB-1",
+          "uploaded_by": "77777777-7777-4777-8777-777777777777",
+          "client_id": "33333333-3333-4333-8333-333333333333"
         }
       ]
     },

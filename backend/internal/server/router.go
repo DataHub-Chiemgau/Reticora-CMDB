@@ -436,6 +436,20 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The import runs (WP-301) get the job service in registerJobKinds; the
 	// routes serve in both profiles and answer 503 without it.
 	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
+	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
+	// job kind document.scan of the module documents on the job queue:
+	// clamd from opts.Documents, status, audit and event in a transaction
+	// of the application pool. The upload submits it after its commit;
+	// without the queue no submitter is wired and versions stay
+	// pending_scan.
+	documentHandler := document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents)
+	var documentScanner *document.Scanner
+	if opts.Modules.Enabled("documents") {
+		documentScanner = document.NewScanner(repos.Document, opts.Blobs, opts.Documents).WithPool(opts.AuditPool)
+		if opts.JobQueue != nil && repos.Jobs != nil {
+			documentHandler.WithScans(opts.JobQueue)
+		}
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -485,7 +499,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
+			documentScanner)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -590,7 +605,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
-		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents),
+		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order).WithMovements(repos.Movement),

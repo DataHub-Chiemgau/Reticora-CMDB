@@ -14,7 +14,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
@@ -349,6 +351,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	var systemJobs []jobs.Schedule
 	if d.modules.Enabled(server.ModuleInventory) {
 		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
+	}
+	// Document versions without a scan result are submitted to the
+	// malware scan again every 15 minutes (SEC-09, E-42, WP-734), with
+	// the module documents and the job queue only.
+	if pool := d.pool; pool != nil && d.modules.Enabled("documents") && d.jobQueue != nil && d.repos.Jobs != nil {
+		systemJobs = append(systemJobs, document.NewScanSweeper(d.repos.Document,
+			func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) },
+			d.jobQueue, jobs.NewService(d.repos.Jobs)).Schedule())
 	}
 	// Retention runs per kind of data (NFR-06, AUD-09) and key rotation
 	// (SEC-06).

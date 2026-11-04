@@ -26,6 +26,9 @@ type Handler struct {
 	// uploads are the size, parallelism and deadline of uploads
 	// (WithUploads, SEC-09).
 	uploads uploadLimits
+	// scans submits the malware scan of a stored version (WithScans,
+	// WP-734); nil leaves every new version pending_scan.
+	scans ScanSubmitter
 }
 
 // NewHandler creates a new document handler. blobs may be nil; content

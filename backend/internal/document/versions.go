@@ -178,7 +178,8 @@ func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
 // other, (4) store the version in one transaction that counts the usage
 // within the limit (Repository.CreateVersion). A refusal or rollback in (4)
 // deletes the blob again. Only a writable document takes versions (WP-341);
-// any other answers 404 before anything is stored. Each upload takes one of
+// any other answers 404 before anything is stored. (5) After the commit the
+// version's malware scan is submitted (WithScans, WP-734). Each upload takes one of
 // the upload slots of the instance (503 with Retry-After without one) and
 // runs under the upload deadline. It writes the error response itself and
 // reports whether the version was stored.
@@ -266,6 +267,8 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		}
 		return nil, nil, false
 	}
+	// (5) The malware scan of the committed version (SEC-09, E-42).
+	h.enqueueScan(r.Context(), v)
 	return updated, v, true
 }
 

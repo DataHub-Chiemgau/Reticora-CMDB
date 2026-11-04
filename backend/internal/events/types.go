@@ -228,9 +228,22 @@ type MetamodelPublishedData struct {
 	ID string `json:"id"`
 }
 
-// DocumentScannedData is the data of document.scanned (WP-734).
+// DocumentScannedData is the data of document.scanned (WP-734): the scan
+// result of a document version, clean, infected or scan_failed, with the
+// signature of a finding. ID and DocumentID name the document. The
+// signature is scan_signature: the key signature would be sealed as
+// personal data (pii). ClientID and SiteID are set only when every link of
+// the document carries the same client or site; uploaded_by is the
+// uploader's user id, absent for versions without one.
 type DocumentScannedData struct {
-	ID string `json:"id"`
+	ID            string `json:"id"`
+	DocumentID    string `json:"document_id"`
+	Version       int    `json:"version"`
+	Result        string `json:"result"`
+	ScanSignature string `json:"scan_signature,omitempty"`
+	UploadedBy    string `json:"uploaded_by,omitempty"`
+	ClientID      string `json:"client_id,omitempty"`
+	SiteID        string `json:"site_id,omitempty"`
 }
 
 // ImportCompletedData is the data of import.completed, the import run

@@ -20099,11 +20099,11 @@ components:
             category → subscribed or muted, the view of `muted_categories`.
             Every category is subscribed by default; a muted one reaches the
             user only with a critical notification (collector, invitation,
-            certificate, apikey and expired licences are critical). In a PUT
+            certificate, apikey, security and expired licences are critical). In a PUT
             the named categories win over `muted_categories`; the response
             lists every category.
           propertyNames:
-            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, webhook]
+            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, webhook]
           additionalProperties:
             type: string
             enum: [subscribed, muted]

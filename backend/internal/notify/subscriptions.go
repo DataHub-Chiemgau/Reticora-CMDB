@@ -136,6 +136,24 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{Permission: identity.PermAPIKeyManage, Roles: []string{"org_admin"}}
 		},
 	},
+	events.DocumentScanned: {
+		// A finding quarantines the version (SEC-09, E-42, WP-734): its
+		// uploader and the org_admins who read the document are told. A
+		// clean or failed scan notifies nobody; the sweep retries a failed
+		// one.
+		Category: "security", Critical: true,
+		Audience: func(d map[string]any) *Audience {
+			if str(d, "result") != "infected" {
+				return &Audience{}
+			}
+			var uploader []string
+			if by := str(d, "uploaded_by"); by != "" {
+				uploader = []string{by}
+			}
+			return &Audience{DirectUserIDs: uploader, Roles: []string{"org_admin"}, Permission: identity.PermDocumentRead,
+				ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+		},
+	},
 }
 
 // EventConsumer notifies of the subscribed events of the outbox

@@ -1328,3 +1328,5 @@ JOB-04;[B];C;backend/internal/importer/job_test.go;WP-301
 API-06;[P2]/[P3]/[P4]/[A];C;backend/internal/importer/job_test.go;WP-301
 MGT-12;[P2];B;backend/internal/contract/supplier_integration_test.go;WP-736
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/contract/supplier_integration_test.go;WP-736
+SEC-09;[P2];B;backend/internal/document/scan_integration_test.go;WP-734
+MGT-01;[P2];B;backend/internal/document/scan_integration_test.go;WP-734

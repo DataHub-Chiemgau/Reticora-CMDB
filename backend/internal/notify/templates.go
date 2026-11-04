@@ -207,6 +207,20 @@ var Templates = map[string]map[string]render{
 					keptKeys(d, "service account")}
 		},
 	},
+	events.DocumentScanned: {
+		// Only a finding notifies (Subscriptions): the version is
+		// quarantined, its download refused (SEC-09, E-42).
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Schadsoftware in Dokument gefunden: " + str(d, "scan_signature"),
+				"Die Version " + fmt.Sprint(d["version"]) + " des Dokuments " + str(d, "document_id") + " enthält " +
+					str(d, "scan_signature") + " und wurde in Quarantäne gesetzt. Der Download ist gesperrt."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Malware found in document: " + str(d, "scan_signature"),
+				"Version " + fmt.Sprint(d["version"]) + " of document " + str(d, "document_id") + " contains " +
+					str(d, "scan_signature") + " and was quarantined. Its download is blocked."}
+		},
+	},
 }
 
 // Render renders the notification of an event type in a template locale;

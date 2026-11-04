@@ -9491,7 +9491,7 @@ export interface components {
       /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
       /**
-       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
        * @example {
        *       "review": "muted",
        *       "export": "subscribed"

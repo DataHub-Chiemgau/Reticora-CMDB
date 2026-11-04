@@ -345,6 +345,8 @@ func Load() *Config {
 			MaxUploadMB:       l.integer("RETICORA_DOCUMENT_MAX_UPLOAD_MB", DefaultDocumentMaxUploadMB),
 			UploadConcurrency: l.integer("RETICORA_DOCUMENT_UPLOAD_CONCURRENCY", DefaultDocumentUploadConcurrency),
 			UploadTimeout:     l.duration("RETICORA_DOCUMENT_UPLOAD_TIMEOUT", DefaultDocumentUploadTimeout),
+			ClamdAddr:         l.str("RETICORA_CLAMD_ADDR", ""),
+			ClamdTimeout:      l.duration("RETICORA_CLAMD_TIMEOUT", DefaultClamdTimeout),
 		},
 
 		LogLevel: slog.LevelInfo,
@@ -379,6 +381,9 @@ func Load() *Config {
 
 	if cfg.Environment == EnvDevelopment {
 		cfg.LogLevel = slog.LevelDebug
+		if cfg.Documents.ClamdAddr == "" {
+			cfg.Documents.ClamdAddr = DefaultClamdAddr
+		}
 		if cfg.InvitationAcceptURL == "" {
 			cfg.InvitationAcceptURL = DefaultInvitationAcceptURL
 		}
@@ -694,6 +699,7 @@ func (c *Config) Validate(noDB bool) error {
 		errs = append(errs, fmt.Errorf("RETICORA_ENVIRONMENT=%s requires RETICORA_NATS_URL: without the NATS ingest queue "+
 			"the HTTP ingest takes no identity locks and several instances can duplicate devices (docs/betrieb/ingest-spuren.md)", EnvProduction))
 	}
+	errs = append(errs, c.documentScanErrors()...)
 	return errors.Join(errs...)
 }
 
@@ -704,17 +710,28 @@ const (
 	DefaultDocumentUploadTimeout     = 5 * time.Minute
 )
 
-// DocumentSettings are the upload limits of the document module (SEC-09,
-// WP-268): RETICORA_DOCUMENT_MAX_UPLOAD_MB is the largest body of one upload
-// in MiB (default 50), RETICORA_DOCUMENT_UPLOAD_CONCURRENCY the uploads one
+// Defaults of the malware scanner (SEC-09, WP-734): the clamd address
+// applies in development only, outside it RETICORA_CLAMD_ADDR is required
+// with the module documents.
+const (
+	DefaultClamdAddr    = "localhost:3310"
+	DefaultClamdTimeout = 60 * time.Second
+)
+
+// DocumentSettings are the settings of the document module (SEC-09):
+// RETICORA_DOCUMENT_MAX_UPLOAD_MB is the largest body of one upload in MiB
+// (default 50), RETICORA_DOCUMENT_UPLOAD_CONCURRENCY the uploads one
 // instance runs at the same time (default 4, beyond that 503), and
 // RETICORA_DOCUMENT_UPLOAD_TIMEOUT the read and write deadline of an upload
-// request (default 5 min) in place of the global 15 s. Later document
-// settings (clamd, WP-734) belong here as well.
+// request (default 5 min) in place of the global 15 s (WP-268).
+// RETICORA_CLAMD_ADDR (host:port) and RETICORA_CLAMD_TIMEOUT (default 60 s)
+// are the clamd of the malware scan (WP-734).
 type DocumentSettings struct {
 	MaxUploadMB       int
 	UploadConcurrency int
 	UploadTimeout     time.Duration
+	ClamdAddr         string
+	ClamdTimeout      time.Duration
 }
 
 // MaxUploadBytes is MaxUploadMB in bytes.
@@ -734,7 +751,61 @@ func (d DocumentSettings) errors() []error {
 	if d.UploadTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_DOCUMENT_UPLOAD_TIMEOUT must be positive, got %s", d.UploadTimeout))
 	}
+	if d.ClamdAddr != "" && !hostPort(d.ClamdAddr) {
+		errs = append(errs, fmt.Errorf("RETICORA_CLAMD_ADDR=%q is not host:port", d.ClamdAddr))
+	}
+	if d.ClamdTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_CLAMD_TIMEOUT must be positive, got %s", d.ClamdTimeout))
+	}
 	return errs
+}
+
+// hostPort reports whether addr is host:port with a host and a port from 1
+// to 65535.
+func hostPort(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host == "" || strings.ContainsAny(host, "/ ") {
+		return false
+	}
+	n, err := strconv.Atoi(port)
+	return err == nil && n >= 1 && n <= 65535
+}
+
+// documentsEnabled reports whether RETICORA_MODULES switches the module
+// documents on: "all", the phase value P2 or its key (server.ParseModules).
+func (c *Config) documentsEnabled() bool {
+	spec := strings.TrimSpace(c.Modules)
+	if strings.EqualFold(spec, "all") {
+		return true
+	}
+	for _, key := range strings.Split(spec, ",") {
+		switch strings.TrimSpace(key) {
+		case "documents", "P2":
+			return true
+		}
+	}
+	return false
+}
+
+// documentScanErrors is the fail-closed start check of the malware scan
+// (OPS-01, E-42): outside development the module documents needs an
+// explicit clamd (RETICORA_CLAMD_ADDR) and the job queue
+// (RETICORA_NATS_URL); without either every upload would stay locked.
+func (c *Config) documentScanErrors() []error {
+	if c.IsDevelopment() || !c.documentsEnabled() {
+		return nil
+	}
+	var missing []string
+	for _, key := range []string{"RETICORA_CLAMD_ADDR", "RETICORA_NATS_URL"} {
+		if !c.explicit[key] {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return []error{fmt.Errorf("RETICORA_ENVIRONMENT=%s with the module documents requires %s: "+
+		"the malware scan of uploads runs on clamd over the job queue (SEC-09)", c.Environment, strings.Join(missing, ", "))}
 }
 
 // uuidValue matches a UUID in its canonical text form.
