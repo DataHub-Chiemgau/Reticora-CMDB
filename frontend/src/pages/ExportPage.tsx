@@ -24,6 +24,19 @@ const statusVariants: Record<
   expired: 'neutral',
 };
 
+// errorReportURL is the error report of a completed, unexpired DATEV job: the
+// asset rows the file leaves out and why (EXP-01, WP-310). The server sends
+// the URL only then; the page checks it again so a stale list never offers it.
+function errorReportURL(job: ExportJob): string | undefined {
+  if (job.format !== 'datev' || job.status !== 'completed' || !job.error_report_url) {
+    return undefined;
+  }
+  if (job.expires_at && new Date(job.expires_at).getTime() <= Date.now()) {
+    return undefined;
+  }
+  return job.error_report_url;
+}
+
 export function ExportPage() {
   const { t } = useTranslation();
   const jobs = useExportJobs();
@@ -41,12 +54,10 @@ export function ExportPage() {
   // The file is fetched and saved as a same-origin blob: browsers ignore the
   // download attribute of a link to the object store's origin (WebKit then
   // navigates away from the page instead of saving the file).
-  const download = (event: MouseEvent<HTMLAnchorElement>, job: ExportJob) => {
+  const download = (event: MouseEvent<HTMLAnchorElement>, filename: string) => {
     event.preventDefault();
     setDownloadFailed(false);
-    downloadExport(event.currentTarget.href, `export_${job.id}.${job.format}`).catch(() =>
-      setDownloadFailed(true),
-    );
+    downloadExport(event.currentTarget.href, filename).catch(() => setDownloadFailed(true));
   };
 
   const submit = () => {
@@ -145,10 +156,20 @@ export function ExportPage() {
                         <a
                           href={job.download_url}
                           download
-                          onClick={(event) => download(event, job)}
+                          onClick={(event) => download(event, `export_${job.id}.${job.format}`)}
                           className="text-sm font-medium text-primary hover:underline"
                         >
                           {t('export.download')}
+                        </a>
+                      ) : null}
+                      {errorReportURL(job) ? (
+                        <a
+                          href={errorReportURL(job)}
+                          download
+                          onClick={(event) => download(event, `export_${job.id}.errors.csv`)}
+                          className="ml-3 text-sm font-medium text-primary hover:underline"
+                        >
+                          {t('export.errorReport')}
                         </a>
                       ) : null}
                     </td>

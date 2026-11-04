@@ -1060,7 +1060,7 @@
   "export": {
     "omittedFields": "{{count}} fields not included",
     "title": "Export",
-    "subtitle": "Asynchronous exports render the tenant's CI data into object storage; finished exports are available for 24 hours via a signed URL.",
+    "subtitle": "Asynchronous exports render the tenant's data into object storage: CSV and JSON export CIs, DATEV exports the assets for the asset accounting. Finished exports are available for 24 hours via a signed URL.",
     "loading": "Loading export jobs",
     "errorTitle": "Export jobs could not be loaded",
     "startExport": "Start export",
@@ -1073,7 +1073,8 @@
     "download": "Download",
     "downloadFailed": "The file could not be downloaded.",
     "emptyTitle": "No export jobs",
-    "emptyHint": "Start an export to download CI data as CSV, DATEV or JSON.",
+    "emptyHint": "Start an export to download the CIs as CSV or JSON or the assets as a DATEV file.",
+    "errorReport": "Error report",
     "status_pending": "Pending",
     "status_running": "Running",
     "status_completed": "Completed",

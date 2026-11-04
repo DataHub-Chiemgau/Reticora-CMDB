@@ -1060,7 +1060,7 @@
   "export": {
     "omittedFields": "{{count}} Felder nicht enthalten",
     "title": "Export",
-    "subtitle": "Asynchrone Exporte rendern die CI-Daten des Mandants in Objektspeicher; fertige Exporte stehen 24 Stunden über eine signierte URL zum Download bereit.",
+    "subtitle": "Asynchrone Exporte rendern die Daten des Mandants in Objektspeicher: CSV und JSON exportieren CIs, DATEV exportiert die Anlagen (Assets) für die Anlagenbuchhaltung. Fertige Exporte stehen 24 Stunden über eine signierte URL zum Download bereit.",
     "loading": "Exportaufträge werden geladen",
     "errorTitle": "Exportaufträge konnten nicht geladen werden",
     "startExport": "Export starten",
@@ -1073,7 +1073,8 @@
     "download": "Herunterladen",
     "downloadFailed": "Die Datei konnte nicht heruntergeladen werden.",
     "emptyTitle": "Keine Exportaufträge",
-    "emptyHint": "Starten Sie einen Export, um die CI-Daten als CSV, DATEV oder JSON herunterzuladen.",
+    "emptyHint": "Starten Sie einen Export, um die CIs als CSV oder JSON oder die Anlagen als DATEV-Datei herunterzuladen.",
+    "errorReport": "Fehlerreport",
     "status_pending": "Ausstehend",
     "status_running": "Läuft",
     "status_completed": "Abgeschlossen",
