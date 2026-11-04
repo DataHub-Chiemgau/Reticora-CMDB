@@ -113,8 +113,6 @@ var unroutedKeys = map[string]string{
 // work package registers, with that package (E-106). A key leaves the list
 // with its first route.
 var unroutedUntil = map[string]string{
-	"contract:read":           "suppliers and contracts (WP-269)",
-	"contract:write":          "suppliers and contracts (WP-269)",
 	"field_permission:manage": "field-permissions (WP-264, WP-726)",
 }
 

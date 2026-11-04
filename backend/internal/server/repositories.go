@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contract"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -88,6 +89,7 @@ func MemoryRepositories() Repositories {
 		Discovery:         discoveryRepo,
 		CIType:            citype.NewMemoryRepository(),
 		Import:            importer.NewMemoryRepository(),
+		Supplier:          contract.NewMemoryRepository(),
 		RelationshipType:  relationshiptype.NewMemoryRepository(),
 		Lifecycle:         lifecycle.NewMemoryRepository(),
 		LocationTree:      locations.NewMemoryRepository(),
@@ -201,6 +203,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		CIType:            citype.NewPGRepository(pool),
 		MetamodelDraft:    metamodel.NewPGRepository(pool),
 		Import:            importer.NewPGRepository(pool),
+		Supplier:          contract.NewPGRepository(pool),
 		RelationshipType:  relationshiptype.NewPGRepository(pool),
 		Lifecycle:         lifecycle.NewPGRepository(pool),
 		LocationTree:      locations.NewPGRepository(pool),

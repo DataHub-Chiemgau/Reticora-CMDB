@@ -26,6 +26,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contract"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -138,8 +139,9 @@ type Repositories struct {
 	Privacy privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
-	MetamodelDraft    metamodel.Repository // drafts (WP-260); nil without a database: the routes answer 503
-	Import            importer.Repository  // import mapping profiles (WP-774, IMP-IO-01)
+	MetamodelDraft    metamodel.Repository        // drafts (WP-260); nil without a database: the routes answer 503
+	Import            importer.Repository         // import mapping profiles (WP-774, IMP-IO-01)
+	Supplier          contract.SupplierRepository // suppliers (WP-736, MGT-12); nil: the routes answer 503
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -614,6 +616,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
+		contract.NewHandler(repos.Supplier),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),

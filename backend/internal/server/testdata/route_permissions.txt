@@ -61,6 +61,7 @@ DELETE /api/v1/slas/{id} sla:write
 DELETE /api/v1/stocktakes/{id} stocktake:write
 DELETE /api/v1/subnets/{id} ipam:write
 DELETE /api/v1/subnets/{id}/reservations/{ip_id} ipam:write
+DELETE /api/v1/suppliers/{id} contract:write
 DELETE /api/v1/tags/{id} tag:manage
 DELETE /api/v1/teams/{id} team:manage
 DELETE /api/v1/teams/{teamId}/members/{userId} team:manage
@@ -290,6 +291,8 @@ GET /api/v1/subnets ipam:read
 GET /api/v1/subnets/{id} ipam:read
 GET /api/v1/subnets/{id}/addresses ipam:read
 GET /api/v1/subnets/{id}/reservations ipam:read
+GET /api/v1/suppliers contract:read
+GET /api/v1/suppliers/{id} contract:read
 GET /api/v1/tags ci:read
 GET /api/v1/tags/{id} ci:read
 GET /api/v1/teams user:read
@@ -380,6 +383,7 @@ PATCH /api/v1/sites/{id} location:write
 PATCH /api/v1/slas/{id} sla:write
 PATCH /api/v1/stocktakes/{id} stocktake:write
 PATCH /api/v1/subnets/{id} ipam:write
+PATCH /api/v1/suppliers/{id} contract:write
 PATCH /api/v1/tags/{id} tag:manage
 PATCH /api/v1/teams/{id} team:manage
 PATCH /api/v1/templates/{id} citype:manage
@@ -541,6 +545,7 @@ POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write
 POST /api/v1/subnets ipam:write
 POST /api/v1/subnets/{id}/reservations ipam:write
+POST /api/v1/suppliers contract:write
 POST /api/v1/tags tag:manage
 POST /api/v1/tags/{id}/merge tag:manage
 POST /api/v1/teams team:manage

@@ -53,10 +53,12 @@ var readPermissionFor = map[string]identity.Permission{
 	"desk-bookings":        identity.PermDeskRead,
 	"tickets":              identity.PermTicketRead,
 	"slas":                 identity.PermSLARead,
-	"business-calendars":   identity.PermSLARead,   // business calendars of the SLA clock (WP-768); writes sla:write
-	"import-profiles":      identity.PermImportRun, // import mapping profiles (WP-774, E-106); writes import:manage
-	"imports":              identity.PermImportRun, // import runs (WP-301): read, start and preview need import:run
-	"tags":                 identity.PermCIRead,    // tag catalog (CI-08, WP-753, E-106); writes tag:manage
+	"business-calendars":   identity.PermSLARead,      // business calendars of the SLA clock (WP-768); writes sla:write
+	"import-profiles":      identity.PermImportRun,    // import mapping profiles (WP-774, E-106); writes import:manage
+	"imports":              identity.PermImportRun,    // import runs (WP-301): read, start and preview need import:run
+	"tags":                 identity.PermCIRead,       // tag catalog (CI-08, WP-753, E-106); writes tag:manage
+	"suppliers":            identity.PermContractRead, // suppliers (MGT-12, WP-736, E-106); writes contract:write
+	"contracts":            identity.PermContractRead, // contracts (MGT-12, WP-269, E-106); writes contract:write
 	"users":                identity.PermUserRead,
 	"service-accounts":     identity.PermUserRead,
 	// Invitations name addresses and grant roles: read and write need
