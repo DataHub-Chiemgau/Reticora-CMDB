@@ -15,6 +15,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -252,6 +254,13 @@ func (f fakeAccess) CanReadEvent(_ context.Context, _, serviceAccountID, permiss
 		}
 	}
 	return true, nil
+}
+
+// FieldPolicy implements SubscriberAccess: the fake knows no field
+// permissions, so every payload passes unchanged (fieldrights_test.go
+// covers the projection).
+func (f fakeAccess) FieldPolicy(context.Context, string, string) (*permission.FieldPolicy, error) {
+	return permission.UnrestrictedPolicy(identity.AllPermissions()), nil
 }
 
 // TestDispatcherFiltersBoundSubscriptions covers WP-069 (RBA-08): a

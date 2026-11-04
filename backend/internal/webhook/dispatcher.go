@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
 
@@ -126,14 +127,25 @@ type DispatcherOptions struct {
 	// Without it such events reach only unbound subscriptions and accounts
 	// that read org-wide.
 	Objects ObjectResolver
+	// CIs reads the type and scope of the CI of override.changed for the
+	// field permissions of the payload (project.go). Without it the event
+	// reaches no subscription whose policy restricts CI fields.
+	CIs CIFieldScopes
 }
 
 // SubscriberAccess checks the read right of a service account on the
 // objects of an event with the given permission. objects holds the client
 // and site of every object ("" is NULL); nil means the scope of the event is
 // unknown, which only an account reading org-wide may read.
+//
+// FieldPolicy returns the field policy a payload is projected with (RBA-07,
+// E-43, WP-730): for a service account the policy of its roles and scopes
+// (an inactive or unknown account has no rights), for "" (an unbound
+// subscription) the default policy without role, in which sensitive fields
+// are closed and no role grant applies.
 type SubscriberAccess interface {
-	CanReadEvent(ctx context.Context, orgID, serviceAccountID, permission string, objects []ObjectScope) (bool, error)
+	CanReadEvent(ctx context.Context, orgID, serviceAccountID, perm string, objects []ObjectScope) (bool, error)
+	FieldPolicy(ctx context.Context, orgID, serviceAccountID string) (*permission.FieldPolicy, error)
 }
 
 // EventReadPermission is the permission needed to read the object of an
@@ -268,11 +280,11 @@ func (d *Dispatcher) mayDeliver(ctx context.Context, orgID, event string, body [
 	if sub.ServiceAccountID == "" {
 		return true
 	}
-	permission := EventDataReadPermission(event, body)
-	if permission == "" || d.opts.Access == nil {
+	perm := EventDataReadPermission(event, body)
+	if perm == "" || d.opts.Access == nil {
 		return false
 	}
-	ok, err := d.opts.Access.CanReadEvent(ctx, orgID, sub.ServiceAccountID, permission, objects)
+	ok, err := d.opts.Access.CanReadEvent(ctx, orgID, sub.ServiceAccountID, perm, objects)
 	if err != nil {
 		slog.Error("check webhook subscriber rights failed", "error", err, "organization_id", orgID, "subscription_id", sub.ID)
 		return false
@@ -440,26 +452,44 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 	}
 
 	// The scope of the event objects is resolved once, and only when a
-	// bound subscription or a restricted scope snapshot needs it.
+	// bound subscription, a restricted scope snapshot or the projection of
+	// an edge needs it.
 	var objects []ObjectScope
-	for i := range subs {
-		if subs[i].ServiceAccountID != "" || !subs[i].Scope.orgWide() {
-			objects = d.eventObjects(ctx, orgID, event, body)
-			break
+	resolved := false
+	eventObjects := func() []ObjectScope {
+		if !resolved {
+			objects, resolved = d.eventObjects(ctx, orgID, event, body), true
 		}
+		return objects
 	}
+	policies := map[string]*permission.FieldPolicy{}
 
 	var failed []error
 	for i := range subs {
 		sub := &subs[i]
-		if !d.mayDeliver(ctx, orgID, event, body, objects, sub) {
+		var subObjects []ObjectScope
+		if sub.ServiceAccountID != "" || !sub.Scope.orgWide() {
+			subObjects = eventObjects()
+		}
+		if !d.mayDeliver(ctx, orgID, event, body, subObjects, sub) {
+			continue
+		}
+		// The payload as the subscription may read it (WP-730): projected
+		// before it is stored, so retries send it unchanged and the
+		// signature covers it.
+		payload, deliver, err := d.projectFor(ctx, orgID, event, body, sub, policies, eventObjects)
+		if err != nil {
+			failed = append(failed, err)
+			continue
+		}
+		if !deliver {
 			continue
 		}
 		job := deliveryJob{
 			deliveryID: d.nextID(),
 			orgID:      orgID,
 			event:      event,
-			payload:    body,
+			payload:    payload,
 			maxAttempt: d.opts.MaxAttempts,
 			sub:        *sub,
 			origin:     origin,
@@ -468,7 +498,7 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 			OrganizationID: orgID,
 			SubscriptionID: sub.ID,
 			Event:          event,
-			Payload:        body,
+			Payload:        payload,
 			Status:         StatusPending,
 			MaxAttempts:    d.opts.MaxAttempts,
 		}
@@ -506,6 +536,35 @@ func (d *Dispatcher) dispatchAs(ctx context.Context, orgID, event string, aliase
 		d.enqueueJob(&job)
 	}
 	return errors.Join(failed...)
+}
+
+// projectFor returns the payload of the event for the subscription with
+// the field policy of its service account, of an unbound subscription the
+// default policy (SubscriberAccess.FieldPolicy, RBA-07, WP-730); deliver is
+// false when the event is withheld from it (project.go). policies caches
+// the policies of one dispatch by account. Without Access the payload is
+// not projected: only the PostgreSQL profile has field permissions, and
+// without Access bound subscriptions receive nothing (mayDeliver). A
+// policy that cannot be resolved withholds the delivery and is returned,
+// so an outbox event is handed over again.
+func (d *Dispatcher) projectFor(ctx context.Context, orgID, event string, body []byte, sub *Subscription,
+	policies map[string]*permission.FieldPolicy, objects func() []ObjectScope,
+) (payload []byte, deliver bool, err error) {
+	if d.opts.Access == nil {
+		return body, true, nil
+	}
+	policy, ok := policies[sub.ServiceAccountID]
+	if !ok {
+		policy, err = d.opts.Access.FieldPolicy(ctx, orgID, sub.ServiceAccountID)
+		if err != nil {
+			slog.Error("resolve webhook field policy failed", "error", err, "organization_id", orgID, "subscription_id", sub.ID)
+			return nil, false, fmt.Errorf("resolve field policy for subscription %s: %w", sub.ID, err)
+		}
+		policies[sub.ServiceAccountID] = policy
+	}
+	p := &projector{ctx: ctx, d: d, orgID: orgID, event: event, policy: policy, objects: objects}
+	payload, deliver = p.projectPayload(body)
+	return payload, deliver, nil
 }
 
 func (d *Dispatcher) enqueueJob(job *deliveryJob) {
