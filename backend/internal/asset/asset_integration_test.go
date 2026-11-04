@@ -273,7 +273,7 @@ func TestAssetAST01FieldRights(t *testing.T) {
 	hidden := func(rec *httptest.ResponseRecorder) {
 		t.Helper()
 		s := rec.Body.String()
-		if strings.Contains(s, "4711") || strings.Contains(s, "x-geheim") || !strings.Contains(s, `"public":"offen"`) ||
+		if strings.Contains(s, `"purchase_price"`) || strings.Contains(s, `"4711`) || strings.Contains(s, "x-geheim") || !strings.Contains(s, `"public":"offen"`) ||
 			!strings.Contains(s, `"organization_id"`) || !strings.Contains(s, `"created_at"`) {
 			t.Fatalf("not projected: %s", s)
 		}
