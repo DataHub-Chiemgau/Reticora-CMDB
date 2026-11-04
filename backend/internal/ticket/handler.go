@@ -21,6 +21,12 @@ type SLAHooks interface {
 	ApplyForTicket(ctx context.Context, orgID string, t *Ticket) error
 	MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error
 	MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error
+	// ReapplyForTicket chooses the SLA again after PATCH changed the
+	// priority or the object of the ticket (WP-769).
+	ReapplyForTicket(ctx context.Context, orgID string, t *Ticket) error
+	// MarkReopened resets the resolution clock after a change of the
+	// status to open (WP-769); a state without resolution stays.
+	MarkReopened(ctx context.Context, orgID, ticketID string, at time.Time) error
 }
 
 // AttachmentReader reads the documents linked to an object
@@ -32,18 +38,16 @@ type AttachmentReader interface {
 
 // Handler provides HTTP handlers for ticket endpoints.
 type Handler struct {
+	svc  *Service
 	repo Repository
 	sla  SLAHooks
 	docs AttachmentReader
 }
 
-// NewHandler creates a new ticket handler.
-func NewHandler(repo Repository, hooks ...SLAHooks) *Handler {
-	h := &Handler{repo: repo}
-	if len(hooks) > 0 {
-		h.sla = hooks[0]
-	}
-	return h
+// NewHandler creates a new ticket handler; tickets and comments are created
+// through svc only (WP-766), reads and changes go to its repository.
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc, repo: svc.repo, sla: svc.sla}
 }
 
 // WithDocuments gives the handler the document repository the attachments
@@ -256,7 +260,10 @@ func validateEnums(w http.ResponseWriter, status, priority *string) bool {
 // constraint, policy or SQLSTATE text reaches the client (API-03, F-047),
 // the log keeps it.
 func writeTicketError(w http.ResponseWriter, r *http.Request, err error) {
+	var open *ErrOpenTicketExists
 	switch {
+	case errors.As(err, &open):
+		api.WriteError(w, http.StatusConflict, "Conflict", "an open ticket is already linked to the object")
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrInvalidTransition):
@@ -296,23 +303,20 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	priority := req.Priority
 	if priority == "" {
-		priority = "medium"
+		priority = DefaultPriority
 	}
 	if !validateEnums(w, nil, &priority) {
 		return
 	}
-	category := req.Category
-	if category == "" {
-		category = "incident"
-	}
 
+	// The service applies the defaults (category incident, status new).
 	ticket := &Ticket{
 		OrganizationID: t.OrganizationID,
 		Title:          req.Title,
 		Description:    req.Description,
 		Status:         StatusNew,
 		Priority:       priority,
-		Category:       category,
+		Category:       req.Category,
 		ReporterID:     t.UserID,
 		AssigneeID:     req.AssigneeID,
 		TeamID:         req.TeamID,
@@ -320,9 +324,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		RelatedAssetID: req.RelatedAssetID,
 		DueDate:        req.DueDate,
 		Tags:           req.Tags,
-	}
-	if ticket.Tags == nil {
-		ticket.Tags = []string{}
 	}
 	// Every field the request sets must be editable (WP-765); the server
 	// defaults of priority and category are no field of the request.
@@ -337,12 +338,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.repo.Create(r.Context(), ticket); err != nil {
+	if err := h.svc.Create(r.Context(), ticket, nil, CreateOptions{}); err != nil {
 		writeTicketError(w, r, err)
 		return
-	}
-	if h.sla != nil {
-		_ = h.sla.ApplyForTicket(r.Context(), t.OrganizationID, ticket)
 	}
 
 	writeTicket(w, r, http.StatusCreated, ticket)
@@ -371,26 +369,59 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !h.checkUpdate(w, r, t.OrganizationID, id, &req) {
 		return
 	}
+	reapply, ok := h.slaReapplyNeeded(w, r, t.OrganizationID, id, &req)
+	if !ok {
+		return
+	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeTicketError(w, r, err)
 		return
 	}
-	// SLA hooks: new→open is no first response, a reopen (to open) calls
-	// none; resetting the resolution clock after a reopen is WP-292.
-	if h.sla != nil && req.Status != nil {
+	// SLA hooks: new→open is no first response; a change to open resets
+	// the resolution clock of a resolved ticket (reopen, WP-769); a new
+	// priority or object chooses the SLA again (WP-769).
+	if h.sla != nil {
 		now := time.Now().UTC()
-		switch *req.Status {
-		case "in_progress", "waiting":
-			_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
-		case "resolved", "closed":
-			_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
-			_ = h.sla.MarkResolved(r.Context(), t.OrganizationID, id, now)
+		if req.Status != nil {
+			switch *req.Status {
+			case "in_progress", "waiting":
+				_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
+			case "resolved", "closed":
+				_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
+				_ = h.sla.MarkResolved(r.Context(), t.OrganizationID, id, now)
+			case StatusOpen:
+				if hookErr := h.sla.MarkReopened(r.Context(), t.OrganizationID, id, now); hookErr != nil {
+					slog.WarnContext(r.Context(), "ticket reopen: reset sla", "ticket_id", id, "error", hookErr)
+				}
+			}
+		}
+		if reapply {
+			if hookErr := h.sla.ReapplyForTicket(r.Context(), t.OrganizationID, item); hookErr != nil {
+				slog.WarnContext(r.Context(), "ticket update: choose sla again", "ticket_id", id, "error", hookErr)
+			}
 		}
 	}
 
 	writeTicket(w, r, http.StatusOK, item)
+}
+
+// slaReapplyNeeded reports whether the PATCH changes the priority or the
+// object (related_ci_id, related_asset_id) of the ticket, so that its SLA
+// is chosen again after the update (WP-769). Only then it reads the
+// ticket; a ticket outside the scope is 404.
+func (h *Handler) slaReapplyNeeded(w http.ResponseWriter, r *http.Request, orgID, id string, req *UpdateRequest) (reapply, ok bool) {
+	if h.sla == nil || req.Priority == nil && req.RelatedCIID == nil && req.RelatedAssetID == nil {
+		return false, true
+	}
+	current, err := h.repo.GetByID(r.Context(), orgID, id)
+	if err != nil {
+		writeTicketError(w, r, err)
+		return false, false
+	}
+	changes := req.changes(current)
+	return changes["priority"] || changes["related_ci_id"] || changes["related_asset_id"], true
 }
 
 // checkUpdate checks a PATCH against the field permissions of the kind
@@ -546,16 +577,14 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: t.OrganizationID,
 		TicketID:       ticketID,
 		AuthorID:       t.UserID,
+		AuthorType:     AuthorUser,
 		Content:        req.Content,
 		IsInternal:     req.IsInternal,
 	}
 
-	if err := h.repo.AddComment(r.Context(), comment); err != nil {
+	if err := h.svc.AddComment(r.Context(), comment); err != nil {
 		writeTicketError(w, r, err)
 		return
-	}
-	if h.sla != nil && !comment.IsInternal {
-		_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, ticketID, time.Now().UTC())
 	}
 
 	api.WriteJSON(w, http.StatusCreated, comment)

@@ -309,6 +309,10 @@ var routeRules = []routeRule{
 	{http.MethodPost, "assets/*/return", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/transfer", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/reserve", identity.PermReservationWrite},
+	// Linking a CI to an asset writes ci.asset_id like PATCH /cis/{id}
+	// (WP-272); the handler also requires asset:write.
+	{http.MethodPost, "assets/*/cis", identity.PermCIWrite},
+	{http.MethodDelete, "assets/*/cis/*", identity.PermCIWrite},
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
@@ -716,6 +720,12 @@ var domainRecordedRoutes = map[string]string{
 	// in the transaction of the transition.
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    "lifecycle.PGStateStore.RecordTransition",
 	"POST /api/v1/assets/{id}/lifecycle-transitions": "lifecycle.PGStateStore.RecordTransition",
+
+	// Asset↔CI links (AST-04, WP-272): asset.linked and asset.unlinked
+	// with the CI and the primary flag, last in the transaction, besides
+	// ci.updated of the CI.
+	"POST /api/v1/assets/{id}/cis":           "asset.PGRepository.RecordLink",
+	"DELETE /api/v1/assets/{id}/cis/{ci_id}": "asset.PGRepository.RecordLink",
 
 	// Document links (MGT-01, WP-267): document.linked and
 	// document.unlinked with link id and target, in the transaction of the

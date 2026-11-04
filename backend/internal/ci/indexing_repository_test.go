@@ -521,3 +521,84 @@ func TestIndexingRepositoryCoversPGRepositoryMethods(t *testing.T) {
 		t.Errorf("without the exceptions: checker reported %v, want [WithComputed WithEvents]", got)
 	}
 }
+
+// recordingBatchIndexer records the batches of IndexDocuments.
+type recordingBatchIndexer struct {
+	recordingIndexer
+	batches [][]Document
+}
+
+func (r *recordingBatchIndexer) IndexDocuments(_ context.Context, docs []Document) error {
+	r.batches = append(r.batches, docs)
+	return nil
+}
+
+// TestIndexDocumentForSearchFields covers the fields of WP-308:
+// IndexDocumentFor carries the management IP, the primary MAC, the
+// inventory number of the linked asset and the scalar attributes (lists
+// element by element) in Fields; objects, nested lists and empty values are
+// left out.
+func TestIndexDocumentForSearchFields(t *testing.T) {
+	item := &Item{ID: "ci-1", OrganizationID: "org-1", Name: "srv", Hostname: "srv.example", ManagementIP: "10.1.2.3",
+		PrimaryMAC: "08:00:2b:01:02:03", AssetID: "asset-1", Asset: &AssetFacts{ID: "asset-1", InventoryNo: "INV-308"},
+		Attributes: map[string]any{"room": "R1", "ports": float64(48), "weight": 1.5, "poe": true,
+			"vlans":       []any{"10", float64(20), "", map[string]any{"x": 1}, []any{"n"}},
+			"fingerprint": map[string]any{"mac_addresses": []any{"aa"}}, "empty": "", "none": nil}}
+	got := IndexDocumentFor(item).Fields
+	want := map[string]string{
+		"core.hostname": "srv.example", "core.management_ip": "10.1.2.3", "core.primary_mac": "08:00:2b:01:02:03",
+		"asset.inventory_no": "INV-308", "attributes.room": "R1", "attributes.ports": "48", "attributes.weight": "1.5",
+		"attributes.poe": "true", "attributes.vlans": "10 20",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Fields = %v, want %v", got, want)
+	}
+	if fields := IndexDocumentFor(&Item{ID: "ci-2", OrganizationID: "org-1", AssetID: "asset-1"}).Fields; len(fields) != 0 {
+		t.Errorf("Fields of a CI without values = %v", fields)
+	}
+}
+
+// TestIndexingRepositoryPassesSearchFields: Create, CreateMany and Update
+// hand the identifier and attribute fields to the indexer (WP-308).
+func TestIndexingRepositoryPassesSearchFields(t *testing.T) {
+	ctx := context.Background()
+	indexer := &recordingBatchIndexer{}
+	repo := NewIndexingRepository(NewMemoryRepository(), indexer)
+	item := &Item{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-308", ManagementIP: "10.3.0.8",
+		PrimaryMAC: "08:00:2b:00:03:08", Asset: &AssetFacts{InventoryNo: "INV-308"}, Attributes: map[string]any{"rack": "R308"}}
+	if err := repo.Create(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	check := func(stage string, doc *Document) {
+		t.Helper()
+		for k, v := range map[string]string{"core.management_ip": "10.3.0.8", "core.primary_mac": "08:00:2b:00:03:08", "attributes.rack": "R308"} {
+			if doc.Fields[k] != v {
+				t.Errorf("%s: Fields[%s] = %q, want %q (%v)", stage, k, doc.Fields[k], v, doc.Fields)
+			}
+		}
+	}
+	if len(indexer.indexed) != 1 {
+		t.Fatalf("create: %d documents", len(indexer.indexed))
+	}
+	check("create", &indexer.indexed[0])
+	if indexer.indexed[0].Fields["asset.inventory_no"] != "INV-308" {
+		t.Errorf("create: inventory number missing: %v", indexer.indexed[0].Fields)
+	}
+	batch := []*Item{{OrganizationID: "org-1", CITypeID: testServerType, Name: "srv-308-b", ManagementIP: "10.3.0.8",
+		PrimaryMAC: "08:00:2b:00:03:08", Attributes: map[string]any{"rack": "R308"}}}
+	if _, err := repo.(BatchCreator).CreateMany(ctx, "org-1", batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(indexer.batches) != 1 || len(indexer.batches[0]) != 1 {
+		t.Fatalf("create many: batches %v", indexer.batches)
+	}
+	check("create many", &indexer.batches[0][0])
+	name := "srv-308-renamed"
+	if _, err := repo.Update(ctx, "org-1", item.ID, UpdateRequest{Name: &name}); err != nil {
+		t.Fatal(err)
+	}
+	if len(indexer.indexed) != 2 {
+		t.Fatalf("update: %d documents", len(indexer.indexed))
+	}
+	check("update", &indexer.indexed[1])
+}

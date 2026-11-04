@@ -2,12 +2,14 @@ package search
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -16,10 +18,76 @@ import (
 type Handler struct {
 	backend     Backend
 	permissions permission.Repository
+	jobs        ReindexJobs
+	queue       ReindexQueue
 }
 
 func NewHandler(backend Backend, permissions permission.Repository) *Handler {
 	return &Handler{backend: backend, permissions: permissions}
+}
+
+// ReindexJobs runs the rebuild of the index as a job in this process;
+// jobs.Service implements it.
+type ReindexJobs interface {
+	RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
+		run func(ctx context.Context) (any, error)) (*jobs.Job, error)
+}
+
+// ReindexQueue submits the rebuild of the index to the job queue on NATS
+// (TEC-14), whose workers run it with RunReindexJob; jobs.Queue implements
+// it.
+type ReindexQueue interface {
+	Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error)
+}
+
+// WithJobs makes POST /api/v1/search/reindex a job (WP-786).
+func (h *Handler) WithJobs(j ReindexJobs) *Handler {
+	h.jobs = j
+	return h
+}
+
+// WithQueue runs the rebuild on the job queue instead of in this process:
+// the job outlives the replica that accepted it.
+func (h *Handler) WithQueue(q ReindexQueue) *Handler {
+	h.queue = q
+	return h
+}
+
+// ReindexResponse is the answer of POST /api/v1/search/reindex: the job of
+// the rebuild (WP-786). Indexed is deprecated (API-01): it is 0 for a job,
+// whose result carries the count; only without the job model, when the
+// rebuild runs in the request, it is the count.
+type ReindexResponse struct {
+	Indexed int         `json:"indexed"`
+	JobID   string      `json:"job_id,omitempty"`
+	Status  jobs.Status `json:"status,omitempty"`
+	Kind    string      `json:"kind,omitempty"`
+}
+
+// reindexJobParams are the parameters of a job search.reindex: none. The
+// rebuild runs organization-wide (E-08); the job keeps no permissions or
+// groups of its creator.
+type reindexJobParams struct{}
+
+// errReindexFailed is the error a failed rebuild records on its job; the
+// cause goes to the log (API-03).
+var errReindexFailed = errors.New("the search index could not be rebuilt; the documents written before stay")
+
+// runReindex rebuilds the index of the organization for a job.
+func (h *Handler) runReindex(ctx context.Context, orgID string) (any, error) {
+	res, err := h.backend.ReindexTenant(ctx, orgID)
+	if err != nil {
+		slog.ErrorContext(ctx, "search reindex failed", "organization_id", orgID, "indexed", res.Indexed, "error", err)
+		return nil, errReindexFailed
+	}
+	return res, nil
+}
+
+// RunReindexJob runs a job search.reindex of the job queue with the tenant
+// and the scope of its creator (jobs.CreatorContext); the rebuild itself
+// runs organization-wide (E-08).
+func (h *Handler) RunReindexJob(ctx context.Context, job *jobs.Job) (any, error) {
+	return h.runReindex(jobs.CreatorContext(ctx, job), job.OrganizationID)
 }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/search", h.Search)
@@ -44,14 +112,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
-	// WP-266); a policy that cannot be resolved answers 500 (fail-closed).
-	policy, err := permission.PolicyFrom(r.Context())
-	if err != nil {
+	// WP-266), the addresses and MACs of the interfaces with ipam:read
+	// (WP-308); a policy that cannot be resolved answers 500 (fail-closed).
+	if err := ApplyPrincipal(r.Context(), &q, func(perm string) bool { return h.allowed(r.Context(), t, perm) }); err != nil {
 		slog.ErrorContext(r.Context(), "search: field permissions could not be resolved", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the field permissions could not be resolved")
 		return
 	}
-	q.Policy = policy
 	res, err := h.backend.Query(r.Context(), &q)
 	if err != nil {
 		// A checked query leaves backend failures only; their text goes to
@@ -75,19 +142,42 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 
 // Reindex handles POST /api/v1/search/reindex. The route is gated by the
 // search:write permission in the router's authorization layer; the handler
-// only needs the tenant context.
+// only needs the tenant context. The rebuild is the job search.reindex
+// (WP-786): on the job queue when there is one, otherwise in the
+// background of this process, each with the scope of the caller; the
+// answer is 202 with the job and its Location. Without the job model
+// (profile without a database) the rebuild runs in the request.
 func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	out, err := h.backend.ReindexTenant(r.Context(), t.OrganizationID)
+	orgID := t.OrganizationID
+	if h.jobs == nil && h.queue == nil {
+		out, err := h.backend.ReindexTenant(r.Context(), orgID)
+		if err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+		api.WriteJSON(w, http.StatusAccepted, ReindexResponse{Indexed: out.Indexed})
+		return
+	}
+	var job *jobs.Job
+	var err error
+	if h.queue != nil {
+		job, _, err = h.queue.Submit(r.Context(), orgID, ReindexJobKind, reindexJobParams{}, jobs.EnqueueOptions{CreatedBy: t.UserID})
+	} else {
+		job, err = h.jobs.RunDetached(r.Context(), orgID, ReindexJobKind, reindexJobParams{}, t.UserID,
+			func(ctx context.Context) (any, error) { return h.runReindex(ctx, orgID) })
+	}
 	if err != nil {
+		slog.ErrorContext(r.Context(), "search reindex: submit the job", "error", err)
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusAccepted, out)
+	w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+	api.WriteJSON(w, http.StatusAccepted, ReindexResponse{JobID: job.ID, Status: job.Status, Kind: job.Kind})
 }
 
 // filterAllowed keeps the hits whose entity type the caller may read
@@ -118,6 +208,16 @@ func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits [
 		}
 	}
 	return out
+}
+
+// allowed reports whether the caller holds the permission; without a
+// permission repository or a user never (fail-closed).
+func (h *Handler) allowed(ctx context.Context, t tenant.TenantInfo, perm string) bool {
+	if h.permissions == nil || t.UserID == "" {
+		return false
+	}
+	ok, err := h.permissions.HasPermission(ctx, t.OrganizationID, t.UserID, perm)
+	return err == nil && ok
 }
 
 // validateRequest checks the search text and the type filter: a 400 field

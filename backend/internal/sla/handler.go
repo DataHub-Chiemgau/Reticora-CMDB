@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 	"github.com/go-chi/chi/v5"
@@ -406,16 +407,51 @@ func (h *Handler) DeleteCalendar(w http.ResponseWriter, r *http.Request) {
 }
 
 // TicketHooks lets the ticket handler keep SLA state consistent without taking
-// a dependency on this package.
-type TicketHooks struct{ Repo Repository }
+// a dependency on this package. SLAs belong to ticketing_standard (E-39,
+// WP-769): without an active feature the hooks apply no SLA, choose none
+// again and reset none. A nil Features checks nothing (tests, installations
+// without entitlements).
+type TicketHooks struct {
+	Repo     Repository
+	Features entitlement.Checker
+}
+
+// standard reports whether the organization holds ticketing_standard.
+func (h TicketHooks) standard(ctx context.Context, orgID string) bool {
+	return h.Features == nil || h.Features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingStandard)
+}
 
 func (h TicketHooks) ApplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	if !h.standard(ctx, orgID) {
+		return nil
+	}
 	_, err := h.Repo.ApplyForTicket(ctx, orgID, t, "")
 	return err
 }
+
+// ReapplyForTicket chooses the SLA again after a change of priority or
+// object; no matching policy keeps the state.
+func (h TicketHooks) ReapplyForTicket(ctx context.Context, orgID string, t *ticket.Ticket) error {
+	if !h.standard(ctx, orgID) {
+		return nil
+	}
+	if err := h.Repo.ReapplyForTicket(ctx, orgID, t); err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
 func (h TicketHooks) MarkFirstResponse(ctx context.Context, orgID, ticketID string, at time.Time) error {
 	return h.Repo.MarkFirstResponse(ctx, orgID, ticketID, at)
 }
 func (h TicketHooks) MarkResolved(ctx context.Context, orgID, ticketID string, at time.Time) error {
 	return h.Repo.MarkResolved(ctx, orgID, ticketID, at)
+}
+
+// MarkReopened resets the resolution clock after a reopen.
+func (h TicketHooks) MarkReopened(ctx context.Context, orgID, ticketID string, at time.Time) error {
+	if !h.standard(ctx, orgID) {
+		return nil
+	}
+	return h.Repo.MarkReopened(ctx, orgID, ticketID, at)
 }

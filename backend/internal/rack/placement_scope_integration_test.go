@@ -24,7 +24,10 @@ const scopeRefusal = "the asset of the CI or another CI of the asset is outside 
 	"the location cannot follow the placement"
 
 // setAssetClient sets the client of an asset through the maintenance pool
-// (empty for an org-wide asset) and checks it.
+// (empty for an org-wide asset) and checks it. The client check of the
+// linked CIs (trg_asset_ci_client, WP-272) is off for the one update: the
+// tests build an asset with a CI of another client as it exists from
+// before that check.
 func setAssetClient(t *testing.T, f *scopetest.Fixture, assetID, clientID string) {
 	t.Helper()
 	var client any
@@ -32,8 +35,19 @@ func setAssetClient(t *testing.T, f *scopetest.Fixture, assetID, clientID string
 		client = clientID
 	}
 	var got string
-	if err := f.Admin.QueryRow(context.Background(), `UPDATE asset SET client_id = $2 WHERE id = $1
-		RETURNING COALESCE(client_id::text, '')`, assetID, client).Scan(&got); err != nil || got != clientID {
+	err := pgx.BeginFunc(context.Background(), f.Admin, func(tx pgx.Tx) error {
+		ctx := context.Background()
+		if _, err := tx.Exec(ctx, `ALTER TABLE asset DISABLE TRIGGER trg_asset_ci_client`); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `UPDATE asset SET client_id = $2 WHERE id = $1
+			RETURNING COALESCE(client_id::text, '')`, assetID, client).Scan(&got); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `ALTER TABLE asset ENABLE TRIGGER trg_asset_ci_client`)
+		return err
+	})
+	if err != nil || got != clientID {
 		t.Fatalf("client of asset %s: %q err %v, want %q", assetID, got, err, clientID)
 	}
 }

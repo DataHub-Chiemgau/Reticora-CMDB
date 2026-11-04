@@ -7,7 +7,9 @@
  * inheritable (definitions of a type) and the applicability of a global
  * definition (applies_to, WP-255). A computed definition (WP-258) offers
  * neither required nor unique. Refusals of the server show at the field
- * they name (`field`, `violations`) and as a reason in the dialog.
+ * they name (`field`, `violations`) and as a reason in the dialog. A set
+ * attribute (WP-797) is created with its attribute_set_id; the 422 of the
+ * composition check (WP-709) shows at the key.
  */
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -119,6 +121,7 @@ export function fieldErrors(error: unknown): Record<string, string> {
 export type AttributeEditorTarget =
   | { mode: 'create'; scope: 'type'; ciTypeId: string }
   | { mode: 'create'; scope: 'global' }
+  | { mode: 'create'; scope: 'set'; attributeSetId: string }
   | { mode: 'edit'; definition: AttributeDefinition };
 
 interface Draft {
@@ -208,7 +211,7 @@ function patchOf(
     if (!sameList(values, d.enum_values ?? [])) patch.enum_values = values;
   }
   if (!computed && draft.required !== before.required) patch.required = draft.required;
-  if (d.scope === 'type' && draft.inheritable !== before.inheritable) {
+  if (d.scope !== 'global' && draft.inheritable !== before.inheritable) {
     patch.inheritable = draft.inheritable;
   }
   const flags = computed ? { ...draft.flags, unique: false } : draft.flags;
@@ -254,8 +257,11 @@ function createOf(target: AttributeEditorTarget & { mode: 'create' }, draft: Dra
   if (draft.description) body.description = draft.description;
   if (draft.order.trim() !== '') body.order = Number(draft.order);
   if (ENUM_TYPES.has(draft.data_type)) body.enum_values = splitList(draft.enum_values);
-  if (target.scope === 'type') {
-    body.ci_type_id = target.ciTypeId;
+  if (target.scope === 'type' || target.scope === 'set') {
+    // A set attribute (WP-250, WP-797) belongs to its set; the types of the
+    // set take it like their own (subtypes the inheritable ones).
+    if (target.scope === 'type') body.ci_type_id = target.ciTypeId;
+    else body.attribute_set_id = target.attributeSetId;
     body.required = draft.required;
     body.inheritable = draft.inheritable;
   } else {
@@ -306,7 +312,9 @@ export function AttributeEditor({
     ? t('citypes.editField', { name: editing.key })
     : scope === 'global'
       ? t('citypes.globals.add')
-      : t('citypes.addField');
+      : scope === 'set'
+        ? t('citypes.sets.addAttribute')
+        : t('citypes.addField');
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -405,7 +413,7 @@ export function AttributeEditor({
         {computed ? (
           <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.computedHint')}</p>
         ) : null}
-        {scope === 'type' && !computed ? (
+        {scope !== 'global' && !computed ? (
           <>
             <label className={checkboxLabel}>
               <input
@@ -419,7 +427,7 @@ export function AttributeEditor({
             {checkboxError('required')}
           </>
         ) : null}
-        {scope === 'type' ? (
+        {scope !== 'global' ? (
           <>
             <label className={checkboxLabel}>
               <input

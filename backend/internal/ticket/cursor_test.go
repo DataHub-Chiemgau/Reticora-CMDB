@@ -51,7 +51,7 @@ func TestListCursorPaginationWalksEveryRowExactlyOnce(t *testing.T) {
 	seedTickets(t, repo, 25)
 
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
+	NewHandler(NewService(repo, nil)).RegisterRoutes(mux)
 
 	seen := map[string]int{}
 	url := "/api/v1/tickets?limit=10&sort_by=title&sort_dir=asc"
@@ -90,7 +90,7 @@ func TestListCursorPaginationWalksEveryRowExactlyOnce(t *testing.T) {
 func TestListRejectsMalformedCursor(t *testing.T) {
 	repo := NewMemoryRepository()
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
+	NewHandler(NewService(repo, nil)).RegisterRoutes(mux)
 
 	req := httptest.NewRequest("GET", "/api/v1/tickets?cursor=%21%21%21", nil)
 	req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1"}))
@@ -107,7 +107,7 @@ func TestListRejectsCursorFromDifferentSortOrder(t *testing.T) {
 	seedTickets(t, repo, 4)
 
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
+	NewHandler(NewService(repo, nil)).RegisterRoutes(mux)
 
 	page := listTicketPage(t, mux, "/api/v1/tickets?limit=2&sort_by=title&sort_dir=asc")
 	if page.NextCursor == "" {

@@ -136,6 +136,23 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{Permission: identity.PermAPIKeyManage, Roles: []string{"org_admin"}}
 		},
 	},
+	events.TicketSLABreached: {
+		// The escalation of a missed due time (the sla.check run, TKT-01,
+		// WP-769) to the assignee and the lead of the ticket's team; they
+		// must read tickets in the ticket's client and site. Not critical:
+		// quiet hours, muted categories and the digest apply.
+		Category: "ticket",
+		Audience: func(d map[string]any) *Audience {
+			var users []string
+			for _, key := range []string{"assignee_id", "team_lead_id"} {
+				if id := str(d, key); id != "" && !slices.Contains(users, id) {
+					users = append(users, id)
+				}
+			}
+			return &Audience{Permission: identity.PermTicketRead, UserIDs: users,
+				ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+		},
+	},
 	events.DocumentScanned: {
 		// A finding quarantines the version (SEC-09, E-42, WP-734): its
 		// uploader and the org_admins who read the document are told. A

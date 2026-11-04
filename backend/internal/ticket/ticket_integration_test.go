@@ -41,7 +41,7 @@ func newTicketEnv(t *testing.T) *ticketEnv {
 	f := scopetest.Seed(t, "38")
 	repo := ticket.NewPGRepository(f.App).WithEvents(events.NewOutbox())
 	mux := chi.NewRouter()
-	ticket.NewHandler(repo).RegisterRoutes(mux)
+	ticket.NewHandler(ticket.NewService(repo, nil)).RegisterRoutes(mux)
 	return &ticketEnv{f: f, repo: repo, mux: mux, user: f.AppUser(t, f.OrgA, "reporter")}
 }
 

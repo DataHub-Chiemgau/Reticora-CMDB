@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -40,6 +41,24 @@ type Repository interface {
 	// DeleteLink removes link linkID of ticket ticketID; a link that does
 	// not exist or is not visible is ErrNotFound.
 	DeleteLink(ctx context.Context, orgID, ticketID, linkID string) error
+
+	// RunInTx runs fn in one transaction of the context's tenant scope; the
+	// repository calls fn makes with its context join it, which commits when
+	// fn returns nil and rolls back otherwise (WP-766).
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+	// LockOpenTicket takes the transaction lock of the target (entity type
+	// and id) and returns the oldest ticket visible to the caller that is
+	// linked to it and not closed, or nil; called in RunInTx, the lock is
+	// held until the end of the transaction, so concurrent creations for
+	// the same target see each other's ticket.
+	LockOpenTicket(ctx context.Context, orgID string, target Target) (*LinkedTicket, error)
+	// LinkedTickets returns per id of entityType the tickets visible to the
+	// caller that are linked to it, by ticket number, with one query; ids
+	// without tickets have no entry.
+	LinkedTickets(ctx context.Context, orgID, entityType string, ids []string) (map[string][]LinkedTicket, error)
+	// RecordOrigin writes the audit entry ticket.create of a ticket created
+	// for origin as the last write of the context transaction (WP-766).
+	RecordOrigin(ctx context.Context, t *Ticket, origin Target) error
 }
 
 // ValidLinkEntityType reports whether entityType is an entity type of a
@@ -85,6 +104,10 @@ func LinkNextCursor(items []Link, limit int) string {
 
 // MemoryRepository is an in-memory implementation of Repository.
 type MemoryRepository struct {
+	// txMu serializes RunInTx: the memory repository knows no transaction,
+	// one RunInTx at a time keeps the exclusive check and the creation of
+	// a ticket together (WP-766).
+	txMu      sync.Mutex
 	mu        sync.RWMutex
 	tickets   map[string]*Ticket
 	comments  map[string]*Comment
@@ -415,6 +438,9 @@ func (r *MemoryRepository) AddComment(_ context.Context, c *Comment) error {
 		return ErrNotFound
 	}
 
+	if c.AuthorType == "" {
+		c.AuthorType = AuthorUser
+	}
 	r.nextCmtID++
 	c.ID = fmt.Sprintf("comment-%d", r.nextCmtID)
 	now := time.Now().UTC()
@@ -445,4 +471,70 @@ func (r *MemoryRepository) ListComments(_ context.Context, orgID, ticketID strin
 		end = total
 	}
 	return result[start:end], total, nil
+}
+
+// RunInTx implements Repository without a transaction: calls run one at a
+// time, and when fn fails the tickets, comments and links it wrote are
+// removed again, so a ticket and its links appear together or not at all.
+func (r *MemoryRepository) RunInTx(ctx context.Context, _ string, fn func(ctx context.Context) error) error {
+	r.txMu.Lock()
+	defer r.txMu.Unlock()
+	r.mu.RLock()
+	tickets, comments, links := maps.Clone(r.tickets), maps.Clone(r.comments), maps.Clone(r.links)
+	r.mu.RUnlock()
+	if err := fn(ctx); err != nil {
+		r.mu.Lock()
+		r.tickets, r.comments, r.links = tickets, comments, links
+		r.mu.Unlock()
+		return err
+	}
+	return nil
+}
+
+// LockOpenTicket implements Repository (RunInTx serializes the callers).
+func (r *MemoryRepository) LockOpenTicket(_ context.Context, orgID string, target Target) (*LinkedTicket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var found *LinkedTicket
+	for _, l := range r.links {
+		if l.OrganizationID != orgID || l.EntityType != target.EntityType || !strings.EqualFold(l.EntityID, target.EntityID) {
+			continue
+		}
+		t, ok := r.tickets[l.TicketID]
+		if !ok || t.Status == StatusClosed {
+			continue
+		}
+		if found == nil || t.TicketNumber < found.TicketNumber {
+			found = &LinkedTicket{ID: t.ID, TicketNumber: t.TicketNumber, Status: t.Status}
+		}
+	}
+	return found, nil
+}
+
+// LinkedTickets implements Repository.
+func (r *MemoryRepository) LinkedTickets(_ context.Context, orgID, entityType string, ids []string) (map[string][]LinkedTicket, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := map[string][]LinkedTicket{}
+	for _, l := range r.links {
+		if l.OrganizationID != orgID || l.EntityType != entityType {
+			continue
+		}
+		idx := slices.IndexFunc(ids, func(id string) bool { return strings.EqualFold(id, l.EntityID) })
+		if idx < 0 {
+			continue
+		}
+		if t, ok := r.tickets[l.TicketID]; ok {
+			out[ids[idx]] = append(out[ids[idx]], LinkedTicket{ID: t.ID, TicketNumber: t.TicketNumber, Status: t.Status})
+		}
+	}
+	for id := range out {
+		slices.SortFunc(out[id], func(a, b LinkedTicket) int { return a.TicketNumber - b.TicketNumber })
+	}
+	return out, nil
+}
+
+// RecordOrigin implements Repository; the memory profile has no audit log.
+func (r *MemoryRepository) RecordOrigin(context.Context, *Ticket, Target) error {
+	return nil
 }

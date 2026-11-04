@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
@@ -208,7 +209,9 @@ func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, 
 // parentAssetLookup adapts asset.Repository to the composition.AssetLookup
 // port (spec §5: a child CI displays the parent asset's shared inventory
 // identity read-only instead of duplicating it). It is the mirror image of
-// ciLookup, which projects the opposite direction.
+// ciLookup, which projects the opposite direction. ParentAssetRef keeps the
+// old names and the float purchase cost until WP-273; the decimal string of
+// the asset is converted here (an empty one is 0).
 type parentAssetLookup struct {
 	repo asset.Repository
 }
@@ -217,6 +220,12 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 	a, err := l.repo.GetByID(ctx, orgID, id)
 	if err != nil {
 		return nil, err
+	}
+	var purchaseCost float64
+	if a.PurchaseCost != "" {
+		if purchaseCost, err = strconv.ParseFloat(a.PurchaseCost, 64); err != nil {
+			return nil, err
+		}
 	}
 	return &composition.ParentAssetRef{
 		ID:            a.ID,
@@ -227,7 +236,7 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 		Barcode:       a.Barcode,
 		RFIDTag:       a.RFIDTag,
 		PurchaseDate:  a.PurchaseDate,
-		PurchaseCost:  a.PurchaseCost,
+		PurchaseCost:  purchaseCost,
 		Currency:      a.Currency,
 		Supplier:      a.Supplier,
 		InvoiceNumber: a.InvoiceNumber,

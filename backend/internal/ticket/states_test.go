@@ -163,7 +163,7 @@ func ticketRequest(t *testing.T, mux chi.Router, method, url string, body any) *
 
 func TestHandlerTicketStatusAndPriority(t *testing.T) {
 	mux := chi.NewRouter()
-	NewHandler(NewMemoryRepository()).RegisterRoutes(mux)
+	NewHandler(NewService(NewMemoryRepository(), nil)).RegisterRoutes(mux)
 
 	w := ticketRequest(t, mux, http.MethodPost, "/api/v1/tickets", map[string]any{"title": "Drucker"})
 	if w.Code != http.StatusCreated {

@@ -214,12 +214,29 @@ type ReservationData struct {
 	QuantityItemID string `json:"quantity_item_id,omitempty"`
 }
 
-// TicketData is the data of ticket.updated (WP-290) and
-// ticket.sla_breached (WP-292).
+// TicketData is the data of ticket.updated (WP-290).
 type TicketData struct {
 	ID       string `json:"id"`
 	ClientID string `json:"client_id,omitempty"`
 	SiteID   string `json:"site_id,omitempty"`
+}
+
+// TicketSLABreachedData is the data of ticket.sla_breached, one missed due
+// time of a ticket (the sla.check run, WP-769): kind response or
+// resolution, its due time, the ticket's assignee, team and the team's
+// lead (team.lead_id), the recipients of the escalation.
+type TicketSLABreachedData struct {
+	ID           string `json:"id"`
+	TicketNumber int    `json:"ticket_number"`
+	Priority     string `json:"priority"`
+	SLAID        string `json:"sla_id"`
+	Kind         string `json:"kind"`
+	DueAt        string `json:"due_at"`
+	AssigneeID   string `json:"assignee_id,omitempty"`
+	TeamID       string `json:"team_id,omitempty"`
+	TeamLeadID   string `json:"team_lead_id,omitempty"`
+	ClientID     string `json:"client_id,omitempty"`
+	SiteID       string `json:"site_id,omitempty"`
 }
 
 // MetamodelPublishedData is the data of metamodel.published, the
@@ -298,7 +315,7 @@ var Payloads = map[string]any{
 	ReservationExpired:    ReservationData{},
 	ReservationConverted:  ReservationData{},
 	TicketUpdated:         TicketData{},
-	TicketSLABreached:     TicketData{},
+	TicketSLABreached:     TicketSLABreachedData{},
 	MetamodelPublished:    MetamodelPublishedData{},
 	DocumentScanned:       DocumentScannedData{},
 	ImportCompleted:       ImportCompletedData{},

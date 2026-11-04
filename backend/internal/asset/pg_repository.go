@@ -24,16 +24,16 @@ const assetSelectColumns = `
 	organization_id::text,
 	COALESCE(client_id::text, ''),
 	COALESCE(ci_id::text, ''),
-	asset_tag,
+	inventory_no,
 	name,
 	category,
 	status,
 	COALESCE(manufacturer, ''),
 	COALESCE(model, ''),
 	purchase_date,
-	COALESCE(purchase_cost, 0),
+	COALESCE(purchase_price::text, ''),
 	COALESCE(currency, ''),
-	warranty_end,
+	warranty_until,
 	COALESCE(cost_center, ''),
 	COALESCE(supplier, ''),
 	COALESCE(supplier_id::text, ''),
@@ -61,20 +61,37 @@ const physicalAssetModelID = "00000000-0000-0000-0000-000000000101"
 
 // constraintFields maps the unique indexes and references of asset onto the
 // request field they protect (api.FieldDBError): a taken inventory number,
-// barcode or RFID tag is 409 with the field (WP-271).
+// barcode or RFID tag is 409 with the field (WP-271). The unique index of
+// the inventory number kept its name idx_asset_tag_org (WP-738).
 var constraintFields = map[string]string{
-	"idx_asset_tag_org":        "asset_tag",
+	"idx_asset_tag_org":        "inventory_no",
 	"idx_asset_barcode_org":    "barcode",
 	"idx_asset_rfid":           "rfid_tag",
 	"asset_supplier_id_fkey":   "supplier_id",
 	"asset_contract_id_fkey":   "contract_id",
 	"asset_owner_user_id_fkey": "owner_user_id",
 	"asset_owner_team_id_fkey": "owner_team_id",
+	// A client that differs from the client of a linked CI (WP-272,
+	// trigger ci_asset_client of migration 000235).
+	"ci_asset_client": "client_id",
 }
 
-// assetDBError maps a constraint violation onto its request field.
-func assetDBError(err error) error {
-	mapped := api.FieldDBError(err, constraintFields)
+// primaryCIConstraintFields are constraintFields for a write of the primary
+// CI (asset.ci_id): the trigger asset_sync_primary_ci links the CI, so a
+// client conflict of that link is one of primary_ci_id.
+var primaryCIConstraintFields = func() map[string]string {
+	out := make(map[string]string, len(constraintFields))
+	for k, v := range constraintFields {
+		out[k] = v
+	}
+	out["ci_asset_client"] = fieldPrimaryCI
+	return out
+}()
+
+// assetFieldDBError maps a constraint violation onto its request field by
+// fields.
+func assetFieldDBError(err error, fields map[string]string) error {
+	mapped := api.FieldDBError(err, fields)
 	var fe *api.FieldError
 	if errors.As(mapped, &fe) && fe.Status == 0 {
 		// A reference that does not hold is 422 like the check before
@@ -94,7 +111,8 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// requireCI fails with a 422 field error on ci_id when the CI to link is no
+// requireCI fails with a 422 field error on primary_ci_id (the API name of
+// the column ci_id, E-122) when the CI to link is no
 // UUID or not visible under the caller's scope. The foreign key on ci is
 // checked without row level security: a CI of another organization or
 // client was linked (201) and an unknown one refused with the constraint
@@ -103,7 +121,7 @@ func requireCI(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
 	if nilIfEmpty(ciID) == nil {
 		return nil
 	}
-	if err := api.RequireUUID("ci_id", ciID); err != nil {
+	if err := api.RequireUUID(fieldPrimaryCI, ciID); err != nil {
 		return err
 	}
 	var visible bool
@@ -111,10 +129,14 @@ func requireCI(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
 		return fmt.Errorf("check ci of asset: %w", err)
 	}
 	if !visible {
-		return &api.FieldError{Field: "ci_id", Message: "CI not found", Status: http.StatusUnprocessableEntity}
+		return &api.FieldError{Field: fieldPrimaryCI, Message: "CI not found", Status: http.StatusUnprocessableEntity}
 	}
 	return nil
 }
+
+// fieldPrimaryCI is the API name of the primary CI (column asset.ci_id,
+// E-122).
+const fieldPrimaryCI = "primary_ci_id"
 
 // Messages of the reference checks: the same text whether the object does
 // not exist, belongs to another organization, is outside the caller's scope
@@ -218,7 +240,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			argPos++
 		}
 		if filter.Search != "" {
-			whereParts = append(whereParts, fmt.Sprintf("(name ILIKE $%d OR asset_tag ILIKE $%d)", argPos, argPos))
+			whereParts = append(whereParts, fmt.Sprintf("(name ILIKE $%d OR inventory_no ILIKE $%d)", argPos, argPos))
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
@@ -307,7 +329,9 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, e
 // organization (trigger asset_default_currency); the asset starts in the
 // initial state of its effective lifecycle model (physical_asset without
 // one, E-120). LocationID is written for internal callers only (the
-// inventory conversion); the API has no location on create.
+// inventory conversion); the API has no location on create. The free text
+// supplier is not written: the trigger asset_mirror_legacy_columns mirrors
+// supplier.name of supplier_id (E-41, WP-739).
 func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if a.CustomFields == nil {
@@ -329,19 +353,19 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 
 		query := `
 			INSERT INTO asset (
-				organization_id, client_id, ci_id, asset_tag, name, category, status,
-				purchase_date, purchase_cost, currency, warranty_end, supplier, invoice_number,
+				organization_id, client_id, ci_id, inventory_no, name, category, status,
+				purchase_date, purchase_price, currency, warranty_until, invoice_number,
 				serial_number, location, notes, custom_fields, rfid_tag, barcode,
 				manufacturer, model, cost_center, supplier_id, contract_id, owner_user_id, owner_team_id,
 				location_id, asset_type_id, lifecycle_state
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13,
-				$14, $15, $16, $17, $18, $19,
-				$20, $21, $22, $23, $24, $25, $26,
-				$27, $28::uuid,
+				$8, $9::numeric, $10, $11, $12,
+				$13, $14, $15, $16, $17, $18,
+				$19, $20, $21, $22, $23, $24, $25,
+				$26, $27::uuid,
 				(SELECT s.key FROM lifecycle_state s
-				 WHERE s.definition_id = COALESCE(lifecycle_model_effective($28::uuid, 'asset'), $29::uuid) AND s.is_initial
+				 WHERE s.definition_id = COALESCE(lifecycle_model_effective($27::uuid, 'asset'), $28::uuid) AND s.is_initial
 				 ORDER BY s.sort_order, s.key LIMIT 1)
 			)
 			RETURNING id::text
@@ -355,10 +379,9 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			a.Category,
 			a.Status,
 			nilIfEmpty(a.PurchaseDate),
-			a.PurchaseCost,
+			nilIfEmpty(a.PurchaseCost),
 			nilIfEmpty(a.Currency),
 			nilIfEmpty(a.WarrantyEnd),
-			nilIfEmpty(a.Supplier),
 			nilIfEmpty(a.InvoiceNumber),
 			nilIfEmpty(a.SerialNumber),
 			nilIfEmpty(a.Location),
@@ -377,7 +400,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			nilIfEmpty(a.AssetTypeID),
 			physicalAssetModelID,
 		).Scan(&a.ID); err != nil {
-			return fmt.Errorf("create asset: %w", assetDBError(err))
+			return fmt.Errorf("create asset: %w", assetFieldDBError(err, primaryCIConstraintFields))
 		}
 		// The row as stored: currency, lifecycle state and site come from
 		// the database.
@@ -442,22 +465,22 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 		}
 
 		addNonNullStringField("name", req.Name)
+		addNonNullStringField("inventory_no", req.AssetTag)
 		addNonNullStringField("category", req.Category)
 		addNonNullStringField("status", req.Status)
 		addStringField("manufacturer", req.Manufacturer)
 		addStringField("model", req.Model)
 		addStringField("purchase_date", req.PurchaseDate)
 		if req.PurchaseCost != nil {
-			setClauses = append(setClauses, fmt.Sprintf("purchase_cost = $%d", argPos))
-			args = append(args, *req.PurchaseCost)
+			setClauses = append(setClauses, fmt.Sprintf("purchase_price = $%d::numeric", argPos))
+			args = append(args, nilIfEmpty(*req.PurchaseCost))
 			argPos++
 		}
 		// An empty currency is stored as NULL; the trigger
 		// asset_default_currency sets the currency of the organization.
 		addStringField("currency", req.Currency)
-		addStringField("warranty_end", req.WarrantyEnd)
+		addStringField("warranty_until", req.WarrantyEnd)
 		addStringField("cost_center", req.CostCenter)
-		addStringField("supplier", req.Supplier)
 		addStringField("supplier_id", req.SupplierID)
 		addStringField("contract_id", req.ContractID)
 		addStringField("owner_user_id", req.OwnerUserID)
@@ -495,7 +518,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
 			}
-			return fmt.Errorf("update asset: %w", assetDBError(err))
+			fields := constraintFields
+			if req.CIID != nil {
+				fields = primaryCIConstraintFields
+			}
+			return fmt.Errorf("update asset: %w", assetFieldDBError(err, fields))
 		}
 		after, err := pii.Generic(asset)
 		if err != nil {

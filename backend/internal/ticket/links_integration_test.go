@@ -132,7 +132,7 @@ func TestTicketLinksInPostgreSQL(t *testing.T) {
 	// Parity: the memory repository answers alike (it checks no target).
 	memory := ticket.NewMemoryRepository()
 	memMux := chi.NewRouter()
-	ticket.NewHandler(memory).RegisterRoutes(memMux)
+	ticket.NewHandler(ticket.NewService(memory, nil)).RegisterRoutes(memMux)
 	w := e.request(t, memMux, http.MethodPost, "/api/v1/tickets", map[string]any{"title": "Objektbezug"})
 	var memTicket ticket.Ticket
 	if err := json.Unmarshal(w.Body.Bytes(), &memTicket); err != nil || w.Code != http.StatusCreated {

@@ -4,8 +4,10 @@ package search
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
@@ -27,8 +29,11 @@ type Document struct {
 	SiteID    string    `json:"site_id,omitempty"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// Fields are the summary columns by field key (SummaryFields, RBA-07,
-	// WP-266). The PostgreSQL index stores them as field rows; they are
-	// never serialized, so neither a hit nor a remote index carries them.
+	// WP-266), the attributes (attributes.<key>) and the identifiers of
+	// identifierKinds (WP-308). The PostgreSQL index stores the columns and
+	// the searchable attributes as field rows, the identifiers in
+	// search_identifier; they are never serialized, so neither a hit nor a
+	// remote index carries them.
 	Fields map[string]string `json:"-"`
 }
 
@@ -48,6 +53,26 @@ type Query struct {
 	// copy of HybridBackend.ReindexTenant, the AI retriever) and answers
 	// without field permissions.
 	Policy *permission.FieldPolicy
+	// NetworkReadable lets the identifiers network.ip and network.mac (the
+	// addresses and MACs of the interfaces of a CI) count for a hit: the
+	// principal holds ipam:read, the permission of GET
+	// /api/v1/cis/{id}/interfaces (SRC-02, WP-308). ApplyPrincipal sets it.
+	NetworkReadable bool
+}
+
+// ApplyPrincipal sets the field policy of the request context and the
+// network permission of the principal on the query (RBA-07, SRC-02); has
+// reports whether the principal holds a permission. The REST handler and
+// the GraphQL resolver share it. A policy that cannot be resolved is an
+// error (fail-closed).
+func ApplyPrincipal(ctx context.Context, q *Query, has func(perm string) bool) error {
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return err
+	}
+	q.Policy = policy
+	q.NetworkReadable = has != nil && has(string(identity.PermIPAMRead))
+	return nil
 }
 
 // SummaryFields are the field keys of the summary columns per entity type,
@@ -96,10 +121,83 @@ func readableFields(policy *permission.FieldPolicy, entityType, typeID string, r
 	return out
 }
 
+// identifierPermission returns the object kind and the field key of the
+// field permission of an identifier field (WP-308): the typed column of
+// the CI, the inventory number under the key of the asset policy
+// (permission.FieldKeyOf), also at the CI document.
+func identifierPermission(field string) (kind permission.ObjectKind, key string) {
+	column := ""
+	kind = permission.KindCI
+	switch field {
+	case IdentifierManagementIP:
+		column = "management_ip"
+	case IdentifierPrimaryMAC:
+		column = "primary_mac"
+	case IdentifierInventory, IdentifierAssetInventory:
+		kind, column = permission.KindAsset, "inventory_no"
+	}
+	key, _, _ = permission.FieldKeyOf(kind, column)
+	return kind, key
+}
+
+// readableIdentifiers returns the identifier fields of the entity type the
+// principal may read for an object of the type and scope: network.* with
+// Query.NetworkReadable, the inventory number of the linked asset at a CI
+// under the asset policy for that asset (assetRef: hitAssetRef), the
+// others under the policy of the type. A key without mapping is not
+// readable (fail-closed).
+func readableIdentifiers(q *Query, entityType, typeID string, ref *permission.ObjectRef, assetRef string) []string {
+	var out []string
+	for _, field := range identifierFields[entityType] {
+		if strings.HasPrefix(field, "network.") {
+			if q.NetworkReadable {
+				out = append(out, field)
+			}
+			continue
+		}
+		kind, key := identifierPermission(field)
+		if key == "" {
+			continue
+		}
+		readable := false
+		switch {
+		case field == IdentifierAssetInventory && !q.Policy.Restricted(permission.KindAsset):
+			readable = true
+		case field == IdentifierAssetInventory:
+			parts := strings.Split(assetRef, "|")
+			if len(parts) == 4 {
+				asset := permission.ObjectRef{ID: parts[0], ClientID: parts[2], SiteID: parts[3]}
+				readable = q.Policy.Level(kind, parts[1], key, asset).Readable()
+			}
+		default:
+			readable = q.Policy.Level(kind, typeID, key, *ref).Readable()
+		}
+		if readable {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
 type Hit struct {
 	Document
 	Score      float64  `json:"score"`
 	Highlights []string `json:"highlights,omitempty"`
+	// MatchedFields are the fields that matched the search text (SRC-02,
+	// WP-786), with field permissions only the readable ones (RBA-07,
+	// WP-266). Only the PostgreSQL index fills them, for a query with
+	// highlighting.
+	MatchedFields []MatchedField `json:"matched_fields,omitempty"`
+}
+
+// MatchedField is a field of a hit that matched the search text: the key of
+// the field row or identifier (title, summary, core.<column>,
+// attributes.<key>, asset.inventory_no, network.ip, network.mac) and its
+// highlight, the ts_headline fragment of a text field or the value of an
+// identifier in canonical form (a MAC with colons, an IP as host()).
+type MatchedField struct {
+	Field     string `json:"field"`
+	Highlight string `json:"highlight"`
 }
 
 type Result struct {
@@ -117,9 +215,19 @@ type Result struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
+// ReindexResult is the result of a rebuild of the index: the number of
+// documents written. It is the result of the job search.reindex.
 type ReindexResult struct {
 	Indexed int `json:"indexed"`
 }
+
+// ReindexJobKind is the job kind of the rebuild of the index of an
+// organization (SRC-02, WP-786).
+const ReindexJobKind = "search.reindex"
+
+// ReindexBatchSize is the number of entities of one transaction of
+// PGRepository.ReindexTenant (WP-786).
+const ReindexBatchSize = 1000
 
 type Backend interface {
 	Ping(ctx context.Context) error

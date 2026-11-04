@@ -118,7 +118,7 @@ test('drags a rack in the room plan and moves it by keyboard', async ({ page }) 
 test('undoes a delete within the undo window', async ({ page }) => {
   const asset = {
     id: '44444444-4444-4444-8444-000000000001',
-    asset_tag: 'INV-0001',
+    inventory_no: 'INV-0001',
     name: 'Laptop E2E',
     category: 'laptop',
     status: 'in_use',

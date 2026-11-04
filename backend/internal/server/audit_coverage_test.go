@@ -397,7 +397,7 @@ func (c *countingRouteAuditor) count(route string) int {
 // TestEveryWriteRouteAuditedOnPostgreSQL in the order they run, with their
 // bodies; the other write routes follow, the deletes last. Placeholders:
 // <client> a client, <user> the caller, <uuid> a new id, <citype> the
-// server type, <ci2> and <ci3> further CIs, <ci6> a CI of the type
+// server type, <ci2>, <ci3> and <ci7> further CIs, <ci6> a CI of the type
 // application (lifecycle model software), <asset2> a further asset,
 // <id:path> the id the create of path returned.
 var auditRouteCreates = []struct{ route, body string }{
@@ -415,7 +415,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/layouts", `{"key":"a5_layout","ci_type_id":"<id:/api/v1/ci-types>","layout":{"sections":[{"key":"main","title":{"de":"Haupt","en":"Main"},"visible_when":["a5_rule"],"fields":[{"name":"a5_attr","width":6}]}]}}`},
 	{"POST /api/v1/metamodel/drafts", `{"name":"a5 draft"}`},
 	{"POST /api/v1/cis", `{"ci_type_id":"<citype>","name":"a5-ci","client_id":"<client>"}`},
-	{"POST /api/v1/assets", `{"asset_tag":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
+	{"POST /api/v1/assets", `{"inventory_no":"a5-asset","name":"a5-asset","client_id":"<client>"}`},
 	{"POST /api/v1/contacts", `{"name":"a5 contact","email":"a5-contact@example.com"}`},
 	{"POST /api/v1/vrfs", `{"name":"a5-vrf"}`},
 	{"POST /api/v1/vlans", `{"vlan_id":305,"name":"a5-vlan"}`},
@@ -557,7 +557,11 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// transition receives it. <ci6> has the type application with the
 	// system model software.
 	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"received","reason":"a5 receive"}`},
-	"POST /api/v1/cis/{id}/lifecycle-transitions":    {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
+	// Asset↔CI links (WP-272): <ci7> becomes the primary CI of the asset,
+	// the DELETE unlinks it again.
+	"POST /api/v1/assets/{id}/cis":                {"", `{"ci_id":"<ci7>","primary":true}`},
+	"DELETE /api/v1/assets/{id}/cis/{ci_id}":      {"/api/v1/assets/<id:/api/v1/assets>/cis/<ci7>", ""},
+	"POST /api/v1/cis/{id}/lifecycle-transitions": {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
 
 	// Metamodel drafts (WP-260): an item for a new type; its removal names
 	// the item the sub-create returned, before the draft is discarded.
@@ -669,6 +673,8 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	// A CI whose type has a ci lifecycle model (software) for POST
 	// /cis/{id}/lifecycle-transitions (WP-724).
 	fixed["<ci6>"] = f.CI(t, f.OrgA, f.Client1, "a5-ci6")
+	// A CI for the asset links (WP-272).
+	fixed["<ci7>"] = f.CI(t, f.OrgA, f.Client1, "a5-ci7")
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET ci_type_id = $2 WHERE id = $1`, fixed["<ci6>"], citype2); err != nil {
 		t.Fatal(err)
 	}

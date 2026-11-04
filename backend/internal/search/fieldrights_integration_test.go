@@ -325,10 +325,11 @@ func TestSearchFieldRows(t *testing.T) {
 		t.Errorf("field rows after Delete: %v", got)
 	}
 
-	// A hit carries no fields.
+	// A hit carries no field rows (Document.Fields); matched_fields (WP-786)
+	// names fields, not their rows.
 	_, res := w.find(t, permission.UnrestrictedPolicy(frPerms), "alpha")
 	raw, _ := json.Marshal(res)
-	if len(res.Data) == 0 || strings.Contains(strings.ToLower(string(raw)), "fields") {
+	if len(res.Data) == 0 || strings.Contains(strings.ToLower(string(raw)), `"fields"`) {
 		t.Errorf("hit: %s", raw)
 	}
 }

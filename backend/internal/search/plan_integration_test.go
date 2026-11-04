@@ -132,7 +132,9 @@ func ftsScanProblem(nodes []searchPlanNode) string {
 				problems = append(problems, "the match is the "+key+" of "+fmt.Sprint(n["Node Type"]))
 			}
 		}
-		if n["Relation Name"] != "search_document" {
+		// The policy of the custom field rows (search_document_field,
+		// WP-308) looks their document up by id: no read of the index.
+		if n["Relation Name"] != "search_document" || n["Index Name"] == "search_document_pkey" {
 			continue
 		}
 		scans++

@@ -4,21 +4,31 @@ import type { TFunction } from 'i18next';
 import {
   useAllCITypes,
   useApplicableAttributeDefinitions,
+  useAttributeSets,
+  useCITypeAttributeSets,
   useCITypeTemplates,
   useCloneCIType,
+  useCreateAttributeSet,
   useCreateCIType,
   useDeleteAttributeDefinition,
+  useDeleteAttributeSet,
   useGlobalAttributeDefinitions,
   useReindexAttributeDefinition,
   useSensitiveCIFields,
+  useSetAttributeDefinitions,
   useSetCITypeActive,
   useTypeAttributeDefinitions,
+  useUpdateAttributeSet,
   useUpdateCIType,
 } from '../api/cmdbHooks';
 import { useHasPermission } from '../api/hooks';
+import { useModules } from '../hooks/useEntitlements';
 import {
   localizedText,
   type AttributeDefinition,
+  type AttributeSet,
+  type AttributeSetCreate,
+  type AttributeSetPatch,
   type CIType,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
@@ -42,6 +52,8 @@ import {
   type AttributeEditorTarget,
 } from '../components/metamodel/AttributeEditor';
 import { IndexStatus } from '../components/metamodel/IndexStatus';
+import { AttributeSetEditor } from '../components/metamodel/AttributeSetEditor';
+import { TypeSetAssignment } from '../components/metamodel/TypeSetAssignment';
 
 // Data types of MET-11 (the catalog test labels each of them).
 export { FIELD_TYPES } from '../components/metamodel/AttributeEditor';
@@ -53,7 +65,19 @@ type TypeLabel = (type: CIType) => string;
 const TYPE_DEACTIVATED = 'the CI type is deactivated';
 
 /** The origin of an attribute in the catalog of a type (UI-11). */
-type Origin = { kind: 'own' } | { kind: 'inherited'; from: CIType } | { kind: 'global' };
+type Origin =
+  | { kind: 'own' }
+  | { kind: 'inherited'; from: CIType }
+  | { kind: 'set'; set: AttributeSet }
+  | { kind: 'global' };
+
+/** setLabel is the name of an attribute set in the UI language. */
+function setLabel(set: AttributeSet, language: string): string {
+  return localizedText(set.display_name, language) || set.key;
+}
+
+/** A dialog of an attribute set: create, or edit an existing set. */
+type SetDialogState = { mode: 'create' } | { mode: 'edit'; set: AttributeSet };
 
 /** A dialog of the type: create, or edit an existing type. */
 type TypeDialogState = { mode: 'create' } | { mode: 'edit'; type: CIType };
@@ -131,6 +155,22 @@ export function CITypeAdminPage() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [typeDialog, setTypeDialog] = useState<TypeDialogState | null>(null);
   const [editor, setEditor] = useState<AttributeEditorTarget | null>(null);
+  const [openSetId, setOpenSetId] = useState<string | undefined>();
+
+  // Attribute sets (WP-250, WP-797) belong to the module metamodel (E-105):
+  // switched off, the set routes answer 404 and the page shows a note
+  // instead; tree and attribute catalog stay.
+  const modules = useModules();
+  const metamodelOn = !modules.isLoading && modules.isModuleEnabled('metamodel');
+  const setsQuery = useAttributeSets({ enabled: metamodelOn });
+  const setsOff =
+    (!modules.isLoading && !metamodelOn) ||
+    (setsQuery.error instanceof ApiError && setsQuery.error.status === 404);
+  const sets = setsOff ? [] : (setsQuery.data?.data ?? []);
+  const openSet = (id: string) => {
+    setOpenSetId(id);
+    document.getElementById('attribute-sets')?.scrollIntoView?.({ block: 'start' });
+  };
 
   // Every type, all pages of 200 (offset paging, WP-466): the tree needs the
   // whole chain; the search filters in the loaded tree.
@@ -245,6 +285,9 @@ export function CITypeAdminPage() {
                 setEditor({ mode: 'create', scope: 'type', ciTypeId: selected.id })
               }
               onEditAttribute={(definition) => setEditor({ mode: 'edit', definition })}
+              sets={sets}
+              setsEnabled={metamodelOn && !setsOff}
+              onOpenSet={openSet}
               t={t}
             />
           ) : (
@@ -259,6 +302,16 @@ export function CITypeAdminPage() {
             label={label}
             onAdd={() => setEditor({ mode: 'create', scope: 'global' })}
             onEdit={(definition) => setEditor({ mode: 'edit', definition })}
+            t={t}
+          />
+          <AttributeSetsSection
+            off={setsOff}
+            sets={sets}
+            loading={modules.isLoading || setsQuery.isLoading}
+            error={setsOff ? null : setsQuery.error}
+            onRetry={() => void setsQuery.refetch()}
+            openSetId={openSetId}
+            onOpenSet={setOpenSetId}
             t={t}
           />
         </div>
@@ -550,6 +603,11 @@ function AttributeRow({
               {t('citypes.origin.inherited', { type: originLabel(origin, i18n.language) })}
             </Badge>
           ) : null}
+          {origin?.kind === 'set' ? (
+            <Badge variant="info">
+              {t('citypes.origin.set', { name: setLabel(origin.set, i18n.language) })}
+            </Badge>
+          ) : null}
           {origin?.kind === 'global' ? (
             <Badge variant="info">{t('citypes.origin.global')}</Badge>
           ) : null}
@@ -588,6 +646,15 @@ function AttributeRow({
             onClick={onOpenOrigin}
           >
             {t('citypes.origin.open', { type: originLabel(origin, i18n.language) })}
+          </button>
+        ) : null}
+        {onOpenOrigin && origin?.kind === 'set' ? (
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline"
+            onClick={onOpenOrigin}
+          >
+            {t('citypes.origin.openSet', { name: setLabel(origin.set, i18n.language) })}
           </button>
         ) : null}
         {origin?.kind === 'global' ? (
@@ -634,6 +701,9 @@ function CITypeDetail({
   onEdit,
   onAddAttribute,
   onEditAttribute,
+  sets,
+  setsEnabled,
+  onOpenSet,
   t,
 }: {
   type: CIType;
@@ -643,6 +713,9 @@ function CITypeDetail({
   onEdit: () => void;
   onAddAttribute: () => void;
   onEditAttribute: (definition: AttributeDefinition) => void;
+  sets: AttributeSet[];
+  setsEnabled: boolean;
+  onOpenSet: (id: string) => void;
   t: TFunction;
 }) {
   const cloneType = useCloneCIType();
@@ -655,6 +728,19 @@ function CITypeDetail({
   // Of the ancestors only the inheritable definitions (WP-248).
   const ancestors = ancestorsOf(type.id, types);
   const ancestorDefinitions = useTypeAttributeDefinitions(ancestors.map((a) => a.id));
+  // The attributes of the assigned active sets in the order of the
+  // assignment (MET-16, WP-709): they follow the type chain.
+  const assignment = useCITypeAttributeSets(type.id, {
+    enabled: setsEnabled && !type.is_system,
+  });
+  const assignedSets = [...(assignment.data?.attribute_sets ?? [])]
+    .sort((a, b) => a.position - b.position)
+    .map((a) => sets.find((s) => s.id === a.attribute_set_id))
+    .filter((s): s is AttributeSet => !!s && s.is_active);
+  const setDefinitions = useSetAttributeDefinitions(
+    assignedSets.map((s) => s.id),
+    { enabled: setsEnabled },
+  );
   const sensitive = useSensitiveCIFields();
   const chain = [type.id, ...ancestors.map((a) => a.id)];
   const marks = sensitive.data ?? [];
@@ -675,9 +761,15 @@ function CITypeDetail({
       .sort(byOrder)
       .map((d) => ({ definition: d, from: ancestor })),
   );
+  const fromSets = assignedSets.flatMap((set, i) =>
+    [...(setDefinitions[i]?.data?.data ?? [])].sort(byOrder).map((d) => ({ definition: d, set })),
+  );
   const loading = applicable.isLoading || ancestorDefinitions.some((q) => q.isLoading);
-  const failed = applicable.error ?? ancestorDefinitions.find((q) => q.error)?.error;
-  const count = own.length + inherited.length + globals.length;
+  const failed =
+    applicable.error ??
+    ancestorDefinitions.find((q) => q.error)?.error ??
+    setDefinitions.find((q) => q.error)?.error;
+  const count = own.length + inherited.length + fromSets.length + globals.length;
 
   const remove = (d: AttributeDefinition) => {
     if (!window.confirm(t('citypes.attributes.deleteConfirm', { name: d.key }))) return;
@@ -752,6 +844,7 @@ function CITypeDetail({
           </ul>
         </div>
       ) : null}
+      {setsEnabled ? <TypeSetAssignment type={type} sets={sets} /> : null}
       <div className="mt-4 flex items-center justify-between">
         <h4 className="text-sm font-semibold">
           {t('citypes.attributes.title')} ({count})
@@ -770,6 +863,7 @@ function CITypeDetail({
           onRetry={() => {
             void applicable.refetch();
             ancestorDefinitions.forEach((q) => void q.refetch());
+            setDefinitions.forEach((q) => void q.refetch());
           }}
         />
       ) : null}
@@ -814,6 +908,16 @@ function CITypeDetail({
             origin={{ kind: 'inherited', from }}
             sensitive={isSensitive(marks, d, chain)}
             onOpenOrigin={() => onSelectType(from.id)}
+            t={t}
+          />
+        ))}
+        {fromSets.map(({ definition: d, set }) => (
+          <AttributeRow
+            key={`set:${set.id}:${d.id}`}
+            definition={d}
+            origin={{ kind: 'set', set }}
+            sensitive={isSensitive(marks, d, chain)}
+            onOpenOrigin={() => onOpenSet(set.id)}
             t={t}
           />
         ))}
@@ -949,5 +1053,302 @@ function GlobalAttributesSection({
         </ul>
       </Card>
     </div>
+  );
+}
+
+/**
+ * AttributeSetsSection lists the attribute sets (GET /attribute-sets, MET-16,
+ * WP-250): the organization's and the read-only system sets. A set is
+ * created, edited (key only on creation) and deleted over
+ * /attribute-sets/{id}; a 409 on deleting an assigned set shows at the set.
+ * Its attributes are maintained in the AttributeSetEditor. With the module
+ * metamodel switched off (E-105) a note takes the place of the section.
+ */
+function AttributeSetsSection({
+  off,
+  sets,
+  loading,
+  error,
+  onRetry,
+  openSetId,
+  onOpenSet,
+  t,
+}: {
+  off: boolean;
+  sets: AttributeSet[];
+  loading: boolean;
+  error: unknown;
+  onRetry: () => void;
+  openSetId?: string;
+  onOpenSet: (id: string | undefined) => void;
+  t: TFunction;
+}) {
+  const { i18n } = useTranslation();
+  const deleteSet = useDeleteAttributeSet();
+  const [dialog, setDialog] = useState<SetDialogState | null>(null);
+  const list = [...sets].sort(
+    (a, b) =>
+      Number(a.is_system) - Number(b.is_system) ||
+      setLabel(a, i18n.language).localeCompare(setLabel(b, i18n.language)),
+  );
+  const open = list.find((s) => s.id === openSetId);
+
+  if (off) {
+    return (
+      <div id="attribute-sets">
+        <Card title={t('citypes.sets.title')}>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.sets.moduleOff')}</p>
+        </Card>
+      </div>
+    );
+  }
+
+  const remove = (set: AttributeSet) => {
+    if (!window.confirm(t('citypes.sets.deleteConfirm', { name: setLabel(set, i18n.language) }))) {
+      return;
+    }
+    deleteSet.mutate(set.id, {
+      onSuccess: () => {
+        if (openSetId === set.id) onOpenSet(undefined);
+      },
+    });
+  };
+
+  return (
+    <div id="attribute-sets">
+      <Card
+        title={t('citypes.sets.title')}
+        actions={
+          <Button size="sm" variant="secondary" onClick={() => setDialog({ mode: 'create' })}>
+            {t('citypes.sets.create')}
+          </Button>
+        }
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.sets.hint')}</p>
+        {loading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
+        {error ? (
+          <ErrorState title={t('app.error')} retryLabel={t('common.retry')} onRetry={onRetry} />
+        ) : null}
+        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+          {list.map((set) => {
+            const name = setLabel(set, i18n.language);
+            const deleteError =
+              deleteSet.error && deleteSet.variables === set.id ? deleteSet.error : null;
+            return (
+              <li key={set.id} className="space-y-1 py-2 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{name}</span>
+                      {name !== set.key ? (
+                        <span className="text-xs text-muted">{set.key}</span>
+                      ) : null}
+                      {set.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
+                      {!set.is_active ? (
+                        <Badge variant="warning">{t('citypes.inactive')}</Badge>
+                      ) : null}
+                    </div>
+                    {set.description ? (
+                      <p className="text-xs text-gray-600 dark:text-gray-300">{set.description}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      aria-expanded={openSetId === set.id}
+                      aria-label={t('citypes.sets.attributesAction', { name })}
+                      onClick={() => onOpenSet(openSetId === set.id ? undefined : set.id)}
+                    >
+                      {t('citypes.sets.attributes')}
+                    </button>
+                    {!set.is_system ? (
+                      <>
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          aria-label={t('citypes.sets.editAction', { name })}
+                          onClick={() => setDialog({ mode: 'edit', set })}
+                        >
+                          {t('common.edit')}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs text-danger hover:underline"
+                          aria-label={t('citypes.sets.deleteAction', { name })}
+                          disabled={deleteSet.isPending}
+                          onClick={() => remove(set)}
+                        >
+                          {t('common.delete')}
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                {deleteError ? (
+                  <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                    {deleteError instanceof ApiError && deleteError.status === 409
+                      ? t('citypes.sets.deleteAssigned', { name })
+                      : t('citypes.sets.deleteFailed', {
+                          name,
+                          reason: describeFlagRefusal(deleteError, t),
+                        })}
+                  </p>
+                ) : null}
+              </li>
+            );
+          })}
+          {!loading && !error && list.length === 0 ? (
+            <li className="py-2 text-sm text-muted">{t('citypes.sets.empty')}</li>
+          ) : null}
+        </ul>
+        {open ? (
+          <AttributeSetEditor key={open.id} set={open} onClose={() => onOpenSet(undefined)} />
+        ) : null}
+      </Card>
+      {dialog ? (
+        <SetDialog
+          state={dialog}
+          onClose={() => setDialog(null)}
+          onSaved={(saved) => {
+            setDialog(null);
+            onOpenSet(saved.id);
+          }}
+          t={t}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * SetDialog creates (POST /attribute-sets) or edits (PATCH
+ * /attribute-sets/{id}) an attribute set: key (only on creation), labels
+ * DE/EN, description and active. Refusals show at the field they name.
+ */
+function SetDialog({
+  state,
+  onClose,
+  onSaved,
+  t,
+}: {
+  state: SetDialogState;
+  onClose: () => void;
+  onSaved: (set: AttributeSet) => void;
+  t: TFunction;
+}) {
+  const editing = state.mode === 'edit' ? state.set : undefined;
+  const [draft, setDraft] = useState({
+    key: editing?.key ?? '',
+    de: editing?.display_name?.de ?? '',
+    en: editing?.display_name?.en ?? '',
+    description: editing?.description ?? '',
+    active: editing?.is_active ?? true,
+  });
+  const createSet = useCreateAttributeSet();
+  const updateSet = useUpdateAttributeSet();
+  const mutation = editing ? updateSet : createSet;
+  const error = mutation.error;
+  const errors = fieldErrors(error);
+  const shownAtField = ['key', 'display_name', 'description', 'is_active'].filter(
+    (f) => errors[f],
+  ).length;
+  const set = (change: Partial<typeof draft>) => setDraft((d) => ({ ...d, ...change }));
+  const displayName = () => ({
+    ...(draft.de ? { de: draft.de } : {}),
+    ...(draft.en ? { en: draft.en } : {}),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!editing) {
+      const body: AttributeSetCreate = { key: draft.key.trim(), is_active: draft.active };
+      if (draft.de || draft.en) body.display_name = displayName();
+      if (draft.description) body.description = draft.description;
+      createSet.mutate(body, { onSuccess: onSaved });
+      return;
+    }
+    const patch: AttributeSetPatch = {};
+    if (
+      draft.de !== (editing.display_name?.de ?? '') ||
+      draft.en !== (editing.display_name?.en ?? '')
+    ) {
+      patch.display_name = displayName();
+    }
+    if (draft.description !== (editing.description ?? '')) patch.description = draft.description;
+    if (draft.active !== editing.is_active) patch.is_active = draft.active;
+    if (Object.keys(patch).length === 0) {
+      onClose();
+      return;
+    }
+    updateSet.mutate({ id: editing.id, patch }, { onSuccess: onSaved });
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}
+      title={
+        editing ? t('citypes.sets.editTitle', { name: editing.key }) : t('citypes.sets.create')
+      }
+    >
+      <form className="space-y-3" onSubmit={submit}>
+        <Input
+          label={t('citypes.sets.key')}
+          value={draft.key}
+          required={!editing}
+          disabled={!!editing}
+          readOnly={!!editing}
+          onChange={(e) => set({ key: e.target.value })}
+          error={errors.key}
+        />
+        {editing ? <p className="text-xs text-muted">{t('citypes.sets.keyImmutable')}</p> : null}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input
+            label={t('citypes.labelDe')}
+            value={draft.de}
+            onChange={(e) => set({ de: e.target.value })}
+            error={errors.display_name}
+          />
+          <Input
+            label={t('citypes.labelEn')}
+            value={draft.en}
+            onChange={(e) => set({ en: e.target.value })}
+          />
+        </div>
+        <Input
+          label={t('citypes.description')}
+          value={draft.description}
+          onChange={(e) => set({ description: e.target.value })}
+          error={errors.description}
+        />
+        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+          <input
+            type="checkbox"
+            checked={draft.active}
+            onChange={(e) => set({ active: e.target.checked })}
+          />
+          {t('citypes.sets.active')}
+        </label>
+        {errors.is_active ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{errors.is_active}</p>
+        ) : null}
+        {error ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {shownAtField > 0
+              ? t('citypes.typeErrors.checkFields')
+              : t('citypes.sets.notSaved', { reason: describeFlagRefusal(error, t) })}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" disabled={mutation.isPending}>
+            {editing ? t('common.save') : t('common.create')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }

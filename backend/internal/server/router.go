@@ -458,6 +458,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// caller, a queued snapshot with that of its creator (WP-727).
 	historyHandler := history.NewHandler(repos.History).WithCIs(HistoryCIs(&repos)).
 		WithCreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver))
+	// The rebuild of the search index is the job search.reindex (WP-786),
+	// wired in registerJobKinds; without the job model it runs in the
+	// request.
+	searchHandler := search.NewHandler(repos.Search, repos.Permission)
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -529,6 +533,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running import is cancelled with import:run like its
 			// start (WP-301, WP-514).
 			WithKind(importer.JobKind, identity.PermImportRun, nil).
+			// The rebuild of the search index is read with search:write
+			// like its start (WP-786).
+			WithKind(search.ReindexJobKind, identity.PermSearchWrite, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
 				if opts.CIService == nil {
@@ -568,7 +575,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
-			documentScanner)
+			documentScanner, searchHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -655,6 +662,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// Tickets and comments are created through one service (WP-766).
+	// SLAs are ticketing_standard (E-39, WP-769): the hooks apply, choose
+	// again and reset them only with the feature.
+	slaHooks := sla.TicketHooks{Repo: repos.SLA}
+	if opts.Entitlements != nil {
+		slaHooks.Features = opts.Entitlements
+	}
+	tickets := ticket.NewService(repos.Ticket, slaHooks)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -674,7 +689,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
-			WithCIs(ciLookup{repo: repos.CI}),
+			WithCIs(ciLookup{repo: repos.CI}).
+			// Links write ci.asset_id through the CI service (WP-272).
+			WithCILinks(opts.CIService),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
@@ -689,10 +706,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		// The attachments of a ticket are its linked documents (WP-765).
-		ticket.NewHandler(repos.Ticket, sla.TicketHooks{Repo: repos.SLA}).WithDocuments(repos.Document),
+		ticket.NewHandler(tickets).WithDocuments(repos.Document),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
-		search.NewHandler(repos.Search, repos.Permission),
+		searchHandler,
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflowRuns),

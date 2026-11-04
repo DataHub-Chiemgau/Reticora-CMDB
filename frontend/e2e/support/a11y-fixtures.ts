@@ -43,6 +43,7 @@ export const A11Y_MARKERS = {
   savedView: 'a11y-saved-view',
   ciType: 'a11y-org-type',
   ciTypeChild: 'a11y-child-type',
+  attributeSet: 'a11y-attribute-set',
   consumable: 'a11y-toner',
   order: 'a11y-order-title',
   maintenance: 'a11y-maintenance-window',
@@ -171,12 +172,11 @@ const asset = {
   id: ASSET,
   organization_id: ORG,
   client_id: CLIENT,
-  ci_id: CI_ID,
-  asset_tag: 'AT-0001',
+  primary_ci_id: CI_ID,
+  inventory_no: 'AT-0001',
   name: M.asset,
   category: 'hardware',
   status: 'assigned',
-  supplier: 'Bechtle',
   location: 'Hamburg',
   serial_number: 'SN-A-1',
   custom_fields: {},
@@ -349,10 +349,55 @@ const ATTRIBUTES_BY_TYPE: Record<string, unknown[]> = {
   ],
 };
 
-/** GET /attribute-definitions by its filters (applicable_to, ci_type_id, scope). */
+// An attribute set with two attributes, assigned to the child (WP-250,
+// WP-797): the set section, its editor and the assignment of the type.
+const ATTRIBUTE_SET = {
+  id: '5e7c0000-0000-4000-8000-0000000000b1',
+  organization_id: ORG,
+  key: 'a11y_set',
+  display_name: { de: M.attributeSet, en: M.attributeSet },
+  description: 'a11y set',
+  is_system: false,
+  is_active: true,
+  created_at: AT,
+  updated_at: AT,
+};
+
+const SET_ATTRIBUTES = [
+  attributeDefinition('ad000000-0000-4000-8000-0000000000b1', 'a11y_set_vlan', {
+    ci_type_id: undefined,
+    scope: 'set',
+    attribute_set_id: ATTRIBUTE_SET.id,
+    order: 10,
+  }),
+  attributeDefinition('ad000000-0000-4000-8000-0000000000b2', 'a11y_set_speed', {
+    ci_type_id: undefined,
+    scope: 'set',
+    attribute_set_id: ATTRIBUTE_SET.id,
+    order: 20,
+    searchable: true,
+    index_status: indexStatus('succeeded'),
+  }),
+];
+
+/** GET /ci-types/{id}/attribute-sets: the child carries the set. */
+function typeAttributeSets(_request: Request, url: URL): Reply {
+  const id = url.pathname.split('/').at(-2) ?? '';
+  return {
+    body: {
+      ci_type_id: id,
+      attribute_sets:
+        id === CHILD_TYPE.id ? [{ attribute_set_id: ATTRIBUTE_SET.id, position: 1 }] : [],
+    },
+  };
+}
+
+/** GET /attribute-definitions by its filters (applicable_to, ci_type_id, attribute_set_id, scope). */
 function attributeDefinitions(_request: Request, url: URL): Reply {
   const applicable = url.searchParams.get('applicable_to');
   const typeId = url.searchParams.get('ci_type_id');
+  const setId = url.searchParams.get('attribute_set_id');
+  if (setId) return { body: { data: setId === ATTRIBUTE_SET.id ? SET_ATTRIBUTES : [] } };
   const data = applicable
     ? [...(ATTRIBUTES_BY_TYPE[applicable] ?? []), GLOBAL_ATTRIBUTE]
     : typeId
@@ -1091,6 +1136,9 @@ export const A11Y_HANDLERS: Handler[] = [
     ),
   },
   { path: '/attribute-definitions', reply: attributeDefinitions },
+  // The attribute sets of WP-797 and the assignment of the child.
+  { path: '/attribute-sets', reply: fixed({ data: [ATTRIBUTE_SET] }) },
+  { path: /^\/ci-types\/[^/]+\/attribute-sets$/, reply: typeAttributeSets },
   // The sensitive fields of WP-726: one attribute of the child is marked.
   {
     path: '/field-permissions/sensitive-fields',

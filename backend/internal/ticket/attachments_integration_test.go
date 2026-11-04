@@ -39,7 +39,7 @@ func newAttachEnv(t *testing.T) *attachEnv {
 	f := scopetest.Seed(t, "38")
 	docs := document.NewPGRepository(f.App)
 	mux := chi.NewRouter()
-	ticket.NewHandler(ticket.NewPGRepository(f.App)).WithDocuments(docs).RegisterRoutes(mux)
+	ticket.NewHandler(ticket.NewService(ticket.NewPGRepository(f.App), nil)).WithDocuments(docs).RegisterRoutes(mux)
 	document.NewHandler(docs, nil).RegisterRoutes(mux)
 	return &attachEnv{f: f, mux: mux, user: f.AppUser(t, f.OrgA, "attach-reporter")}
 }
@@ -189,7 +189,7 @@ func TestTicketAttachments(t *testing.T) {
 
 	// Without the document repository the route answers 503.
 	bare := chi.NewRouter()
-	ticket.NewHandler(ticket.NewPGRepository(f.App)).RegisterRoutes(bare)
+	ticket.NewHandler(ticket.NewService(ticket.NewPGRepository(f.App), nil)).RegisterRoutes(bare)
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req.WithContext(tenant.WithTenant(org, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: e.user})))

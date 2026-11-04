@@ -49,11 +49,13 @@ var assetStructural = map[string]bool{
 	"id": true, "organization_id": true, "client_id": true, "name": true, "created_at": true, "updated_at": true,
 }
 
-// assetFieldAliases are the AST-01 names of asset columns (WP-738) whose
-// field key is still that of the deprecated name until WP-739 renames the
-// keys: a grant on core.asset_tag also covers inventory_no.
+// assetFieldAliases are the AST-01 names of asset fields (WP-738, WP-739)
+// whose field key keeps the column name before AST-01, so existing grants
+// and sensitivity rows keep applying: a grant on core.asset_tag also covers
+// inventory_no, one on core.ci_id the primary CI primary_ci_id (E-122).
 var assetFieldAliases = map[string]string{
 	"inventory_no": "asset_tag", "purchase_price": "purchase_cost", "warranty_until": "warranty_end",
+	"primary_ci_id": "ci_id",
 }
 
 // assetCustomFields is the member of the asset DTO with the custom fields;

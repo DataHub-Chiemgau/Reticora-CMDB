@@ -3091,7 +3091,7 @@ paths:
             Forbidden: the route permission (ProblemDetail) or the field
             permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden,
             FieldForbiddenProblem: `fields` names the DTO paths): a status or
-            category filter, a search (asset_tag) or a sort on asset_tag,
+            category filter, a search (inventory_no) or a sort on inventory_no,
             category or status the caller cannot read in every scope.
           content:
             application/problem+json:
@@ -3140,14 +3140,14 @@ paths:
                   - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '409':
           description: >-
-            The inventory number (asset_tag), the barcode or the rfid_tag is
+            The inventory number (inventory_no), the barcode or the rfid_tag is
             already taken in the organization; `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
-            ci_id or client_id is no UUID, or ci_id names a CI that is unknown,
+            primary_ci_id or client_id is no UUID, or primary_ci_id names a CI that is unknown,
             of another organization or outside the caller's scope (all alike,
             TEN-04), or client_id names no client of the organization; or
             supplier_id, contract_id, owner_user_id or owner_team_id is not
@@ -3224,7 +3224,7 @@ paths:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
-            ci_id is no UUID or names a CI that is unknown, of another
+            primary_ci_id is no UUID or names a CI that is unknown, of another
             organization or outside the caller's scope (all alike, TEN-04); a
             reference (supplier_id, contract_id, owner_user_id, owner_team_id)
             is not usable for the asset (all alike); or the body sends the
@@ -12633,9 +12633,25 @@ paths:
       operationId: reindexSearch
       tags: [Search]
       summary: Rebuild the tenant search index
+      description: >-
+        Rebuilds the search index of the whole organization, also when a
+        client-scoped administrator starts it (E-08), as the job
+        `search.reindex` (SRC-02, WP-786): in batches of 1,000 entities per
+        entity type, each in a transaction of its own, so the index stays
+        searchable during the rebuild; a last step removes the documents of
+        entities that are gone. The answer names the job; its state and, on
+        success, the number of documents written (`result.indexed`) are read
+        with GET /api/v1/jobs/{id} (search:write). A failed batch fails the
+        job; the batches written before stay. Without the job model
+        (profile without a database) the rebuild runs in the request and
+        `indexed` carries the count.
       responses:
         '202':
           description: Reindex accepted
+          headers:
+            Location:
+              description: The job of the rebuild (/api/v1/jobs/{id}); absent without the job model.
+              schema: { type: string }
           content:
             application/json:
               schema:
@@ -18536,20 +18552,22 @@ paths:
   /api/v1/assets/{id}/cis:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listAssetCIs
+      x-status: planned
       tags: [Assets]
       summary: List the CIs linked to an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Planned (E-38). The CIs of an asset are listed by GET
+        /api/v1/cis?filter[asset_id]= (WP-272).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with WP-272.
+          description: List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with a later WP.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -18562,25 +18580,74 @@ paths:
       operationId: linkAssetCI
       tags: [Assets]
       summary: Link a CI to an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Links the CI ci_id to the asset (AST-04, AST-03, WP-272): ci.asset_id
+        is the link, an asset has n CIs. A CI of another asset moves to this
+        one, as with PATCH /api/v1/cis/{id}; when it was the primary CI of
+        the other asset, that asset's primary_ci_id is cleared. primary true
+        makes the CI the primary CI (primary_ci_id) of the asset, false
+        clears the primary CI when it is this CI, absent leaves it; the
+        previous primary CI stays linked. The link is a manual change of the
+        CI in the same transaction: its version rises, the history records
+        asset_id, the event ci.changed and the audit entries ci.updated and
+        asset.linked (changes ci_id, primary) are written. An asset without
+        location takes the location of the CI (E-81). Requires ci:write
+        (route) and asset:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkAssetCIRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-272.
+          description: The CI is linked to the asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetCILink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The caller lacks ci:write or asset:write, the field permissions do
+            not let it edit asset_id of the CI (FieldForbiddenProblem), or it
+            may not change an asset whose primary CI the link would set or
+            clear (a client-scoped caller and an org-wide asset, TEN-05);
+            nothing is changed.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The asset or the CI is unknown, of another organization or outside
+            the caller's scope (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            The CI and the asset belong to different clients (both set; a
+            missing client on either side is compatible), or the asset has no
+            location and the caller may not let it take the CI's location;
+            `field` is asset_id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          description: The CI domain is not available to the asset API.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assets/{id}/cis/{ci_id}:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: ci_id
@@ -18588,21 +18655,48 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
         description: CI identifier.
     delete:
       operationId: unlinkAssetCI
       tags: [Assets]
       summary: Unlink a CI from an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Unlinks the CI from the asset (AST-04, WP-272) as a manual change of
+        the CI (version, history asset_id, ci.changed, audit ci.updated and
+        asset.unlinked with changes ci_id, primary). When the CI is the
+        primary CI of the asset, primary_ci_id is cleared with it. Requires
+        ci:write (route) and asset:write.
       responses:
         '204':
-          description: Deleted.
+          description: The CI is unlinked.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The caller lacks ci:write or asset:write, the field permissions do
+            not let it edit asset_id of the CI (FieldForbiddenProblem), or the
+            CI is the primary CI of an asset the caller may not change (a
+            client-scoped caller and an org-wide asset, TEN-05); nothing is
+            changed.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The asset or the CI is unknown, of another organization or outside
+            the caller's scope, or the CI is not linked to the asset.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          description: The CI domain is not available to the asset API.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assets/{id}/label:
     x-phase: P2
@@ -21316,7 +21410,7 @@ components:
             the named categories win over `muted_categories`; the response
             lists every category.
           propertyNames:
-            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, webhook]
+            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, ticket, webhook]
           additionalProperties:
             type: string
             enum: [subscribed, muted]
@@ -21327,12 +21421,12 @@ components:
             Categories whose e-mails are bundled into one digest per window
             (NTF-04): category → hourly (ends at the full hour) or daily (ends
             at midnight in time_zone). Allowed are the categories with a
-            non-critical event (entitlement, export, job, review, webhook);
+            non-critical event (entitlement, export, job, review, ticket, webhook);
             critical notifications, the in-app center and webhooks are never
             bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every
             e-mail on its own.
           propertyNames:
-            enum: [entitlement, export, job, review, webhook]
+            enum: [entitlement, export, job, review, ticket, webhook]
           additionalProperties:
             type: string
             enum: [hourly, daily]
@@ -24053,7 +24147,9 @@ components:
         asset_tag:
           type: string
           deprecated: true
-          description: Deprecated name of inventory_no (API-01, E-120 (c)).
+          x-deprecated-at: '2026-11-04'
+          x-sunset: '2028-06-30'
+          description: Deprecated name of inventory_no (API-01, E-120 (c)); sunset 2028-06-30.
         name: { type: string }
         serial_number: { type: string }
         location_id: { type: string }
@@ -24070,11 +24166,17 @@ components:
           type: string
           format: date
           deprecated: true
-          description: Deprecated name of warranty_until (API-01, E-120 (c)).
+          x-deprecated-at: '2026-11-04'
+          x-sunset: '2028-06-30'
+          description: Deprecated name of warranty_until (API-01, E-120 (c)); sunset 2028-06-30.
         supplier:
           type: string
           deprecated: true
-          description: Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)).
+          x-deprecated-at: '2026-11-04'
+          x-sunset: '2028-06-30'
+          description: >-
+            Deprecated name of the supplier record supplier_id (E-41, API-01,
+            E-120 (c)); sunset 2028-06-30.
         invoice_number: { type: string }
         manufacturer: { type: string, description: Manufacturer of the asset (AST-01, WP-271). }
         model: { type: string, description: Model of the asset (AST-01, WP-271). }
@@ -25721,6 +25823,10 @@ components:
         (client_id when set); the others are left out when the field
         permissions do not let the caller read them (object kind asset,
         field keys core.<field>, custom fields attributes.<key>, RBA-07).
+        The fields carry the names of AST-01 (WP-739): inventory_no,
+        purchase_price, warranty_until and primary_ci_id; their field keys
+        stay core.asset_tag, core.purchase_cost, core.warranty_end and
+        core.ci_id.
       required: [id, organization_id, name, custom_fields, created_at, updated_at]
       properties:
         id:
@@ -25729,11 +25835,13 @@ components:
           type: string
         client_id:
           type: string
-        ci_id:
+        primary_ci_id:
           type: string
-        asset_tag:
+          format: uuid
+          description: Primary CI of the asset (AST-01, AST-04; column asset.ci_id, E-122).
+        inventory_no:
           type: string
-          description: Inventory number, unique per organization.
+          description: Inventory number, unique per organization (AST-01).
         name:
           type: string
         category:
@@ -25741,7 +25849,11 @@ components:
         status:
           type: string
           deprecated: true
-          description: Legacy status; the state of the asset is lifecycle_state (E-120).
+          x-deprecated-at: '2026-11-04'
+          x-sunset: '2028-06-30'
+          description: >-
+            Legacy status, derived from lifecycle_state (E-120); the state of
+            the asset is lifecycle_state. Sunset 2028-06-30 (API-01).
         manufacturer:
           type: string
         model:
@@ -25749,20 +25861,20 @@ components:
         purchase_date:
           type: string
           format: date
-        purchase_cost:
-          type: number
+        purchase_price:
+          type: string
+          pattern: '^[0-9]{1,12}\.[0-9]{2}$'
+          description: Purchase price as a decimal string with two decimals (NUMERIC(14,2), AST-01).
+          example: '1234.50'
         currency:
           type: string
           description: ISO 4217 code; the currency of the organization unless set.
-        warranty_end:
+        warranty_until:
           type: string
           format: date
+          description: End of the warranty (AST-01).
         cost_center:
           type: string
-        supplier:
-          type: string
-          deprecated: true
-          description: Free text of the supplier; the supplier record is supplier_id (E-41).
         supplier_id:
           type: string
           format: uuid
@@ -25788,7 +25900,11 @@ components:
         location:
           type: string
           deprecated: true
-          description: Free text of the location; the location is location_id (E-120).
+          x-deprecated-at: '2026-11-04'
+          x-sunset: '2028-06-30'
+          description: >-
+            Free text of the location; the location is location_id (E-120).
+            Sunset 2028-06-30 (API-01).
         location_id:
           type: string
           readOnly: true
@@ -25815,14 +25931,24 @@ components:
 
     CreateAssetRequest:
       type: object
-      required: [asset_tag, name]
+      description: >-
+        Names of AST-01 (WP-739); the names asset_tag, purchase_cost,
+        warranty_end, supplier and ci_id are unknown members (400).
+      required: [inventory_no, name]
       properties:
         client_id:
           type: string
-        ci_id:
+        primary_ci_id:
           type: string
-        asset_tag:
+          format: uuid
+          description: >-
+            Primary CI; linked in the same transaction as a manual change of
+            the CI (version, history, ci.changed; requires ci:write). An
+            unknown CI or one outside the caller's scope, or a CI of another
+            client than the asset, is 422 on primary_ci_id.
+        inventory_no:
           type: string
+          description: Inventory number, unique per organization (409 on inventory_no otherwise).
         name:
           type: string
         category:
@@ -25837,19 +25963,20 @@ components:
         purchase_date:
           type: string
           format: date
-        purchase_cost:
-          type: number
+        purchase_price:
+          type: string
+          pattern: '^[0-9]{1,12}(\.[0-9]{1,2})?$'
+          description: >-
+            Purchase price as a decimal string, up to 12 integer digits and 2
+            decimals (400 on purchase_price otherwise); no float rounding.
         currency:
           type: string
           description: ISO 4217 code (400 on currency otherwise); missing or empty is the currency of the organization.
-        warranty_end:
+        warranty_until:
           type: string
           format: date
         cost_center:
           type: string
-        supplier:
-          type: string
-          deprecated: true
         supplier_id:
           type: string
           format: uuid
@@ -25886,10 +26013,16 @@ components:
       description: >-
         location_id and lifecycle_state are read-only: sending either is 422
         naming the canonical write path. An empty currency is the currency
-        of the organization.
+        of the organization, an empty purchase_price removes the price.
+        Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end,
+        supplier and ci_id are unknown members (400).
       properties:
         name:
           type: string
+        inventory_no:
+          type: string
+          minLength: 1
+          description: Inventory number, unique per organization (409 on inventory_no otherwise; empty is 400).
         category:
           type: string
         status:
@@ -25902,18 +26035,19 @@ components:
         purchase_date:
           type: string
           format: date
-        purchase_cost:
-          type: number
+        purchase_price:
+          type: string
+          pattern: '^([0-9]{1,12}(\.[0-9]{1,2})?)?$'
+          description: >-
+            Purchase price as a decimal string, up to 12 integer digits and 2
+            decimals (400 on purchase_price otherwise); no float rounding.
         currency:
           type: string
-        warranty_end:
+        warranty_until:
           type: string
           format: date
         cost_center:
           type: string
-        supplier:
-          type: string
-          deprecated: true
         supplier_id:
           type: string
           format: uuid
@@ -25939,11 +26073,49 @@ components:
           deprecated: true
         notes:
           type: string
-        ci_id:
+        primary_ci_id:
           type: string
+          description: >-
+            Primary CI; linked in the same transaction as a manual change of
+            the CI (version, history, ci.changed; requires ci:write); the
+            previous primary CI stays linked. An empty string clears the
+            primary CI, the CI stays linked (DELETE
+            /api/v1/assets/{id}/cis/{ci_id} unlinks it). An unknown CI or one
+            outside the caller's scope, or a CI of another client than the
+            asset, is 422 on primary_ci_id.
         custom_fields:
           type: object
           additionalProperties: true
+
+    LinkAssetCIRequest:
+      type: object
+      description: The CI to link to the asset (WP-272).
+      required: [ci_id]
+      additionalProperties: false
+      properties:
+        ci_id:
+          type: string
+          format: uuid
+        primary:
+          type: boolean
+          description: >-
+            true makes the CI the primary CI of the asset (primary_ci_id),
+            false clears the primary CI when it is this CI; absent leaves the
+            primary CI unchanged.
+
+    AssetCILink:
+      type: object
+      description: A CI linked to an asset (ci.asset_id) and whether it is the asset's primary CI.
+      required: [asset_id, ci_id, primary]
+      properties:
+        asset_id:
+          type: string
+          format: uuid
+        ci_id:
+          type: string
+          format: uuid
+        primary:
+          type: boolean
 
     AssetListResponse:
       allOf:
@@ -26550,7 +26722,7 @@ components:
 
     TicketComment:
       type: object
-      required: [id, organization_id, ticket_id, author_id, content, is_internal, created_at, updated_at]
+      required: [id, organization_id, ticket_id, author_id, author_type, content, is_internal, created_at, updated_at]
       properties:
         id:
           type: string
@@ -26559,7 +26731,12 @@ components:
         ticket_id:
           type: string
         author_id:
+          type: [string, 'null']
+          description: The user who wrote the comment; null exactly for a system comment (author_type system, WP-766).
+        author_type:
           type: string
+          enum: [user, system]
+          description: user for a comment of a user, system for a comment the system writes (internal, without author_id).
         content:
           type: string
         is_internal:
@@ -31600,6 +31777,14 @@ components:
         highlights:
           type: array
           items: { type: string }
+        matched_fields:
+          type: array
+          items: { $ref: '#/components/schemas/SearchMatchedField' }
+          description: >-
+            The fields of the hit that matched the search text (SRC-02,
+            WP-786); under field permissions only the fields the caller may
+            read (RBA-07). Absent without a match per field, for a contact
+            hit and with the OpenSearch backend.
         metadata:
           type: object
           additionalProperties: { type: string }
@@ -31626,11 +31811,37 @@ components:
         offset: { type: integer }
         has_more: { type: boolean }
 
+    SearchMatchedField:
+      type: object
+      required: [field, highlight]
+      properties:
+        field:
+          type: string
+          description: >-
+            Key of the matched field: title, summary, core.<column>,
+            attributes.<key>, asset.inventory_no, network.ip or network.mac.
+        highlight:
+          type: string
+          description: >-
+            For a text field its fragment with the matched words in
+            <mark>…</mark>; for an identifier its value in canonical form (a
+            MAC with colons, an IP address as host(), an inventory number in
+            lower case).
+
     ReindexResponse:
       type: object
       required: [indexed]
       properties:
-        indexed: { type: integer }
+        indexed:
+          type: integer
+          deprecated: true
+          description: >-
+            Deprecated (API-01, sunset no earlier than 12 months after
+            WP-786): 0 when the rebuild runs as a job, whose result carries
+            the count; the count only without the job model.
+        job_id: { type: string }
+        status: { type: string }
+        kind: { type: string, description: search.reindex }
 
     AIConversation:
       type: object

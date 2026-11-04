@@ -1476,7 +1476,9 @@
       "inherited": "inherited from {{type}}",
       "global": "global",
       "open": "Go to origin: {{type}}",
-      "openGlobal": "Go to global attributes"
+      "openGlobal": "Go to global attributes",
+      "set": "Set {{name}}",
+      "openSet": "Go to set: {{name}}"
     },
     "globals": {
       "title": "Global attributes",
@@ -1512,6 +1514,60 @@
       "reindex": "Rebuild index",
       "reindexAction": "Rebuild index: {{name}}",
       "reindexFailed": "Index not rebuilt. {{reason}}"
+    },
+    "sets": {
+      "title": "Attribute sets",
+      "hint": "An attribute set bundles reusable attributes. Assigned active sets add to the attributes of a type in the order of the assignment. System sets are read-only.",
+      "create": "New set",
+      "moduleOff": "Attribute sets belong to the module “Metamodel”, which is switched off. Types and attributes remain editable.",
+      "empty": "No attribute sets defined.",
+      "attributes": "Attributes",
+      "attributesAction": "Edit the attributes of the set: {{name}}",
+      "editAction": "Edit set: {{name}}",
+      "deleteAction": "Delete set: {{name}}",
+      "deleteConfirm": "Delete set “{{name}}” with its attributes?",
+      "deleteAssigned": "Set “{{name}}” not deleted: it is assigned to a CI type. Remove the assignment first.",
+      "deleteFailed": "Set “{{name}}” not deleted. {{reason}}",
+      "editTitle": "Edit set “{{name}}”",
+      "key": "Key",
+      "keyImmutable": "The key cannot be changed after creation.",
+      "active": "Active (can be assigned to types)",
+      "notSaved": "Set not saved. {{reason}}",
+      "editorTitle": "Set “{{name}}”: attributes",
+      "addAttribute": "Add attribute to the set",
+      "closeEditor": "Close",
+      "systemReadOnly": "System set: attributes and order are read-only.",
+      "orderHint": "Change the order by dragging, with the keyboard (Space, arrow keys, Space) or with the arrow buttons; it is saved at once.",
+      "reorderFailed": "Order not saved. {{reason}}",
+      "noAttributes": "The set has no attributes yet.",
+      "attributesLabel": "Attributes of the set {{name}}",
+      "sortable": {
+        "handle": "Move: {{name}}",
+        "up": "Move up: {{name}}",
+        "down": "Move down: {{name}}",
+        "instructions": "Press Space to pick up. Move with the arrow keys, press Space to drop, Escape to cancel.",
+        "pickedUp": "Picked up {{name}}, position {{position}} of {{total}}.",
+        "movedOver": "{{name}} moved to position {{position}} of {{total}}.",
+        "outside": "{{name}} is outside the list.",
+        "dropped": "{{name}} dropped at position {{position}} of {{total}}.",
+        "droppedOutside": "{{name}} dropped, the order stays.",
+        "cancelled": "Move cancelled. {{name}} stays at position {{position}} of {{total}}."
+      },
+      "assignment": {
+        "title": "Attribute sets of this type",
+        "hint": "The attributes of active sets follow the attributes of the type chain in this order. Every change is saved at once.",
+        "systemType": "System types get no attribute sets. Clone the type to assign sets.",
+        "loadFailed": "Assignment not loaded. {{reason}}",
+        "notSaved": "Assignment not saved. {{reason}}",
+        "empty": "No sets assigned.",
+        "listLabel": "Attribute sets of {{type}}",
+        "remove": "Remove",
+        "removeAction": "Remove set: {{name}}",
+        "entryError": "Not assigned: {{detail}}",
+        "choose": "Active set",
+        "choosePlaceholder": "Choose a set",
+        "add": "Assign"
+      }
     }
   },
   "inventory": {

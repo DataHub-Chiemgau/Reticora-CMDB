@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000232_relationship_metadata_schema
+Stand: Migration 000235_asset_ci_link
 
 ## Prüfung
 
@@ -446,6 +446,21 @@ leakproof Operator, die Liste oben würde wachsen. Die Suche filtert mit
 eingeschränkten Feldrechten über `search_document.search_vector` vor und
 liest die Feldzeilen ihrer Kandidaten über den Primärschlüssel
 `(document_id, field)`.
+
+Inventarnummer, IP und MAC (SRC-02, WP-308, Migration 000233) liegen in
+Normalform in `search_identifier` (MAC zwölf Hex-Ziffern ohne Trenner, IP
+als `host()`-Text und Hostadresse in `addr`, Inventarnummer
+`lower(btrim())`). Gleichheit und Bereiche auf `norm` (`text_pattern_ops`:
+`=`, `~>=~`, `~<~`) und `addr` (`inet`-Vergleiche) sind leakproof; die
+Indizes `idx_search_identifier_norm` und `idx_search_identifier_addr`
+bedienen die Suche deshalb auch für die App-Rolle
+(`TestSearchFieldsPlanUnderRLS`). Die Policy prüft nur die Organisation,
+gelesen wird die Tabelle nur im Join mit `search_document`. Gepflegt wird
+sie vom Indexer (`core.management_ip`, `core.primary_mac`,
+`asset.inventory_no`) und von den Triggern `trg_asset_sync_search_index`,
+`search_identifier_interface_*` und `search_identifier_ip_*`. Feldzeilen
+haben die Spalte `source` (`indexer`, `trigger`); die Asset-Dokumente mit
+ihren Feldzeilen pflegt der Trigger.
 
 <!-- rls-leaky-indexes:begin -->
 
@@ -1179,6 +1194,17 @@ den Spiegel nach einer Umbenennung nach. `asset_status_from_lifecycle`
 Datenmigration: `saved_view.filter_spec` (`where`, `sort`, `columns`) und
 `attribute_definition.computed` verwenden die neuen Namen.
 
+Systemkommentare von Tickets (TKT-01, WP-766, Migration 000234):
+`ticket_comment.author_id` ist nullable, dazu kommt `author_type` (TEXT NOT
+NULL DEFAULT `user`, `ticket_comment_author_type_check`: `user`, `system`);
+`ticket_comment_author_check` verlangt `author_id` genau bei `user`
+(`(author_type = 'user') = (author_id IS NOT NULL)`). Bestandskommentare
+erhalten `user` über den Default. Der Fremdschlüssel
+`ticket_comment_author_id_fkey`, RLS (`ticket_comment_tenant_isolation` und
+die scoped Policies) und `derive_ticket_comment_scope` bleiben unverändert.
+Die Down-Migration löscht die Systemkommentare und stellt NOT NULL wieder
+her.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1312,6 +1338,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
 | `search_document_field` | ja | ja | search_document_field_tenant_isolation (ALL) |
+| `search_identifier` | ja | ja | search_identifier_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |
 | `service_account_role` | ja | ja | service_account_role_isolation (ALL) |

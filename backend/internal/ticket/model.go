@@ -1,7 +1,10 @@
 // Package ticket provides the Ticket System (Essential) domain.
 package ticket
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Ticket represents a support/task ticket.
 type Ticket struct {
@@ -31,16 +34,41 @@ type Ticket struct {
 	SiteID   string `json:"-"`
 }
 
+// Author types of a ticket comment (WP-766): a comment of a user carries
+// its author_id, a comment of the system none.
+const (
+	AuthorUser   = "user"
+	AuthorSystem = "system"
+)
+
 // Comment represents a comment on a ticket.
 type Comment struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	TicketID       string    `json:"ticket_id"`
-	AuthorID       string    `json:"author_id"`
-	Content        string    `json:"content"`
-	IsInternal     bool      `json:"is_internal"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	TicketID       string `json:"ticket_id"`
+	// AuthorID is the user who wrote the comment, "" for a system comment
+	// (author_id null in the DTO).
+	AuthorID string `json:"author_id"`
+	// AuthorType is user or system ("" counts as user).
+	AuthorType string    `json:"author_type"`
+	Content    string    `json:"content"`
+	IsInternal bool      `json:"is_internal"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// MarshalJSON writes the comment with author_id null when it has no author
+// (system comment, WP-766).
+func (c Comment) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver: comments are marshaled as values and pointers
+	type plain Comment
+	var author *string
+	if c.AuthorID != "" {
+		author = &c.AuthorID
+	}
+	return json.Marshal(struct {
+		plain
+		AuthorID *string `json:"author_id"`
+	}{plain: plain(c), AuthorID: author})
 }
 
 // CreateRequest is the payload for creating a ticket.

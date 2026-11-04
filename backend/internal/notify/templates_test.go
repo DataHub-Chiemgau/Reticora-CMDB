@@ -31,6 +31,8 @@ var templateData = map[string]map[string]any{
 	events.CertificateExpiring: {"name": "www.acme.example", "expires_at": "2026-12-18T09:30:00Z"},
 	events.APIKeyCreatorDeactivated: {"user_id": "u-9", "keys": []any{map[string]any{"key_prefix": "rk_ab",
 		"name": "ci-sync", "service_account_name": "sync", "service_account_id": "sa-1"}}},
+	events.TicketSLABreached: {"ticket_number": float64(42), "priority": "high", "kind": "resolution",
+		"due_at": "2026-11-04T16:00:00Z"},
 	events.DocumentScanned: {"document_id": "d-1", "version": float64(2), "result": "infected",
 		"scan_signature": "Win.Test.EICAR_HDB-1", "uploaded_by": "u-7"},
 }

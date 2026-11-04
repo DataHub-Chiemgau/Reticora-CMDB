@@ -2472,6 +2472,10 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "health", Detail: "the health is computed from monitoring"}}}
 	case "ci_asset_id_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: "asset not found"}}}
+	case "ci_asset_client":
+		// The CI and its asset name different clients (WP-272, trigger of
+		// migration 000235); NULL on either side is compatible.
+		return &ValidationError{Violations: []Violation{{Field: "asset_id", Detail: assetOfAnotherClient}}}
 	case "ci_ci_type_id_fkey", "ci_type_organization":
 		// An unknown type and a type of another organization (trigger of
 		// migration 000153) are the same answer (TEN-09).
@@ -2481,6 +2485,10 @@ func locationError(err error) error {
 	}
 	return err
 }
+
+// assetOfAnotherClient is the violation of a link between a CI and an asset
+// of different clients (AST-04, WP-272).
+const assetOfAnotherClient = "the CI and the asset belong to different clients"
 
 // locationOwnedByAsset is the violation of a location write on a CI linked
 // to an asset (DB-05).

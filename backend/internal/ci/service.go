@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -191,6 +192,8 @@ type Document struct {
 	// Fields are the summary columns by field key (core.<column>, RBA-07,
 	// WP-266): the PostgreSQL index stores them as field rows, so a search
 	// with restricted field permissions matches the readable ones only.
+	// They also carry the identifiers and the scalar attributes of the CI
+	// (ciSearchFields, WP-308).
 	// They are never serialized: neither a hit nor a remote index carries
 	// them.
 	Fields map[string]string `json:"-"`
@@ -211,23 +214,91 @@ func IndexDocumentFor(item *Item) Document {
 		URL:            "/cmdb/" + item.ID,
 		ClientID:       item.ClientID,
 		SiteID:         item.SiteID,
-		Fields:         ciSummaryFields(item),
+		Fields:         ciSearchFields(item),
 	}
 }
 
-// ciSummaryFields are the summary columns of the CI by field key (the
-// columns of ciSummary); empty values are left out.
-func ciSummaryFields(item *Item) map[string]string {
-	fields := make(map[string]string, 6)
+// Identifier fields of the search document of a CI (SRC-02, WP-308): the
+// search index keeps them in normal form in its identifier table, not as
+// full-text field rows. The inventory number is the one of the linked
+// asset (Item.Asset).
+const (
+	searchFieldManagementIP   = permission.NamespaceCore + ".management_ip"
+	searchFieldPrimaryMAC     = permission.NamespaceCore + ".primary_mac"
+	searchFieldAssetInventory = "asset.inventory_no"
+)
+
+// ciSearchFields are the fields of the search document of the CI: the
+// summary columns by field key (the columns of ciSummary, WP-266), the
+// identifiers and the scalar attributes (attributes.<key>; WP-308), of which
+// the index keeps the searchable ones. Empty values are left out.
+func ciSearchFields(item *Item) map[string]string {
+	fields := make(map[string]string, 9+len(item.Attributes))
+	inventory := ""
+	if item.Asset != nil {
+		inventory = item.Asset.InventoryNo
+	}
 	for _, f := range [...]struct{ key, value string }{
 		{"core.hostname", item.Hostname}, {"core.manufacturer", item.Manufacturer}, {"core.model", item.Model},
 		{"core.serial_number", item.SerialNumber}, {"core.os_name", item.OSName}, {"core.os_version", item.OSVersion},
+		{searchFieldManagementIP, item.ManagementIP}, {searchFieldPrimaryMAC, item.PrimaryMAC},
+		{searchFieldAssetInventory, inventory},
 	} {
 		if f.value != "" {
 			fields[f.key] = f.value
 		}
 	}
+	for key, value := range item.Attributes {
+		if text := searchAttributeText(value); text != "" {
+			fields[permission.NamespaceAttributes+"."+key] = text
+		}
+	}
 	return fields
+}
+
+// searchAttributeText is the searchable text of an attribute value: a
+// text, number or truth value as its text, a list its scalar elements
+// separated by blanks, anything else none (search_field_text, migration
+// 000233).
+func searchAttributeText(value any) string {
+	switch v := value.(type) {
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, e := range v {
+			if _, nested := e.([]any); nested {
+				continue
+			}
+			if text := searchAttributeText(e); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, " ")
+	case []string:
+		parts := make([]string, 0, len(v))
+		for _, e := range v {
+			if e != "" {
+				parts = append(parts, e)
+			}
+		}
+		return strings.Join(parts, " ")
+	case string:
+		return v
+	case bool:
+		return strconv.FormatBool(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case json.Number:
+		return v.String()
+	}
+	return ""
 }
 
 func ciSummary(item *Item) string {

@@ -1087,15 +1087,54 @@
       ]
     },
     "ticket.sla_breached": {
-      "description": "Data frame of ticket.sla_breached. entity_id: the ticket. Origin: plan addition. Producer: WP-292. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of ticket.sla_breached: one missed due time of a ticket, written once per kind by the sla.check run (TKT-01, ticketing_standard). entity_id: the ticket. Origin: plan addition. Producer: WP-769. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "ticket_number", "priority", "sla_id", "kind", "due_at"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The ticket."
+        },
+        "ticket_number": {
+          "type": "integer",
+          "description": "Number of the ticket within the organization."
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Priority of the ticket."
+        },
+        "sla_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The SLA policy of the ticket."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["response", "resolution"],
+          "description": "The missed due time: first response or resolution."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The missed due time."
+        },
+        "assignee_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Assignee of the ticket; absent without assignee."
+        },
+        "team_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Team of the ticket; absent without team."
+        },
+        "team_lead_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Lead of the ticket's team (team.lead_id); absent without team or lead."
         },
         "client_id": {
           "type": "string",
@@ -1111,6 +1150,14 @@
       "examples": [
         {
           "id": "66666666-6666-4666-8666-666666666666",
+          "ticket_number": 42,
+          "priority": "high",
+          "sla_id": "77777777-7777-4777-8777-777777777777",
+          "kind": "resolution",
+          "due_at": "2026-11-04T16:00:00Z",
+          "assignee_id": "88888888-8888-4888-8888-888888888888",
+          "team_id": "99999999-9999-4999-8999-999999999999",
+          "team_lead_id": "55555555-5555-4555-8555-555555555555",
           "client_id": "33333333-3333-4333-8333-333333333333"
         }
       ]

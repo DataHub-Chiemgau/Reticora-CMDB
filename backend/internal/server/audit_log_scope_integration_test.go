@@ -65,8 +65,8 @@ func TestAuditLogHidesForeignClientRouteEntries(t *testing.T) {
 	}
 	ciA, ciB := f.CI(t, f.OrgA, f.Client2, "als-ci-c2-a"), f.CI(t, f.OrgA, f.Client2, "als-ci-c2-b")
 	rel2 := created("/api/v1/relationships", fmt.Sprintf(`{"source_ci_id":%q,"target_ci_id":%q,"rel_type":"depends_on"}`, ciA, ciB))
-	asset1 := created("/api/v1/assets", fmt.Sprintf(`{"asset_tag":"als-asset-c1","name":"als-asset-c1","client_id":%q}`, f.Client1))
-	asset2 := created("/api/v1/assets", fmt.Sprintf(`{"asset_tag":"als-asset-c2","name":"als-asset-c2-secret","client_id":%q}`, f.Client2))
+	asset1 := created("/api/v1/assets", fmt.Sprintf(`{"inventory_no":"als-asset-c1","name":"als-asset-c1","client_id":%q}`, f.Client1))
+	asset2 := created("/api/v1/assets", fmt.Sprintf(`{"inventory_no":"als-asset-c2","name":"als-asset-c2-secret","client_id":%q}`, f.Client2))
 
 	// Objects of the modules (second verifier of F-389): client 2 owns one
 	// per table, client 1 an SLA and a key (control); the org-wide admin

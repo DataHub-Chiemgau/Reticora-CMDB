@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-query';
 import {
   attributeDefinitionApi,
+  attributeSetApi,
   ciTypeApi,
   ciFieldApi,
   relationshipTypeApi,
@@ -29,6 +30,9 @@ import {
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
   type AttributeDefinitionPatch,
+  type AttributeSetAssignment,
+  type AttributeSetCreate,
+  type AttributeSetPatch,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
@@ -224,6 +228,106 @@ export function useReindexAttributeDefinition() {
   return useMutation({
     mutationFn: (id: string) => attributeDefinitionApi.reindex(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['attribute-definitions'] }),
+  });
+}
+
+/** The definitions of each of the given attribute sets (?attribute_set_id=, WP-250). */
+export function useSetAttributeDefinitions(setIds: string[], options: { enabled?: boolean } = {}) {
+  return useQueries({
+    queries: setIds.map((id) => ({
+      ...attributeDefinitionsQuery({ attribute_set_id: id }),
+      enabled: options.enabled ?? true,
+    })),
+  });
+}
+
+/**
+ * Saves a new order of definitions (MET-16): one PATCH of `order` per
+ * changed definition, then the lists are read again.
+ */
+export function useReorderAttributeDefinitions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (changes: { id: string; order: number }[]) => {
+      for (const change of changes) {
+        await attributeDefinitionApi.update(change.id, { order: change.order });
+      }
+    },
+    onSettled: () => invalidateAttributes(qc),
+  });
+}
+
+// ─── Attribute sets (MET-16, WP-250, WP-797) ─────────────────────────────────
+
+const ATTRIBUTE_SETS_KEY = ['attribute-sets'];
+
+/** The sets of the organization and the system sets; off while the module metamodel is off. */
+export function useAttributeSets(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ATTRIBUTE_SETS_KEY,
+    queryFn: () => attributeSetApi.list(),
+    enabled: options.enabled ?? true,
+    // A 404 is the switched-off module (E-105): no retry.
+    retry: false,
+  });
+}
+
+export function useCreateAttributeSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AttributeSetCreate) => attributeSetApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ATTRIBUTE_SETS_KEY }),
+  });
+}
+
+export function useUpdateAttributeSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: AttributeSetPatch }) =>
+      attributeSetApi.update(id, patch),
+    // An inactive set leaves the composition of its types.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ATTRIBUTE_SETS_KEY });
+      qc.invalidateQueries({ queryKey: ['ci-types'] });
+    },
+  });
+}
+
+/** DELETE /attribute-sets/{id}; its set attributes go with it. */
+export function useDeleteAttributeSet() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => attributeSetApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ATTRIBUTE_SETS_KEY });
+      invalidateAttributes(qc);
+    },
+  });
+}
+
+/** The ordered sets of a CI type (GET /ci-types/{id}/attribute-sets). */
+export function useCITypeAttributeSets(ciTypeId: string | undefined, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: ['ci-types', ciTypeId, 'attribute-sets'],
+    queryFn: () => attributeSetApi.ofType(ciTypeId!),
+    ...options,
+    enabled: !!ciTypeId && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/** PUT /ci-types/{id}/attribute-sets: the ordered list replaces the former one. */
+export function useReplaceCITypeAttributeSets() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ciTypeId, sets }: { ciTypeId: string; sets: AttributeSetAssignment[] }) =>
+      attributeSetApi.replaceOfType(ciTypeId, sets),
+    // The answer is the new list; the schema of the type and its subtypes
+    // changes (schema_version).
+    onSuccess: (saved, { ciTypeId }) => {
+      qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
+      invalidateAttributes(qc);
+    },
   });
 }
 

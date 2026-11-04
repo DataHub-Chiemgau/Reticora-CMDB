@@ -112,20 +112,20 @@ func TestAssetAST01UniquenessAndCurrency(t *testing.T) {
 	w := newAssetWorld(t)
 	w.admin(t, `UPDATE organization SET currency = 'CHF' WHERE id = $1`, w.f.OrgA)
 
-	a := w.create(t, `{"asset_tag":"AST-1","name":"Laptop","barcode":"BC-1","rfid_tag":"RF-1","manufacturer":"Lenovo",
+	a := w.create(t, `{"inventory_no":"AST-1","name":"Laptop","barcode":"BC-1","rfid_tag":"RF-1","manufacturer":"Lenovo",
 		"model":"T14","cost_center":"KST-4711"}`)
 	if a.Currency != "CHF" || a.LifecycleState != "ordered" || a.Manufacturer != "Lenovo" || a.Model != "T14" ||
 		a.CostCenter != "KST-4711" {
 		t.Fatalf("created: %+v", a)
 	}
 	for _, dup := range []struct{ body, field string }{
-		{`{"asset_tag":"AST-1","name":"x"}`, "asset_tag"},
-		{`{"asset_tag":"AST-2","name":"x","barcode":"BC-1"}`, "barcode"},
-		{`{"asset_tag":"AST-3","name":"x","rfid_tag":"RF-1"}`, "rfid_tag"},
+		{`{"inventory_no":"AST-1","name":"x"}`, "inventory_no"},
+		{`{"inventory_no":"AST-2","name":"x","barcode":"BC-1"}`, "barcode"},
+		{`{"inventory_no":"AST-3","name":"x","rfid_tag":"RF-1"}`, "rfid_tag"},
 	} {
 		w.do(t, &call{method: http.MethodPost, path: assetsPath, body: dup.body, want: http.StatusConflict, wantField: dup.field})
 	}
-	other := w.create(t, `{"asset_tag":"AST-4","name":"Monitor","currency":"USD"}`)
+	other := w.create(t, `{"inventory_no":"AST-4","name":"Monitor","currency":"USD"}`)
 	if other.Currency != "USD" {
 		t.Fatalf("explicit currency: %+v", other)
 	}
@@ -135,7 +135,7 @@ func TestAssetAST01UniquenessAndCurrency(t *testing.T) {
 	if got := w.patch(t, other.ID, `{"currency":""}`); got.Currency != "CHF" {
 		t.Fatalf("empty currency on update: %+v", got)
 	}
-	for _, bad := range []string{`{"asset_tag":"AST-5","name":"x","currency":"EURO"}`, `{"asset_tag":"AST-5","name":"x","currency":"eur"}`} {
+	for _, bad := range []string{`{"inventory_no":"AST-5","name":"x","currency":"EURO"}`, `{"inventory_no":"AST-5","name":"x","currency":"eur"}`} {
 		w.do(t, &call{method: http.MethodPost, path: assetsPath, body: bad, want: http.StatusBadRequest, wantField: "currency"})
 	}
 	w.do(t, &call{method: http.MethodPatch, path: path, body: `{"currency":"XYZ"}`, want: http.StatusBadRequest, wantField: "currency"})
@@ -184,7 +184,7 @@ func TestAssetAST01References(t *testing.T) {
 	w.admin(t, `INSERT INTO team (id, organization_id, name) VALUES ($1, $2, 'wp271-a'), ($3, $4, 'wp271-b')`,
 		ids["teamA"], f.OrgA, ids["teamB"], f.OrgB)
 
-	base := `"asset_tag":"REF-%s","name":"ref","client_id":"` + f.Client1 + `"`
+	base := `"inventory_no":"REF-%s","name":"ref","client_id":"` + f.Client1 + `"`
 	body := func(tag, extra string) string { return "{" + strings.Replace(base, "%s", tag, 1) + "," + extra + "}" }
 	for _, bad := range []struct{ extra, field string }{
 		{`"supplier_id":"` + ids["supC2"] + `"`, "supplier_id"},
@@ -199,7 +199,7 @@ func TestAssetAST01References(t *testing.T) {
 	}
 	ciID := f.CI(t, f.OrgA, f.Client1, "wp271-ci")
 	a := w.create(t, body("OK", `"supplier_id":"`+ids["supOrg"]+`","contract_id":"`+ids["conC1"]+`","owner_team_id":"`+
-		ids["teamA"]+`","owner_user_id":"`+userA+`","manufacturer":"Dell","model":"R650","cost_center":"KST-1","ci_id":"`+ciID+`"`))
+		ids["teamA"]+`","owner_user_id":"`+userA+`","manufacturer":"Dell","model":"R650","cost_center":"KST-1","primary_ci_id":"`+ciID+`"`))
 	if a.SupplierID != ids["supOrg"] || a.ContractID != ids["conC1"] || a.OwnerTeamID != ids["teamA"] || a.OwnerUserID != userA {
 		t.Fatalf("created with references: %+v", a)
 	}
@@ -237,14 +237,15 @@ func TestAssetAST01References(t *testing.T) {
 }
 
 // TestAssetAST01FieldRights covers Konvention 11 for assets (RBA-07,
-// WP-271): a field without read grant (core.purchase_cost, a custom field)
+// WP-271): a field without read grant (purchase_price under core.purchase_cost,
+// a custom field)
 // is left out of the detail, the list, the answer of POST and PATCH; a
 // write of a field the principal may not edit is 403 with the fields, the
 // unchanged value of a readable, read-only field passes.
 func TestAssetAST01FieldRights(t *testing.T) {
 	w := newAssetWorld(t)
 	bg := context.Background()
-	a := w.create(t, `{"asset_tag":"FR-1","name":"geheim","purchase_cost":4711,"notes":"lesbar",
+	a := w.create(t, `{"inventory_no":"FR-1","name":"geheim","purchase_price":"4711","notes":"lesbar",
 		"custom_fields":{"secret":"x-geheim","public":"offen"}}`)
 	path := assetsPath + "/" + a.ID
 
@@ -285,11 +286,11 @@ func TestAssetAST01FieldRights(t *testing.T) {
 	hidden(as(http.MethodGet, assetsPath, "", http.StatusOK))
 	hidden(as(http.MethodPatch, path, `{"notes":"lesbar","name":"umbenannt"}`, http.StatusOK))
 	wantFields(as(http.MethodPatch, path, `{"notes":"neu"}`, http.StatusForbidden), "notes")
-	wantFields(as(http.MethodPatch, path, `{"purchase_cost":4711}`, http.StatusForbidden), "purchase_cost")
+	wantFields(as(http.MethodPatch, path, `{"purchase_price":"4711"}`, http.StatusForbidden), "purchase_price")
 	wantFields(as(http.MethodPatch, path, `{"custom_fields":{"secret":"x-geheim"}}`, http.StatusForbidden), "custom_fields.secret")
-	wantFields(as(http.MethodPost, assetsPath, `{"asset_tag":"FR-2","name":"x","purchase_cost":1}`, http.StatusForbidden), "purchase_cost")
-	created := as(http.MethodPost, assetsPath, `{"asset_tag":"FR-3","name":"x","custom_fields":{"public":"offen"}}`, http.StatusCreated)
-	if strings.Contains(created.Body.String(), "purchase_cost") {
+	wantFields(as(http.MethodPost, assetsPath, `{"inventory_no":"FR-2","name":"x","purchase_price":"1"}`, http.StatusForbidden), "purchase_price")
+	created := as(http.MethodPost, assetsPath, `{"inventory_no":"FR-3","name":"x","custom_fields":{"public":"offen"}}`, http.StatusCreated)
+	if strings.Contains(created.Body.String(), "purchase_price") {
 		t.Fatalf("created answer: %s", created.Body.String())
 	}
 	// The full DTO for a principal without restriction.
@@ -327,10 +328,16 @@ func TestAssetAST01Migration(t *testing.T) {
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		if name == "down" {
-			return string(names) + "\n" + string(b)
+		// 000233 (WP-308) has a trigger on asset columns of 000229: it
+		// goes down first and up last as well.
+		search, readErr := os.ReadFile("../../migrations/000233_search_fields." + name + ".sql")
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		return string(b) + "\n" + string(names)
+		if name == "down" {
+			return string(search) + "\n" + string(names) + "\n" + string(b)
+		}
+		return string(b) + "\n" + string(names) + "\n" + string(search)
 	}
 	tx, err := f.Admin.Begin(bg)
 	if err != nil {

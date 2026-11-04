@@ -145,6 +145,10 @@ var withSystemCallers = map[string]string{
 	// their tenant transaction.
 	"internal/relationship/cleanup.go": "organizations whose stale relationships are cleaned up",
 
+	// SLA breach run (TKT-01, WP-769): lists the organizations whose ticket
+	// SLAs are checked one by one in their tenant transaction.
+	"internal/sla/check.go": "organizations whose SLA breaches the sla.check run reports",
+
 	// MFA reconciliation: lists the organizations whose org_admins are bound
 	// to MFA in their tenant transaction.
 	"internal/user/mfa.go": "organizations whose org_admins are bound to MFA",

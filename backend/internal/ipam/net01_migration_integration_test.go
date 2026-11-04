@@ -40,7 +40,10 @@ func TestNet01DedupeAvoidsExistingSuffix(t *testing.T) {
 		}
 		return string(raw)
 	}
-	down, up := read("000110_interface_net01.down.sql"), read("000110_interface_net01.up.sql")
+	// The search triggers of 000233 (WP-308) read network_interface.mac,
+	// which 000110 names: they go down first.
+	down := read("000233_search_fields.down.sql") + "\n" + read("000110_interface_net01.down.sql")
+	up := read("000110_interface_net01.up.sql")
 	probe := f.CI(t, f.OrgA, "", "net01-probe")
 	triple := f.CI(t, f.OrgA, "", "net01-triple")
 	suffixed := f.CI(t, f.OrgA, "", "net01-suffixed")
