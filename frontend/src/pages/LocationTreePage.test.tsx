@@ -473,7 +473,7 @@ describe('LocationTreePage', () => {
         ci: true,
         asset: true,
         quantity_item: true,
-        asset_movement: true,
+        stock_movement: true,
         rack_mount: true,
         role_assignment: true,
         ci_attribute: true,

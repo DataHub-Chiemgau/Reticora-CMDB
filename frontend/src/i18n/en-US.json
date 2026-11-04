@@ -1675,7 +1675,7 @@
       "ci": "CIs",
       "asset": "assets",
       "quantity_item": "stock items",
-      "asset_movement": "movements",
+      "stock_movement": "movements",
       "rack_mount": "rack mounts",
       "role_assignment": "role assignments",
       "ci_attribute": "CI attributes referencing the location",

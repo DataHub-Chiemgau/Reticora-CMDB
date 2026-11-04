@@ -21,7 +21,24 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-const ledgerMigration = "../../migrations/000242_stock_movement_canonical"
+const (
+	ledgerMigration = "../../migrations/000242_stock_movement_canonical"
+	dropMigration   = "../../migrations/000246_drop_asset_movement"
+)
+
+// readMigration returns the up and the down part of the migration path.
+func readMigration(t *testing.T, path string) (up, down string) {
+	t.Helper()
+	rawUp, err := os.ReadFile(path + ".up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawDown, err := os.ReadFile(path + ".down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(rawUp), string(rawDown)
+}
 
 // siteCtx returns a request context of a principal of organization A that is
 // restricted to siteID (clients and teams unrestricted).
@@ -43,7 +60,8 @@ func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 
 // TestStockMovementCanonicalMigration covers the data migration of 000242
 // (STK-04, AST-07, WP-744) in a rolled-back transaction: after the down part
-// the legacy ledgers asset_movement, the former stock_movement and
+// of 000246 (which restores asset_movement, WP-842) and of 000242 the legacy
+// ledgers asset_movement, the former stock_movement and
 // assignment get rows; the up part maps the types, keeps the ids, clears
 // asset quantities and second object columns, takes the assignee from the
 // notes, quarantines invalid rows, imports the assignment history without
@@ -55,14 +73,8 @@ func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 func TestStockMovementCanonicalMigration(t *testing.T) {
 	f := scopetest.Seed(t, "2f")
 	ctx := context.Background()
-	up, err := os.ReadFile(ledgerMigration + ".up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	down, err := os.ReadFile(ledgerMigration + ".down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
+	up, down := readMigration(t, ledgerMigration)
+	_, dropDown := readMigration(t, dropMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig242-a1")
 	asset2 := f.Asset(t, f.OrgA, f.Client1, "mig242-a2")
 	foreign := f.Asset(t, f.OrgB, "", "mig242-foreign")
@@ -81,7 +93,8 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
-	exec(string(down))
+	exec(dropDown)
+	exec(down)
 	exec(`UPDATE ci SET asset_id = $2 WHERE id = $1`, ciWithAsset, asset2)
 
 	item, cons := f.ID(), f.ID()
@@ -143,7 +156,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	}
 	legacyBefore := count(`SELECT count(*) FROM asset_movement WHERE organization_id = $1`, f.OrgA)
 
-	exec(string(up))
+	exec(up)
 
 	type row struct {
 		kind, asset, item, typ, reason, notes, assignee, client string
@@ -256,7 +269,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	exec(`INSERT INTO stock_movement (id, organization_id, item_kind, asset_id, movement_type) VALUES ($1, $2, 'asset', $3, 'transfer')`, booked, f.OrgA, asset1)
 	exec(`INSERT INTO stock_movement (id, organization_id, item_kind, consumable_id, movement_type, quantity, notes) VALUES ($1, $2, 'consumable', $3, 'receipt', 2, 'PO-2')`,
 		bookedCons, f.OrgA, cons)
-	exec(string(down))
+	exec(down)
 	if err = tx.QueryRow(ctx, `SELECT movement_type FROM asset_movement WHERE id = $1`, booked).Scan(&legacyType); err != nil || legacyType != "warehouse_transfer" {
 		t.Errorf("asset movement booked after the up migration, after down: %q, %v; want warehouse_transfer", legacyType, err)
 	}
@@ -273,7 +286,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000242'`); n != 0 {
 		t.Errorf("quarantine entries of 000242 after down: %d", n)
 	}
-	exec(string(up))
+	exec(up)
 	for _, c := range []struct{ id, typ string }{{booked, "transfer"}, {bookedCons, "receipt"}, {stockIn, "receipt"}, {mWarehouse, "transfer"}} {
 		if got := read(c.id); got.typ != c.typ {
 			t.Errorf("movement %s after down and up: %s, want %s", c.id, got.typ, c.typ)
@@ -281,6 +294,154 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	}
 	if got := history(aNew); len(got) != 2 {
 		t.Errorf("assignment history after down and up: %+v, want 2 movements", got)
+	}
+}
+
+// TestDropAssetMovementMigration covers 000246 (AST-07, WP-842) in a
+// rolled-back transaction: the down part restores asset_movement (state
+// after 000075: append-only, ENABLE + FORCE RLS, truncate guard, RESTRICT
+// on the locations) from the ledger with the former type names, without
+// the movements of the assignment history and the consumables, and with
+// the rows 000242 quarantined; the up part drops table and trigger
+// function, and aborts without change while a row of asset_movement is
+// missing in stock_movement.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestDropAssetMovementMigration(t *testing.T) {
+	f := scopetest.Seed(t, "2f")
+	ctx := context.Background()
+	up, down := readMigration(t, dropMigration)
+	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig246-a1")
+	room := f.Room(t, f.Client1, "mig246-room")
+
+	tx, err := f.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(ctx, sql, args...); execErr != nil {
+			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
+		}
+	}
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if scanErr := tx.QueryRow(ctx, sql, args...).Scan(&n); scanErr != nil {
+			t.Fatalf("%s: %v", sql, scanErr)
+		}
+		return n
+	}
+
+	item, cons := f.ID(), f.ID()
+	exec(`INSERT INTO quantity_item (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'mig246')`, item, f.OrgA, f.Client1)
+	exec(`INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'mig246')`, cons, f.OrgA, f.Client1)
+	mTransfer, mRelease, mRepair, mReceipt, mAssigned, mHistory, mConsumable, mQuarantined :=
+		f.ID(), f.ID(), f.ID(), f.ID(), f.ID(), f.ID(), f.ID(), f.ID()
+	insert := `INSERT INTO stock_movement (id, organization_id, item_kind, asset_id, quantity_item_id, consumable_id, movement_type, quantity, to_location_id, notes)
+		VALUES ($1, $2, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, '')::uuid, $7, $8, NULLIF($9, '')::uuid, NULLIF($10, ''))`
+	two := 2.0
+	for _, m := range []struct {
+		id, kind, asset, item, cons, typ, to, notes string
+		quantity                                    *float64
+	}{
+		{mTransfer, "asset", asset1, "", "", "transfer", room, "", nil},
+		{mRelease, "asset", asset1, "", "", "release", "", "", nil},
+		{mRepair, "asset", asset1, "", "", "repair", "", "", nil},
+		{mReceipt, "quantity_item", "", item, "", "receipt", "", "", &two},
+		{mAssigned, "asset", asset1, "", "", "assignment", "", "assigned to someone", nil},
+		{mHistory, "asset", asset1, "", "", "assignment", "", "assignment:" + f.ID(), nil},
+		{mConsumable, "consumable", "", "", cons, "receipt", "", "", &two},
+	} {
+		exec(insert, m.id, f.OrgA, m.kind, m.asset, m.item, m.cons, m.typ, m.quantity, m.to, m.notes)
+	}
+	exec(`INSERT INTO migration_quarantine (organization_id, source_table, row_data, reason, migration)
+		VALUES ($1, 'asset_movement', jsonb_build_object('id', $2::uuid, 'organization_id', $1::uuid, 'item_kind', 'asset',
+			'asset_id', $3::uuid, 'movement_type', 'teleport', 'created_at', now()), 'movement_foreign_reference', '000242')`,
+		f.OrgA, mQuarantined, asset1)
+
+	// Down.
+	exec(down)
+	legacy := func(id string) (typ, to string) {
+		t.Helper()
+		if scanErr := tx.QueryRow(ctx, `SELECT movement_type, COALESCE(to_location_id::text, '') FROM asset_movement WHERE id = $1`, id).
+			Scan(&typ, &to); scanErr != nil {
+			t.Fatalf("asset_movement row %s: %v", id, scanErr)
+		}
+		return typ, to
+	}
+	for _, c := range []struct{ name, id, typ, to string }{
+		{"transfer", mTransfer, "warehouse_transfer", room},
+		{"release", mRelease, "reservation_release", ""},
+		{"repair", mRepair, "repair_transfer", ""},
+		{"quantity item", mReceipt, "receipt", ""},
+		{"assignment of the handler", mAssigned, "assignment", ""},
+		{"quarantined by 000242", mQuarantined, "teleport", ""},
+	} {
+		if typ, to := legacy(c.id); typ != c.typ || to != c.to {
+			t.Errorf("%s after down: %s to %q, want %s to %q", c.name, typ, to, c.typ, c.to)
+		}
+	}
+	for _, id := range []string{mHistory, mConsumable} {
+		if n := count(`SELECT count(*) FROM asset_movement WHERE id = $1`, id); n != 0 {
+			t.Errorf("movement %s is in asset_movement after down", id)
+		}
+	}
+	if n := count(`SELECT count(*) FROM pg_class WHERE oid = 'asset_movement'::regclass AND relrowsecurity AND relforcerowsecurity`); n != 1 {
+		t.Error("asset_movement after down: RLS not enabled and forced")
+	}
+	if n := count(`SELECT count(*) FROM pg_policy WHERE polrelid = 'asset_movement'::regclass AND polname = 'asset_movement_isolation'`); n != 1 {
+		t.Error("asset_movement after down: no policy asset_movement_isolation")
+	}
+	if n := count(`SELECT count(*) FROM pg_trigger WHERE tgrelid = 'asset_movement'::regclass
+		AND tgname IN ('reticora_truncate_guard', 'trg_asset_movement_no_update', 'trg_asset_movement_no_delete')`); n != 3 {
+		t.Errorf("asset_movement after down: %d of the 3 guard triggers", n)
+	}
+	if n := count(`SELECT count(*) FROM pg_constraint WHERE conrelid = 'asset_movement'::regclass AND contype = 'f'
+		AND confrelid = 'location'::regclass AND confdeltype = 'r'`); n != 2 {
+		t.Errorf("asset_movement after down: %d RESTRICT references on location, want 2", n)
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, updErr := sp.Exec(ctx, `UPDATE asset_movement SET notes = 'rewritten' WHERE id = $1`, mTransfer)
+	_ = sp.Rollback(ctx)
+	if pgCode(updErr) != "P0001" {
+		t.Errorf("UPDATE of asset_movement after down: %v, want the append-only refusal", updErr)
+	}
+
+	// Up with a row missing in the ledger aborts and changes nothing.
+	unbooked := f.ID()
+	exec(`INSERT INTO asset_movement (id, organization_id, asset_id, movement_type) VALUES ($1, $2, $3, 'receipt')`, unbooked, f.OrgA, asset1)
+	sp, err = tx.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, upErr := sp.Exec(ctx, up)
+	_ = sp.Rollback(ctx)
+	var pgErr *pgconn.PgError
+	if !errors.As(upErr, &pgErr) || pgErr.Code != "P0001" || pgErr.Message != "asset_movement (000246): 1 rows are missing in stock_movement" {
+		t.Errorf("up with a movement missing in stock_movement: %v, want the abort with 1 missing row", upErr)
+	}
+	if n := count(`SELECT count(*) FROM pg_class WHERE relname = 'asset_movement'`); n != 1 {
+		t.Error("asset_movement is gone after the aborted up")
+	}
+
+	// Up once every row is in the ledger (or quarantined).
+	exec(`ALTER TABLE asset_movement DISABLE TRIGGER trg_asset_movement_no_delete`)
+	exec(`DELETE FROM asset_movement WHERE id = $1`, unbooked)
+	exec(`ALTER TABLE asset_movement ENABLE TRIGGER trg_asset_movement_no_delete`)
+	exec(up)
+	if n := count(`SELECT count(*) FROM pg_class WHERE relname = 'asset_movement'`); n != 0 {
+		t.Error("asset_movement survives the up migration")
+	}
+	if n := count(`SELECT count(*) FROM pg_proc WHERE proname = 'reject_asset_movement_mutation'`); n != 0 {
+		t.Error("reject_asset_movement_mutation survives the up migration")
+	}
+	if n := count(`SELECT count(*) FROM stock_movement WHERE id IN ($1, $2, $3)`, mTransfer, mHistory, mConsumable); n != 3 {
+		t.Errorf("ledger rows after the up migration: %d of 3", n)
 	}
 }
 
@@ -438,11 +599,11 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		}
 
 		// LOC-11: a location kept only by a movement answers 409 with the
-		// kind asset_movement, also through the foreign key.
+		// kind stock_movement (WP-842), also through the foreign key.
 		depErr := locations.CheckDeletable(ctx, tx, room3)
 		var de *locations.DependencyError
-		if !errors.As(depErr, &de) || !slices.Equal(de.Kinds, []string{locations.DependencyAssetMovement}) {
-			t.Errorf("dependencies of a location with movements: %v, want %s", depErr, locations.DependencyAssetMovement)
+		if !errors.As(depErr, &de) || !slices.Equal(de.Kinds, []string{locations.DependencyStockMovement}) {
+			t.Errorf("dependencies of a location with movements: %v, want %s", depErr, locations.DependencyStockMovement)
 		}
 		sp, err := tx.Begin(ctx)
 		if err != nil {
@@ -452,8 +613,8 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		_ = sp.Rollback(ctx)
 		rec := httptest.NewRecorder()
 		if !locations.WriteDependencyConflict(rec, httptest.NewRequest(http.MethodDelete, "/api/v1/locations/"+room3, nil), locations.DeleteError(delErr)) ||
-			rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"asset_movement"`) {
-			t.Errorf("delete of a location kept by a movement: %d %s (%v), want 409 with asset_movement", rec.Code, rec.Body.String(), delErr)
+			rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"dependencies":["stock_movement"]`) {
+			t.Errorf("delete of a location kept by a movement: %d %s (%v), want 409 with stock_movement", rec.Code, rec.Body.String(), delErr)
 		}
 	})
 

@@ -14325,7 +14325,7 @@ export interface components {
         | 'ci'
         | 'asset'
         | 'quantity_item'
-        | 'asset_movement'
+        | 'stock_movement'
         | 'rack_mount'
         | 'role_assignment'
         | 'ci_attribute'

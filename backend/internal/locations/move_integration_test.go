@@ -199,9 +199,9 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	exec(`INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, 'del', $3)`, f.OrgA, f.Client1, stock.ID)
 	expect("/api/v1/locations/"+stock.ID, http.StatusConflict, "quantity_item")
 	moved := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindZone, ParentID: tr.warehouse.ID, Name: "del-moved"})
-	exec(`INSERT INTO asset_movement (organization_id, item_kind, asset_id, movement_type, to_location_id) VALUES ($1, 'asset', $2, 'transfer', $3)`,
+	exec(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, to_location_id) VALUES ($1, 'asset', $2, 'transfer', $3)`,
 		f.OrgA, assetID, moved.ID)
-	expect("/api/v1/locations/"+moved.ID, http.StatusConflict, "asset_movement")
+	expect("/api/v1/locations/"+moved.ID, http.StatusConflict, "stock_movement")
 	scoped := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "del-scoped"})
 	roleID := f.ID()
 	exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'del-role', '[]')`, roleID, f.OrgA)
@@ -694,7 +694,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	}
 	kinds := []string{
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyQuantityItem,
-		locations.DependencyAssetMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
+		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
 		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 	}

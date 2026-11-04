@@ -359,7 +359,7 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`asset_movement`, `assignment`, `composition`, `form_submission` und
+`assignment`, `composition`, `form_submission` und
 `stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
 Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
@@ -556,10 +556,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `asset.parent_asset_id` | `asset_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
 | `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `asset_movement.asset_id` | `asset_movement_asset_id_fkey` | `asset` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.from_location_id` | `asset_movement_from_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.quantity_item_id` | `asset_movement_quantity_item_fk` | `quantity_item` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.to_location_id` | `asset_movement_to_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
 | `assignment.asset_id` | `assignment_asset_id_fkey` | `asset` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `assignment.assigned_by` | `assignment_assigned_by_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `assignment.assigned_to` | `assignment_assigned_to_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
@@ -1359,9 +1355,16 @@ TRUNCATE-Schutz `reticora_truncate_guard` und `stock_movement_isolation`
 mit Org-, Client- und Site-Prädikat (USING mit NULL-Ausnahme, WITH CHECK
 ohne, E-09) sowie die RESTRICTIVE-Policies `stock_movement_scoped_update` und
 `stock_movement_scoped_delete` (Muster 000151). Die Zeilen von
-`asset_movement` (bleibt bis WP-842), des alten `stock_movement` und die
-Historie von `assignment` sind übernommen; ungültige Zeilen stehen in
+`asset_movement`, des alten `stock_movement` und die Historie von
+`assignment` sind übernommen; ungültige Zeilen stehen in
 `migration_quarantine` (Migration `000242`).
+
+Drop der Alttabelle (AST-07, WP-842, Migration 000246): `asset_movement`
+(000055) und die Triggerfunktion `reject_asset_movement_mutation()` sind
+entfernt. Die Migration bricht ab, solange eine Zeile von `asset_movement`
+weder ID-gleich in `stock_movement` noch in `migration_quarantine`
+(Migration `000242`) steht. LOC-11 meldet Bewegungen als Art
+`stock_movement`.
 
 Ziel-Bin interner Bestellungen (STK-05, LOC-11, WP-847, Migration 000247):
 `internal_order` erhält `target_location_id` (UUID, nullable) mit
@@ -1390,7 +1393,6 @@ SECURITY`), Policies mit ihrem Kommando.
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
-| `asset_movement` | ja | ja | asset_movement_isolation (ALL) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |

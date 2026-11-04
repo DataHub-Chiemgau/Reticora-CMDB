@@ -20,7 +20,7 @@ const (
 	DependencyCI             = "ci"
 	DependencyAsset          = "asset"
 	DependencyQuantityItem   = "quantity_item"
-	DependencyAssetMovement  = "asset_movement"
+	DependencyStockMovement  = "stock_movement"
 	DependencyRackMount      = "rack_mount"
 	DependencyRoleAssignment = "role_assignment"
 
@@ -60,10 +60,9 @@ var dependencies = []dependency{
 	{DependencyCI, `EXISTS (SELECT 1 FROM ci WHERE ci.location_id = $1)`},
 	{DependencyAsset, `EXISTS (SELECT 1 FROM asset a WHERE a.location_id = $1)`},
 	{DependencyQuantityItem, `EXISTS (SELECT 1 FROM quantity_item q WHERE q.location_id = $1)`},
-	// Movements of the ledger stock_movement count under the kind of the
-	// former asset_movement until WP-842 drops it (WP-744).
-	{DependencyAssetMovement, `(EXISTS (SELECT 1 FROM asset_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)
-		OR EXISTS (SELECT 1 FROM stock_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1))`},
+	// Movements of the ledger stock_movement (WP-744; the former
+	// asset_movement is dropped since 000246, WP-842).
+	{DependencyStockMovement, `EXISTS (SELECT 1 FROM stock_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)`},
 	{DependencyRackMount, `EXISTS (SELECT 1 FROM rack_mount rm WHERE rm.rack_id = $1)`},
 	{DependencyRoleAssignment, `EXISTS (SELECT 1 FROM role_assignment ra WHERE ra.scope_site_id = $1)`},
 	{DependencyCIAttribute, ciAttributeReference},
@@ -126,15 +125,13 @@ var siteObjects = []siteObject{
 // referenceKinds maps the table of a violated foreign key to the kind it
 // reports when it is not the name of a kind: the nodes of the tree are
 // child locations, the site scope of a service account is a role
-// assignment.
+// assignment. The ledger stock_movement is a kind by its table name.
 var referenceKinds = map[string]string{
 	"location":             DependencyLocation,
 	"building":             DependencyLocation,
 	"room":                 DependencyLocation,
 	"rack":                 DependencyLocation,
 	"service_account_role": DependencyRoleAssignment,
-	// The ledger reports the kind of the former asset_movement (WP-744).
-	"stock_movement": DependencyAssetMovement,
 }
 
 // DependencyError reports the kinds of objects that still reference a

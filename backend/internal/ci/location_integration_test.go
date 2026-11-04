@@ -131,8 +131,9 @@ func TestCILocationDerivation(t *testing.T) {
 // TestMigration74MovesReferencesToLocation runs the real SQL of migration
 // 000074 against references into location_node and checks the mapping, the
 // derivation, the archive and the down migration. It works inside one
-// transaction that is always rolled back: it first reverts 000074, seeds the
-// side tree and its references, then migrates up and down again.
+// transaction that is always rolled back: it first restores asset_movement
+// (dropped by 000246) and reverts 000074, seeds the side tree and its
+// references, then migrates up and down again.
 func TestMigration74MovesReferencesToLocation(t *testing.T) {
 	f := scopetest.Seed(t, "58")
 	if os.Getenv("TEST_DATABASE_URL") == "" {
@@ -147,10 +148,20 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 		return string(raw)
 	}
 	up, down := read("up"), read("down")
+	// 000246 dropped asset_movement (WP-842); its down part recreates the
+	// table in the state after 000075, without the rows of the ledger.
+	raw, err := os.ReadFile("../../migrations/000246_drop_asset_movement.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyTable, _, found := strings.Cut(string(raw), "-- ─── 2. Rows")
+	if !found {
+		t.Fatal("000246 down: no rows section")
+	}
 	ctx := context.Background()
 	roomID := f.Room(t, f.Client1, "mig74")
 	var siteID string
-	if err := f.Admin.QueryRow(ctx, `SELECT site_id::text FROM location WHERE id = $1`, roomID).Scan(&siteID); err != nil {
+	if err = f.Admin.QueryRow(ctx, `SELECT site_id::text FROM location WHERE id = $1`, roomID).Scan(&siteID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,6 +176,7 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
+	exec(legacyTable)
 	exec(down)
 	// Before 000074 asset and quantity item reference location_node; the
 	// derivation of their site from location (000151) is not part of that

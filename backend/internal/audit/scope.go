@@ -197,8 +197,7 @@ var scopeParents = map[string]map[string]string{
 	"reservation":     {"asset_id": "asset", "quantity_item_id": "quantity_item", "ticket_id": "ticket", "order_id": "internal_order"},
 	"role_assignment": {"scope_client_id": "client", "scope_site_id": "site"},
 	// The policy of the ledger filters client and site of the booking
-	// (WP-744); the referenced objects must be visible as well, as for
-	// asset_movement before.
+	// (WP-744); the referenced objects must be visible as well.
 	"stock_movement": {"asset_id": "asset", "consumable_id": "consumable", "quantity_item_id": "quantity_item",
 		"from_location_id": "location", "to_location_id": "location", "ticket_id": "ticket", "order_id": "internal_order",
 		"document_id": "document"},

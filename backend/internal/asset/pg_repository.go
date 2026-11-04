@@ -574,8 +574,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return err
 		}
 		var blocked bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset_movement WHERE asset_id = $1)
-			OR EXISTS (SELECT 1 FROM stock_movement WHERE asset_id = $1)
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_movement WHERE asset_id = $1)
 			OR EXISTS (SELECT 1 FROM disposal_record WHERE asset_id = $1)`, id).Scan(&blocked); err != nil {
 			return fmt.Errorf("check records of asset: %w", err)
 		}
@@ -605,7 +604,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 }
 
 // appendOnly reports whether err is the refusal of an append-only guard
-// (asset_movement, disposal_record) a delete cascaded into, or of the
+// (disposal_record) a delete cascaded into, or of the
 // RESTRICT reference of the ledger stock_movement (WP-744).
 func appendOnly(err error) bool {
 	var pgErr *pgconn.PgError

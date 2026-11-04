@@ -58,7 +58,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 
 	// asset.organization_id is NO ACTION rather than ON DELETE CASCADE, so the
 	// fixture tears its rows down explicitly, child tables first.
-	// The append-only guards on audit_log, asset_movement and stock_movement deliberately block
+	// The append-only guards on audit_log and stock_movement deliberately block
 	// deletion, so their rows are removed under session_replication_role =
 	// replica, which skips triggers for this session only and therefore cannot
 	// race with other packages sharing the database. Everything else is
@@ -76,7 +76,7 @@ func seed(t *testing.T, ctx context.Context, dsn string) {
 			t.Errorf("lift append-only guards: %v", err)
 			return
 		}
-		for _, table := range []string{"asset_movement", "stock_movement", "audit_log"} {
+		for _, table := range []string{"stock_movement", "audit_log"} {
 			if _, err := conn.Exec(ctx,
 				`DELETE FROM `+table+` WHERE organization_id IN ($1::uuid, $2::uuid)`, orgA, orgB); err != nil {
 				t.Errorf("cleanup %s: %v", table, err)
@@ -282,29 +282,6 @@ func TestAuditLogIsAppendOnly(t *testing.T) {
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM audit_log WHERE organization_id = $1`, orgA); err == nil {
 		t.Fatal("expected audit_log DELETE to be rejected")
-	}
-}
-
-// TestAssetMovementIsAppendOnly asserts the movement ledger cannot be rewritten
-// so historical movements never disappear when the current location changes.
-func TestAssetMovementIsAppendOnly(t *testing.T) {
-	dsn := testDatabaseURL(t)
-	ctx := context.Background()
-	seed(t, ctx, dsn)
-	pool := scoped(t, ctx, orgA)
-
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO asset_movement (organization_id, asset_id, movement_type)
-		 VALUES ($1,$2,'receipt')`, orgA, assetA); err != nil {
-		t.Fatalf("record movement: %v", err)
-	}
-	if _, err := pool.Exec(ctx,
-		`UPDATE asset_movement SET movement_type = 'disposal' WHERE organization_id = $1`, orgA); err == nil {
-		t.Fatal("expected asset_movement UPDATE to be rejected")
-	}
-	if _, err := pool.Exec(ctx,
-		`DELETE FROM asset_movement WHERE organization_id = $1`, orgA); err == nil {
-		t.Fatal("expected asset_movement DELETE to be rejected")
 	}
 }
 
