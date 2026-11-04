@@ -60,9 +60,10 @@ var coreFields = map[ObjectKind][]string{
 		"parent_ci_id", "primary_mac", "room_id", "serial_number", "status", "sys_object_id",
 	},
 	KindAsset: {
-		"asset_tag", "barcode", "category", "ci_id", "currency", "invoice_number", "lifecycle_state", "location",
-		"location_id", "notes", "parent_asset_id", "purchase_cost", "purchase_date", "rfid_tag", "serial_number",
-		"status", "supplier", "warranty_end",
+		"asset_tag", "barcode", "category", "ci_id", "contract_id", "cost_center", "currency", "invoice_number",
+		"lifecycle_state", "location", "location_id", "manufacturer", "model", "notes", "owner_team_id",
+		"owner_user_id", "parent_asset_id", "purchase_cost", "purchase_date", "rfid_tag", "serial_number", "status",
+		"supplier", "supplier_id", "warranty_end",
 	},
 	KindContract: {
 		"currency", "end_date", "kind", "notes", "notice_period_days", "start_date", "status", "supplier_id", "value",

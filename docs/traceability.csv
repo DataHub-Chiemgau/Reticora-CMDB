@@ -1356,3 +1356,5 @@ RBA-07;[P2];B;backend/internal/export/fieldrights_test.go;WP-729
 RBA-07;[P2];B;backend/internal/ci/actions_integration_test.go;WP-728
 RBA-07;[P2];B;backend/internal/relationship/fieldrights_integration_test.go;WP-770
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/links_integration_test.go;WP-764
+AST-01;[P2];B;backend/internal/asset/asset_integration_test.go;WP-271
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/asset/asset_integration_test.go;WP-271

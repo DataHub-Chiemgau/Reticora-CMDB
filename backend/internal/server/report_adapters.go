@@ -69,10 +69,10 @@ func (c assetCreator) Create(ctx context.Context, ref *movement.AssetRef) (strin
 		Category:       ref.Category,
 		Status:         "in_stock",
 		SerialNumber:   ref.SerialNumber,
-		CustomFields:   map[string]any{},
-	}
-	if ref.LocationID != "" {
-		a.CustomFields["location_id"] = ref.LocationID
+		// The canonical location column (WP-271); the currency is the
+		// organization's (trigger asset_default_currency).
+		LocationID:   ref.LocationID,
+		CustomFields: map[string]any{},
 	}
 	if err := c.repo.Create(ctx, a); err != nil {
 		return "", err

@@ -1,15 +1,20 @@
 package asset
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -79,6 +84,7 @@ var parentOwnedColumns = map[string]string{
 	"purchase_date":  "PurchaseDate",
 	"purchase_cost":  "PurchaseCost",
 	"supplier":       "Supplier",
+	"supplier_id":    "SupplierID",
 	"invoice_number": "InvoiceNumber",
 	"warranty_end":   "WarrantyEnd",
 	"location":       "Location",
@@ -96,11 +102,54 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assets/{id}/label.svg", h.Label)
 }
 
-// List handles GET /api/v1/assets
-func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+// requestContext returns the organization and the field policy of the
+// request (permission.PolicyFrom), or answers 401 or 500 (policy not
+// resolvable, fail-closed).
+func requestContext(w http.ResponseWriter, r *http.Request) (string, *permission.FieldPolicy, bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return "", nil, false
+	}
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		slog.WarnContext(r.Context(), "asset field policy failed", "error", err)
+		api.WriteRepoError(w, err)
+		return "", nil, false
+	}
+	return t.OrganizationID, policy, true
+}
+
+// assetRef is the object reference of an asset for its field permissions:
+// the asset, its client and its site.
+func assetRef(a *Asset) permission.ObjectRef {
+	return permission.ObjectRef{ID: a.ID, ClientID: a.ClientID, SiteID: a.SiteID}
+}
+
+// project returns the asset as the policy lets the principal read it
+// (RBA-07, WP-265, Konvention 11): the asset itself without a restriction,
+// otherwise without the fields it may not read and with the readable
+// custom fields only.
+func project(policy *permission.FieldPolicy, a *Asset) (any, error) {
+	return permission.ProjectValue(policy, permission.KindAsset, a.AssetTypeID, assetRef(a), a)
+}
+
+// projectCIRef returns the linked CI's identity for the policy: when the
+// CI policy is restricted only id, name and status, the identity without
+// technical fields (projecting them needs the CI's type and scope, which
+// the identity does not carry; fail-closed).
+func projectCIRef(policy *permission.FieldPolicy, ref *CIRef) any {
+	if !permission.NeedsProjection(policy, permission.KindCI) {
+		return ref
+	}
+	return map[string]string{"id": ref.ID, "name": ref.Name, "status": ref.Status}
+}
+
+// List handles GET /api/v1/assets. A filter, search or sort on a field the
+// principal cannot read in every scope is 403 with the fields.
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	orgID, policy, ok := requestContext(w, r)
+	if !ok {
 		return
 	}
 
@@ -117,8 +166,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortBy:   r.URL.Query().Get("sort_by"),
 		SortDir:  r.URL.Query().Get("sort_dir"),
 	}
+	if filterErr := permission.CheckListFilter(policy, permission.KindAsset, nil, listFieldPaths(&filter)); filterErr != nil {
+		api.WriteFieldError(w, filterErr)
+		return
+	}
 
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, &filter, page)
+	items, total, err := h.repo.List(r.Context(), orgID, &filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -132,21 +185,48 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != nil {
 		hasMore = len(items) == page.Limit
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Asset]{
-		Data:       items,
-		Total:      total,
-		Limit:      page.Limit,
-		Offset:     page.Offset,
-		HasMore:    hasMore,
-		NextCursor: NextCursor(items, &filter, page.Limit),
+	nextCursor := NextCursor(items, &filter, page.Limit)
+	if !permission.NeedsProjection(policy, permission.KindAsset) {
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[Asset]{
+			Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: nextCursor,
+		})
+		return
+	}
+	data := make([]any, len(items))
+	for i := range items {
+		if data[i], err = project(policy, &items[i]); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[any]{
+		Data: data, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: nextCursor,
 	})
+}
+
+// listFieldPaths are the DTO paths the list reads: its filters, the search
+// over the inventory number and a sort on a field column.
+func listFieldPaths(filter *FilterParams) []string {
+	var paths []string
+	if filter.Status != "" {
+		paths = append(paths, "status")
+	}
+	if filter.Category != "" {
+		paths = append(paths, "category")
+	}
+	if filter.Search != "" {
+		paths = append(paths, "asset_tag")
+	}
+	if column, _ := NormalizeSort(filter); column == "asset_tag" || column == "category" || column == "status" {
+		paths = append(paths, column)
+	}
+	return paths
 }
 
 // Get handles GET /api/v1/assets/{id}
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	orgID, policy, ok := requestContext(w, r)
+	if !ok {
 		return
 	}
 
@@ -154,32 +234,38 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
+	item, err := h.repo.GetByID(r.Context(), orgID, id)
 	if err != nil {
 		writeAssetError(w, r, err)
+		return
+	}
+	body, err := project(policy, item)
+	if err != nil {
+		api.WriteRepoError(w, err)
 		return
 	}
 
 	// Enrich with the linked CI's read-only technical identity (spec §4); the
 	// CI stays the source of truth for technical data.
 	if h.cis != nil && item.CIID != "" {
-		if linked, err := h.cis.GetByID(r.Context(), t.OrganizationID, item.CIID); err == nil && linked != nil {
+		if linked, err := h.cis.GetByID(r.Context(), orgID, item.CIID); err == nil && linked != nil {
 			api.WriteJSON(w, http.StatusOK, map[string]any{
-				"asset": item,
-				"ci":    linked,
+				"asset": body,
+				"ci":    projectCIRef(policy, linked),
 			})
 			return
 		}
 	}
 
-	api.WriteJSON(w, http.StatusOK, item)
+	api.WriteJSON(w, http.StatusOK, body)
 }
 
-// Create handles POST /api/v1/assets
+// Create handles POST /api/v1/assets. A missing or empty currency is the
+// currency of the organization; every sent field must be editable for the
+// principal (403 with the fields).
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	orgID, policy, ok := requestContext(w, r)
+	if !ok {
 		return
 	}
 
@@ -193,6 +279,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and asset_tag are required")
 		return
 	}
+	if err := validCurrency(req.Currency); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 
 	category := req.Category
 	if category == "" {
@@ -202,24 +292,27 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "in_stock"
 	}
-	currency := req.Currency
-	if currency == "" {
-		currency = "EUR"
-	}
 
 	a := &Asset{
-		OrganizationID: t.OrganizationID,
+		OrganizationID: orgID,
 		ClientID:       req.ClientID,
 		CIID:           req.CIID,
 		AssetTag:       req.AssetTag,
 		Name:           req.Name,
 		Category:       category,
 		Status:         status,
+		Manufacturer:   req.Manufacturer,
+		Model:          req.Model,
 		PurchaseDate:   req.PurchaseDate,
 		PurchaseCost:   req.PurchaseCost,
-		Currency:       currency,
+		Currency:       strings.TrimSpace(req.Currency),
 		WarrantyEnd:    req.WarrantyEnd,
+		CostCenter:     req.CostCenter,
 		Supplier:       req.Supplier,
+		SupplierID:     req.SupplierID,
+		ContractID:     req.ContractID,
+		OwnerUserID:    req.OwnerUserID,
+		OwnerTeamID:    req.OwnerTeamID,
 		InvoiceNumber:  req.InvoiceNumber,
 		SerialNumber:   req.SerialNumber,
 		RFIDTag:        req.RFIDTag,
@@ -231,13 +324,32 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if a.CustomFields == nil {
 		a.CustomFields = make(map[string]any)
 	}
+	if err := permission.CheckWrite(policy, permission.KindAsset, "", assetRef(a), req.SentFields()); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 
 	if err := h.repo.Create(r.Context(), a); err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, a)
+	body, err := project(policy, a)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, body)
+}
+
+// validCurrency checks a sent currency (ISO 4217, WP-107): empty passes
+// (the organization's currency applies), anything else must be an active
+// code (400 on currency).
+func validCurrency(code string) error {
+	if strings.TrimSpace(code) == "" {
+		return nil
+	}
+	return tenantapi.ValidCurrency(code)
 }
 
 // ParentOwnedFieldError refuses a write to a shared inventory property of a
@@ -252,9 +364,12 @@ func (e *ParentOwnedFieldError) Error() string {
 // writeAssetError answers a failed asset request: an asset that is unknown,
 // of another organization or outside the caller's scope is 404 (TEN-04), a
 // parent-owned field of a composition child 409 with its domain message, a
-// linked CI that is no UUID or not visible 422 on ci_id. Database errors go
-// through api.WriteRepoError; no table, constraint, policy or SQLSTATE text
-// reaches the client (API-03, F-047), the log keeps it.
+// linked CI that is no UUID or not visible 422 on ci_id, a reference that is
+// not usable 422 on its field, a taken inventory number, barcode or RFID tag
+// 409 on its field, a field the principal may not edit 403 with the fields.
+// Database errors go through api.WriteRepoError; no table, constraint,
+// policy or SQLSTATE text reaches the client (API-03, F-047), the log keeps
+// it.
 func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 	var owned *ParentOwnedFieldError
 	switch {
@@ -269,11 +384,33 @@ func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// readOnlyPaths name the canonical write path of each read-only member of
+// the asset (E-120).
+var readOnlyPaths = []struct {
+	field, message string
+	sent           func(*UpdateRequest) bool
+}{
+	{"location_id", "is read-only; the location changes through stock movements (POST /api/v1/stock-movements) or rack placement",
+		func(req *UpdateRequest) bool { return req.LocationID.Set }},
+	{"lifecycle_state", "is read-only; the state changes through POST /api/v1/assets/{id}/lifecycle-transitions",
+		func(req *UpdateRequest) bool { return req.LifecycleState.Set }},
+}
+
+// rejectReadOnly returns the 422 field error of the first read-only member
+// the request sends.
+func rejectReadOnly(req *UpdateRequest) error {
+	for _, ro := range readOnlyPaths {
+		if ro.sent(req) {
+			return &api.FieldError{Field: ro.field, Message: ro.message, Status: http.StatusUnprocessableEntity}
+		}
+	}
+	return nil
+}
+
 // Update handles PATCH /api/v1/assets/{id}
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	orgID, policy, ok := requestContext(w, r)
+	if !ok {
 		return
 	}
 
@@ -287,22 +424,100 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if err := rejectReadOnly(&req); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if req.Currency != nil {
+		if err := validCurrency(*req.Currency); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 
 	// Children must not duplicate the parent asset's shared inventory
 	// properties (spec §5). Reject writes to parent-owned fields when the
 	// asset participates as a composition child.
-	if err := h.rejectParentOwnedFields(r.Context(), t.OrganizationID, id, &req); err != nil {
+	if err := h.rejectParentOwnedFields(r.Context(), orgID, id, &req); err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
 
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, &req)
+	req.Check = checkUpdate(policy, &req)
+	item, err := h.repo.Update(r.Context(), orgID, id, &req)
 	if err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, item)
+	body, err := project(policy, item)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, body)
+}
+
+// checkUpdate returns the check of a PATCH against the field permissions
+// (WP-265): every sent field the principal may not read counts, whatever
+// its value (no equality oracle), and every readable field whose value
+// changes; each must be editable.
+func checkUpdate(policy *permission.FieldPolicy, req *UpdateRequest) func(*Asset) error {
+	return func(current *Asset) error {
+		if !policy.Restricted(permission.KindAsset) {
+			return nil
+		}
+		ref := assetRef(current)
+		before, err := fieldValues(current)
+		if err != nil {
+			return err
+		}
+		after, err := fieldValues(req)
+		if err != nil {
+			return err
+		}
+		var changed []string
+		for _, path := range req.SentFields() {
+			if !permission.Readable(policy, permission.KindAsset, current.AssetTypeID, ref, path) ||
+				!bytes.Equal(normalizedValue(before[path]), normalizedValue(after[path])) {
+				changed = append(changed, path)
+			}
+		}
+		return permission.CheckWrite(policy, permission.KindAsset, current.AssetTypeID, ref, changed)
+	}
+}
+
+// fieldValues encodes v (an asset or an update request) as its DTO members,
+// with each custom field as custom_fields.<key>.
+func fieldValues(v any) (map[string]json.RawMessage, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]json.RawMessage
+	if decodeErr := json.Unmarshal(raw, &out); decodeErr != nil {
+		return nil, decodeErr
+	}
+	if custom, ok := out["custom_fields"]; ok {
+		var fields map[string]json.RawMessage
+		if decodeErr := json.Unmarshal(custom, &fields); decodeErr == nil {
+			for k, value := range fields {
+				out[customFieldsPrefix+k] = value
+			}
+		}
+	}
+	return out, nil
+}
+
+// normalizedValue treats an absent member, null, "" and 0 alike: the
+// repository stores an empty text as NULL and the DTO omits empty members.
+func normalizedValue(raw json.RawMessage) []byte {
+	switch s := strings.TrimSpace(string(raw)); s {
+	case "", "null", `""`, "0":
+		return nil
+	default:
+		return []byte(s)
+	}
 }
 
 // rejectParentOwnedFields returns a *ParentOwnedFieldError when the request

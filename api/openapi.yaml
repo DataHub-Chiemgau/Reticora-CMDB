@@ -3063,12 +3063,30 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission (ProblemDetail) or the field
+            permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden,
+            FieldForbiddenProblem: `fields` names the DTO paths): a status or
+            category filter, a search (asset_tag) or a sort on asset_tag,
+            category or status the caller cannot read in every scope.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createAsset
       tags: [Assets]
       summary: Create an asset
+      description: >-
+        Creates an asset (AST-01, WP-271). A missing or empty currency is the
+        currency of the organization; the asset starts in the initial state
+        of its effective lifecycle model (physical_asset: ordered). The
+        location and the lifecycle state are not writable here.
       requestBody:
         required: true
         content:
@@ -3087,7 +3105,20 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: client_id lies outside the caller's scope.
+          description: >-
+            client_id lies outside the caller's scope (ProblemDetail), or the
+            field permissions do not let the caller edit a sent field
+            (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
+        '409':
+          description: >-
+            The inventory number (asset_tag), the barcode or the rfid_tag is
+            already taken in the organization; `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -3095,7 +3126,11 @@ paths:
           description: >-
             ci_id or client_id is no UUID, or ci_id names a CI that is unknown,
             of another organization or outside the caller's scope (all alike,
-            TEN-04), or client_id names no client of the organization.
+            TEN-04), or client_id names no client of the organization; or
+            supplier_id, contract_id, owner_user_id or owner_team_id is not
+            usable: unknown, of another organization, outside the caller's
+            scope or (supplier, contract) of another client than the asset
+            (all alike, `field` names it).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -3143,17 +3178,37 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The field permissions do not let the caller edit a sent field: a
+            field it cannot read (whatever the value) or a readable field
+            whose value changes (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The field is owned by the parent asset of a composition (spec §5).
+          description: >-
+            The field is owned by the parent asset of a composition (spec §5),
+            or the inventory number, barcode or rfid_tag is already taken in
+            the organization (`field` names it).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           description: >-
             ci_id is no UUID or names a CI that is unknown, of another
-            organization or outside the caller's scope (all alike, TEN-04).
+            organization or outside the caller's scope (all alike, TEN-04); a
+            reference (supplier_id, contract_id, owner_user_id, owner_team_id)
+            is not usable for the asset (all alike); or the body sends the
+            read-only location_id (written through stock movements and rack
+            placement) or lifecycle_state (written through POST
+            /api/v1/assets/{id}/lifecycle-transitions). `field` names the
+            field.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -23916,6 +23971,13 @@ components:
         warranty_end: { type: string, format: date }
         supplier: { type: string }
         invoice_number: { type: string }
+        manufacturer: { type: string, description: Manufacturer of the asset (AST-01, WP-271). }
+        model: { type: string, description: Model of the asset (AST-01, WP-271). }
+        cost_center: { type: string, description: Cost center of the asset (AST-01, WP-271). }
+        owner_user_id: { type: string, format: uuid, description: Owning user of the asset (WP-271). }
+        owner_team_id: { type: string, format: uuid, description: Owning team of the asset (WP-271). }
+        supplier_id: { type: string, format: uuid, description: Supplier record of the asset (E-41, WP-271). }
+        contract_id: { type: string, format: uuid, description: Contract of the asset (WP-271). }
 
     CreateCIRequest:
       type: object
@@ -25472,7 +25534,13 @@ components:
 
     Asset:
       type: object
-      required: [id, organization_id, asset_tag, name, category, status, custom_fields, created_at, updated_at]
+      description: >-
+        An asset after AST-01 (WP-271). The fields id, organization_id,
+        client_id, name, custom_fields and the timestamps are always present
+        (client_id when set); the others are left out when the field
+        permissions do not let the caller read them (object kind asset,
+        field keys core.<field>, custom fields attributes.<key>, RBA-07).
+      required: [id, organization_id, name, custom_fields, created_at, updated_at]
       properties:
         id:
           type: string
@@ -25484,11 +25552,18 @@ components:
           type: string
         asset_tag:
           type: string
+          description: Inventory number, unique per organization.
         name:
           type: string
         category:
           type: string
         status:
+          type: string
+          deprecated: true
+          description: Legacy status; the state of the asset is lifecycle_state (E-120).
+        manufacturer:
+          type: string
+        model:
           type: string
         purchase_date:
           type: string
@@ -25497,21 +25572,54 @@ components:
           type: number
         currency:
           type: string
+          description: ISO 4217 code; the currency of the organization unless set.
         warranty_end:
           type: string
           format: date
+        cost_center:
+          type: string
         supplier:
           type: string
+          deprecated: true
+          description: Free text of the supplier; the supplier record is supplier_id (E-41).
+        supplier_id:
+          type: string
+          format: uuid
+        contract_id:
+          type: string
+          format: uuid
+        owner_user_id:
+          type: string
+          format: uuid
+        owner_team_id:
+          type: string
+          format: uuid
         invoice_number:
           type: string
         serial_number:
           type: string
+        rfid_tag:
+          type: string
+          description: Unique per organization.
+        barcode:
+          type: string
+          description: Unique per organization.
         location:
           type: string
+          deprecated: true
+          description: Free text of the location; the location is location_id (E-120).
         location_id:
           type: string
           readOnly: true
-          description: Node of the canonical location tree; changed through stock movements.
+          description: >-
+            Node of the canonical location tree; changed through stock
+            movements and rack placement only.
+        lifecycle_state:
+          type: string
+          readOnly: true
+          description: >-
+            State of the effective asset lifecycle model (E-120); changed
+            through POST /api/v1/assets/{id}/lifecycle-transitions only.
         notes:
           type: string
         custom_fields:
@@ -25540,6 +25648,11 @@ components:
           type: string
         status:
           type: string
+          deprecated: true
+        manufacturer:
+          type: string
+        model:
+          type: string
         purchase_date:
           type: string
           format: date
@@ -25547,11 +25660,29 @@ components:
           type: number
         currency:
           type: string
+          description: ISO 4217 code (400 on currency otherwise); missing or empty is the currency of the organization.
         warranty_end:
           type: string
           format: date
+        cost_center:
+          type: string
         supplier:
           type: string
+          deprecated: true
+        supplier_id:
+          type: string
+          format: uuid
+          description: Org-wide supplier or one of the asset's client (422 otherwise).
+        contract_id:
+          type: string
+          format: uuid
+          description: Org-wide contract or one of the asset's client (422 otherwise).
+        owner_user_id:
+          type: string
+          format: uuid
+        owner_team_id:
+          type: string
+          format: uuid
         invoice_number:
           type: string
         serial_number:
@@ -25562,6 +25693,7 @@ components:
           type: string
         location:
           type: string
+          deprecated: true
         notes:
           type: string
         custom_fields:
@@ -25570,12 +25702,21 @@ components:
 
     UpdateAssetRequest:
       type: object
+      description: >-
+        location_id and lifecycle_state are read-only: sending either is 422
+        naming the canonical write path. An empty currency is the currency
+        of the organization.
       properties:
         name:
           type: string
         category:
           type: string
         status:
+          type: string
+          deprecated: true
+        manufacturer:
+          type: string
+        model:
           type: string
         purchase_date:
           type: string
@@ -25587,8 +25728,23 @@ components:
         warranty_end:
           type: string
           format: date
+        cost_center:
+          type: string
         supplier:
           type: string
+          deprecated: true
+        supplier_id:
+          type: string
+          format: uuid
+        contract_id:
+          type: string
+          format: uuid
+        owner_user_id:
+          type: string
+          format: uuid
+        owner_team_id:
+          type: string
+          format: uuid
         invoice_number:
           type: string
         serial_number:
@@ -25599,6 +25755,7 @@ components:
           type: string
         location:
           type: string
+          deprecated: true
         notes:
           type: string
         ci_id:

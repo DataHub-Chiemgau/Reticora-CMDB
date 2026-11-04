@@ -2523,7 +2523,10 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
 		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_end, 'YYYY-MM-DD'), ''),
 		       COALESCE(supplier, ''), COALESCE(invoice_number, ''), COALESCE(asset_type_id::text, ''),
-		       COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+		       COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
+		       COALESCE(manufacturer, ''), COALESCE(model, ''), COALESCE(cost_center, ''),
+		       COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, ''),
+		       COALESCE(supplier_id::text, ''), COALESCE(contract_id::text, '')
 		FROM asset WHERE id = ANY($1::uuid[])`, ids)
 	if err != nil {
 		return fmt.Errorf("load asset facts: %w", err)
@@ -2533,7 +2536,8 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 		var a AssetFacts
 		if err := rows.Scan(&a.ID, &a.AssetTag, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
 			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
-			&a.ClientID, &a.SiteID); err != nil {
+			&a.ClientID, &a.SiteID, &a.Manufacturer, &a.Model, &a.CostCenter, &a.OwnerUserID, &a.OwnerTeamID,
+			&a.SupplierID, &a.ContractID); err != nil {
 			return fmt.Errorf("scan asset facts: %w", err)
 		}
 		for _, item := range byAsset[a.ID] {

@@ -553,9 +553,10 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/tags/{id}/merge": {"/api/v1/tags/<tag_src>/merge", `{"into_id":"<id:/api/v1/tags>"}`},
 
 	// Lifecycle transitions (WP-724): the asset has no type model, so
-	// physical_asset with the initial state ordered; <ci6> has the type
-	// application with the system model software.
-	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"ordered","reason":"a5 order"}`},
+	// physical_asset; it starts in the initial state ordered (WP-271), the
+	// transition receives it. <ci6> has the type application with the
+	// system model software.
+	"POST /api/v1/assets/{id}/lifecycle-transitions": {"", `{"to_state":"received","reason":"a5 receive"}`},
 	"POST /api/v1/cis/{id}/lifecycle-transitions":    {"/api/v1/cis/<ci6>/lifecycle-transitions", `{"to_state":"evaluation","reason":"a5 evaluation"}`},
 
 	// Metamodel drafts (WP-260): an item for a new type; its removal names

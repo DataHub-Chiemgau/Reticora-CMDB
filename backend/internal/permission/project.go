@@ -42,9 +42,19 @@ var ciProjected = map[string]bool{
 	"os_version": true, "firmware_version": true, "sys_object_id": true,
 }
 
-// assetStructural are the members of the embedded asset facts the asset
-// policy does not cover.
-var assetStructural = map[string]bool{"id": true, "name": true}
+// assetStructural are the members of the asset DTO and of the embedded
+// asset facts the asset policy does not cover: identity, name, client scope
+// and the timestamps (WP-271).
+var assetStructural = map[string]bool{
+	"id": true, "organization_id": true, "client_id": true, "name": true, "created_at": true, "updated_at": true,
+}
+
+// assetCustomFields is the member of the asset DTO with the custom fields;
+// custom_fields.<key> has the field key attributes.<key> (WP-271).
+const (
+	assetCustomFields       = "custom_fields"
+	assetCustomFieldsPrefix = assetCustomFields + "."
+)
 
 // contractStructural are the members of the contract DTO field permissions
 // do not cover (WP-269): identity, number, client scope, version and the
@@ -138,6 +148,10 @@ func (c *projectConfig) fieldKey(kind ObjectKind, path string) (key string, stru
 			return "", true, true
 		case slices.Contains(coreFields[KindAsset], path):
 			return NamespaceCore + "." + path, false, true
+		case strings.HasPrefix(path, assetCustomFieldsPrefix):
+			if name := strings.TrimPrefix(path, assetCustomFieldsPrefix); name != "" {
+				return NamespaceAttributes + "." + name, false, true
+			}
 		}
 	case KindContract:
 		switch {
@@ -293,17 +307,42 @@ func toObject(v any) (map[string]json.RawMessage, error) {
 	return body, nil
 }
 
-// projectObject keeps the members of body the principal may read.
+// projectObject keeps the members of body the principal may read; the
+// custom fields of an asset keep the readable keys.
 func (c *projectConfig) projectObject(policy *FieldPolicy, kind ObjectKind, typeID string, ref *ObjectRef, body map[string]json.RawMessage) map[string]json.RawMessage {
 	if !policy.Restricted(kind) {
 		return body
 	}
-	for member := range body {
+	for member, raw := range body {
+		if kind == KindAsset && member == assetCustomFields && !isNull(raw) {
+			body[member] = c.projectCustomFields(policy, typeID, ref, raw)
+			continue
+		}
 		if !c.readable(policy, kind, typeID, ref, member) {
 			delete(body, member)
 		}
 	}
 	return body
+}
+
+// projectCustomFields returns the custom fields of an asset (a JSON
+// object) without the keys the principal may not read; an empty object
+// when they are no object (fail-closed).
+func (c *projectConfig) projectCustomFields(policy *FieldPolicy, typeID string, ref *ObjectRef, raw json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return json.RawMessage("{}")
+	}
+	for k := range fields {
+		if !c.readable(policy, KindAsset, typeID, ref, assetCustomFieldsPrefix+k) {
+			delete(fields, k)
+		}
+	}
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return out
 }
 
 func isNull(raw json.RawMessage) bool {

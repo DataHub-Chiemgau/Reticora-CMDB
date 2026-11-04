@@ -1376,7 +1376,10 @@ export interface paths {
     /** List assets */
     get: operations['listAssets'];
     put?: never;
-    /** Create an asset */
+    /**
+     * Create an asset
+     * @description Creates an asset (AST-01, WP-271). A missing or empty currency is the currency of the organization; the asset starts in the initial state of its effective lifecycle model (physical_asset: ordered). The location and the lifecycle state are not writable here.
+     */
     post: operations['createAsset'];
     delete?: never;
     options?: never;
@@ -11441,6 +11444,32 @@ export interface components {
       warranty_end?: string;
       supplier?: string;
       invoice_number?: string;
+      /** @description Manufacturer of the asset (AST-01 */
+      manufacturer?: string;
+      /** @description Model of the asset (AST-01 */
+      model?: string;
+      /** @description Cost center of the asset (AST-01 */
+      cost_center?: string;
+      /**
+       * Format: uuid
+       * @description Owning user of the asset (WP-271).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning team of the asset (WP-271).
+       */
+      owner_team_id?: string;
+      /**
+       * Format: uuid
+       * @description Supplier record of the asset (E-41
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Contract of the asset (WP-271).
+       */
+      contract_id?: string;
     };
     CreateCIRequest: {
       /**
@@ -12286,27 +12315,59 @@ export interface components {
     ModuleListResponse: {
       data: components['schemas']['ModuleStatus'][];
     };
+    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). */
     Asset: {
       id: string;
       organization_id: string;
       client_id?: string;
       ci_id?: string;
-      asset_tag: string;
+      /** @description Inventory number, unique per organization. */
+      asset_tag?: string;
       name: string;
-      category: string;
-      status: string;
+      category?: string;
+      /**
+       * @deprecated
+       * @description Legacy status; the state of the asset is lifecycle_state (E-120).
+       */
+      status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
+      /** @description ISO 4217 code; the currency of the organization unless set. */
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /**
+       * @deprecated
+       * @description Free text of the supplier; the supplier record is supplier_id (E-41).
+       */
       supplier?: string;
+      /** Format: uuid */
+      supplier_id?: string;
+      /** Format: uuid */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
+      /** @description Unique per organization. */
+      rfid_tag?: string;
+      /** @description Unique per organization. */
+      barcode?: string;
+      /**
+       * @deprecated
+       * @description Free text of the location; the location is location_id (E-120).
+       */
       location?: string;
-      /** @description Node of the canonical location tree; changed through stock movements. */
+      /** @description Node of the canonical location tree; changed through stock movements and rack placement only. */
       readonly location_id?: string;
+      /** @description State of the effective asset lifecycle model (E-120); changed through POST /api/v1/assets/{id}/lifecycle-transitions only. */
+      readonly lifecycle_state?: string;
       notes?: string;
       custom_fields: {
         [key: string]: unknown;
@@ -12322,39 +12383,75 @@ export interface components {
       asset_tag: string;
       name: string;
       category?: string;
+      /** @deprecated */
       status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
+      /** @description ISO 4217 code (400 on currency otherwise); missing or empty is the currency of the organization. */
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /** @deprecated */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Org-wide supplier or one of the asset's client (422 otherwise).
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Org-wide contract or one of the asset's client (422 otherwise).
+       */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
       rfid_tag?: string;
       barcode?: string;
+      /** @deprecated */
       location?: string;
       notes?: string;
       custom_fields?: {
         [key: string]: unknown;
       };
     };
+    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization. */
     UpdateAssetRequest: {
       name?: string;
       category?: string;
+      /** @deprecated */
       status?: string;
+      manufacturer?: string;
+      model?: string;
       /** Format: date */
       purchase_date?: string;
       purchase_cost?: number;
       currency?: string;
       /** Format: date */
       warranty_end?: string;
+      cost_center?: string;
+      /** @deprecated */
       supplier?: string;
+      /** Format: uuid */
+      supplier_id?: string;
+      /** Format: uuid */
+      contract_id?: string;
+      /** Format: uuid */
+      owner_user_id?: string;
+      /** Format: uuid */
+      owner_team_id?: string;
       invoice_number?: string;
       serial_number?: string;
       rfid_tag?: string;
       barcode?: string;
+      /** @deprecated */
       location?: string;
       notes?: string;
       ci_id?: string;
@@ -18824,6 +18921,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (asset_tag) or a sort on asset_tag, category or status the caller cannot read in every scope. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -18851,8 +18958,18 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description client_id lies outside the caller's scope. */
+      /** @description client_id lies outside the caller's scope (ProblemDetail), or the field permissions do not let the caller edit a sent field (FieldForbiddenProblem with `fields`). */
       403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      /** @description The inventory number (asset_tag), the barcode or the rfid_tag is already taken in the organization; `field` names it. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -18860,7 +18977,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization. */
+      /** @description ci_id or client_id is no UUID, or ci_id names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04), or client_id names no client of the organization; or supplier_id, contract_id, owner_user_id or owner_team_id is not usable: unknown, of another organization, outside the caller's scope or (supplier, contract) of another client than the asset (all alike, `field` names it). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -18947,8 +19064,18 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description The field permissions do not let the caller edit a sent field: a field it cannot read (whatever the value) or a readable field whose value changes (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
-      /** @description The field is owned by the parent asset of a composition (spec §5). */
+      /** @description The field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -18957,7 +19084,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      /** @description ci_id is no UUID or names a CI that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a reference (supplier_id, contract_id, owner_user_id, owner_team_id) is not usable for the asset (all alike); or the body sends the read-only location_id (written through stock movements and rack placement) or lifecycle_state (written through POST /api/v1/assets/{id}/lifecycle-transitions). `field` names the field. */
       422: {
         headers: {
           [name: string]: unknown;

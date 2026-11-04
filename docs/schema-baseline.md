@@ -1123,6 +1123,30 @@ Organisation in `tag` (Schlüssel nach `tag_normalize_key`, leere Schlüssel
 entfallen, `display_name` de/en = Originalwert, bestehende Schlüssel
 bleiben) und `ticket_tag`; danach entfällt die Spalte `ticket.tags`.
 
+Asset-Kern nach AST-01 (WP-271, E-41, E-120, E-124, Migration 000229):
+`asset` erhält `manufacturer`, `model`, `cost_center`, `supplier_id`,
+`contract_id`, `owner_user_id` und `owner_team_id`. Verweise mit
+Organisation (K19): `asset_supplier_id_fkey` (`supplier_id`,
+`organization_id`) → `supplier`, `asset_contract_id_fkey` (`contract_id`,
+`organization_id`) → `contract`, `asset_owner_user_id_fkey`
+(`owner_user_id`, `organization_id`) → `app_user` ohne Löschaktion (E-124;
+das Löschen des Nutzers ergibt 409) und `asset_owner_team_id_fkey`
+(`owner_team_id`, `organization_id`) → `team` ON DELETE SET NULL
+(`owner_team_id`); die Fremdschlüssel sind Rückfallebene, Scope und Client
+prüft das Repository. Indizes `idx_asset_supplier`, `idx_asset_contract`,
+`idx_asset_owner_user`, `idx_asset_owner_team` (je Spalte mit
+`organization_id`, partiell auf NOT NULL). `barcode` ist je Organisation
+eindeutig (`idx_asset_barcode_org` auf `organization_id`, `barcode` WHERE
+`barcode IS NOT NULL`); Bestandsdubletten behält die älteste Zeile, die
+übrigen stehen mit Grund `duplicate_barcode` in `migration_quarantine`.
+`currency` hat keinen Standard mehr: der Trigger `asset_default_currency`
+(BEFORE INSERT OR UPDATE OF `currency`, Funktion `asset_default_currency()`)
+setzt bei NULL oder leerem Wert `organization.currency`. Datenmigration:
+Lieferanten aus dem Freitext `supplier` (org-weit, gleichnamige Zeilen
+werden wiederverwendet), `lifecycle_state` aus `status` (E-120 (a); ohne
+Zustand, z. B. `lost`, als Kopie in `migration_quarantine`) und
+`location_id` aus `custom_fields.location_id`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL

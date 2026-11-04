@@ -167,6 +167,15 @@ type AssetFacts struct {
 	WarrantyEnd    string `json:"warranty_end,omitempty"`
 	Supplier       string `json:"supplier,omitempty"`
 	InvoiceNumber  string `json:"invoice_number,omitempty"`
+	// Manufacturer to ContractID are the AST-01 fields of the asset
+	// (WP-271), read-only on the CI (DB-05).
+	Manufacturer string `json:"manufacturer,omitempty"`
+	Model        string `json:"model,omitempty"`
+	CostCenter   string `json:"cost_center,omitempty"`
+	OwnerUserID  string `json:"owner_user_id,omitempty"`
+	OwnerTeamID  string `json:"owner_team_id,omitempty"`
+	SupplierID   string `json:"supplier_id,omitempty"`
+	ContractID   string `json:"contract_id,omitempty"`
 	// AssetTypeID, ClientID and SiteID are the type and scope of the asset:
 	// the facts are projected by the asset's field permissions (RBA-07,
 	// WP-265). Not part of the API.
