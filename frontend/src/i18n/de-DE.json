@@ -1220,7 +1220,9 @@
       "approved": "Genehmigt",
       "rejected": "Abgelehnt",
       "ordered": "Bestellt",
+      "partially_received": "Teilweise geliefert",
       "received": "Geliefert",
+      "closed": "Abgeschlossen",
       "cancelled": "Storniert"
     }
   },

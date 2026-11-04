@@ -1,39 +1,23 @@
 package order
 
 import (
-	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
-// MovementRecorder records order receipts into the inventory movement ledger
-// (spec §9: receipt is an auditable movement). Satisfied by the movement
-// repository.
-type MovementRecorder interface {
-	Record(ctx context.Context, m *movement.Movement) error
-}
-
 // Handler provides HTTP handlers for the internal ordering module.
 type Handler struct {
-	repo      Repository
-	movements MovementRecorder
+	repo Repository
 }
 
 // NewHandler creates a new order handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
-}
-
-// WithMovements attaches the movement ledger so order items received into
-// inventory emit receipt movements. Movement failures never fail the order.
-func (h *Handler) WithMovements(recorder MovementRecorder) *Handler {
-	h.movements = recorder
-	return h
 }
 
 // RegisterRoutes registers order routes on the given mux.
@@ -46,7 +30,27 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/orders/{id}/submit", h.Submit)
 	r.Post("/api/v1/orders/{id}/approve", h.Approve)
 	r.Post("/api/v1/orders/{id}/reject", h.Reject)
+	r.Post("/api/v1/orders/{id}/place", h.Place)
+	r.Post("/api/v1/orders/{id}/cancel", h.Cancel)
+	r.Post("/api/v1/orders/{id}/close", h.Close)
 	r.Post("/api/v1/orders/{id}/items", h.AddItem)
+}
+
+// writeError maps the repository errors: a refused transition or a change
+// outside draft is 409, the four-eyes rule 403; everything else goes
+// through api.WriteRepoError (404, 422 field problems, sanitized database
+// errors).
+func writeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrInvalidTransition):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrInvalidTransition.Error())
+	case errors.Is(err, ErrNotDraft):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotDraft.Error())
+	case errors.Is(err, ErrFourEyes):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrFourEyes.Error())
+	default:
+		api.WriteRepoError(w, err)
+	}
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +84,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -106,15 +110,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ClientID:       req.ClientID,
 		OrderNumber:    req.OrderNumber,
 		Title:          req.Title,
-		Status:         "draft",
+		Status:         StatusDraft,
 		RequestedBy:    t.UserID,
-		Supplier:       req.Supplier,
+		SupplierID:     req.SupplierID,
+		Supplier:       strings.TrimSpace(req.Supplier),
 		TotalCost:      req.TotalCost,
 		Currency:       req.Currency,
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), o); err != nil {
-		api.WriteRepoError(w, err)
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, o)
@@ -133,7 +138,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -146,13 +151,14 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// setStatus is the shared transition handler for submit/approve/reject.
+// setStatus is the shared transition handler; the repository checks the
+// state machine and, for an approval, the four-eyes rule.
 func (h *Handler) setStatus(w http.ResponseWriter, r *http.Request, status string) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -161,21 +167,35 @@ func (h *Handler) setStatus(w http.ResponseWriter, r *http.Request, status strin
 	}
 	item, err := h.repo.SetStatus(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), status, t.UserID)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
+		writeError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
 // Submit handles POST /api/v1/orders/{id}/submit (draft → submitted).
-func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, "submitted") }
+func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusSubmitted) }
 
-// Approve handles POST /api/v1/orders/{id}/approve (→ approved; records actor).
-func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, "approved") }
+// Approve handles POST /api/v1/orders/{id}/approve (submitted → approved;
+// four-eyes rule, records the approver).
+func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusApproved) }
 
-// Reject handles POST /api/v1/orders/{id}/reject (→ rejected; records actor).
-func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, "rejected") }
+// Reject handles POST /api/v1/orders/{id}/reject (submitted → rejected;
+// records the actor).
+func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusRejected) }
 
+// Place handles POST /api/v1/orders/{id}/place (approved → ordered).
+func (h *Handler) Place(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusOrdered) }
+
+// Cancel handles POST /api/v1/orders/{id}/cancel (draft, submitted,
+// approved, ordered or partially_received → cancelled).
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusCancelled) }
+
+// Close handles POST /api/v1/orders/{id}/close (received → closed).
+func (h *Handler) Close(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusClosed) }
+
+// AddItem handles POST /api/v1/orders/{id}/items: a position of an order
+// in draft. It books no movement; the goods receipt does (WP-760).
 func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -197,35 +217,13 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		Quantity:       req.Quantity,
 		UnitPrice:      req.UnitPrice,
-		ConsumableID:   req.ConsumableID,
-		AssetID:        req.AssetID,
+		ConsumableID:   strings.TrimSpace(req.ConsumableID),
+		AssetID:        strings.TrimSpace(req.AssetID),
 	}
 	o, err := h.repo.AddItem(r.Context(), item)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "order not found")
+		writeError(w, err)
 		return
-	}
-	// Receiving an ordered item into inventory is an auditable receipt
-	// movement (spec §9). Assets move as serialized units; consumable-linked
-	// positions move as quantities.
-	if h.movements != nil {
-		m := &movement.Movement{
-			OrganizationID: t.OrganizationID,
-			MovementType:   "receipt",
-			OrderID:        item.OrderID,
-			Notes:          item.Description,
-		}
-		if item.AssetID != "" {
-			m.ItemKind = "asset"
-			m.AssetID = item.AssetID
-			_ = h.movements.Record(r.Context(), m)
-		} else if item.ConsumableID != "" {
-			m.ItemKind = "quantity_item"
-			m.QuantityItemID = item.ConsumableID
-			qty := item.Quantity
-			m.Quantity = &qty
-			_ = h.movements.Record(r.Context(), m)
-		}
 	}
 	api.WriteJSON(w, http.StatusCreated, o)
 }

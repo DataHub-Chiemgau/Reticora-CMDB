@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000239_ticket_external_ref
+Stand: Migration 000240_internal_order_states
 
 ## Prüfung
 
@@ -1277,6 +1277,33 @@ keine (23514); die Teil-Unique-Indizes `uq_ticket_org_external_ref` bzw.
 machen die Referenz je Organisation und Provider eindeutig (23505, ohne
 Ausdruck, K22). RLS und Policies bleiben unverändert.
 
+Interne Bestellungen (STK-05, WP-286, E-41, Migration 000240):
+`internal_order_status_check` erlaubt `draft`, `submitted`, `approved`,
+`rejected`, `ordered`, `partially_received`, `received`, `closed` und
+`cancelled`. `internal_order` erhält `supplier_id` (UUID, nullable) mit
+`internal_order_supplier_id_fkey` (`supplier_id`, `organization_id`) →
+`supplier` ohne Löschaktion und Teilindex `idx_internal_order_supplier`
+(`supplier_id`, `organization_id`) WHERE NOT NULL; die Freitextspalte
+`supplier` entfällt nach der Überführung in org-weite Lieferanten
+(gleichnamige Zeilen werden wiederverwendet). `currency` hat keinen
+Standard mehr (das Repository setzt `organization.currency`).
+`internal_order_item` erhält `received_quantity` (`numeric(12,2)`, NOT
+NULL, Standard 0, `internal_order_item_received_quantity_check`: 0 bis
+`quantity`; Positionen empfangener Bestellungen sind voll empfangen),
+`internal_order_item_reference_check` (nicht `consumable_id` und
+`asset_id` zugleich; Bestandszeilen mit beiden stehen in
+`migration_quarantine`, `asset_id` geleert) und `client_id` (UUID) mit
+`internal_order_item_client_id_fkey` (`client_id`, `organization_id`) →
+`client` und Index `idx_internal_order_item_client` (`organization_id`,
+`client_id`). Den Client leitet `internal_order_item_client` (BEFORE INSERT
+OR UPDATE, Funktion `internal_order_item_client()`) aus der Bestellung ab;
+`internal_order_client_items` (AFTER UPDATE OF `client_id` ON
+`internal_order`, Funktion `internal_order_client_items()`) führt einen
+Client-Wechsel der Bestellung nach. RLS: `internal_order_item_isolation`
+trägt das Client-Prädikat (USING mit NULL-Ausnahme, WITH CHECK ohne, E-09),
+dazu die RESTRICTIVE-Policies `internal_order_item_scoped_update` und
+`internal_order_item_scoped_delete`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1360,7 +1387,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `import_profile` | ja | ja | import_profile_isolation (ALL) |
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
-| `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
+| `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
 | `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |

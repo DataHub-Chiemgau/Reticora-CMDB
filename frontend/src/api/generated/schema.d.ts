@@ -1541,11 +1541,17 @@ export interface paths {
     get: operations['getOrder'];
     put?: never;
     post?: never;
-    /** Delete an internal order */
+    /**
+     * Delete an internal order
+     * @description Only in status draft (409 otherwise).
+     */
     delete: operations['deleteOrder'];
     options?: never;
     head?: never;
-    /** Update an internal order */
+    /**
+     * Update an internal order
+     * @description Only in status draft (409 otherwise).
+     */
     patch: operations['updateOrder'];
     trace?: never;
   };
@@ -1561,7 +1567,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Submit an order for approval (draft → submitted) */
+    /**
+     * Submit an order for approval (draft → submitted)
+     * @description State machine of STK-05 (WP-286); a transition from another state is 409.
+     */
     post: operations['submitOrder'];
     delete?: never;
     options?: never;
@@ -1581,7 +1590,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve an order (records the approving user) */
+    /**
+     * Approve an order (submitted → approved, records the approving user)
+     * @description Four-eyes rule (STK-05, WP-286): the approver must differ from the requester (requested_by), and an order without a requester cannot be approved (403). A transition from another state than submitted is 409; of parallel approvals exactly one succeeds.
+     */
     post: operations['approveOrder'];
     delete?: never;
     options?: never;
@@ -1601,7 +1613,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reject an order (records the rejecting user) */
+    /**
+     * Reject an order (submitted → rejected, records the rejecting user)
+     * @description A transition from another state than submitted is 409 (WP-286).
+     */
     post: operations['rejectOrder'];
     delete?: never;
     options?: never;
@@ -1621,7 +1636,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Add a position to an order */
+    /**
+     * Add a position to an order
+     * @description Only in status draft (409 otherwise). A position references a consumable (consumable_id) or is an asset position (description and quantity, asset_id optional), never both (422). A consumable must be org-wide or of the order's client (422). Adding a position books no movement; the goods receipt does (WP-760).
+     */
     post: operations['addOrderItem'];
     delete?: never;
     options?: never;
@@ -8520,8 +8538,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Place an approved order
-     * @description Planned (E-38); WP-286 implements the operation.
+     * Place an approved order (approved → ordered)
+     * @description State machine of STK-05 (WP-286); a transition from another state than approved is 409.
      */
     post: operations['placeOrder'];
     delete?: never;
@@ -8544,7 +8562,7 @@ export interface paths {
     put?: never;
     /**
      * Cancel an order
-     * @description Planned (E-38); WP-286 implements the operation.
+     * @description Possible from draft, submitted, approved, ordered and partially_received (409 otherwise). After a partial receipt the booked movements stay; the rest is dropped (WP-286).
      */
     post: operations['cancelOrder'];
     delete?: never;
@@ -8566,8 +8584,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Close an order
-     * @description Planned (E-38); WP-286 implements the operation.
+     * Close a received order (received → closed)
+     * @description State machine of STK-05 (WP-286); a transition from another state than received is 409.
      */
     post: operations['closeOrder'];
     delete?: never;
@@ -13094,9 +13112,28 @@ export interface components {
       title: string;
       /** @enum {string} */
       status:
-        'draft' | 'submitted' | 'approved' | 'rejected' | 'ordered' | 'received' | 'cancelled';
+        | 'draft'
+        | 'submitted'
+        | 'approved'
+        | 'rejected'
+        | 'ordered'
+        | 'partially_received'
+        | 'received'
+        | 'closed'
+        | 'cancelled';
       requested_by?: string;
       approved_by?: string;
+      /**
+       * Format: uuid
+       * @description Supplier record of the order (E-41
+       */
+      supplier_id?: string;
+      /** @description Name of the supplier. */
+      supplier_name?: string;
+      /**
+       * @deprecated
+       * @description Same as supplier_name; removed with WP-320.
+       */
       supplier?: string;
       total_cost?: number;
       currency?: string;
@@ -13113,6 +13150,8 @@ export interface components {
       order_id: string;
       description: string;
       quantity: number;
+      /** @description Quantity received so far (goods receipt */
+      received_quantity: number;
       unit_price?: number;
       consumable_id?: string;
       asset_id?: string;
@@ -13123,6 +13162,15 @@ export interface components {
       client_id?: string;
       order_number?: string;
       title: string;
+      /**
+       * Format: uuid
+       * @description Org-wide supplier or one of the order's client (422 otherwise).
+       */
+      supplier_id?: string;
+      /**
+       * @deprecated
+       * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
+       */
       supplier?: string;
       total_cost?: number;
       currency?: string;
@@ -13131,11 +13179,18 @@ export interface components {
     UpdateOrderRequest: {
       client_id?: string;
       title?: string;
+      /** @description Org-wide supplier or one of the order's client (422 otherwise); empty removes the supplier. */
+      supplier_id?: string;
+      /**
+       * @deprecated
+       * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
+       */
       supplier?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
     };
+    /** @description consumable_id and asset_id together are 422. */
     CreateOrderItemRequest: {
       description: string;
       quantity: number;
@@ -19732,6 +19787,8 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getOrder: {
@@ -19779,7 +19836,9 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   updateOrder: {
@@ -19809,7 +19868,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   submitOrder: {
@@ -19834,7 +19896,9 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   approveOrder: {
@@ -19859,7 +19923,9 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   rejectOrder: {
@@ -19884,7 +19950,9 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   addOrderItem: {
@@ -19914,7 +19982,10 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listMaintenanceWindows: {
@@ -38441,18 +38512,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-286. */
+      /** @description The order in its new state */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
     };
   };
   cancelOrder: {
@@ -38467,18 +38539,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-286. */
+      /** @description The order in its new state */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
     };
   };
   closeOrder: {
@@ -38493,18 +38566,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-286. */
+      /** @description The order in its new state */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
     };
   };
   receiveOrder: {

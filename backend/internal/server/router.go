@@ -735,7 +735,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
-		order.NewHandler(repos.Order).WithMovements(repos.Movement),
+		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
 		disposal.NewHandler(repos.Disposal).WithMovements(repos.Movement),
 		keymgmt.NewHandler(repos.Key),

@@ -1220,7 +1220,9 @@
       "approved": "Approved",
       "rejected": "Rejected",
       "ordered": "Ordered",
+      "partially_received": "Partially received",
       "received": "Received",
+      "closed": "Closed",
       "cancelled": "Cancelled"
     }
   },

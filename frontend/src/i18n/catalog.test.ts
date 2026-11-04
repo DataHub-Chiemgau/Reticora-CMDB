@@ -213,7 +213,9 @@ describe('i18n catalog', () => {
       'approved',
       'rejected',
       'ordered',
+      'partially_received',
       'received',
+      'closed',
       'cancelled',
     ]);
     expect(specEnum('KeyItem', 'status')).toEqual(['available', 'issued', 'lost', 'retired']);

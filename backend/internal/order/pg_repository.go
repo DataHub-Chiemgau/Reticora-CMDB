@@ -2,6 +2,7 @@ package order
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,9 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier,''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at`
+// orderCols reads an order with the name of its supplier; the subquery
+// also works in RETURNING.
+const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier_id::text,''), COALESCE((SELECT s.name FROM supplier s WHERE s.id = internal_order.supplier_id), ''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at`
 
-const itemCols = `id::text, organization_id::text, order_id::text, description, quantity, COALESCE(unit_price,0), COALESCE(consumable_id::text,''), COALESCE(asset_id::text,''), created_at`
+const itemCols = `id::text, organization_id::text, order_id::text, description, quantity, received_quantity, COALESCE(unit_price,0), COALESCE(consumable_id::text,''), COALESCE(asset_id::text,''), created_at`
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -27,38 +30,120 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 func scanOrder(s pgx.Row) (*Order, error) {
 	o := &Order{}
-	if err := s.Scan(&o.ID, &o.OrganizationID, &o.ClientID, &o.OrderNumber, &o.Title, &o.Status, &o.RequestedBy, &o.ApprovedBy, &o.Supplier, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
+	if err := s.Scan(&o.ID, &o.OrganizationID, &o.ClientID, &o.OrderNumber, &o.Title, &o.Status, &o.RequestedBy, &o.ApprovedBy,
+		&o.SupplierID, &o.SupplierName, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		return nil, err
 	}
+	// The deprecated alias carries the name until WP-320.
+	o.Supplier = o.SupplierName
 	return o, nil
 }
 
 func scanItem(s pgx.Row) (*Item, error) {
 	it := &Item{}
-	if err := s.Scan(&it.ID, &it.OrganizationID, &it.OrderID, &it.Description, &it.Quantity, &it.UnitPrice, &it.ConsumableID, &it.AssetID, &it.CreatedAt); err != nil {
+	if err := s.Scan(&it.ID, &it.OrganizationID, &it.OrderID, &it.Description, &it.Quantity, &it.ReceivedQuantity, &it.UnitPrice,
+		&it.ConsumableID, &it.AssetID, &it.CreatedAt); err != nil {
 		return nil, err
 	}
 	return it, nil
 }
 
 // itemVisible restricts order items to those whose order, consumable and
-// asset are visible under the transaction's tenant scope: their policies
-// filter the subqueries, while internal_order_item carries no client column
-// yet (WP-025).
+// asset are visible under the transaction's tenant scope, on top of the
+// client predicate of internal_order_item_isolation (000240).
 const itemVisible = `EXISTS (SELECT 1 FROM internal_order WHERE internal_order.id = internal_order_item.order_id)
 	AND (internal_order_item.consumable_id IS NULL OR EXISTS (SELECT 1 FROM consumable WHERE consumable.id = internal_order_item.consumable_id))
 	AND (internal_order_item.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = internal_order_item.asset_id))`
 
-// requireVisible fails with "not found" when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
-func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
-	var ok bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
-		return fmt.Errorf("check %s visibility: %w", table, err)
+// lockOrder reads the order under a row lock. FOR UPDATE applies
+// internal_order_scoped_update, so an order the principal may not change
+// is not found.
+func lockOrder(ctx context.Context, tx pgx.Tx, orgID, id string) (*Order, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
 	}
-	if !ok {
-		return fmt.Errorf("not found")
+	o, err := scanOrder(tx.QueryRow(ctx, "SELECT "+orderCols+" FROM internal_order WHERE organization_id = $1 AND id = $2 FOR UPDATE", orgID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock order: %w", err)
+	}
+	return o, nil
+}
+
+// clientFits reports whether an object of objectClient may serve an order
+// of orderClient: org-wide objects always, client objects only for an
+// order of the same client.
+func clientFits(objectClient *string, orderClient string) bool {
+	return objectClient == nil || (orderClient != "" && strings.EqualFold(*objectClient, orderClient))
+}
+
+// supplierByName resolves the deprecated alias: the supplier of the
+// organization with exactly this name, visible under the scope.
+func supplierByName(ctx context.Context, tx pgx.Tx, orgID, name string) (string, error) {
+	var id string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM supplier WHERE organization_id = $1 AND name = $2`, orgID, name).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fieldError("supplier", "no supplier of the organization has this name")
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve supplier: %w", err)
+	}
+	return id, nil
+}
+
+// checkSupplier verifies that supplierID names a supplier visible under the
+// scope that is org-wide or of the order's client (422 on field).
+func checkSupplier(ctx context.Context, tx pgx.Tx, orgID, clientID, supplierID, field string) error {
+	if !api.IsUUID(supplierID) {
+		return fieldError(field, "the referenced supplier does not exist")
+	}
+	var client *string
+	err := tx.QueryRow(ctx, `SELECT client_id::text FROM supplier WHERE organization_id = $1 AND id = $2`, orgID, supplierID).Scan(&client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fieldError(field, "the referenced supplier does not exist")
+	}
+	if err != nil {
+		return fmt.Errorf("read supplier: %w", err)
+	}
+	if !clientFits(client, clientID) {
+		return fieldError(field, "the supplier belongs to another client than the order")
+	}
+	return nil
+}
+
+// resolveSupplier combines supplier_id and the deprecated name alias: an
+// empty alias is not set, a name resolves to an existing supplier only,
+// and a name that contradicts supplier_id is refused. It returns the
+// supplier id and the field to report on.
+func resolveSupplier(ctx context.Context, tx pgx.Tx, orgID, supplierID, alias string) (id, field string, err error) {
+	id, field = strings.TrimSpace(supplierID), "supplier_id"
+	if alias == "" {
+		return id, field, nil
+	}
+	named, err := supplierByName(ctx, tx, orgID, alias)
+	if err != nil {
+		return "", "", err
+	}
+	if id != "" && !strings.EqualFold(id, named) {
+		return "", "", fieldError("supplier", "supplier and supplier_id name different suppliers")
+	}
+	return named, "supplier", nil
+}
+
+// checkItemsClient refuses a client of the order that does not fit the
+// consumables of its positions (422 on client_id).
+func checkItemsClient(ctx context.Context, tx pgx.Tx, orgID, orderID, clientID string) error {
+	var misfit bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM internal_order_item i JOIN consumable c ON c.id = i.consumable_id AND c.organization_id = i.organization_id
+		                WHERE i.organization_id = $1 AND i.order_id = $2 AND c.client_id IS NOT NULL
+		                  AND c.client_id IS DISTINCT FROM NULLIF($3, '')::uuid)`, orgID, orderID, clientID).Scan(&misfit); err != nil {
+		return fmt.Errorf("check consumables of the positions: %w", err)
+	}
+	if misfit {
+		return fieldError("client_id", "a consumable of the positions belongs to another client")
 	}
 	return nil
 }
@@ -137,12 +222,15 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 }
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Order, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
 	var o *Order
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		o, err = scanOrder(tx.QueryRow(ctx, "SELECT "+orderCols+" FROM internal_order WHERE organization_id = $1 AND id = $2", orgID, id))
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("order not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
 		}
 		if err != nil {
 			return err
@@ -156,25 +244,50 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Order, e
 func (r *PGRepository) Create(ctx context.Context, o *Order) error {
 	return database.WithRequestTenant(ctx, r.pool, o.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if o.Status == "" {
-			o.Status = "draft"
+			o.Status = StatusDraft
+		}
+		if strings.TrimSpace(o.Currency) == "" {
+			if err := tx.QueryRow(ctx, `SELECT currency FROM organization WHERE id = $1`, o.OrganizationID).Scan(&o.Currency); err != nil {
+				return fmt.Errorf("read organization currency: %w", err)
+			}
+		}
+		supplierID, field, err := resolveSupplier(ctx, tx, o.OrganizationID, o.SupplierID, strings.TrimSpace(o.Supplier))
+		if err != nil {
+			return err
+		}
+		if supplierID != "" {
+			if supErr := checkSupplier(ctx, tx, o.OrganizationID, o.ClientID, supplierID, field); supErr != nil {
+				return supErr
+			}
 		}
 		if o.OrderNumber == "" {
-			if err := tx.QueryRow(ctx, "SELECT 'ORD-' || LPAD((COUNT(*)+1)::text, 6, '0') FROM internal_order WHERE organization_id = $1", o.OrganizationID).Scan(&o.OrderNumber); err != nil {
+			if err = tx.QueryRow(ctx, "SELECT 'ORD-' || LPAD((COUNT(*)+1)::text, 6, '0') FROM internal_order WHERE organization_id = $1", o.OrganizationID).Scan(&o.OrderNumber); err != nil {
 				return fmt.Errorf("assign order number: %w", err)
 			}
 		}
-		return tx.QueryRow(ctx, `
-			INSERT INTO internal_order (organization_id, client_id, order_number, title, status, requested_by, supplier, total_cost, currency, notes)
-			VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, NULLIF($6,'')::uuid, $7, $8, $9, $10)
-			RETURNING id::text, created_at, updated_at
-		`, o.OrganizationID, o.ClientID, o.OrderNumber, o.Title, o.Status, o.RequestedBy, o.Supplier, o.TotalCost, o.Currency, o.Notes).
-			Scan(&o.ID, &o.CreatedAt, &o.UpdatedAt)
+		created, err := scanOrder(tx.QueryRow(ctx, `
+			INSERT INTO internal_order (organization_id, client_id, order_number, title, status, requested_by, supplier_id, total_cost, currency, notes)
+			VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid, $8, $9, $10)
+			RETURNING `+orderCols,
+			o.OrganizationID, o.ClientID, o.OrderNumber, o.Title, o.Status, o.RequestedBy, supplierID, o.TotalCost, o.Currency, o.Notes))
+		if err != nil {
+			return err
+		}
+		*o = *created
+		return nil
 	})
 }
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateOrderRequest) (*Order, error) {
 	var o *Order
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := lockOrder(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusDraft {
+			return ErrNotDraft
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -183,14 +296,36 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateO
 			args = append(args, val)
 			pos++
 		}
+		client := current.ClientID
 		if req.ClientID != nil {
-			set("client_id", nilIfEmpty(*req.ClientID))
+			client = strings.TrimSpace(*req.ClientID)
+			set("client_id", nilIfEmpty(client))
+		}
+		clientChanged := !strings.EqualFold(client, current.ClientID)
+		alias := supplierName(req.Supplier)
+		supplierID, field := current.SupplierID, "supplier_id"
+		if req.SupplierID != nil || alias != "" {
+			explicit := ""
+			if req.SupplierID != nil {
+				explicit = *req.SupplierID
+			}
+			if supplierID, field, err = resolveSupplier(ctx, tx, orgID, explicit, alias); err != nil {
+				return err
+			}
+			set("supplier_id", nilIfEmpty(supplierID))
+		}
+		if supplierID != "" && (clientChanged || req.SupplierID != nil || alias != "") {
+			if supErr := checkSupplier(ctx, tx, orgID, client, supplierID, field); supErr != nil {
+				return supErr
+			}
+		}
+		if clientChanged {
+			if itemsErr := checkItemsClient(ctx, tx, orgID, id, client); itemsErr != nil {
+				return itemsErr
+			}
 		}
 		if req.Title != nil {
 			set("title", *req.Title)
-		}
-		if req.Supplier != nil {
-			set("supplier", *req.Supplier)
 		}
 		if req.TotalCost != nil {
 			set("total_cost", *req.TotalCost)
@@ -201,18 +336,17 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateO
 		if req.Notes != nil {
 			set("notes", *req.Notes)
 		}
-		var err error
 		if len(sets) == 0 {
-			o, err = scanOrder(tx.QueryRow(ctx, "SELECT "+orderCols+" FROM internal_order WHERE organization_id = $1 AND id = $2", orgID, id))
+			o = current
 		} else {
 			sets = append(sets, "updated_at = now()")
-			o, err = scanOrder(tx.QueryRow(ctx, "UPDATE internal_order SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 RETURNING "+orderCols, args...))
-		}
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("order not found")
-		}
-		if err != nil {
-			return err
+			o, err = scanOrder(tx.QueryRow(ctx, "UPDATE internal_order SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 AND status = 'draft' RETURNING "+orderCols, args...))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotDraft
+			}
+			if err != nil {
+				return err
+			}
 		}
 		o.Items, err = r.listItemsTx(ctx, tx, orgID, id)
 		return err
@@ -222,28 +356,51 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateO
 
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, "DELETE FROM internal_order WHERE organization_id = $1 AND id = $2", orgID, id)
+		current, err := lockOrder(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusDraft {
+			return ErrNotDraft
+		}
+		tag, err := tx.Exec(ctx, "DELETE FROM internal_order WHERE organization_id = $1 AND id = $2 AND status = 'draft'", orgID, id)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("order not found")
+			return ErrNotDraft
 		}
 		return nil
 	})
 }
 
+// SetStatus locks the order, checks the state machine and the four-eyes
+// rule and writes the new state only from the state it read
+// (UPDATE … AND status = <from>): of parallel transitions one succeeds,
+// the others find the new state and fail with ErrInvalidTransition.
 func (r *PGRepository) SetStatus(ctx context.Context, orgID, id, status, actorID string) (*Order, error) {
 	var o *Order
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
+		current, err := lockOrder(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if !CanTransition(current.Status, status) {
+			return ErrInvalidTransition
+		}
+		if status == StatusApproved {
+			if eyesErr := checkFourEyes(current.RequestedBy, actorID); eyesErr != nil {
+				return eyesErr
+			}
+		}
 		approvedBy := any(nil)
-		if status == "approved" || status == "rejected" {
+		if status == StatusApproved || status == StatusRejected {
 			approvedBy = nilIfEmpty(actorID)
 		}
-		o, err = scanOrder(tx.QueryRow(ctx, "UPDATE internal_order SET status = $3, approved_by = COALESCE($4::uuid, approved_by), updated_at = now() WHERE organization_id = $1 AND id = $2 RETURNING "+orderCols, orgID, id, status, approvedBy))
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("order not found")
+		o, err = scanOrder(tx.QueryRow(ctx, `UPDATE internal_order SET status = $3, approved_by = COALESCE($4::uuid, approved_by), updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND status = $5 RETURNING `+orderCols, orgID, id, status, approvedBy, current.Status))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidTransition
 		}
 		if err != nil {
 			return err
@@ -254,35 +411,72 @@ func (r *PGRepository) SetStatus(ctx context.Context, orgID, id, status, actorID
 	return o, err
 }
 
+// AddItem adds a position to an order in draft. The consumable must be
+// org-wide or of the order's client; consumable and asset must be visible
+// under the scope (422 otherwise). It books no movement (WP-760).
 func (r *PGRepository) AddItem(ctx context.Context, item *Item) (*Order, error) {
+	if err := item.validate(); err != nil {
+		return nil, err
+	}
 	var o *Order
 	err := database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `
+		current, err := lockOrder(ctx, tx, item.OrganizationID, item.OrderID)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusDraft {
+			return ErrNotDraft
+		}
+		if item.ConsumableID != "" {
+			if refErr := checkReference(ctx, tx, "consumable", "consumable_id", item.OrganizationID, item.ConsumableID, &current.ClientID); refErr != nil {
+				return refErr
+			}
+		}
+		if item.AssetID != "" {
+			if refErr := checkReference(ctx, tx, "asset", "asset_id", item.OrganizationID, item.AssetID, nil); refErr != nil {
+				return refErr
+			}
+		}
+		if insErr := tx.QueryRow(ctx, `
 			INSERT INTO internal_order_item (organization_id, order_id, description, quantity, unit_price, consumable_id, asset_id)
 			VALUES ($1, $2, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid)
 			RETURNING id::text, created_at
 		`, item.OrganizationID, item.OrderID, item.Description, item.Quantity, item.UnitPrice, item.ConsumableID, item.AssetID).
-			Scan(&item.ID, &item.CreatedAt); err != nil {
-			return err
+			Scan(&item.ID, &item.CreatedAt); insErr != nil {
+			return insErr
 		}
-		if err := requireVisible(ctx, tx, "internal_order_item", itemVisible, item.ID); err != nil {
-			return err
-		}
-		var err error
-		o, err = scanOrder(tx.QueryRow(ctx, "SELECT "+orderCols+" FROM internal_order WHERE organization_id = $1 AND id = $2", item.OrganizationID, item.OrderID))
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("order not found")
-		}
-		if err != nil {
-			return err
-		}
+		o = current
 		o.Items, err = r.listItemsTx(ctx, tx, item.OrganizationID, item.OrderID)
 		return err
 	})
 	return o, err
 }
 
+// checkReference verifies that the row id of table (consumable or asset)
+// is visible under the scope; with orderClient it must also be org-wide or
+// of that client of the order ("" for an org-wide order).
+func checkReference(ctx context.Context, tx pgx.Tx, table, field, orgID, id string, orderClient *string) error {
+	if !api.IsUUID(id) {
+		return fieldError(field, "the referenced record does not exist")
+	}
+	var client *string
+	err := tx.QueryRow(ctx, "SELECT client_id::text FROM "+table+" WHERE organization_id = $1 AND id = $2", orgID, id).Scan(&client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fieldError(field, "the referenced record does not exist")
+	}
+	if err != nil {
+		return fmt.Errorf("read %s: %w", table, err)
+	}
+	if orderClient != nil && !clientFits(client, *orderClient) {
+		return fieldError(field, "the referenced record belongs to another client than the order")
+	}
+	return nil
+}
+
 func (r *PGRepository) ListItems(ctx context.Context, orgID, orderID string) ([]Item, error) {
+	if !api.IsUUID(orderID) {
+		return nil, ErrNotFound
+	}
 	var out []Item
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error

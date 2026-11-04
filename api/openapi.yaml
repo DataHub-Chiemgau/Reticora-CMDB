@@ -3620,6 +3620,10 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/orders/{id}:
     x-phase: P2
@@ -3645,6 +3649,7 @@ paths:
       operationId: updateOrder
       tags: [Orders]
       summary: Update an internal order
+      description: Only in status draft (409 otherwise).
       requestBody:
         required: true
         content:
@@ -3662,19 +3667,30 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteOrder
       tags: [Orders]
       summary: Delete an internal order
+      description: Only in status draft (409 otherwise).
       responses:
         '204':
           description: Order deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/submit:
     x-phase: P2
@@ -3685,6 +3701,7 @@ paths:
       operationId: submitOrder
       tags: [Orders]
       summary: Submit an order for approval (draft → submitted)
+      description: State machine of STK-05 (WP-286); a transition from another state is 409.
       responses:
         '200':
           description: Order submitted
@@ -3694,8 +3711,12 @@ paths:
                 $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/approve:
     x-phase: P2
@@ -3705,7 +3726,12 @@ paths:
     post:
       operationId: approveOrder
       tags: [Orders]
-      summary: Approve an order (records the approving user)
+      summary: Approve an order (submitted → approved, records the approving user)
+      description: >-
+        Four-eyes rule (STK-05, WP-286): the approver must differ from the
+        requester (requested_by), and an order without a requester cannot be
+        approved (403). A transition from another state than submitted is 409;
+        of parallel approvals exactly one succeeds.
       responses:
         '200':
           description: Order approved
@@ -3715,8 +3741,12 @@ paths:
                 $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/reject:
     x-phase: P2
@@ -3726,7 +3756,8 @@ paths:
     post:
       operationId: rejectOrder
       tags: [Orders]
-      summary: Reject an order (records the rejecting user)
+      summary: Reject an order (submitted → rejected, records the rejecting user)
+      description: A transition from another state than submitted is 409 (WP-286).
       responses:
         '200':
           description: Order rejected
@@ -3736,8 +3767,12 @@ paths:
                 $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/items:
     x-phase: P2
@@ -3748,6 +3783,12 @@ paths:
       operationId: addOrderItem
       tags: [Orders]
       summary: Add a position to an order
+      description: >-
+        Only in status draft (409 otherwise). A position references a
+        consumable (consumable_id) or is an asset position (description and
+        quantity, asset_id optional), never both (422). A consumable must be
+        org-wide or of the order's client (422). Adding a position books no
+        movement; the goods receipt does (WP-760).
       requestBody:
         required: true
         content:
@@ -3765,8 +3806,14 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/maintenance-windows:
     x-phase: P3
@@ -19010,77 +19057,80 @@ paths:
   /api/v1/orders/{id}/place:
     x-phase: P2
     x-feature: internal_orders
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: placeOrder
-      tags: [Stocktake]
-      summary: Place an approved order
-      description: Planned (E-38); WP-286 implements the operation.
+      tags: [Orders]
+      summary: Place an approved order (approved → ordered)
+      description: State machine of STK-05 (WP-286); a transition from another state than approved is 409.
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-286.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The order in its new state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/cancel:
     x-phase: P2
     x-feature: internal_orders
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: cancelOrder
-      tags: [Stocktake]
+      tags: [Orders]
       summary: Cancel an order
-      description: Planned (E-38); WP-286 implements the operation.
+      description: Possible from draft, submitted, approved, ordered and partially_received (409 otherwise). After a partial receipt the booked movements stay; the rest is dropped (WP-286).
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-286.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The order in its new state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/close:
     x-phase: P2
     x-feature: internal_orders
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: closeOrder
-      tags: [Stocktake]
-      summary: Close an order
-      description: Planned (E-38); WP-286 implements the operation.
+      tags: [Orders]
+      summary: Close a received order (received → closed)
+      description: State machine of STK-05 (WP-286); a transition from another state than received is 409.
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-286.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The order in its new state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/orders/{id}/receive:
     x-phase: P2
@@ -27285,10 +27335,15 @@ components:
         client_id: { type: string }
         order_number: { type: string }
         title: { type: string }
-        status: { type: string, enum: [draft, submitted, approved, rejected, ordered, received, cancelled] }
+        status: { type: string, enum: [draft, submitted, approved, rejected, ordered, partially_received, received, closed, cancelled] }
         requested_by: { type: string }
         approved_by: { type: string }
-        supplier: { type: string }
+        supplier_id: { type: string, format: uuid, description: Supplier record of the order (E-41, WP-286). }
+        supplier_name: { type: string, description: Name of the supplier. }
+        supplier:
+          type: string
+          deprecated: true
+          description: Same as supplier_name; removed with WP-320.
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -27299,13 +27354,14 @@ components:
           items: { $ref: '#/components/schemas/OrderItem' }
     OrderItem:
       type: object
-      required: [id, organization_id, order_id, description, quantity, created_at]
+      required: [id, organization_id, order_id, description, quantity, received_quantity, created_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         order_id: { type: string }
         description: { type: string }
         quantity: { type: number }
+        received_quantity: { type: number, description: Quantity received so far (goods receipt, WP-760). }
         unit_price: { type: number }
         consumable_id: { type: string }
         asset_id: { type: string }
@@ -27317,7 +27373,14 @@ components:
         client_id: { type: string }
         order_number: { type: string }
         title: { type: string }
-        supplier: { type: string }
+        supplier_id: { type: string, format: uuid, description: Org-wide supplier or one of the order's client (422 otherwise). }
+        supplier:
+          type: string
+          deprecated: true
+          description: >-
+            Name of an existing supplier of the organization (resolved to
+            supplier_id, 422 if unknown or contradicting supplier_id); an empty
+            value is not set. Removed with WP-320.
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -27326,12 +27389,20 @@ components:
       properties:
         client_id: { type: string }
         title: { type: string }
-        supplier: { type: string }
+        supplier_id: { type: string, description: Org-wide supplier or one of the order's client (422 otherwise); empty removes the supplier. }
+        supplier:
+          type: string
+          deprecated: true
+          description: >-
+            Name of an existing supplier of the organization (resolved to
+            supplier_id, 422 if unknown or contradicting supplier_id); an empty
+            value is not set. Removed with WP-320.
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
     CreateOrderItemRequest:
       type: object
+      description: consumable_id and asset_id together are 422.
       required: [description, quantity]
       properties:
         description: { type: string }
