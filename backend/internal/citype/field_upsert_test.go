@@ -25,9 +25,9 @@ import (
 // PostgreSQL side is TestAttributeDefinitionsAgainstPostgres.
 func TestUpsertFieldRefusesSystemTypes(t *testing.T) {
 	repo := NewMemoryRepository()
-	repo.SeedType(Type{ID: "sys-switch", Key: "switch", Name: "Switch", IsSystem: true, IsActive: true})
-	repo.SeedType(Type{ID: "org-a-type", OrganizationID: "org-a", Key: "router_copy", Name: "Router copy", IsActive: true})
-	repo.SeedType(Type{ID: "org-b-type", OrganizationID: "org-b", Key: "pdu_copy", Name: "PDU copy", IsActive: true})
+	repo.SeedType(&Type{ID: "sys-switch", Key: "switch", Name: "Switch", IsSystem: true, IsActive: true})
+	repo.SeedType(&Type{ID: "org-a-type", OrganizationID: "org-a", Key: "router_copy", Name: "Router copy", IsActive: true})
+	repo.SeedType(&Type{ID: "org-b-type", OrganizationID: "org-b", Key: "pdu_copy", Name: "PDU copy", IsActive: true})
 	mux := chi.NewRouter()
 	NewHandler(repo).RegisterRoutes(mux)
 	put := func(typeID, body string) *httptest.ResponseRecorder {

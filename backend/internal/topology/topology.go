@@ -298,7 +298,7 @@ func (h *Handler) Graph(ctx context.Context, orgID, rootCIID string, depth int, 
 		}
 		return h.buildFromRoot(ctx, orgID, rootCIID, depth, filter.TypeID)
 	}
-	return h.buildFull(ctx, orgID, *filter)
+	return h.buildFull(ctx, orgID, filter)
 }
 
 // ParseDepth reads a depth parameter: the default 2 for "", an integer
@@ -308,7 +308,7 @@ func ParseDepth(raw string) (int, error) { return parseDepth(raw, defaultDepth) 
 // buildFull lists all CIs matching the filter and every edge whose endpoints are
 // both in the resulting node set, ordered by id. GET /topology without a root
 // and the BFF query topology share it.
-func (h *Handler) buildFull(ctx context.Context, orgID string, filter ci.FilterParams) (Graph, error) {
+func (h *Handler) buildFull(ctx context.Context, orgID string, filter *ci.FilterParams) (Graph, error) {
 	items, total, err := h.ciRepo.List(ctx, orgID, filter, api.PaginationParams{Limit: MaxTopologyNodes, Offset: 0})
 	if err != nil {
 		return Graph{}, err

@@ -28,7 +28,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (m *MemoryStore) Get(_ context.Context, key string) (string, bool, error) {
+func (m *MemoryStore) Get(_ context.Context, key string) (value string, found bool, err error) {
 	m.mu.RLock()
 	entry, exists := m.entries[key]
 	m.mu.RUnlock()
@@ -45,7 +45,7 @@ func (m *MemoryStore) Get(_ context.Context, key string) (string, bool, error) {
 	return entry.value, true, nil
 }
 
-func (m *MemoryStore) Set(_ context.Context, key string, value string, ttl time.Duration) error {
+func (m *MemoryStore) Set(_ context.Context, key, value string, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

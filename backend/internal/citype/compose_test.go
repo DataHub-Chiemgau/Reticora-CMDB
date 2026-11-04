@@ -736,8 +736,8 @@ func TestResolveFieldsAppliesTo(t *testing.T) {
 func TestMemoryDeleteFieldNoGlobalFallback(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMemoryRepository()
-	repo.SeedType(Type{ID: "t1", OrganizationID: "org", Key: "t1", Name: "t1", IsActive: true})
-	if _, err := repo.UpsertField(ctx, "org", "", UpsertFieldRequest{Scope: "global", Name: "cost_center", DataType: "text"}); err != nil {
+	repo.SeedType(&Type{ID: "t1", OrganizationID: "org", Key: "t1", Name: "t1", IsActive: true})
+	if _, err := repo.UpsertField(ctx, "org", "", &UpsertFieldRequest{Scope: "global", Name: "cost_center", DataType: "text"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.DeleteField(ctx, "org", "t1", "cost_center"); err == nil {

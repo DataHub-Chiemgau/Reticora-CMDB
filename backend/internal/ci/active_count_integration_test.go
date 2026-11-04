@@ -71,11 +71,11 @@ func TestCIActiveCountIgnoresCallerScope(t *testing.T) {
 
 	repo := ci.NewPGRepository(f.App)
 	client1 := f.ClientCtx(f.Client1)
-	_, visible, err := repo.List(client1, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+	_, visible, err := repo.List(client1, f.OrgA, &ci.FilterParams{}, api.PaginationParams{Limit: 1})
 	if err != nil || visible != 2 {
 		t.Fatalf("precondition: client 1 lists %d CIs (err %v), want 2 (its own and the org-wide one)", visible, err)
 	}
-	if _, visible, err = repo.List(site1Ctx, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1}); err != nil || visible != want-1 {
+	if _, visible, err = repo.List(site1Ctx, f.OrgA, &ci.FilterParams{}, api.PaginationParams{Limit: 1}); err != nil || visible != want-1 {
 		t.Fatalf("precondition: site 1 lists %d CIs (err %v), want %d (not the one on site 2)", visible, err, want-1)
 	}
 	for name, ctx := range map[string]context.Context{"client 1": client1, "site 1": site1Ctx, "org-wide": f.OrgCtx(f.OrgA)} {

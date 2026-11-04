@@ -36,7 +36,7 @@ func TestIngestValidatesObservedValues(t *testing.T) {
 	if resp.Created != 1 || resp.InvalidValues != 2 {
 		t.Fatalf("response %+v, want 1 created and 2 invalid values", resp)
 	}
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 50})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 50})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("items %d (%v)", len(items), err)
 	}

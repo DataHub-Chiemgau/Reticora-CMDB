@@ -74,7 +74,7 @@ func TestBulkIngestRecordsProvenance(t *testing.T) {
 	if resp.Created != 1 {
 		t.Fatalf("expected 1 created, got %+v", resp)
 	}
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestBulkIngestPersistsDiscoveredAttributes(t *testing.T) {
 
 	// Created path.
 	ingest(t, h, `{"collector_id":"col-1","items":[{"ci_type_name":"server","name":"srv","serial_number":"SN-1","attributes":{"ram_gb":32,"cpu_model":"Xeon"}}]}`)
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

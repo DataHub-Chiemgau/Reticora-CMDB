@@ -150,7 +150,7 @@ func TestSystemTypeSeedsAndFields(t *testing.T) {
 
 	// Updates keep a partial label complete and switch observation.
 	observeOff := false
-	updated, err := repo.Update(orgCtx, f.OrgA, logicalType.ID, UpdateTypeRequest{
+	updated, err := repo.Update(orgCtx, f.OrgA, logicalType.ID, &UpdateTypeRequest{
 		DisplayName: LocalizedText{"de": "Lohnabrechnung", "en": "Payroll"}, IsObservable: &observeOff})
 	if err != nil {
 		t.Fatal(err)

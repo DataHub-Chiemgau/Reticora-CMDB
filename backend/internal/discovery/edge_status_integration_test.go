@@ -93,7 +93,7 @@ func TestAuditEdgeIngestRefusesDisabledOrUnknownCollector(t *testing.T) {
 				t.Fatal(err)
 			}
 			reply := h.EdgeIngest(ctx, "org-1", colID, body)
-			items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+			items, _, err := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -746,7 +746,7 @@ func (h *Handler) identityContext(ctx context.Context, orgID string, types map[s
 func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *IngestItem) ([]ci.Item, error) {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
-		items, _, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
+		items, _, err := h.ciRepo.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
 		return items, err
 	}
 	q := identityQuery(item)
@@ -794,7 +794,7 @@ func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *In
 func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []IngestItem) []ci.Item {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
-		all, _, _ := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
+		all, _, _ := h.ciRepo.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
 		return all
 	}
 	seen := map[string]bool{}

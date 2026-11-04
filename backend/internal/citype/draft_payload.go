@@ -27,7 +27,7 @@ func CheckCreateType(req *CreateTypeRequest) error {
 		return &api.FieldError{Field: "display_name", Message: err.Error()}
 	}
 	for i := range req.Fields {
-		if err := validateField(req.Fields[i]); err != nil {
+		if err := validateField(&req.Fields[i]); err != nil {
 			return &api.FieldError{Field: "fields[" + strconv.Itoa(i) + "]." + definitionField(err), Message: err.Error()}
 		}
 	}
@@ -52,7 +52,7 @@ func CheckUpdateType(req *UpdateTypeRequest) error {
 // (fieldmeta.ValidateDefinition).
 // validation: the texts of fieldmeta.ValidateDefinition.
 func CheckUpsertField(req *UpsertFieldRequest) error {
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(*req)); err != nil {
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
 		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
 	return nil

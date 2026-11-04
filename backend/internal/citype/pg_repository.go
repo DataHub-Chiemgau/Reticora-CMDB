@@ -214,7 +214,8 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
-		for _, f := range typ.Fields {
+		for i := range typ.Fields {
+			f := &typ.Fields[i]
 			if _, err := upsertFieldTx(ctx, tx, typ.OrganizationID, typ.ID, &UpsertFieldRequest{
 				Scope: "type", Name: f.Name, Label: f.Label, Description: f.Description,
 				DataType: f.DataType, Required: f.Required, DefaultValue: f.DefaultValue,
@@ -320,7 +321,7 @@ func typeDBError(err error) error {
 // organization's global attributes that apply (MET-13, WP-255): the type
 // and its subtypes stay composable with them, otherwise a 422 on category
 // and nothing is stored.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
 	}
@@ -1129,8 +1130,10 @@ func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Fi
 // in attribute_definition, keyed by type and name (legacy field view). A
 // type-bound field needs a type of the organization: an unknown type is
 // "not found" (404), a system type a 422 on ci_type_id (checkFieldType).
-func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error) {
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, in *UpsertFieldRequest) (*Field, error) {
+	// The scope default below applies to this call only, not to the caller's request.
+	req := *in
+	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(&req)); err != nil {
 		return nil, err
 	}
 	if req.Scope == "" {
@@ -1335,7 +1338,7 @@ func (r *PGRepository) InstanceFieldNames(ctx context.Context, orgID, ciID strin
 
 // UpsertInstanceField creates or updates an instance field definition and
 // records the change in the audit log (MET-14).
-func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error) {
+func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error) {
 	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
 		return nil, err
 	}

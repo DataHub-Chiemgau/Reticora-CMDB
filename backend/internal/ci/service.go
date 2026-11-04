@@ -91,7 +91,7 @@ func VisibleIDs(reader NodeReader) func(ctx context.Context, orgID string, ids [
 
 // Repository defines persistence operations for CIs.
 type Repository interface {
-	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error)
+	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Item, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Item, error)
 	Create(ctx context.Context, item *Item) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error)
@@ -139,7 +139,7 @@ func CountActive(ctx context.Context, repo Repository, orgID string) (int64, err
 	if counter, ok := repo.(ActiveCounter); ok {
 		return counter.CountActive(ctx, orgID)
 	}
-	_, total, err := repo.List(ctx, orgID, FilterParams{}, api.PaginationParams{Limit: 1})
+	_, total, err := repo.List(ctx, orgID, &FilterParams{}, api.PaginationParams{Limit: 1})
 	return int64(total), err
 }
 
@@ -431,7 +431,7 @@ func tagKeys(texts []string) (keys, names []string) {
 }
 
 // List returns paginated CIs filtered by the given parameters.
-func (s *Service) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
+func (s *Service) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	return s.repo.List(ctx, orgID, filter, page)
 }
 
@@ -539,7 +539,7 @@ func (s *Service) allowActive(ctx context.Context, orgID string) error {
 // Update modifies an existing CI. The repository loads the prior state inside
 // the mutation transaction so the recorded diff cannot race with concurrent
 // writers.
-func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository; the update works on its own copy
 	// null clears a nullable field; on a required one it is refused (CI-04).
 	if err := req.nullViolations(); err != nil {
 		return nil, err

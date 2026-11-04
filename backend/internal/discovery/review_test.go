@@ -208,7 +208,7 @@ func TestResolveReviewItemCreate(t *testing.T) {
 	}
 	created := func(name string) *ci.Item {
 		t.Helper()
-		items, _, _ := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
+		items, _, _ := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
 		for i := range items {
 			if items[i].Name == name {
 				return &items[i]

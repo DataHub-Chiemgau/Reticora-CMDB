@@ -72,7 +72,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := ci.FilterParams{
+	filter := &ci.FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
 		ClientID: r.URL.Query().Get("client_id"),
@@ -128,7 +128,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	writer.flushHTTP(w)
 }
 
-func (h *Handler) fetch(r *http.Request, orgID string, filter ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
+func (h *Handler) fetch(r *http.Request, orgID string, filter *ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
 	items, _, err := h.ciRepo.List(r.Context(), orgID, filter, api.PaginationParams{
 		Limit:  h.batchSize,
 		Cursor: cursor,

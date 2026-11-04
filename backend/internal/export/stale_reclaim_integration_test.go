@@ -36,7 +36,7 @@ type gatedCIs struct {
 	calls   atomic.Int32
 }
 
-func (g *gatedCIs) List(ctx context.Context, orgID string, filter ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error) {
+func (g *gatedCIs) List(ctx context.Context, orgID string, filter *ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error) {
 	g.calls.Add(1)
 	if g.gate != nil {
 		select {

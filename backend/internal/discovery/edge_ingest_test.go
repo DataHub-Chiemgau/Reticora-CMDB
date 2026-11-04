@@ -51,11 +51,11 @@ func TestEdgeIngest(t *testing.T) {
 	if reply.Status != http.StatusAccepted || reply.Result == nil || reply.Result.Created != 1 || reply.LicenseStatus != LicenseActive {
 		t.Fatalf("ingest: %+v", reply)
 	}
-	items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("CIs of org-1: %d, %v", len(items), err)
 	}
-	if other, _, _ := cis.List(ctx, "org-2", ci.FilterParams{}, api.PaginationParams{Limit: 10}); len(other) != 0 {
+	if other, _, _ := cis.List(ctx, "org-2", &ci.FilterParams{}, api.PaginationParams{Limit: 10}); len(other) != 0 {
 		t.Errorf("records reached another organization: %d", len(other))
 	}
 

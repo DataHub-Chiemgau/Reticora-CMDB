@@ -17,7 +17,7 @@ const renderBatchSize = 500
 // tenant export never buffers the whole result set in memory. The exported
 // row shape is identical to the streaming endpoint.
 func RenderFormat(ctx context.Context, ciRepo ci.Repository, orgID string, format string, filters JobFilters, out io.Writer) (int, error) {
-	filter := ci.FilterParams{
+	filter := &ci.FilterParams{
 		Status:   filters.Status,
 		TypeID:   filters.CITypeID,
 		ClientID: filters.ClientID,

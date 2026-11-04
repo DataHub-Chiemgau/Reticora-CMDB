@@ -75,7 +75,7 @@ func TestResolverLayerOrder(t *testing.T) {
 		{Name: "wp589_l_inst", DataType: "integer", Description: "instance"},
 		{Name: "wp589_size", DataType: "integer", Description: "instance", Validation: &fieldmeta.ValidationRules{Max: ptr(50)}},
 	} {
-		if _, err := repo.UpsertInstanceField(ctx, f.OrgA, ciID, req); err != nil {
+		if _, err := repo.UpsertInstanceField(ctx, f.OrgA, ciID, &req); err != nil {
 			t.Fatalf("instance field %s: %v", req.Name, err)
 		}
 	}

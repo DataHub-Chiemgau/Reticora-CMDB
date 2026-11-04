@@ -158,7 +158,7 @@ func TestHandler_CreateNeedsTheTypeID(t *testing.T) {
 			t.Errorf("POST /cis with ci_type_id %q: %d %s, want 422 on ci_type_id", typeID, w.Code, w.Body.String())
 		}
 	}
-	if _, total, err := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || total != 0 {
+	if _, total, err := repo.List(context.Background(), "org-1", &FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || total != 0 {
 		t.Errorf("CIs stored: %d, %v; want none", total, err)
 	}
 }

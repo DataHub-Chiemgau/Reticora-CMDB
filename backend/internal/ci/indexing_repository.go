@@ -73,7 +73,7 @@ func (r *indexingRepository) CreateMany(ctx context.Context, orgID string, items
 	return res, nil
 }
 
-func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository
 	item, err := r.Repository.Update(ctx, orgID, id, req)
 	if err != nil {
 		return nil, err

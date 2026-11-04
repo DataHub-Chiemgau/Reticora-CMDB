@@ -33,7 +33,7 @@ type MetricStore interface {
 // CIUpserter reconciles the endpoint into a CI (source "agent").
 type CIUpserter interface {
 	GetByID(ctx context.Context, orgID, id string) (*ci.Item, error)
-	List(ctx context.Context, orgID string, filter ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error)
+	List(ctx context.Context, orgID string, filter *ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error)
 	Create(ctx context.Context, item *ci.Item) error
 	Update(ctx context.Context, orgID, id string, req ci.UpdateRequest) (*ci.Item, error)
 }
@@ -543,7 +543,7 @@ func (h *Handler) hostnameMatches(ctx context.Context, orgID, hostname string) (
 }
 
 func (h *Handler) exactHostname(ctx context.Context, orgID, hostname string) ([]ci.Item, error) {
-	existing, _, err := h.cis.List(ctx, orgID, ci.FilterParams{Search: hostname}, api.PaginationParams{Limit: 50})
+	existing, _, err := h.cis.List(ctx, orgID, &ci.FilterParams{Search: hostname}, api.PaginationParams{Limit: 50})
 	if err != nil {
 		return nil, err
 	}

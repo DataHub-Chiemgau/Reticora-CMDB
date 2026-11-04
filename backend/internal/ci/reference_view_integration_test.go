@@ -107,7 +107,7 @@ func TestCIReferencesInclude(t *testing.T) {
 	// stored as they are (a G1 value without UUID form among them), an
 	// instance attribute under _instance.
 	holder := f.CI(t, f.OrgA, f.Client1, "wp713-holder")
-	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, holder, citype.UpsertInstanceFieldRequest{
+	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, holder, &citype.UpsertInstanceFieldRequest{
 		Name: "wp713_backup", DataType: fieldmeta.TypeCIRef}); err != nil {
 		t.Fatalf("instance field: %v", err)
 	}

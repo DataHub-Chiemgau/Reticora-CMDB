@@ -33,7 +33,7 @@ func TestDiscoveryRaisesGenericDevice(t *testing.T) {
 		if _, err := h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&rec)}); err != nil {
 			t.Fatal(err)
 		}
-		items, _, err := ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		items, _, err := ciRepo.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}

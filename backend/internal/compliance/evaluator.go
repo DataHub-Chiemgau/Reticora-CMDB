@@ -41,7 +41,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationRespo
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
-	items, _, err := e.cis.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 100})
+	items, _, err := e.cis.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return EvaluationResponse{}, err
 	}

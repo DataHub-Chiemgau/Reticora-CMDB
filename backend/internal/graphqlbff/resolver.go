@@ -180,8 +180,8 @@ func (q *queryResolver) CurrentUser(ctx context.Context) (*generated.User, error
 	return user, nil
 }
 
-func ciFilter(f *generated.CIFilter) ci.FilterParams {
-	out := ci.FilterParams{}
+func ciFilter(f *generated.CIFilter) *ci.FilterParams {
+	out := &ci.FilterParams{}
 	if f == nil {
 		return out
 	}

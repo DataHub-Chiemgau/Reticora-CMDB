@@ -121,7 +121,7 @@ func TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices(t *testing.T) {
 		h, repo, cis, ctx := memoryIngest(t)
 		ingestRecordsInto(t, h, ctx, "org-1", recs.snmp("10.0.0.1", "00:11:22:33:44:01"))
 		ingestRecordsInto(t, h, ctx, "org-1", later.sweep("10.0.0.1", "00:11:22:33:44:01"))
-		list, _, _ := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		list, _, _ := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		if len(list) != 1 || list[0].CITypeID != "switch" {
 			t.Fatalf("control: want one CI of type switch, got %d (%+v)", len(list), list)
 		}
@@ -133,7 +133,7 @@ func TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices(t *testing.T) {
 	t.Run("sweep record first in the batch of an SNMP-classified switch: no open review", func(t *testing.T) {
 		h, repo, cis, ctx := memoryIngest(t)
 		ingestRecordsInto(t, h, ctx, "org-1", recs.sweep("10.0.0.2", "00:11:22:33:44:02"), later.snmp("10.0.0.2", "00:11:22:33:44:02"))
-		list, _, _ := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		list, _, _ := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		if len(list) != 1 || list[0].CITypeID != "switch" {
 			t.Fatalf("control: want one CI of type switch, got %d (%+v)", len(list), list)
 		}
@@ -147,7 +147,7 @@ func TestAuditUnclassifiedReviewOnlyForUnclassifiedDevices(t *testing.T) {
 		if resp := ingestRecordsInto(t, h, ctx, "org-1", recs.sweep("10.0.0.9", "00:11:22:33:44:09")); resp.ReviewItems != 1 {
 			t.Errorf("response counts %d review items, want 1", resp.ReviewItems)
 		}
-		list, _, _ := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		list, _, _ := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		items := unclassifiedItems(t, repo, ctx, "org-1", ReviewStatusOpen)
 		if len(list) != 1 || list[0].CITypeID != "generic_device" || len(items) != 1 {
 			t.Fatalf("control: want one generic_device CI with exactly 1 open unclassified_device review, got CIs %+v, reviews %+v", list, items)
@@ -189,7 +189,7 @@ func TestUnclassifiedReviewResolvedWhenReclassified(t *testing.T) {
 				t.Fatalf("control: %d open reviews after the sweep, want 1", len(open))
 			}
 			ingestRecordsInto(t, h, ctx, "org-1", tc.record(classifiedRecords{at: now.Add(time.Minute)}, "10.0.1.1", "00:1b:21:41:71:01"))
-			list, _, _ := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+			list, _, _ := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 			if len(list) != 1 || list[0].CITypeID != tc.ciType {
 				t.Fatalf("control: want the CI raised to %s, got %+v", tc.ciType, list)
 			}

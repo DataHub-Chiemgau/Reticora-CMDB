@@ -639,7 +639,7 @@ func TestNoDBLanesKeepOneDevice(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		items, _, err := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -778,7 +778,7 @@ func TestConsumeBatchAcksSettledRecords(t *testing.T) {
 	if n := testutil.ToFloat64(laneRecords.WithLabelValues("0")) - recordsBefore; n != 3 {
 		t.Errorf("reticora_ingest_lane_records_total grew by %v, want 3", n)
 	}
-	items, _, _ := cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, _ := cis.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if len(items) != 3 {
 		t.Errorf("%d CIs, want ACK-0, ACK-1 and ACK-3", len(items))
 	}

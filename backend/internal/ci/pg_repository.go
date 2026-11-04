@@ -351,7 +351,7 @@ func attributeFilterOf(ctx context.Context, tx pgx.Tx, f api.Filter, key string,
 var indexedSort = map[string]bool{"created_at": true, "name": true}
 
 // List returns paginated CIs filtered by the given parameters.
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	items := make([]Item, 0)
 	var total int
 	// joined: the list runs in the caller's transaction (database.ContextWithTx).

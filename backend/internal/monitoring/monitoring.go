@@ -954,7 +954,7 @@ type CIAddressResolver struct{ CIs ci.Repository }
 
 // ResolveCI implements CIResolver.
 func (a CIAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
-	items, _, err := a.CIs.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
+	items, _, err := a.CIs.List(ctx, orgID, &ci.FilterParams{Filters: []api.Filter{
 		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
 	}}, api.PaginationParams{Limit: 2})
 	if err != nil || len(items) != 1 {

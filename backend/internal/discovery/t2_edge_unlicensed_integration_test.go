@@ -44,7 +44,7 @@ func TestT2EdgeIngestUnlicensed(t *testing.T) {
 
 	countCIs := func() int {
 		t.Helper()
-		_, total, err := ciRepo.List(orgCtx, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		_, total, err := ciRepo.List(orgCtx, f.OrgA, &ci.FilterParams{}, api.PaginationParams{Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}

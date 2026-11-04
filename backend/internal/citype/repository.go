@@ -54,7 +54,7 @@ type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Type, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Type, error)
 	Create(ctx context.Context, typ *Type) error
-	Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error)
+	Update(ctx context.Context, orgID, id string, req *UpdateTypeRequest) (*Type, error)
 	// Clone copies a type (including its field definitions, its parent and,
 	// in PostgreSQL, its attribute set assignments with their positions)
 	// under a new key; a deactivated parent is a conflict (409).
@@ -76,14 +76,14 @@ type Repository interface {
 
 	ListFields(ctx context.Context, orgID, typeID string) ([]Field, error)
 	ListGlobalFields(ctx context.Context, orgID string) ([]Field, error)
-	UpsertField(ctx context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error)
+	UpsertField(ctx context.Context, orgID, typeID string, req *UpsertFieldRequest) (*Field, error)
 	DeleteField(ctx context.Context, orgID, typeID, name string) error
 
 	ListInstanceFields(ctx context.Context, orgID, ciID string) ([]InstanceField, error)
 	// InstanceFieldNames lists the names of the instance attributes of a CI;
 	// discovery must not write them (MET-14).
 	InstanceFieldNames(ctx context.Context, orgID, ciID string) ([]string, error)
-	UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error)
+	UpsertInstanceField(ctx context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error)
 	DeleteInstanceField(ctx context.Context, orgID, ciID, name string) error
 
 	// ResolveFields merges the global, type and instance attribute scopes into
@@ -117,9 +117,10 @@ func (r *MemoryRepository) nextID() string {
 }
 
 // SeedType registers a type directly (tests, --no-db defaults).
-func (r *MemoryRepository) SeedType(t Type) {
+func (r *MemoryRepository) SeedType(seed *Type) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	t := *seed
 	if t.ID == "" {
 		t.ID = r.nextID()
 	}
@@ -211,7 +212,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *UpdateTypeRequest) (*Type, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.types[id]
@@ -249,7 +250,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	return &out, nil
 }
 
-func applyTypeUpdate(t *Type, req UpdateTypeRequest) {
+func applyTypeUpdate(t *Type, req *UpdateTypeRequest) {
 	if req.Name != nil {
 		t.Name = *req.Name
 	}
@@ -575,29 +576,31 @@ func (r *MemoryRepository) ListGlobalFields(_ context.Context, orgID string) ([]
 	return out, nil
 }
 
-func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error) {
+func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, req *UpsertFieldRequest) (*Field, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def := fieldFromUpsert(req)
 	if err := fieldmeta.ValidateDefinition(def); err != nil {
 		return nil, err
 	}
-	f := fieldFromDefinition(def)
+	f := fieldFromDefinition(&def)
 	f.Scope = req.Scope
 	if f.Scope == "" {
 		f.Scope = "type"
 	}
 	if f.Scope == "global" {
 		list := r.globals[orgID]
-		for i, existing := range list {
-			if existing.Name == f.Name {
-				// The legacy upsert keeps the applicability (WP-255).
-				f.ID, f.AppliesTo = existing.ID, existing.AppliesTo
-				f.AppliesToCategories, f.AppliesToTypeIDs = existing.AppliesToCategories, existing.AppliesToTypeIDs
-				list[i] = f
-				r.globals[orgID] = list
-				return &f, nil
+		for i := range list {
+			existing := &list[i]
+			if existing.Name != f.Name {
+				continue
 			}
+			// The legacy upsert keeps the applicability (WP-255).
+			f.ID, f.AppliesTo = existing.ID, existing.AppliesTo
+			f.AppliesToCategories, f.AppliesToTypeIDs = existing.AppliesToCategories, existing.AppliesToTypeIDs
+			list[i] = f
+			r.globals[orgID] = list
+			return &f, nil
 		}
 		f.ID, f.AppliesTo = r.nextID(), AppliesToAll
 		r.globals[orgID] = append(list, f)
@@ -613,8 +616,8 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 		return nil, errSystemTypeAttribute()
 	}
 	list := r.fields[typeID]
-	for i, existing := range list {
-		if existing.Name == f.Name {
+	for i := range list {
+		if existing := &list[i]; existing.Name == f.Name {
 			f.ID = existing.ID
 			list[i] = f
 			r.fields[typeID] = list
@@ -644,8 +647,8 @@ func (r *MemoryRepository) DeleteField(_ context.Context, orgID, typeID, name st
 		return nil
 	}
 	list := r.fields[typeID]
-	for i, existing := range list {
-		if existing.Name == name {
+	for i := range list {
+		if list[i].Name == name {
 			r.fields[typeID] = append(list[:i], list[i+1:]...)
 			return nil
 		}
@@ -667,7 +670,7 @@ func (r *MemoryRepository) InstanceFieldNames(ctx context.Context, orgID, ciID s
 	return fieldNames(fields), err
 }
 
-func (r *MemoryRepository) UpsertInstanceField(_ context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error) {
+func (r *MemoryRepository) UpsertInstanceField(_ context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
@@ -691,15 +694,17 @@ func (r *MemoryRepository) UpsertInstanceField(_ context.Context, orgID, ciID st
 	}
 	now := time.Now().UTC()
 	list := r.inst[ciID]
-	for i, existing := range list {
-		if existing.Name == f.Name {
-			f.ID = existing.ID
-			f.CreatedAt = existing.CreatedAt
-			f.UpdatedAt = now
-			list[i] = f
-			r.inst[ciID] = list
-			return &f, nil
+	for i := range list {
+		existing := &list[i]
+		if existing.Name != f.Name {
+			continue
 		}
+		f.ID = existing.ID
+		f.CreatedAt = existing.CreatedAt
+		f.UpdatedAt = now
+		list[i] = f
+		r.inst[ciID] = list
+		return &f, nil
 	}
 	f.ID = r.nextID()
 	f.CreatedAt = now
@@ -712,8 +717,8 @@ func (r *MemoryRepository) DeleteInstanceField(_ context.Context, orgID, ciID, n
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	list := r.inst[ciID]
-	for i, existing := range list {
-		if existing.Name == name {
+	for i := range list {
+		if list[i].Name == name {
 			r.inst[ciID] = append(list[:i], list[i+1:]...)
 			return nil
 		}
@@ -721,7 +726,7 @@ func (r *MemoryRepository) DeleteInstanceField(_ context.Context, orgID, ciID, n
 	return fmt.Errorf("not found")
 }
 
-func fieldFromUpsert(req UpsertFieldRequest) fieldmeta.FieldDefinition {
+func fieldFromUpsert(req *UpsertFieldRequest) fieldmeta.FieldDefinition {
 	return fieldmeta.FieldDefinition{
 		Name:            req.Name,
 		Label:           req.Label,
@@ -738,7 +743,7 @@ func fieldFromUpsert(req UpsertFieldRequest) fieldmeta.FieldDefinition {
 	}
 }
 
-func instanceFieldFromUpsert(req UpsertInstanceFieldRequest) fieldmeta.FieldDefinition {
+func instanceFieldFromUpsert(req *UpsertInstanceFieldRequest) fieldmeta.FieldDefinition {
 	return fieldmeta.FieldDefinition{
 		Name:            req.Name,
 		Label:           req.Label,
@@ -755,7 +760,7 @@ func instanceFieldFromUpsert(req UpsertInstanceFieldRequest) fieldmeta.FieldDefi
 	}
 }
 
-func fieldFromDefinition(def fieldmeta.FieldDefinition) Field {
+func fieldFromDefinition(def *fieldmeta.FieldDefinition) Field {
 	return Field{
 		Name:            def.Name,
 		Label:           def.Label,

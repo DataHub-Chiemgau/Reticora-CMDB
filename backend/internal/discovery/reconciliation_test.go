@@ -61,7 +61,7 @@ func TestBulkIngestUsesReconciliation(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 
-	items, total, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
+	items, total, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestBulkIngestQueuesValueConflictsForReview(t *testing.T) {
 		t.Fatalf("lower-ranked serial: %+v", resp)
 	}
 
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}

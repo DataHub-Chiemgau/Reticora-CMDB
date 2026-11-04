@@ -50,10 +50,10 @@ func TestCITypeRepositoryScope(t *testing.T) {
 	}
 
 	field := citype.UpsertInstanceFieldRequest{Name: "rack_note", DataType: "string"}
-	if _, err = repo.UpsertInstanceField(f.OrgCtx(f.OrgA), f.OrgA, foreign, field); err != nil {
+	if _, err = repo.UpsertInstanceField(f.OrgCtx(f.OrgA), f.OrgA, foreign, &field); err != nil {
 		t.Fatalf("org-wide upsert on client-2 CI: %v", err)
 	}
-	if _, err = repo.UpsertInstanceField(ctx, f.OrgA, own, field); err != nil {
+	if _, err = repo.UpsertInstanceField(ctx, f.OrgA, own, &field); err != nil {
 		t.Fatalf("client-1 upsert on own CI: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestCITypeRepositoryScope(t *testing.T) {
 	if len(fields) != 0 {
 		t.Fatalf("client-1 principal sees %d instance fields of a client-2 CI", len(fields))
 	}
-	if _, err = repo.UpsertInstanceField(ctx, f.OrgA, foreign, citype.UpsertInstanceFieldRequest{Name: "intruder", DataType: "string"}); err == nil {
+	if _, err = repo.UpsertInstanceField(ctx, f.OrgA, foreign, &citype.UpsertInstanceFieldRequest{Name: "intruder", DataType: "string"}); err == nil {
 		t.Fatal("client-1 principal added an instance field to a client-2 CI")
 	}
 	if err = repo.DeleteInstanceField(ctx, f.OrgA, foreign, "rack_note"); err == nil {

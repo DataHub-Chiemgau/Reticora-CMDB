@@ -174,7 +174,7 @@ func TestIngestAcceptsDeviceRecords(t *testing.T) {
 			t.Fatalf("%s: %d %s (Deprecation %q)", path, w.Code, w.Body.String(), w.Header().Get("Deprecation"))
 		}
 	}
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("CIs after two identical records: %d, %v", len(items), err)
 	}
@@ -250,7 +250,7 @@ func TestUnclassifiedDeviceBecomesGenericDeviceWithReview(t *testing.T) {
 	if _, err := h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&unknown), itemFromRecord(&known)}); err != nil {
 		t.Fatal(err)
 	}
-	items, _, err := ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := ciRepo.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("CIs: %d, %v", len(items), err)
 	}
@@ -268,7 +268,7 @@ func TestUnclassifiedDeviceBecomesGenericDeviceWithReview(t *testing.T) {
 	if _, err = h.processItems(ctx, "org-1", []IngestItem{itemFromRecord(&again)}); err != nil {
 		t.Fatal(err)
 	}
-	if items, _, err = ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || len(items) != 2 {
+	if items, _, err = ciRepo.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || len(items) != 2 {
 		t.Fatalf("CIs after the second sighting: %d, %v; want the same two", len(items), err)
 	}
 	reviews, _, err := discoveryRepo.ListReviewItems(ctx, "org-1", ReviewFilter{}, api.PaginationParams{Limit: 10})

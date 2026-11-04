@@ -349,7 +349,7 @@ func (h *Handler) ciNameIndex(ctx context.Context, orgID string, names []string)
 		if _, found := out[n]; found {
 			continue
 		}
-		items, _, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{Search: n}, api.PaginationParams{Limit: 50})
+		items, _, err := h.ciRepo.List(ctx, orgID, &ci.FilterParams{Search: n}, api.PaginationParams{Limit: 50})
 		if err != nil {
 			continue
 		}

@@ -264,7 +264,7 @@ func TestReferenceAttributes(t *testing.T) {
 
 	// An instance attribute (_instance) is checked like a type attribute.
 	holder := mustCreate(orgCtx, f.Client1, nil)
-	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, holder.ID, citype.UpsertInstanceFieldRequest{
+	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, holder.ID, &citype.UpsertInstanceFieldRequest{
 		Name: "wp254_backup", DataType: fieldmeta.TypeCIRef}); err != nil {
 		t.Fatalf("instance field: %v", err)
 	}

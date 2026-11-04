@@ -265,14 +265,14 @@ func TestSubtypeUniqueAgainstPostgres(t *testing.T) {
 	}
 	x.ci(t, m.ID, "wp708-m1", map[string]any{"wp708_tag": "T1"})
 	parent := x.c
-	_, err := x.types.Update(x.ctx, f.OrgA, m.ID, citype.UpdateTypeRequest{ParentTypeID: &parent})
+	_, err := x.types.Update(x.ctx, f.OrgA, m.ID, &citype.UpdateTypeRequest{ParentTypeID: &parent})
 	var fe *api.FieldError
 	if !errors.As(err, &fe) || fe.Field != "parent_type_id" || fe.Status != http.StatusConflict {
 		t.Fatalf("parent change that joins duplicates: %v, want 409 on parent_type_id", err)
 	}
 	// Below O nothing inherits wp708_tag.
 	other := x.o
-	if _, err = x.types.Update(x.ctx, f.OrgA, m.ID, citype.UpdateTypeRequest{ParentTypeID: &other}); err != nil {
+	if _, err = x.types.Update(x.ctx, f.OrgA, m.ID, &citype.UpdateTypeRequest{ParentTypeID: &other}); err != nil {
 		t.Fatalf("parent change without duplicates: %v", err)
 	}
 }

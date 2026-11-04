@@ -274,7 +274,7 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	expect("/api/v1/locations/"+placed, http.StatusConflict, "ci_attribute")
 	expect("/api/v1/locations/"+listed, http.StatusConflict, "ci_attribute")
 	instanceHolder := f.CI(t, f.OrgA, f.Client1, "del-instance")
-	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, instanceHolder, citype.UpsertInstanceFieldRequest{
+	if _, err = types.UpsertInstanceField(orgCtx, f.OrgA, instanceHolder, &citype.UpsertInstanceFieldRequest{
 		Name: "wp713_spot", DataType: fieldmeta.TypeLocation}); err != nil {
 		t.Fatalf("instance field: %v", err)
 	}

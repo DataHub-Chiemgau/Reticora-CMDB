@@ -139,7 +139,7 @@ func TestCIKeysetPaginationAgainstPostgres(t *testing.T) {
 		t.Fatal("page 1 has no next_cursor")
 	}
 	body, sig, _ := strings.Cut(firstCursor, ".")
-	_, otherSig, _ := strings.Cut(ci.NextCursor([]ci.Item{{ID: want[0], CreatedAt: "2026-01-01T00:00:00Z"}}, ci.FilterParams{}, 1), ".")
+	_, otherSig, _ := strings.Cut(ci.NextCursor([]ci.Item{{ID: want[0], CreatedAt: "2026-01-01T00:00:00Z"}}, &ci.FilterParams{}, 1), ".")
 	flipped := []byte(sig)
 	flipped[0] ^= 1
 	for _, cursor := range []string{body + "." + otherSig, body + "." + string(flipped), body} {

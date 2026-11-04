@@ -169,7 +169,7 @@ func AsValidationError(err error) (*ValidationError, bool) {
 // request actually carries, which is what read-only enforcement keys on.
 // Attributes without a definition are left untouched: discovery and
 // integrations legitimately store attributes the metadata does not describe.
-func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any, incoming map[string]any, existing map[string]any) error {
+func validateAttributes(defs []fieldmeta.FieldDefinition, values, incoming, existing map[string]any) error {
 	return validateWithRules(defs, nil, values, incoming, existing)
 }
 
@@ -315,8 +315,9 @@ func catalogViolation(rule *fieldmeta.CatalogRule, code, detail string) Violatio
 // validateAttributes), unsorted.
 func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, existing map[string]any) []Violation {
 	var violations []Violation
-	for _, def := range defs {
-		state := fieldmeta.Evaluate(def, values)
+	for i := range defs {
+		def := &defs[i]
+		state := fieldmeta.Evaluate(*def, values)
 		value, present := values[def.Name]
 
 		if !state.Visible {
@@ -339,7 +340,7 @@ func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, exi
 		if !present || isBlank(value) {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(def, value); err != nil {
+		if err := fieldmeta.ValidateValue(*def, value); err != nil {
 			violations = append(violations, Violation{Field: def.Name, Detail: trimFieldPrefix(def.Name, err.Error())})
 			continue
 		}

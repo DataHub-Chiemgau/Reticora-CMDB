@@ -33,7 +33,7 @@ func TestCIRepositoryClientScope(t *testing.T) {
 	ctx := f.ClientCtx(f.Client1)
 	page := api.PaginationParams{Limit: 100}
 
-	items, _, err := repo.List(ctx, f.OrgA, ci.FilterParams{}, page)
+	items, _, err := repo.List(ctx, f.OrgA, &ci.FilterParams{}, page)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestCIRepositoryClientScope(t *testing.T) {
 	}
 
 	// An org-wide principal of organization A sees both clients.
-	items, _, err = repo.List(f.OrgCtx(f.OrgA), f.OrgA, ci.FilterParams{}, page)
+	items, _, err = repo.List(f.OrgCtx(f.OrgA), f.OrgA, &ci.FilterParams{}, page)
 	if err != nil {
 		t.Fatalf("org-wide list: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestCIRepositoryClientScope(t *testing.T) {
 		t.Fatalf("org-wide list: own=%v foreign=%v other org=%v, want true/true/false", seen[own], seen[foreign], seen[otherOrg])
 	}
 
-	if _, _, err = repo.List(context.Background(), f.OrgA, ci.FilterParams{}, page); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.List(context.Background(), f.OrgA, &ci.FilterParams{}, page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 	if _, err = repo.GetByID(ctx, f.OrgB, otherOrg); !errors.Is(err, database.ErrTenantMismatch) {

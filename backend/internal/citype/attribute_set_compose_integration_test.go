@@ -229,7 +229,7 @@ func TestAttributeSetCompositionRulesAgainstPostgres(t *testing.T) {
 	if _, err := f.Admin.Exec(bg, `UPDATE ci SET ci_type_id = $2 WHERE id = $1`, ciID, child.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.repo.UpsertInstanceField(a.ctx(org), org, ciID, citype.UpsertInstanceFieldRequest{
+	if _, err := a.repo.UpsertInstanceField(a.ctx(org), org, ciID, &citype.UpsertInstanceFieldRequest{
 		Name: "wp709_level", DataType: "enum", EnumValues: []string{"c", "d"},
 	}); err != nil {
 		t.Fatalf("instance field: %v", err)
