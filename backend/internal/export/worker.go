@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -10,8 +11,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
@@ -79,6 +82,32 @@ type JobWorker struct {
 	// optional. export.completed (NTF-05) is written by Jobs.CompleteJob
 	// in the transaction that completes the job (WP-550).
 	Tracker jobs.Tracker
+	// Policies resolves the field policy of the job's creator when the job
+	// is rendered (RBA-07, WP-729): the roles at render time, never rights
+	// stored with the job. Without it the export reads no field with field
+	// permissions (fail-closed).
+	Policies permission.PolicyResolver
+}
+
+// ManifestKey returns the blob key of the manifest of a rendered job, next
+// to its object in the export bucket (WP-729).
+func ManifestKey(job *Job) string {
+	return ObjectKey(job) + ".manifest.json"
+}
+
+// creatorPolicy resolves the field policy of the job's creator with its
+// current role assignments: the principal caps nothing, so its levels are
+// those of the creator's roles at render time (as if it had a session
+// without IdP groups); a creator that is no user (service account) holds
+// no role and reads no field with field permissions (fail-closed). The
+// scope of the export stays the snapshot of the job (TenantScope).
+func (w *JobWorker) creatorPolicy(ctx context.Context, job *Job) (*permission.FieldPolicy, error) {
+	if w.Policies == nil {
+		slog.Warn("export job without field policy resolver: fields with field permissions are left out", "job", job.ID)
+		return nil, nil
+	}
+	return w.Policies.Resolve(ctx, identity.Principal{Subject: job.InitiatedBy, OrganizationID: job.OrganizationID,
+		Type: identity.PrincipalTypeUser, Permissions: identity.AllPermissions()})
 }
 
 // mirror follows the status of an export job in the generic job model; a
@@ -119,12 +148,20 @@ func (w *JobWorker) cancelled(ctx context.Context, job *Job) bool {
 func (w *JobWorker) stop(ctx context.Context, job *Job, key string) {
 	slog.Info("export job cancelled", "job", job.ID)
 	if key != "" {
-		if err := w.Blobs.Delete(ctx, w.Bucket, key); err != nil {
-			w.report(job.ID, fmt.Errorf("delete object of cancelled export: %w", err))
-		}
+		w.deleteObjects(ctx, job, key, ManifestKey(job))
 	}
 	if err := w.Jobs.FailJob(ctx, job.OrganizationID, job.ID, CancelledByUser, w.Now()); err != nil {
 		w.report(job.ID, fmt.Errorf("mark export job cancelled: %w", err))
+	}
+}
+
+// deleteObjects deletes the stored objects (export, manifest) of a job
+// that does not complete (WP-729).
+func (w *JobWorker) deleteObjects(ctx context.Context, job *Job, keys ...string) {
+	for _, k := range keys {
+		if err := w.Blobs.Delete(ctx, w.Bucket, k); err != nil {
+			w.report(job.ID, fmt.Errorf("delete object of unfinished export: %w", err))
+		}
 	}
 }
 
@@ -239,8 +276,15 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 			return
 		}
 	}
+	// The field policy of the creator is resolved now, with its roles at
+	// render time (WP-729); a resolution error fails the job.
+	policy, err := w.creatorPolicy(ctx, job)
+	if err != nil {
+		w.fail(ctx, job, fmt.Errorf("resolve field permissions of the export: %w", err))
+		return
+	}
 	var buf bytes.Buffer
-	rowCount, err := RenderFormat(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
+	rowCount, manifest, err := RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
 	if err != nil {
 		w.fail(ctx, job, err)
 		return
@@ -251,8 +295,20 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	if err := w.Blobs.Put(ctx, w.Bucket, key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), contentType); err != nil {
-		w.fail(ctx, job, fmt.Errorf("store export object: %w", err))
+	if perr := w.Blobs.Put(ctx, w.Bucket, key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), contentType); perr != nil {
+		w.fail(ctx, job, fmt.Errorf("store export object: %w", perr))
+		return
+	}
+	// The manifest of the file lies next to it (WP-729): GET
+	// /api/v1/exports/{id} answers it for the completed job.
+	rawManifest, err := json.Marshal(&manifest)
+	if err != nil {
+		w.fail(ctx, job, fmt.Errorf("encode export manifest: %w", err))
+		return
+	}
+	if merr := w.Blobs.Put(ctx, w.Bucket, ManifestKey(job), bytes.NewReader(rawManifest), int64(len(rawManifest)), "application/json"); merr != nil {
+		w.deleteObjects(ctx, job, key)
+		w.fail(ctx, job, fmt.Errorf("store export manifest: %w", merr))
 		return
 	}
 
@@ -261,17 +317,17 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		return
 	}
 	now := w.Now()
-	if err := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); err != nil {
-		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
+	if cerr := w.Jobs.CompleteJob(ctx, job.OrganizationID, job.ID, key, rowCount, int64(buf.Len()), now, now.Add(w.JobTTL)); cerr != nil {
+		w.report(job.ID, fmt.Errorf("complete export job: %w", cerr))
 		return
 	}
 	w.mirror(ctx, job, jobs.StatusSucceeded, "")
 	// The mirrored job names the export and its size (GET
 	// /api/v1/jobs/{id}/result, F-347).
 	if tracker, ok := w.Tracker.(jobs.ResultTracker); ok {
-		if err := tracker.MirrorResult(ctx, job.OrganizationID, "export_job", job.ID,
-			map[string]any{"export_id": job.ID, "row_count": rowCount}); err != nil {
-			slog.Warn("mirror export job result", "job", job.ID, "error", err)
+		if rerr := tracker.MirrorResult(ctx, job.OrganizationID, "export_job", job.ID,
+			map[string]any{"export_id": job.ID, "row_count": rowCount}); rerr != nil {
+			slog.Warn("mirror export job result", "job", job.ID, "error", rerr)
 		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -36,8 +37,10 @@ func openDATEVGate() *DATEVGate { return NewDATEVGate(allowAll{}, true) }
 // assetReader adds a principal with asset:read to a request, as DATEV
 // requires (WP-790).
 func assetReader(r *http.Request) *http.Request {
-	return r.WithContext(identity.WithPrincipal(r.Context(), identity.Principal{Subject: "user-1",
-		Permissions: []identity.Permission{identity.PermExportRun, identity.PermCIRead, identity.PermAssetRead}}))
+	perms := []identity.Permission{identity.PermExportRun, identity.PermCIRead, identity.PermAssetRead}
+	ctx := identity.WithPrincipal(r.Context(), identity.Principal{Subject: "user-1", Permissions: perms})
+	// The policy source of FieldPolicyMiddleware: no field permissions.
+	return r.WithContext(permission.WithPolicy(ctx, permission.UnrestrictedPolicy(perms)))
 }
 
 func TestExportJSON(t *testing.T) {

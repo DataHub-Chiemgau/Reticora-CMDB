@@ -1078,7 +1078,14 @@ export interface paths {
      *     response is chunked and neither the server nor the client has to hold
      *     the full result set in memory. There is no row limit. CSV and DATEV
      *     are UTF-8 with BOM and semicolons (EXP-01); X-Export-Omitted-Fields
-     *     names the CI fields the layout leaves out. format=datev is gated
+     *     names the CI fields the layout leaves out and those the caller may
+     *     not read (field permissions, RBA-07, WP-729): a CSV column not
+     *     readable for one of the exported CI types (ci_type_id, otherwise
+     *     every type of the organization) drops out, in the fixed DATEV
+     *     layout its cells stay empty, JSON writes each CI as the projected
+     *     DTO of the CI API; a field not readable on single CIs only (object
+     *     grant, scope of a role assignment) leaves their cells empty. Without
+     *     field permissions the payload is unchanged. format=datev is gated
      *     (WP-790): it needs the module inventory (otherwise 400 like an
      *     unknown format), the entitlements export_datev and assets_basic
      *     (otherwise 403 feature-not-entitled) and the permission asset:read
@@ -12126,13 +12133,14 @@ export interface components {
       has_more: boolean;
       next_cursor?: string;
     };
-    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01). */
+    /** @description The fields of an export and the visible CI fields it leaves out (EXP-01): reason layout for a field the format has no column for, field_permission for a field the creator may not read for at least one of the exported CI types (RBA-07, WP-729); attributes and asset facts are named one by one (attributes.<key>, asset.<field>). A completed job answers the manifest stored with its file, any other job the preview with the caller's field permissions. X-Export-Omitted-Fields of the streaming export lists the same fields. */
     ExportManifest: {
       format: string;
       fields: string[];
       omitted: {
         field: string;
-        reason: string;
+        /** @enum {string} */
+        reason: 'layout' | 'field_permission';
       }[];
     };
     ExportJob: {
@@ -35941,13 +35949,14 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read). */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read) (ProblemDetail), or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (as attributes.tags), a sort key, a column or, for CIs, asset.<field>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/problem+json': components['schemas']['ProblemDetail'];
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
       /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */

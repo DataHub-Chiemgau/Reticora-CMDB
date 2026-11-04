@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -271,6 +272,8 @@ func TestSavedViewSortAndColumnsAgainstPostgres(t *testing.T) {
 		t.Helper()
 		ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: owner})
 		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: owner, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser})
+		// The policy source of FieldPolicyMiddleware: no field permissions (WP-729).
+		ctx = permission.WithPolicy(ctx, permission.UnrestrictedPolicy(nil))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx))
 		var out map[string]any

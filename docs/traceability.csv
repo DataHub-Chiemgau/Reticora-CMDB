@@ -1352,3 +1352,4 @@ MGT-12;[P2];B;backend/internal/contract/contract_integration_test.go;WP-269
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/contract/contract_integration_test.go;WP-269
 RBA-07;[P2];B;backend/internal/graphqlbff/fieldrights_test.go;WP-727
 GQL-04;[B];B;backend/internal/graphqlbff/fieldrights_test.go;WP-727
+RBA-07;[P2];B;backend/internal/export/fieldrights_test.go;WP-729

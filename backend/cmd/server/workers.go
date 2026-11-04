@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
@@ -69,6 +70,9 @@ type workerDeps struct {
 	// modules are the late modules; the export worker checks inventory for
 	// DATEV jobs (WP-790).
 	modules *server.ModuleSet
+	// fieldPolicyCache holds the field permission snapshots (the cache of
+	// server.Options.FieldPolicyCache); nil keeps them per process.
+	fieldPolicyCache cache.Store
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
@@ -122,6 +126,10 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			datevEntitlements = d.entitlements
 		}
 		exportWorker.DATEV = export.NewDATEVGate(datevEntitlements, d.modules.Enabled(server.ModuleInventory))
+		// The field policy of the job's creator is resolved at render time
+		// with the role assignments of then (RBA-07, WP-729); the snapshots
+		// share the cache of the API, so an invalidation reaches the worker.
+		exportWorker.Policies = server.NewFieldResolver(d.repos, d.fieldPolicyCache)
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },

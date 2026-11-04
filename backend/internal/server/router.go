@@ -321,11 +321,19 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflic
 // accounts through their role assignments, the snapshots are cached in
 // opts.FieldPolicyCache.
 func newFieldResolver(repos *Repositories, opts *Options) *permission.FieldResolver {
+	return NewFieldResolver(repos, opts.FieldPolicyCache)
+}
+
+// NewFieldResolver builds the field permission resolver of the
+// repositories with the snapshot cache store (nil: per process); the
+// export worker of cmd/server resolves the policy of a job's creator with
+// it (WP-729).
+func NewFieldResolver(repos *Repositories, store cache.Store) *permission.FieldResolver {
 	var serviceAccounts identity.ServiceAccountAccessResolver
 	if repos.ServiceAccounts != nil {
 		serviceAccounts = user.ServiceAccountAccess{Repo: repos.ServiceAccounts}
 	}
-	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, opts.FieldPolicyCache)
+	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, store)
 }
 
 // operatorHandler builds the operator path; organizations are created with
@@ -560,6 +568,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	exportWorker.Tracker = jobTracker
 	datevGate := exportDATEVGate(&opts)
 	exportWorker.DATEV = datevGate
+	// The worker renders with the field policy of the job's creator,
+	// resolved at render time (RBA-07, WP-729).
+	exportWorker.Policies = fieldResolver
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).

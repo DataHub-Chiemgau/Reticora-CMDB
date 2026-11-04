@@ -28,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -58,6 +59,8 @@ func (v *auditT7Views) call(org, user, method, path, body string) (int, map[stri
 	scope := database.OrgWideScope(org, user)
 	ctx = database.ContextWithTenantScope(ctx, &scope)
 	ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: user, OrganizationID: org, Type: identity.PrincipalTypeUser})
+	// The policy source of FieldPolicyMiddleware: no field permissions (WP-729).
+	ctx = permission.WithPolicy(ctx, permission.UnrestrictedPolicy(nil))
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")

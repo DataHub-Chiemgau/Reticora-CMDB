@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -265,6 +266,111 @@ type QueryResult struct {
 	// Columns holds the value of each requested column (FilterSpec.Columns)
 	// by field name; absent when the run asked for no columns.
 	Columns map[string]any `json:"columns,omitempty"`
+	// TypeID, ClientID and SiteID are the type (ci_type_id, asset_type_id)
+	// and scope of the row, SummaryParts the columns summary joins: the
+	// field projection needs them (RBA-07, WP-729). Not part of the API.
+	TypeID       string        `json:"-"`
+	ClientID     string        `json:"-"`
+	SiteID       string        `json:"-"`
+	SummaryParts []SummaryPart `json:"-"`
+}
+
+// SummaryPart is a column of the summary of a row with its value; a NULL
+// column is no part.
+type SummaryPart struct {
+	Field string
+	Value string
+}
+
+// FieldRef is a field a filter spec reads (RBA-07, WP-729): the entity kind
+// whose field permissions cover it ("ci" or "asset"; asset.<field> of a CI
+// query is "asset"), its path in that kind (a column or attributes.<key>)
+// and the name the request gives it, which a refusal names.
+type FieldRef struct {
+	EntityKind string
+	Path       string
+	Name       string
+}
+
+// ReferencedFields returns every field the spec reads for the entity kind,
+// in the order of the spec and without duplicates: the flat fields on
+// columns (asset_category as category, warranty_within_days as
+// warranty_end, lifecycle, status and the location filters as
+// location_id, discovery_source, ci_type as ci_type_id, search as name),
+// tags as attributes.tags, the keys of attributes as attributes.<key>,
+// every comparison of the AST in where (asset.<field> of a CI as the
+// asset's field), the sort keys and the columns. The caller decides which
+// of them field permissions cover. Follow-up field kinds of the
+// structured query extend it (WP-309).
+func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
+	var out []FieldRef
+	seen := map[FieldRef]bool{}
+	add := func(kind, path, name string) {
+		ref := FieldRef{EntityKind: kind, Path: path, Name: name}
+		if !seen[ref] {
+			seen[ref] = true
+			out = append(out, ref)
+		}
+	}
+	// field adds a field of the AST, a sort key or a column.
+	field := func(name string) {
+		switch sub, isAsset := strings.CutPrefix(name, "asset."); {
+		case isAsset && entityKind == "ci":
+			add("asset", sub, name)
+		case name == "ci_type":
+			add(entityKind, "ci_type_id", name)
+		default:
+			add(entityKind, name, name)
+		}
+	}
+	isAsset := entityKind == "asset"
+	for _, flat := range []struct {
+		set        bool
+		path, name string
+	}{
+		{f.Search != "", "name", "search"},
+		{f.ClientID != "", "client_id", "client_id"},
+		{f.CIType != "", "ci_type_id", "ci_type"},
+		{f.AssetCategory != "" && isAsset, "category", "asset_category"},
+		{f.Lifecycle != "", "lifecycle_state", "lifecycle"},
+		{f.Status != "", "status", "status"},
+		{f.DiscoverySource != "" && !isAsset, "discovery_source", "discovery_source"},
+		{f.LocationID != "", "location_id", "location_id"},
+		{f.LocationSubtree != "", "location_id", "location_subtree"},
+		{f.LocationSearch != "", "location_id", "location_search"},
+		{f.WarrantyWithinDays > 0 && isAsset, "warranty_end", "warranty_within_days"},
+		{f.AvailableOnly && isAsset, "status", "available_only"},
+		{f.AvailableOnly && isAsset, "lifecycle_state", "available_only"},
+	} {
+		if flat.set {
+			add(entityKind, flat.path, flat.name)
+		}
+	}
+	if len(f.Tags) > 0 {
+		add(entityKind, "attributes.tags", "tags")
+	}
+	keys := make([]string, 0, len(f.Attributes))
+	for k := range f.Attributes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		add(entityKind, "attributes."+k, "attributes."+k)
+	}
+	if f.Where != nil {
+		f.Where.walk(func(e *Expr) {
+			if e.Field != "" {
+				field(e.Field)
+			}
+		})
+	}
+	for _, key := range f.Sort {
+		field(key.Field)
+	}
+	for _, col := range f.Columns {
+		field(col)
+	}
+	return out
 }
 
 // Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and
@@ -359,6 +465,20 @@ type ASTError struct {
 }
 
 func (e *ASTError) Error() string { return "where" + e.Path + ": " + e.Message }
+
+// walk calls visit for the node and every node below it.
+func (e *Expr) walk(visit func(*Expr)) {
+	visit(e)
+	for i := range e.And {
+		e.And[i].walk(visit)
+	}
+	for i := range e.Or {
+		e.Or[i].walk(visit)
+	}
+	if e.Not != nil {
+		e.Not.walk(visit)
+	}
+}
 
 // Validate checks the AST against the field whitelist of the entity kind,
 // the operators of each field kind and the size limits.
