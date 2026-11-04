@@ -1404,3 +1404,6 @@ MET-53;[P2];C;frontend/src/pages/MetamodelDraftsPage.test.tsx;WP-799
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
 MGT-12;[P2];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
 STK-05;[P2];B;backend/internal/order/order_integration_test.go;WP-286
+BLK-02;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
+CI-08;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
+OVR-03;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304

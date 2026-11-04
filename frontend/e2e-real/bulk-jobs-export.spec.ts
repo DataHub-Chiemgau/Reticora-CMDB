@@ -542,7 +542,7 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       value: 'maintenance',
       reason: 'override',
       override_author: a.userId,
-      override_reason: 'bulk set_status',
+      override_reason: 'bulk',
       protected: true,
     });
     const manualChange = (await changesOf(a, manual.id)).find(

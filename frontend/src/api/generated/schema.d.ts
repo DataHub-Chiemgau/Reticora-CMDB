@@ -553,8 +553,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Bulk status change of up to 500 CIs (API-08, BLK-01)
-     * @description Sets the status of every CI in ids. Below 100 ids the answer is the partial failure report (200): every id with ok or its error and the HTTP status the single change would have answered. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}). More than 500 ids is 422. Requires ci:write. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. Every change is a manual change like a PATCH of status (CI-04, OVR-01): the status is set also over an existing override and gets a protected override with the requesting user (for a job its creator) as author; the CI version rises (API-07), so a later PATCH of status with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the requested status afterwards, otherwise it is an error.
+     * Bulk change of up to 500 CIs (API-08, BLK-01, BLK-02)
+     * @description Applies the action to every CI in ids: set_status (the default when action is absent; the target in status), set_fields, set_location, add_tags, remove_tags, set_owner or archive (their parameters in params). Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single change would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). Requires ci:write; every action of this list needs no further right. A CI outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. set_status, set_fields, set_location, set_owner and the status of archive are manual changes like a PATCH (CI-04, OVR-01, OVR-03): through the same checks (field permissions, rules, computed attributes, asset-owned fields), every changed field gets a protected override with the reason bulk (in a job bulk:<job_id>) and the requesting user (for a job its creator) as author, the owner fields excepted; the CI version rises (API-07), so a later PATCH of such a field with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the written value afterwards. set_fields takes a merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags and reserved keys are 422 for the request, an instance attribute of a CI 422 for its id, a value of a unique attribute another CI holds 409 for the id. set_location and set_owner on a CI linked to an asset are 422 for the id (DB-05). add_tags and remove_tags write the tag list like PUT /api/v1/cis/{id}/tags with the version read (no override; a tag change in between is 409 for the id); a CI with nothing to change is ok without a write. archive sets status inactive and the system tag archived in one transaction; an archived inactive CI is ok without a write.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -10867,7 +10867,9 @@ export interface components {
       category: string;
       heuristic?: boolean;
     };
-    CIBulkResult: {
+    CIBulkResult: components['schemas']['BulkResult'];
+    /** @description The partial failure report of a bulk operation on CIs or assets (API-08, BLK-01): one item per id, in the order of the ids. */
+    BulkResult: {
       action: string;
       total: number;
       succeeded: number;
@@ -10876,14 +10878,101 @@ export interface components {
       skipped?: number;
       /** @description The bulk job was cancelled while running and stopped before the skipped ids. */
       cancelled?: boolean;
-      items: {
-        id: string;
-        /** @enum {string} */
-        result: 'ok' | 'error' | 'skipped';
-        /** @description The HTTP status the single operation would have answered; 0 for a skipped id. 403 when the action grants (ci:write on the type and scope of the CI, WP-728) or the field permissions refuse the id; the other ids go on. */
-        code: number;
-        error?: string;
-      }[];
+      items: components['schemas']['BulkItemResult'][];
+    };
+    BulkItemResult: {
+      id: string;
+      /** @enum {string} */
+      result: 'ok' | 'error' | 'skipped';
+      /** @description The HTTP status the single operation would have answered; 0 for a skipped id. 403 when the action grants (ci:write on the type and scope of the CI, WP-728) or the field permissions refuse the id; the other ids go on. */
+      code: number;
+      error?: string;
+      /** @description Problem type of an error (RFC 7807): the type of the problem the error names, otherwise https://reticora.io/problems/<code>. */
+      type?: string;
+      /** @description Fields the error names: the violated fields (422), a unique attribute another CI holds or a field changed since the read (409), the fields the field permissions refuse (403). */
+      fields?: string[];
+    };
+    /** @description Body of POST /api/v1/cis/bulk (WP-304): one variant per action. Without action the body is set_status; every other variant names its action. */
+    CIBulkRequest:
+      | components['schemas']['CIBulkSetStatus']
+      | components['schemas']['CIBulkSetFields']
+      | components['schemas']['CIBulkSetLocation']
+      | components['schemas']['CIBulkTags']
+      | components['schemas']['CIBulkSetOwner']
+      | components['schemas']['CIBulkArchive'];
+    CIBulkIDs: string[];
+    CIBulkSetStatus: {
+      /**
+       * @default set_status
+       * @enum {string}
+       */
+      action: 'set_status';
+      ids: components['schemas']['CIBulkIDs'];
+      /** @enum {string} */
+      status: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
+    };
+    CIBulkSetFields: {
+      /** @enum {string} */
+      action: 'set_fields';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** @description Merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags is refused (tags change through add_tags and remove_tags). */
+        fields: {
+          name?: string;
+          client_id?: string | null;
+          parent_ci_id?: string | null;
+          manufacturer?: string | null;
+          model?: string | null;
+          serial_number?: string | null;
+          hardware_uuid?: string | null;
+          management_ip?: string | null;
+          primary_mac?: string | null;
+          hostname?: string | null;
+          fqdn?: string | null;
+          os_name?: string | null;
+          os_version?: string | null;
+          firmware_version?: string | null;
+          sys_object_id?: string | null;
+          /** @description RFC 7396 merge patch of the attributes. */
+          attributes?: {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+    CIBulkSetLocation: {
+      /** @enum {string} */
+      action: 'set_location';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** @description Node of the location tree (empty string or null clears it). An unknown or invisible location is 422 on location_id for the id, so is a CI linked to an asset (its location is the asset's, DB-05). */
+        location_id: string | null;
+      };
+    };
+    CIBulkTags: {
+      /** @enum {string} */
+      action: 'add_tags' | 'remove_tags';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** @description Keys of tags of the catalog (GET /api/v1/tags). */
+        tags: string[];
+      };
+    };
+    CIBulkSetOwner: {
+      /** @enum {string} */
+      action: 'set_owner';
+      ids: components['schemas']['CIBulkIDs'];
+      /** @description The owner (WP-280); an empty string or null clears it. A CI linked to an asset, an unknown user or team is 422 for the id, a team outside the team scope of the caller 403 (TEN-05). */
+      params: {
+        owner_user_id?: string | null;
+        owner_team_id?: string | null;
+      };
+    };
+    CIBulkArchive: {
+      /** @enum {string} */
+      action: 'archive';
+      ids: components['schemas']['CIBulkIDs'];
+      params?: Record<string, never>;
     };
     /** @description A template assigned to a CI (ci_template, MET-16, WP-710). */
     CITemplate: {
@@ -17680,16 +17769,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': {
-          /**
-           * @default set_status
-           * @enum {string}
-           */
-          action?: 'set_status';
-          ids: string[];
-          /** @enum {string} */
-          status: 'active' | 'inactive' | 'maintenance' | 'decommissioned' | 'unknown';
-        };
+        'application/json': components['schemas']['CIBulkRequest'];
       };
     };
     responses: {
@@ -17719,7 +17799,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description More than 500 ids, an unknown action or status. */
+      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>) or a tag the catalog lacks (params.tags). */
       422: {
         headers: {
           [name: string]: unknown;

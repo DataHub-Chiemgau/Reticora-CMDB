@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -50,7 +52,8 @@ func (r *bulkRepo) Update(ctx context.Context, orgID, id string, req UpdateReque
 }
 
 // checkManual asserts that every id was written as a manual change of
-// author with If-Match "*" (WP-368, E-66 option 1) and has version 2.
+// author with If-Match "*" (WP-368, E-66 option 1) and the reason bulk
+// (bulk:<job_id> in a job, WP-304) and has version 2.
 func (r *bulkRepo) checkManual(t *testing.T, author string, ids []string) {
 	t.Helper()
 	r.mu.Lock()
@@ -62,8 +65,8 @@ func (r *bulkRepo) checkManual(t *testing.T, author string, ids []string) {
 			t.Errorf("%s: not written", id)
 		case req.Manual == nil || req.Manual.Author != author:
 			t.Errorf("%s: manual change %+v, want author %s", id, req.Manual, author)
-		case req.ChangeReason != "bulk set_status" || req.IfMatch == nil || *req.IfMatch != api.IfMatchAny:
-			t.Errorf("%s: reason %q, If-Match %v, want bulk set_status and *", id, req.ChangeReason, req.IfMatch)
+		case (req.ChangeReason != "bulk" && !strings.HasPrefix(req.ChangeReason, "bulk:")) || req.IfMatch == nil || *req.IfMatch != api.IfMatchAny:
+			t.Errorf("%s: reason %q, If-Match %v, want bulk (or bulk:<job_id>) and *", id, req.ChangeReason, req.IfMatch)
 		}
 		if item, _ := r.GetByID(context.Background(), "org-1", id); item.Version != 2 {
 			t.Errorf("%s: version %d, want 2", id, item.Version)
@@ -319,7 +322,8 @@ func TestBulkErrorMapsLikeTheSinglePatch(t *testing.T) {
 		{fmt.Errorf("get: %w", ErrNotFound), http.StatusNotFound},
 		{errors.New("boom"), http.StatusInternalServerError},
 	} {
-		code, msg := bulkError(tc.err)
+		f := bulkError(tc.err)
+		code, msg := f.code, f.msg
 		if code != tc.code {
 			t.Errorf("%v: code %d, want %d", tc.err, code, tc.code)
 		}
@@ -401,6 +405,13 @@ func TestBulkFromHundredIDsIsAJob(t *testing.T) {
 		t.Errorf("job created by %q", job.CreatedBy)
 	}
 	repo.checkManual(t, "user-1", ids)
+	// WP-304: the reason of a job names it.
+	repo.mu.Lock()
+	reason := repo.requests[ids[0]].ChangeReason
+	repo.mu.Unlock()
+	if reason != "bulk:"+job.ID {
+		t.Errorf("reason of the job's change %q, want bulk:<job_id>", reason)
+	}
 }
 
 // TestBulkJobWritesAsItsCreator covers WP-368 (OVR-01): the author of the
@@ -495,9 +506,224 @@ func TestBulkJobStopsAfterCancel(t *testing.T) {
 	// Not cancelled: one checkpoint per 25 ids, every id done.
 	repo2, ids2 := newBulkRepo(t, 101)
 	checks := 0
-	all := NewService(repo2).runBulk(ctx, "org-1", "user-2", &BulkRequest{Action: BulkSetStatus, IDs: ids2, Status: StatusMaintenance},
+	all := NewService(repo2).runBulk(ctx, "org-1", "user-2", "", &BulkRequest{Action: BulkSetStatus, IDs: ids2, Status: StatusMaintenance},
 		func() bool { checks++; return false })
 	if all.Succeeded != 101 || all.Skipped != 0 || all.Cancelled || checks != 4 {
 		t.Errorf("uncancelled run: %d ok, %d skipped, cancelled %v, %d checkpoints; want 101, 0, false, 4", all.Succeeded, all.Skipped, all.Cancelled, checks)
+	}
+}
+
+// problemField returns the status and the field of a problem answer.
+func problemField(t *testing.T, w *httptest.ResponseRecorder) (int, string) {
+	t.Helper()
+	var problem struct {
+		Field string `json:"field"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &problem)
+	return w.Code, problem.Field
+}
+
+// TestBulkValidatesActionAndParams covers the contract of WP-304 (BLK-02,
+// API-08): action defaults to set_status, status belongs to set_status
+// alone, the other actions take params; an unknown action is 422 on
+// action, unknown, missing or invalid parameters 422 on params.<name>, a
+// tag the catalog lacks 422 on params.tags; nothing is written.
+func TestBulkValidatesActionAndParams(t *testing.T) {
+	mux, repo, ids, _ := bulkMux(t, 1)
+	id := ids[0]
+	body := func(action, params string) string {
+		return `{"action":"` + action + `","ids":["` + id + `"],"params":` + params + `}`
+	}
+	for _, tc := range []struct {
+		body  string
+		field string
+	}{
+		{`{"action":"delete","ids":["` + id + `"]}`, "action"},
+		{`{"ids":["` + id + `"]}`, "status"},
+		{`{"action":"set_fields","ids":["` + id + `"],"status":"active","params":{"fields":{"model":"x"}}}`, "status"},
+		{`{"action":"set_status","ids":["` + id + `"],"status":"active","params":{"fields":{}}}`, "params.fields"},
+		{body(BulkSetFields, `{}`), "params.fields"},
+		{body(BulkSetFields, `[]`), "params"},
+		{body(BulkSetFields, `{"fields":{}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"status":"active"}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"location_id":""}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"owner_team_id":""}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"asset_id":""}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"bogus":1}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"name":null}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"attributes":{"tags":["a"]}}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"attributes":{"_instance":{}}}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"management_ip":"not-an-ip"}}`), "params.fields"},
+		{body(BulkSetFields, `{"fields":{"model":"x"},"tags":["a"]}`), "params.tags"},
+		{body(BulkSetLocation, `{}`), "params.location_id"},
+		{body(BulkSetLocation, `{"location_id":"x"}`), "params.location_id"},
+		{body(BulkAddTags, `{}`), "params.tags"},
+		{body(BulkAddTags, `{"tags":[]}`), "params.tags"},
+		{body(BulkAddTags, `{"tags":["Not A Key"]}`), "params.tags"},
+		{body(BulkAddTags, `{"tags":["unknown-tag"]}`), "params.tags"},
+		{body(BulkRemoveTags, `{"tags":["archived","unknown-tag"]}`), "params.tags"},
+		{body(BulkSetOwner, `{}`), "params.owner_user_id"},
+		{body(BulkSetOwner, `{"owner_team_id":"team-1"}`), "params.owner_team_id"},
+		{body(BulkArchive, `{"reason":"x"}`), "params.reason"},
+	} {
+		code, field := problemField(t, postBulk(mux, tc.body))
+		if code != http.StatusUnprocessableEntity || field != tc.field {
+			t.Errorf("%s: %d on %q, want 422 on %s", tc.body, code, field, tc.field)
+		}
+	}
+	repo.mu.Lock()
+	written := len(repo.requests)
+	repo.mu.Unlock()
+	if item, _ := repo.GetByID(context.Background(), "org-1", id); written != 0 || item.Version != 1 || len(item.Tags) != 0 {
+		t.Errorf("an invalid request wrote: %d updates, version %d, tags %v", written, item.Version, item.Tags)
+	}
+	// Valid: without action set_status; archive without params.
+	for _, ok := range []string{`{"ids":["` + id + `"],"status":"active"}`, `{"action":"archive","ids":["` + id + `"]}`} {
+		if w := postBulk(mux, ok); w.Code != http.StatusOK {
+			t.Errorf("%s: %d %s, want 200", ok, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestBulkFieldOperations covers the field operations of WP-304 (BLK-02,
+// CI-08, OVR-03) against the memory repository: set_fields, set_location
+// and set_owner write manual changes of the caller with the reason bulk;
+// add_tags and remove_tags change the tags, an unchanged CI keeps its
+// version; archive sets inactive and the tag archived once.
+func TestBulkFieldOperations(t *testing.T) {
+	mux, repo, ids, _ := bulkMux(t, 2)
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
+	if _, err := NewService(repo).CreateTag(ctx, "org-1", &CreateTagRequest{Key: "dmz", DisplayName: map[string]string{"en": "DMZ"}}); err != nil {
+		t.Fatal(err)
+	}
+	get := func(id string) *Item {
+		item, err := repo.GetByID(context.Background(), "org-1", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	run := func(action, params string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"action": action, "ids": ids, "params": json.RawMessage(params)})
+		w := postBulk(mux, string(raw))
+		var res BulkResult
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", action, w.Code, w.Body.String())
+		}
+		if res.Action != action || res.Succeeded != len(ids) || res.Failed != 0 {
+			t.Errorf("%s: report %+v, want every id ok", action, res)
+		}
+	}
+
+	run(BulkSetFields, `{"fields":{"model":"bulk-model","attributes":{"rack_unit":"u1"}}}`)
+	repo.checkManual(t, "user-1", ids)
+	for _, id := range ids {
+		if item := get(id); item.Model != "bulk-model" || item.Attributes["rack_unit"] != "u1" {
+			t.Errorf("%s after set_fields: model %q, attributes %v", id, item.Model, item.Attributes)
+		}
+	}
+
+	const loc, owner = "0a0a0a0a-0000-4000-8000-00000000000a", "0b0b0b0b-0000-4000-8000-00000000000b"
+	run(BulkSetLocation, `{"location_id":"`+loc+`"}`)
+	run(BulkSetOwner, `{"owner_user_id":"`+strings.ToUpper(owner)+`"}`)
+	repo.mu.Lock()
+	req := repo.requests[ids[1]]
+	repo.mu.Unlock()
+	if req.OwnerUserID == nil || *req.OwnerUserID != owner || req.OwnerTeamID != nil || req.ChangeReason != "bulk" || req.Manual == nil {
+		t.Errorf("set_owner request: %+v", req)
+	}
+	if item := get(ids[0]); item.LocationID != loc || item.OwnerUserID != owner {
+		t.Errorf("after set_location and set_owner: location %q owner %q", item.LocationID, item.OwnerUserID)
+	}
+
+	run(BulkAddTags, `{"tags":["dmz"]}`)
+	version := get(ids[0]).Version
+	run(BulkAddTags, `{"tags":["dmz"]}`)
+	if item := get(ids[0]); !slices.Equal(item.Tags, []string{"dmz"}) || item.Version != version {
+		t.Errorf("after add_tags twice: tags %v version %d, want [dmz] and version %d", item.Tags, item.Version, version)
+	}
+
+	run(BulkArchive, `null`)
+	version = get(ids[0]).Version
+	run(BulkArchive, `{}`)
+	if item := get(ids[0]); item.Status != StatusInactive || !slices.Equal(item.Tags, []string{"archived", "dmz"}) || item.Version != version {
+		t.Errorf("after archive twice: status %s tags %v version %d, want inactive, [archived dmz], %d", item.Status, item.Tags, item.Version, version)
+	}
+
+	run(BulkRemoveTags, `{"tags":["dmz","archived"]}`)
+	if item := get(ids[1]); len(item.Tags) != 0 {
+		t.Errorf("after remove_tags: %v", item.Tags)
+	}
+}
+
+// typedErr is an error with its own problem type.
+type typedErr struct{}
+
+func (typedErr) Error() string       { return "typed refusal" }
+func (typedErr) ProblemType() string { return "https://reticora.io/problems/typed" }
+
+// TestBulkReportsTypeAndFields covers the report of WP-304: every error
+// carries its problem type (an api.TypedProblem its own, otherwise
+// /problems/<code>) and the fields it names; a taken unique attribute is
+// 409 with the attributes.
+func TestBulkReportsTypeAndFields(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		code   int
+		typ    string
+		fields []string
+	}{
+		{&UniqueError{Fields: []string{"asset_tag"}}, http.StatusConflict, "https://reticora.io/problems/409", []string{"asset_tag"}},
+		{fmt.Errorf("update: %w", &ConflictError{Fields: []string{"tags"}, Current: 3}), http.StatusConflict, "https://reticora.io/problems/409", []string{"tags"}},
+		{&api.FieldError{Field: "location_id", Message: "x", Status: http.StatusUnprocessableEntity}, http.StatusUnprocessableEntity,
+			"https://reticora.io/problems/422", []string{"location_id"}},
+		{&ValidationError{Violations: []Violation{{Field: "owner_user_id", Detail: "user not found"}, {Field: "owner_user_id"}, {Field: "attributes.k"}}},
+			http.StatusUnprocessableEntity, "https://reticora.io/problems/422", []string{"owner_user_id", "attributes.k"}},
+		{&api.FieldForbiddenError{Fields: []string{"attributes.secret"}}, http.StatusForbidden, "https://reticora.io/problems/403", []string{"attributes.secret"}},
+		{fmt.Errorf("update: %w", typedErr{}), http.StatusInternalServerError, "https://reticora.io/problems/typed", nil},
+		{fmt.Errorf("get: %w", ErrNotFound), http.StatusNotFound, "https://reticora.io/problems/404", nil},
+	} {
+		item := bulkFailed("id-1", tc.err)
+		if item.Result != bulkResultError || item.Code != tc.code || item.Type != tc.typ || !slices.Equal(item.Fields, tc.fields) {
+			t.Errorf("%v: %+v, want %d %s %v", tc.err, item, tc.code, tc.typ, tc.fields)
+		}
+	}
+	if item := bulkOK("id-1"); item.Type != "" || item.Fields != nil {
+		t.Errorf("ok item: %+v", item)
+	}
+}
+
+// TestBulkActionRights covers the rights per action of WP-304: every field
+// operation needs ci:write, which the route middleware checks, so the
+// service admits it without a principal; a right beyond ci:write is
+// checked before any change, fail-closed without a principal.
+func TestBulkActionRights(t *testing.T) {
+	want := []string{BulkAddTags, BulkArchive, BulkRemoveTags, BulkSetFields, BulkSetLocation, BulkSetOwner, BulkSetStatus}
+	if got := BulkActions(); !slices.Equal(got, want) {
+		t.Errorf("actions %v, want %v", got, want)
+	}
+	for _, action := range want {
+		if perm, ok := BulkActionPermission(action); !ok || perm != identity.PermCIWrite {
+			t.Errorf("%s needs %q, want ci:write", action, perm)
+		}
+		if err := checkBulkPermission(context.Background(), action); err != nil {
+			t.Errorf("%s without a principal: %v", action, err)
+		}
+	}
+	const extra = "wp304_test_action"
+	bulkActionPermissions[extra] = identity.PermJobRead
+	defer delete(bulkActionPermissions, extra)
+	var forbidden *api.FieldForbiddenError
+	if err := checkBulkPermission(context.Background(), extra); !errors.As(err, &forbidden) || forbidden.Action != string(identity.PermJobRead) {
+		t.Errorf("a right beyond ci:write without a principal: %v, want 403", err)
+	}
+	ctx := identity.WithPrincipal(context.Background(), identity.Principal{Subject: "user-1", Permissions: []identity.Permission{identity.PermJobRead}})
+	if err := checkBulkPermission(ctx, extra); err != nil {
+		t.Errorf("with the right: %v", err)
+	}
+	other := identity.WithPrincipal(context.Background(), identity.Principal{Subject: "user-1", Permissions: []identity.Permission{identity.PermCIWrite}})
+	if err := checkBulkPermission(other, extra); !errors.As(err, &forbidden) {
+		t.Errorf("without the right: %v, want 403", err)
 	}
 }

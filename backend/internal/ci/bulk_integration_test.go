@@ -136,7 +136,7 @@ func TestBulkAgainstPostgres(t *testing.T) {
 // none and is not refused (a deliberate overwrite, If-Match "*"). Every CI
 // takes the status also over an existing manual override and gets a
 // protected status override by the initiating user with the reason
-// "bulk set_status", version+1, a ci_change row of the new version and an
+// "bulk" (in a job "bulk:<job_id>", WP-304), version+1, a ci_change row of the new version and an
 // audit entry, synchronously and in the job from 100 ids on. A PATCH of
 // status with the If-Match read before is 409 fields=[status]; an automated
 // write of status under the bulk override is still dropped.
@@ -160,7 +160,7 @@ func TestBulkStatusIsManualWriteUnderRequiredIfMatch(t *testing.T) {
 	// audit entries of status changes by the user.
 	const (
 		bulkOverrides = `SELECT count(*) FROM ci_field_value WHERE ci_id = ANY($1::uuid[]) AND field_name = 'status'
-			AND override_value = to_jsonb($2::text) AND override_author = $3 AND override_reason = 'bulk set_status' AND protected AND override_at IS NOT NULL`
+			AND override_value = to_jsonb($2::text) AND override_author = $3 AND override_reason ~ '^bulk(:[0-9a-f-]{36})?$' AND protected AND override_at IS NOT NULL`
 		statusChanges = `SELECT count(*) FROM ci_change WHERE ci_id = ANY($1::uuid[]) AND change_type = 'status_change' AND field_name = 'status'
 			AND new_value = to_jsonb($2::text) AND ci_version = $3 AND actor_id = $4`
 		statusAudits = `SELECT count(*) FROM audit_log WHERE resource_id = ANY($1::uuid[]) AND action = 'ci.status_changed' AND actor_id = $2`
@@ -183,8 +183,10 @@ func TestBulkStatusIsManualWriteUnderRequiredIfMatch(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK {
 		t.Fatalf("bulk without If-Match under require_if_match: %d %s, want 200", w.Code, w.Body.String())
 	}
-	if res.Succeeded != 2 || res.Failed != 0 || res.Items[0] != (ci.BulkItemResult{ID: a, Result: "ok", Code: http.StatusOK}) ||
-		res.Items[1] != (ci.BulkItemResult{ID: b, Result: "ok", Code: http.StatusOK}) {
+	okItem := func(item ci.BulkItemResult, id string) bool {
+		return item.ID == id && item.Result == "ok" && item.Code == http.StatusOK && item.Error == "" && item.Type == "" && item.Fields == nil
+	}
+	if res.Succeeded != 2 || res.Failed != 0 || !okItem(res.Items[0], a) || !okItem(res.Items[1], b) {
 		t.Errorf("report: %+v", res)
 	}
 	for id, v0 := range map[string]int64{a: va, b: vb} {

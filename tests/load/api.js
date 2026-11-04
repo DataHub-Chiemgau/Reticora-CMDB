@@ -28,6 +28,9 @@
 // scenario, every bulk job succeeds (bulk_jobs_succeeded, the checks of
 // the scenario bulk), and bulk_500_duration records only bulk jobs that
 // succeeded; a refused bulk request (a few ms) never counts as a fast bulk.
+// bulk_fields does the same with set_fields on 500 other CIs (WP-304,
+// bulk_fields_500_duration, bulk_fields_jobs_succeeded and the checks of
+// the scenario bulk_fields).
 // Every failed request is logged with its status (lib.js failed).
 //
 //   k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat key) tests/load/api.js
@@ -55,6 +58,9 @@ const ATTR_VALUES = Number(__ENV.ATTR_VALUES || 50);
 const BULK_JOBS = 3;
 const bulkDuration = new Trend('bulk_500_duration', true);
 const bulkSucceeded = new Counter('bulk_jobs_succeeded');
+// The bulk set_fields of 500 ids (WP-304) in the same way.
+const bulkFieldsDuration = new Trend('bulk_fields_500_duration', true);
+const bulkFieldsSucceeded = new Counter('bulk_fields_jobs_succeeded');
 // The size of the blast radius answers of the core switch (WP-297).
 const blastRadiusBytes = new Trend('blast_radius_bytes');
 
@@ -78,6 +84,7 @@ const scenarios = {
   impact_full: { ...reads('impactFull'), vus: 2 },
   blast_radius: { ...reads('blastRadius'), vus: 2 },
   bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
+  bulk_fields: { executor: 'per-vu-iterations', exec: 'bulkFields', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
 };
 
 // The p95 budgets of NFR-02 by request name; LATENCY_BUDGETS keeps all of
@@ -109,11 +116,15 @@ export const options = {
   scenarios,
   thresholds: {
     ...latencyThresholds,
-    ...(LATENCY_BUDGETS === 'all' ? { bulk_500_duration: ['p(95)<30000'] } : {}),
+    ...(LATENCY_BUDGETS === 'all'
+      ? { bulk_500_duration: ['p(95)<30000'], bulk_fields_500_duration: ['p(95)<30000'] }
+      : {}),
     // F-388: every bulk job succeeds (a submetric without samples is not
     // evaluated, so the counter also catches bulk jobs that never ran).
     bulk_jobs_succeeded: [`count==${BULK_JOBS}`],
     'checks{scenario:bulk}': ['rate==1'],
+    bulk_fields_jobs_succeeded: [`count==${BULK_JOBS}`],
+    'checks{scenario:bulk_fields}': ['rate==1'],
     // F-388: no failed request in the run (setup included) and in every
     // scenario.
     http_req_failed: ['rate==0'],
@@ -125,7 +136,7 @@ export const options = {
 
 export function setup() {
   const ids = [];
-  for (let offset = 0; ids.length < 500; offset += 200) {
+  for (let offset = 0; ids.length < 1000; offset += 200) {
     const page = get(`/cis?limit=200&offset=${offset}&sort_by=name`, 'setup').json('data');
     ids.push(...page.map((c) => c.id));
   }
@@ -145,6 +156,9 @@ export function setup() {
     server: firstID('search=srv-04242'),
     rack: racks[0].id,
     bulk: ids.slice(0, 500),
+    // bulk_fields writes 500 other CIs, so the two bulk scenarios do not
+    // wait for each other's row locks.
+    bulkFields: ids.slice(500, 1000),
     spread,
   };
 }
@@ -275,19 +289,18 @@ export function blastRadius(data) {
   sleep(1);
 }
 
-// bulk sets the status of 500 CIs (202, a job) and waits until the job
-// ended. Only a job that succeeded adds its duration and counts in
-// bulk_jobs_succeeded; a refused request, a job that failed or one still
-// running after the wait fails the check "bulk job succeeded" (F-388).
-export function bulk(data) {
-  const status = __ITER % 2 === 0 ? 'maintenance' : 'active';
+// runBulkJob posts a bulk request of 500 ids (202, a job) and waits until
+// the job ended. Only a job that succeeded adds its duration to trend and
+// counts in succeeded; a refused request, a job that failed or one still
+// running after the wait fails the check "<name> job succeeded" (F-388).
+function runBulkJob(name, body, trend, succeeded) {
   const start = Date.now();
-  const res = post('/cis/bulk', { ids: data.bulk, status }, 'bulk');
+  const res = post('/cis/bulk', body, name);
   let state = `HTTP ${res.status}`;
   if (res.status === 202) {
     const job = res.json('job_id');
     for (let i = 0; i < 300; i++) {
-      const poll = failed(http.get(`${BASE_URL}/api/v1/jobs/${job}`, params('bulk-poll')), 'bulk-poll');
+      const poll = failed(http.get(`${BASE_URL}/api/v1/jobs/${job}`, params(`${name}-poll`)), `${name}-poll`);
       state = poll.status === 200 ? poll.json('status') : `HTTP ${poll.status}`;
       if (!['queued', 'running'].includes(state)) {
         break;
@@ -295,10 +308,31 @@ export function bulk(data) {
       sleep(0.1);
     }
   }
-  if (check(state, { 'bulk job succeeded': (s) => s === 'succeeded' })) {
-    bulkDuration.add(Date.now() - start);
-    bulkSucceeded.add(1);
+  if (check(state, { [`${name} job succeeded`]: (s) => s === 'succeeded' })) {
+    trend.add(Date.now() - start);
+    succeeded.add(1);
   } else {
-    console.warn(`bulk job ${__ITER + 1} of ${BULK_JOBS} did not succeed: ${state}`);
+    console.warn(`${name} job ${__ITER + 1} of ${BULK_JOBS} did not succeed: ${state}`);
   }
+}
+
+// bulk sets the status of 500 CIs (202, a job) and waits until the job
+// ended (runBulkJob, bulk_500_duration, bulk_jobs_succeeded).
+export function bulk(data) {
+  const status = __ITER % 2 === 0 ? 'maintenance' : 'active';
+  runBulkJob('bulk', { ids: data.bulk, status }, bulkDuration, bulkSucceeded);
+}
+
+// bulkFields sets a typed field of 500 other CIs with set_fields (WP-304,
+// NFR-02; bulk_fields_500_duration, bulk_fields_jobs_succeeded): every
+// iteration writes another value, so each CI changes (override, version,
+// history, audit, event).
+export function bulkFields(data) {
+  const fields = { firmware_version: `load-${__ITER + 1}` };
+  runBulkJob(
+    'bulk_fields',
+    { action: 'set_fields', ids: data.bulkFields, params: { fields } },
+    bulkFieldsDuration,
+    bulkFieldsSucceeded,
+  );
 }
