@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
@@ -120,6 +121,8 @@ type Repositories struct {
 	IPAM              ipam.Repository
 	Metrics           monitoring.MetricStore
 	Permission        permission.Repository
+	// FieldGrants stores the field permissions (RBA-07, WP-264).
+	FieldGrants permission.FieldGrantRepository
 	// APIKeys identifies and manages API keys (AUT-04).
 	APIKeys identity.APIKeyRepository
 	// ServiceAccounts holds the non-human principals (RBA-08).
@@ -166,6 +169,10 @@ type Options struct {
 	MetricsTenantLabel bool
 	// Entitlements resolves plans and gates add-on routes.
 	Entitlements *entitlement.Service
+	// FieldPolicyCache holds the field permission snapshots of the
+	// organizations (fieldgrants:<org>, RBA-07); the server passes the
+	// shared cache store, nil keeps a per-process store (tests).
+	FieldPolicyCache cache.Store
 	// Dispatcher publishes CI lifecycle events to webhook subscribers.
 	Dispatcher *webhook.Dispatcher
 	// CIService is the CI domain service (limit-aware).
@@ -307,6 +314,18 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflic
 	return h
 }
 
+// newFieldResolver builds the field permission resolver (RBA-07): users
+// and IdP groups resolve through the permission repository, service
+// accounts through their role assignments, the snapshots are cached in
+// opts.FieldPolicyCache.
+func newFieldResolver(repos *Repositories, opts *Options) *permission.FieldResolver {
+	var serviceAccounts identity.ServiceAccountAccessResolver
+	if repos.ServiceAccounts != nil {
+		serviceAccounts = user.ServiceAccountAccess{Repo: repos.ServiceAccounts}
+	}
+	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, opts.FieldPolicyCache)
+}
+
 // operatorHandler builds the operator path; organizations are created with
 // the creation chain of the self-signup (TLC-02).
 func operatorHandler(opts *Options) *operator.Handler {
@@ -401,6 +420,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// and lays a draft over the form preview (E-113).
 	protected := &authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
 		drafts: repos.MetamodelDraft}
+
+	// The field permissions (RBA-07, WP-264) resolve per principal; the
+	// handlers of WP-726 and WP-265 take this resolver.
+	fieldResolver := newFieldResolver(&repos, &opts)
+	_ = fieldResolver
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
 		WithProvisioning(opts.UserProvisioner, opts.DefaultProvisionRole).
@@ -733,6 +757,8 @@ func validate(repos *Repositories, opts *Options) error {
 	switch {
 	case repos.Permission == nil:
 		return fmt.Errorf("server: permission repository is required")
+	case repos.FieldGrants == nil:
+		return fmt.Errorf("server: field grant repository is required")
 	case repos.SLA == nil:
 		return fmt.Errorf("server: SLA repository is required")
 	case repos.Form == nil:

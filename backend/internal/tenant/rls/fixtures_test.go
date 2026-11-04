@@ -96,6 +96,10 @@ var matrixOverrides = map[string]map[string]string{
 	// The number is unique per organization and assigned by a trigger the
 	// matrix skips (WP-290, 000214).
 	"ticket": {"ticket_number": "@seq"},
+	// A field permission names exactly one role, an object grant exactly
+	// one grantee (WP-264).
+	"field_grant":  {"role_id": "@uuid"},
+	"object_grant": {"grantee_role_id": "@uuid"},
 	// The i18n check of the tag catalog needs a de/en map (WP-281).
 	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
 }
