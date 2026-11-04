@@ -59,7 +59,10 @@ var dependencies = []dependency{
 	{DependencyLocation, `EXISTS (SELECT 1 FROM location c WHERE c.parent_id = $1)`},
 	{DependencyCI, `EXISTS (SELECT 1 FROM ci WHERE ci.location_id = $1)`},
 	{DependencyAsset, `EXISTS (SELECT 1 FROM asset a WHERE a.location_id = $1)`},
-	{DependencyQuantityItem, `EXISTS (SELECT 1 FROM quantity_item q WHERE q.location_id = $1)`},
+	// Until WP-758 the kind quantity_item also stands for the stock of
+	// consumables per bin (stock_level, WP-283).
+	{DependencyQuantityItem, `(EXISTS (SELECT 1 FROM quantity_item q WHERE q.location_id = $1)
+		OR EXISTS (SELECT 1 FROM stock_level s WHERE s.location_id = $1))`},
 	// Movements of the ledger stock_movement (WP-744; the former
 	// asset_movement is dropped since 000246, WP-842).
 	{DependencyStockMovement, `EXISTS (SELECT 1 FROM stock_movement m WHERE m.from_location_id = $1 OR m.to_location_id = $1)`},
@@ -125,8 +128,10 @@ var siteObjects = []siteObject{
 // referenceKinds maps the table of a violated foreign key to the kind it
 // reports when it is not the name of a kind: the nodes of the tree are
 // child locations, the site scope of a service account is a role
-// assignment. The ledger stock_movement is a kind by its table name.
+// assignment, the stock of consumables per bin (WP-283) a quantity item
+// until WP-758. The ledger stock_movement is a kind by its table name.
 var referenceKinds = map[string]string{
+	"stock_level":          DependencyQuantityItem,
 	"location":             DependencyLocation,
 	"building":             DependencyLocation,
 	"room":                 DependencyLocation,

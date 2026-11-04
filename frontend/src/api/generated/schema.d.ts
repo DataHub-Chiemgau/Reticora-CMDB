@@ -2405,7 +2405,7 @@ export interface paths {
     put?: never;
     /**
      * Record a stock in/out movement and adjust the level atomically
-     * @description The planned successor is POST /api/v1/stock-movements with the quantity bookings receipt and retrieval (E-38); the deprecation follows once the successor is implemented (WP-283, WP-756).
+     * @description The planned successor is POST /api/v1/stock-movements with the quantity bookings receipt and retrieval (E-38); the deprecation follows once the successor is implemented (WP-756). Until then in books a receipt into the bin location_id and out a retrieval from it (WP-283).
      */
     post: operations['addConsumableMovement'];
     delete?: never;
@@ -8491,7 +8491,7 @@ export interface paths {
     };
     /**
      * List the stock levels of a consumable per bin
-     * @description Planned (E-38); WP-283 implements the operation.
+     * @description The stock rows of the consumable in the bins visible under the caller's client and site scope, ordered by bin (STK-02, WP-283).
      */
     get: operations['listConsumableStock'];
     put?: never;
@@ -13212,37 +13212,73 @@ export interface components {
       client_id?: string;
       name: string;
       sku?: string;
+      /** @description Unique per organization where set (WP-283). */
+      barcode?: string;
+      /**
+       * Format: uuid
+       * @description Supplier of the consumable (E-41, WP-283).
+       */
+      supplier_id?: string;
       category: string;
       unit: string;
-      stock_level: number;
+      /**
+       * @deprecated
+       * @description Sum of on_hand over the bins of the consumable the caller sees (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept as a computed field until WP-320 (WP-283).
+       */
+      readonly stock_level: number;
       min_level: number;
-      location?: string;
       notes?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description The stock is booked per bin (POST /api/v1/consumables/{id}/movements with location_id), not set on create (WP-283). */
     CreateConsumableRequest: {
       client_id?: string;
       name: string;
       sku?: string;
+      barcode?: string;
+      /** Format: uuid */
+      supplier_id?: string;
       category?: string;
       unit?: string;
-      stock_level?: number;
       min_level?: number;
-      location?: string;
       notes?: string;
     };
     UpdateConsumableRequest: {
+      /** @description A client that does not match the bins holding stock of the consumable is 422 (WP-283). */
       client_id?: string;
       name?: string;
       sku?: string;
+      barcode?: string;
+      supplier_id?: string;
       category?: string;
       unit?: string;
       min_level?: number;
-      location?: string;
       notes?: string;
+    };
+    /** @description The stock of a consumable in one bin (stock_level, STK-02, WP-283). */
+    ConsumableStock: {
+      /** Format: uuid */
+      consumable_id: string;
+      /**
+       * Format: uuid
+       * @description The bin.
+       */
+      location_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      on_hand: number;
+      /** @description Never above on_hand. */
+      reserved: number;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ConsumableStockListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableStock'][];
     };
     /** @description A stock movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (direction and reference are derived from movement_type and notes of the ledger, WP-744). */
     ConsumableMovement: {
@@ -13251,6 +13287,8 @@ export interface components {
       consumable_id: string;
       /** @enum {string} */
       direction: 'in' | 'out';
+      /** @description The bin, target of in and source of out (WP-283). */
+      location_id?: string;
       quantity: number;
       reason?: string;
       reference?: string;
@@ -13261,6 +13299,11 @@ export interface components {
     CreateConsumableMovementRequest: {
       /** @enum {string} */
       direction: 'in' | 'out';
+      /**
+       * Format: uuid
+       * @description The bin: in is a receipt into it, out a retrieval from it. Without it the consumable must have exactly one bin, else 422 (WP-283).
+       */
+      location_id?: string;
       quantity: number;
       reason?: string;
       reference?: string;
@@ -21907,7 +21950,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description The consumable has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
+      /** @description The consumable has movements in the ledger, which are kept (dependencies stock_movement, WP-274), or stock on hand or reserved in a bin (WP-283). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -21946,6 +21989,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listConsumableMovements: {
@@ -22014,7 +22058,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The bin does not hold the quantity (type insufficient-stock). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description location_id names no visible bin, a bin of another client, or is missing while the consumable has none or several bins. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakes: {
@@ -38829,12 +38890,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283. */
+      /** @description List the stock levels of a consumable per bin. The page follows the cursor contract (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConsumableStockListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

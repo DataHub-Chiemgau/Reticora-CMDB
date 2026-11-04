@@ -1429,3 +1429,7 @@ AUD-08;[P2];C;backend/internal/asset/history_integration_test.go;WP-794
 AST-05;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-841
 MGT-02;[P2];B;backend/internal/disposal/disposal_tx_integration_test.go;WP-278
 AST-02;[P2];B;backend/internal/asset/holder_integration_test.go;WP-745
+STK-02;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+STK-03;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+STK-01;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/stock_integration_test.go;WP-283

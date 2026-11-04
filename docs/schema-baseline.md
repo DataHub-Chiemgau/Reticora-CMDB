@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000251_asset_holder_columns
+Stand: Migration 000252_consumable_stock_level
 
 ## Prüfung
 
@@ -1480,6 +1480,41 @@ NOT NULL. `assigned_team_id` ist kein Scope-Merkmal; Policies unverändert.
 (TIMESTAMPTZ) mit CHECK `stock_movement_due_at_assignment` (`due_at IS
 NULL OR movement_type = 'assignment'`). Keine Daten (Backfill WP-275).
 
+Bestand von Mengenartikeln je Bin (STK-01, STK-02, STK-03, API-06, WP-283,
+E-40, E-41, Migration 000252): `consumable` erhält `barcode` (TEXT, partieller
+UNIQUE-Index `consumable_organization_id_barcode_key` (`organization_id`,
+`barcode`) WHERE NOT NULL) und `supplier_id` (UUID) mit
+`consumable_supplier_id_fkey` (`supplier_id`, `organization_id`) →
+`supplier` (ohne ON-DELETE-Aktion) und Teilindex `idx_consumable_supplier`;
+die Spalten `stock_level` und `location` entfallen. `stock_level` (`id`,
+`organization_id` → `organization` ON DELETE CASCADE, `client_id` und
+`site_id` NOT NULL ohne Fremdschlüssel, `consumable_id`, `location_id`,
+`on_hand` und `reserved` `numeric(12,2)` NOT NULL DEFAULT 0 mit
+`stock_level_on_hand_check` (`on_hand >= 0`) und
+`stock_level_reserved_check` (`reserved >= 0 AND reserved <= on_hand`),
+`updated_at`) mit `stock_level_consumable_id_location_id_key`,
+`stock_level_consumable_fkey` (`consumable_id`, `organization_id`) →
+`consumable` und `stock_level_location_fkey` (`location_id`,
+`organization_id`) → `location`, beide ON DELETE RESTRICT (K19), sowie
+den Indizes `idx_stock_level_location` (`location_id`) und
+`idx_stock_level_org_consumable` (`organization_id`, `consumable_id`).
+`stock_level_derive_location` (BEFORE INSERT OR UPDATE OF `location_id`,
+`consumable_id`, `client_id`, `site_id`, Funktion
+`stock_level_derive_location()` mit erweitertem Scope) setzt Client und
+Standort des Bins und lehnt Nicht-Bins (`stock_level_location_bin`) und
+Artikel eines anderen Clients (`stock_level_location_client`) mit 23514
+ab; `location_refresh_stock_level` (AFTER UPDATE ON `location` bei
+geändertem `path`, `site_id` oder `client_id`, Funktion
+`location_refresh_stock_level()`) leitet nach; `consumable_client_stock`
+(BEFORE UPDATE OF `client_id` ON `consumable`, Funktion
+`consumable_client_stock()`) lehnt einen Client ab, der nicht zu den Bins
+passt (`consumable_stock_level_client`, 23514). RLS mit ENABLE/FORCE,
+TRUNCATE-Schutz `reticora_truncate_guard` und `stock_level_isolation` mit
+Org-, Client- und Site-Prädikat (USING = WITH CHECK). Der Altbestand
+(`stock_level <> 0`, Gründe `stock_without_bin`/`negative_stock`) und
+Freitext-Standorte ohne Bestand (`location_without_bin`) stehen in
+`migration_quarantine` (Migration `000252`).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1622,6 +1657,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
+| `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
 | `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |

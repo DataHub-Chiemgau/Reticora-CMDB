@@ -11,7 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const consumableCols = `id::text, organization_id::text, COALESCE(client_id::text,''), name, COALESCE(sku,''), category, unit, stock_level, min_level, COALESCE(location,''), COALESCE(notes,''), created_at, updated_at`
+// stockTotal is the sum of on_hand over the bins of the consumable the
+// caller sees (stock_level_isolation); it backs the deprecated field
+// stock_level and the filter low_stock (WP-283).
+const stockTotal = `(SELECT COALESCE(sum(s.on_hand), 0) FROM stock_level s WHERE s.consumable_id = consumable.id AND s.organization_id = consumable.organization_id)`
+
+const consumableCols = `id::text, organization_id::text, COALESCE(client_id::text,''), name, COALESCE(sku,''), COALESCE(barcode,''), COALESCE(supplier_id::text,''), category, unit, ` + stockTotal + `::float8, min_level, COALESCE(notes,''), created_at, updated_at`
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -25,7 +30,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 func scanConsumable(s pgx.Row) (*Consumable, error) {
 	c := &Consumable{}
-	if err := s.Scan(&c.ID, &c.OrganizationID, &c.ClientID, &c.Name, &c.SKU, &c.Category, &c.Unit, &c.StockLevel, &c.MinLevel, &c.Location, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
+	if err := s.Scan(&c.ID, &c.OrganizationID, &c.ClientID, &c.Name, &c.SKU, &c.Barcode, &c.SupplierID, &c.Category, &c.Unit, &c.StockLevel, &c.MinLevel, &c.Notes, &c.CreatedAt, &c.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -49,7 +54,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			pos++
 		}
 		if filter.LowStock {
-			where = append(where, "stock_level <= min_level")
+			where = append(where, stockTotal+" <= min_level")
 		}
 		if filter.Search != "" {
 			where = append(where, fmt.Sprintf("name ILIKE $%d", pos))
@@ -83,7 +88,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Consumab
 		var err error
 		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2", orgID, id))
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("consumable not found")
+			return ErrNotFound
 		}
 		return err
 	})
@@ -99,10 +104,10 @@ func (r *PGRepository) Create(ctx context.Context, c *Consumable) error {
 			c.Unit = "pcs"
 		}
 		return tx.QueryRow(ctx, `
-			INSERT INTO consumable (organization_id, client_id, name, sku, category, unit, stock_level, min_level, location, notes)
-			VALUES ($1, NULLIF($2,'')::uuid, $3, NULLIF($4,''), $5, $6, $7, $8, $9, $10)
+			INSERT INTO consumable (organization_id, client_id, name, sku, barcode, supplier_id, category, unit, min_level, notes)
+			VALUES ($1, NULLIF($2,'')::uuid, $3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,'')::uuid, $7, $8, $9, $10)
 			RETURNING id::text, created_at, updated_at
-		`, c.OrganizationID, c.ClientID, c.Name, c.SKU, c.Category, c.Unit, c.StockLevel, c.MinLevel, c.Location, c.Notes).
+		`, c.OrganizationID, c.ClientID, c.Name, c.SKU, c.Barcode, c.SupplierID, c.Category, c.Unit, c.MinLevel, c.Notes).
 			Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 	})
 }
@@ -127,6 +132,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 		if req.SKU != nil {
 			set("sku", *req.SKU)
 		}
+		if req.Barcode != nil {
+			set("barcode", nilIfEmpty(*req.Barcode))
+		}
+		if req.SupplierID != nil {
+			set("supplier_id", nilIfEmpty(*req.SupplierID))
+		}
 		if req.Category != nil {
 			set("category", *req.Category)
 		}
@@ -135,9 +146,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 		}
 		if req.MinLevel != nil {
 			set("min_level", *req.MinLevel)
-		}
-		if req.Location != nil {
-			set("location", *req.Location)
 		}
 		if req.Notes != nil {
 			set("notes", *req.Notes)
@@ -150,65 +158,102 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 			c, err = scanConsumable(tx.QueryRow(ctx, "UPDATE consumable SET "+strings.Join(sets, ", ")+" WHERE organization_id = $1 AND id = $2 RETURNING "+consumableCols, args...))
 		}
 		if err == pgx.ErrNoRows {
-			return fmt.Errorf("consumable not found")
+			return ErrNotFound
 		}
 		return err
 	})
 	return c, err
 }
 
+// Delete removes the consumable. Stock in a bin keeps it (ErrHasStock,
+// 409); rows with nothing on hand or reserved go in the same transaction.
+// Rows of bins the caller cannot see, and the ledger, keep it through their
+// RESTRICT foreign keys.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if !api.IsUUID(id) {
+			return ErrNotFound
+		}
+		var stocked bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_level WHERE consumable_id = $1 AND organization_id = $2
+			AND (on_hand > 0 OR reserved > 0))`, id, orgID).Scan(&stocked); err != nil {
+			return fmt.Errorf("check stock: %w", err)
+		}
+		if stocked {
+			return ErrHasStock
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM stock_level WHERE consumable_id = $1 AND organization_id = $2
+			AND on_hand = 0 AND reserved = 0`, id, orgID); err != nil {
+			return fmt.Errorf("remove empty stock: %w", err)
+		}
 		tag, err := tx.Exec(ctx, "DELETE FROM consumable WHERE organization_id = $1 AND id = $2", orgID, id)
 		if err != nil {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("consumable not found")
+			return ErrNotFound
 		}
 		return nil
 	})
 }
 
-// AddMovement records the movement and adjusts the stock level in one
-// transaction, rejecting out-movements that would drive stock negative.
+// AddMovement books the movement on the stock of a bin and appends it to
+// the ledger in one transaction (transitional path until WP-756): in is a
+// receipt into the bin m.LocationID, out a retrieval from it, both through
+// ApplyBooking. Without a bin the consumable must have exactly one
+// stock_level row (visible to the caller), else a 422 on location_id. The
+// ledger row (item_kind consumable) names the bin; its trigger derives the
+// client of the consumable and the site of the bin.
 func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumable, error) {
 	var c *Consumable
 	err := database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2 FOR UPDATE", m.OrganizationID, m.ConsumableID))
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("consumable not found")
+		if m.LocationID == "" {
+			bin, binErr := onlyBin(ctx, tx, m.OrganizationID, m.ConsumableID)
+			if binErr != nil {
+				return binErr
+			}
+			m.LocationID = bin
 		}
-		if err != nil {
+		b := bookingOf(m)
+		if err := ApplyBooking(ctx, tx, &b); err != nil {
 			return err
 		}
-		delta := m.Quantity
-		if m.Direction == "out" {
-			delta = -m.Quantity
-		}
-		if c.StockLevel+delta < 0 {
-			return fmt.Errorf("insufficient stock")
-		}
-		// The ledger stock_movement (WP-744) books in as receipt and out as
-		// retrieval, the reference as notes; its trigger derives the client
-		// of the consumable, and the policy refuses a row outside the scope.
-		movementType := "receipt"
-		if m.Direction == "out" {
-			movementType = "retrieval"
-		}
 		if insertErr := tx.QueryRow(ctx, `
-			INSERT INTO stock_movement (organization_id, item_kind, consumable_id, movement_type, quantity, reason, notes, actor_id)
-			VALUES ($1, 'consumable', $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7,'')::uuid)
+			INSERT INTO stock_movement (organization_id, item_kind, consumable_id, movement_type, from_location_id, to_location_id,
+				quantity, reason, notes, actor_id)
+			VALUES ($1, 'consumable', $2, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, $6, $7, NULLIF($8, ''), NULLIF($9,'')::uuid)
 			RETURNING id::text, created_at
-		`, m.OrganizationID, m.ConsumableID, movementType, m.Quantity, m.Reason, m.Reference, m.ActorID).
+		`, m.OrganizationID, m.ConsumableID, b.MovementType, b.FromLocationID, b.ToLocationID, m.Quantity, m.Reason, m.Reference, m.ActorID).
 			Scan(&m.ID, &m.CreatedAt); insertErr != nil {
 			return insertErr
 		}
-		c, err = scanConsumable(tx.QueryRow(ctx, "UPDATE consumable SET stock_level = stock_level + $3, updated_at = now() WHERE organization_id = $1 AND id = $2 RETURNING "+consumableCols, m.OrganizationID, m.ConsumableID, delta))
+		var err error
+		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2", m.OrganizationID, m.ConsumableID))
 		return err
 	})
 	return c, err
+}
+
+// onlyBin returns the bin of the only stock_level row of the consumable the
+// caller sees; none or several are a 422 on location_id, an invisible
+// consumable ErrNotFound.
+func onlyBin(ctx context.Context, tx pgx.Tx, orgID, consumableID string) (string, error) {
+	if _, err := lockConsumable(ctx, tx, orgID, consumableID); err != nil {
+		return "", err
+	}
+	bins, err := tx.Query(ctx, `SELECT location_id::text FROM stock_level WHERE consumable_id = $1 AND organization_id = $2 LIMIT 2`,
+		consumableID, orgID)
+	if err != nil {
+		return "", fmt.Errorf("find bin: %w", err)
+	}
+	ids, err := pgx.CollectRows(bins, pgx.RowTo[string])
+	if err != nil {
+		return "", fmt.Errorf("find bin: %w", err)
+	}
+	if len(ids) != 1 {
+		return "", ErrBinRequired
+	}
+	return ids[0], nil
 }
 
 func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Movement, int, error) {
@@ -227,7 +272,9 @@ func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID st
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text,
-			CASE movement_type WHEN 'receipt' THEN 'in' ELSE 'out' END, quantity, COALESCE(reason,''), COALESCE(notes,''),
+			CASE movement_type WHEN 'receipt' THEN 'in' ELSE 'out' END,
+			COALESCE(CASE movement_type WHEN 'receipt' THEN to_location_id ELSE from_location_id END::text, ''),
+			quantity, COALESCE(reason,''), COALESCE(notes,''),
 			COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+where+
 			fmt.Sprintf(" ORDER BY occurred_at DESC, created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
 		if err != nil {
@@ -236,7 +283,7 @@ func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID st
 		defer rows.Close()
 		for rows.Next() {
 			m := Movement{}
-			if err := rows.Scan(&m.ID, &m.OrganizationID, &m.ConsumableID, &m.Direction, &m.Quantity, &m.Reason, &m.Reference, &m.ActorID, &m.CreatedAt); err != nil {
+			if err := rows.Scan(&m.ID, &m.OrganizationID, &m.ConsumableID, &m.Direction, &m.LocationID, &m.Quantity, &m.Reason, &m.Reference, &m.ActorID, &m.CreatedAt); err != nil {
 				return err
 			}
 			out = append(out, m)
@@ -251,4 +298,17 @@ func nilIfEmpty(v string) any {
 		return nil
 	}
 	return v
+}
+
+// ListStock returns the stock per bin of the consumable visible to the
+// caller (ListStock in its own transaction).
+func (r *PGRepository) ListStock(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Stock, int, error) {
+	var out []Stock
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, total, err = ListStock(ctx, tx, orgID, consumableID, page)
+		return err
+	})
+	return out, total, err
 }

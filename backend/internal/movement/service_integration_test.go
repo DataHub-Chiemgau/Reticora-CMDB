@@ -296,8 +296,14 @@ func TestStockMovementAPI(t *testing.T) {
 		item, f.OrgA, f.Client1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name, stock_level) VALUES ($1, $2, $3, 'api-toner', 4)`,
+	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'api-toner')`,
 		cons, f.OrgA, f.Client1); err != nil {
+		t.Fatal(err)
+	}
+	// One piece in a bin (WP-283): the retrieval below empties it, so the
+	// delete is kept by the ledger only.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 1)`,
+		f.OrgA, cons, stockBin(t, f, f.Client1, "api-bin")); err != nil {
 		t.Fatal(err)
 	}
 

@@ -5050,6 +5050,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteConsumable
       tags: [Consumables]
@@ -5062,7 +5064,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The consumable has movements in the ledger, which are kept (dependencies stock_movement, WP-274).
+          description: >-
+            The consumable has movements in the ledger, which are kept
+            (dependencies stock_movement, WP-274), or stock on hand or
+            reserved in a bin (WP-283).
           content:
             application/problem+json:
               schema:
@@ -5097,7 +5102,9 @@ paths:
       description: >-
         The planned successor is POST /api/v1/stock-movements with the
         quantity bookings receipt and retrieval (E-38); the deprecation
-        follows once the successor is implemented (WP-283, WP-756).
+        follows once the successor is implemented (WP-756). Until then in
+        books a receipt into the bin location_id and out a retrieval from it
+        (WP-283).
       requestBody:
         required: true
         content:
@@ -5114,7 +5121,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The bin does not hold the quantity (type insufficient-stock).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            location_id names no visible bin, a bin of another client, or is
+            missing while the consumable has none or several bins.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes:
     x-phase: P2
@@ -19203,20 +19222,25 @@ paths:
   /api/v1/consumables/{id}/stock:
     x-phase: P2
     x-feature: stock
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listConsumableStock
       tags: [Consumables]
       summary: List the stock levels of a consumable per bin
-      description: Planned (E-38); WP-283 implements the operation.
+      description: >-
+        The stock rows of the consumable in the bins visible under the
+        caller's client and site scope, ordered by bin (STK-02, WP-283).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283.
+          description: List the stock levels of a consumable per bin. The page follows the cursor contract (API-02).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumableStockListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -27766,38 +27790,88 @@ components:
         client_id: { type: string }
         name: { type: string }
         sku: { type: string }
+        barcode:
+          type: string
+          description: Unique per organization where set (WP-283).
+        supplier_id:
+          type: string
+          format: uuid
+          description: Supplier of the consumable (E-41, WP-283).
         category: { type: string }
         unit: { type: string }
-        stock_level: { type: number }
+        stock_level:
+          type: number
+          readOnly: true
+          deprecated: true
+          description: >-
+            Sum of on_hand over the bins of the consumable the caller sees
+            (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept
+            as a computed field until WP-320 (WP-283).
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CreateConsumableRequest:
       type: object
       required: [name]
+      description: >-
+        The stock is booked per bin (POST /api/v1/consumables/{id}/movements
+        with location_id), not set on create (WP-283).
       properties:
         client_id: { type: string }
         name: { type: string }
         sku: { type: string }
+        barcode: { type: string }
+        supplier_id: { type: string, format: uuid }
         category: { type: string }
         unit: { type: string }
-        stock_level: { type: number }
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
     UpdateConsumableRequest:
       type: object
       properties:
-        client_id: { type: string }
+        client_id:
+          type: string
+          description: >-
+            A client that does not match the bins holding stock of the
+            consumable is 422 (WP-283).
         name: { type: string }
         sku: { type: string }
+        barcode: { type: string }
+        supplier_id: { type: string }
         category: { type: string }
         unit: { type: string }
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
+    ConsumableStock:
+      type: object
+      description: The stock of a consumable in one bin (stock_level, STK-02, WP-283).
+      required: [consumable_id, location_id, on_hand, reserved, updated_at]
+      properties:
+        consumable_id: { type: string, format: uuid }
+        location_id:
+          type: string
+          format: uuid
+          description: The bin.
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        on_hand:
+          type: number
+          minimum: 0
+        reserved:
+          type: number
+          minimum: 0
+          description: Never above on_hand.
+        updated_at: { type: string, format: date-time }
+    ConsumableStockListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ConsumableStock' }
     ConsumableMovement:
       type: object
       description: >-
@@ -27810,6 +27884,9 @@ components:
         organization_id: { type: string }
         consumable_id: { type: string }
         direction: { type: string, enum: [in, out] }
+        location_id:
+          type: string
+          description: The bin, target of in and source of out (WP-283).
         quantity: { type: number }
         reason: { type: string }
         reference: { type: string }
@@ -27820,6 +27897,12 @@ components:
       required: [direction, quantity]
       properties:
         direction: { type: string, enum: [in, out] }
+        location_id:
+          type: string
+          format: uuid
+          description: >-
+            The bin: in is a receipt into it, out a retrieval from it. Without
+            it the consumable must have exactly one bin, else 422 (WP-283).
         quantity: { type: number }
         reason: { type: string }
         reference: { type: string }

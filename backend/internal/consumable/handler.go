@@ -1,6 +1,7 @@
 package consumable
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -27,6 +28,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/consumables/{id}", h.Get)
 	r.Patch("/api/v1/consumables/{id}", h.Update)
 	r.Delete("/api/v1/consumables/{id}", h.Delete)
+	r.Get("/api/v1/consumables/{id}/stock", h.ListStock)
 	r.Get("/api/v1/consumables/{id}/movements", h.ListMovements)
 	r.Post("/api/v1/consumables/{id}/movements", h.AddMovement)
 }
@@ -89,11 +91,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ClientID:       req.ClientID,
 		Name:           req.Name,
 		SKU:            req.SKU,
+		Barcode:        req.Barcode,
+		SupplierID:     req.SupplierID,
 		Category:       req.Category,
 		Unit:           req.Unit,
-		StockLevel:     req.StockLevel,
 		MinLevel:       req.MinLevel,
-		Location:       req.Location,
 		Notes:          req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), c); err != nil {
@@ -116,6 +118,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		// A client that does not match the bins of the stock (23514), a
+		// taken barcode (23505) or an unknown supplier (23503) is answered
+		// by api.WriteDBError; everything else reads as not found.
+		if !errors.Is(err, ErrNotFound) && api.WriteDBError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
 		return
 	}
@@ -133,6 +141,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		// 409 with dependencies ["stock_movement"] (WP-274).
 		if movement.IsLedgerReference(err) {
 			movement.WriteLedgerDependency(w, r)
+			return
+		}
+		// Stock in a bin keeps the consumable (WP-283), also a row of a
+		// bin the caller cannot see (RESTRICT of stock_level).
+		if errors.Is(err, ErrHasStock) || isStockReference(err) {
+			api.WriteError(w, http.StatusConflict, "Conflict", "the consumable still has stock in a bin")
 			return
 		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
@@ -159,6 +173,39 @@ func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListStock answers GET /api/v1/consumables/{id}/stock: the stock per bin
+// visible to the caller, cursor-paginated (API-02).
+func (h *Handler) ListStock(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	}
+	rows, total, err := h.repo.ListStock(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
+		return
+	case errors.Is(err, api.ErrInvalidCursor):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, StockPage(rows, total, page))
+}
+
+// AddMovement answers POST /api/v1/consumables/{id}/movements, the
+// transitional path until WP-756: in is a receipt into the bin location_id,
+// out a retrieval from it; without location_id the only bin of the
+// consumable. A shortfall is 409 insufficient-stock, a missing, foreign or
+// non-bin location 422 on location_id.
 func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -182,6 +229,7 @@ func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: t.OrganizationID,
 		ConsumableID:   chi.URLParam(r, "id"),
 		Direction:      req.Direction,
+		LocationID:     req.LocationID,
 		Quantity:       req.Quantity,
 		Reason:         req.Reason,
 		Reference:      req.Reference,
@@ -189,15 +237,18 @@ func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.repo.AddMovement(r.Context(), m)
 	if err != nil {
-		if strings.Contains(err.Error(), "insufficient stock") {
-			api.WriteError(w, http.StatusConflict, "Conflict", "insufficient stock")
-			return
-		}
-		if strings.Contains(err.Error(), "not found") {
+		var field *api.FieldError
+		switch {
+		case IsInsufficientStock(err):
+			api.WriteTypedProblem(w, http.StatusConflict, err)
+		case errors.Is(err, ErrNotFound):
 			api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
-			return
+		case errors.As(err, &field) && (field.Field == "to_location_id" || field.Field == "from_location_id"):
+			// The bin of the transitional path is location_id.
+			api.WriteFieldError(w, &api.FieldError{Field: "location_id", Message: field.Message, Status: field.Status})
+		default:
+			api.WriteRepoError(w, err)
 		}
-		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, map[string]any{"movement": m, "consumable": c})
