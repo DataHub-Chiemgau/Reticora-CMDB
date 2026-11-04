@@ -1746,7 +1746,17 @@ export interface paths {
     /** List revision-safe disposal records (append-only) */
     get: operations['listDisposalRecords'];
     put?: never;
-    /** Record a disposal (revision-safe; records cannot be edited or deleted) */
+    /**
+     * Record a disposal (revision-safe; records cannot be edited or deleted)
+     * @description Records a disposal after DIN 66399 and the BSI recommendation for data
+     *     carriers (E-55). The required fields depend on the method (see
+     *     CreateDisposalRecordRequest); a missing field or a value out of range
+     *     answers 400 naming the field. The names in performed_by and witness are
+     *     stored only as vault surrogates. The database sets record_hash, and the
+     *     audit entry disposal_record.created is written in the same transaction.
+     *     An asset, CI, supplier or evidence document the caller cannot see
+     *     answers 404 without a record.
+     */
     post: operations['createDisposalRecord'];
     delete?: never;
     options?: never;
@@ -13354,19 +13364,51 @@ export interface components {
         | 'secure_erasure'
         | 'physical_destruction'
         | 'return_to_vendor';
-      /** @description Reference to the revision-safe disposal certificate. */
-      certificate_ref?: string;
-      /** @description Data carrier destruction note (BSI/ISO). */
+      /** @description Protection class after DIN 66399. */
+      protection_class?: number;
+      /** @description Security level after DIN 66399, e.g. P-4. */
+      security_level?: string;
+      /** @description Identification of the data carrier. */
       data_carrier?: string;
+      /**
+       * Format: uuid
+       * @description Service provider that performed the disposal.
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Evidence document (part of record_hash).
+       */
+      evidence_document_id?: string;
+      /** @description Reference to the disposal certificate or the erasure procedure. */
+      certificate_ref?: string;
+      /** @description Name of the performer, resolved from its vault surrogate; empty after crypto-shredding. Records written before the vault surrogates show the stored plaintext. */
       performed_by?: string;
+      /** @description Name of the witness */
+      witness?: string;
       /** Format: date-time */
       performed_at: string;
       notes?: string;
+      /** @description SHA-256 (hex) over the canonical JSON of the business fields incl. the surrogate ids, set by the database; verifiable after crypto-shredding. */
+      record_hash: string;
       /** Format: date-time */
       created_at: string;
     };
+    /**
+     * @description Required fields per method (E-55, the table disposal.RequiredFields of
+     *     the handler; "a|b" means either field):
+     *
+     *     | method | required |
+     *     |---|---|
+     *     | every method | method, performed_at, performed_by, asset_id\|ci_id |
+     *     | destruction, physical_destruction | protection_class, security_level, data_carrier, supplier_id\|witness, evidence_document_id |
+     *     | secure_erasure | data_carrier, certificate_ref\|notes (the procedure), evidence_document_id |
+     *     | reuse, recycling, return_to_vendor | only the fields of every method |
+     */
     CreateDisposalRecordRequest: {
+      /** Format: uuid */
       asset_id?: string;
+      /** Format: uuid */
       ci_id?: string;
       /** @enum {string} */
       method:
@@ -13376,11 +13418,30 @@ export interface components {
         | 'secure_erasure'
         | 'physical_destruction'
         | 'return_to_vendor';
-      certificate_ref?: string;
+      /** @description Protection class after DIN 66399. */
+      protection_class?: number;
+      /** @description Security level after DIN 66399, e.g. P-4. */
+      security_level?: string;
+      /** @description Identification of the data carrier. */
       data_carrier?: string;
-      performed_by?: string;
+      /**
+       * Format: uuid
+       * @description Service provider (GET /api/v1/suppliers).
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Evidence document (GET /api/v1/documents).
+       */
+      evidence_document_id?: string;
+      /** @description Reference to the disposal certificate or the erasure procedure. */
+      certificate_ref?: string;
+      /** @description Name of the performer; stored only as vault surrogate. */
+      performed_by: string;
+      /** @description Name of the witness; stored only as vault surrogate. */
+      witness?: string;
       /** Format: date-time */
-      performed_at?: string;
+      performed_at: string;
       notes?: string;
     };
     DisposalRecordListResponse: components['schemas']['PaginationEnvelope'] & {
@@ -20347,6 +20408,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getDisposalRecord: {

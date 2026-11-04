@@ -278,6 +278,8 @@ func seedObjectReferences(t *testing.T, f *scopetest.Fixture) map[string]objectR
 	// With the triggers off no ticket number is assigned (ticket_number_assign, 000214).
 	ticketFK := `INSERT INTO ticket (organization_id, title, reporter_id, ticket_number, %s) VALUES ($2, 'w838', '` + user + `', 1, $1)`
 	disposal := `INSERT INTO disposal_record (organization_id, method, performed_at, %s) VALUES ($2, 'reuse', now(), $1)`
+	// With the triggers off no record hash is set (disposal_record_set_hash, 000245).
+	disposalFK := `INSERT INTO disposal_record (organization_id, method, performed_at, record_hash, %s) VALUES ($2, 'reuse', now(), 'w838', $1)`
 	orderItem := `INSERT INTO internal_order_item (organization_id, order_id, description, quantity, %s)
 		VALUES ($2, '` + order + `', 'w838', 1, $1)`
 	// A warehouse below the site; with the triggers off, path is set by hand.
@@ -321,17 +323,18 @@ func seedObjectReferences(t *testing.T, f *scopetest.Fixture) map[string]objectR
 			app:        `INSERT INTO reservation (asset_id, organization_id) VALUES ($1, $2)`, appConstraint: "reservation_asset_id_fkey",
 			fk: `INSERT INTO reservation (asset_id, organization_id) VALUES ($1, $2)`, args: inOrg, foreign: assetB, own: assetA,
 		},
+		// The disposal references refuse the deletion since 000245 (WP-751).
 		"disposal_record.asset_id": {
 			constraint: "disposal_record_asset_id_fkey",
-			def:        "FOREIGN KEY (asset_id, organization_id) REFERENCES asset(id, organization_id) ON DELETE SET NULL (asset_id)",
+			def:        "FOREIGN KEY (asset_id, organization_id) REFERENCES asset(id, organization_id) ON DELETE RESTRICT",
 			app:        fmt.Sprintf(disposal, "asset_id"), appConstraint: "disposal_record_asset_id_fkey",
-			fk: fmt.Sprintf(disposal, "asset_id"), args: inOrg, foreign: assetB, own: assetA,
+			fk: fmt.Sprintf(disposalFK, "asset_id"), args: inOrg, foreign: assetB, own: assetA,
 		},
 		"disposal_record.ci_id": {
 			constraint: "disposal_record_ci_id_fkey",
-			def:        "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE SET NULL (ci_id)",
+			def:        "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE RESTRICT",
 			app:        fmt.Sprintf(disposal, "ci_id"), appConstraint: "disposal_record_ci_id_fkey",
-			fk: fmt.Sprintf(disposal, "ci_id"), args: inOrg, foreign: ciB, own: ciA,
+			fk: fmt.Sprintf(disposalFK, "ci_id"), args: inOrg, foreign: ciB, own: ciA,
 		},
 		"internal_order_item.asset_id": {
 			constraint: "internal_order_item_asset_id_fkey",

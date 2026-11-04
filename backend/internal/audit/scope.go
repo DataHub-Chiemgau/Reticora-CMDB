@@ -46,6 +46,7 @@ var resourceTables = map[string][]string{
 	"ci_type":                  {"ci_type"},
 	"form_layout":              {"form_layout"},
 	"collector":                {"collector"},
+	"disposal_record":          {"disposal_record"},
 	"location":                 {"location"},
 	"metamodel_draft":          {"metamodel_draft"},
 	"metamodel_rule":           {"metamodel_rule"},

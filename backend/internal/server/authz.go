@@ -738,6 +738,11 @@ var domainRecordedRoutes = map[string]string{
 	// Soft delete of a document (MGT-01, WP-732): document.deleted in the
 	// transaction that sets deleted_at; the route audit stays the fallback.
 	"DELETE /api/v1/documents/{id}": "document.PGRepository.Delete",
+
+	// Disposal records (MGT-02, WP-751): disposal_record.created with
+	// record_hash, object, method and DIN 66399 classification, last in the
+	// transaction of the record.
+	"POST /api/v1/disposal-records": "disposal.PGRepository.Create",
 }
 
 // auditedRoutes records, per write route registered through an

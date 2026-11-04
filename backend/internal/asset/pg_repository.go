@@ -603,16 +603,16 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// appendOnly reports whether err is the refusal of an append-only guard
-// (disposal_record) a delete cascaded into, or of the
-// RESTRICT reference of the ledger stock_movement (WP-744).
+// appendOnly reports whether err is the refusal of an append-only guard a
+// delete cascaded into, or of the RESTRICT reference of the ledger
+// stock_movement (WP-744) or of a disposal record (WP-751).
 func appendOnly(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
 	}
 	return (pgErr.Code == "P0001" && strings.Contains(pgErr.Message, "append-only")) ||
-		(pgErr.Code == "23503" && pgErr.TableName == "stock_movement")
+		(pgErr.Code == "23503" && (pgErr.TableName == "stock_movement" || pgErr.TableName == "disposal_record"))
 }
 
 // checkPrecondition enforces If-Match on a PATCH (API-07, API-03; pattern

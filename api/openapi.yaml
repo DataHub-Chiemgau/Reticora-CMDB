@@ -4022,6 +4022,15 @@ paths:
       operationId: createDisposalRecord
       tags: [Disposal]
       summary: Record a disposal (revision-safe; records cannot be edited or deleted)
+      description: |
+        Records a disposal after DIN 66399 and the BSI recommendation for data
+        carriers (E-55). The required fields depend on the method (see
+        CreateDisposalRecordRequest); a missing field or a value out of range
+        answers 400 naming the field. The names in performed_by and witness are
+        stored only as vault surrogates. The database sets record_hash, and the
+        audit entry disposal_record.created is written in the same transaction.
+        An asset, CI, supplier or evidence document the caller cannot see
+        answers 404 without a record.
       requestBody:
         required: true
         content:
@@ -4039,6 +4048,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/disposal-records/{id}:
     x-phase: P2
@@ -27696,29 +27707,63 @@ components:
 
     DisposalRecord:
       type: object
-      required: [id, organization_id, method, performed_at, created_at]
+      required: [id, organization_id, method, performed_at, record_hash, created_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         asset_id: { type: string }
         ci_id: { type: string }
         method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
-        certificate_ref: { type: string, description: Reference to the revision-safe disposal certificate. }
-        data_carrier: { type: string, description: Data carrier destruction note (BSI/ISO). }
-        performed_by: { type: string }
+        protection_class: { type: integer, minimum: 1, maximum: 3, description: Protection class after DIN 66399. }
+        security_level: { type: string, pattern: '^[POTEFH]-[1-7]$', description: 'Security level after DIN 66399, e.g. P-4.' }
+        data_carrier: { type: string, description: Identification of the data carrier. }
+        supplier_id: { type: string, format: uuid, description: Service provider that performed the disposal. }
+        evidence_document_id: { type: string, format: uuid, description: Evidence document (part of record_hash). }
+        certificate_ref: { type: string, description: Reference to the disposal certificate or the erasure procedure. }
+        performed_by:
+          type: string
+          description: Name of the performer, resolved from its vault surrogate; empty after crypto-shredding. Records written before the vault surrogates show the stored plaintext.
+        witness: { type: string, description: Name of the witness, resolved from its vault surrogate. }
         performed_at: { type: string, format: date-time }
         notes: { type: string }
+        record_hash:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 (hex) over the canonical JSON of the business fields incl. the surrogate ids, set by the database; verifiable after crypto-shredding.
         created_at: { type: string, format: date-time }
     CreateDisposalRecordRequest:
       type: object
-      required: [method]
+      description: |
+        Required fields per method (E-55, the table disposal.RequiredFields of
+        the handler; "a|b" means either field):
+
+        | method | required |
+        |---|---|
+        | every method | method, performed_at, performed_by, asset_id\|ci_id |
+        | destruction, physical_destruction | protection_class, security_level, data_carrier, supplier_id\|witness, evidence_document_id |
+        | secure_erasure | data_carrier, certificate_ref\|notes (the procedure), evidence_document_id |
+        | reuse, recycling, return_to_vendor | only the fields of every method |
+      x-required-fields-by-method:
+        '*': [method, performed_at, performed_by, asset_id|ci_id]
+        destruction: [protection_class, security_level, data_carrier, supplier_id|witness, evidence_document_id]
+        physical_destruction: [protection_class, security_level, data_carrier, supplier_id|witness, evidence_document_id]
+        secure_erasure: [data_carrier, certificate_ref|notes, evidence_document_id]
+        reuse: []
+        recycling: []
+        return_to_vendor: []
+      required: [method, performed_at, performed_by]
       properties:
-        asset_id: { type: string }
-        ci_id: { type: string }
+        asset_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
         method: { type: string, enum: [reuse, recycling, destruction, secure_erasure, physical_destruction, return_to_vendor] }
-        certificate_ref: { type: string }
-        data_carrier: { type: string }
-        performed_by: { type: string }
+        protection_class: { type: integer, minimum: 1, maximum: 3, description: Protection class after DIN 66399. }
+        security_level: { type: string, pattern: '^[POTEFH]-[1-7]$', description: 'Security level after DIN 66399, e.g. P-4.' }
+        data_carrier: { type: string, description: Identification of the data carrier. }
+        supplier_id: { type: string, format: uuid, description: Service provider (GET /api/v1/suppliers). }
+        evidence_document_id: { type: string, format: uuid, description: Evidence document (GET /api/v1/documents). }
+        certificate_ref: { type: string, description: Reference to the disposal certificate or the erasure procedure. }
+        performed_by: { type: string, description: Name of the performer; stored only as vault surrogate. }
+        witness: { type: string, description: Name of the witness; stored only as vault surrogate. }
         performed_at: { type: string, format: date-time }
         notes: { type: string }
     DisposalRecordListResponse:

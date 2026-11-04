@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -462,7 +463,7 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/lifecycle-definitions", `{"key":"a5_lc","name":"a5 lifecycle","applies_to":"ci","states":[{"key":"new","label":"New","is_initial":true},{"key":"used","label":"Used"}],"transitions":[{"from_state_key":"new","to_state_key":"used","key":"use"}]}`},
 	{"POST /api/v1/reservations", `{"item_kind":"asset","asset_id":"<id:/api/v1/assets>","quantity":1}`},
 	{"POST /api/v1/stock-movements", `{"consumable_id":"<id:/api/v1/consumables>","direction":"in","quantity":1}`},
-	{"POST /api/v1/disposal-records", `{"method":"reuse","asset_id":"<asset2>"}`},
+	{"POST /api/v1/disposal-records", `{"method":"reuse","asset_id":"<asset2>","performed_at":"2026-11-02T10:00:00Z","performed_by":"A5 Entsorger"}`},
 	{"POST /api/v1/export/jobs", `{"format":"csv"}`},
 	{"POST /api/v1/exports", `{"format":"csv"}`},
 	{"POST /api/v1/history/snapshots", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
@@ -620,6 +621,10 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Disposal records keep their persons only as vault surrogates
+	// (WP-751).
+	pii.SetDefault(pii.NewVault(f.App, encryptor))
+	t.Cleanup(func() { pii.SetDefault(nil) })
 	repos := PostgresRepositories(f.App, audit.NewPGRecorder())
 	policy := egress.Options{AllowPrivate: true}
 	emitter := events.NewPGEmitter(f.App)

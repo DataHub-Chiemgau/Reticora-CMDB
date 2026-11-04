@@ -255,6 +255,33 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
 
+### Entsorgungsnachweis nach E-55 (WP-751)
+
+Migration 000245 ergänzt `disposal_record` um `protection_class`
+(`smallint`, `disposal_record_protection_class_check`: 1 bis 3),
+`security_level` (`text`, `disposal_record_security_level_check`:
+`^[POTEFH]-[1-7]$`), `supplier_id`, `evidence_document_id`,
+`performer_surrogate` und `witness_surrogate` (`uuid`, Vault-Subjekte der Art
+`person`, ohne FK) sowie `record_hash` (`text NOT NULL`). Die Spalte
+`performed_by` bleibt für Altzeilen und wird nicht mehr geschrieben.
+`record_hash` setzt der BEFORE-INSERT-Trigger `disposal_record_set_hash` über
+`disposal_record_hash(…)` (SHA-256 hex über `convert_to(<kanonisches JSON>,
+'UTF8')` aus `id`, `organization_id`, `asset_id`, `ci_id`, `method`,
+`protection_class`, `security_level`, `data_carrier`, `certificate_ref`,
+`supplier_id`, `evidence_document_id`, `performer_surrogate`,
+`witness_surrogate`, `performed_at`, `notes`, `created_at`; ohne
+`performed_by`, `client_id` und `site_id`). Altzeilen sind unter
+abgeschaltetem `disposal_record_no_update` nachgefüllt. Verweise mit
+Organisation (K19), alle ON DELETE RESTRICT: `disposal_record_asset_id_fkey`
+→ `asset`, `disposal_record_ci_id_fkey` → `ci` (vorher SET NULL),
+`disposal_record_supplier_id_fkey` → `supplier`,
+`disposal_record_evidence_document_id_fkey` → `document`. Dazu
+`disposal_record_object_check` (`asset_id` oder `ci_id`, NOT VALID) und die
+Teilindizes `idx_disposal_record_asset`, `idx_disposal_record_ci`,
+`idx_disposal_record_supplier` und `idx_disposal_record_evidence_document`
+(je Spalte `WHERE … IS NOT NULL`). RLS, Policies und Scope-Trigger aus 000145
+bleiben unverändert.
+
 ### Linkziele von Dokumenten (WP-267)
 
 `document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
@@ -523,7 +550,9 @@ Migration 000194 legt `UNIQUE (id, organization_id)` auf `location` und
 `reservation.asset_id`, `disposal_record.asset_id`, `disposal_record.ci_id`,
 `internal_order_item.asset_id`, `internal_order_item.consumable_id`,
 `location.site_id` und `location.parent_id` um. Constraint-Namen und
-Löschverhalten bleiben (SET NULL als `ON DELETE SET NULL (spalte)`).
+Löschverhalten bleiben (SET NULL als `ON DELETE SET NULL (spalte)`);
+`disposal_record.asset_id` und `disposal_record.ci_id` sind seit 000245
+ON DELETE RESTRICT (WP-751).
 Bestehende Zeilen mit einem Verweis über die Organisationsgrenze stehen danach
 in `migration_quarantine` (Migration `000194`): Nullbare Verweise sind auf NULL
 gesetzt, die ganze Zeile ist protokolliert; Reservierungen sind verschoben
