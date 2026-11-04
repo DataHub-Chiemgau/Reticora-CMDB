@@ -146,7 +146,7 @@ func (s *t2Stack) login(t *testing.T, perms ...identity.Permission) (token, cook
 	}
 	now := time.Now().UTC()
 	claims.ID, claims.IssuedAt, claims.ExpiresAt = "t2-jti-"+strconv.Itoa(s.sessions), now, now.Add(15*time.Minute)
-	token, err = s.issuer.Issue(claims)
+	token, err = s.issuer.Issue(&claims)
 	if err != nil {
 		t.Fatalf("issue access token: %v", err)
 	}

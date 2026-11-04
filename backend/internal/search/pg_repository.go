@@ -17,7 +17,7 @@ type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 func (r *PGRepository) Ping(ctx context.Context) error { return r.pool.Ping(ctx) }
-func (r *PGRepository) IndexDocument(ctx context.Context, doc Document) error {
+func (r *PGRepository) IndexDocument(ctx context.Context, doc *Document) error {
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
 		return fmt.Errorf("organization_id, entity_type and entity_id are required")
 	}
@@ -106,8 +106,8 @@ const contactTokenMatch = `(search_document.entity_type = 'contact' AND EXISTS (
 	SELECT 1 FROM contact c JOIN pii_subject s ON s.surrogate_id = c.pii_subject_id
 	WHERE c.id = search_document.entity_id AND s.search_tokens @> $%d::text[]))`
 
-func buildPostgresQuery(q Query) (string, []any, error) {
-	return buildPostgresQueryWithTokens(&q, nil)
+func buildPostgresQuery(q *Query) (query string, args []any, err error) {
+	return buildPostgresQueryWithTokens(q, nil)
 }
 
 // buildPostgresQueryWithTokens adds the contacts found by the blind tokens
@@ -157,7 +157,7 @@ func buildPostgresQueryWithTokens(q *Query, tokens []string) (query string, args
 		snippet, score, strings.Join(where, " AND "), api.TotalCountLimit, pos+1, pos, pos, pos+1)
 	return query, args, nil
 }
-func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
+func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 	limit := q.Limit
 	if limit <= 0 || limit > api.MaxPageLimit {
 		limit = api.DefaultPageLimit
@@ -172,7 +172,7 @@ func (r *PGRepository) Query(ctx context.Context, q Query) (Result, error) {
 				return err
 			}
 		}
-		sql, args, err := buildPostgresQueryWithTokens(&q, tokens)
+		sql, args, err := buildPostgresQueryWithTokens(q, tokens)
 		if err != nil {
 			return err
 		}

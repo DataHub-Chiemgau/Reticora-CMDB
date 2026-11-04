@@ -612,7 +612,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				}
 				hookSubscription = t6ID(r.Body)
 				due := time.Now().Add(-time.Minute)
-				rec, err := e.Repos.WebhookDeliveries.Enqueue(f.OrgCtx(f.OrgA), webhook.DeliveryRecord{OrganizationID: f.OrgA,
+				rec, err := e.Repos.WebhookDeliveries.Enqueue(f.OrgCtx(f.OrgA), &webhook.DeliveryRecord{OrganizationID: f.OrgA,
 					SubscriptionID: hookSubscription, Event: "ci.created", Payload: []byte(`{"id":"evt02"}`), MaxAttempts: 1, NextRetryAt: &due})
 				if err != nil {
 					t.Fatal(err)

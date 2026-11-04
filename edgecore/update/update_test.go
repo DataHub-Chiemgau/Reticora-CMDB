@@ -110,7 +110,7 @@ func TestCheckEdgeCasesReturnNil(t *testing.T) {
 
 func TestApplyRequiresDownloadURL(t *testing.T) {
 	c := &Checker{}
-	err := c.Apply(context.Background(), ReleaseInfo{Version: "v2"})
+	err := c.Apply(context.Background(), &ReleaseInfo{Version: "v2"})
 	if err == nil {
 		t.Fatal("expected error for missing download URL, got nil")
 	}
@@ -211,7 +211,7 @@ func TestApply(t *testing.T) {
 				Verifier:       fakeVerifier{},
 				executablePath: func() (string, error) { return fakeExec, nil },
 			}
-			err := c.Apply(context.Background(), ReleaseInfo{
+			err := c.Apply(context.Background(), &ReleaseInfo{
 				Version:            "v2.0.0",
 				DownloadURL:        downloadURL,
 				SignatureBundleURL: bundleURL,
@@ -288,7 +288,7 @@ func TestApplyRespectsContextCancellation(t *testing.T) {
 	defer cancel()
 
 	c := &Checker{Verifier: fakeVerifier{}, executablePath: func() (string, error) { return fakeExec, nil }}
-	err := c.Apply(ctx, ReleaseInfo{Version: "v2", DownloadURL: srv.URL + "/binary", SignatureBundleURL: srv.URL + "/bundle"})
+	err := c.Apply(ctx, &ReleaseInfo{Version: "v2", DownloadURL: srv.URL + "/binary", SignatureBundleURL: srv.URL + "/bundle"})
 	if err == nil {
 		t.Fatal("expected error for cancelled context, got nil")
 	}
@@ -342,7 +342,7 @@ func TestApplyRefusesUnsignedAndWronglySignedReleases(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := &Checker{Verifier: tt.verifier, executablePath: func() (string, error) { return fakeExec, nil }}
-			err := c.Apply(context.Background(), ReleaseInfo{Version: "v3.0.0", DownloadURL: srv.URL + "/binary", SignatureBundleURL: tt.bundle})
+			err := c.Apply(context.Background(), &ReleaseInfo{Version: "v3.0.0", DownloadURL: srv.URL + "/binary", SignatureBundleURL: tt.bundle})
 			installed, _ := os.ReadFile(fakeExec)
 			if tt.wantErr == "" {
 				if err != nil || string(installed) != string(binary) || verified != string(binary) {
@@ -524,7 +524,7 @@ func TestFailedStartsRollBackTheUpdate(t *testing.T) {
 	}
 	srv := serveRelease(t, []byte("new-binary"))
 	c := &Checker{Verifier: fakeVerifier{}, executablePath: func() (string, error) { return execPath, nil }}
-	if err := c.Apply(context.Background(), ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"}); err != nil {
+	if err := c.Apply(context.Background(), &ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -560,7 +560,7 @@ func TestConfirmKeepsTheUpdate(t *testing.T) {
 	}
 	srv := serveRelease(t, []byte("new-binary"))
 	c := &Checker{Verifier: fakeVerifier{}, executablePath: func() (string, error) { return execPath, nil }}
-	if err := c.Apply(context.Background(), ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"}); err != nil {
+	if err := c.Apply(context.Background(), &ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"}); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	if _, err := CheckPending(execPath, 0); err != nil {
@@ -601,7 +601,7 @@ func TestApplyRefusesABinaryThatDoesNotStart(t *testing.T) {
 			}
 			srv := serveRelease(t, []byte(tt.binary))
 			c := &Checker{Verifier: fakeVerifier{}, ProbeArgs: []string{"version"}, executablePath: func() (string, error) { return execPath, nil }}
-			err := c.Apply(context.Background(), ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"})
+			err := c.Apply(context.Background(), &ReleaseInfo{Version: "v2.0.0", DownloadURL: srv.URL + "/bin", SignatureBundleURL: srv.URL + "/bundle"})
 			got, _ := os.ReadFile(execPath)
 			if tt.wantErr == "" {
 				if err != nil || string(got) != tt.binary {

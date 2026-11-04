@@ -21,7 +21,7 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{client: client}
 }
 
-func (r *RedisStore) Get(ctx context.Context, key string) (string, bool, error) {
+func (r *RedisStore) Get(ctx context.Context, key string) (value string, found bool, err error) {
 	val, err := r.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return "", false, nil
@@ -32,7 +32,7 @@ func (r *RedisStore) Get(ctx context.Context, key string) (string, bool, error) 
 	return val, true, nil
 }
 
-func (r *RedisStore) Set(ctx context.Context, key string, value string, ttl time.Duration) error {
+func (r *RedisStore) Set(ctx context.Context, key, value string, ttl time.Duration) error {
 	err := r.client.Set(ctx, key, value, ttl).Err()
 	if err != nil {
 		return fmt.Errorf("cache: redis set: %w", err)

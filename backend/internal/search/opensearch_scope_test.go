@@ -105,9 +105,9 @@ func TestOpenSearchDropsHitsOutsideScope(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
 	ctx := database.ContextWithTenantScope(context.Background(), restricted([]string{osClient1}, []string{osSite1}))
-	res, err := b.Query(ctx, Query{OrganizationID: osOrg, Text: "x"})
+	res, err := b.Query(ctx, &Query{OrganizationID: osOrg, Text: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestOpenSearchDropsHitsOutsideScope(t *testing.T) {
 		t.Errorf("request to the index lacks the client filter: %s", request)
 	}
 
-	if _, err := b.Query(context.Background(), Query{OrganizationID: osOrg, Text: "x"}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, err := b.Query(context.Background(), &Query{OrganizationID: osOrg, Text: "x"}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Errorf("query without tenant scope: %v, want ErrNoTenantScope", err)
 	}
 }
@@ -137,9 +137,10 @@ func TestCIIndexerCarriesScope(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	indexer := NewCIIndexer(NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client()))
+	indexer := NewCIIndexer(NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client()))
 	item := &ci.Item{ID: "ci-1", OrganizationID: osOrg, ClientID: osClient1, SiteID: osSite1, Name: "router"}
-	if err := indexer.IndexDocument(context.Background(), ci.IndexDocumentFor(item)); err != nil {
+	doc := ci.IndexDocumentFor(item)
+	if err := indexer.IndexDocument(context.Background(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if indexed.ClientID != osClient1 || indexed.SiteID != osSite1 {

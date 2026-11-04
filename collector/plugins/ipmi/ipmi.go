@@ -150,7 +150,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 		slog.Debug("ipmi: reverse DNS lookup failed, falling back to target address", "target", target, "error", err)
 	} else if len(names) > 0 {
 		hostname = names[0]
-		if len(hostname) > 0 && hostname[len(hostname)-1] == '.' {
+		if hostname != "" && hostname[len(hostname)-1] == '.' {
 			hostname = hostname[:len(hostname)-1]
 		}
 	}

@@ -180,7 +180,7 @@ func TestOperatorPathAdmitsOperatorsOnly(t *testing.T) {
 	now := time.Now().UTC()
 	sign := func(c identity.SessionClaims) string {
 		t.Helper()
-		token, err := issuer.Issue(c)
+		token, err := issuer.Issue(&c)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -392,7 +392,7 @@ func TestOperatorActionsFailWithoutTheirAuditEntry(t *testing.T) {
 	oidc := identity.NewOIDCProvider(identity.OIDCConfig{IssuerURL: idp.server.URL, ClientID: "reticora-app",
 		ClientSecret: "secret", RedirectURL: "https://app.example.com/auth/callback"})
 	now := time.Now().UTC()
-	operatorToken, err := issuer.Issue(identity.SessionClaims{Subject: "op-1", Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	operatorToken, err := issuer.Issue(&identity.SessionClaims{Subject: "op-1", Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

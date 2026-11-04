@@ -215,7 +215,7 @@ func TestAuditT3VLANReferenceMustBeVisible(t *testing.T) {
 	})
 	t.Run("UpdateSubnet", func(t *testing.T) {
 		vlan := foreign.ID
-		_, err := repo.UpdateSubnet(c1, f.OrgA, ownSubnet.ID, ipam.UpdateSubnetRequest{VLANID: &vlan})
+		_, err := repo.UpdateSubnet(c1, f.OrgA, ownSubnet.ID, &ipam.UpdateSubnetRequest{VLANID: &vlan})
 		if got := auditT3Str(t, f, `SELECT coalesce(vlan_id::text, '') FROM subnet WHERE id = $1`, ownSubnet.ID); err == nil || got != own.ID {
 			t.Errorf("client-1 UpdateSubnet vlan_id -> client-2 VLAN: err=%v, stored vlan_id=%s; want an error and %s", err, got, own.ID)
 		}
@@ -229,7 +229,7 @@ func TestAuditT3VLANReferenceMustBeVisible(t *testing.T) {
 	})
 	t.Run("UpdateInterface", func(t *testing.T) {
 		vlan := foreign.ID
-		_, err := repo.UpdateInterface(c1, f.OrgA, ownIf.ID, ipam.UpdateInterfaceRequest{VLANID: &vlan})
+		_, err := repo.UpdateInterface(c1, f.OrgA, ownIf.ID, &ipam.UpdateInterfaceRequest{VLANID: &vlan})
 		if got := auditT3Str(t, f, `SELECT coalesce(vlan_id::text, '') FROM network_interface WHERE id = $1`, ownIf.ID); err == nil || got != own.ID {
 			t.Errorf("client-1 UpdateInterface vlan_id -> client-2 VLAN: err=%v, stored vlan_id=%s; want an error and %s", err, got, own.ID)
 		}
@@ -339,7 +339,7 @@ func TestVLANReferenceStaysWithinTheClient(t *testing.T) {
 			{"org-wide subnet, org-wide VLAN", org, ipam.UpdateSubnetRequest{VLANID: str(shared.ID)}, "", "- " + shared.ID},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				_, err := repo.UpdateSubnet(tc.ctx, f.OrgA, sn.ID, tc.req)
+				_, err := repo.UpdateSubnet(tc.ctx, f.OrgA, sn.ID, &tc.req)
 				check(t, err, tc.want)
 				if got := state(); got != tc.state {
 					t.Errorf("client and VLAN after the update %q, want %q", got, tc.state)
@@ -350,7 +350,7 @@ func TestVLANReferenceStaysWithinTheClient(t *testing.T) {
 		if err := repo.CreateSubnet(org, foreignNet); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := repo.UpdateSubnet(c1, f.OrgA, foreignNet.ID, ipam.UpdateSubnetRequest{VLANID: str(own.ID)}); !errors.Is(err, ipam.ErrNotFound) {
+		if _, err := repo.UpdateSubnet(c1, f.OrgA, foreignNet.ID, &ipam.UpdateSubnetRequest{VLANID: str(own.ID)}); !errors.Is(err, ipam.ErrNotFound) {
 			t.Errorf("client-1 principal sets a VLAN on a client-2 subnet: err=%v, want ErrNotFound", err)
 		}
 	})
@@ -413,7 +413,7 @@ func TestVLANReferenceStaysWithinTheClient(t *testing.T) {
 			{"client-1 principal, own VLAN", c1, own.ID, "", own.ID},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				_, err := repo.UpdateInterface(tc.ctx, f.OrgA, ni.ID, ipam.UpdateInterfaceRequest{VLANID: str(tc.vlan)})
+				_, err := repo.UpdateInterface(tc.ctx, f.OrgA, ni.ID, &ipam.UpdateInterfaceRequest{VLANID: str(tc.vlan)})
 				check(t, err, tc.want)
 				if got := vlanOf(ni.ID); got != tc.left {
 					t.Errorf("VLAN after the update %q, want %q", got, tc.left)
@@ -421,7 +421,7 @@ func TestVLANReferenceStaysWithinTheClient(t *testing.T) {
 			})
 		}
 		other := nic(f.CI(t, f.OrgA, f.Client2, "vlan-scope-update-c2"))
-		if _, err := repo.UpdateInterface(c1, f.OrgA, other.ID, ipam.UpdateInterfaceRequest{VLANID: str(own.ID)}); !errors.Is(err, ipam.ErrNotFound) {
+		if _, err := repo.UpdateInterface(c1, f.OrgA, other.ID, &ipam.UpdateInterfaceRequest{VLANID: str(own.ID)}); !errors.Is(err, ipam.ErrNotFound) {
 			t.Errorf("client-1 principal sets a VLAN on a client-2 interface: err=%v, want ErrNotFound", err)
 		}
 		if got := vlanOf(other.ID); got != "-" {

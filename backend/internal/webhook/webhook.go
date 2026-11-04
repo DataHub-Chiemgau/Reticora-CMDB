@@ -133,6 +133,15 @@ type SecretRotator interface {
 	RotateSecret(ctx context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error)
 }
 
+// MemoryRepository is an in-memory webhook store. Like the PostgreSQL
+// repository it shows a request only the subscriptions in its scope
+// (visibleIn).
+type MemoryRepository struct {
+	mu    sync.RWMutex
+	items map[string]*Subscription
+	seq   int
+}
+
 // RotateSecret implements SecretRotator.
 func (r *MemoryRepository) RotateSecret(_ context.Context, orgID, id, secret string, validUntil time.Time) (*Subscription, error) {
 	r.mu.Lock()
@@ -303,15 +312,6 @@ type Repository interface {
 	ListByEvent(ctx context.Context, orgID, event string) ([]Subscription, error)
 }
 
-// MemoryRepository is an in-memory webhook store. Like the PostgreSQL
-// repository it shows a request only the subscriptions in its scope
-// (visibleIn).
-type MemoryRepository struct {
-	mu    sync.RWMutex
-	items map[string]*Subscription
-	seq   int
-}
-
 // NewMemoryRepository creates a new in-memory webhook repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string]*Subscription)}
@@ -410,7 +410,7 @@ func (r *MemoryRepository) ListByEvent(ctx context.Context, orgID, event string)
 
 // TestDeliverer performs a single synchronous delivery for the test endpoint.
 type TestDeliverer interface {
-	DeliverOnce(sub Subscription, event string, payload any) (Delivery, error)
+	DeliverOnce(sub *Subscription, event string, payload any) (Delivery, error)
 }
 
 // DeliveryLister exposes the durable delivery history of a subscription.
@@ -596,7 +596,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	delivery, err := h.deliverer.DeliverOnce(*sub, TestEvent, map[string]any{
+	delivery, err := h.deliverer.DeliverOnce(sub, TestEvent, map[string]any{
 		"event":           TestEvent,
 		"subscription_id": sub.ID,
 		"organization_id": sub.OrganizationID,

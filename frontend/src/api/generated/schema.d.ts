@@ -6492,6 +6492,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/metamodel/drafts/{id}/publish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish a tested metamodel draft (MET-53)
+     * @description Applies the items of a `tested` draft (WP-261) in one transaction and sets it `published` with `published_at`. The draft row is locked; a draft that is not `tested`, or already published or discarded (also a concurrent second publication), is 409. Before the first item the targets of all items are locked and compared with the base the items captured: a target that changed or vanished is 409 with `stale_items`, and nothing changes. Every item runs through its resource route with that route's checks and error contract (422 for a MET-16 composition conflict, also one the schema generator finds when the deferred regeneration runs after the last item; 409 for a unique conflict; 403 for a system row); the problem names the refused item (`item_id`), and every element is rolled back. Item references `{"$item": "<item id>"}` take the id the referenced item created. Each affected type gets at most one new `schema_version`. The audit entries of the elements, the audit entry `metamodel.published` of the draft and one event `metamodel.published` (entity: the draft) are written in the same transaction; the webhook events of the applied types and attributes (`ci_type.*`, `ci_attribute.changed`) follow the commit. Requires metamodel:publish; without the database 503.
+     */
+    post: operations['publishMetamodelDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -7646,6 +7669,61 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
+    trace?: never;
+  };
+  '/api/v1/suppliers': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List suppliers (MGT-12)
+     * @description The suppliers of the organization visible under the caller's scope: org-wide suppliers (client_id null) and those of the caller's clients (E-09). Filters `filter[name]`, `filter[client_id]` and `filter[external_ref]` (API-02); `sort` name (default) or created_at, a leading `-` sorts descending. `limit` (default 50, at most 200) and the signed keyset `cursor` from `next_cursor`; a forged cursor or one of another sort is 400. Requires contract:read.
+     */
+    get: operations['listSuppliers'];
+    put?: never;
+    /**
+     * Create a supplier (MGT-12)
+     * @description A supplier of the organization (client_id null) or of a client. name is the company name, unique per organization (409 on name). The contact person is referenced by contact_id only; its name, phone and e-mail come from the contacts resource (PII vault). A client or contact of another organization, or a contact outside the caller's scope, is 422 on the field. A caller restricted to clients cannot create an org-wide supplier or one of another client (403, E-09). Requires contract:write.
+     */
+    post: operations['createSupplier'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/suppliers/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a supplier
+     * @description A supplier visible under the caller's scope, with its version as ETag; an unknown, foreign or invisible id is 404. Requires contract:read.
+     */
+    get: operations['getSupplier'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a supplier
+     * @description Deletes a supplier no contract, asset or order references (422 otherwise). An org-wide supplier is 404 for a caller restricted to clients. Requires contract:write.
+     */
+    delete: operations['deleteSupplier'];
+    options?: never;
+    head?: never;
+    /**
+     * Update a supplier
+     * @description Sent fields change, null clears an optional field; every change raises the version by 1. `client_id` cannot change (400 on client_id). If-Match (API-07): 412 when the organization requires it (require_if_match) and it is missing, or when it names another than the current version. A taken name is 409, a contact of another organization or outside the caller's scope 422. An org-wide supplier is 404 for a caller restricted to clients and stays unchanged. Requires contract:write.
+     */
+    patch: operations['updateSupplier'];
     trace?: never;
   };
   '/api/v1/tags': {
@@ -9389,6 +9467,18 @@ export interface components {
       rule?: string;
       message: string;
     };
+    /** @description The answer of the publication of a metamodel draft (WP-261): the published draft, the number of applied elements per item kind and the affected CI types with their `schema_version` after the publication. */
+    MetamodelPublication: {
+      draft: components['schemas']['MetamodelDraft'];
+      counts: {
+        [key: string]: number;
+      };
+      types: {
+        /** Format: uuid */
+        id: string;
+        schema_version: number;
+      }[];
+    };
     MetamodelTestReportPage: components['schemas']['MetamodelTestReport'] & {
       data: components['schemas']['MetamodelTestViolation'][];
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -9436,7 +9526,7 @@ export interface components {
       /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
       /**
-       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
        * @example {
        *       "review": "muted",
        *       "export": "subscribed"
@@ -12908,6 +12998,60 @@ export interface components {
     };
     ImportReportLink: {
       download_url: string;
+    };
+    /** @description A supplier of the organization or one of its clients (MGT-12, E-41). name is the company name and no personal data; the contact person is only referenced by contact_id (the contacts resource reveals name, phone and e-mail from the PII vault, WP-242). */
+    Supplier: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Client of the supplier; null is org-wide.
+       */
+      client_id: string | null;
+      /** @description Company name, unique per organization. */
+      name: string;
+      /** @description Reference in an external system, e.g. the creditor number. */
+      external_ref: string | null;
+      /**
+       * Format: uuid
+       * @description Contact person; null when none or after the contact was deleted.
+       */
+      contact_id: string | null;
+      notes: string | null;
+      /**
+       * Format: int64
+       * @description Raised by every change; the ETag of the supplier.
+       */
+      version: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateSupplierRequest: {
+      /**
+       * Format: uuid
+       * @description Client of the supplier; null or absent is org-wide. Set only at creation.
+       */
+      client_id?: string | null;
+      name: string;
+      external_ref?: string | null;
+      /** Format: uuid */
+      contact_id?: string | null;
+      notes?: string | null;
+    };
+    /** @description Sent fields change, null clears an optional field. client_id cannot change; sending it is 400 on client_id. */
+    UpdateSupplierRequest: {
+      name?: string;
+      external_ref?: string | null;
+      /** Format: uuid */
+      contact_id?: string | null;
+      notes?: string | null;
+    };
+    SupplierListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Supplier'][];
     };
     /** @description A catalog tag of the organization (CI-08, WP-753). */
     Tag: {
@@ -32409,6 +32553,36 @@ export interface operations {
       503: components['responses']['ServiceUnavailable'];
     };
   };
+  publishMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The published draft */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelPublication'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listCiTypes: {
     parameters: {
       query?: {
@@ -35375,6 +35549,197 @@ export interface operations {
           'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
+    };
+  };
+  listSuppliers: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Suppliers, sorted by name unless sort says otherwise */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SupplierListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createSupplier: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateSupplierRequest'];
+      };
+    };
+    responses: {
+      /** @description Supplier created */
+      201: {
+        headers: {
+          /** @description The version of the supplier. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Supplier'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  getSupplier: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supplier */
+      200: {
+        headers: {
+          /** @description The version of the supplier. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Supplier'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  deleteSupplier: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Supplier deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  updateSupplier: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateSupplierRequest'];
+      };
+    };
+    responses: {
+      /** @description Supplier updated */
+      200: {
+        headers: {
+          /** @description The new version of the supplier. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Supplier'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description If-Match missing although required, or not the current version of the supplier */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listTags: {

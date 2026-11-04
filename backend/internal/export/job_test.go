@@ -306,7 +306,7 @@ func TestFailingRenderMarksJobFailed(t *testing.T) {
 
 type failingCIRepo struct{ ci.Repository }
 
-func (failingCIRepo) List(context.Context, string, ci.FilterParams, api.PaginationParams) ([]ci.Item, int, error) {
+func (failingCIRepo) List(context.Context, string, *ci.FilterParams, api.PaginationParams) ([]ci.Item, int, error) {
 	return nil, 0, errBoom
 }
 

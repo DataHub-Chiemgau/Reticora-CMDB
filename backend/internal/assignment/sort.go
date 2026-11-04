@@ -19,7 +19,7 @@ var sortColumnCasts = map[string]string{
 
 // NormalizeSort maps the requested sort onto the supported column/direction
 // pair. Unknown values fall back to the stable default ordering.
-func NormalizeSort(filter FilterParams) (column, direction string) {
+func NormalizeSort(filter *FilterParams) (column, direction string) {
 	column = "created_at"
 	if _, ok := sortColumnCasts[filter.SortBy]; ok {
 		column = filter.SortBy
@@ -34,7 +34,7 @@ func NormalizeSort(filter FilterParams) (column, direction string) {
 // sortValue returns the value of the sort column for one item, formatted the
 // same way for the in-memory and the PostgreSQL repository so cursors are
 // interchangeable.
-func sortValue(item Assignment, column string) string {
+func sortValue(item *Assignment, column string) string {
 	switch column {
 	case "status":
 		return item.Status
@@ -51,12 +51,12 @@ func sortValue(item Assignment, column string) string {
 
 // NextCursor returns the opaque cursor pointing after the last returned item,
 // or an empty string when the page was not full (i.e. no more rows follow).
-func NextCursor(items []Assignment, filter FilterParams, limit int) string {
+func NextCursor(items []Assignment, filter *FilterParams, limit int) string {
 	if len(items) == 0 || len(items) < limit {
 		return ""
 	}
 	column, direction := NormalizeSort(filter)
-	last := items[len(items)-1]
+	last := &items[len(items)-1]
 	return api.EncodeCursor(api.Cursor{
 		Sort:  column,
 		Dir:   direction,

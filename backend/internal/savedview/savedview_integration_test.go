@@ -465,7 +465,7 @@ func TestSavedViewRelationshipFilterSeesProjection(t *testing.T) {
 		t.Helper()
 		spec.EntityKind = "ci"
 		spec.Search = "rel-"
-		results, total, err := engine.Query(ctx, f.OrgA, spec, api.PaginationParams{Limit: 100})
+		results, total, err := engine.Query(ctx, f.OrgA, &spec, api.PaginationParams{Limit: 100})
 		if err != nil {
 			t.Fatalf("%+v: %v", spec, err)
 		}

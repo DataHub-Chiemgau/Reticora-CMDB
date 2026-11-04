@@ -12,7 +12,7 @@ type Repository interface {
 	List(ctx context.Context, orgID string) ([]Entitlement, error)
 	// Upsert stores an entitlement, replacing an existing row for the same
 	// (organization, feature) pair.
-	Upsert(ctx context.Context, ent Entitlement) (Entitlement, error)
+	Upsert(ctx context.Context, ent *Entitlement) (Entitlement, error)
 	// InsertMissing stores the rows of the organization whose feature has
 	// no row yet and returns their feature keys; an existing row, enabled
 	// or not, is left unchanged.
@@ -43,7 +43,8 @@ func (r *MemoryRepository) List(_ context.Context, orgID string) ([]Entitlement,
 }
 
 // Upsert stores or replaces a single entitlement.
-func (r *MemoryRepository) Upsert(_ context.Context, ent Entitlement) (Entitlement, error) {
+func (r *MemoryRepository) Upsert(_ context.Context, in *Entitlement) (Entitlement, error) {
+	ent := *in
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

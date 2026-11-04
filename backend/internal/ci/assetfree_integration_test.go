@@ -55,7 +55,7 @@ func TestAssetFreeCIAgainstPostgres(t *testing.T) {
 		t.Errorf("relationships: %+v %v", list, lerr)
 	}
 	// Search.
-	found, err := search.NewPGRepository(f.App).Query(ctx, search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: "assetfree-billing-b7", Limit: 10})
+	found, err := search.NewPGRepository(f.App).Query(ctx, &search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: "assetfree-billing-b7", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

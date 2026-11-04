@@ -141,10 +141,10 @@ func (r *PGRepository) ListForCI(ctx context.Context, orgID, ciID string) ([]Fie
 		// resolved: the connection cannot run a query while rows are open.
 		var values []*FieldValue
 		for rows.Next() {
-			fv, err := scan(rows)
-			if err != nil {
+			fv, scanErr := scan(rows)
+			if scanErr != nil {
 				rows.Close()
-				return err
+				return scanErr
 			}
 			values = append(values, fv)
 		}

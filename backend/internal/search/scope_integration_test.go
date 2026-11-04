@@ -126,7 +126,7 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 
 	hits := func(ctx context.Context) map[string]bool {
 		t.Helper()
-		res, err := repo.Query(ctx, search.Query{OrganizationID: f.OrgA, Text: "scopehit", Limit: 50})
+		res, err := repo.Query(ctx, &search.Query{OrganizationID: f.OrgA, Text: "scopehit", Limit: 50})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}

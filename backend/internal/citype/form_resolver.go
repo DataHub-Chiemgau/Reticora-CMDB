@@ -512,7 +512,7 @@ func fieldStates(in *formInput) map[string]fieldmeta.FieldState {
 	out := make(map[string]fieldmeta.FieldState, len(in.defs))
 	for i := range in.defs {
 		def := &in.defs[i]
-		state := fieldmeta.Evaluate(*def, in.values)
+		state := fieldmeta.Evaluate(def, in.values)
 		hidden := !state.Visible
 		if st := byField[def.Name]; st != nil {
 			state.Required = state.Required || st.required

@@ -106,7 +106,7 @@ func TestRenewCertificateWithFakeClock(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "credentials.json")
-	if err := (&keystore.FileStore{Path: path}).Save(ctx, enrolled); err != nil {
+	if err := (&keystore.FileStore{Path: path}).Save(ctx, &enrolled); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := os.ReadFile(path)

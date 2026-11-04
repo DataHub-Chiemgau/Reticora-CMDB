@@ -26,6 +26,9 @@ type Handler struct {
 	// uploads are the size, parallelism and deadline of uploads
 	// (WithUploads, SEC-09).
 	uploads uploadLimits
+	// scans submits the malware scan of a stored version (WithScans,
+	// WP-734); nil leaves every new version pending_scan.
+	scans ScanSubmitter
 }
 
 // NewHandler creates a new document handler. blobs may be nil; content
@@ -201,7 +204,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -225,7 +228,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Limit:      page.Limit,
 		Offset:     page.Offset,
 		HasMore:    hasMore,
-		NextCursor: NextCursor(items, filter, page.Limit),
+		NextCursor: NextCursor(items, &filter, page.Limit),
 	})
 }
 

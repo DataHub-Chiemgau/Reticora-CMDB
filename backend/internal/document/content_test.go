@@ -97,7 +97,7 @@ func newDocumentFixture(t *testing.T) (*MemoryRepository, chi.Router) {
 
 func documentID(t *testing.T, repo *MemoryRepository) string {
 	t.Helper()
-	docs, _, err := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 50})
+	docs, _, err := repo.List(context.Background(), "org-1", &FilterParams{}, api.PaginationParams{Limit: 50})
 	if err != nil || len(docs) == 0 {
 		t.Fatalf("list: %v (n=%d)", err, len(docs))
 	}
@@ -610,7 +610,7 @@ func TestUploadWithoutBlobStoreReturns503(t *testing.T) {
 	mux := chi.NewRouter()
 	NewHandler(repo, nil).RegisterRoutes(mux)
 
-	docs, _, _ := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 50})
+	docs, _, _ := repo.List(context.Background(), "org-1", &FilterParams{}, api.PaginationParams{Limit: 50})
 	w := contentRequest(t, mux, "PUT", "/api/v1/documents/"+docs[0].ID+"/content", "application/pdf", "x")
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("got %d, want 503", w.Code)

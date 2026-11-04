@@ -28,7 +28,7 @@ func TestHandlerGrantListAndCheck(t *testing.T) {
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("tenant write: %d, want 405", w.Code)
 	}
-	if _, err := h.service.Grant(req.Context(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingEssential, Plan: PlanPro, Enabled: true}); err != nil {
+	if _, err := h.service.Grant(req.Context(), &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingEssential, Plan: PlanPro, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -94,7 +94,7 @@ func TestMiddlewareBlocksUnentitledModule(t *testing.T) {
 		t.Fatalf("expected core routes to stay reachable, got %d", w.Code)
 	}
 
-	if _, err := svc.Grant(req.Context(), Entitlement{
+	if _, err := svc.Grant(req.Context(), &Entitlement{
 		OrganizationID: "org-1",
 		FeatureKey:     FeatureTicketingEssential,
 		Plan:           PlanStandard,

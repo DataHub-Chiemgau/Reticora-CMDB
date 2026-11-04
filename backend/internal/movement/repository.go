@@ -90,7 +90,8 @@ func (r *MemoryRepository) ListMovements(_ context.Context, orgID string, filter
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Movement
-	for _, m := range r.movements {
+	for i := range r.movements {
+		m := &r.movements[i]
 		if m.OrganizationID != orgID {
 			continue
 		}
@@ -106,7 +107,7 @@ func (r *MemoryRepository) ListMovements(_ context.Context, orgID string, filter
 		if filter.LocationID != "" && m.FromLocationID != filter.LocationID && m.ToLocationID != filter.LocationID {
 			continue
 		}
-		out = append(out, m)
+		out = append(out, *m)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	total := len(out)

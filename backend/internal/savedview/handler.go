@@ -181,7 +181,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, verr)
 		return
 	}
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, ownerID(r), req)
+	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, ownerID(r), &req)
 	if err != nil {
 		// A name the owner uses for another view is 409, not 404 (F-047).
 		writeViewError(w, r, err)
@@ -263,7 +263,7 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
-	items, total, err := h.query.Query(r.Context(), t.OrganizationID, spec, page)
+	items, total, err := h.query.Query(r.Context(), t.OrganizationID, &spec, page)
 	if err != nil {
 		// A validated spec compiles to SQL whose casts cannot fail; any
 		// error left is internal and its text goes to the log only (API-03).

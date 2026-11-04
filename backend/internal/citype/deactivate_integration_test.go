@@ -118,7 +118,7 @@ func TestDeactivatedTypeAgainstPostgres(t *testing.T) {
 			t.Errorf("%d audit entries of the system type", n)
 		}
 		mem := citype.NewMemoryRepository()
-		mem.SeedType(citype.Type{ID: "sys", Name: "sys", IsActive: true})
+		mem.SeedType(&citype.Type{ID: "sys", Name: "sys", IsActive: true})
 		if _, err := mem.SetActive(bg, f.OrgA, "sys", false); !errors.Is(err, citype.ErrTypeReadOnly) {
 			t.Errorf("memory deactivate of a system type: %v", err)
 		}

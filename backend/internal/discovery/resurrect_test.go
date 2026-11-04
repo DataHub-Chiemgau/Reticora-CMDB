@@ -79,7 +79,7 @@ func TestDeletedDeviceSeenAgainIsReviewed(t *testing.T) {
 	if len(reviews) != 1 || len(reviews[0].CandidateCIIDs) != 1 || reviews[0].CandidateCIIDs[0] != "gone" {
 		t.Fatalf("reviews: %+v", reviews)
 	}
-	if _, total, _ := cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 1}); total != 0 {
+	if _, total, _ := cis.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 1}); total != 0 {
 		t.Errorf("CIs created: %d", total)
 	}
 	// Another device still becomes a CI.
@@ -696,7 +696,7 @@ func TestReviewNewClientWithoutDatabase(t *testing.T) {
 			if w := resolveAs(t, mux, ctx, item.ID, `{"action":"new"}`); w.Code != tc.status {
 				t.Fatalf("resolve new: %d %s, want %d", w.Code, w.Body.String(), tc.status)
 			}
-			all, _, err := cis.List(bg, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100})
+			all, _, err := cis.List(bg, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 100})
 			if err != nil {
 				t.Fatal(err)
 			}

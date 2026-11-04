@@ -152,7 +152,7 @@ func TestAccessRequestStartsWorkflowRun(t *testing.T) {
 	// A failing action marks the run failed; the request is created and
 	// names the run.
 	inactive := false
-	if _, err := workflows.UpdateDefinition(ctx, f.OrgA, approval.ID, workflow.UpdateDefinitionRequest{Active: &inactive}); err != nil {
+	if _, err := workflows.UpdateDefinition(ctx, f.OrgA, approval.ID, &workflow.UpdateDefinitionRequest{Active: &inactive}); err != nil {
 		t.Fatalf("deactivate %s: %v", approval.Name, err)
 	}
 	define("c-access-form", event, true, workflow.JSONMap{"type": "submit_form", "form_id": "00000000-0000-4000-8000-0000000000fe"})

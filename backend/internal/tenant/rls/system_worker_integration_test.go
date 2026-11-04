@@ -39,7 +39,7 @@ func TestSystemWorkersPerOrganization(t *testing.T) {
 			org).Scan(&subID); err != nil {
 			t.Fatalf("seed subscription: %v", err)
 		}
-		if _, err := deliveries.Enqueue(bg, webhook.DeliveryRecord{OrganizationID: org, SubscriptionID: subID, Event: "ci.created", Payload: []byte(`{}`), Status: "pending", NextRetryAt: &past}); err != nil {
+		if _, err := deliveries.Enqueue(bg, &webhook.DeliveryRecord{OrganizationID: org, SubscriptionID: subID, Event: "ci.created", Payload: []byte(`{}`), Status: "pending", NextRetryAt: &past}); err != nil {
 			t.Fatalf("enqueue delivery for %s: %v", org, err)
 		}
 	}

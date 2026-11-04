@@ -96,7 +96,7 @@ func TestOpenSearchFollowsRackPlacement(t *testing.T) {
 
 	remote := newFakeOpenSearch(t)
 	hybrid := &search.HybridBackend{
-		Remote: search.NewOpenSearchBackend(search.OpenSearchConfig{URL: remote.URL, Index: "t1-idx"}, remote.Client()),
+		Remote: search.NewOpenSearchBackend(&search.OpenSearchConfig{URL: remote.URL, Index: "t1-idx"}, remote.Client()),
 		Source: search.NewPGRepository(f.App),
 	}
 	// The wiring of cmd/server/main.go.
@@ -117,7 +117,7 @@ func TestOpenSearchFollowsRackPlacement(t *testing.T) {
 	}
 	query := func(scope *database.TenantScope, text string) map[string]bool {
 		t.Helper()
-		res, err := hybrid.Query(database.ContextWithTenantScope(bg, scope), search.Query{OrganizationID: f.OrgA, Text: text})
+		res, err := hybrid.Query(database.ContextWithTenantScope(bg, scope), &search.Query{OrganizationID: f.OrgA, Text: text})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}

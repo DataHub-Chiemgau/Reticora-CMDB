@@ -24,7 +24,7 @@ func TestSavedViewScope(t *testing.T) {
 
 	ctx := f.ClientCtx(f.Client1)
 	engine := savedview.NewPGQueryEngine(f.App)
-	results, total, err := engine.Query(ctx, f.OrgA, savedview.FilterSpec{EntityKind: "ci"}, api.PaginationParams{Limit: 100})
+	results, total, err := engine.Query(ctx, f.OrgA, &savedview.FilterSpec{EntityKind: "ci"}, api.PaginationParams{Limit: 100})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestSavedViewScope(t *testing.T) {
 	if _, err = repo.GetByID(ctx, f.OrgB, viewB.ID, f.User); !errors.Is(err, database.ErrTenantMismatch) {
 		t.Fatalf("read organization B view: got %v, want ErrTenantMismatch", err)
 	}
-	if _, _, err = engine.Query(context.Background(), f.OrgA, savedview.FilterSpec{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = engine.Query(context.Background(), f.OrgA, &savedview.FilterSpec{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("query without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

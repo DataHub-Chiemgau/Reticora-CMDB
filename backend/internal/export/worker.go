@@ -131,9 +131,9 @@ func (w *JobWorker) stop(ctx context.Context, job *Job, key string) {
 // NewJobWorker creates a worker. A nil blobs store disables the worker: the
 // handler then refuses to accept new jobs instead of queueing work that can
 // never complete.
-func NewJobWorker(jobs JobRepository, cis ci.Repository, blobs blob.Store) *JobWorker {
+func NewJobWorker(jobRepo JobRepository, cis ci.Repository, blobs blob.Store) *JobWorker {
 	return &JobWorker{
-		Jobs:       jobs,
+		Jobs:       jobRepo,
 		CIs:        cis,
 		Blobs:      blobs,
 		Bucket:     ExportBucket,
@@ -163,15 +163,15 @@ func (w *JobWorker) ProcessOne(ctx context.Context) bool {
 	if !w.Enabled() {
 		return false
 	}
-	jobs, err := w.Jobs.ClaimPending(ctx, 1)
+	claimed, err := w.Jobs.ClaimPending(ctx, 1)
 	if err != nil {
 		w.report("", fmt.Errorf("claim pending export jobs: %w", err))
 		return false
 	}
-	if len(jobs) == 0 {
+	if len(claimed) == 0 {
 		return false
 	}
-	w.process(ctx, jobs[0])
+	w.process(ctx, &claimed[0])
 	return true
 }
 
@@ -212,20 +212,20 @@ func (w *JobWorker) keepAlive(ctx context.Context, job *Job) (stop func()) {
 	}
 }
 
-func (w *JobWorker) process(ctx context.Context, job Job) {
+func (w *JobWorker) process(ctx context.Context, job *Job) {
 	// The heartbeat runs until the job is completed or failed.
-	defer w.keepAlive(ctx, &job)()
-	w.mirror(ctx, &job, jobs.StatusRunning, "")
+	defer w.keepAlive(ctx, job)()
+	w.mirror(ctx, job, jobs.StatusRunning, "")
 	// The export runs with the scope its creator had when queueing it
 	// (EXP-01, TEN-06): the CI repository reads through database.WithTenant
 	// with exactly this scope. A job without a snapshot is refused rather
 	// than exported org-wide.
 	if job.Scope == nil {
-		w.fail(ctx, &job, fmt.Errorf("export job has no scope snapshot"))
+		w.fail(ctx, job, fmt.Errorf("export job has no scope snapshot"))
 		return
 	}
-	if w.cancelled(ctx, &job) {
-		w.stop(ctx, &job, "")
+	if w.cancelled(ctx, job) {
+		w.stop(ctx, job, "")
 		return
 	}
 	scope := job.Scope.TenantScope(job.OrganizationID, job.InitiatedBy)
@@ -235,29 +235,29 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 	// asset:read counts as checked when the job was created.
 	if job.Format == FormatDATEV {
 		if err := w.DATEV.Allow(renderCtx, job.OrganizationID); err != nil {
-			w.fail(ctx, &job, err)
+			w.fail(ctx, job, err)
 			return
 		}
 	}
 	var buf bytes.Buffer
 	rowCount, err := RenderFormat(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, &buf)
 	if err != nil {
-		w.fail(ctx, &job, err)
+		w.fail(ctx, job, err)
 		return
 	}
 
-	key := ObjectKey(&job)
+	key := ObjectKey(job)
 	contentType := exportContentTypes[job.Format]
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	if err := w.Blobs.Put(ctx, w.Bucket, key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), contentType); err != nil {
-		w.fail(ctx, &job, fmt.Errorf("store export object: %w", err))
+		w.fail(ctx, job, fmt.Errorf("store export object: %w", err))
 		return
 	}
 
-	if w.cancelled(ctx, &job) {
-		w.stop(ctx, &job, key)
+	if w.cancelled(ctx, job) {
+		w.stop(ctx, job, key)
 		return
 	}
 	now := w.Now()
@@ -265,7 +265,7 @@ func (w *JobWorker) process(ctx context.Context, job Job) {
 		w.report(job.ID, fmt.Errorf("complete export job: %w", err))
 		return
 	}
-	w.mirror(ctx, &job, jobs.StatusSucceeded, "")
+	w.mirror(ctx, job, jobs.StatusSucceeded, "")
 	// The mirrored job names the export and its size (GET
 	// /api/v1/jobs/{id}/result, F-347).
 	if tracker, ok := w.Tracker.(jobs.ResultTracker); ok {

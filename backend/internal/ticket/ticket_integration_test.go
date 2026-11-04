@@ -365,7 +365,7 @@ func TestTicketUpdatedEvents(t *testing.T) {
 	errRollback := errors.New("rollback")
 	err := database.WithRequestTenantTx(f.OrgCtx(f.OrgA), f.App, f.OrgA, func(ctx context.Context) error {
 		title := "nie"
-		if _, updErr := e.repo.Update(ctx, f.OrgA, tk2.ID, ticket.UpdateRequest{Title: &title}); updErr != nil {
+		if _, updErr := e.repo.Update(ctx, f.OrgA, tk2.ID, &ticket.UpdateRequest{Title: &title}); updErr != nil {
 			return updErr
 		}
 		return errRollback
@@ -403,7 +403,7 @@ func TestTicketRoutesNeedTicketingEssential(t *testing.T) {
 	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "feature-not-entitled") {
 		t.Fatalf("PATCH without ticketing_essential: %d %s, want 403 feature-not-entitled", w.Code, w.Body)
 	}
-	if _, err := svc.Grant(context.Background(), entitlement.Entitlement{OrganizationID: e.f.OrgA, FeatureKey: entitlement.FeatureTicketingEssential,
+	if _, err := svc.Grant(context.Background(), &entitlement.Entitlement{OrganizationID: e.f.OrgA, FeatureKey: entitlement.FeatureTicketingEssential,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "billing"}); err != nil {
 		t.Fatal(err)
 	}

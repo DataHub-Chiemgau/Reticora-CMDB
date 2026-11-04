@@ -166,7 +166,7 @@ func (r *PGJobRepository) MarkRunning(ctx context.Context, orgID, id string, at 
 // appended to the outbox in the transaction that completes the job
 // (WP-550): a failed append rolls the completion back, the job stays
 // running and is resumed (ReclaimStale).
-func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
+func (r *PGJobRepository) CompleteJob(ctx context.Context, orgID, id, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
 	return database.WithTenant(ctx, r.pool, workerScope(orgID), func(ctx context.Context, tx pgx.Tx) error {
 		var format, initiatedBy string
 		err := tx.QueryRow(ctx, `

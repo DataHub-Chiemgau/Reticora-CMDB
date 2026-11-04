@@ -196,7 +196,7 @@ func TestCreateDocumentWithLinksClientScopeAndAudit(t *testing.T) {
 			t.Errorf("memory repository, %s: %d %s, want %d", c.name, rec.Code, rec.Body.String(), c.want)
 		}
 	}
-	if _, total, err := mem.List(context.Background(), f.OrgA, document.FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || total != 0 {
+	if _, total, err := mem.List(context.Background(), f.OrgA, &document.FilterParams{}, api.PaginationParams{Limit: 10}); err != nil || total != 0 {
 		t.Errorf("memory repository after the refused creations: %d documents (%v), want none", total, err)
 	}
 	if rec := memCall(&w.client1Scope, http.MethodPost, "/api/v1/documents", createBody("cd-mem", "ci", ci1)); rec.Code != http.StatusCreated {

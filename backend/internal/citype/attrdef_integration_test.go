@@ -111,10 +111,10 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 	}
 
 	// The legacy field endpoint writes the same source.
-	if _, err := repo.UpsertField(orgA, f.OrgA, typ.ID, UpsertFieldRequest{Scope: "type", Name: "mgmt_ip", Label: "Management IP", DataType: "ip"}); err != nil {
+	if _, err := repo.UpsertField(orgA, f.OrgA, typ.ID, &UpsertFieldRequest{Scope: "type", Name: "mgmt_ip", Label: "Management IP", DataType: "ip"}); err != nil {
 		t.Fatalf("legacy upsert: %v", err)
 	}
-	if _, err := repo.UpsertField(orgA, f.OrgA, "", UpsertFieldRequest{Scope: "global", Name: "cost_center", DataType: "text"}); err != nil {
+	if _, err := repo.UpsertField(orgA, f.OrgA, "", &UpsertFieldRequest{Scope: "global", Name: "cost_center", DataType: "text"}); err != nil {
 		t.Fatalf("legacy global upsert: %v", err)
 	}
 	var carriers, globals int
@@ -201,7 +201,7 @@ func TestAttributeDefinitionsAgainstPostgres(t *testing.T) {
 		systemType).Scan(&x6); err != nil || x6 != 0 {
 		t.Errorf("definitions x6 = %d (%v), want none", x6, err)
 	}
-	if _, err := repo.UpsertField(orgA, f.OrgA, systemType, UpsertFieldRequest{Name: "x6", DataType: "text"}); err == nil {
+	if _, err := repo.UpsertField(orgA, f.OrgA, systemType, &UpsertFieldRequest{Name: "x6", DataType: "text"}); err == nil {
 		t.Error("repository: legacy field on a system type accepted")
 	}
 	if rec := call(orgA, http.MethodPut, "/api/v1/ci-types/"+f.ID()+"/fields", `{"name":"x7","data_type":"text"}`); rec.Code != http.StatusNotFound {
@@ -299,7 +299,7 @@ func TestAttributeUniqueFlagConflict(t *testing.T) {
 	if err := repo.Create(ctx, typ); err != nil {
 		t.Fatalf("create type: %v", err)
 	}
-	def, uerr := repo.UpsertField(ctx, f.OrgA, typ.ID, UpsertFieldRequest{Scope: "type", Name: "inventory_no", DataType: "text"})
+	def, uerr := repo.UpsertField(ctx, f.OrgA, typ.ID, &UpsertFieldRequest{Scope: "type", Name: "inventory_no", DataType: "text"})
 	if uerr != nil || def.ID == "" {
 		t.Fatalf("upsert field: %+v %v", def, uerr)
 	}
@@ -582,10 +582,10 @@ func TestAttributeDefinitionASTValidation(t *testing.T) {
 			continue
 		}
 		checked = true
-		if verr := fieldmeta.ValidateValue(d, float64(7)); verr == nil {
+		if verr := fieldmeta.ValidateValue(&d, float64(7)); verr == nil {
 			t.Error("value 7 accepted by the resolved range 1..5")
 		}
-		if verr := fieldmeta.ValidateValue(d, float64(3)); verr != nil {
+		if verr := fieldmeta.ValidateValue(&d, float64(3)); verr != nil {
 			t.Errorf("value 3 refused by the resolved range 1..5: %v", verr)
 		}
 	}
@@ -819,7 +819,7 @@ func TestComputedAttributeDefinitions(t *testing.T) {
 	}
 
 	server, plain := newType("wp258-server"), newType("wp258-plain")
-	if _, err := repo.UpsertField(ctx, f.OrgA, plain.ID, UpsertFieldRequest{Scope: "type", Name: "wp258_note", DataType: "text"}); err != nil {
+	if _, err := repo.UpsertField(ctx, f.OrgA, plain.ID, &UpsertFieldRequest{Scope: "type", Name: "wp258_note", DataType: "text"}); err != nil {
 		t.Fatal(err)
 	}
 	_, plainVersion := schemaOf(plain.ID)
@@ -856,7 +856,7 @@ func TestComputedAttributeDefinitions(t *testing.T) {
 		t.Errorf("schema_version of a type without computed attributes v%d, want v%d", v, plainVersion)
 	}
 	// An entered attribute next to it, referenced by a computed text.
-	if _, err = repo.UpsertField(ctx, f.OrgA, server.ID, UpsertFieldRequest{Scope: "type", Name: "wp258_host", DataType: "text"}); err != nil {
+	if _, err = repo.UpsertField(ctx, f.OrgA, server.ID, &UpsertFieldRequest{Scope: "type", Name: "wp258_host", DataType: "text"}); err != nil {
 		t.Fatal(err)
 	}
 	labelID, _ := created(typed("wp258_label", `"data_type":"text","computed":{"op":"upper","args":[{"op":"field","field":"wp258_host"}]}`))

@@ -18,9 +18,9 @@ import (
 // Field names are fixed allow-listed identifiers — never user input — so the
 // generated SQL is injection-safe; only values are parameterized. The spec
 // is validated first (Validate), so no value fails a cast in SQL.
-func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (string, []any, error) {
-	if err := f.Validate(entityKind); err != nil {
-		return "", nil, err
+func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (where string, whereArgs []any, err error) {
+	if verr := f.Validate(entityKind); verr != nil {
+		return "", nil, verr
 	}
 	var parts []string
 	add := func(clause string, vals ...any) {
@@ -183,9 +183,9 @@ func (f FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (stri
 	}
 
 	if f.Where != nil {
-		clause, astArgs, _, err := f.Where.CompileSQL(entityKind, table, nil, pos)
-		if err != nil {
-			return "", nil, err
+		clause, astArgs, _, cerr := f.Where.CompileSQL(entityKind, table, nil, pos)
+		if cerr != nil {
+			return "", nil, cerr
 		}
 		add(clause, astArgs...)
 	}

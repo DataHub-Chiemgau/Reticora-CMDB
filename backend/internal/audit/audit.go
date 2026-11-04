@@ -323,7 +323,7 @@ func AcquireAdvisoryLock(ctx context.Context, tx pgx.Tx, orgID string) error {
 }
 
 // Record appends an audit entry inside tx and returns the persisted entry.
-func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry, error) {
+func (r *PGRecorder) Record(ctx context.Context, tx pgx.Tx, entry Entry) (*Entry, error) { //nolint:gocritic // signature of TxRecorder; the recorder completes its own copy
 	if err := normalize(ctx, &entry); err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ var (
 
 // Repository defines persistence for reservations.
 type Repository interface {
-	List(ctx context.Context, orgID string, state string, page api.PaginationParams) ([]Reservation, int, error)
+	List(ctx context.Context, orgID, state string, page api.PaginationParams) ([]Reservation, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Reservation, error)
 	// Create inserts a reservation after checking for conflicts. Serialized
 	// assets admit exactly one active reservation; quantity items are checked
@@ -68,7 +68,7 @@ func (r *MemoryRepository) nextID() string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, state string, page api.PaginationParams) ([]Reservation, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID, state string, page api.PaginationParams) ([]Reservation, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Reservation

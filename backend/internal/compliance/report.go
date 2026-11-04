@@ -99,8 +99,8 @@ func (s *ReportService) Generate(ctx context.Context, orgID, standard string) (*
 		return nil, fmt.Errorf("list compliance rules: %w", err)
 	}
 	rulesByID := make(map[string]Rule, len(rules))
-	for _, rule := range rules {
-		rulesByID[rule.ID] = rule
+	for i := range rules {
+		rulesByID[rules[i].ID] = rules[i]
 	}
 
 	report := &Report{
@@ -133,7 +133,8 @@ func (s *ReportService) Generate(ctx context.Context, orgID, standard string) (*
 func buildFindings(failures []Result, rules map[string]Rule) []Finding {
 	byRule := map[string]*Finding{}
 	order := []string{}
-	for _, result := range failures {
+	for i := range failures {
+		result := &failures[i]
 		finding, ok := byRule[result.RuleID]
 		if !ok {
 			rule := rules[result.RuleID]

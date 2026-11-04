@@ -23,7 +23,7 @@ func TestEnqueueGeneratesIDAndPersists(t *testing.T) {
 	b := &DiskBuffer{Dir: dir}
 	ctx := testCtx(t)
 
-	id, err := b.Enqueue(ctx, Message{Topic: "metrics", Payload: []byte("hello")})
+	id, err := b.Enqueue(ctx, &Message{Topic: "metrics", Payload: []byte("hello")})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestEnqueuePreservesProvidedIDAndTimestamp(t *testing.T) {
 	ctx := testCtx(t)
 
 	ts := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
-	id, err := b.Enqueue(ctx, Message{
+	id, err := b.Enqueue(ctx, &Message{
 		ID:        "fixed-id",
 		Topic:     "logs",
 		Payload:   []byte("x"),
@@ -96,7 +96,7 @@ func TestEnqueueGeneratesUniqueIDs(t *testing.T) {
 
 	seen := make(map[string]struct{})
 	for i := 0; i < 50; i++ {
-		id, err := b.Enqueue(ctx, Message{Topic: "t"})
+		id, err := b.Enqueue(ctx, &Message{Topic: "t"})
 		if err != nil {
 			t.Fatalf("Enqueue %d: %v", i, err)
 		}
@@ -111,7 +111,7 @@ func TestEnqueueCreatesSpoolDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "spool")
 	b := &DiskBuffer{Dir: dir}
 
-	if _, err := b.Enqueue(testCtx(t), Message{Topic: "t"}); err != nil {
+	if _, err := b.Enqueue(testCtx(t), &Message{Topic: "t"}); err != nil {
 		t.Fatalf("Enqueue into missing dir: %v", err)
 	}
 	info, err := os.Stat(dir)
@@ -132,7 +132,7 @@ func TestPeekBatchOrdersOldestFirstAndLimits(t *testing.T) {
 	// timestamp, so lexicographic order equals chronological order.
 	ids := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
-		id, err := b.Enqueue(ctx, Message{
+		id, err := b.Enqueue(ctx, &Message{
 			ID:      time.Date(2024, 1, 1, 0, 0, i, 0, time.UTC).Format("20060102T150405.000000000Z"),
 			Topic:   "t",
 			Payload: []byte{byte('a' + i)},
@@ -171,7 +171,7 @@ func TestPeekBatchNonPositiveLimitReturnsEmpty(t *testing.T) {
 	b := &DiskBuffer{Dir: dir}
 	ctx := testCtx(t)
 
-	if _, err := b.Enqueue(ctx, Message{Topic: "t"}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "t"}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	for _, limit := range []int{0, -1} {
@@ -190,7 +190,7 @@ func TestPeekBatchIgnoresNonMessageFiles(t *testing.T) {
 	b := &DiskBuffer{Dir: dir}
 	ctx := testCtx(t)
 
-	if _, err := b.Enqueue(ctx, Message{ID: "real", Topic: "t"}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{ID: "real", Topic: "t"}); err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
 	// Stray files that must be ignored by listing.
@@ -224,7 +224,7 @@ func TestAckRemovesMessages(t *testing.T) {
 
 	var ids []string
 	for i := 0; i < 3; i++ {
-		id, err := b.Enqueue(ctx, Message{Topic: "t"})
+		id, err := b.Enqueue(ctx, &Message{Topic: "t"})
 		if err != nil {
 			t.Fatalf("Enqueue %d: %v", i, err)
 		}
@@ -268,7 +268,7 @@ func TestReplayCycleEnqueuePeekAck(t *testing.T) {
 	// Simulate an offline period: buffer messages while "disconnected".
 	want := []string{"one", "two", "three"}
 	for _, p := range want {
-		if _, err := b.Enqueue(ctx, Message{Topic: "telemetry", Payload: []byte(p)}); err != nil {
+		if _, err := b.Enqueue(ctx, &Message{Topic: "telemetry", Payload: []byte(p)}); err != nil {
 			t.Fatalf("Enqueue: %v", err)
 		}
 	}
@@ -310,7 +310,7 @@ func TestPersistenceAcrossBufferInstances(t *testing.T) {
 	ctx := testCtx(t)
 
 	first := &DiskBuffer{Dir: dir}
-	id, err := first.Enqueue(ctx, Message{Topic: "t", Payload: []byte("durable")})
+	id, err := first.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("durable")})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := b.Enqueue(ctx, Message{Topic: "t"}); !errors.Is(err, context.Canceled) {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "t"}); !errors.Is(err, context.Canceled) {
 		t.Errorf("Enqueue with cancelled ctx = %v, want context.Canceled", err)
 	}
 	if _, err := b.PeekBatch(ctx, 10); !errors.Is(err, context.Canceled) {
@@ -357,7 +357,7 @@ func TestEnqueueFailsWhenDirNotCreatable(t *testing.T) {
 	}
 	b := &DiskBuffer{Dir: filepath.Join(blocker, "spool")}
 
-	if _, err := b.Enqueue(testCtx(t), Message{Topic: "t"}); err == nil {
+	if _, err := b.Enqueue(testCtx(t), &Message{Topic: "t"}); err == nil {
 		t.Fatal("expected error when spool dir cannot be created, got nil")
 	} else if !strings.Contains(err.Error(), "buffer:") {
 		t.Errorf("error should be wrapped with buffer context, got: %v", err)
@@ -379,7 +379,7 @@ func TestPeekBatchQuarantinesCorruptFile(t *testing.T) {
 	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { losses = append(losses, l) }}
 	ctx := testCtx(t)
 	for _, id := range []string{"2-a", "3-b"} {
-		if _, err := b.Enqueue(ctx, Message{ID: id, Topic: "t"}); err != nil {
+		if _, err := b.Enqueue(ctx, &Message{ID: id, Topic: "t"}); err != nil {
 			t.Fatalf("Enqueue: %v", err)
 		}
 	}
@@ -418,11 +418,11 @@ func TestAckLossReducesOnlyAcknowledgedTotals(t *testing.T) {
 	dir := t.TempDir()
 	ctx := testCtx(t)
 	b := &DiskBuffer{Dir: dir}
-	if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("aaaa")}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("aaaa")}); err != nil {
 		t.Fatal(err)
 	}
 	b.MaxBytes = spoolSize(t, dir)
-	if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("bbbb")}); !errors.Is(err, ErrSpoolFull) {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("bbbb")}); !errors.Is(err, ErrSpoolFull) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 	reported, err := b.Stats(ctx)
@@ -430,7 +430,7 @@ func TestAckLossReducesOnlyAcknowledgedTotals(t *testing.T) {
 		t.Fatalf("stats = %+v (%v), want one loss", reported, err)
 	}
 	// A further loss after the heartbeat was sent but before it was acked.
-	if _, err = b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("cccc")}); !errors.Is(err, ErrSpoolFull) {
+	if _, err = b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("cccc")}); !errors.Is(err, ErrSpoolFull) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 
@@ -467,11 +467,11 @@ func TestRejectQuarantineAndRecordLossCount(t *testing.T) {
 	ctx := testCtx(t)
 	var reasons []string
 	b := &DiskBuffer{Dir: dir, OnDrop: func(l Loss) { reasons = append(reasons, l.Reason) }}
-	poison, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("poison")})
+	poison, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("poison")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	next, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("next")})
+	next, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("next")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,12 +525,12 @@ func TestEnqueueWritesAtomically(t *testing.T) {
 	dir := t.TempDir()
 	ctx := testCtx(t)
 	b := &DiskBuffer{Dir: dir}
-	id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("payload")})
+	id, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("payload")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	b.MaxBytes = 1
-	if _, err = b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("x")}); !errors.Is(err, ErrSpoolFull) {
+	if _, err = b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("x")}); !errors.Is(err, ErrSpoolFull) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 	entries, err := os.ReadDir(dir)
@@ -622,18 +622,18 @@ func TestDiskBufferMaxAgeKeepsMessagesFor24Hours(t *testing.T) {
 	b := &DiskBuffer{Dir: dir, MaxAge: time.Hour, OnDrop: func(l Loss) { losses = append(losses, l) }}
 	ctx := context.Background()
 
-	youngID, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("23h")})
+	youngID, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("23h")})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	backdate(t, dir, youngID, 23*time.Hour)
-	oldID, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("25h")})
+	oldID, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("25h")})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	backdate(t, dir, oldID, 25*time.Hour)
 
-	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("fresh")}); err != nil {
+	if _, err = b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("fresh")}); err != nil {
 		t.Fatalf("enqueue fresh: %v", err)
 	}
 	msgs, err := b.PeekBatch(ctx, 10)
@@ -666,7 +666,7 @@ func TestDiskBufferSizeLimitAppliesBackpressure(t *testing.T) {
 	ctx := context.Background()
 	var ids []string
 	for _, payload := range []string{"aaaa", "bbbb", "cccc"} {
-		id, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte(payload)})
+		id, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte(payload)})
 		if err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
@@ -677,7 +677,7 @@ func TestDiskBufferSizeLimitAppliesBackpressure(t *testing.T) {
 	if saturated, err := b.Saturated(ctx); err != nil || !saturated {
 		t.Fatalf("spool at the cap must be saturated, got %v (%v)", saturated, err)
 	}
-	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("dddd")}); !errors.Is(err, ErrSpoolFull) {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("dddd")}); !errors.Is(err, ErrSpoolFull) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 	if n, _ := b.Len(ctx); n != 3 {
@@ -689,7 +689,7 @@ func TestDiskBufferSizeLimitAppliesBackpressure(t *testing.T) {
 
 	// Messages older than 24 h may make room; that loss is reported too.
 	backdate(t, dir, ids[0], 25*time.Hour)
-	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("eeee")}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("eeee")}); err != nil {
 		t.Fatalf("enqueue after the old message can be dropped: %v", err)
 	}
 	if len(losses) != 2 || losses[1].Reason != LossSizeLimit || losses[1].Messages != 1 {
@@ -707,7 +707,7 @@ func TestPeekBatchOrdersBySourceTime(t *testing.T) {
 	ctx := context.Background()
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	for _, offset := range []int{3, 1, 2} {
-		if _, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte{byte(offset)}, CreatedAt: base.Add(time.Duration(offset) * time.Minute)}); err != nil {
+		if _, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte{byte(offset)}, CreatedAt: base.Add(time.Duration(offset) * time.Minute)}); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
@@ -726,7 +726,7 @@ func TestDiskBufferUnlimitedByDefault(t *testing.T) {
 	dir := t.TempDir()
 	b := &DiskBuffer{Dir: dir}
 	for i := 0; i < 5; i++ {
-		if _, err := b.Enqueue(context.Background(), Message{Topic: "t", Payload: []byte("x")}); err != nil {
+		if _, err := b.Enqueue(context.Background(), &Message{Topic: "t", Payload: []byte("x")}); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 	}
@@ -753,7 +753,7 @@ func TestStatsReportsCountsAndOldestAge(t *testing.T) {
 	payloads := []string{"aa", "bbbb", "cccccc"}
 	var wantBytes int64
 	for _, p := range payloads {
-		if _, err := b.Enqueue(context.Background(), Message{Topic: "t", Payload: []byte(p)}); err != nil {
+		if _, err := b.Enqueue(context.Background(), &Message{Topic: "t", Payload: []byte(p)}); err != nil {
 			t.Fatalf("enqueue: %v", err)
 		}
 		time.Sleep(2 * time.Millisecond)
@@ -810,11 +810,11 @@ func TestPeekBatchExpiresWithoutEnqueue(t *testing.T) {
 	ctx := testCtx(t)
 	var losses []Loss
 	b := &DiskBuffer{Dir: dir, MaxAge: time.Hour, OnDrop: func(l Loss) { losses = append(losses, l) }}
-	youngID, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("23h")})
+	youngID, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("23h")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldID, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("25h")})
+	oldID, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("25h")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -842,7 +842,7 @@ func TestAuditT3SpoolLossSurvivesRestart(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	b := &DiskBuffer{Dir: dir}
-	if _, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("aaaa")}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("aaaa")}); err != nil {
 		t.Fatal(err)
 	}
 	st, err := b.Stats(ctx)
@@ -850,7 +850,7 @@ func TestAuditT3SpoolLossSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.MaxBytes = st.Bytes
-	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("bbbb")}); err == nil {
+	if _, err = b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("bbbb")}); err == nil {
 		t.Fatalf("precondition: enqueue at the cap succeeded")
 	}
 	if st, err = b.Stats(ctx); err != nil || st.DroppedMessages != 1 {
@@ -874,11 +874,11 @@ func TestAuditT3CorruptHeadDoesNotBlockSpool(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	b := &DiskBuffer{Dir: dir}
-	first, err := b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("first")})
+	first, err := b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("first")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.Enqueue(ctx, Message{Topic: "discovery", Payload: []byte("second")}); err != nil {
+	if _, err = b.Enqueue(ctx, &Message{Topic: "discovery", Payload: []byte("second")}); err != nil {
 		t.Fatal(err)
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "*"))
@@ -945,7 +945,7 @@ func TestReplaceKeepsThePlaceOutsideTheSizeLimit(t *testing.T) {
 	base := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	var ids []string
 	for i, payload := range []string{"before", strings.Repeat("whole", 40), "after"} {
-		id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte(payload), CreatedAt: base.Add(time.Duration(i) * time.Nanosecond)})
+		id, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte(payload), CreatedAt: base.Add(time.Duration(i) * time.Nanosecond)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1018,7 +1018,7 @@ func TestReplaceRollsBackAndRefuses(t *testing.T) {
 	dir := t.TempDir()
 	ctx := testCtx(t)
 	b := &DiskBuffer{Dir: dir}
-	id, err := b.Enqueue(ctx, Message{Topic: "t", Payload: []byte("whole")})
+	id, err := b.Enqueue(ctx, &Message{Topic: "t", Payload: []byte("whole")})
 	if err != nil {
 		t.Fatal(err)
 	}

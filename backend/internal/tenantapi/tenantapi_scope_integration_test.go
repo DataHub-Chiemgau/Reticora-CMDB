@@ -145,18 +145,18 @@ func TestOrganizationAIOptInThroughAPI(t *testing.T) {
 	clientAdmin := f.AppUser(t, f.OrgA, "optin-client-admin")
 	title := "t2aioptinapiprobe"
 	ciID := f.CI(t, f.OrgA, "", title)
-	if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
+	if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, &search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
 		Title: title, URL: "/cis/" + ciID}); err != nil {
 		t.Fatalf("index search document: %v", err)
 	}
-	if err := ai.NewPGRepository(f.App).UpsertChunk(orgCtx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
+	if err := ai.NewPGRepository(f.App).UpsertChunk(orgCtx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
 		Title: title, Content: title + " runs the billing database", URL: "/cis/" + ciID}); err != nil {
 		t.Fatalf("upsert chunk: %v", err)
 	}
 	if _, err := entitlements.Provision(orgCtx, f.OrgA, entitlement.PlanEssential); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
-	if _, err := entitlements.Grant(orgCtx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureAI,
+	if _, err := entitlements.Grant(orgCtx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureAI,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "manual"}); err != nil {
 		t.Fatalf("grant ai add-on: %v", err)
 	}

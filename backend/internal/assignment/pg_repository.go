@@ -65,7 +65,7 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 }
 
 // List returns paginated assignments filtered by the given parameters.
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
 	var assignments []Assignment
 	var total int
 

@@ -78,7 +78,7 @@ func requireCI(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
 }
 
 // List returns paginated assets filtered by the given parameters.
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Asset, int, error) {
 	var assets []Asset
 	var total int
 
@@ -249,7 +249,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 }
 
 // Update modifies an existing asset.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *UpdateRequest) (*Asset, error) {
 	var asset *Asset
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

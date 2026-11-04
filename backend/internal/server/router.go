@@ -26,6 +26,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contract"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/desk"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
@@ -138,8 +139,9 @@ type Repositories struct {
 	Privacy privacy.Repository
 	// Enterprise CMDB + asset/inventory extension (additive modules).
 	CIType            citype.Repository
-	MetamodelDraft    metamodel.Repository // drafts (WP-260); nil without a database: the routes answer 503
-	Import            importer.Repository  // import mapping profiles (WP-774, IMP-IO-01)
+	MetamodelDraft    metamodel.Repository        // drafts (WP-260); nil without a database: the routes answer 503
+	Import            importer.Repository         // import mapping profiles (WP-774, IMP-IO-01)
+	Supplier          contract.SupplierRepository // suppliers (WP-736, MGT-12); nil: the routes answer 503
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
@@ -284,7 +286,7 @@ var errMergeGone = errors.New("the merge of the job no longer exists")
 // /metrics.
 // agentTypeResolver adapts the discovery repository's CI type lookup for the
 // agent handler's endpoint reconciliation.
-func agentTypeResolver(repos Repositories) agent.CITypeResolver {
+func agentTypeResolver(repos *Repositories) agent.CITypeResolver {
 	r, ok := repos.Discovery.(agent.CITypeResolver)
 	if !ok {
 		return nil
@@ -297,7 +299,7 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 // manual override open an override_conflict review in the review queue of
 // discovery (REC-12).
 func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflicts agent.ConflictReviews) *agent.Handler {
-	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
+	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflicts)
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
@@ -365,8 +367,8 @@ func userHandler(repos *Repositories, opts *Options) *user.Handler {
 	return h
 }
 
-func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
-	if err := validate(repos, opts); err != nil {
+func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) { //nolint:gocritic // public constructor with about 480 callers; the configuration is passed by value
+	if err := validate(&repos, &opts); err != nil {
 		return nil, nil, err
 	}
 	if pg, ok := repos.User.(*user.PGRepository); ok && opts.MFA != nil {
@@ -397,7 +399,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	// The draft service captures metamodel writes with ?draft (WP-720)
 	// and lays a draft over the form preview (E-113).
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
+	protected := &authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
 		drafts: repos.MetamodelDraft}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
@@ -420,6 +422,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
+	// The publication of a draft (WP-261) applies its items through the
+	// resource routes on repos.CIType, the instance cmd/server/workers.go
+	// gives the index scheduler, and sends their webhook events after the
+	// commit through the dispatcher, as the direct path does.
+	var draftDispatcher citype.EventDispatcher
+	if opts.Dispatcher != nil {
+		draftDispatcher = opts.Dispatcher
+	}
+	draftHandler.WithPublish(repos.CIType, draftDispatcher)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -434,6 +445,20 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The import runs (WP-301) get the job service in registerJobKinds; the
 	// routes serve in both profiles and answer 503 without it.
 	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
+	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
+	// job kind document.scan of the module documents on the job queue:
+	// clamd from opts.Documents, status, audit and event in a transaction
+	// of the application pool. The upload submits it after its commit;
+	// without the queue no submitter is wired and versions stay
+	// pending_scan.
+	documentHandler := document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents)
+	var documentScanner *document.Scanner
+	if opts.Modules.Enabled("documents") {
+		documentScanner = document.NewScanner(repos.Document, opts.Blobs, opts.Documents).WithPool(opts.AuditPool)
+		if opts.JobQueue != nil && repos.Jobs != nil {
+			documentHandler.WithScans(opts.JobQueue)
+		}
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -483,7 +508,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.CIService != nil {
 			opts.CIService.WithJobs(jobTracker)
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
+			documentScanner)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -588,7 +614,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
-		document.NewHandler(repos.Document, opts.Blobs).WithLimits(opts.Entitlements).WithUploads(opts.Documents),
+		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order).WithMovements(repos.Movement),
@@ -608,12 +634,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflowRuns),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
-			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
+			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
 			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
+		contract.NewHandler(repos.Supplier),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
@@ -694,14 +721,14 @@ func accessRequestRuns(modules *ModuleSet, runs *workflow.Executor) iga.RunStart
 // reportAuditVerifier returns the audit-chain verifier for the security
 // report when a database pool exists; without a database the report omits the
 // integrity section instead of failing.
-func reportAuditVerifier(opts Options) compliance.AuditVerifier {
+func reportAuditVerifier(opts *Options) compliance.AuditVerifier {
 	if opts.AuditPool == nil {
 		return nil
 	}
 	return auditVerifier{pool: opts.AuditPool}
 }
 
-func validate(repos Repositories, opts Options) error {
+func validate(repos *Repositories, opts *Options) error {
 	switch {
 	case repos.Permission == nil:
 		return fmt.Errorf("server: permission repository is required")
@@ -777,7 +804,7 @@ func registerOperational(mux *chi.Mux, version string, includeTenantLabel bool, 
 // dedicated registry so the endpoint stays stable regardless of what else is
 // instrumented. It also registers the tenant-aware HTTP request metrics and
 // returns the middleware that records them.
-func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func(http.Handler) http.Handler) {
+func metricsHandler(version string, includeTenantLabel bool) (handler http.Handler, record func(http.Handler) http.Handler) {
 	registry := prometheus.NewRegistry()
 
 	up := prometheus.NewGauge(prometheus.GaugeOpts{

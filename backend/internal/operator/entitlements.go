@@ -97,7 +97,7 @@ func (h *Handler) GrantEntitlement(w http.ResponseWriter, r *http.Request) {
 			if listErr != nil {
 				return nil, listErr
 			}
-			stored, grantErr := h.entitlements.Grant(ctx, ent)
+			stored, grantErr := h.entitlements.Grant(ctx, &ent)
 			if grantErr != nil {
 				return nil, grantErr
 			}

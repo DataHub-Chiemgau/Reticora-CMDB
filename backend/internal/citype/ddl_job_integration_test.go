@@ -1043,7 +1043,7 @@ func TestInheritedAttributeIndex(t *testing.T) {
 
 	// Moving C (with G) below P2: the former ancestor loses the subtree.
 	parent := p2
-	if _, err := repo.Update(ctx, f.OrgA, c, UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
+	if _, err := repo.Update(ctx, f.OrgA, c, &UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
 		t.Fatalf("move the subtype: %v", err)
 	}
 	run()
@@ -1070,7 +1070,7 @@ func TestInheritedAttributeIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent = p
-	if _, err := repo.Update(ctx, f.OrgA, c, UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
+	if _, err := repo.Update(ctx, f.OrgA, c, &UpdateTypeRequest{ParentTypeID: &parent}); err != nil {
 		t.Fatalf("move the subtype back: %v", err)
 	}
 	for i, typ := range []string{p, g} {

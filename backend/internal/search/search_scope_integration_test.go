@@ -24,7 +24,7 @@ func TestSearchRepositoryClientScope(t *testing.T) {
 	repo := search.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
 	for id, title := range map[string]string{own: "scopetest-search-own", foreign: "scopetest-search-foreign"} {
-		if err := repo.IndexDocument(orgCtx, search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, URL: "/cmdb/" + id}); err != nil {
+		if err := repo.IndexDocument(orgCtx, &search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, URL: "/cmdb/" + id}); err != nil {
 			t.Fatalf("index %s: %v", title, err)
 		}
 	}
@@ -32,7 +32,7 @@ func TestSearchRepositoryClientScope(t *testing.T) {
 	ctx := f.ClientCtx(f.Client1)
 	hits := func(c context.Context) map[string]bool {
 		t.Helper()
-		res, err := repo.Query(c, search.Query{OrganizationID: f.OrgA, Text: "scopetest", Limit: 50})
+		res, err := repo.Query(c, &search.Query{OrganizationID: f.OrgA, Text: "scopetest", Limit: 50})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
@@ -61,7 +61,7 @@ func TestSearchRepositoryClientScope(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("index of client-2 CI after client-1 reindex: %d documents, want 1", count)
 	}
-	if _, err := repo.Query(context.Background(), search.Query{OrganizationID: f.OrgA, Text: "scopetest"}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, err := repo.Query(context.Background(), &search.Query{OrganizationID: f.OrgA, Text: "scopetest"}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("query without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

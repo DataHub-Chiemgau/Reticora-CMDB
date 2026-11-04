@@ -171,7 +171,7 @@ func TestSeedSIM01(t *testing.T) {
 	for _, org := range []struct{ id, prefix, other string }{{demo, "seedtest-demo", "seedtest-acme"}, {acme, "seedtest-acme", "seedtest-demo"}} {
 		scope := database.OrgWideScope(org.id, "")
 		res, err := search.NewPGRepository(f.App).Query(database.ContextWithTenantScope(ctx, &scope),
-			search.Query{OrganizationID: org.id, Text: "srv-00021"})
+			&search.Query{OrganizationID: org.id, Text: "srv-00021"})
 		if err != nil {
 			t.Fatalf("search in %s: %v", org.prefix, err)
 		}

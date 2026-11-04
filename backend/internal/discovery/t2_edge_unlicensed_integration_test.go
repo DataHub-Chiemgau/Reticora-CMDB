@@ -44,7 +44,7 @@ func TestT2EdgeIngestUnlicensed(t *testing.T) {
 
 	countCIs := func() int {
 		t.Helper()
-		_, total, err := ciRepo.List(orgCtx, f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 1})
+		_, total, err := ciRepo.List(orgCtx, f.OrgA, &ci.FilterParams{}, api.PaginationParams{Limit: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +52,7 @@ func TestT2EdgeIngestUnlicensed(t *testing.T) {
 	}
 	setLimit := func(limit int) {
 		t.Helper()
-		if _, err := svc.Grant(orgCtx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, err := svc.Grant(orgCtx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: int64(limit)}}); err != nil {
 			t.Fatal(err)
 		}

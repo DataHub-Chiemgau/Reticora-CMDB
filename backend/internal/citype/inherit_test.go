@@ -22,24 +22,24 @@ import (
 // org-a "inh-leaf" and a type of org-b.
 func inheritRepo() *MemoryRepository {
 	repo := NewMemoryRepository()
-	repo.SeedType(Type{ID: "inh-root", Key: "inh_root", Name: "Root", IsSystem: true, IsActive: true,
+	repo.SeedType(&Type{ID: "inh-root", Key: "inh_root", Name: "Root", IsSystem: true, IsActive: true,
 		Fields: []Field{
 			{Name: "vendor", DataType: fieldmeta.TypeText, Inheritable: true},
 			{Name: "secret", DataType: fieldmeta.TypeText, Inheritable: false},
 			{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b", "c"}, Inheritable: true},
 		}})
-	repo.SeedType(Type{ID: "inh-mid", OrganizationID: "org-a", Key: "inh_mid", Name: "Mid", IsActive: true,
+	repo.SeedType(&Type{ID: "inh-mid", OrganizationID: "org-a", Key: "inh_mid", Name: "Mid", IsActive: true,
 		ParentTypeID: "inh-root",
 		Fields: []Field{
 			{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b"}, Inheritable: true},
 			{Name: "mid_only", DataType: fieldmeta.TypeText, Inheritable: false},
 		}})
-	repo.SeedType(Type{ID: "inh-leaf", OrganizationID: "org-a", Key: "inh_leaf", Name: "Leaf", IsActive: true,
+	repo.SeedType(&Type{ID: "inh-leaf", OrganizationID: "org-a", Key: "inh_leaf", Name: "Leaf", IsActive: true,
 		ParentTypeID: "inh-mid",
 		Fields: []Field{
 			{Name: "vendor", DataType: fieldmeta.TypeText, Required: true, Inheritable: true},
 		}})
-	repo.SeedType(Type{ID: "org-b-type", OrganizationID: "org-b", Key: "inh_b", Name: "B", IsActive: true})
+	repo.SeedType(&Type{ID: "org-b-type", OrganizationID: "org-b", Key: "inh_b", Name: "B", IsActive: true})
 	return repo
 }
 
@@ -98,7 +98,7 @@ func TestMemoryTypeChainAndSubtree(t *testing.T) {
 		"descendant as parent":       {id: "inh-mid", parent: "inh-leaf", conflict: true},
 		"system type below org type": {id: "inh-root", parent: "inh-leaf"},
 	} {
-		_, err = repo.Update(ctx, "org-a", tc.id, UpdateTypeRequest{ParentTypeID: parent(tc.parent)})
+		_, err = repo.Update(ctx, "org-a", tc.id, &UpdateTypeRequest{ParentTypeID: parent(tc.parent)})
 		switch {
 		case tc.conflict && (!errors.As(err, &ce) || ce.Field != "parent_type_id"):
 			t.Errorf("%s: err = %v, want a conflict on parent_type_id", name, err)
@@ -107,8 +107,8 @@ func TestMemoryTypeChainAndSubtree(t *testing.T) {
 		}
 	}
 	// Unknown and foreign parent read alike.
-	_, errUnknown := repo.Update(ctx, "org-a", "inh-mid", UpdateTypeRequest{ParentTypeID: parent("no-such-type")})
-	_, errForeign := repo.Update(ctx, "org-a", "inh-mid", UpdateTypeRequest{ParentTypeID: parent("org-b-type")})
+	_, errUnknown := repo.Update(ctx, "org-a", "inh-mid", &UpdateTypeRequest{ParentTypeID: parent("no-such-type")})
+	_, errForeign := repo.Update(ctx, "org-a", "inh-mid", &UpdateTypeRequest{ParentTypeID: parent("org-b-type")})
 	if errUnknown.Error() != errForeign.Error() {
 		t.Errorf("unknown %q and foreign %q parent differ", errUnknown, errForeign)
 	}
@@ -137,15 +137,15 @@ func TestMemoryTypeChainAndSubtree(t *testing.T) {
 	}
 	chain, _ = repo.TypeChain(ctx, "org-a", prev)
 	level5 := chain[4].ID
-	if _, err = repo.Update(ctx, "org-a", solo.ID, UpdateTypeRequest{ParentTypeID: &level5}); !errors.As(err, &fe) || fe.Field != "parent_type_id" {
+	if _, err = repo.Update(ctx, "org-a", solo.ID, &UpdateTypeRequest{ParentTypeID: &level5}); !errors.As(err, &fe) || fe.Field != "parent_type_id" {
 		t.Errorf("moved subtree at level 7: err = %v, want 422 on parent_type_id", err)
 	}
 	level4 := chain[3].ID
-	if _, err = repo.Update(ctx, "org-a", solo.ID, UpdateTypeRequest{ParentTypeID: &level4}); err != nil {
+	if _, err = repo.Update(ctx, "org-a", solo.ID, &UpdateTypeRequest{ParentTypeID: &level4}); err != nil {
 		t.Errorf("moved subtree at level 6: %v", err)
 	}
 	// "" makes the type a root again.
-	moved, err := repo.Update(ctx, "org-a", solo.ID, UpdateTypeRequest{ParentTypeID: parent("")})
+	moved, err := repo.Update(ctx, "org-a", solo.ID, &UpdateTypeRequest{ParentTypeID: parent("")})
 	if err != nil || moved.ParentTypeID != "" {
 		t.Errorf("back to root: %+v %v", moved, err)
 	}

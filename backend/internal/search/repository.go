@@ -18,9 +18,10 @@ type MemoryRepository struct {
 
 func NewMemoryRepository() *MemoryRepository             { return &MemoryRepository{docs: map[string]Document{}} }
 func (r *MemoryRepository) Ping(_ context.Context) error { return nil }
-func (r *MemoryRepository) IndexDocument(_ context.Context, doc Document) error {
+func (r *MemoryRepository) IndexDocument(_ context.Context, in *Document) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	doc := *in
 	if doc.OrganizationID == "" || doc.EntityType == "" || doc.EntityID == "" {
 		return fmt.Errorf("organization_id, entity_type and entity_id are required")
 	}
@@ -44,14 +45,14 @@ func (r *MemoryRepository) ReindexTenant(_ context.Context, orgID string) (Reind
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	count := 0
-	for _, d := range r.docs {
-		if d.OrganizationID == orgID {
+	for k := range r.docs {
+		if r.docs[k].OrganizationID == orgID {
 			count++
 		}
 	}
 	return ReindexResult{Indexed: count}, nil
 }
-func (r *MemoryRepository) Query(_ context.Context, q Query) (Result, error) {
+func (r *MemoryRepository) Query(_ context.Context, q *Query) (Result, error) {
 	if err := validateQuery(q.Text); err != nil {
 		return Result{}, err
 	}
@@ -67,7 +68,8 @@ func (r *MemoryRepository) Query(_ context.Context, q Query) (Result, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var hits []Hit
-	for _, d := range r.docs {
+	for k := range r.docs {
+		d := r.docs[k]
 		if d.OrganizationID != q.OrganizationID || (len(allowed) > 0 && !allowed[d.EntityType]) {
 			continue
 		}

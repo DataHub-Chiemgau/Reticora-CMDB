@@ -125,7 +125,7 @@ func TestAuditT1MetricReadPathsHonourScope(t *testing.T) {
 	for kind, ctx := range m.scopes() {
 		for path, step := range steps {
 			for _, ciID := range []string{m.own, m.sibling, m.foreign} {
-				points, err := m.store.Query(ctx, monitoring.MetricQuery{OrgID: m.f.OrgA, CIID: ciID, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
+				points, err := m.store.Query(ctx, &monitoring.MetricQuery{OrgID: m.f.OrgA, CIID: ciID, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
 				if err != nil {
 					t.Fatalf("%s %s query: %v", kind, path, err)
 				}
@@ -134,7 +134,7 @@ func TestAuditT1MetricReadPathsHonourScope(t *testing.T) {
 				}
 			}
 			// Without a CI filter the foreign value must never contribute.
-			points, err := m.store.Query(ctx, monitoring.MetricQuery{OrgID: m.f.OrgA, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
+			points, err := m.store.Query(ctx, &monitoring.MetricQuery{OrgID: m.f.OrgA, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
 			if err != nil {
 				t.Fatalf("%s %s unfiltered query: %v", kind, path, err)
 			}
@@ -150,7 +150,7 @@ func TestAuditT1MetricReadPathsHonourScope(t *testing.T) {
 	}
 	// Another organization reads nothing of organization A.
 	for path, step := range steps {
-		points, err := m.store.Query(m.f.OrgCtx(m.f.OrgB), monitoring.MetricQuery{OrgID: m.f.OrgB, CIID: m.own, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
+		points, err := m.store.Query(m.f.OrgCtx(m.f.OrgB), &monitoring.MetricQuery{OrgID: m.f.OrgB, CIID: m.own, Name: "t1_cpu", From: m.from, To: m.to, Step: step})
 		if err != nil || len(points) != 0 {
 			t.Errorf("org B %s reads an org A CI: %+v, %v", path, points, err)
 		}

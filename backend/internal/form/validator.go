@@ -57,10 +57,10 @@ func validateValue(schema JSONMap, value any, path string, fields *[]FieldError)
 	case []any:
 		validateArray(schema, v, path, fields)
 	case string:
-		if min, ok := number(schema["minLength"]); ok && float64(len(v)) < min {
+		if lower, ok := number(schema["minLength"]); ok && float64(len(v)) < lower {
 			add(fields, path, "is shorter than minimum length")
 		}
-		if max, ok := number(schema["maxLength"]); ok && float64(len(v)) > max {
+		if upper, ok := number(schema["maxLength"]); ok && float64(len(v)) > upper {
 			add(fields, path, "is longer than maximum length")
 		}
 		if pattern, ok := schema["pattern"].(string); ok && pattern != "" {
@@ -76,10 +76,10 @@ func validateValue(schema JSONMap, value any, path string, fields *[]FieldError)
 		if !ok {
 			return
 		}
-		if min, ok := number(schema["minimum"]); ok && val < min {
+		if lower, ok := number(schema["minimum"]); ok && val < lower {
 			add(fields, path, "is below minimum")
 		}
-		if max, ok := number(schema["maximum"]); ok && val > max {
+		if upper, ok := number(schema["maximum"]); ok && val > upper {
 			add(fields, path, "is above maximum")
 		}
 	}
@@ -127,10 +127,10 @@ func validateObject(schema JSONMap, obj map[string]any, path string, fields *[]F
 }
 
 func validateArray(schema JSONMap, arr []any, path string, fields *[]FieldError) {
-	if min, ok := number(schema["minItems"]); ok && float64(len(arr)) < min {
+	if lower, ok := number(schema["minItems"]); ok && float64(len(arr)) < lower {
 		add(fields, path, "has too few items")
 	}
-	if max, ok := number(schema["maxItems"]); ok && float64(len(arr)) > max {
+	if upper, ok := number(schema["maxItems"]); ok && float64(len(arr)) > upper {
 		add(fields, path, "has too many items")
 	}
 	rawItems, exists := schema["items"]

@@ -73,7 +73,7 @@ func (r *PGRepository) AddMessage(ctx context.Context, orgID, conversationID, ro
 		return err
 	})
 }
-func (r *PGRepository) UpsertChunk(ctx context.Context, ch Chunk) error {
+func (r *PGRepository) UpsertChunk(ctx context.Context, ch *Chunk) error {
 	emb, err := json.Marshal(ch.Embedding)
 	if err != nil {
 		return fmt.Errorf("marshal embedding: %w", err)
@@ -131,7 +131,7 @@ func (r *PGRepository) DeleteChunk(ctx context.Context, orgID, entityType, entit
 		return err
 	})
 }
-func (r *PGRepository) CandidateChunks(ctx context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
+func (r *PGRepository) CandidateChunks(ctx context.Context, orgID string, entityTypes, entityIDs []string, limit int) ([]Chunk, error) {
 	if limit <= 0 {
 		limit = 50
 	}

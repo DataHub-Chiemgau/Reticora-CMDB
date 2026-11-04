@@ -106,14 +106,14 @@ func incomingMACs(item *IngestItem) map[string]bool {
 }
 
 func storedMACs(item *ci.Item) map[string]bool {
-	return identityMACs(append([]string{item.PrimaryMAC}, existingFingerprintSlice(*item, "mac_addresses")...)...)
+	return identityMACs(append([]string{item.PrimaryMAC}, existingFingerprintSlice(item, "mac_addresses")...)...)
 }
 
 func storedUUID(item *ci.Item) string {
 	if item.HardwareUUID != "" {
 		return item.HardwareUUID
 	}
-	return existingFingerprintValue(*item, "hardware_uuid")
+	return existingFingerprintValue(item, "hardware_uuid")
 }
 
 func incomingUUID(item *IngestItem) string {
@@ -190,7 +190,7 @@ func ResolveIdentity(candidates []ci.Item, incoming *IngestItem, ic *IdentityCon
 			return ReconcileResult{}, false
 		case 1:
 			res := ReconcileResult{Action: ReconcileMatched, MatchedCIID: matches[0].ID, Criterion: criterion}
-			res.ValueConflicts = identityConflicts(*matches[0], *incoming)
+			res.ValueConflicts = identityConflicts(matches[0], incoming)
 			return res, true
 		}
 		ids := make([]string, len(matches))
@@ -746,7 +746,7 @@ func (h *Handler) identityContext(ctx context.Context, orgID string, types map[s
 func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *IngestItem) ([]ci.Item, error) {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
-		items, _, err := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
+		items, _, err := h.ciRepo.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
 		return items, err
 	}
 	q := identityQuery(item)
@@ -794,7 +794,7 @@ func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *In
 func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []IngestItem) []ci.Item {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
-		all, _, _ := h.ciRepo.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
+		all, _, _ := h.ciRepo.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 1 << 30})
 		return all
 	}
 	seen := map[string]bool{}
@@ -899,7 +899,7 @@ func (h *Handler) resurrectionWith(ctx context.Context, orgID string, item *Inge
 	}
 	// One open review per deleted CI: a device seen again and again is
 	// not queued again (REC-08 deduplication).
-	review := reviewItemFromConflict(orgID, *item, ReconcileResult{CandidateCIIDs: candidates, Criterion: res.Criterion})
+	review := reviewItemFromConflict(orgID, item, &ReconcileResult{CandidateCIIDs: candidates, Criterion: res.Criterion})
 	review.Kind = ReviewKindResurrectedDevice
 	sorted := append([]string(nil), candidates...)
 	sort.Strings(sorted)

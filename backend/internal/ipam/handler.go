@@ -234,7 +234,7 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), req)
+	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), &req)
 	if err != nil {
 		if !api.WriteFieldError(w, err) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
@@ -552,7 +552,7 @@ func (h *Handler) UpdateInterface(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "if_type", Message: "invalid interface type"})
 		return
 	}
-	ni, err := h.repo.UpdateInterface(r.Context(), orgID, chi.URLParam(r, "id"), req)
+	ni, err := h.repo.UpdateInterface(r.Context(), orgID, chi.URLParam(r, "id"), &req)
 	if err != nil {
 		if !api.WriteFieldError(w, err) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "network interface not found")

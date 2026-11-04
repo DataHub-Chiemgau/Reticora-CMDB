@@ -26,7 +26,7 @@ func TestMemoryMetricStoreQueryAggregatesByStep(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	points, err := store.Query(t.Context(), MetricQuery{
+	points, err := store.Query(t.Context(), &MetricQuery{
 		OrgID: "org-1",
 		CIID:  "ci-1",
 		Name:  "cpu_usage",
@@ -116,7 +116,7 @@ func TestEvaluatorFiresAfterDurationOnce(t *testing.T) {
 	}
 
 	alerts := NewAlertManager()
-	if _, err := alerts.CreateRule(t.Context(), AlertRule{
+	if _, err := alerts.CreateRule(t.Context(), &AlertRule{
 		OrgID: "org-1", Name: "High CPU", MetricName: "cpu_usage",
 		Condition: "gt", Threshold: 90, Duration: 5 * time.Minute,
 		Severity: "critical", Enabled: true,
@@ -125,8 +125,8 @@ func TestEvaluatorFiresAfterDurationOnce(t *testing.T) {
 	}
 
 	var fired []AlertEvent
-	ev := NewEvaluator(store, alerts, NotifierFunc(func(_ context.Context, e AlertEvent) {
-		fired = append(fired, e)
+	ev := NewEvaluator(store, alerts, NotifierFunc(func(_ context.Context, e *AlertEvent) {
+		fired = append(fired, *e)
 	}))
 	ev.Now = func() time.Time { return base.Add(2 * time.Minute) }
 
@@ -175,14 +175,14 @@ func TestEvaluatorDisabledRulesAreSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 	alerts := NewAlertManager()
-	if _, err := alerts.CreateRule(t.Context(), AlertRule{
+	if _, err := alerts.CreateRule(t.Context(), &AlertRule{
 		OrgID: "org-1", Name: "disabled", MetricName: "cpu_usage",
 		Condition: "gt", Threshold: 1, Enabled: false,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	fired := 0
-	ev := NewEvaluator(store, alerts, NotifierFunc(func(context.Context, AlertEvent) { fired++ }))
+	ev := NewEvaluator(store, alerts, NotifierFunc(func(context.Context, *AlertEvent) { fired++ }))
 	ev.Evaluate(t.Context())
 	if fired != 0 {
 		t.Fatalf("disabled rule must not fire, got %d alerts", fired)
@@ -328,7 +328,7 @@ func TestListAlertsAndMetricsAreCursorPages(t *testing.T) {
 			org = "org-2"
 		}
 		rule := AlertRule{ID: fmt.Sprintf("alert-%d", i), OrgID: org, Name: name, MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "critical"}
-		if _, err := alerts.CreateRule(t.Context(), rule); err != nil {
+		if _, err := alerts.CreateRule(t.Context(), &rule); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -49,7 +49,7 @@ func newServiceChain(t *testing.T) *serviceChainFixture {
 		ids: map[string]string{}}
 	f.rels = relationship.NewMemoryRepository().WithNodeVisibility(ci.VisibleIDs(f.cis))
 	for _, key := range []string{"business_service", "application", "database", "vm", "hypervisor", "switch", "pdu"} {
-		f.types.SeedType(citype.Type{ID: "type-" + key, Key: key, Name: key, IsSystem: true, IsActive: true})
+		f.types.SeedType(&citype.Type{ID: "type-" + key, Key: key, Name: key, IsSystem: true, IsActive: true})
 	}
 	f.add("business_service", "type-business_service")
 	f.add("application", "type-application")
@@ -272,13 +272,13 @@ func TestServiceChainVariants(t *testing.T) {
 	t.Run("subtype and deactivated type", func(t *testing.T) {
 		f := newServiceChain(t)
 		f.link("hypervisor", "uplink_to", "switch")
-		f.types.SeedType(citype.Type{ID: "type-webapp", Key: "webapp", Name: "webapp", OrganizationID: "org-1",
+		f.types.SeedType(&citype.Type{ID: "type-webapp", Key: "webapp", Name: "webapp", OrganizationID: "org-1",
 			ParentTypeID: "type-application", IsActive: true})
-		f.types.SeedType(citype.Type{ID: "type-legacy", Key: "legacy_service", Name: "legacy_service", OrganizationID: "org-1",
+		f.types.SeedType(&citype.Type{ID: "type-legacy", Key: "legacy_service", Name: "legacy_service", OrganizationID: "org-1",
 			ParentTypeID: "type-business_service", IsActive: false})
 		// A type of another organization that would be a service stays
 		// out: its CIs are no service of org-1.
-		f.types.SeedType(citype.Type{ID: "type-foreign", Key: "business_service", Name: "foreign", OrganizationID: "org-2", IsActive: true})
+		f.types.SeedType(&citype.Type{ID: "type-foreign", Key: "business_service", Name: "foreign", OrganizationID: "org-2", IsActive: true})
 		f.add("webapp", "type-webapp")
 		f.add("legacy", "type-legacy")
 		f.add("foreign-typed", "type-foreign")

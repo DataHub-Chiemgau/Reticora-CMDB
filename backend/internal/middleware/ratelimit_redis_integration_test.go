@@ -63,7 +63,7 @@ func TestRateLimitRedisReplicasShareBudgets(t *testing.T) {
 	session := func(jti string) string {
 		t.Helper()
 		now := time.Now().UTC()
-		token, err := issuer.Issue(identity.SessionClaims{
+		token, err := issuer.Issue(&identity.SessionClaims{
 			Subject: "replica-user", OrganizationID: org, Permissions: []identity.Permission{identity.PermCIRead},
 			SessionID: "replica-sid", ID: jti, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
 		})

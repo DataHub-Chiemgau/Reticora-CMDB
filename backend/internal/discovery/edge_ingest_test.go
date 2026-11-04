@@ -51,11 +51,11 @@ func TestEdgeIngest(t *testing.T) {
 	if reply.Status != http.StatusAccepted || reply.Result == nil || reply.Result.Created != 1 || reply.LicenseStatus != LicenseActive {
 		t.Fatalf("ingest: %+v", reply)
 	}
-	items, _, err := cis.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := cis.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("CIs of org-1: %d, %v", len(items), err)
 	}
-	if other, _, _ := cis.List(ctx, "org-2", ci.FilterParams{}, api.PaginationParams{Limit: 10}); len(other) != 0 {
+	if other, _, _ := cis.List(ctx, "org-2", &ci.FilterParams{}, api.PaginationParams{Limit: 10}); len(other) != 0 {
 		t.Errorf("records reached another organization: %d", len(other))
 	}
 
@@ -256,7 +256,7 @@ func TestEdgeMetrics(t *testing.T) {
 	body := []byte(`[{"name":"sweep_reachable","value":1,"labels":{"target":"192.0.2.10","kind":"sweep"}},` +
 		`{"name":"sweep_reachable","value":0,"labels":{"target":"192.0.2.99","kind":"sweep"}}]`)
 	stored := func(orgID string) int {
-		points, err := store.Query(ctx, monitoring.MetricQuery{OrgID: orgID, CIID: "ci-192.0.2.10", Name: "sweep_reachable"})
+		points, err := store.Query(ctx, &monitoring.MetricQuery{OrgID: orgID, CIID: "ci-192.0.2.10", Name: "sweep_reachable"})
 		if err != nil {
 			t.Fatal(err)
 		}

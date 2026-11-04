@@ -180,7 +180,7 @@ func listEdges(byCI bool, filters string) string {
 
 // List returns the relationships of the organization (of one CI when ciID
 // is set): the stored ones and, after them, the projected structural ones.
-func (r *PGRepository) List(ctx context.Context, orgID string, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]Relationship, int, error) {
 	return r.ListFiltered(ctx, orgID, ListFilter{CIID: ciID}, page)
 }
 

@@ -43,7 +43,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
-	res, err := h.backend.Query(r.Context(), q)
+	res, err := h.backend.Query(r.Context(), &q)
 	if err != nil {
 		// A checked query leaves backend failures only; their text goes to
 		// the log, the client gets the sanitized answer (API-03).
@@ -92,7 +92,8 @@ func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits [
 		return out
 	}
 	allowed := map[string]bool{}
-	for _, hit := range hits {
+	for i := range hits {
+		hit := &hits[i]
 		key, ok := ReadPermission[hit.EntityType]
 		if !ok {
 			continue
@@ -104,7 +105,7 @@ func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits [
 			allowed[key] = granted
 		}
 		if granted {
-			out = append(out, hit)
+			out = append(out, *hit)
 		}
 	}
 	return out

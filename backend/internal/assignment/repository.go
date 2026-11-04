@@ -13,7 +13,7 @@ import (
 
 // Repository defines persistence operations for assignments.
 type Repository interface {
-	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Assignment, int, error)
+	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Assignment, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Assignment, error)
 	Create(ctx context.Context, a *Assignment) error
 	Update(ctx context.Context, orgID, id string, a *Assignment) error
@@ -32,7 +32,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{assignments: make(map[string]*Assignment)}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Assignment, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -63,7 +63,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 
 	column, direction := NormalizeSort(filter)
 	sort.Slice(result, func(i, j int) bool {
-		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		vi, vj := sortValue(&result[i], column), sortValue(&result[j], column)
 		if vi == vj {
 			if direction == "asc" {
 				return result[i].ID < result[j].ID
@@ -81,9 +81,10 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 		}
 		remaining := make([]Assignment, 0, len(result))
-		for _, item := range result {
+		for i := range result {
+			item := &result[i]
 			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
-				remaining = append(remaining, item)
+				remaining = append(remaining, *item)
 			}
 		}
 		if len(remaining) > page.Limit {

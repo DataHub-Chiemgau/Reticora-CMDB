@@ -17,7 +17,7 @@ func TestCIChunkIndexerMirrorsDocument(t *testing.T) {
 	repo := NewMemoryRepository()
 	idx := NewCIChunkIndexer(repo, DisabledProvider{})
 	doc := ci.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Summary: "core router acme", URL: "/cmdb/c1"}
-	if err := idx.IndexDocument(context.Background(), doc); err != nil {
+	if err := idx.IndexDocument(context.Background(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	chunks, err := repo.CandidateChunks(context.Background(), "org", []string{"ci"}, []string{"c1"}, 1)
@@ -42,7 +42,7 @@ func TestCIChunkIndexerEmbeddingDegradesGracefully(t *testing.T) {
 	// made; a provider with a failing embed path must still persist the chunk.
 	idx := NewCIChunkIndexer(repo, DisabledProvider{})
 	doc := ci.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c2", Title: "Switch", Summary: "access switch"}
-	if err := idx.IndexDocument(context.Background(), doc); err != nil {
+	if err := idx.IndexDocument(context.Background(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	chunks, _ := repo.CandidateChunks(context.Background(), "org", []string{"ci"}, []string{"c2"}, 1)
@@ -55,11 +55,11 @@ func TestCIChunkIndexerDelete(t *testing.T) {
 	repo := NewMemoryRepository()
 	idx := NewCIChunkIndexer(repo, DisabledProvider{})
 	doc := ci.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c3", Title: "Server", Summary: "db server"}
-	if err := idx.IndexDocument(context.Background(), doc); err != nil {
+	if err := idx.IndexDocument(context.Background(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	// A chunk with an explicitly set ID must be found by DeleteChunk too.
-	if err := repo.UpsertChunk(context.Background(), Chunk{ID: "custom-id", OrganizationID: "org", EntityType: "ci", EntityID: "c4", Title: "X", Content: "x"}); err != nil {
+	if err := repo.UpsertChunk(context.Background(), &Chunk{ID: "custom-id", OrganizationID: "org", EntityType: "ci", EntityID: "c4", Title: "X", Content: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := idx.DeleteDocument(context.Background(), "org", "ci", "c3"); err != nil {
@@ -107,7 +107,7 @@ func TestCIChunkIndexerEmbedsOnlyWithOptInAndAddon(t *testing.T) {
 	consent := OrgConsent{OptIn: optIns{"opted": true, "opted-no-addon": true}, Entitlements: addons{"opted": true, "addon-only": true}}
 	idx := NewCIChunkIndexer(repo, provider).WithConsent(consent)
 	for _, org := range []string{"opted", "opted-no-addon", "addon-only", "neither"} {
-		if err := idx.IndexDocument(ctx, ci.Document{OrganizationID: org, EntityType: "ci", EntityID: "c-" + org, Title: org}); err != nil {
+		if err := idx.IndexDocument(ctx, &ci.Document{OrganizationID: org, EntityType: "ci", EntityID: "c-" + org, Title: org}); err != nil {
 			t.Fatal(err)
 		}
 		chunks, _ := repo.CandidateChunks(ctx, org, []string{"ci"}, []string{"c-" + org}, 1)
@@ -122,7 +122,7 @@ func TestCIChunkIndexerEmbedsOnlyWithOptInAndAddon(t *testing.T) {
 
 	// Without a consent no embedding is requested at all.
 	provider.embeds = 0
-	if err := NewCIChunkIndexer(repo, provider).IndexDocument(ctx, ci.Document{OrganizationID: "opted", EntityType: "ci", EntityID: "c-x"}); err != nil {
+	if err := NewCIChunkIndexer(repo, provider).IndexDocument(ctx, &ci.Document{OrganizationID: "opted", EntityType: "ci", EntityID: "c-x"}); err != nil {
 		t.Fatal(err)
 	}
 	if provider.embeds != 0 {

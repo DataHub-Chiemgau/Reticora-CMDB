@@ -250,7 +250,7 @@ func (r *MemoryRepository) SeedCIType(name, id string) {
 }
 
 // LookupCITypeID resolves a seeded CI type name to its id.
-func (r *MemoryRepository) LookupCITypeID(_ context.Context, _ string, nameOrID string) (string, error) {
+func (r *MemoryRepository) LookupCITypeID(_ context.Context, _, nameOrID string) (string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if id, ok := r.ciTypes[nameOrID]; ok {
@@ -1764,7 +1764,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 			}
 		}
 		writes := map[string]any{
-			"fingerprint": mergeFingerprint(existingFingerprintMap(*matched), item.Fingerprint,
+			"fingerprint": mergeFingerprint(existingFingerprintMap(matched), item.Fingerprint,
 				override.SourceRank(source) >= override.SourceRank(matched.DiscoverySource)),
 			"raw_data": item.RawData,
 		}
@@ -1845,7 +1845,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		// silently applied (spec §5.3: Unklarheiten in Review-Queue).
 		if len(lowerRank) > 0 {
 			result.ValueConflicts = lowerRank
-			if reviewItem := reviewItemFromValueConflicts(orgID, *matched, item, result); reviewItem != nil {
+			if reviewItem := reviewItemFromValueConflicts(orgID, matched, &item, &result); reviewItem != nil {
 				opened, openErr := h.openReview(ctx, reviewItem)
 				if openErr != nil {
 					return openErr
@@ -1857,7 +1857,7 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		}
 	case ReconcileConflict:
 		resp.Conflicts++
-		if reviewItem := reviewItemFromConflict(orgID, item, result); reviewItem != nil {
+		if reviewItem := reviewItemFromConflict(orgID, &item, &result); reviewItem != nil {
 			opened, openErr := h.openReview(ctx, reviewItem)
 			if openErr != nil {
 				return openErr
@@ -2282,7 +2282,7 @@ func mergeFingerprint(stored, incoming map[string]any, incomingWins bool) map[st
 // existingFingerprintMap extracts the stored fingerprint map of a CI,
 // accepting both the nested attributes.fingerprint layout and top-level
 // attribute keys written by older ingest versions.
-func existingFingerprintMap(item ci.Item) map[string]any {
+func existingFingerprintMap(item *ci.Item) map[string]any {
 	if item.Attributes == nil {
 		return nil
 	}

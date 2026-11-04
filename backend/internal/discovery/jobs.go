@@ -158,17 +158,17 @@ func (h *Handler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		Status:      r.URL.Query().Get("status"),
 		CollectorID: r.URL.Query().Get("collector_id"),
 	}
-	jobs, total, err := h.repo.ListJobs(r.Context(), t.OrganizationID, filter, page)
+	list, total, err := h.repo.ListJobs(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	for i := range jobs {
-		jobs[i].Error = JobErrorOf(&jobs[i])
+	for i := range list {
+		list[i].Error = JobErrorOf(&list[i])
 	}
 
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Job]{
-		Data:    jobs,
+		Data:    list,
 		Total:   total,
 		Limit:   page.Limit,
 		Offset:  page.Offset,

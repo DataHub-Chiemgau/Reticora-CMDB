@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -24,6 +26,10 @@ type Handler struct {
 	repo  Repository
 	jobs  TestJobs
 	queue TestQueue
+	// apply runs the resource routes of the items of a publication
+	// (WP-261); dispatcher sends their webhook events after the commit.
+	apply      Applier
+	dispatcher citype.EventDispatcher
 }
 
 // TestJobs runs the test jobs in this process and reads a job;
@@ -54,6 +60,20 @@ func (h *Handler) WithQueue(q TestQueue) *Handler {
 	return h
 }
 
+// WithPublish sets what the publication (WP-261) needs: catalog, the
+// metamodel repository whose resource routes apply the items (the instance
+// with the index scheduler, so the index jobs of the elements join the
+// publication), and dispatcher, which sends the webhook events of the
+// applied elements after the commit as the direct path does (ci_type.*,
+// ci_attribute.changed). Without catalog POST …/publish answers 503.
+func (h *Handler) WithPublish(catalog citype.Repository, dispatcher citype.EventDispatcher) *Handler {
+	if catalog != nil {
+		h.apply = newRouteApplier(catalog)
+	}
+	h.dispatcher = dispatcher
+	return h
+}
+
 // NewHandler returns the draft handler; without a repository (no
 // database) every route answers 503.
 func NewHandler(repo Repository) *Handler {
@@ -72,6 +92,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/metamodel/drafts/{id}/items/{item_id}", h.RemoveItem)
 	r.Post("/api/v1/metamodel/drafts/{id}/test", h.StartTest)
 	r.Get("/api/v1/metamodel/drafts/{id}/test", h.GetTest)
+	r.Post("/api/v1/metamodel/drafts/{id}/publish", h.Publish)
 }
 
 // store returns the repository and the tenant, or answers 503 (no
@@ -423,4 +444,60 @@ func (h *Handler) GetTest(w http.ResponseWriter, r *http.Request) {
 		out.NextCursor = api.EncodeOffsetCursor(end)
 	}
 	api.WriteJSON(w, http.StatusOK, out)
+}
+
+// Publish handles POST /api/v1/metamodel/drafts/{id}/publish (WP-261,
+// MET-53): the tested draft is applied in one transaction (publish.go) and
+// answered with the published draft, the counters per kind and the
+// affected types with their new schema_version. A draft that is not
+// tested, or published or discarded, is 409, as is one whose items rest on
+// a changed target (stale_items); a refused item answers with the status
+// and problem of its resource route (422, 409, 403, …) and item_id; the
+// webhook events of the applied elements follow the commit. Without the
+// database 503.
+func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
+	repo, t, ok := h.store(w, r)
+	if !ok {
+		return
+	}
+	publisher, isPublisher := repo.(Publisher)
+	if !isPublisher || h.apply == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the publication needs the database")
+		return
+	}
+	buffer := &webhookBuffer{}
+	res, err := publisher.Publish(withWebhookBuffer(r.Context(), buffer), t.OrganizationID, chi.URLParam(r, "id"), h.apply)
+	if err != nil {
+		writePublishError(w, err)
+		return
+	}
+	buffer.flush(r.Context(), t.OrganizationID, h.dispatcher)
+	w.Header().Set("ETag", api.ETag(res.Draft.Version))
+	api.WriteJSON(w, http.StatusOK, res)
+}
+
+// writePublishError reports a refused publication (RFC 7807).
+func writePublishError(w http.ResponseWriter, err error) {
+	var stale *StaleError
+	var refused *ItemError
+	switch {
+	case errors.Is(err, ErrNotTested):
+		api.WriteProblem(w, http.StatusConflict, "urn:reticora:problem:conflict", "Conflict", ErrNotTested.Error())
+	case errors.As(err, &stale):
+		api.WriteProblemBody(w, http.StatusConflict, map[string]any{
+			"type": "urn:reticora:problem:conflict", "title": "Conflict", "status": http.StatusConflict,
+			"detail":      "the targets of items of the draft changed since they were captured; nothing was published",
+			"stale_items": stale.Items,
+		})
+	case errors.As(err, &refused):
+		problem := map[string]any{}
+		if json.Unmarshal(refused.Body, &problem) != nil {
+			problem = map[string]any{"type": "https://reticora.io/problems/" + strconv.Itoa(refused.Status),
+				"title": http.StatusText(refused.Status), "status": refused.Status}
+		}
+		problem["item_id"], problem["item_kind"], problem["item_op"] = refused.ItemID, refused.Kind, refused.Op
+		api.WriteProblemBody(w, refused.Status, problem)
+	default:
+		writeDraftError(w, err)
+	}
 }

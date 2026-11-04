@@ -73,7 +73,7 @@ func TestIngestPipelineDedupesAndOrders(t *testing.T) {
 	if resp := postRecords(t, mux, ctx, newest, middle, newest); resp.Updated != 2 || resp.Duplicates != 1 {
 		t.Errorf("batch out of order: %+v", resp)
 	}
-	items, _, err := cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, err := cis.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(items) != 1 || items[0].Model != "m3" {
 		t.Fatalf("CI after the batch: %+v, %v", items, err)
 	}
@@ -117,7 +117,7 @@ func (d *fakeDelivery) Delivered() uint64 { return d.delivered }
 // failingCIs fails every update, so a consumed batch cannot be processed.
 type failingCIs struct{ ci.Repository }
 
-func (failingCIs) List(context.Context, string, ci.FilterParams, api.PaginationParams) ([]ci.Item, int, error) {
+func (failingCIs) List(context.Context, string, *ci.FilterParams, api.PaginationParams) ([]ci.Item, int, error) {
 	return nil, 0, errors.New("database down")
 }
 
@@ -187,7 +187,7 @@ func TestIngestQueuePublishesAndConsumes(t *testing.T) {
 			t.Errorf("processed message: %s", d.result)
 		}
 	}
-	items, _, _ := cis.List(context.Background(), scope.OrgID, ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	items, _, _ := cis.List(context.Background(), scope.OrgID, &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	if len(items) != 1 || items[0].Model != "q2" {
 		t.Fatalf("CI after consuming: %+v", items)
 	}
@@ -283,7 +283,7 @@ func TestConsumeBatchIsolatesRecordFailures(t *testing.T) {
 	if n := testutil.ToFloat64(deadLetters.WithLabelValues("permanent")) - permanentBefore; n != 1 {
 		t.Errorf("reticora_ingest_dead_letters_total{reason=\"permanent\"} grew by %v, want 1", n)
 	}
-	stored, _, _ := cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	stored, _, _ := cis.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	got := map[string]string{}
 	for i := range stored {
 		got[stored[i].SerialNumber] = stored[i].Model
@@ -300,7 +300,7 @@ func TestConsumeBatchIsolatesRecordFailures(t *testing.T) {
 		newIngestMessages(context.Background(), tenant.TenantInfo{OrganizationID: "org-1"}, "col-1", again)); err != nil {
 		t.Fatal(err)
 	}
-	stored, _, _ = cis.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+	stored, _, _ = cis.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 	for i := range stored {
 		if stored[i].SerialNumber == "SN-A" && stored[i].Model != "ok" {
 			t.Errorf("SN-A after the redelivery: model %q, want A2's", stored[i].Model)

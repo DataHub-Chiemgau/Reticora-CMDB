@@ -19,12 +19,12 @@ import (
 func TestEntitlementRepositoryScope(t *testing.T) {
 	f := scopetest.Seed(t, "1c")
 	repo := entitlement.NewPGRepository(f.App)
-	if _, err := repo.Upsert(f.OrgCtx(f.OrgB), entitlement.Entitlement{OrganizationID: f.OrgB, FeatureKey: "monitoring", Plan: entitlement.PlanPro, Enabled: true}); err != nil {
+	if _, err := repo.Upsert(f.OrgCtx(f.OrgB), &entitlement.Entitlement{OrganizationID: f.OrgB, FeatureKey: "monitoring", Plan: entitlement.PlanPro, Enabled: true}); err != nil {
 		t.Fatalf("org B upsert: %v", err)
 	}
 
 	ctx := f.ClientCtx(f.Client1)
-	if _, err := repo.Upsert(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore, Plan: entitlement.PlanStandard, Enabled: true}); err != nil {
+	if _, err := repo.Upsert(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore, Plan: entitlement.PlanStandard, Enabled: true}); err != nil {
 		t.Fatalf("org A upsert: %v", err)
 	}
 	list, err := repo.List(ctx, f.OrgA)
@@ -39,7 +39,7 @@ func TestEntitlementRepositoryScope(t *testing.T) {
 	if len(list) == 0 {
 		t.Fatal("organization A list is empty")
 	}
-	if _, err = repo.Upsert(ctx, entitlement.Entitlement{OrganizationID: f.OrgB, FeatureKey: "monitoring", Enabled: false}); !errors.Is(err, database.ErrTenantMismatch) {
+	if _, err = repo.Upsert(ctx, &entitlement.Entitlement{OrganizationID: f.OrgB, FeatureKey: "monitoring", Enabled: false}); !errors.Is(err, database.ErrTenantMismatch) {
 		t.Fatalf("write organization B entitlement: got %v, want ErrTenantMismatch", err)
 	}
 	var enabled bool

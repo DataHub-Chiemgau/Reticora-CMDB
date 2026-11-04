@@ -223,8 +223,8 @@ type ReconcileResult struct {
 
 // Reconcile matches an incoming discovery item against existing CIs by the
 // identity rules of REC-02 (ResolveIdentity) without type or VRF context.
-func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
-	return ResolveIdentity(existing, &incoming, nil)
+func Reconcile(existing []ci.Item, incoming *IngestItem) ReconcileResult {
+	return ResolveIdentity(existing, incoming, nil)
 }
 
 // identityConflicts compares the strong identity fields of a matched CI with
@@ -232,7 +232,7 @@ func Reconcile(existing []ci.Item, incoming IngestItem) ReconcileResult {
 // values. These are candidates for the review queue rather than silent
 // overwrites, because a changed serial number or hardware UUID on an existing
 // identity usually means replaced hardware or a mis-keyed fingerprint.
-func identityConflicts(item ci.Item, incoming IngestItem) []string {
+func identityConflicts(item *ci.Item, incoming *IngestItem) []string {
 	var conflicts []string
 	addIfDiffering := func(field, existing, incomingValue string) {
 		if !normalizedEqual(existing, incomingValue) && strings.TrimSpace(existing) != "" && strings.TrimSpace(incomingValue) != "" {
@@ -274,7 +274,7 @@ func normalizeMACValue(value string) string {
 	return value
 }
 
-func existingFingerprintValue(item ci.Item, key string) string {
+func existingFingerprintValue(item *ci.Item, key string) string {
 	if item.Attributes == nil {
 		return ""
 	}
@@ -289,7 +289,7 @@ func existingFingerprintValue(item ci.Item, key string) string {
 	return ""
 }
 
-func existingFingerprintSlice(item ci.Item, key string) []string {
+func existingFingerprintSlice(item *ci.Item, key string) []string {
 	if item.Attributes == nil {
 		return nil
 	}

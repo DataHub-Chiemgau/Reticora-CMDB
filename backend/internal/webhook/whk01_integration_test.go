@@ -31,7 +31,7 @@ func TestWHK01AgainstPostgres(t *testing.T) {
 	}
 	var dead []webhook.DeliveryRecord
 	for i := 0; i < 3; i++ {
-		rec, err := store.Enqueue(ctx, webhook.DeliveryRecord{OrganizationID: f.OrgA, SubscriptionID: sub.ID, Event: "ci.created",
+		rec, err := store.Enqueue(ctx, &webhook.DeliveryRecord{OrganizationID: f.OrgA, SubscriptionID: sub.ID, Event: "ci.created",
 			Payload: []byte(`{"id":"ci"}`), MaxAttempts: 6})
 		if err != nil {
 			t.Fatal(err)

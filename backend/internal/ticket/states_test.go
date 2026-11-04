@@ -101,7 +101,7 @@ func TestMemoryRepositoryTransitionsAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := func(status string) (*Ticket, error) {
-		return repo.Update(ctx, "org-1", tk.ID, UpdateRequest{Status: &status})
+		return repo.Update(ctx, "org-1", tk.ID, &UpdateRequest{Status: &status})
 	}
 	if _, err := set(StatusWaiting); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("new → waiting: %v, want ErrInvalidTransition", err)
@@ -138,7 +138,7 @@ func TestMemoryRepositoryTeamMineIsEmpty(t *testing.T) {
 	if err := repo.Create(context.Background(), &Ticket{OrganizationID: "org-1", Title: "x", TeamID: "team-1"}); err != nil {
 		t.Fatal(err)
 	}
-	items, total, err := repo.List(context.Background(), "org-1", FilterParams{TeamMemberOf: "user-1"}, api.PaginationParams{Limit: 10})
+	items, total, err := repo.List(context.Background(), "org-1", &FilterParams{TeamMemberOf: "user-1"}, api.PaginationParams{Limit: 10})
 	if err != nil || total != 0 || len(items) != 0 {
 		t.Fatalf("team_id=mine in memory: total=%d items=%v err=%v, want empty", total, items, err)
 	}

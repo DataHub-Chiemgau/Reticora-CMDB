@@ -33,7 +33,7 @@ type Repository interface {
 	ListAll(ctx context.Context, orgID string) ([]Type, error)
 	GetByKey(ctx context.Context, orgID, key string) (*Type, error)
 	Create(ctx context.Context, typ *Type) error
-	Update(ctx context.Context, orgID, key string, req UpsertRequest) (*Type, error)
+	Update(ctx context.Context, orgID, key string, req *UpsertRequest) (*Type, error)
 	Delete(ctx context.Context, orgID, key string) error
 	// Exists reports whether a key resolves to a visible type.
 	Exists(ctx context.Context, orgID, key string) (bool, error)
@@ -50,8 +50,9 @@ type MemoryRepository struct {
 // catalogue so relationship validation works in tests and --no-db mode.
 func NewMemoryRepository() *MemoryRepository {
 	r := &MemoryRepository{types: map[string]*Type{}}
-	for _, t := range Catalogue() {
-		stored := t
+	catalogue := Catalogue()
+	for i := range catalogue {
+		stored := catalogue[i]
 		r.seq++
 		stored.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)
 		now := time.Now().UTC()
@@ -76,11 +77,12 @@ func (r *MemoryRepository) ListAll(_ context.Context, orgID string) ([]Type, err
 	defer r.mu.RUnlock()
 	byKey := map[string]Type{}
 	for _, t := range r.types {
-		if t.OrganizationID == "" {
+		switch t.OrganizationID {
+		case "":
 			if _, taken := byKey[t.Key]; !taken {
 				byKey[t.Key] = *t
 			}
-		} else if t.OrganizationID == orgID {
+		case orgID:
 			byKey[t.Key] = *t
 		}
 	}
@@ -132,7 +134,7 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(_ context.Context, orgID, key string, req UpsertRequest) (*Type, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, key string, req *UpsertRequest) (*Type, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	t, ok := r.types[mapKey(orgID, key)]

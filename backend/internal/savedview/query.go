@@ -13,7 +13,7 @@ import (
 
 // QueryEngine executes a filter spec against the CI or asset table.
 type QueryEngine interface {
-	Query(ctx context.Context, orgID string, spec FilterSpec, page api.PaginationParams) ([]QueryResult, int, error)
+	Query(ctx context.Context, orgID string, spec *FilterSpec, page api.PaginationParams) ([]QueryResult, int, error)
 }
 
 // PGQueryEngine compiles the filter DSL to SQL and runs it tenant-scoped.
@@ -30,7 +30,7 @@ func NewPGQueryEngine(pool *pgxpool.Pool) *PGQueryEngine {
 // the principal's full scope (client, site, team). entity_kind selects the
 // table: "ci" or "asset". Unknown kinds are rejected; deleted CIs are never
 // returned.
-func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec FilterSpec, page api.PaginationParams) ([]QueryResult, int, error) {
+func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpec, page api.PaginationParams) ([]QueryResult, int, error) {
 	table := "ci"
 	switch spec.entityKind() {
 	case "ci":
@@ -143,7 +143,7 @@ func presentationSQL(table string, sortKeys []SortKey, fields []string, args []a
 }
 
 // entityKind defaults the spec's entity kind to "ci".
-func (f FilterSpec) entityKind() string {
+func (f *FilterSpec) entityKind() string {
 	if f.EntityKind == "" {
 		return "ci"
 	}

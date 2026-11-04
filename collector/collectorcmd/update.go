@@ -128,7 +128,7 @@ func checkAndApply(ctx context.Context, u update.Updater) string {
 		return ""
 	}
 	slog.Info("installing collector update", "from", Version, "to", rel.Version, "channel", rel.Channel)
-	if err = u.Apply(ctx, *rel); err != nil {
+	if err = u.Apply(ctx, rel); err != nil {
 		slog.Error("collector update refused", "version", rel.Version, "error", err)
 		return ""
 	}

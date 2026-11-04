@@ -161,7 +161,7 @@ func TestBundlePlaintextOnlyInMemory(t *testing.T) {
 	// The keystore holds the collector key the bundle is sealed for.
 	b, key := loadGoldenBundle(t)
 	store := &keystore.FileStore{Path: filepath.Join(dataDir, "credentials.json")}
-	if err := store.Save(ctx, keystore.Credentials{DeviceID: b.CollectorID, ClientPrivateKeyPEM: key}); err != nil {
+	if err := store.Save(ctx, &keystore.Credentials{DeviceID: b.CollectorID, ClientPrivateKeyPEM: key}); err != nil {
 		t.Fatal(err)
 	}
 	identity, err := store.Load(ctx)

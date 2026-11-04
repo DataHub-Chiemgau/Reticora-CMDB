@@ -34,7 +34,7 @@ type MTLS struct {
 }
 
 // NewMTLS constructs an mTLS-enabled transport from PEM encoded credentials.
-func NewMTLS(cfg Config) (*MTLS, error) {
+func NewMTLS(cfg *Config) (*MTLS, error) {
 	if len(cfg.ClientCertPEM) == 0 || len(cfg.ClientKeyPEM) == 0 {
 		return nil, fmt.Errorf("transport: client certificate and key are required")
 	}

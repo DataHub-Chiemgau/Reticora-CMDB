@@ -445,7 +445,7 @@ func TestMetamodelExportV2AgainstPostgres(t *testing.T) {
 
 	// The snapshot is READ ONLY.
 	err = a.repo.RunInSnapshot(a.ctx(f.OrgA), f.OrgA, func(ctx context.Context) error {
-		_, writeErr := a.repo.Update(ctx, f.OrgA, child.ID, citype.UpdateTypeRequest{Name: ptr("wp262-written")})
+		_, writeErr := a.repo.Update(ctx, f.OrgA, child.ID, &citype.UpdateTypeRequest{Name: ptr("wp262-written")})
 		return writeErr
 	})
 	var pgErr *pgconn.PgError

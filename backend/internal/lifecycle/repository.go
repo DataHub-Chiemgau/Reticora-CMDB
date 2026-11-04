@@ -100,15 +100,17 @@ type MemoryRepository struct {
 // software lifecycle (LCY-02), as in PostgreSQL (000055, 000201).
 func NewMemoryRepository() *MemoryRepository {
 	r := &MemoryRepository{defs: map[string]*Definition{}}
-	r.SeedDefinition(DefaultPhysicalAssetLifecycle())
-	r.SeedDefinition(DefaultSoftwareLifecycle())
+	physical, software := DefaultPhysicalAssetLifecycle(), DefaultSoftwareLifecycle()
+	r.SeedDefinition(&physical)
+	r.SeedDefinition(&software)
 	return r
 }
 
 // SeedDefinition registers a definition directly (tests, --no-db defaults).
-func (r *MemoryRepository) SeedDefinition(d Definition) {
+func (r *MemoryRepository) SeedDefinition(seed *Definition) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	d := *seed
 	if d.ID == "" {
 		r.seq++
 		d.ID = fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)

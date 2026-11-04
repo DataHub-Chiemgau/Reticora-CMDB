@@ -226,7 +226,7 @@ func TestAuditT2EntitlementAPIAccessGatesAPIKeys(t *testing.T) {
 
 	grant := func(enabled bool) {
 		t.Helper()
-		if _, err := s.entitlements.Grant(context.Background(), entitlement.Entitlement{OrganizationID: t2Org, FeatureKey: entitlement.FeatureAPIAccess,
+		if _, err := s.entitlements.Grant(context.Background(), &entitlement.Entitlement{OrganizationID: t2Org, FeatureKey: entitlement.FeatureAPIAccess,
 			Plan: entitlement.PlanEssential, Enabled: enabled, Source: "manual"}); err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +268,7 @@ func t2ProvisionRows(t *testing.T, s *t2Stack, rows ...entitlement.Entitlement) 
 	}
 	for _, row := range rows {
 		row.OrganizationID, row.Plan, row.Source = t2Org, entitlement.PlanEssential, "manual"
-		if _, err := s.entitlements.Grant(ctx, row); err != nil {
+		if _, err := s.entitlements.Grant(ctx, &row); err != nil {
 			t.Fatalf("grant %s: %v", row.FeatureKey, err)
 		}
 	}
@@ -390,7 +390,7 @@ func TestT2EntitlementQuotaDowngrade(t *testing.T) {
 		entitlement.FeatureCMDBCore:  entitlement.LimitMaxUsers,
 		entitlement.FeatureDiscovery: entitlement.LimitMaxCollectors,
 	} {
-		if _, err := s.entitlements.Grant(ctx, entitlement.Entitlement{OrganizationID: t2Org, FeatureKey: feature,
+		if _, err := s.entitlements.Grant(ctx, &entitlement.Entitlement{OrganizationID: t2Org, FeatureKey: feature,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{quota: 1}}); err != nil {
 			t.Fatal(err)
 		}
@@ -459,7 +459,7 @@ func TestT2EntitlementQuotaFirstLoginWithInvitation(t *testing.T) {
 	}
 	setLimit := func(limit int64) {
 		t.Helper()
-		if _, err := svc.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, err := svc.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{entitlement.LimitMaxUsers: limit}}); err != nil {
 			t.Fatal(err)
 		}
@@ -570,7 +570,7 @@ func TestT2EntitlementMaxCIsOnRestoreAndReviewNew(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	scope := identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-	token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+	token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 		Scope: &scope, SessionID: "maxcis-sid", ID: "maxcis-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +632,7 @@ func TestT2EntitlementMaxCIsOnRestoreAndReviewNew(t *testing.T) {
 	}
 	setLimit := func(limit int64) {
 		t.Helper()
-		if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{entitlement.LimitMaxCIs: limit}}); gerr != nil {
 			t.Fatal(gerr)
 		}
@@ -742,7 +742,7 @@ func TestAuditT2EntitlementAliasPathsGated(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	stamp := strconv.FormatInt(now.UnixNano(), 10)
-	token, err := s.issuer.Issue(identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+	token, err := s.issuer.Issue(&identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 		Scope:     &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 		SessionID: "alias-sid-" + stamp, ID: "alias-jti-" + stamp, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 	if err != nil {
@@ -789,7 +789,7 @@ func TestAuditT2EntitlementAliasPathsGated(t *testing.T) {
 	setFeatures := func(enabled bool) {
 		t.Helper()
 		for _, feature := range []string{entitlement.FeatureRackView, entitlement.FeatureDiscovery} {
-			if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+			if _, gerr := s.entitlements.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
 				Plan: entitlement.PlanEssential, Enabled: enabled, Source: "manual"}); gerr != nil {
 				t.Fatal(gerr)
 			}
@@ -904,7 +904,7 @@ func TestT2EntitlementMaxCIsCountsTheWholeOrganization(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 		if err != nil {
 			t.Fatal(err)
@@ -968,7 +968,7 @@ func TestT2EntitlementMaxCIsCountsTheWholeOrganization(t *testing.T) {
 	}
 	setLimit := func(limit int64) {
 		t.Helper()
-		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: map[string]int64{entitlement.LimitMaxCIs: limit}}); err != nil {
 			t.Fatal(err)
 		}
@@ -1046,7 +1046,7 @@ func TestEntitlementLimitDetailHidesOrgCountFromScopedCallers(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 		if err != nil {
 			t.Fatal(err)
@@ -1062,7 +1062,7 @@ func TestEntitlementLimitDetailHidesOrgCountFromScopedCallers(t *testing.T) {
 	}
 	grant := func(feature string, limits map[string]int64) {
 		t.Helper()
-		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+		if _, err := s.entitlements.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: limits}); err != nil {
 			t.Fatal(err)
 		}

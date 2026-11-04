@@ -64,7 +64,7 @@ func TestEffectiveViewAndOverrideClear(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		items, _, err := repo.List(ctx, f.OrgA, ci.FilterParams{Search: "eff-ci"}, api.PaginationParams{Limit: 10})
+		items, _, err := repo.List(ctx, f.OrgA, &ci.FilterParams{Search: "eff-ci"}, api.PaginationParams{Limit: 10})
 		if err != nil || len(items) != 1 {
 			t.Fatalf("list: %d items, %v", len(items), err)
 		}

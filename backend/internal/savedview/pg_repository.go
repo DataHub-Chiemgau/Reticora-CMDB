@@ -116,7 +116,7 @@ func (r *PGRepository) Create(ctx context.Context, view *View) error {
 // Update modifies a view the caller owns; a view shared with the caller,
 // org-wide or by role, is read-only and not found (E-86, option 1). Only
 // the fields the request sends change (F-166).
-func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, req UpsertRequest) (*View, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error) {
 	var out *View
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		sets := []string{}

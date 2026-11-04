@@ -33,7 +33,7 @@ type MetricStore interface {
 // CIUpserter reconciles the endpoint into a CI (source "agent").
 type CIUpserter interface {
 	GetByID(ctx context.Context, orgID, id string) (*ci.Item, error)
-	List(ctx context.Context, orgID string, filter ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error)
+	List(ctx context.Context, orgID string, filter *ci.FilterParams, page api.PaginationParams) ([]ci.Item, int, error)
 	Create(ctx context.Context, item *ci.Item) error
 	Update(ctx context.Context, orgID, id string, req ci.UpdateRequest) (*ci.Item, error)
 }
@@ -69,7 +69,7 @@ type ConflictReviews interface {
 // TokenIssuer signs the agent credential (implemented by
 // identity.SessionIssuer).
 type TokenIssuer interface {
-	Issue(claims identity.SessionClaims) (string, error)
+	Issue(claims *identity.SessionClaims) (string, error)
 }
 
 // AgentTokenLifetime is the validity of an agent credential; an agent is
@@ -100,7 +100,7 @@ func (h *Handler) issueAgentToken(a *Agent) (string, error) {
 		scope.Clients = identity.ScopeSet{IDs: []string{a.ClientID}}
 	}
 	now := time.Now().UTC()
-	return h.tokens.Issue(identity.SessionClaims{
+	return h.tokens.Issue(&identity.SessionClaims{
 		Subject:        AgentSubject(a.AgentID),
 		OrganizationID: a.OrganizationID,
 		ClientScope:    scope.LegacyClientScope(),
@@ -358,7 +358,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
+	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, &payload)
 	if err != nil {
 		if errors.Is(err, errLinkedCIUnreadable) {
 			// Nothing was written: the collector sends the telemetry again.
@@ -420,7 +420,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 // hostname, and only when exactly one CI carries it (AGT-05, E-20). Every
 // attribute of an existing CI goes through the central write decision with
 // rank 85.
-func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload TelemetryPayload) (string, error) {
+func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload *TelemetryPayload) (string, error) {
 	if h.cis == nil {
 		return "", nil
 	}
@@ -543,7 +543,7 @@ func (h *Handler) hostnameMatches(ctx context.Context, orgID, hostname string) (
 }
 
 func (h *Handler) exactHostname(ctx context.Context, orgID, hostname string) ([]ci.Item, error) {
-	existing, _, err := h.cis.List(ctx, orgID, ci.FilterParams{Search: hostname}, api.PaginationParams{Limit: 50})
+	existing, _, err := h.cis.List(ctx, orgID, &ci.FilterParams{Search: hostname}, api.PaginationParams{Limit: 50})
 	if err != nil {
 		return nil, err
 	}

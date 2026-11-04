@@ -597,7 +597,9 @@ func (s *Service) AllowCreate(ctx context.Context, orgID, quota string, current 
 
 // Grant stores (or updates) an entitlement for the organization. It joins
 // the transaction of ctx (database.ContextWithTx).
-func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, error) {
+func (s *Service) Grant(ctx context.Context, in *Entitlement) (Entitlement, error) {
+	// Grant completes its own copy; the caller's entitlement stays as it is.
+	ent := *in
 	if ent.OrganizationID == "" {
 		return Entitlement{}, fmt.Errorf("organization is required")
 	}
@@ -610,7 +612,7 @@ func (s *Service) Grant(ctx context.Context, ent Entitlement) (Entitlement, erro
 	ent.Plan = normalizePlan(ent.Plan)
 	ent.UpdatedAt = s.now()
 
-	stored, err := s.repo.Upsert(ctx, ent)
+	stored, err := s.repo.Upsert(ctx, &ent)
 	if err != nil {
 		return Entitlement{}, err
 	}

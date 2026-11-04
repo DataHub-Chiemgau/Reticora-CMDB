@@ -106,7 +106,7 @@ func newAgentChain(t *testing.T) *agentChain {
 func (c *agentChain) adminToken(orgID string) string {
 	c.t.Helper()
 	now := time.Now().UTC()
-	token, err := c.issuer.Issue(identity.SessionClaims{
+	token, err := c.issuer.Issue(&identity.SessionClaims{
 		ID: "wp365-admin-" + orgID, Subject: c.f.AppUser(c.t, orgID, "wp365-admin-"+orgID[len(orgID)-4:]), OrganizationID: orgID,
 		Permissions: []identity.Permission{identity.PermAgentManage, identity.PermAgentRead},
 		Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},

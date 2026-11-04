@@ -215,7 +215,7 @@ func TestTopologyComplexityScalesWithNodes(t *testing.T) {
 // blockingCIs answers a list only when the request context ends.
 type blockingCIs struct{ *ci.MemoryRepository }
 
-func (b blockingCIs) List(ctx context.Context, _ string, _ ci.FilterParams, _ api.PaginationParams) ([]ci.Item, int, error) {
+func (b blockingCIs) List(ctx context.Context, _ string, _ *ci.FilterParams, _ api.PaginationParams) ([]ci.Item, int, error) {
 	<-ctx.Done()
 	return nil, 0, ctx.Err()
 }

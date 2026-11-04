@@ -38,7 +38,7 @@ func TestDocumentSoftDelete(t *testing.T) {
 		t.Helper()
 		out := map[string]bool{}
 		for _, text := range []string{"softdeletewp", "softdeletekept"} {
-			res, err := repoSearch.Query(w.orgCtx, search.Query{OrganizationID: f.OrgA, Text: text, Limit: 50})
+			res, err := repoSearch.Query(w.orgCtx, &search.Query{OrganizationID: f.OrgA, Text: text, Limit: 50})
 			if err != nil {
 				t.Fatalf("search: %v", err)
 			}
@@ -164,7 +164,7 @@ func TestMemoryRepositorySoftDelete(t *testing.T) {
 	if _, err = mem.GetByID(ctx, "org-1", md.ID); err == nil {
 		t.Error("memory: the deleted document is found")
 	}
-	if items, _, _ := mem.List(ctx, "org-1", document.FilterParams{}, api.PaginationParams{Limit: 10}); len(items) != 0 {
+	if items, _, _ := mem.List(ctx, "org-1", &document.FilterParams{}, api.PaginationParams{Limit: 10}); len(items) != 0 {
 		t.Errorf("memory: list %v", items)
 	}
 	if err = mem.LinkDocument(ctx, &document.DocumentLink{OrganizationID: "org-1", DocumentID: md.ID, EntityType: "asset", EntityID: "a"}); !errors.Is(err, api.ErrNotFound) {

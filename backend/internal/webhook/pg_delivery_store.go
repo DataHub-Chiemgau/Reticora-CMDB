@@ -52,8 +52,8 @@ func visibleSubscription(alias string) string {
 // Enqueue stores a new pending delivery for the tenant. A preset ID is
 // kept; a delivery of an event the subscription already has is not stored
 // again (unique index of migration 000169, WP-506): ErrDeliveryExists.
-func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (DeliveryRecord, error) {
-	stored := rec
+func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec *DeliveryRecord) (DeliveryRecord, error) {
+	stored := *rec
 
 	err := database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
@@ -99,7 +99,7 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, rec DeliveryRecord) (Deli
 }
 
 // Update persists the outcome of a delivery attempt.
-func (s *PGDeliveryStore) Update(ctx context.Context, rec DeliveryRecord) error {
+func (s *PGDeliveryStore) Update(ctx context.Context, rec *DeliveryRecord) error {
 	return database.WithTenant(ctx, s.pool, orgScope(rec.OrganizationID), func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE webhook_delivery

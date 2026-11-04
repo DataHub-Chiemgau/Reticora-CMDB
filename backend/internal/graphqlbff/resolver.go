@@ -180,8 +180,8 @@ func (q *queryResolver) CurrentUser(ctx context.Context) (*generated.User, error
 	return user, nil
 }
 
-func ciFilter(f *generated.CIFilter) ci.FilterParams {
-	out := ci.FilterParams{}
+func ciFilter(f *generated.CIFilter) *ci.FilterParams {
+	out := &ci.FilterParams{}
 	if f == nil {
 		return out
 	}
@@ -305,7 +305,7 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 	if q.sources.Search == nil {
 		return nil, errUnavailable
 	}
-	res, err := q.sources.Search.Query(ctx, search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
+	res, err := q.sources.Search.Query(ctx, &search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
 		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage)})
 	if err != nil {
 		return nil, gqlError(codeBadInput, err.Error())

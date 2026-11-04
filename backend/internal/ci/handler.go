@@ -127,7 +127,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		filter.Search = lq.Q
 	}
 
-	items, counted, err := h.svc.List(r.Context(), t.OrganizationID, filter, page)
+	items, counted, err := h.svc.List(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -147,7 +147,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		hasMore = len(items) == page.Limit
 	}
 	total, capped := api.CapTotal(counted)
-	next := NextCursor(items, filter, page.Limit)
+	next := NextCursor(items, &filter, page.Limit)
 	if len(lq.Fields) > 0 {
 		data, perr := api.SelectFields(items, lq.Fields)
 		if perr != nil {

@@ -90,7 +90,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		SortDir:    r.URL.Query().Get("sort_dir"),
 	}
 
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
+	items, total, err := h.repo.List(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
@@ -110,7 +110,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Limit:      page.Limit,
 		Offset:     page.Offset,
 		HasMore:    hasMore,
-		NextCursor: NextCursor(items, filter, page.Limit),
+		NextCursor: NextCursor(items, &filter, page.Limit),
 	})
 }
 

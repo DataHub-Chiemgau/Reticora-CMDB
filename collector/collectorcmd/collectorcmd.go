@@ -382,7 +382,7 @@ func newUploader(ctx context.Context, cfg collectorConfig) (*uploader, error) {
 		return nil, err
 	}
 	if len(certPEM) > 0 && len(keyPEM) > 0 {
-		mtlsTransport, err := transport.NewMTLS(transport.Config{
+		mtlsTransport, err := transport.NewMTLS(&transport.Config{
 			ServerName:    cfg.TLSServerName,
 			RootCAsPEM:    caPEM,
 			ClientCertPEM: certPEM,
@@ -1086,7 +1086,7 @@ func (u *uploader) spoolResults(ctx context.Context, payload []byte, sourceTime 
 	if u.spool == nil {
 		return nil
 	}
-	id, err := u.spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: payload, CreatedAt: sourceTime.UTC()})
+	id, err := u.spool.Enqueue(ctx, &buffer.Message{Topic: spoolTopic, Payload: payload, CreatedAt: sourceTime.UTC()})
 	if err != nil {
 		return err
 	}
@@ -1738,7 +1738,7 @@ func (u *uploader) spoolAgentTelemetry(ctx context.Context, message []byte) erro
 	if u.spool == nil {
 		return errors.New("no spool configured")
 	}
-	_, err := u.spool.Enqueue(ctx, buffer.Message{Topic: agentTelemetryTopic, Payload: message, CreatedAt: time.Now().UTC()})
+	_, err := u.spool.Enqueue(ctx, &buffer.Message{Topic: agentTelemetryTopic, Payload: message, CreatedAt: time.Now().UTC()})
 	return err
 }
 

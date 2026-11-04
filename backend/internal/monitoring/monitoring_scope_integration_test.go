@@ -41,7 +41,7 @@ func TestMonitoringStoreScope(t *testing.T) {
 	ctx := f.ClientCtx(f.Client1)
 	query := func(ciID string) []monitoring.MetricPoint {
 		t.Helper()
-		points, err := store.Query(ctx, monitoring.MetricQuery{OrgID: f.OrgA, CIID: ciID, Name: "cpu_usage", From: now.Add(-time.Hour)})
+		points, err := store.Query(ctx, &monitoring.MetricQuery{OrgID: f.OrgA, CIID: ciID, Name: "cpu_usage", From: now.Add(-time.Hour)})
 		if err != nil {
 			t.Fatalf("query %s: %v", ciID, err)
 		}
@@ -61,11 +61,11 @@ func TestMonitoringStoreScope(t *testing.T) {
 	}
 
 	alerts := store.AlertStore()
-	ruleB, err := alerts.CreateRule(f.OrgCtx(f.OrgB), monitoring.AlertRule{OrgID: f.OrgB, Name: "b", MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "warning", Enabled: true})
+	ruleB, err := alerts.CreateRule(f.OrgCtx(f.OrgB), &monitoring.AlertRule{OrgID: f.OrgB, Name: "b", MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "warning", Enabled: true})
 	if err != nil {
 		t.Fatalf("create organization B rule: %v", err)
 	}
-	if _, err = alerts.CreateRule(ctx, monitoring.AlertRule{OrgID: f.OrgA, Name: "a", MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "warning", Enabled: true}); err != nil {
+	if _, err = alerts.CreateRule(ctx, &monitoring.AlertRule{OrgID: f.OrgA, Name: "a", MetricName: "cpu_usage", Condition: "gt", Threshold: 90, Severity: "warning", Enabled: true}); err != nil {
 		t.Fatalf("create organization A rule: %v", err)
 	}
 	rules, err := alerts.ListRules(ctx, f.OrgA)
@@ -75,7 +75,7 @@ func TestMonitoringStoreScope(t *testing.T) {
 	if _, err = alerts.DeleteRule(ctx, f.OrgB, ruleB.ID); !errors.Is(err, database.ErrTenantMismatch) {
 		t.Fatalf("delete organization B rule: got %v, want ErrTenantMismatch", err)
 	}
-	if _, err = store.Query(bg, monitoring.MetricQuery{OrgID: f.OrgA}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, err = store.Query(bg, &monitoring.MetricQuery{OrgID: f.OrgA}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("query without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

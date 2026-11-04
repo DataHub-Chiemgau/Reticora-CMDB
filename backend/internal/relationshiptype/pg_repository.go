@@ -151,7 +151,7 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 
 // Update modifies a tenant-owned relationship type; the merged type must
 // satisfy the REL-01 contract.
-func (r *PGRepository) Update(ctx context.Context, orgID, key string, req UpsertRequest) (*Type, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, key string, req *UpsertRequest) (*Type, error) {
 	var out *Type
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := scan(tx.QueryRow(ctx, fmt.Sprintf(

@@ -34,7 +34,7 @@ type StoredEntry struct {
 
 // Writer defines the interface for writing audit log entries.
 type Writer interface {
-	Write(ctx context.Context, entry Entry) error
+	Write(ctx context.Context, entry *Entry) error
 }
 
 // Reader defines the interface for reading audit log entries.
@@ -59,16 +59,17 @@ func NewMemoryWriter() *MemoryWriter {
 }
 
 // Write appends an entry to the in-memory audit log with hash-chain linkage.
-func (w *MemoryWriter) Write(_ context.Context, entry Entry) error {
+func (w *MemoryWriter) Write(_ context.Context, in *Entry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	entry := *in
 
 	if entry.OccurredAt.IsZero() {
 		entry.OccurredAt = time.Now().UTC()
 	}
 
 	w.seq++
-	hash := computeHash(w.lastHash, w.seq, entry)
+	hash := computeHash(w.lastHash, w.seq, &entry)
 
 	stored := StoredEntry{
 		Entry:        entry,
@@ -94,9 +95,9 @@ func (w *MemoryWriter) List(_ context.Context, orgID string, limit, offset int) 
 	defer w.mu.Unlock()
 
 	var filtered []StoredEntry
-	for _, e := range w.entries {
-		if e.OrgID == orgID {
-			filtered = append(filtered, e)
+	for i := range w.entries {
+		if w.entries[i].OrgID == orgID {
+			filtered = append(filtered, w.entries[i])
 		}
 	}
 
@@ -118,7 +119,8 @@ func (w *MemoryWriter) Verify(_ context.Context, orgID string) (bool, error) {
 
 	var prev string
 	first := true
-	for _, e := range w.entries {
+	for i := range w.entries {
+		e := &w.entries[i]
 		if e.OrgID != orgID {
 			continue
 		}
@@ -126,7 +128,7 @@ func (w *MemoryWriter) Verify(_ context.Context, orgID string) (bool, error) {
 			prev = e.PreviousHash
 			first = false
 		}
-		expected := computeHash(prev, e.Sequence, e.Entry)
+		expected := computeHash(prev, e.Sequence, &e.Entry)
 		if e.Hash != expected {
 			return false, fmt.Errorf("audit: hash mismatch at sequence %d", e.Sequence)
 		}
@@ -135,7 +137,7 @@ func (w *MemoryWriter) Verify(_ context.Context, orgID string) (bool, error) {
 	return true, nil
 }
 
-func computeHash(previousHash string, seq int64, entry Entry) string {
+func computeHash(previousHash string, seq int64, entry *Entry) string {
 	// Hashing must be deterministic and never fail, so an unmarshalable
 	// payload falls back to its type-quoted representation.
 	payload, err := json.Marshal(entry.Payload)

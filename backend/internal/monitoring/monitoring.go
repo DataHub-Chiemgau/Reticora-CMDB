@@ -23,7 +23,7 @@ import (
 // MetricStore defines metric ingestion and query operations.
 type MetricStore interface {
 	Ingest(ctx context.Context, metrics []Metric) error
-	Query(ctx context.Context, q MetricQuery) ([]MetricPoint, error)
+	Query(ctx context.Context, q *MetricQuery) ([]MetricPoint, error)
 }
 
 // Metric is a single telemetry sample.
@@ -90,27 +90,27 @@ type AlertEvent struct {
 
 // Notifier receives fired alerts (webhooks, tickets, log lines, ...).
 type Notifier interface {
-	NotifyAlert(ctx context.Context, event AlertEvent)
+	NotifyAlert(ctx context.Context, event *AlertEvent)
 }
 
 // NotifierFunc adapts a plain function to the Notifier interface.
-type NotifierFunc func(ctx context.Context, event AlertEvent)
+type NotifierFunc func(ctx context.Context, event *AlertEvent)
 
 // NotifyAlert implements Notifier.
-func (f NotifierFunc) NotifyAlert(ctx context.Context, event AlertEvent) { f(ctx, event) }
+func (f NotifierFunc) NotifyAlert(ctx context.Context, event *AlertEvent) { f(ctx, event) }
 
 // AlertStore is the persistence port for alert rules and their evaluation
 // state. AlertManager implements it in memory; PGAlertStore persists in
 // PostgreSQL.
 type AlertStore interface {
 	ListRules(ctx context.Context, orgID string) ([]AlertRule, error)
-	CreateRule(ctx context.Context, rule AlertRule) (AlertRule, error)
+	CreateRule(ctx context.Context, rule *AlertRule) (AlertRule, error)
 	UpdateRule(ctx context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error)
 	DeleteRule(ctx context.Context, orgID, id string) (bool, error)
 	ListEnabled(ctx context.Context) ([]AlertRule, error)
-	MarkPending(ctx context.Context, rule AlertRule, since time.Time) error
-	MarkFired(ctx context.Context, rule AlertRule, at time.Time) error
-	ClearPending(ctx context.Context, rule AlertRule) error
+	MarkPending(ctx context.Context, rule *AlertRule, since time.Time) error
+	MarkFired(ctx context.Context, rule *AlertRule, at time.Time) error
+	ClearPending(ctx context.Context, rule *AlertRule) error
 }
 
 // UpdateAlertRuleRequest carries the mutable fields of an alert rule. Nil
@@ -126,7 +126,7 @@ type UpdateAlertRuleRequest struct {
 }
 
 // MarshalJSON encodes duration values as Go duration strings.
-func (r AlertRule) MarshalJSON() ([]byte, error) {
+func (r AlertRule) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver: json.Marshal of values and pointers
 	type alias AlertRule
 	return json.Marshal(struct {
 		alias
@@ -210,11 +210,11 @@ func (m *AlertManager) ListRules(_ context.Context, orgID string) ([]AlertRule, 
 	defer m.mu.RUnlock()
 
 	result := make([]AlertRule, 0, len(m.rules))
-	for _, rule := range m.rules {
-		if orgID != "" && rule.OrgID != orgID {
+	for i := range m.rules {
+		if orgID != "" && m.rules[i].OrgID != orgID {
 			continue
 		}
-		result = append(result, rule)
+		result = append(result, m.rules[i])
 	}
 	// Name, then id, like PGAlertStore: the offset pages of
 	// GET /monitoring/alerts need a stable order (API-02).
@@ -228,15 +228,16 @@ func (m *AlertManager) ListRules(_ context.Context, orgID string) ([]AlertRule, 
 }
 
 // CreateRule stores a new alert rule.
-func (m *AlertManager) CreateRule(_ context.Context, rule AlertRule) (AlertRule, error) {
+func (m *AlertManager) CreateRule(_ context.Context, in *AlertRule) (AlertRule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	rule := *in
 
 	if rule.ID == "" {
 		rule.ID = fmt.Sprintf("alert-%d", time.Now().UTC().UnixNano())
 	}
-	for _, existing := range m.rules {
-		if existing.ID == rule.ID && existing.OrgID == rule.OrgID {
+	for i := range m.rules {
+		if existing := &m.rules[i]; existing.ID == rule.ID && existing.OrgID == rule.OrgID {
 			return AlertRule{}, ErrAlertRuleExists
 		}
 	}
@@ -249,10 +250,11 @@ func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req Updat
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for i, rule := range m.rules {
-		if rule.ID != id || rule.OrgID != orgID {
+	for i := range m.rules {
+		if m.rules[i].ID != id || m.rules[i].OrgID != orgID {
 			continue
 		}
+		rule := m.rules[i]
 		if req.Name != nil {
 			rule.Name = *req.Name
 		}
@@ -286,8 +288,8 @@ func (m *AlertManager) DeleteRule(_ context.Context, orgID, id string) (bool, er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for i, rule := range m.rules {
-		if rule.ID != id || rule.OrgID != orgID {
+	for i := range m.rules {
+		if m.rules[i].ID != id || m.rules[i].OrgID != orgID {
 			continue
 		}
 		m.rules = append(m.rules[:i], m.rules[i+1:]...)
@@ -302,9 +304,9 @@ func (m *AlertManager) ListEnabled(_ context.Context) ([]AlertRule, error) {
 	defer m.mu.RUnlock()
 
 	result := make([]AlertRule, 0, len(m.rules))
-	for _, rule := range m.rules {
-		if rule.Enabled {
-			result = append(result, rule)
+	for i := range m.rules {
+		if m.rules[i].Enabled {
+			result = append(result, m.rules[i])
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -317,12 +319,12 @@ func (m *AlertManager) ListEnabled(_ context.Context) ([]AlertRule, error) {
 }
 
 // MarkPending records when the condition started being true.
-func (m *AlertManager) MarkPending(_ context.Context, rule AlertRule, since time.Time) error {
+func (m *AlertManager) MarkPending(_ context.Context, rule *AlertRule, since time.Time) error {
 	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = &since })
 }
 
 // MarkFired records the firing and clears the pending marker.
-func (m *AlertManager) MarkFired(_ context.Context, rule AlertRule, at time.Time) error {
+func (m *AlertManager) MarkFired(_ context.Context, rule *AlertRule, at time.Time) error {
 	return m.updateRuleState(rule, func(r *AlertRule) {
 		r.PendingSince = nil
 		r.LastFiredAt = &at
@@ -331,11 +333,11 @@ func (m *AlertManager) MarkFired(_ context.Context, rule AlertRule, at time.Time
 
 // ClearPending resets the duration tracking once the condition no longer
 // holds.
-func (m *AlertManager) ClearPending(_ context.Context, rule AlertRule) error {
+func (m *AlertManager) ClearPending(_ context.Context, rule *AlertRule) error {
 	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = nil })
 }
 
-func (m *AlertManager) updateRuleState(rule AlertRule, update func(*AlertRule)) error {
+func (m *AlertManager) updateRuleState(rule *AlertRule, update func(*AlertRule)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range m.rules {
@@ -380,7 +382,7 @@ func (s *MemoryMetricStore) Ingest(ctx context.Context, metrics []Metric) error 
 }
 
 // Query filters and optionally aggregates metrics.
-func (s *MemoryMetricStore) Query(ctx context.Context, q MetricQuery) ([]MetricPoint, error) {
+func (s *MemoryMetricStore) Query(ctx context.Context, q *MetricQuery) ([]MetricPoint, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -530,7 +532,7 @@ func (h *Handler) QueryMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	points, err := h.store.Query(r.Context(), query)
+	points, err := h.store.Query(r.Context(), &query)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -678,7 +680,7 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 	}
 	rule.OrgID = orgID
 
-	created, err := h.alerts.CreateRule(r.Context(), rule)
+	created, err := h.alerts.CreateRule(r.Context(), &rule)
 	if err != nil {
 		writeAlertError(w, r, err)
 		return
@@ -825,7 +827,7 @@ func readMetricsBody(body io.ReadCloser) ([]byte, error) {
 // decodeMetrics reads the metrics of an ingest body.
 // validation: fixed texts.
 func decodeMetrics(data []byte) ([]Metric, error) {
-	if len(strings.TrimSpace(string(data))) == 0 {
+	if strings.TrimSpace(string(data)) == "" {
 		return nil, errors.New("request body is required")
 	}
 	if !json.Valid(data) {
@@ -954,7 +956,7 @@ type CIAddressResolver struct{ CIs ci.Repository }
 
 // ResolveCI implements CIResolver.
 func (a CIAddressResolver) ResolveCI(ctx context.Context, orgID, address string) (ciID string, ok bool) {
-	items, _, err := a.CIs.List(ctx, orgID, ci.FilterParams{Filters: []api.Filter{
+	items, _, err := a.CIs.List(ctx, orgID, &ci.FilterParams{Filters: []api.Filter{
 		{Field: "management_ip", Op: api.OpExact, Kind: api.KindText, Values: []string{address}},
 	}}, api.PaginationParams{Limit: 2})
 	if err != nil || len(items) != 1 {
@@ -1045,7 +1047,7 @@ func (h *Handler) CIMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, name := range names {
 		q := query
 		q.Name = name
-		points, qerr := h.store.Query(r.Context(), q)
+		points, qerr := h.store.Query(r.Context(), &q)
 		if qerr != nil {
 			api.WriteRepoError(w, qerr)
 			return

@@ -74,7 +74,7 @@ type RackSource interface {
 
 // SearchSource runs full-text queries (search.Backend).
 type SearchSource interface {
-	Query(ctx context.Context, q search.Query) (search.Result, error)
+	Query(ctx context.Context, q *search.Query) (search.Result, error)
 }
 
 // ReviewSource lists review items (reviews.Repository).

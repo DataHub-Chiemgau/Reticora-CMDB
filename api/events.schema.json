@@ -1116,38 +1116,173 @@
       ]
     },
     "metamodel.published": {
-      "description": "Data frame of metamodel.published. entity_id: the publication. Origin: EVT-03. Producer: WP-261. Its content follows decision E-37. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of metamodel.published. entity_id: the publication, i.e. the published metamodel draft, or for a change through a resource route without a draft (direct, MET-04) the changed object. Origin: EVT-03. Producer: WP-261. Its content follows decision E-37. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "direct", "counts", "types"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
-          "description": "The publication."
+          "description": "The publication: the draft, or the changed object of a direct change."
+        },
+        "draft_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The published metamodel draft; absent for a direct change."
+        },
+        "direct": {
+          "type": "boolean",
+          "description": "true for a change through a resource route without a draft (MET-04)."
+        },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Number of published elements per part, by item kind; a kind without elements is absent.",
+          "properties": {
+            "ci_type": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ci_type_field": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "global_field": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attribute_definition": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "attribute_set": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "template": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "template_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rule": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "layout": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "types": {
+          "type": "array",
+          "description": "The affected CI types with their schema_version after the publication.",
+          "items": {
+            "type": "object",
+            "required": ["id", "schema_version"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "schema_version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
         }
       },
       "examples": [
         {
-          "id": "66666666-6666-4666-8666-666666666666"
+          "id": "66666666-6666-4666-8666-666666666666",
+          "draft_id": "66666666-6666-4666-8666-666666666666",
+          "direct": false,
+          "counts": {
+            "ci_type": 1,
+            "attribute_definition": 2
+          },
+          "types": [
+            {
+              "id": "55555555-5555-4555-8555-555555555555",
+              "schema_version": 4
+            }
+          ]
+        },
+        {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "direct": true,
+          "counts": {
+            "attribute_definition": 1
+          },
+          "types": [
+            {
+              "id": "55555555-5555-4555-8555-555555555555",
+              "schema_version": 5
+            }
+          ]
         }
       ]
     },
     "document.scanned": {
       "description": "Data frame of document.scanned. entity_id: the document. Origin: plan addition. Producer: WP-734. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "document_id", "version", "result"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The document."
+        },
+        "document_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The document (same as id)."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The scanned version of the document."
+        },
+        "result": {
+          "type": "string",
+          "enum": ["clean", "infected", "scan_failed"],
+          "description": "Scan result: clean (downloadable), infected (quarantined) or scan_failed (no result after the last attempt; the sweep retries)."
+        },
+        "scan_signature": {
+          "type": "string",
+          "description": "Signature name reported by the scanner for an infected version; absent otherwise."
+        },
+        "uploaded_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "User who uploaded the version; absent for versions without uploader."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client shared by every link of the document; absent otherwise (organization-wide)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site shared by every link of the document; absent otherwise (organization-wide)."
         }
       },
       "examples": [
         {
-          "id": "66666666-6666-4666-8666-666666666666"
+          "id": "66666666-6666-4666-8666-666666666666",
+          "document_id": "66666666-6666-4666-8666-666666666666",
+          "version": 2,
+          "result": "infected",
+          "scan_signature": "Win.Test.EICAR_HDB-1",
+          "uploaded_by": "77777777-7777-4777-8777-777777777777",
+          "client_id": "33333333-3333-4333-8333-333333333333"
         }
       ]
     },

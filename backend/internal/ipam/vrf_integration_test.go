@@ -101,7 +101,7 @@ func TestVRFModel(t *testing.T) {
 	if err = repo.CreateVRF(ctx, third); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.UpdateSubnet(ctx, f.OrgA, defaultSubnet.ID, ipam.UpdateSubnetRequest{VRFID: &third.ID}); err != nil {
+	if _, err = repo.UpdateSubnet(ctx, f.OrgA, defaultSubnet.ID, &ipam.UpdateSubnetRequest{VRFID: &third.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := repo.GetIPAddress(ctx, f.OrgA, a1.ID); got == nil || got.VRFID != third.ID {

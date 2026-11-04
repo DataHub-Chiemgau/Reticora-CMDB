@@ -150,13 +150,13 @@ func TestListRejectsCursorFromDifferentSortOrder(t *testing.T) {
 
 func TestNextCursorEmptyOnPartialPage(t *testing.T) {
 	items := []Item{{ID: "a", Name: "a", CreatedAt: "2026-01-01T00:00:00Z"}}
-	if got := NextCursor(items, FilterParams{}, 10); got != "" {
+	if got := NextCursor(items, &FilterParams{}, 10); got != "" {
 		t.Errorf("expected no cursor for a partial page, got %q", got)
 	}
-	if got := NextCursor(nil, FilterParams{}, 10); got != "" {
+	if got := NextCursor(nil, &FilterParams{}, 10); got != "" {
 		t.Errorf("expected no cursor for an empty page, got %q", got)
 	}
-	if got := NextCursor(items, FilterParams{}, 1); got == "" {
+	if got := NextCursor(items, &FilterParams{}, 1); got == "" {
 		t.Error("expected a cursor for a full page")
 	}
 }

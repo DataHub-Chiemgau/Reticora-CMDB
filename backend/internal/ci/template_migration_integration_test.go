@@ -184,7 +184,7 @@ func TestTemplateMigrationOnPostgreSQL(t *testing.T) {
 			t.Fatalf("manual update: %v", err)
 		}
 	}
-	if _, err := types.UpsertInstanceField(ctx, f.OrgA, device.ID, citype.UpsertInstanceFieldRequest{Name: "w253_note", DataType: "text"}); err != nil {
+	if _, err := types.UpsertInstanceField(ctx, f.OrgA, device.ID, &citype.UpsertInstanceFieldRequest{Name: "w253_note", DataType: "text"}); err != nil {
 		t.Fatalf("instance field: %v", err)
 	}
 	if _, err := repo.Update(ctx, f.OrgA, device.ID, ci.UpdateRequest{Attributes: map[string]any{"w253_note": "inst"}}); err != nil {
@@ -384,7 +384,7 @@ func TestTemplateMigrationOnPostgreSQL(t *testing.T) {
 	// definition caps w253_level at 5, version 2 asks for at least 10.
 	capped := newCI("w253-capped", nil, narrow)
 	five := 5.0
-	if _, err = types.UpsertInstanceField(ctx, f.OrgA, capped.ID, citype.UpsertInstanceFieldRequest{Name: "w253_level",
+	if _, err = types.UpsertInstanceField(ctx, f.OrgA, capped.ID, &citype.UpsertInstanceFieldRequest{Name: "w253_level",
 		DataType: "integer", Validation: &fieldmeta.ValidationRules{Max: &five}}); err != nil {
 		t.Fatalf("instance definition: %v", err)
 	}

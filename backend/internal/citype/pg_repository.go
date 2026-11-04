@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -214,7 +215,8 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if err := row.Scan(&typ.ID, &typ.IsActive, &typ.Version, &typ.SchemaVersion, &typ.CreatedAt, &typ.UpdatedAt); err != nil {
 			return fmt.Errorf("create ci type: %w", typeDBError(err))
 		}
-		for _, f := range typ.Fields {
+		for i := range typ.Fields {
+			f := &typ.Fields[i]
 			if _, err := upsertFieldTx(ctx, tx, typ.OrganizationID, typ.ID, &UpsertFieldRequest{
 				Scope: "type", Name: f.Name, Label: f.Label, Description: f.Description,
 				DataType: f.DataType, Required: f.Required, DefaultValue: f.DefaultValue,
@@ -320,7 +322,7 @@ func typeDBError(err error) error {
 // organization's global attributes that apply (MET-13, WP-255): the type
 // and its subtypes stay composable with them, otherwise a 422 on category
 // and nothing is stored.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateTypeRequest) (*Type, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *UpdateTypeRequest) (*Type, error) {
 	if !api.IsUUID(id) {
 		return nil, fmt.Errorf("not found")
 	}
@@ -1129,8 +1131,11 @@ func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Fi
 // in attribute_definition, keyed by type and name (legacy field view). A
 // type-bound field needs a type of the organization: an unknown type is
 // "not found" (404), a system type a 422 on ci_type_id (checkFieldType).
-func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, req UpsertFieldRequest) (*Field, error) {
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, in *UpsertFieldRequest) (*Field, error) {
+	// The scope default below applies to this call only, not to the caller's request.
+	req := *in
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return nil, err
 	}
 	if req.Scope == "" {
@@ -1335,8 +1340,9 @@ func (r *PGRepository) InstanceFieldNames(ctx context.Context, orgID, ciID strin
 
 // UpsertInstanceField creates or updates an instance field definition and
 // records the change in the audit log (MET-14).
-func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req UpsertInstanceFieldRequest) (*InstanceField, error) {
-	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error) {
+	fieldDef := instanceFieldFromUpsert(req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return nil, err
 	}
 	enumJSON := "null"
@@ -1681,7 +1687,110 @@ func recordMetamodelAudit(ctx context.Context, tx pgx.Tx, orgID, action, resourc
 	}); err != nil {
 		return fmt.Errorf("record audit: %w", err)
 	}
+	if InPublication(ctx) {
+		return nil
+	}
+	return appendDirectPublished(ctx, tx, orgID, resourceType, resourceID, before, after)
+}
+
+// publicationKey marks the context of a draft publication.
+type publicationKey struct{}
+
+// WithPublication marks ctx as the context of the publication of a
+// metamodel draft (WP-261): the publication writes one metamodel.published
+// for the whole draft, so recordMetamodelAudit writes none for its
+// elements.
+func WithPublication(ctx context.Context) context.Context {
+	return context.WithValue(ctx, publicationKey{}, true)
+}
+
+// InPublication reports whether ctx is the context of a draft publication.
+func InPublication(ctx context.Context) bool {
+	marked, _ := ctx.Value(publicationKey{}).(bool)
+	return marked
+}
+
+// publishedPart is the part of a published metamodel change by audit
+// resource type: the item kinds of the metamodel drafts.
+var publishedPart = map[string]string{
+	"metamodel_rule": "rule",
+	"form_layout":    "layout",
+}
+
+// directPublishedSetting is the transaction-local setting that marks a
+// transaction whose direct metamodel change has its event already.
+const directPublishedSetting = "reticora.metamodel_published"
+
+// appendDirectPublished writes metamodel.published for a change through a
+// resource route without a draft (MET-04, WP-261) after its audit entry, in
+// the transaction of the change: direct true, entity_id and id the changed
+// object, the affected type with its schema_version. A route that changes
+// several definitions in one transaction (a type with its fields, a
+// template with its first version) publishes one change: only the first
+// audit entry of a transaction writes the event.
+func appendDirectPublished(ctx context.Context, tx pgx.Tx, orgID, resourceType, resourceID string, before, after any) error {
+	var first bool
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(current_setting('`+directPublishedSetting+`', true), '') = '',
+			set_config('`+directPublishedSetting+`', 'on', true) IS NOT NULL`).Scan(&first, new(bool)); err != nil {
+		return fmt.Errorf("mark metamodel publication: %w", err)
+	}
+	if !first {
+		return nil
+	}
+	part := resourceType
+	if p, ok := publishedPart[resourceType]; ok {
+		part = p
+	}
+	data := events.MetamodelPublishedData{ID: resourceID, Direct: true, Counts: map[string]int{part: 1},
+		Types: []events.MetamodelPublishedType{}}
+	typeID := resourceID
+	if resourceType != "ci_type" {
+		typeID = changedTypeID(after)
+		if typeID == "" {
+			typeID = changedTypeID(before)
+		}
+	}
+	if typeID != "" {
+		var version int64
+		err := tx.QueryRow(ctx, `SELECT schema_version FROM ci_type WHERE id = $1`, typeID).Scan(&version)
+		switch {
+		case err == nil:
+			data.Types = append(data.Types, events.MetamodelPublishedType{ID: typeID, SchemaVersion: version})
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("read schema version: %w", err)
+		}
+	}
+	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.MetamodelPublished,
+		EntityID: resourceID, Data: data}); err != nil {
+		return fmt.Errorf("append metamodel.published: %w", err)
+	}
 	return nil
+}
+
+// changedTypeID is the ci_type_id of an audited definition, "" for none.
+func changedTypeID(v any) string {
+	if v == nil || isNilPointer(v) {
+		return ""
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	var ref struct {
+		CITypeID string `json:"ci_type_id"`
+	}
+	if json.Unmarshal(raw, &ref) != nil || !isUUIDText(ref.CITypeID) {
+		return ""
+	}
+	return ref.CITypeID
+}
+
+// AttributeDBError maps a database error of an attribute definition write
+// as the resource routes do: a composition conflict of the generator
+// (constraint attribute_definition_composition) is 422 on key with its
+// code (WP-261: the publication meets it at SET CONSTRAINTS … IMMEDIATE).
+func AttributeDBError(err error) error {
+	return attributeDBError(err)
 }
 
 // recordAttributeAudit audits a created (before nil), changed or deleted

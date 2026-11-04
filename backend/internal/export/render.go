@@ -16,8 +16,8 @@ const renderBatchSize = 500
 // the number of rows written. It streams keyset-paginated batches so a large
 // tenant export never buffers the whole result set in memory. The exported
 // row shape is identical to the streaming endpoint.
-func RenderFormat(ctx context.Context, ciRepo ci.Repository, orgID string, format string, filters JobFilters, out io.Writer) (int, error) {
-	filter := ci.FilterParams{
+func RenderFormat(ctx context.Context, ciRepo ci.Repository, orgID, format string, filters JobFilters, out io.Writer) (int, error) {
+	filter := &ci.FilterParams{
 		Status:   filters.Status,
 		TypeID:   filters.CITypeID,
 		ClientID: filters.ClientID,
@@ -35,8 +35,8 @@ func RenderFormat(ctx context.Context, ciRepo ci.Repository, orgID string, forma
 		if err != nil {
 			return written, fmt.Errorf("export query: %w", err)
 		}
-		for _, item := range items {
-			writer.row(item)
+		for i := range items {
+			writer.row(&items[i])
 			written++
 		}
 		if flushErr := writer.flush(); flushErr != nil {

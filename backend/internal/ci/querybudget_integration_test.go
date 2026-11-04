@@ -166,7 +166,7 @@ func TestCIQueryBudget(t *testing.T) {
 	identities := discovery.NewPGRepository(trace.pool)
 	ctx := f.OrgCtx(f.OrgA)
 
-	list := func(limit int, filter ci.FilterParams) int {
+	list := func(limit int, filter *ci.FilterParams) int {
 		return len(trace.run(t, func() error {
 			items, total, err := repo.List(ctx, f.OrgA, filter, api.PaginationParams{Limit: limit})
 			if err == nil && (len(items) != limit || total < limit) {
@@ -176,8 +176,8 @@ func TestCIQueryBudget(t *testing.T) {
 		}))
 	}
 	// Warm the pool: the first connection switches its role.
-	list(10, ci.FilterParams{})
-	small, large := list(10, ci.FilterParams{}), list(200, ci.FilterParams{})
+	list(10, &ci.FilterParams{})
+	small, large := list(10, &ci.FilterParams{}), list(200, &ci.FilterParams{})
 	if small != large {
 		t.Errorf("list: %d statements for 10 rows, %d for 200 (N+1)", small, large)
 	}
@@ -186,7 +186,7 @@ func TestCIQueryBudget(t *testing.T) {
 	if large > listBudget {
 		t.Errorf("list: %d statements, budget %d", large, listBudget)
 	}
-	if filtered := list(200, ci.FilterParams{Status: "maintenance"}); filtered > listBudget {
+	if filtered := list(200, &ci.FilterParams{Status: "maintenance"}); filtered > listBudget {
 		t.Errorf("filtered list: %d statements, budget %d", filtered, listBudget)
 	}
 
@@ -211,7 +211,7 @@ func TestCIQueryBudget(t *testing.T) {
 	const identityBudget = 3
 	// The row budget: 1 % of the organization's CIs.
 	const maxRows = orgCIs / 100
-	listItems := func(filter ci.FilterParams) func() ([]string, error) {
+	listItems := func(filter *ci.FilterParams) func() ([]string, error) {
 		return func() ([]string, error) {
 			items, _, err := repo.List(ctx, f.OrgA, filter, api.PaginationParams{Limit: 50})
 			out := make([]string, 0, len(items))
@@ -224,8 +224,8 @@ func TestCIQueryBudget(t *testing.T) {
 	identity := func(q discovery.IdentityQuery) func() ([]string, error) {
 		return func() ([]string, error) { return identities.IdentityCandidates(ctx, f.OrgA, &q) }
 	}
-	exact := func(field, value string) ci.FilterParams {
-		return ci.FilterParams{Filters: []api.Filter{{Field: field, Op: api.OpExact, Values: []string{value}}}}
+	exact := func(field, value string) *ci.FilterParams {
+		return &ci.FilterParams{Filters: []api.Filter{{Field: field, Op: api.OpExact, Values: []string{value}}}}
 	}
 	const (
 		listPage      = " ORDER BY ci."
@@ -234,16 +234,16 @@ func TestCIQueryBudget(t *testing.T) {
 	serial := []string{"idx_ci_serial_number_lc"}
 	ip := []string{"idx_ci_mgmt_ip_sys_object", "idx_ci_mgmt_ip"}
 	byID := []string{"ci_pkey", "ci_id_organization_key"}
-	tagged := func(op string, keys ...string) ci.FilterParams {
-		return ci.FilterParams{Filters: []api.Filter{{Field: ci.TagsField, Op: op, Kind: api.KindSet, Values: keys}}}
+	tagged := func(op string, keys ...string) *ci.FilterParams {
+		return &ci.FilterParams{Filters: []api.Filter{{Field: ci.TagsField, Op: op, Kind: api.KindSet, Values: keys}}}
 	}
 	calls := []budgetCall{
 		{name: "list", match: listPage, statements: listBudget, ordered: true,
 			budget: queryBudget{indexes: [][]string{{listSortIndex}}, maxRows: maxRows},
-			run:    listItems(ci.FilterParams{}), want: ids("true", "created_at DESC, id DESC LIMIT 50")},
+			run:    listItems(&ci.FilterParams{}), want: ids("true", "created_at DESC, id DESC LIMIT 50")},
 		{name: "name filter (search=)", match: listPage, statements: listBudget,
 			budget: queryBudget{gap: "WP-438/SR-04: name ILIKE (texticlike) is not leakproof, no index can serve it under row level security"},
-			run:    listItems(ci.FilterParams{Search: "budget-4242"}), want: ids(`name = 'budget-4242'`, "id")},
+			run:    listItems(&ci.FilterParams{Search: "budget-4242"}), want: ids(`name = 'budget-4242'`, "id")},
 		{name: "name filter (filter[name]=)", match: listPage, statements: listBudget,
 			budget: queryBudget{gap: "WP-438: no index on (organization_id, name); name = $n (texteq) is leakproof and could use one"},
 			run:    listItems(exact("name", "budget-4242")), want: ids(`name = 'budget-4242'`, "id")},

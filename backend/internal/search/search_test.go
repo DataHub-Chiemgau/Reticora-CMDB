@@ -13,7 +13,7 @@ import (
 )
 
 func TestPostgresQueryBuilderUsesParameters(t *testing.T) {
-	sql, args, err := buildPostgresQuery(Query{OrganizationID: "org", Text: "x' | delete", EntityTypes: []string{"ci"}, Limit: 10, Highlight: true})
+	sql, args, err := buildPostgresQuery(&Query{OrganizationID: "org", Text: "x' | delete", EntityTypes: []string{"ci"}, Limit: 10, Highlight: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,8 +54,8 @@ func TestOpenSearchHTTPQuery(t *testing.T) {
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
-	res, err := b.Query(orgWideContext("org"), Query{OrganizationID: "org", Text: "router"})
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
+	res, err := b.Query(orgWideContext("org"), &Query{OrganizationID: "org", Text: "router"})
 	if err != nil || len(res.Data) != 1 {
 		t.Fatalf("res=%#v err=%v", res, err)
 	}
@@ -77,23 +77,23 @@ type failingRoundTripper struct{ err error }
 func (f failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) { return nil, f.err }
 
 func TestOpenSearchPingInvalidURL(t *testing.T) {
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: "://bad-url"}, nil)
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: "://bad-url"}, nil)
 	if err := b.Ping(context.Background()); err == nil {
 		t.Fatal("expected error for invalid URL")
 	}
 }
 
 func TestOpenSearchPingUnreachable(t *testing.T) {
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
 	if err := b.Ping(context.Background()); err == nil {
 		t.Fatal("expected error for unreachable backend")
 	}
 }
 
 func TestOpenSearchIndexDocumentMarshalError(t *testing.T) {
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: "http://opensearch.local"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
 	doc := Document{OrganizationID: "org", EntityType: "ci", EntityID: "1", Metadata: map[string]string{"bad": "\xff\xfe"}}
-	if err := b.IndexDocument(context.Background(), doc); err == nil {
+	if err := b.IndexDocument(context.Background(), &doc); err == nil {
 		t.Fatal("expected marshal error for invalid UTF-8 metadata")
 	}
 }
@@ -104,11 +104,11 @@ func TestOpenSearchQueryRoundTrip(t *testing.T) {
 		_, _ = w.Write([]byte(`{"hits":{"total":{"value":1},"hits":[{"_score":1.5,"_source":{"id":"d1","organization_id":"org","entity_type":"ci","entity_id":"1","title":"switch"},"highlight":{"title":["<em>switch</em>"]}}]}}`))
 	}))
 	defer srv.Close()
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL}, srv.Client())
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL}, srv.Client())
 	if err := b.Ping(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	res, err := b.Query(orgWideContext("org"), Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
+	res, err := b.Query(orgWideContext("org"), &Query{OrganizationID: "org", Text: "switch", Limit: 10, Highlight: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestEnsureIndexTemplateIdempotent(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client())
 	if err := b.EnsureIndexTemplate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestEnsureIndexTemplateIdempotent(t *testing.T) {
 }
 
 func TestEnsureIndexTemplateError(t *testing.T) {
-	b := NewOpenSearchBackend(OpenSearchConfig{URL: "http://opensearch.local", Index: "idx"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
+	b := NewOpenSearchBackend(&OpenSearchConfig{URL: "http://opensearch.local", Index: "idx"}, &http.Client{Transport: failingRoundTripper{err: errTest}})
 	if err := b.EnsureIndexTemplate(context.Background()); err == nil {
 		t.Fatal("expected error for unreachable backend")
 	}

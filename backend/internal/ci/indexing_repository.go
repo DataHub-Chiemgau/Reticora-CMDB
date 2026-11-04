@@ -73,7 +73,7 @@ func (r *indexingRepository) CreateMany(ctx context.Context, orgID string, items
 	return res, nil
 }
 
-func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository
 	item, err := r.Repository.Update(ctx, orgID, id, req)
 	if err != nil {
 		return nil, err
@@ -346,7 +346,7 @@ func (r *indexingRepository) index(ctx context.Context, item *Item) {
 	if doc.OrganizationID == "" || doc.EntityID == "" {
 		return
 	}
-	if err := r.indexer.IndexDocument(ctx, doc); err != nil {
+	if err := r.indexer.IndexDocument(ctx, &doc); err != nil {
 		slog.WarnContext(ctx, "search index update failed; rebuild via POST /api/v1/search/reindex", "ci_id", item.ID, "error", err)
 	}
 }

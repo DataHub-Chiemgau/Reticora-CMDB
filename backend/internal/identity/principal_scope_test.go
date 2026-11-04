@@ -296,7 +296,7 @@ func TestRefreshReadsRoleAssignmentsFromDatabase(t *testing.T) {
 	handler := NewHandler(nil, sessionIssuer).WithAccessResolver(resolver)
 
 	orgWide := Scope{Clients: ScopeSet{All: true}, Sites: ScopeSet{All: true}, Teams: ScopeSet{All: true}}
-	token, err := sessionIssuer.Issue(SessionClaims{
+	token, err := sessionIssuer.Issue(&SessionClaims{
 		Subject:        "user-123",
 		OrganizationID: scopeOrg,
 		Permissions:    []Permission{PermCIRead, PermCIDelete},
@@ -326,7 +326,7 @@ func TestRefreshReadsRoleAssignmentsFromDatabase(t *testing.T) {
 func TestRefreshFailsWhenRoleAssignmentsCannotBeRead(t *testing.T) {
 	sessionIssuer := testSessionIssuer(t)
 	handler := NewHandler(nil, sessionIssuer).WithAccessResolver(&fakeAccessResolver{err: errors.New("db down")})
-	token, err := sessionIssuer.Issue(SessionClaims{
+	token, err := sessionIssuer.Issue(&SessionClaims{
 		Subject: "user-123", OrganizationID: scopeOrg,
 		IssuedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
 	})

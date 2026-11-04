@@ -96,7 +96,7 @@ func TestDiscoveryScopeWorkerChecksTheDiscoveryLicense(t *testing.T) {
 	if resp := scopes(); len(resp.Scopes) != 0 || resp.Error != "discovery license not_entitled" {
 		t.Errorf("scopes.request without the discovery entitlement: %+v, want no scopes and discovery license not_entitled", resp)
 	}
-	if _, err = ents.Grant(bg, entitlement.Entitlement{OrganizationID: org, FeatureKey: entitlement.FeatureDiscovery,
+	if _, err = ents.Grant(bg, &entitlement.Entitlement{OrganizationID: org, FeatureKey: entitlement.FeatureDiscovery,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "manual"}); err != nil {
 		t.Fatal(err)
 	}

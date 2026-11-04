@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -49,6 +50,12 @@ var (
 	// exportJobKind it has no queue handler yet: the run goes in the
 	// process that accepted it (the queue handler follows with WP-775).
 	importJobKind = jobs.Kind{Name: importer.JobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
+	// documentScanJobKind (WP-734, SEC-09, E-42): the malware scan of a
+	// document version only reads the blob and stores its result once; it
+	// is retried while clamd fails, its last attempt stores scan_failed and
+	// ends without job.failed. It is not cancellable while running.
+	documentScanJobKind = jobs.Kind{Name: document.ScanJobKind, MaxAttempts: 5, Timeout: 2 * time.Minute,
+		Backoff: jobs.ExponentialBackoff(30*time.Second, 15*time.Minute)}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -59,11 +66,12 @@ type jobKind struct {
 
 // applicationJobKinds lists the kinds the application submits with their
 // handlers; the bulk kind needs the CI service, the template migration its
-// executor (nil while the module metamodel is off, E-105). The test run of
-// a draft runs on the draft handler (without a database its handler
-// fails, the route answers 503 before).
+// executor (nil while the module metamodel is off, E-105), the malware scan
+// of documents its scanner (nil while the module documents is off). The
+// test run of a draft runs on the draft handler (without a database its
+// handler fails, the route answers 503 before).
 func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs,
-	draftHandler *metamodel.Handler) []jobKind {
+	draftHandler *metamodel.Handler, scanner *document.Scanner) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob}}
 	if ciService != nil {
@@ -71,6 +79,9 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 	}
 	if templateJobs != nil {
 		kinds = append(kinds, jobKind{kind: templateMigrateJobKind, handler: templateJobs.RunJob})
+	}
+	if scanner != nil {
+		kinds = append(kinds, jobKind{kind: documentScanJobKind, handler: scanner.RunJob})
 	}
 	return kinds
 }
@@ -83,9 +94,12 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 //
 // The template migration takes progress and cancel from svc in both cases,
 // the test run of a draft the state of a running test, the import its
-// jobs (it runs in this process also with a queue, WP-301).
+// jobs (it runs in this process also with a queue, WP-301). The malware
+// scan of documents runs on the queue only: without it no submitter is
+// wired and new versions stay pending_scan (fail-closed, E-42).
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
-	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler) {
+	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
+	scanner *document.Scanner) {
 	svc.Register(exportJobKind)
 	svc.Register(importJobKind)
 	importHandler.WithJobs(svc)
@@ -93,7 +107,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		templateJobs.WithJobs(svc)
 	}
 	draftHandler.WithJobs(svc)
-	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler) {
+	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, scanner) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)

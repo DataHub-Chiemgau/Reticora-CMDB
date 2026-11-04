@@ -382,7 +382,7 @@ func TestCIListBudget(t *testing.T) {
 	// statements that follow it.
 	var sorting string
 	if err = database.WithRequestTenant(f.OrgCtx(f.OrgA), pool, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
-		items, _, lerr := ci.NewPGRepository(pool).List(database.ContextWithTx(ctx, tx), f.OrgA, ci.FilterParams{}, api.PaginationParams{Limit: 50})
+		items, _, lerr := ci.NewPGRepository(pool).List(database.ContextWithTx(ctx, tx), f.OrgA, &ci.FilterParams{}, api.PaginationParams{Limit: 50})
 		if lerr != nil || len(items) != 50 {
 			return fmt.Errorf("list in the caller's transaction: %d items, %v", len(items), lerr)
 		}

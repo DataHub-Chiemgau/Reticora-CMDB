@@ -362,7 +362,7 @@ func TestInstanceDefinitionMovesValue(t *testing.T) {
 		VALUES ($1, $2, 'asset_note', '"N-1"', 'manual', now(), true)`, e.f.OrgA, device)
 
 	if _, err := e.types.UpsertInstanceField(e.manager, e.f.OrgA, device,
-		citype.UpsertInstanceFieldRequest{Name: "asset_note", DataType: "text"}); err != nil {
+		&citype.UpsertInstanceFieldRequest{Name: "asset_note", DataType: "text"}); err != nil {
 		t.Fatalf("upsert definition: %v", err)
 	}
 	attrs := e.stored(device)
@@ -378,7 +378,7 @@ func TestInstanceDefinitionMovesValue(t *testing.T) {
 	}
 	// An update of the definition moves nothing.
 	if _, err = e.types.UpsertInstanceField(e.manager, e.f.OrgA, device,
-		citype.UpsertInstanceFieldRequest{Name: "asset_note", DataType: "text", Label: "Note"}); err != nil {
+		&citype.UpsertInstanceFieldRequest{Name: "asset_note", DataType: "text", Label: "Note"}); err != nil {
 		t.Fatalf("update definition: %v", err)
 	}
 	if e.namespace(device, "_instance")["asset_note"] != "N-1" {

@@ -356,7 +356,7 @@ func main() {
 			slog.Error("RETICORA_OPENSEARCH_URL is required when RETICORA_SEARCH_BACKEND=opensearch")
 			os.Exit(1)
 		}
-		osBackend := search.NewOpenSearchBackend(search.OpenSearchConfig{
+		osBackend := search.NewOpenSearchBackend(&search.OpenSearchConfig{
 			URL: cfg.OpenSearchURL, Username: cfg.OpenSearchUsername, Password: cfg.OpenSearchPassword, Index: cfg.OpenSearchIndex,
 		}, nil)
 		if pingErr := osBackend.Ping(context.Background()); pingErr != nil {

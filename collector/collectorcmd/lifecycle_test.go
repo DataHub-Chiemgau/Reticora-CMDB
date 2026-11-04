@@ -380,7 +380,7 @@ authorization {
 	}
 	oldSerial := oldLeaf.SerialNumber.Text(16)
 	credPath := filepath.Join(dir, "credentials.json")
-	if err = (&keystore.FileStore{Path: credPath}).Save(context.Background(), keystore.Credentials{
+	if err = (&keystore.FileStore{Path: credPath}).Save(context.Background(), &keystore.Credentials{
 		DeviceID: colID, ClientCertificatePEM: colCert, ClientPrivateKeyPEM: auditKeyPEM(t, colKey), CertificateAuthority: ca.pem,
 	}); err != nil {
 		t.Fatal(err)

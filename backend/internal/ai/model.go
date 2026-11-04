@@ -49,7 +49,7 @@ type Chunk struct {
 }
 type Provider interface {
 	Enabled() bool
-	Chat(messages []Message) (string, int, int, error)
+	Chat(messages []Message) (answer string, promptTokens, completionTokens int, err error)
 	Embed(text string) ([]float64, error)
 	EmbeddingsEnabled() bool
 }
@@ -58,7 +58,7 @@ type Repository interface {
 	GetConversation(ctx context.Context, orgID, id string) (Conversation, error)
 	ListConversations(ctx context.Context, orgID, userID string) ([]Conversation, error)
 	AddMessage(ctx context.Context, orgID, conversationID, role, content string, promptTokens, completionTokens int, citations []Citation) error
-	UpsertChunk(ctx context.Context, chunk Chunk) error
+	UpsertChunk(ctx context.Context, chunk *Chunk) error
 	DeleteChunk(ctx context.Context, orgID, entityType, entityID string) error
-	CandidateChunks(ctx context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error)
+	CandidateChunks(ctx context.Context, orgID string, entityTypes, entityIDs []string, limit int) ([]Chunk, error)
 }

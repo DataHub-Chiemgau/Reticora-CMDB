@@ -92,8 +92,8 @@ func (r *MemoryRepository) id(_ string) string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.next)
 }
 
-func page[T any](items []T, p api.PaginationParams) ([]T, int, error) {
-	total := len(items)
+func page[T any](items []T, p api.PaginationParams) (window []T, total int, err error) {
+	total = len(items)
 	start := min(p.Offset, total)
 	end := min(start+p.Limit, total)
 	return items[start:end], total, nil
@@ -459,7 +459,7 @@ func (r *MemoryRepository) GetDrift(_ context.Context, orgID, id string) (*Drift
 	return &cp, nil
 }
 
-func matchConditions(conditions JSONMap, attrs JSONMap) bool {
+func matchConditions(conditions, attrs JSONMap) bool {
 	for k, want := range conditions {
 		if strings.TrimSpace(fmt.Sprint(want)) == "" {
 			continue

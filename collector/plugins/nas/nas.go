@@ -255,7 +255,7 @@ func (p *Plugin) verifyVendor(ctx context.Context, client *http.Client, baseURL,
 		return false, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkURL, http.NoBody)
 	if err != nil {
 		return false, nil
 	}

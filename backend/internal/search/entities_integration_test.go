@@ -25,7 +25,7 @@ func TestLocationsAndContactsAreHitsAgainstPostgres(t *testing.T) {
 	idx := search.NewPGRepository(f.App)
 	find := func(ctx context.Context, text, entityType string) []search.Hit {
 		t.Helper()
-		res, err := idx.Query(ctx, search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text, EntityTypes: []string{entityType}, Limit: 10})
+		res, err := idx.Query(ctx, &search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text, EntityTypes: []string{entityType}, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +90,7 @@ func TestLocationAndContactHitsLeadToTheirEntity(t *testing.T) {
 	idx := search.NewPGRepository(f.App)
 	hit := func(ctx context.Context, text, entityType, id string) *search.Hit {
 		t.Helper()
-		res, err := idx.Query(ctx, search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text, EntityTypes: []string{entityType}, Limit: 10})
+		res, err := idx.Query(ctx, &search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text, EntityTypes: []string{entityType}, Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}

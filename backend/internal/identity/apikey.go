@@ -149,7 +149,7 @@ func GenerateAPIKey(environment string) (GeneratedAPIKey, error) {
 }
 
 // Generate creates a new live API key and returns the plaintext token with its metadata.
-func (s *APIKeyService) Generate(orgID string, name string, scopes []Permission, expiresAt *time.Time) (plaintext string, info APIKeyInfo, err error) {
+func (s *APIKeyService) Generate(orgID, name string, scopes []Permission, expiresAt *time.Time) (plaintext string, info APIKeyInfo, err error) {
 	if s == nil {
 		return "", APIKeyInfo{}, errors.New("identity: API key service is nil")
 	}

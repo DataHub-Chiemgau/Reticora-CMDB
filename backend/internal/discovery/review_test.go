@@ -33,7 +33,7 @@ func TestReviewItemFromConflict(t *testing.T) {
 		Criterion:      "serial_number",
 	}
 
-	item := reviewItemFromConflict("org-1", incoming, result)
+	item := reviewItemFromConflict("org-1", &incoming, &result)
 	if item == nil {
 		t.Fatal("expected review item, got nil")
 	}
@@ -51,7 +51,7 @@ func TestReviewItemFromConflict(t *testing.T) {
 	}
 
 	// No candidates yields no review item.
-	if reviewItemFromConflict("org-1", incoming, ReconcileResult{Action: ReconcileConflict}) != nil {
+	if reviewItemFromConflict("org-1", &incoming, &ReconcileResult{Action: ReconcileConflict}) != nil {
 		t.Error("expected nil review item when no candidates")
 	}
 }
@@ -208,7 +208,7 @@ func TestResolveReviewItemCreate(t *testing.T) {
 	}
 	created := func(name string) *ci.Item {
 		t.Helper()
-		items, _, _ := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
+		items, _, _ := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
 		for i := range items {
 			if items[i].Name == name {
 				return &items[i]

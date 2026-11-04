@@ -27,7 +27,7 @@ func TestEntitlementModel(t *testing.T) {
 	svc := entitlement.NewService(repo, entitlement.Options{Enforce: true})
 
 	until := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
-	if _, err := svc.Grant(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
+	if _, err := svc.Grant(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
 		Plan: entitlement.PlanStandard, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCollectors: 7},
 		ValidUntil: &until, Source: "billing"}); err != nil {
 		t.Fatal(err)

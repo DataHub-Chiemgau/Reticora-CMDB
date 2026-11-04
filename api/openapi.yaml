@@ -136,6 +136,8 @@ tags:
     description: Lifecycle models, forms, templates and indexing of the metamodel
   - name: Tags
     description: Tag catalog and the tags of CIs and assets
+  - name: Suppliers
+    description: Supplier master data of the organization and its clients (MGT-12)
   - name: Import
     description: Import profiles and import runs of CSV/XLSX files
   - name: IPAM
@@ -14338,6 +14340,58 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/metamodel/drafts/{id}/publish:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: publishMetamodelDraft
+      tags: [Metamodel]
+      summary: Publish a tested metamodel draft (MET-53)
+      description: >-
+        Applies the items of a `tested` draft (WP-261) in one transaction
+        and sets it `published` with `published_at`. The draft row is
+        locked; a draft that is not `tested`, or already published or
+        discarded (also a concurrent second publication), is 409. Before
+        the first item the targets of all items are locked and compared
+        with the base the items captured: a target that changed or vanished
+        is 409 with `stale_items`, and nothing changes. Every item runs
+        through its resource route with that route's checks and error
+        contract (422 for a MET-16 composition conflict, also one the
+        schema generator finds when the deferred regeneration runs after
+        the last item; 409 for a unique conflict; 403 for a system row);
+        the problem names the refused item (`item_id`), and every element
+        is rolled back. Item references `{"$item": "<item id>"}` take the
+        id the referenced item created. Each affected type gets at most one
+        new `schema_version`. The audit entries of the elements, the audit
+        entry `metamodel.published` of the draft and one event
+        `metamodel.published` (entity: the draft) are written in the same
+        transaction; the webhook events of the applied types and
+        attributes (`ci_type.*`, `ci_attribute.changed`) follow the commit.
+        Requires metamodel:publish; without the database 503.
+      responses:
+        '200':
+          description: The published draft
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelPublication'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -16713,6 +16767,187 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
+
+  /api/v1/suppliers:
+    x-phase: P2
+    x-feature: assets_basic
+    get:
+      operationId: listSuppliers
+      tags: [Suppliers]
+      summary: List suppliers (MGT-12)
+      description: >-
+        The suppliers of the organization visible under the caller's scope:
+        org-wide suppliers (client_id null) and those of the caller's
+        clients (E-09). Filters `filter[name]`, `filter[client_id]` and
+        `filter[external_ref]` (API-02); `sort` name (default) or
+        created_at, a leading `-` sorts descending. `limit` (default 50, at
+        most 200) and the signed keyset `cursor` from `next_cursor`; a
+        forged cursor or one of another sort is 400. Requires
+        contract:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/ListFilter'
+        - $ref: '#/components/parameters/ListSort'
+      responses:
+        '200':
+          description: Suppliers, sorted by name unless sort says otherwise
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupplierListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    post:
+      operationId: createSupplier
+      tags: [Suppliers]
+      summary: Create a supplier (MGT-12)
+      description: >-
+        A supplier of the organization (client_id null) or of a client.
+        name is the company name, unique per organization (409 on name).
+        The contact person is referenced by contact_id only; its name,
+        phone and e-mail come from the contacts resource (PII vault). A
+        client or contact of another organization, or a contact outside
+        the caller's scope, is 422 on the field. A caller restricted to
+        clients cannot create an org-wide supplier or one of another client
+        (403, E-09). Requires contract:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupplierRequest'
+      responses:
+        '201':
+          description: Supplier created
+          headers:
+            ETag:
+              description: The version of the supplier.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Supplier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/suppliers/{id}:
+    x-phase: P2
+    x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSupplier
+      tags: [Suppliers]
+      summary: Get a supplier
+      description: >-
+        A supplier visible under the caller's scope, with its version as
+        ETag; an unknown, foreign or invisible id is 404. Requires
+        contract:read.
+      responses:
+        '200':
+          description: Supplier
+          headers:
+            ETag:
+              description: The version of the supplier.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Supplier'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateSupplier
+      tags: [Suppliers]
+      summary: Update a supplier
+      description: >-
+        Sent fields change, null clears an optional field; every change
+        raises the version by 1. `client_id` cannot change (400 on
+        client_id). If-Match (API-07): 412 when the organization requires it
+        (require_if_match) and it is missing, or when it names another than
+        the current version. A taken name is 409, a contact of another
+        organization or outside the caller's scope 422. An org-wide
+        supplier is 404 for a caller restricted to clients and stays
+        unchanged. Requires contract:write.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSupplierRequest'
+      responses:
+        '200':
+          description: Supplier updated
+          headers:
+            ETag:
+              description: The new version of the supplier.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Supplier'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          description: If-Match missing although required, or not the current version of the supplier
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      operationId: deleteSupplier
+      tags: [Suppliers]
+      summary: Delete a supplier
+      description: >-
+        Deletes a supplier no contract, asset or order references (422
+        otherwise). An org-wide supplier is 404 for a caller restricted to
+        clients. Requires contract:write.
+      responses:
+        '204':
+          description: Supplier deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/tags:
     get:
@@ -19839,6 +20074,30 @@ components:
         code: { type: string }
         rule: { type: string, description: The key of the violated catalog rule. }
         message: { type: string }
+    MetamodelPublication:
+      type: object
+      description: >-
+        The answer of the publication of a metamodel draft (WP-261): the
+        published draft, the number of applied elements per item kind and
+        the affected CI types with their `schema_version` after the
+        publication.
+      required: [draft, counts, types]
+      properties:
+        draft:
+          $ref: '#/components/schemas/MetamodelDraft'
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        types:
+          type: array
+          items:
+            type: object
+            required: [id, schema_version]
+            properties:
+              id: { type: string, format: uuid }
+              schema_version: { type: integer }
     MetamodelTestReportPage:
       allOf:
         - $ref: '#/components/schemas/MetamodelTestReport'
@@ -19916,11 +20175,11 @@ components:
             category → subscribed or muted, the view of `muted_categories`.
             Every category is subscribed by default; a muted one reaches the
             user only with a critical notification (collector, invitation,
-            certificate, apikey and expired licences are critical). In a PUT
+            certificate, apikey, security and expired licences are critical). In a PUT
             the named categories win over `muted_categories`; the response
             lists every category.
           propertyNames:
-            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, webhook]
+            enum: [apikey, certificate, collector, entitlement, export, invitation, job, review, security, webhook]
           additionalProperties:
             type: string
             enum: [subscribed, muted]
@@ -25747,6 +26006,97 @@ components:
       properties:
         download_url:
           type: string
+
+    Supplier:
+      type: object
+      description: >-
+        A supplier of the organization or one of its clients (MGT-12,
+        E-41). name is the company name and no personal data; the contact
+        person is only referenced by contact_id (the contacts resource
+        reveals name, phone and e-mail from the PII vault, WP-242).
+      required: [id, organization_id, client_id, name, external_ref, contact_id, notes, version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: Client of the supplier; null is org-wide.
+        name:
+          type: string
+          description: Company name, unique per organization.
+        external_ref:
+          type: [string, 'null']
+          description: Reference in an external system, e.g. the creditor number.
+        contact_id:
+          type: [string, 'null']
+          format: uuid
+          description: Contact person; null when none or after the contact was deleted.
+        notes:
+          type: [string, 'null']
+        version:
+          type: integer
+          format: int64
+          description: Raised by every change; the ETag of the supplier.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateSupplierRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Client of the supplier; null or absent is org-wide. Set only at
+            creation.
+        name:
+          type: string
+          minLength: 1
+        external_ref:
+          type: [string, 'null']
+        contact_id:
+          type: [string, 'null']
+          format: uuid
+        notes:
+          type: [string, 'null']
+
+    UpdateSupplierRequest:
+      type: object
+      description: >-
+        Sent fields change, null clears an optional field. client_id cannot
+        change; sending it is 400 on client_id.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        external_ref:
+          type: [string, 'null']
+        contact_id:
+          type: [string, 'null']
+          format: uuid
+        notes:
+          type: [string, 'null']
+
+    SupplierListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/Supplier'
 
     Tag:
       type: object

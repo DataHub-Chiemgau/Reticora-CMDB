@@ -169,7 +169,7 @@ func AsValidationError(err error) (*ValidationError, bool) {
 // request actually carries, which is what read-only enforcement keys on.
 // Attributes without a definition are left untouched: discovery and
 // integrations legitimately store attributes the metadata does not describe.
-func validateAttributes(defs []fieldmeta.FieldDefinition, values map[string]any, incoming map[string]any, existing map[string]any) error {
+func validateAttributes(defs []fieldmeta.FieldDefinition, values, incoming, existing map[string]any) error {
 	return validateWithRules(defs, nil, values, incoming, existing)
 }
 
@@ -251,7 +251,7 @@ func catalogViolations(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.Cat
 	}
 	required, hidden := map[string]bool{}, map[string]bool{}
 	for i := range defs {
-		state := fieldmeta.Evaluate(defs[i], values)
+		state := fieldmeta.Evaluate(&defs[i], values)
 		switch {
 		case !state.Visible:
 			hidden[defs[i].Name] = true
@@ -315,7 +315,8 @@ func catalogViolation(rule *fieldmeta.CatalogRule, code, detail string) Violatio
 // validateAttributes), unsorted.
 func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, existing map[string]any) []Violation {
 	var violations []Violation
-	for _, def := range defs {
+	for i := range defs {
+		def := &defs[i]
 		state := fieldmeta.Evaluate(def, values)
 		value, present := values[def.Name]
 
@@ -396,7 +397,7 @@ func checkReferences(ctx context.Context, lookup fieldmeta.ReferenceLookup, orgI
 				continue
 			}
 		}
-		if !fieldmeta.Evaluate(*def, values).Visible {
+		if !fieldmeta.Evaluate(def, values).Visible {
 			continue
 		}
 		if !fieldmeta.ReferenceTargetAvailable(target) {
@@ -692,7 +693,7 @@ func validateTypedColumns(typed map[string]any) error {
 			continue
 		}
 		def := fieldmeta.FieldDefinition{Name: name, DataType: typedColumns[name]}
-		if err := fieldmeta.ValidateValue(def, value); err != nil {
+		if err := fieldmeta.ValidateValue(&def, value); err != nil {
 			violations = append(violations, Violation{Field: name, Detail: trimFieldPrefix(name, err.Error())})
 		}
 	}
@@ -766,7 +767,7 @@ func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.C
 		if !ok || isBlank(value) {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(fieldmeta.FieldDefinition{Name: name, DataType: dataType}, value); err != nil {
+		if err := fieldmeta.ValidateValue(&fieldmeta.FieldDefinition{Name: name, DataType: dataType}, value); err != nil {
 			invalid[name] = true
 		}
 	}
@@ -776,7 +777,7 @@ func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.C
 		if !ok || isBlank(value) || invalid[def.Name] {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+		if err := fieldmeta.ValidateValue(def, value); err != nil {
 			invalid[def.Name] = true
 		}
 	}

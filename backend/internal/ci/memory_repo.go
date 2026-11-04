@@ -46,7 +46,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Item, int, error) {
+func (r *MemoryRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Item, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -79,7 +79,7 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 
 	column, direction := NormalizeSort(filter)
 	sort.Slice(result, func(i, j int) bool {
-		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		vi, vj := sortValue(&result[i], column), sortValue(&result[j], column)
 		if vi == vj {
 			if direction == "asc" {
 				return result[i].ID < result[j].ID
@@ -97,9 +97,10 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter Filter
 			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 		}
 		remaining := make([]Item, 0, len(result))
-		for _, item := range result {
+		for i := range result {
+			item := &result[i]
 			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
-				remaining = append(remaining, item)
+				remaining = append(remaining, *item)
 			}
 		}
 		if len(remaining) > page.Limit {
@@ -184,7 +185,7 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) {
+func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository; the update works on its own copy
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

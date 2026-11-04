@@ -37,7 +37,8 @@ func TestLoadFromEnv(t *testing.T) {
 func TestDocumentSettingsDefaults(t *testing.T) {
 	clearEnv(t)
 	cfg := Load()
-	want := DocumentSettings{MaxUploadMB: 50, UploadConcurrency: 4, UploadTimeout: 5 * time.Minute}
+	want := DocumentSettings{MaxUploadMB: 50, UploadConcurrency: 4, UploadTimeout: 5 * time.Minute,
+		ClamdAddr: "localhost:3310", ClamdTimeout: time.Minute}
 	if cfg.Documents != want || cfg.Documents.MaxUploadBytes() != 52428800 {
 		t.Fatalf("defaults %+v, want %+v", cfg.Documents, want)
 	}
@@ -45,8 +46,9 @@ func TestDocumentSettingsDefaults(t *testing.T) {
 		t.Fatalf("Validate() = %v", err)
 	}
 	setAll(t, map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "10", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY": "2",
-		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "90s"})
-	if got := Load().Documents; got != (DocumentSettings{MaxUploadMB: 10, UploadConcurrency: 2, UploadTimeout: 90 * time.Second}) {
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "90s", "RETICORA_CLAMD_ADDR": "clamd:3310", "RETICORA_CLAMD_TIMEOUT": "30s"})
+	if got := Load().Documents; got != (DocumentSettings{MaxUploadMB: 10, UploadConcurrency: 2, UploadTimeout: 90 * time.Second,
+		ClamdAddr: "clamd:3310", ClamdTimeout: 30 * time.Second}) {
 		t.Fatalf("from the environment %+v", got)
 	}
 }
@@ -59,7 +61,7 @@ func clearEnv(t *testing.T) {
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
 		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
 		"RETICORA_EVENTS_MAX_BYTES", "RETICORA_DOCUMENT_MAX_UPLOAD_MB", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY",
-		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT",
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -212,6 +214,12 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"negative upload timeout", map[string]string{"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "-1m"}, false, "RETICORA_DOCUMENT_UPLOAD_TIMEOUT must be positive"},
 		{"unparsable upload timeout", map[string]string{"RETICORA_DOCUMENT_UPLOAD_TIMEOUT": "soon"}, false,
 			"RETICORA_DOCUMENT_UPLOAD_TIMEOUT has an invalid value"},
+		{"clamd without port", map[string]string{"RETICORA_CLAMD_ADDR": "clamd"}, false, `RETICORA_CLAMD_ADDR="clamd" is not host:port`},
+		{"clamd without host", map[string]string{"RETICORA_CLAMD_ADDR": ":3310"}, false, "RETICORA_CLAMD_ADDR"},
+		{"clamd port out of range", map[string]string{"RETICORA_CLAMD_ADDR": "clamd:70000"}, false, "RETICORA_CLAMD_ADDR"},
+		{"clamd url", map[string]string{"RETICORA_CLAMD_ADDR": "tcp://clamd:3310"}, false, "RETICORA_CLAMD_ADDR"},
+		{"no clamd timeout", map[string]string{"RETICORA_CLAMD_TIMEOUT": "0s"}, false, "RETICORA_CLAMD_TIMEOUT must be positive"},
+		{"unparsable clamd timeout", map[string]string{"RETICORA_CLAMD_TIMEOUT": "later"}, false, "RETICORA_CLAMD_TIMEOUT has an invalid value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -222,6 +230,47 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestValidateDocumentScanner covers SEC-09 and OPS-01 (WP-734, E-42):
+// outside development the module documents (by key, P2 or all) needs an
+// explicit RETICORA_CLAMD_ADDR and RETICORA_NATS_URL; without the module,
+// and in development with the default localhost:3310, the start passes.
+func TestValidateDocumentScanner(t *testing.T) {
+	for _, modules := range []string{"documents", "P2", "all", "inventory, documents"} {
+		clearEnv(t)
+		setAll(t, productionEnv)
+		t.Setenv("RETICORA_MODULES", modules)
+		err := Load().Validate(false)
+		if err == nil || !strings.Contains(err.Error(), "module documents requires RETICORA_CLAMD_ADDR") {
+			t.Fatalf("production with modules %q without clamd: %v", modules, err)
+		}
+		t.Setenv("RETICORA_CLAMD_ADDR", "clamd:3310")
+		if err = Load().Validate(false); err != nil {
+			t.Fatalf("production with modules %q and clamd: %v", modules, err)
+		}
+	}
+	clearEnv(t)
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_ENVIRONMENT", EnvStaging)
+	t.Setenv("RETICORA_MODULES", "documents")
+	t.Setenv("RETICORA_CLAMD_ADDR", "clamd:3310")
+	t.Setenv("RETICORA_NATS_URL", "")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "module documents requires RETICORA_NATS_URL") {
+		t.Fatalf("staging with documents without NATS: %v", err)
+	}
+	clearEnv(t)
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_MODULES", "inventory")
+	if err := Load().Validate(false); err != nil {
+		t.Fatalf("production without the module documents: %v", err)
+	}
+	clearEnv(t)
+	t.Setenv("RETICORA_MODULES", "documents")
+	cfg := Load()
+	if err := cfg.Validate(true); err != nil || cfg.Documents.ClamdAddr != DefaultClamdAddr {
+		t.Fatalf("development with documents: %v, clamd %q", err, cfg.Documents.ClamdAddr)
 	}
 }
 

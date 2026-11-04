@@ -57,10 +57,11 @@ func (r *MemoryRepository) List(_ context.Context, orgID, entityType, entityID s
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Change
-	for _, c := range r.changes {
+	for i := range r.changes {
+		c := &r.changes[i]
 		if c.OrganizationID == orgID && c.EntityType == entityType && c.EntityID == entityID &&
 			(opts.ChangeKind == "" || c.ChangeKind == opts.ChangeKind) {
-			out = append(out, c)
+			out = append(out, *c)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
@@ -81,10 +82,11 @@ func (r *MemoryRepository) TrailUpTo(_ context.Context, orgID, entityType, entit
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Change
-	for _, c := range r.changes {
+	for i := range r.changes {
+		c := &r.changes[i]
 		if c.OrganizationID == orgID && c.EntityType == entityType && c.EntityID == entityID &&
 			!c.CreatedAt.After(at) {
-			out = append(out, c)
+			out = append(out, *c)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })

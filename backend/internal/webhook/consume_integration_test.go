@@ -53,7 +53,7 @@ type flakyDeliveries struct {
 	fail atomic.Bool
 }
 
-func (s *flakyDeliveries) Enqueue(ctx context.Context, rec webhook.DeliveryRecord) (webhook.DeliveryRecord, error) {
+func (s *flakyDeliveries) Enqueue(ctx context.Context, rec *webhook.DeliveryRecord) (webhook.DeliveryRecord, error) {
 	if s.fail.Load() {
 		return webhook.DeliveryRecord{}, errors.New("audit-e4: delivery store temporarily unavailable")
 	}

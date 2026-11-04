@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-func sampleCreds() Credentials {
-	return Credentials{
+func sampleCreds() *Credentials {
+	return &Credentials{
 		DeviceID:             "edge-01",
 		ClientCertificatePEM: "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----",
 		ClientPrivateKeyPEM:  "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",

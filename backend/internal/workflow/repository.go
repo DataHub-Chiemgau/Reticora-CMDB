@@ -23,7 +23,7 @@ type Repository interface {
 	ListDefinitions(ctx context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error)
 	GetDefinition(ctx context.Context, orgID, id string) (*Definition, error)
 	CreateDefinition(ctx context.Context, def *Definition) error
-	UpdateDefinition(ctx context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error)
+	UpdateDefinition(ctx context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error)
 	DeleteDefinition(ctx context.Context, orgID, id string) error
 	ListRuns(ctx context.Context, orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error)
 	GetRun(ctx context.Context, orgID, id string) (*Run, error)
@@ -85,7 +85,7 @@ func (r *MemoryRepository) CreateDefinition(_ context.Context, def *Definition) 
 	r.definitions[def.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string, req UpdateDefinitionRequest) (*Definition, error) {
+func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := r.definitions[id]

@@ -18,7 +18,7 @@ type remoteIndex struct {
 	fail    error
 }
 
-func (r *remoteIndex) IndexDocument(_ context.Context, doc search.Document) error {
+func (r *remoteIndex) IndexDocument(_ context.Context, doc *search.Document) error {
 	r.indexed = append(r.indexed, doc.EntityID)
 	return r.fail
 }
@@ -37,8 +37,8 @@ func TestHybridIndexesRemoteAfterCommit(t *testing.T) {
 	backend := &search.HybridBackend{Remote: remote, Source: search.NewPGRepository(f.App)}
 	// The PostgreSQL index takes entity ids (uuid) only.
 	ids := map[string]string{"committed": f.ID(), "rolled-back": f.ID(), "direct": f.ID()}
-	doc := func(name string) search.Document {
-		return search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ids[name], Title: name}
+	doc := func(name string) *search.Document {
+		return &search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ids[name], Title: name}
 	}
 	inPG := func(name string) bool {
 		t.Helper()
@@ -95,12 +95,12 @@ type scriptedRemote struct {
 	indexed []search.Document
 }
 
-func (r *scriptedRemote) IndexDocument(_ context.Context, doc search.Document) error {
-	r.indexed = append(r.indexed, doc)
+func (r *scriptedRemote) IndexDocument(_ context.Context, doc *search.Document) error {
+	r.indexed = append(r.indexed, *doc)
 	return nil
 }
 
-func (r *scriptedRemote) Query(_ context.Context, q search.Query) (search.Result, error) {
+func (r *scriptedRemote) Query(_ context.Context, q *search.Query) (search.Result, error) {
 	return search.Result{Data: append([]search.Hit(nil), r.hits...), Total: len(r.hits) + 5, Limit: q.Limit}, nil
 }
 
@@ -190,7 +190,7 @@ func TestHybridQueryChecksHitsAgainstPostgres(t *testing.T) {
 	}
 	backend.Remote = &scriptedRemote{hits: hits}
 
-	res, err := backend.Query(f.ClientCtx(f.Client1), search.Query{OrganizationID: f.OrgA, Text: "hy", Limit: 50})
+	res, err := backend.Query(f.ClientCtx(f.Client1), &search.Query{OrganizationID: f.OrgA, Text: "hy", Limit: 50})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +208,11 @@ func TestHybridQueryChecksHitsAgainstPostgres(t *testing.T) {
 
 	// The org-wide principal gets the foreign CI as well; organization B
 	// gets nothing of organization A.
-	res, err = backend.Query(f.OrgCtx(f.OrgA), search.Query{OrganizationID: f.OrgA, Text: "hy"})
+	res, err = backend.Query(f.OrgCtx(f.OrgA), &search.Query{OrganizationID: f.OrgA, Text: "hy"})
 	if err != nil || len(res.Data) != 5 {
 		t.Errorf("org-wide principal: %d hits (%v), want 5", len(res.Data), err)
 	}
-	res, err = backend.Query(f.OrgCtx(f.OrgB), search.Query{OrganizationID: f.OrgB, Text: "hy"})
+	res, err = backend.Query(f.OrgCtx(f.OrgB), &search.Query{OrganizationID: f.OrgB, Text: "hy"})
 	if err != nil || len(res.Data) != 0 {
 		t.Errorf("organization B: %d hits (%v), want none", len(res.Data), err)
 	}

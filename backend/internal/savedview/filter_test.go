@@ -12,7 +12,7 @@ import (
 )
 
 func TestCompileSQLEmptySpec(t *testing.T) {
-	where, args, err := FilterSpec{}.CompileSQL("ci", []any{"org"}, 2)
+	where, args, err := (&FilterSpec{}).CompileSQL("ci", []any{"org"}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestCompileSQLRelationshipPredicatesReadTheProjection(t *testing.T) {
 			}
 		}
 	}
-	where, args, err := FilterSpec{EntityKind: "ci", HasRelationship: "depends_on"}.CompileSQL("ci", []any{"org"}, 2)
+	where, args, err := (&FilterSpec{EntityKind: "ci", HasRelationship: "depends_on"}).CompileSQL("ci", []any{"org"}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestFilterASTCompilesAndOrNot(t *testing.T) {
 		t.Errorf("args %v, next %d", args, next)
 	}
 	// The AST joins the flat fields of the spec.
-	where, _, err := FilterSpec{Status: "active", Where: mustAST(t, `{"field": "hostname", "op": "exists"}`)}.CompileSQL("ci", []any{"org"}, 2)
+	where, _, err := (&FilterSpec{Status: "active", Where: mustAST(t, `{"field": "hostname", "op": "exists"}`)}).CompileSQL("ci", []any{"org"}, 2)
 	if err != nil || where != "ci.status = $2 AND ci.hostname IS NOT NULL" {
 		t.Errorf("spec with where: %q %v", where, err)
 	}

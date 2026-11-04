@@ -775,8 +775,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "display_name", Message: err.Error()})
 		return
 	}
-	for _, f := range req.Fields {
-		if err := validateField(f); err != nil {
+	for i := range req.Fields {
+		if err := validateField(&req.Fields[i]); err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
@@ -838,7 +838,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.LifecycleModelID, req.LifecycleDefinitionID = model, nil
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &req)
 	if err != nil {
 		writeTypeUpdateError(w, err)
 		return
@@ -940,11 +940,12 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &req)
 	if err != nil {
 		writeFieldDefinitionError(w, err)
 		return
@@ -999,11 +1000,12 @@ func (h *Handler) UpsertGlobalField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Scope = "global"
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, "", req)
+	f, err := h.repo.UpsertField(r.Context(), t.OrganizationID, "", &req)
 	if err != nil {
 		writeFieldDefinitionError(w, err)
 		return
@@ -1053,11 +1055,12 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+	fieldDef := instanceFieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	f, err := h.repo.UpsertInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
+	f, err := h.repo.UpsertInstanceField(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &req)
 	if err != nil {
 		writeFieldDefinitionError(w, err)
 		return
@@ -1083,8 +1086,9 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 
 // validateField checks a field of a CI type.
 // validation: the texts of fieldmeta.ValidateDefinition.
-func validateField(f Field) error {
-	return fieldmeta.ValidateDefinition(f.Definition())
+func validateField(f *Field) error {
+	fieldDef := f.Definition()
+	return fieldmeta.ValidateDefinition(&fieldDef)
 }
 
 // writeTypeError reports a failed create or clone of a CI type: a taken key

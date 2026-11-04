@@ -12,7 +12,7 @@ import (
 func TestReconcileDoesNotMatchOnMissingHardwareUUID(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-pdu", CITypeID: "pdu", SerialNumber: "SN-P", Attributes: map[string]any{"fingerprint": map[string]any{}}}}
 	incoming := IngestItem{CITypeName: "server", SerialNumber: "SN-S", Fingerprint: map[string]any{}}
-	result := Reconcile(existing, incoming)
+	result := Reconcile(existing, &incoming)
 	if result.Action != ReconcileCreated {
 		t.Fatalf("expected ReconcileCreated, got %v (criterion %s)", result.Action, result.Criterion)
 	}

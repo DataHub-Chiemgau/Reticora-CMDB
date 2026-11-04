@@ -126,7 +126,7 @@ type InstanceField struct {
 }
 
 // Definition converts a type/global field into the shared fieldmeta shape.
-func (f Field) Definition() fieldmeta.FieldDefinition {
+func (f *Field) Definition() fieldmeta.FieldDefinition {
 	return fieldmeta.FieldDefinition{
 		Name:            f.Name,
 		Label:           f.Label,
@@ -149,7 +149,7 @@ func (f Field) Definition() fieldmeta.FieldDefinition {
 // Definition converts an instance field into the shared fieldmeta shape;
 // MultiValue stays nil (ci_instance_field_definition has no multi_value),
 // the composition takes it from the layer below.
-func (f InstanceField) Definition() fieldmeta.FieldDefinition {
+func (f *InstanceField) Definition() fieldmeta.FieldDefinition {
 	return fieldmeta.FieldDefinition{
 		Name:            f.Name,
 		Label:           f.Label,

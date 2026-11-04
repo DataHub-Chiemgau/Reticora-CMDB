@@ -271,7 +271,7 @@ func TestRouteMiddlewareRunsAfterAuthorization(t *testing.T) {
 		}
 	}
 	mux := chi.NewRouter()
-	router := authorizingRouter{Router: mux, after: []func(http.Handler) http.Handler{step("validation"), step("idempotency")}}
+	router := &authorizingRouter{Router: mux, after: []func(http.Handler) http.Handler{step("validation"), step("idempotency")}}
 	router.Route("/api/v1/orders", func(r chi.Router) {
 		r.Post("/{id}/approve", func(w http.ResponseWriter, _ *http.Request) {
 			trace = append(trace, "handler")

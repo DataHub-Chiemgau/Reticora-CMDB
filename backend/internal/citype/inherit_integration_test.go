@@ -413,7 +413,7 @@ func TestTypeParentRulesAgainstPostgres(t *testing.T) {
 				defer wg.Done()
 				<-start
 				parent := pair[1]
-				_, errs[j] = a.repo.Update(a.ctx(f.OrgA), f.OrgA, pair[0], citype.UpdateTypeRequest{ParentTypeID: &parent})
+				_, errs[j] = a.repo.Update(a.ctx(f.OrgA), f.OrgA, pair[0], &citype.UpdateTypeRequest{ParentTypeID: &parent})
 			}()
 		}
 		close(start)

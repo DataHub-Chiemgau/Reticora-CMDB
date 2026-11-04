@@ -76,7 +76,7 @@ func TestScopeChannelChecksTheDiscoveryLicense(t *testing.T) {
 	}
 	grant := func(enabled bool, validUntil *time.Time, want entitlement.Status) {
 		t.Helper()
-		if _, err := ents.Grant(org, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
+		if _, err := ents.Grant(org, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
 			Plan: entitlement.PlanEssential, Enabled: enabled, ValidUntil: validUntil, Source: "manual"}); err != nil {
 			t.Fatal(err)
 		}

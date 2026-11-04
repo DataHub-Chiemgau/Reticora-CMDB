@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000222_document_scan_status
+Stand: Migration 000224_metamodel_publish_regeneration
 
 ## Prüfung
 
@@ -1035,6 +1035,28 @@ String-Elemente) nach `ci_tag`, entfernt `attributes.tags` und die Feldwerte
 offene `override_conflict`-Reviews zu `tags`, entfernt `tags` aus offenen
 Merge-Snapshots und normalisiert `saved_view.filter_spec.tags` von CI-Sichten.
 
+Lieferanten (MGT-12, API-06, WP-736, E-41, Migration 000223): `supplier` hält
+die Stammdaten eines Lieferanten der Organisation oder eines Clients
+(`client_id` NULL ist org-weit): `name` (Firmenname, keine PII,
+`supplier_name_check`: nicht leer), optional `external_ref`, `contact_id` und
+`notes`, `version` (Standard 1, ETag), `created_at`, `updated_at` (Trigger
+`trg_supplier_updated_at`). Die Kontaktperson steht nur über `contact_id`
+(PII im Vault, WP-242). Schlüssel `supplier_organization_id_name_key`
+(`organization_id`, `name`) und `supplier_id_organization_key` (`id`,
+`organization_id`) als Ziel für `contract`, `asset` und `internal_order`.
+Verweise mit Organisation (K19): `supplier_client_id_fkey` (`client_id`,
+`organization_id`) → `client` ON DELETE CASCADE und `supplier_contact_id_fkey`
+(`contact_id`, `organization_id`) → `contact` ON DELETE SET NULL
+(`contact_id`); dafür erhält `contact` den Schlüssel
+`contact_id_organization_key` (`id`, `organization_id`). Indizes
+`idx_supplier_client` (`organization_id`, `client_id`),
+`idx_supplier_contact` (`organization_id`, `contact_id`) und
+`idx_supplier_created` (`organization_id`, `created_at`, `id`). RLS mit
+ENABLE/FORCE: `supplier_isolation` (FOR ALL; USING lässt org-weite Lieferanten
+für Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope,
+E-09) und die RESTRICTIVE-Policies `supplier_scoped_update` und
+`supplier_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1174,6 +1196,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
 | `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
+| `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |
 | `team_member` | ja | ja | team_member_isolation (ALL) |

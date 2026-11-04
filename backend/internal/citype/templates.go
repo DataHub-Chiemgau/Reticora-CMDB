@@ -164,24 +164,24 @@ func Templates() []Type {
 
 type fieldBuilder struct{ Field }
 
-func field(name, label, dataType string, required bool, group string) fieldBuilder {
-	return fieldBuilder{Field{
+func field(name, label, dataType string, required bool, group string) *fieldBuilder {
+	return &fieldBuilder{Field{
 		Name: name, Label: label, DataType: dataType,
 		Required: required, UIGroup: group, Scope: "type",
 	}}
 }
 
-func (b fieldBuilder) withEnum(values ...string) fieldBuilder {
+func (b *fieldBuilder) withEnum(values ...string) *fieldBuilder {
 	b.EnumValues = values
 	return b
 }
 
-func (b fieldBuilder) withReference(target string) fieldBuilder {
+func (b *fieldBuilder) withReference(target string) *fieldBuilder {
 	b.ReferenceTarget = target
 	return b
 }
 
-func (b fieldBuilder) visibleWhen(fieldName, op string, value any) fieldBuilder {
+func (b *fieldBuilder) visibleWhen(fieldName, op string, value any) *fieldBuilder {
 	if b.Conditional == nil {
 		b.Conditional = &fieldmeta.ConditionalRules{}
 	}
@@ -194,7 +194,7 @@ func fields(builders ...any) []Field {
 	var out []Field
 	for _, b := range builders {
 		switch v := b.(type) {
-		case fieldBuilder:
+		case *fieldBuilder:
 			out = append(out, v.Field)
 		case []Field:
 			out = append(out, v...)

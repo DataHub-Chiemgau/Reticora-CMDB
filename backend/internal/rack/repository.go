@@ -95,7 +95,8 @@ func validateMountFit(rackHeight, positionU, heightU int, face string, existing 
 		return ruleError(ErrConflict, "mount exceeds rack height of %dU", rackHeight)
 	}
 	start, end := positionU, positionU+heightU
-	for _, e := range existing {
+	for i := range existing {
+		e := &existing[i]
 		if e.ID == selfID || !facesOverlap(face, e.Face) {
 			continue
 		}
@@ -125,8 +126,8 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func pageSlice[T any](items []T, page api.PaginationParams) ([]T, int) {
-	total := len(items)
+func pageSlice[T any](items []T, page api.PaginationParams) (window []T, total int) {
+	total = len(items)
 	start := page.Offset
 	if start > total {
 		start = total

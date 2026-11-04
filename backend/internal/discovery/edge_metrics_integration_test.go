@@ -78,7 +78,7 @@ func TestEdgeMetricsAgainstPostgres(t *testing.T) {
 	repo := NewPGRepository(f.App)
 	ciRepo := ci.NewPGRepository(f.App)
 	features := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
-	if _, err := features.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
+	if _, err := features.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
 		Plan: entitlement.PlanPro, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

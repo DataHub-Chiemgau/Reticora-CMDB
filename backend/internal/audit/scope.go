@@ -137,6 +137,7 @@ var resourceTables = map[string][]string{
 	"stock-movements":           {"asset_movement"},
 	"stocktakes":                {"stocktake"},
 	"subnets":                   {"subnet"},
+	"suppliers":                 {"supplier"},
 	"tags":                      {"tag"},
 	"teams":                     {"team"},
 	"templates":                 {"template"},

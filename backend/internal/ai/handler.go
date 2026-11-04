@@ -157,7 +157,8 @@ const systemPrompt = "Du bist der Reticora CMDB Assistent. Antworte ausschließl
 func buildPrompt(q string, chunks []Chunk) string {
 	var b strings.Builder
 	b.WriteString("Kontext:\n")
-	for i, ch := range chunks {
+	for i := range chunks {
+		ch := &chunks[i]
 		fmt.Fprintf(&b, "[%d] %s %s/%s: %s\n", i+1, ch.Title, ch.EntityType, ch.EntityID, ch.Content)
 	}
 	b.WriteString("\nFrage: " + q)

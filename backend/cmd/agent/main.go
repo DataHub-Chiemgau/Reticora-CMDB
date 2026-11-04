@@ -188,7 +188,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 // follow redirects only under checkRedirect.
 func httpClientFor(cfg agentConfig) (*http.Client, error) {
 	if len(cfg.CertPEM) > 0 && len(cfg.KeyPEM) > 0 {
-		mtlsTransport, err := transport.NewMTLS(transport.Config{
+		mtlsTransport, err := transport.NewMTLS(&transport.Config{
 			ServerName:    cfg.TLSServerName,
 			RootCAsPEM:    cfg.CAPEM,
 			ClientCertPEM: cfg.CertPEM,
@@ -303,7 +303,7 @@ func spoolTelemetry(ctx context.Context, cfg agentConfig, payload agent.Telemetr
 		slog.Error("spool telemetry", "error", err)
 		return
 	}
-	if _, err = spool.Enqueue(ctx, buffer.Message{Topic: spoolTopic, Payload: data, CreatedAt: payload.CollectedAt}); err != nil {
+	if _, err = spool.Enqueue(ctx, &buffer.Message{Topic: spoolTopic, Payload: data, CreatedAt: payload.CollectedAt}); err != nil {
 		slog.Error("spool telemetry", "dir", cfg.SpoolDir, "error", err)
 	}
 }

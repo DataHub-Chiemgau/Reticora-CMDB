@@ -92,7 +92,7 @@ func newAlertStack(t *testing.T, repos server.Repositories, enc *crypto.Envelope
 func (s *alertStack) session(t *testing.T, orgID, userID string, perms ...identity.Permission) string {
 	t.Helper()
 	now := time.Now().UTC()
-	token, err := s.issuer.Issue(identity.SessionClaims{Subject: userID, OrganizationID: orgID, Permissions: perms, ID: "wp448-" + userID,
+	token, err := s.issuer.Issue(&identity.SessionClaims{Subject: userID, OrganizationID: orgID, Permissions: perms, ID: "wp448-" + userID,
 		Scope:    &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 		IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 	if err != nil {

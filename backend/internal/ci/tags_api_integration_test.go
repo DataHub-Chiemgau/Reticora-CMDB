@@ -428,7 +428,7 @@ type recordingIndexer struct {
 	indexed []string
 }
 
-func (x *recordingIndexer) IndexDocument(_ context.Context, doc ci.Document) error {
+func (x *recordingIndexer) IndexDocument(_ context.Context, doc *ci.Document) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.indexed = append(x.indexed, doc.EntityID)

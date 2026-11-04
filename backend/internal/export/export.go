@@ -72,7 +72,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := ci.FilterParams{
+	filter := &ci.FilterParams{
 		Status:   r.URL.Query().Get("status"),
 		TypeID:   r.URL.Query().Get("ci_type_id"),
 		ClientID: r.URL.Query().Get("client_id"),
@@ -95,8 +95,8 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 
 	batch := first
 	for {
-		for _, item := range batch {
-			writer.row(item)
+		for i := range batch {
+			writer.row(&batch[i])
 		}
 		writer.flushHTTP(w)
 
@@ -128,7 +128,7 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 	writer.flushHTTP(w)
 }
 
-func (h *Handler) fetch(r *http.Request, orgID string, filter ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
+func (h *Handler) fetch(r *http.Request, orgID string, filter *ci.FilterParams, cursor *api.Cursor) ([]ci.Item, error) {
 	items, _, err := h.ciRepo.List(r.Context(), orgID, filter, api.PaginationParams{
 		Limit:  h.batchSize,
 		Cursor: cursor,
@@ -193,7 +193,7 @@ func (rw *rowWriter) begin() {
 	}
 }
 
-func (rw *rowWriter) row(item ci.Item) {
+func (rw *rowWriter) row(item *ci.Item) {
 	switch rw.format {
 	case "csv":
 		rw.writeCells([]string{
@@ -260,7 +260,7 @@ func (rw *rowWriter) end() {
 		return
 	}
 	if rw.format == "json" {
-		_, _ = io.WriteString(rw.out, fmt.Sprintf(`],"total":%d}`, rw.written))
+		_, _ = fmt.Fprintf(rw.out, `],"total":%d}`, rw.written)
 	}
 }
 

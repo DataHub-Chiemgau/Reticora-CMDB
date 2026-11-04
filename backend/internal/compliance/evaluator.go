@@ -41,14 +41,16 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationRespo
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
-	items, _, err := e.cis.List(ctx, orgID, ci.FilterParams{}, api.PaginationParams{Limit: 100})
+	items, _, err := e.cis.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
 	results := []Result{}
 	now := time.Now().UTC()
-	for _, rule := range rules {
-		for _, item := range items {
+	for i := range rules {
+		rule := &rules[i]
+		for j := range items {
+			item := &items[j]
 			status := "not_applicable"
 			details := "CI type does not match rule"
 			if rule.CITypeID == "" || rule.CITypeID == item.CITypeID {
@@ -74,7 +76,8 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationRespo
 func summarize(results []Result) EvaluationResponse {
 	by := map[string]*Score{}
 	overall := Score{}
-	for _, r := range results {
+	for i := range results {
+		r := &results[i]
 		score := by[r.CITypeID]
 		if score == nil {
 			score = &Score{CITypeID: r.CITypeID}
@@ -108,7 +111,7 @@ func finish(s *Score) {
 		s.Score = float64(s.Passed) / float64(den) * 100
 	}
 }
-func eval(expr JSONMap, item ci.Item) bool {
+func eval(expr JSONMap, item *ci.Item) bool {
 	field := str(expr, "field", "")
 	op := str(expr, "op", "eq")
 	want := expr["value"]
@@ -131,7 +134,7 @@ func eval(expr JSONMap, item ci.Item) bool {
 		return false
 	}
 }
-func lookup(item ci.Item, field string) any {
+func lookup(item *ci.Item, field string) any {
 	switch field {
 	case "name":
 		return item.Name

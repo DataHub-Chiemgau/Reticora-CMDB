@@ -843,6 +843,15 @@ TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-617
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-618
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-619
 TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-620
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-621
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-622
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-623
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-624
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-625
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-626
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-627
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-628
+TST-04;[Q];A;tests/lint-toolchain.test.sh;WP-629
 JOB-03;[B];C;backend/internal/export/cancel_integration_test.go;WP-515
 JOB-04;[B];C;backend/internal/history/snapshot_integration_test.go;WP-516
 API-08;[B];C;backend/internal/ci/bulk_integration_test.go;WP-517
@@ -1317,3 +1326,10 @@ IMP-IO-01;[P2];C;backend/internal/importer/parse_test.go;WP-301
 API-09;[B];C;backend/internal/importer/job_test.go;WP-301
 JOB-04;[B];C;backend/internal/importer/job_test.go;WP-301
 API-06;[P2]/[P3]/[P4]/[A];C;backend/internal/importer/job_test.go;WP-301
+MGT-12;[P2];B;backend/internal/contract/supplier_integration_test.go;WP-736
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/contract/supplier_integration_test.go;WP-736
+SEC-09;[P2];B;backend/internal/document/scan_integration_test.go;WP-734
+MGT-01;[P2];B;backend/internal/document/scan_integration_test.go;WP-734
+MET-53;[P2];B;backend/internal/metamodel/publish_integration_test.go;WP-261
+AUD-07;[B];B;backend/internal/metamodel/publish_integration_test.go;WP-261
+EVT-03;[P2–P3];B;backend/internal/metamodel/publish_integration_test.go;WP-261

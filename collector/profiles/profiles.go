@@ -149,7 +149,7 @@ func (r *Registry) LoadYAML(reader io.Reader) error {
 		if err := list[i].Validate(); err != nil {
 			return err
 		}
-		if err := r.Register(list[i]); err != nil {
+		if err := r.Register(&list[i]); err != nil {
 			return err
 		}
 	}
@@ -157,7 +157,7 @@ func (r *Registry) LoadYAML(reader io.Reader) error {
 }
 
 // Register adds or replaces a profile in the registry.
-func (r *Registry) Register(profile Profile) error {
+func (r *Registry) Register(profile *Profile) error {
 	if profile.Name == "" {
 		return fmt.Errorf("profiles: name is required")
 	}
@@ -167,7 +167,7 @@ func (r *Registry) Register(profile Profile) error {
 	if r.profiles == nil {
 		r.profiles = make(map[string]Profile)
 	}
-	r.profiles[profile.Name] = profile
+	r.profiles[profile.Name] = *profile
 	r.compiled = nil
 	return nil
 }
@@ -194,7 +194,8 @@ func (r *Registry) BySysObjectID(sysObjectID string) (Profile, bool) {
 
 	var best Profile
 	bestLen := -1
-	for _, profile := range r.profiles {
+	for name := range r.profiles {
+		profile := r.profiles[name]
 		for _, oid := range profile.SysObjectIDs {
 			oid = strings.TrimSpace(oid)
 			if oid == "" {
@@ -231,7 +232,8 @@ func (r *Registry) VendorByMAC(mac string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	for _, profile := range r.profiles {
+	for name := range r.profiles {
+		profile := r.profiles[name]
 		if profile.Vendor == "" {
 			continue
 		}
@@ -287,8 +289,8 @@ func (r *Registry) LoadJSON(reader io.Reader) error {
 
 	var list []Profile
 	if err := json.Unmarshal(payload, &list); err == nil {
-		for _, profile := range list {
-			if err := r.Register(profile); err != nil {
+		for i := range list {
+			if err := r.Register(&list[i]); err != nil {
 				return err
 			}
 		}
@@ -299,11 +301,12 @@ func (r *Registry) LoadJSON(reader io.Reader) error {
 	if err := json.Unmarshal(payload, &named); err != nil {
 		return fmt.Errorf("profiles: decode JSON: %w", err)
 	}
-	for name, profile := range named {
+	for name := range named {
+		profile := named[name]
 		if profile.Name == "" {
 			profile.Name = name
 		}
-		if err := r.Register(profile); err != nil {
+		if err := r.Register(&profile); err != nil {
 			return err
 		}
 	}

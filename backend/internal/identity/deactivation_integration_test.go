@@ -78,7 +78,7 @@ func TestDeactivationEndsAccess(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		claims := identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
-		token, issueErr := issuer.Issue(claims)
+		token, issueErr := issuer.Issue(&claims)
 		if issueErr != nil {
 			t.Fatal(issueErr)
 		}

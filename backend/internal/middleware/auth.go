@@ -444,7 +444,7 @@ func parseJWTClaims(token string) (Claims, error) {
 	return claims, nil
 }
 
-func (c Claims) Organization() string {
+func (c *Claims) Organization() string {
 	if c.OrganizationID != "" {
 		return c.OrganizationID
 	}

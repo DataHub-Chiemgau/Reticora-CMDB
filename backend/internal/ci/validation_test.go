@@ -251,7 +251,7 @@ func TestReservedNamespaces(t *testing.T) {
 		if !IsReservedKey(ns) {
 			t.Errorf("%s is not reserved", ns)
 		}
-		if err := fieldmeta.ValidateDefinition(fieldmeta.FieldDefinition{Name: ns, DataType: fieldmeta.TypeText}); err == nil {
+		if err := fieldmeta.ValidateDefinition(&fieldmeta.FieldDefinition{Name: ns, DataType: fieldmeta.TypeText}); err == nil {
 			t.Errorf("field definition named %s accepted", ns)
 		}
 	}

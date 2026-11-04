@@ -60,7 +60,8 @@ func BuildNeighborIndex(items []ci.Item) *NeighborIndex {
 		byMAC:      make(map[string]string),
 		byHostname: make(map[string]string),
 	}
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		if key := normalizeKey(item.ManagementIP); key != "" {
 			idx.byIP[key] = item.ID
 		}
@@ -296,7 +297,8 @@ func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []Inge
 
 	derived := make([][]DerivedRelationship, len(items))
 	unknown := make([][]UnknownRelationship, len(items))
-	for i, item := range items {
+	for i := range items {
+		item := &items[i]
 		srcID := resolvedCIID[i]
 		if srcID == "" || len(item.Relationships) == 0 {
 			continue

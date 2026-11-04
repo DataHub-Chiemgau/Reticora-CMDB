@@ -16,7 +16,7 @@ import (
 
 func TestReconcilePriorityOrder(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-1", SerialNumber: "SN-1", Attributes: map[string]any{"fingerprint": map[string]any{"hardware_uuid": "uuid-1", "mac_addresses": []any{"aa:bb:cc"}}}, ManagementIP: "10.0.0.1", CITypeID: "server", Name: "srv-01"}}
-	result := Reconcile(existing, IngestItem{CITypeName: "server", SerialNumber: "SN-1", Fingerprint: map[string]any{"hardware_uuid": "uuid-2"}, Name: "other"})
+	result := Reconcile(existing, &IngestItem{CITypeName: "server", SerialNumber: "SN-1", Fingerprint: map[string]any{"hardware_uuid": "uuid-2"}, Name: "other"})
 	if result.Action != ReconcileMatched || result.MatchedCIID != "ci-1" || result.Criterion != "serial_number" {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
@@ -25,7 +25,7 @@ func TestReconcilePriorityOrder(t *testing.T) {
 func TestReconcileConflict(t *testing.T) {
 	// Several CIs with one of the reported MACs: ambiguous (REC-02).
 	existing := []ci.Item{{ID: "ci-1", PrimaryMAC: "00:1b:21:00:00:01"}, {ID: "ci-2", PrimaryMAC: "00:1b:21:00:00:02"}}
-	result := Reconcile(existing, IngestItem{Fingerprint: map[string]any{"mac_addresses": []any{"00:1b:21:00:00:01", "00:1b:21:00:00:02"}}})
+	result := Reconcile(existing, &IngestItem{Fingerprint: map[string]any{"mac_addresses": []any{"00:1b:21:00:00:01", "00:1b:21:00:00:02"}}})
 	if result.Action != ReconcileConflict || len(result.CandidateCIIDs) != 2 {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
@@ -61,7 +61,7 @@ func TestBulkIngestUsesReconciliation(t *testing.T) {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 
-	items, total, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
+	items, total, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 100, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func discoveryTenantCtx(r *http.Request) *http.Request {
 
 func TestReconcileMatchesPrimaryMAC(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-1", PrimaryMAC: "00:1B:21:DD:EE:FF"}}
-	result := Reconcile(existing, IngestItem{PrimaryMAC: "00-1b-21-dd-ee-ff"})
+	result := Reconcile(existing, &IngestItem{PrimaryMAC: "00-1b-21-dd-ee-ff"})
 	if result.Action != ReconcileMatched || result.MatchedCIID != "ci-1" || result.Criterion != "mac_addresses" {
 		t.Fatalf("unexpected reconcile result: %+v", result)
 	}
@@ -91,16 +91,16 @@ func TestReconcileMatchesHostnameFQDN(t *testing.T) {
 	}
 	// Hostname and FQDN never merge (REC-02, CH29): a new CI, reviewed as a
 	// probable duplicate.
-	byHostname := Reconcile(existing, IngestItem{Hostname: "SW-CORE-01"})
+	byHostname := Reconcile(existing, &IngestItem{Hostname: "SW-CORE-01"})
 	if byHostname.Action != ReconcileCreated || len(byHostname.ProbableDuplicates) != 1 || byHostname.ProbableDuplicates[0] != "ci-1" {
 		t.Fatalf("hostname hit: %+v", byHostname)
 	}
-	byFQDN := Reconcile(existing, IngestItem{FQDN: "fw-01.example.net"})
+	byFQDN := Reconcile(existing, &IngestItem{FQDN: "fw-01.example.net"})
 	if byFQDN.Action != ReconcileCreated || len(byFQDN.ProbableDuplicates) != 1 || byFQDN.ProbableDuplicates[0] != "ci-2" {
 		t.Fatalf("fqdn hit: %+v", byFQDN)
 	}
 	// The display name identifies nothing.
-	byName := Reconcile(existing, IngestItem{Name: "legacy-01"})
+	byName := Reconcile(existing, &IngestItem{Name: "legacy-01"})
 	if byName.Action != ReconcileCreated || len(byName.ProbableDuplicates) != 0 {
 		t.Fatalf("name: %+v", byName)
 	}
@@ -108,7 +108,7 @@ func TestReconcileMatchesHostnameFQDN(t *testing.T) {
 
 func TestReconcileMatchesHardwareUUIDColumn(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-1", HardwareUUID: "4C4C4544-004D-4210-8031-B8CAC04F5A32"}}
-	result := Reconcile(existing, IngestItem{HardwareUUID: "4c4c4544-004d-4210-8031-b8cac04f5a32"})
+	result := Reconcile(existing, &IngestItem{HardwareUUID: "4c4c4544-004d-4210-8031-b8cac04f5a32"})
 	if result.Action != ReconcileMatched || result.Criterion != "hardware_uuid" {
 		t.Fatalf("unexpected: %+v", result)
 	}
@@ -124,7 +124,7 @@ func TestReconcileReportsValueConflicts(t *testing.T) {
 		ManagementIP: "10.0.0.1",
 		Hostname:     "old-name",
 	}}
-	result := Reconcile(existing, IngestItem{
+	result := Reconcile(existing, &IngestItem{
 		SerialNumber: "SN-REPLACED",
 		HardwareUUID: "4c4c4544-0042-3510-8051-b4c04f4a4e33",
 		ManagementIP: "10.0.0.9",
@@ -140,7 +140,7 @@ func TestReconcileReportsValueConflicts(t *testing.T) {
 
 func TestReconcileNoValueConflictsWhenIncomingEmpty(t *testing.T) {
 	existing := []ci.Item{{ID: "ci-1", SerialNumber: "SN-1", ManagementIP: "10.0.0.1"}}
-	result := Reconcile(existing, IngestItem{SerialNumber: "SN-1"})
+	result := Reconcile(existing, &IngestItem{SerialNumber: "SN-1"})
 	if result.Action != ReconcileMatched {
 		t.Fatalf("action = %s, want matched", result.Action)
 	}
@@ -255,7 +255,7 @@ func TestBulkIngestQueuesValueConflictsForReview(t *testing.T) {
 		t.Fatalf("lower-ranked serial: %+v", resp)
 	}
 
-	items, _, err := ciRepo.List(context.Background(), "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
+	items, _, err := ciRepo.List(context.Background(), "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10, Offset: 0})
 	if err != nil {
 		t.Fatal(err)
 	}

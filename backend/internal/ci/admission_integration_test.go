@@ -39,7 +39,7 @@ func (unlimited) AllowCreate(context.Context, string, string, int64) error { ret
 // behind the indexing decorator as in production (RunInTx forwarded).
 type nopIndexer struct{}
 
-func (nopIndexer) IndexDocument(context.Context, ci.Document) error             { return nil }
+func (nopIndexer) IndexDocument(context.Context, *ci.Document) error            { return nil }
 func (nopIndexer) DeleteDocument(context.Context, string, string, string) error { return nil }
 
 // TestCreateAdmission covers the max_cis admission of ci.Service (ENT-03,

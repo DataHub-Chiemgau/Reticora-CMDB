@@ -107,7 +107,7 @@ func TestIngestStoresCatalogSystemTemplate(t *testing.T) {
 		if _, err := h.processItems(ctx, "org-1", items); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
-		list, _, err := ciRepo.List(ctx, "org-1", ci.FilterParams{}, api.PaginationParams{Limit: 10})
+		list, _, err := ciRepo.List(ctx, "org-1", &ci.FilterParams{}, api.PaginationParams{Limit: 10})
 		if err != nil || len(list) != 2 {
 			t.Fatalf("round %d: CIs = %+v, %v", round, list, err)
 		}

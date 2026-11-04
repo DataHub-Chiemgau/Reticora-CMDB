@@ -62,9 +62,9 @@ type ReindexResult struct {
 
 type Backend interface {
 	Ping(ctx context.Context) error
-	IndexDocument(ctx context.Context, doc Document) error
+	IndexDocument(ctx context.Context, doc *Document) error
 	Delete(ctx context.Context, orgID, entityType, entityID string) error
-	Query(ctx context.Context, q Query) (Result, error)
+	Query(ctx context.Context, q *Query) (Result, error)
 	ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error)
 }
 

@@ -172,7 +172,7 @@ func requireRefs(ctx context.Context, tx pgx.Tx, orgID string, assigneeID, teamI
 	return nil
 }
 
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Ticket, int, error) {
 	items := make([]Ticket, 0)
 	var total int
 
@@ -363,7 +363,7 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 // the write transaction, so concurrent changes see each other's result.
 // The same status is no change. Changing to resolved or closed sets
 // resolved_at or closed_at; a reopen clears both.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Ticket, error) {
+func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *UpdateRequest) (*Ticket, error) {
 	var item *Ticket
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -454,7 +454,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if visErr := requireVisible(ctx, tx, "ticket", ticketVisible, id); visErr != nil {
 			return visErr
 		}
-		ev := &ticketEvent{ID: id, ClientID: clientID, SiteID: siteID, Change: changeUpdated, ChangedFields: changedFields(before, item, &req)}
+		ev := &ticketEvent{ID: id, ClientID: clientID, SiteID: siteID, Change: changeUpdated, ChangedFields: changedFields(before, item, req)}
 		if statusChange {
 			ev.Change, ev.StatusFrom, ev.StatusTo = changeStatus, before.Status, item.Status
 		}
