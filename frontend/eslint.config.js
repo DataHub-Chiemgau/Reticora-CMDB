@@ -57,6 +57,8 @@ export default tseslint.config(
       // WP-314: the template page and the metamodel components (WP-313).
       'src/pages/TemplatesPage.tsx',
       'src/components/metamodel/**/*.tsx',
+      // WP-799: the work area of the metamodel drafts.
+      'src/pages/MetamodelDraftsPage.tsx',
     ],
     ignores: ['src/components/metamodel/**/*.test.tsx'],
     rules: {

@@ -7,6 +7,8 @@ import {
   A11Y_HANDLERS,
   A11Y_MARKERS as M,
   CI_ID,
+  DRAFT_HANDLERS,
+  DRAFT_ID,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
@@ -192,6 +194,26 @@ const ROUTES: A11yRoute[] = [
       await expect(page.locator('[data-item-key="a11y_serial"]')).toBeVisible();
     },
     ready: (page) => page.locator('#main-content table'),
+  },
+  {
+    // WP-799: a tested and a published draft, with the rights to test and publish.
+    path: '/ci-types/drafts',
+    url: '/ci-types/drafts',
+    handlers: DRAFT_HANDLERS,
+    ready: (page) => page.getByRole('link', { name: M.draft, exact: true }),
+  },
+  {
+    // WP-799: the patch list with the diff per item and the test report.
+    path: '/ci-types/drafts/:id',
+    url: `/ci-types/drafts/${DRAFT_ID}`,
+    handlers: DRAFT_HANDLERS,
+    prepare: async (page) => {
+      await expect(
+        page.locator('#main-content').getByText('a11y changed description'),
+      ).toBeVisible();
+      await expect(page.locator('#main-content').getByText('a11y_template').first()).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content').getByText('a11y value required'),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   { path: '/documents', url: '/documents', ready: text(M.document) },

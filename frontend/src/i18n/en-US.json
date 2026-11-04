@@ -1953,6 +1953,9 @@
     "kinds": {
       "attribute": {
         "index": "Attribute index"
+      },
+      "metamodel": {
+        "test": "Metamodel test"
       }
     }
   },
@@ -2112,13 +2115,101 @@
       "created": "in draft: new",
       "updated": "in draft: changed",
       "deleted": "in draft: deleted"
+    },
+    "open": "Open",
+    "page": {
+      "subtitle": "Drafts collect metamodel changes that take effect only after a test and the publication.",
+      "filterStatus": "Status",
+      "empty": "No drafts.",
+      "listLabel": "Metamodel drafts",
+      "isActive": "active draft",
+      "meta": "Changes: {{count}} · created {{created}}",
+      "chooseActive": "Choose as active draft",
+      "chooseActiveAction": "Choose draft {{name}} as active draft",
+      "discard": "Discard",
+      "discardAction": "Discard draft {{name}}",
+      "discardTitle": "Discard draft “{{name}}”?",
+      "discardText": "The draft is marked as discarded and can no longer be changed or published.",
+      "discardFailed": "The draft could not be discarded.",
+      "notFound": "This draft does not exist.",
+      "back": "Back to the draft list",
+      "detailMeta": "Changes: {{count}} · version {{version}} · created {{created}}",
+      "publishedAt": "Published {{at}}",
+      "readOnly": "This draft is closed and read-only.",
+      "needsPublish": "Testing and publishing need the permission metamodel:publish.",
+      "test": "Test",
+      "publish": "Publish",
+      "reloaded": "The draft was changed in the meantime and has been reloaded. Please review the changes again.",
+      "removeFailed": "The change could not be removed.",
+      "publishFailed": "The draft could not be published.",
+      "testTitle": "Test draft “{{name}}”",
+      "testText": "The test applies the changes tentatively and checks every affected CI of the organization. It runs as a background job.",
+      "testConfirm": "Start test",
+      "publishTitle": "Publish draft “{{name}}”",
+      "publishText": "The following changes take effect in one transaction:",
+      "publishConfirm": "Publish now",
+      "summaryLabel": "Changes per kind",
+      "summaryLine": "{{kind}}: {{count}}",
+      "publishedTitle": "The draft has been published.",
+      "schemaVersion": "{{type}}: schema version {{version}}",
+      "noTypes": "No CI type has a new schema version.",
+      "staleTitle": "Outdated changes: their targets were changed or deleted since the capture. Nothing was published.",
+      "staleLine": "{{kind}} · {{op}} · {{name}} ({{reason}})",
+      "staleReasons": {
+        "changed": "changed",
+        "missing": "no longer exists"
+      },
+      "removeItem": "Remove",
+      "removeItemAction": "Remove change {{name}} from the draft",
+      "noItems": "The draft holds no changes.",
+      "patchList": "Changes",
+      "groupTitle": "{{kind}} ({{count}})",
+      "targetMissing": "The target no longer exists.",
+      "targetUnreadable": "The current state of the target cannot be read.",
+      "diffCaption": "{{op}}: {{name}}",
+      "testSection": "Test",
+      "testFailed": "The test could not be started.",
+      "testRunning": "The test is running ({{progress}} %).",
+      "testJob": "Test job: {{status}}",
+      "notTested": "No test result yet.",
+      "blocked": "The test is blocked: the composition has conflicts. The draft stays in the status draft.",
+      "conflicts": "Blocking conflicts",
+      "conflictLine": "{{code}} · {{key}}: {{message}}",
+      "outdated": "The changes were changed during the test; please test again.",
+      "totals": {
+        "types": "Types",
+        "cis": "CIs",
+        "invalid_cis": "Invalid CIs",
+        "violations": "Violations"
+      },
+      "perType": "Counters per type",
+      "columns": {
+        "type": "Type",
+        "attributes": "Violations per attribute",
+        "ci": "CI",
+        "field": "Field",
+        "message": "Message"
+      },
+      "attributeCount": "{{key}}: {{count}}",
+      "reportFailed": "The test report could not be loaded.",
+      "noViolations": "No violations.",
+      "violations": "Violations",
+      "openCI": "Open CI {{id}}",
+      "violationCount": "{{shown}} of {{total}} violations",
+      "truncated": "At most 10000 violations are stored.",
+      "more": "Load more"
+    },
+    "problem": {
+      "detail": "Error {{status}}: {{detail}}",
+      "traceId": "Trace ID: {{traceId}}"
     }
   },
   "templates": {
     "tabs": {
       "label": "Metamodel",
       "types": "Types",
-      "templates": "Templates"
+      "templates": "Templates",
+      "drafts": "Drafts"
     },
     "subtitle": "Templates bundle attributes of a CI type in a versioned order with narrowing overrides.",
     "hint": "A template refers to an existing CI type and is no type template. System templates are read-only and can be cloned.",

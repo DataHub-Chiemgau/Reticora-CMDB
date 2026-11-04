@@ -4,7 +4,7 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
+import { ApiError, fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
@@ -62,7 +62,127 @@ export const metamodelDraftApi = {
   async items(id: string): Promise<MetamodelDraftItem[]> {
     return fetchAllPages<MetamodelDraftItem>(`/metamodel/drafts/${id}/items`);
   },
+  /** Every draft of every status, all pages over next_cursor (WP-799). */
+  async listAll(): Promise<MetamodelDraft[]> {
+    return fetchAllPages<MetamodelDraft>('/metamodel/drafts');
+  },
+  /**
+   * Discards a draft (status discarded); with the version read, If-Match
+   * refuses a change in between with 412 (API-07).
+   */
+  discard(id: string, version?: number): Promise<MetamodelDraft> {
+    return fetchAPI(`/metamodel/drafts/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    });
+  },
+  /** Removes an item; If-Match names the draft version the page read (412 otherwise). */
+  removeItem(id: string, itemId: string, version: number): Promise<MetamodelDraft> {
+    return fetchAPI(`/metamodel/drafts/${id}/items/${itemId}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    });
+  },
+  /** Starts the test run (job metamodel.test, WP-721); needs metamodel:publish. */
+  test(id: string): Promise<MetamodelTestStart> {
+    return fetchAPI(`/metamodel/drafts/${id}/test`, { method: 'POST' });
+  },
+  /** One page of the test report with its violations; needs metamodel:publish. */
+  testReport(id: string, cursor?: string): Promise<MetamodelTestReportPage> {
+    return fetchAPI(`/metamodel/drafts/${id}/test${qs({ limit: 50, cursor })}`);
+  },
+  /** Publishes a tested draft (WP-261); needs metamodel:publish. */
+  publish(id: string): Promise<MetamodelPublication> {
+    return fetchAPI(`/metamodel/drafts/${id}/publish`, { method: 'POST' });
+  },
+  /**
+   * The current state of the target of an item, for the diff of the patch
+   * list: the resource the item changes or deletes, the field of a type or
+   * the global field of that name. null: the target does not exist (a new
+   * part or a vanished target); undefined: no route reads it (a template
+   * version by its id).
+   */
+  async target(item: MetamodelDraftItem): Promise<Record<string, unknown> | null | undefined> {
+    const id = item.target_id ?? '';
+    const key = item.target_key ?? '';
+    const path = TARGET_PATHS[item.kind];
+    try {
+      if (item.kind === 'ci_type_field') {
+        if (!id || !key) return null;
+        const fields = await fetchAPI<{ data: FieldDefinition[] }>(`/ci-types/${id}/fields`);
+        return asRecord(fields.data.find((f) => f.name === key));
+      }
+      if (item.kind === 'global_field') {
+        if (!key) return null;
+        const fields = await fetchAPI<{ data: FieldDefinition[] }>('/ci-fields/global');
+        return asRecord(fields.data.find((f) => f.name === key));
+      }
+      if (!path) return undefined;
+      if (!id) return null;
+      return await fetchAPI<Record<string, unknown>>(`${path}/${id}`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+  },
 };
+
+/** The routes that read the target of an item by its id (template_version has none). */
+const TARGET_PATHS: Partial<Record<MetamodelDraftItem['kind'], string>> = {
+  ci_type: '/ci-types',
+  attribute_definition: '/attribute-definitions',
+  attribute_set: '/attribute-sets',
+  template: '/templates',
+  rule: '/rules',
+  layout: '/layouts',
+};
+
+function asRecord(value: object | undefined): Record<string, unknown> | null {
+  return value ? (value as Record<string, unknown>) : null;
+}
+
+function ifMatch(version: number | undefined): HeadersInit | undefined {
+  return version !== undefined ? { 'If-Match': `"${version}"` } : undefined;
+}
+
+/** The answer of POST /metamodel/drafts/{id}/test: the job of the run. */
+export interface MetamodelTestStart {
+  job_id: string;
+  status: string;
+  kind: 'metamodel.test';
+}
+/** The counters of a test run without its violations (WP-721). */
+export type MetamodelTestReport = components['schemas']['MetamodelTestReport'];
+export type MetamodelTestReportPage = components['schemas']['MetamodelTestReportPage'];
+export type MetamodelTestViolation = components['schemas']['MetamodelTestViolation'];
+/** The answer of a publication: the draft, counts per kind, the new schema versions. */
+export type MetamodelPublication = components['schemas']['MetamodelPublication'];
+
+/** An item of a draft whose target changed or vanished since its capture (409 of publish). */
+export interface StaleDraftItem {
+  item_id: string;
+  kind: string;
+  op: string;
+  target_id?: string | null;
+  target_key?: string | null;
+  reason: string;
+}
+
+/**
+ * staleItemsOf reads the stale items of a refused publication (409 with
+ * stale_items, WP-261); empty for every other failure.
+ */
+export function staleItemsOf(error: unknown): StaleDraftItem[] {
+  if (!(error instanceof ApiError) || error.status !== 409) return [];
+  const raw = error.problem.stale_items;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (entry): entry is StaleDraftItem =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as Record<string, unknown>).item_id === 'string',
+  );
+}
 
 // ─── CI types (§1) ───────────────────────────────────────────────────────────
 

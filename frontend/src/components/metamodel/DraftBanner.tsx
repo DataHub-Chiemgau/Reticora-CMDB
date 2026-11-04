@@ -1,8 +1,9 @@
 /**
  * DraftBanner shows the active metamodel draft on every page (MET-53,
  * UI-11, WP-798): name, status and number of items, the pending items
- * (kind, operation, target) and the actions to create a draft, switch to
- * another one and leave it. Without an active draft it offers "work in a
+ * (kind, operation, target) and the actions to open the draft in its work
+ * area (/ci-types/drafts/{id}, WP-799), create a draft, switch to another
+ * one and leave it. Without an active draft it offers "work in a
  * draft" in the metamodel area (/ci-types*). It needs citype:manage and the
  * module metamodel (E-105); with the module off, a vanished (404),
  * published or discarded draft the store is reset, so withDraft adds
@@ -13,7 +14,7 @@
  * placeholder rows for new parts from the item payload.
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useCreateMetamodelDraft,
@@ -198,6 +199,9 @@ export function DraftBanner() {
           <span>{t('metamodelDrafts.itemCount', { count })}</span>
         </p>
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" asChild>
+            <Link to={`/ci-types/drafts/${draft.id}`}>{t('metamodelDrafts.open')}</Link>
+          </Button>
           <Button size="sm" variant="secondary" onClick={() => setChooser(true)}>
             {t('metamodelDrafts.switch')}
           </Button>

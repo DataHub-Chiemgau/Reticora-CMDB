@@ -11,7 +11,8 @@ import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
-import { DRAFT_ITEM_KINDS, DRAFT_OPS, DRAFT_STATUSES } from '../stores/metamodelDraft';
+import { DRAFT_ITEM_KINDS, DRAFT_OPS } from '../stores/metamodelDraft';
+import { DRAFT_STATUSES } from '../pages/MetamodelDraftsPage';
 import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
@@ -172,6 +173,10 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['metamodelDrafts.ops', specEnum('MetamodelDraftItem', 'op')],
   ['metamodelDrafts.statuses', DRAFT_STATUSES],
   ['metamodelDrafts.statuses', specEnum('MetamodelDraft', 'status')],
+  // WP-799: the job kind of the draft test (nested, JobCenterPage) and the
+  // reasons of stale items of a refused publication (metamodel.StaleItem).
+  ['jobs.kinds.metamodel', ['test']],
+  ['metamodelDrafts.page.staleReasons', ['changed', 'missing']],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
@@ -297,6 +302,8 @@ describe('i18n catalog', () => {
     '../pages/CITypeAdminPage.tsx',
     '../pages/TopologyPage.tsx',
     '../pages/TemplatesPage.tsx',
+    // WP-799: the work area of the metamodel drafts.
+    '../pages/MetamodelDraftsPage.tsx',
     ...Object.keys(metamodelSources),
   ])('%s has no literal option labels', (file) => {
     const source = pageSources[file] ?? metamodelSources[file];

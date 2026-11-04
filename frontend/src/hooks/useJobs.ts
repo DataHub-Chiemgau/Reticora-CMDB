@@ -55,6 +55,8 @@ export const JOB_KIND_PERMISSIONS: Record<string, string> = {
   'ci.bulk': 'ci:write',
   export: 'export:run',
   'ci.merge': 'ci:delete',
+  // E-106: the test run of a metamodel draft (WP-721, WP-799).
+  'metamodel.test': 'metamodel:publish',
 };
 
 /**

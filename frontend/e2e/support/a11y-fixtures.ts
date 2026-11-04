@@ -46,6 +46,7 @@ export const A11Y_MARKERS = {
   attributeSet: 'a11y-attribute-set',
   template: 'a11y-template',
   systemTemplate: 'a11y-system-template',
+  draft: 'a11y-draft',
   consumable: 'a11y-toner',
   order: 'a11y-order-title',
   maintenance: 'a11y-maintenance-window',
@@ -456,6 +457,117 @@ export const TEMPLATE_PERMISSIONS: Handler = {
     permissions: ['ci:read', 'citype:manage', 'ci_attribute:manage', 'metamodel:publish'],
   }),
 };
+
+// The metamodel drafts of WP-799: a tested draft with an update of the
+// child type, a new attribute and the deletion of the template, its test
+// report with one violation, and a published draft in the list.
+export const DRAFT_ID = 'df000000-0000-4000-8000-000000000001';
+const DRAFT_REPORT = {
+  job_id: 'd1000000-0000-4000-8000-000000000799',
+  state: 'completed',
+  draft_version: 4,
+  started_at: AT,
+  finished_at: AT,
+  blocked: false,
+  outdated: false,
+  conflicts: [],
+  totals: { types: 1, cis: 2, invalid_cis: 1, violations: 1 },
+  types: [
+    {
+      ci_type_id: CHILD_TYPE.id,
+      cis: 2,
+      invalid_cis: 1,
+      violations: 1,
+      attributes: [{ key: 'a11y_rack_unit', violations: 1 }],
+    },
+  ],
+  truncated: false,
+};
+
+function draftItem(id: string, kind: string, op: string, extra: Record<string, unknown>) {
+  return {
+    id,
+    kind,
+    op,
+    target_id: null,
+    target_key: null,
+    payload: {},
+    base: null,
+    schema_versions: {},
+    route: 'POST /api/v1/ci-types',
+    created_by: USER,
+    created_at: AT,
+    ...extra,
+  };
+}
+
+const DRAFT_ITEMS = [
+  draftItem('df100000-0000-4000-8000-000000000001', 'ci_type', 'update', {
+    target_id: CHILD_TYPE.id,
+    payload: { description: 'a11y changed description' },
+    base: AT,
+    route: 'PATCH /api/v1/ci-types/{id}',
+  }),
+  draftItem('df100000-0000-4000-8000-000000000002', 'attribute_definition', 'create', {
+    payload: { key: 'a11y_rack_unit', data_type: 'integer', ci_type_id: CHILD_TYPE.id },
+    route: 'POST /api/v1/attribute-definitions',
+  }),
+  draftItem('df100000-0000-4000-8000-000000000003', 'template', 'delete', {
+    target_id: TEMPLATE_ID,
+    base: AT,
+    route: 'DELETE /api/v1/templates/{id}',
+  }),
+];
+
+const DRAFT = {
+  id: DRAFT_ID,
+  organization_id: ORG,
+  name: M.draft,
+  status: 'tested',
+  created_by: USER,
+  item_count: DRAFT_ITEMS.length,
+  test_report: DRAFT_REPORT,
+  version: 4,
+  created_at: AT,
+  updated_at: AT,
+};
+const PUBLISHED_DRAFT = {
+  ...DRAFT,
+  id: 'df000000-0000-4000-8000-000000000002',
+  name: 'a11y-draft-published',
+  status: 'published',
+  test_report: null,
+  published_at: AT,
+};
+
+/** The routes of the draft pages: list, draft with items, report, targets. */
+export const DRAFT_HANDLERS: Handler[] = [
+  TEMPLATE_PERMISSIONS,
+  {
+    path: '/metamodel/drafts',
+    reply: fixed({ data: [DRAFT, PUBLISHED_DRAFT], has_more: false }),
+  },
+  { path: `/metamodel/drafts/${DRAFT_ID}`, reply: fixed({ ...DRAFT, items: DRAFT_ITEMS }) },
+  {
+    path: `/metamodel/drafts/${DRAFT_ID}/test`,
+    reply: fixed({
+      ...DRAFT_REPORT,
+      data: [
+        {
+          ci_id: CI_ID,
+          ci_type_id: CHILD_TYPE.id,
+          field: 'a11y_rack_unit',
+          code: 'required',
+          message: 'a11y value required',
+        },
+      ],
+      total: 1,
+      limit: 50,
+      has_more: false,
+    }),
+  },
+  { path: `/ci-types/${CHILD_TYPE.id}`, reply: fixed(CHILD_TYPE) },
+];
 
 /** GET /ci-types/{id}/attribute-sets: the child carries the set. */
 function typeAttributeSets(_request: Request, url: URL): Reply {

@@ -312,6 +312,11 @@ export class ApiError extends Error {
   readonly conflictFields: string[];
   /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
   readonly field?: string;
+  /**
+   * problem is the parsed problem body as sent, for the extension members
+   * of one operation (e.g. stale_items of a refused metamodel publication).
+   */
+  readonly problem: Record<string, unknown>;
 
   constructor(
     status: number,
@@ -324,6 +329,7 @@ export class ApiError extends Error {
       traceId?: string;
       conflictFields?: string[];
       field?: string;
+      problem?: Record<string, unknown>;
     } = {},
   ) {
     super(message);
@@ -336,6 +342,7 @@ export class ApiError extends Error {
     this.traceId = options.traceId;
     this.conflictFields = options.conflictFields ?? [];
     this.field = options.field;
+    this.problem = options.problem ?? {};
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -409,6 +416,7 @@ export class ApiError extends Error {
       traceId,
       conflictFields,
       field,
+      problem: body as Record<string, unknown>,
     });
   }
 }
