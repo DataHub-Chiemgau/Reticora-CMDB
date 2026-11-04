@@ -99,7 +99,8 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 // the references on ci and asset of migration 000194 (WP-838),
 // ci_template_ci_fkey (000206), ci_tag_ci_fkey (000218), the CI and
 // asset references of ticket_link (000230), the asset reference of the
-// ledger stock_movement (000242) and asset_tag_link_asset_fkey (000249).
+// ledger stock_movement (000242), asset_tag_link_asset_fkey (000249) and
+// barcode_registry_asset_fkey (000255).
 const dropLaterReferences = `
 	ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
 	ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
@@ -114,7 +115,8 @@ const dropLaterReferences = `
 	ALTER TABLE ci_tag DROP CONSTRAINT ci_tag_ci_fkey;
 	ALTER TABLE ticket_link DROP CONSTRAINT ticket_link_ci_fkey, DROP CONSTRAINT ticket_link_asset_fkey;
 	ALTER TABLE stock_movement DROP CONSTRAINT stock_movement_asset_id_fkey;
-	ALTER TABLE asset_tag_link DROP CONSTRAINT asset_tag_link_asset_fkey;`
+	ALTER TABLE asset_tag_link DROP CONSTRAINT asset_tag_link_asset_fkey;
+	ALTER TABLE barcode_registry DROP CONSTRAINT barcode_registry_asset_fkey;`
 
 func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")

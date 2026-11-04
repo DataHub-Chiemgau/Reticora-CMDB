@@ -1439,3 +1439,4 @@ STK-03;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
 STK-01;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/booking_integration_test.go;WP-756
 AST-07;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/locations/barcode_integration_test.go;WP-289

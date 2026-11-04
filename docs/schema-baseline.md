@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000253_drop_composition
+Stand: Migration 000255_barcode_registry
 
 ## Prüfung
 
@@ -1511,6 +1511,41 @@ Org-, Client- und Site-Prädikat (USING = WITH CHECK). Der Altbestand
 Freitext-Standorte ohne Bestand (`location_without_bin`) stehen in
 `migration_quarantine` (Migration `000252`).
 
+Barcode-Register (INV-03, WP-289, E-26, Migration 000255): `location` erhält
+`barcode` (TEXT). `barcode_registry` (`id`, `organization_id` →
+`organization` ON DELETE CASCADE, `client_id` und `site_id` (UUID, NULL bei
+Assets/Mengenartikeln ohne Client bzw. bei Mengenartikeln ohne Standort),
+`code` TEXT NOT NULL, `source` mit `barcode_registry_source_check`
+(`barcode`, `inventory_no`), `asset_id`, `consumable_id`, `location_id`) mit
+`barcode_registry_organization_id_code_key` UNIQUE (`organization_id`,
+`code`), CHECK `barcode_registry_one_object`
+(`num_nonnulls(asset_id, consumable_id, location_id) = 1`), CHECK
+`barcode_registry_inventory_no_asset` (`source = 'barcode' OR asset_id IS NOT
+NULL`), den Fremdschlüsseln `barcode_registry_client_fkey` → `client`,
+`barcode_registry_asset_fkey` → `asset`, `barcode_registry_consumable_fkey`
+→ `consumable` und `barcode_registry_location_fkey` → `location`, je
+(`…_id`, `organization_id`) und ON DELETE CASCADE (K19), sowie den
+Teilindizes `idx_barcode_registry_asset`, `idx_barcode_registry_consumable`,
+`idx_barcode_registry_location` und `idx_barcode_registry_client` (je WHERE
+NOT NULL). Die Zeilentrigger `barcode_registry_sync` (AFTER INSERT OR UPDATE
+ON `asset`, `consumable` und `location`, Funktionen
+`barcode_registry_sync_asset()`, `barcode_registry_sync_consumable()`,
+`barcode_registry_sync_location()` mit erweitertem Scope) bauen die
+Registerzeilen eines Objekts neu auf, wenn sich `barcode`, bei Assets auch
+`inventory_no`, `client_id` oder `site_id` ändert; gleiche Werte von
+`barcode` und `inventory_no` ergeben eine Zeile (`inventory_no`). Eine
+Dublette über alle Objektarten ist 23505 auf dem UNIQUE-Constraint. RLS mit
+ENABLE/FORCE, TRUNCATE-Schutz `reticora_truncate_guard`,
+`barcode_registry_isolation` (Org-, Client- und Site-Prädikat, NULL lesbar
+wie `asset_tag_link`) sowie die restriktiven
+`barcode_registry_scoped_update` und `barcode_registry_scoped_delete`.
+Übernommen werden `asset.inventory_no`, `asset.barcode`,
+`consumable.barcode` und der Code eines direkt abgebildeten Knotens aus
+`location_node_retired` (`node_type` = `location.kind`, genau ein Knoten mit
+Code); belegte Codes stehen mit Grund `barcode_conflict` (Asset und
+Mengenartikel mit `barcode` NULL; Knoten) bzw. `barcode_ambiguous` (mehrere
+Knoten) in `migration_quarantine` (Migration `000255`).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1535,6 +1570,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
+| `barcode_registry` | ja | ja | barcode_registry_isolation (ALL), barcode_registry_scoped_delete (DELETE), barcode_registry_scoped_update (UPDATE) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `bulk_change_set` | ja | ja | bulk_change_set_isolation (ALL), bulk_change_set_scoped_delete (DELETE), bulk_change_set_scoped_update (UPDATE) |
 | `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |

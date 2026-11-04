@@ -508,6 +508,13 @@ func TestConsumableStockMigration(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
+	// The register trigger of 000255 (WP-289) reads consumable.barcode,
+	// which the down part of 000252 drops: revert 000255 first.
+	laterDown, err := os.ReadFile("../../migrations/000255_barcode_registry.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec(string(laterDown))
 	exec(string(rawDown))
 	positive, negative, located, empty := f.ID(), f.ID(), f.ID(), f.ID()
 	for _, c := range []struct {

@@ -5031,6 +5031,10 @@ paths:
       operationId: updateConsumable
       tags: [Consumables]
       summary: Update a consumable
+      description: >-
+        A barcode that an asset (barcode or inventory number), another
+        consumable or a location of the organization holds is a 409 that does
+        not name the holder (INV-03).
       requestBody:
         required: true
         content:
@@ -5050,6 +5054,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
@@ -16816,10 +16822,12 @@ paths:
     patch:
       operationId: updateLocation
       tags: [Locations]
-      summary: Rename and/or move a node
+      summary: Rename and/or move a node, assign its barcode
       description: >-
         Moving re-derives path, site and client of the node and its subtree.
-        Sites cannot be moved. Renaming or moving a rack node needs the
+        Sites cannot be moved. barcode assigns a code to the node or removes
+        it with an empty string (audit location.barcode_changed, INV-03); it
+        needs no entitlement of its own. Renaming or moving a rack node needs the
         rack_view feature like PATCH /racks/{id} (403 feature-not-entitled
         otherwise, the rack stays unchanged, F-400).
       requestBody:
@@ -20678,7 +20686,10 @@ components:
       description: >-
         The name is taken below the same parent: a site per client, a building
         per site, a room per building, a rack per room (LOC-03..06). `field`
-        is `name`; nothing was stored.
+        is `name`; nothing was stored. On PATCH also a barcode that an
+        asset (barcode or inventory number), a consumable or a location of
+        the organization holds (INV-03): `field` is `barcode`, the holder
+        is not named.
       content:
         application/problem+json:
           schema:
@@ -29841,6 +29852,12 @@ components:
         kind: { $ref: '#/components/schemas/LocationKind' }
         name: { type: string }
         path: { type: string, description: ltree path of the node ids from the site }
+        barcode:
+          type: string
+          description: >-
+            Code assigned to the node (INV-03); absent without one. Unique per
+            organization over the barcodes and inventory numbers of assets,
+            the barcodes of consumables and of locations.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     LocationTreeNode:
@@ -29867,6 +29884,13 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         parent_id: { type: string }
+        barcode:
+          type: string
+          description: >-
+            Assigns the code to the node, also to a site, building, room or
+            rack; an empty string removes it. A code held by any asset,
+            consumable or location of the organization is a 409 with field
+            barcode.
     LocationListResponse:
       type: object
       required: [data, total]

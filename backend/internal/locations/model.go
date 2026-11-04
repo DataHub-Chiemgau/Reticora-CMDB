@@ -74,7 +74,9 @@ func (k Kind) HasSpecialistTable() bool {
 }
 
 // Location is one node of the tree. ClientID, SiteID and Path are derived by
-// the database.
+// the database. Barcode is the code assigned to the node (INV-03, WP-289),
+// unique per organization over assets, consumables and locations
+// (barcode_registry, migration 000255).
 type Location struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
@@ -84,6 +86,7 @@ type Location struct {
 	Kind           Kind      `json:"kind"`
 	Name           string    `json:"name"`
 	Path           string    `json:"path"`
+	Barcode        string    `json:"barcode,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -97,10 +100,12 @@ type CreateRequest struct {
 	Name     string `json:"name"`
 }
 
-// UpdateRequest renames and/or moves a node; nil fields stay unchanged.
+// UpdateRequest renames and/or moves a node and assigns its barcode; nil
+// fields stay unchanged, an empty Barcode removes the code (WP-289).
 type UpdateRequest struct {
 	Name     *string `json:"name,omitempty"`
 	ParentID *string `json:"parent_id,omitempty"`
+	Barcode  *string `json:"barcode,omitempty"`
 }
 
 // Filter narrows a listing.

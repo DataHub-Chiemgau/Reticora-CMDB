@@ -2386,7 +2386,10 @@ export interface paths {
     delete: operations['deleteConsumable'];
     options?: never;
     head?: never;
-    /** Update a consumable */
+    /**
+     * Update a consumable
+     * @description A barcode that an asset (barcode or inventory number), another consumable or a location of the organization holds is a 409 that does not name the holder (INV-03).
+     */
     patch: operations['updateConsumable'];
     trace?: never;
   };
@@ -7438,8 +7441,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Rename and/or move a node
-     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
+     * Rename and/or move a node, assign its barcode
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. barcode assigns a code to the node or removes it with an empty string (audit location.barcode_changed, INV-03); it needs no entitlement of its own. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
      */
     patch: operations['updateLocation'];
     trace?: never;
@@ -14632,6 +14635,8 @@ export interface components {
       name: string;
       /** @description ltree path of the node ids from the site */
       path: string;
+      /** @description Code assigned to the node (INV-03); absent without one. Unique per organization over the barcodes and inventory numbers of assets, the barcodes of consumables and of locations. */
+      barcode?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -14651,6 +14656,8 @@ export interface components {
     LocationUpdateRequest: {
       name?: string;
       parent_id?: string;
+      /** @description Assigns the code to the node, also to a site, building, room or rack; an empty string removes it. A code held by any asset, consumable or location of the organization is a 409 with field barcode. */
+      barcode?: string;
     };
     LocationListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -16760,7 +16767,7 @@ export interface components {
         'application/problem+json': components['schemas']['DependencyProblem'];
       };
     };
-    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. */
+    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. On PATCH also a barcode that an asset (barcode or inventory number), a consumable or a location of the organization holds (INV-03): `field` is `barcode`, the holder is not named. */
     LocationNameTaken: {
       headers: {
         [name: string]: unknown;
@@ -22002,6 +22009,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

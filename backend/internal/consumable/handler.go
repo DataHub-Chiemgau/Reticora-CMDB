@@ -133,8 +133,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
 		// A client that does not match the bins of the stock (23514), a
-		// taken barcode (23505) or an unknown supplier (23503) is answered
-		// by api.WriteDBError; everything else reads as not found.
+		// taken barcode (23505, also a code of an asset or a location in
+		// barcode_registry, WP-289: 409 without naming the holder) or an
+		// unknown supplier (23503) is answered by api.WriteDBError; only
+		// everything else reads as not found.
 		if !errors.Is(err, ErrNotFound) && api.WriteDBError(w, err) {
 			return
 		}

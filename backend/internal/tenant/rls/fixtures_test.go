@@ -106,6 +106,9 @@ var matrixOverrides = map[string]map[string]string{
 	// one grantee (WP-264).
 	"field_grant":  {"role_id": "@uuid"},
 	"object_grant": {"grantee_role_id": "@uuid"},
+	// A register row names exactly one object (barcode_registry_one_object,
+	// WP-289).
+	"barcode_registry": {"asset_id": "@uuid"},
 	// The i18n check of the tag catalog needs a de/en map (WP-281).
 	"tag": {"display_name": `{"de": "Matrix", "en": "Matrix"}`},
 	// The currency of a contract is an ISO 4217 code (WP-269).

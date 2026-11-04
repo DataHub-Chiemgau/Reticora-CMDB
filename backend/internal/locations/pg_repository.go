@@ -17,7 +17,8 @@ import (
 
 const selectColumns = `
 	id::text, organization_id::text, client_id::text, site_id::text,
-	COALESCE(parent_id::text, ''), kind, name, path::text, created_at, updated_at`
+	COALESCE(parent_id::text, ''), kind, name, path::text, COALESCE(barcode, ''),
+	created_at, updated_at`
 
 // PGRepository reads and writes the location tree under RLS.
 type PGRepository struct {
@@ -118,9 +119,13 @@ func (r *PGRepository) Move(ctx context.Context, orgID, id, parentID string) (*L
 	return r.Update(ctx, orgID, id, UpdateRequest{ParentID: &parentID})
 }
 
-// Update renames and/or moves a node in one transaction. Specialist kinds
-// are changed through their table, whose trigger keeps the location row in
-// step.
+// Update renames and/or moves a node and assigns its barcode in one
+// transaction. Specialist kinds are renamed and moved through their table,
+// whose trigger keeps the location row in step; the barcode is written on
+// location for every kind (location_maintain locks only name, move and
+// client there) and audited as location.barcode_changed. A code taken by
+// any asset, consumable or location of the organization is an
+// *api.ConflictError on barcode (barcode_registry, WP-289).
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Location, error) {
 	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return nil, fieldError("name", ErrInvalidInput, "name must not be empty")
@@ -143,6 +148,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 				return withField("name", mapError(fmt.Errorf("rename location: %w", err)))
 			}
 			if auditErr := recordAudit(ctx, tx, "location.renamed", cur, map[string]any{"name": map[string]any{"old": cur.Name, "new": *req.Name}}); auditErr != nil {
+				return auditErr
+			}
+		}
+		if req.Barcode != nil && *req.Barcode != cur.Barcode {
+			if err = exec(ctx, tx, `UPDATE location SET barcode = NULLIF($2, '') WHERE id = $1`, id, *req.Barcode); err != nil {
+				return mapError(fmt.Errorf("assign location barcode: %w", err))
+			}
+			if auditErr := recordAudit(ctx, tx, "location.barcode_changed", cur, map[string]any{"barcode": map[string]any{"old": cur.Barcode, "new": *req.Barcode}}); auditErr != nil {
 				return auditErr
 			}
 		}
@@ -251,7 +264,7 @@ func get(ctx context.Context, tx pgx.Tx, id string) (*Location, error) {
 func scan(row pgx.Row) (*Location, error) {
 	var l Location
 	if err := row.Scan(&l.ID, &l.OrganizationID, &l.ClientID, &l.SiteID, &l.ParentID,
-		&l.Kind, &l.Name, &l.Path, &l.CreatedAt, &l.UpdatedAt); err != nil {
+		&l.Kind, &l.Name, &l.Path, &l.Barcode, &l.CreatedAt, &l.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return &l, nil
@@ -260,12 +273,15 @@ func scan(row pgx.Row) (*Location, error) {
 // nameConstraintFields maps the unique name constraints of the specialist
 // tables onto the request field: a name is unique per client (site), site
 // (building), building (room) and room (rack), LOC-03..06. A duplicate is a
-// 409 naming the field, as on POST /sites.
+// 409 naming the field, as on POST /sites. A barcode is unique per
+// organization over all object kinds (barcode_registry, WP-289); the 409
+// names the field, not the object holding the code.
 var nameConstraintFields = map[string]string{
-	"site_org_client_name_key": "name",
-	"building_site_name_key":   "name",
-	"room_building_name_key":   "name",
-	"rack_room_name_key":       "name",
+	"barcode_registry_organization_id_code_key": "barcode",
+	"site_org_client_name_key":                  "name",
+	"building_site_name_key":                    "name",
+	"room_building_name_key":                    "name",
+	"rack_room_name_key":                        "name",
 }
 
 // mapError translates the errors of the location triggers and policies into
