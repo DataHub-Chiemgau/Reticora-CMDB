@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -75,8 +76,9 @@ func strPtr(s string) *string { return &s }
 
 // newFRAccess builds the grants of the tests: the role of sa-1 reads CIs,
 // relationships, assets and contracts, but not core.serial_number, the
-// attribute owner_secret, the relationship type backs_up and the asset
-// supplier; attributes.salary is sensitive without grant.
+// attribute owner_secret, the relationship type backs_up, the asset
+// supplier and the contract fields value and end_date; attributes.salary
+// is sensitive without grant.
 func newFRAccess(t *testing.T) frAccess {
 	t.Helper()
 	bg := context.Background()
@@ -88,6 +90,7 @@ func newFRAccess(t *testing.T) frAccess {
 		{ObjectKind: permission.KindRelationship, RelationshipTypeID: strPtr("00000000-0000-4000-8000-0000000000b1"), Level: permission.LevelNone},
 		{ObjectKind: permission.KindAsset, FieldKey: strPtr("core.supplier"), Level: permission.LevelNone},
 		{ObjectKind: permission.KindContract, FieldKey: strPtr("core.value"), Level: permission.LevelNone},
+		{ObjectKind: permission.KindContract, FieldKey: strPtr("core.end_date"), Level: permission.LevelNone},
 	} {
 		g.RoleID = strPtr(frRole)
 		if _, err := mem.CreateFieldGrant(bg, frOrg, &g); err != nil {
@@ -337,14 +340,22 @@ func TestWebhookPayloadFieldRights(t *testing.T) {
 		if _, ok := got["unbound"]; ok {
 			t.Errorf("unbound subscription received a workflow frame although its policy restricts fields: %s", got["unbound"])
 		}
-		// contract.expiring has no projection rule: withheld while the
-		// policy restricts contract fields.
-		got = e.dispatch("contract.expiring", map[string]any{"id": "k-1", "client_id": frClient, "expires_at": "2027-01-01"})
-		if _, ok := got["bound"]; ok {
-			t.Errorf("bound subscription received an event without projection rule: %s", got["bound"])
+		// contract.expiring (WP-270) follows the contract policy: the end
+		// date is unreadable, so expires_at and what derives from it (due
+		// date, stage, days left) are left out, like a member without
+		// mapping; the structural members and readable fields stay.
+		got = e.dispatch("contract.expiring", map[string]any{"id": "k-1", "client_id": frClient, "number": "V-1", "kind": "lease",
+			"notice_period_days": 30, "stage": 7, "due_date": "2026-12-02", "expires_at": "2027-01-01", "days_left": 5, "value": 1000})
+		var bound map[string]any
+		if err := json.Unmarshal(got["bound"], &bound); err != nil {
+			t.Fatalf("bound subscription: %s (%v)", got["bound"], err)
 		}
-		if _, ok := got["unbound"]; !ok {
-			t.Error("unbound subscription (no contract restriction) missed contract.expiring")
+		members := slices.Sorted(maps.Keys(bound))
+		if strings.Join(members, ",") != "client_id,id,kind,notice_period_days,number" {
+			t.Errorf("bound contract.expiring members %v, want client_id,id,kind,notice_period_days,number", members)
+		}
+		if !strings.Contains(string(got["unbound"]), `"expires_at":"2027-01-01"`) {
+			t.Errorf("unbound subscription (no contract restriction) got contract.expiring %s", got["unbound"])
 		}
 		// A snapshot without ci_type_id has not the form of its type.
 		got = e.dispatch("ci.changed", map[string]any{"id": frCI, "client_id": frClient, "serial_number": frSerial})

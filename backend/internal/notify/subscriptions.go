@@ -153,6 +153,38 @@ var Subscriptions = map[string]Subscription{
 				ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
 		},
 	},
+	events.ContractExpiring: {
+		// A reached stage before the due date of a contract (the
+		// expiry.check run, NTF-05 [P2], MGT-12, WP-270): the org_admins
+		// who read contracts in the contract's client, organization-wide
+		// for a contract without client. A contract has no owner (E-119).
+		// Not critical: quiet hours, muted categories and the digest apply.
+		Category: "contract",
+		Audience: func(d map[string]any) *Audience {
+			return &Audience{Permission: identity.PermContractRead, Roles: []string{"org_admin"}, ClientID: str(d, "client_id")}
+		},
+	},
+	events.AssetWarrantyExpiring: {
+		// A reached stage before the warranty end of an asset (WP-270):
+		// its owning user and team and the org_admins, each with asset:read
+		// in the asset's client and site, and the owner contacts of its
+		// primary CI.
+		Category: "warranty",
+		Audience: func(d map[string]any) *Audience {
+			a := &Audience{Permission: identity.PermAssetRead, Roles: []string{"org_admin"},
+				ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+			if id := str(d, "owner_user_id"); id != "" {
+				a.UserIDs = []string{id}
+			}
+			if id := str(d, "owner_team_id"); id != "" {
+				a.TeamIDs = []string{id}
+			}
+			if id := str(d, "primary_ci_id"); id != "" {
+				a.CIID, a.ContactRoles = id, []string{"owner"}
+			}
+			return a
+		},
+	},
 	events.DocumentScanned: {
 		// A finding quarantines the version (SEC-09, E-42, WP-734): its
 		// uploader and the org_admins who read the document are told. A

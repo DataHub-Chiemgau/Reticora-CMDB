@@ -179,20 +179,41 @@ type AssetAssignmentData struct {
 	SiteID   string `json:"site_id,omitempty"`
 }
 
-// AssetWarrantyData is the data of asset.warranty_expiring (WP-270).
+// AssetWarrantyData is the data of asset.warranty_expiring, one reached
+// stage of the expiry.check run (WP-270): the stage in days, the due date
+// (the warranty end), expires_at (the warranty end) and the days left
+// until the due date, with the asset's name, inventory number, owners and
+// primary CI (asset.ci_id), the recipients of the notification.
 type AssetWarrantyData struct {
-	ID        string `json:"id"`
-	ClientID  string `json:"client_id,omitempty"`
-	SiteID    string `json:"site_id,omitempty"`
-	ExpiresAt string `json:"expires_at"`
+	ID          string `json:"id"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Name        string `json:"name"`
+	InventoryNo string `json:"inventory_no"`
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+	OwnerTeamID string `json:"owner_team_id,omitempty"`
+	PrimaryCIID string `json:"primary_ci_id,omitempty"`
+	Stage       int    `json:"stage"`
+	DueDate     string `json:"due_date"`
+	ExpiresAt   string `json:"expires_at"`
+	DaysLeft    int    `json:"days_left"`
 }
 
-// ContractExpiringData is the data of contract.expiring (WP-270); a
-// contract has a client, no site.
+// ContractExpiringData is the data of contract.expiring, one reached
+// stage of the expiry.check run (WP-270); a contract has a client, no
+// site. The due date is end_date minus notice_period_days (0 without a
+// notice period), expires_at the end_date.
 type ContractExpiringData struct {
-	ID        string `json:"id"`
-	ClientID  string `json:"client_id,omitempty"`
-	ExpiresAt string `json:"expires_at"`
+	ID               string `json:"id"`
+	ClientID         string `json:"client_id,omitempty"`
+	Number           string `json:"number"`
+	Kind             string `json:"kind,omitempty"`
+	SupplierID       string `json:"supplier_id,omitempty"`
+	NoticePeriodDays int    `json:"notice_period_days"`
+	Stage            int    `json:"stage"`
+	DueDate          string `json:"due_date"`
+	ExpiresAt        string `json:"expires_at"`
+	DaysLeft         int    `json:"days_left"`
 }
 
 // StockMovementData is the data of stock.movement, the movement with the

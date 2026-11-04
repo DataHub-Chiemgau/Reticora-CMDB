@@ -33,6 +33,10 @@ var templateData = map[string]map[string]any{
 		"name": "ci-sync", "service_account_name": "sync", "service_account_id": "sa-1"}}},
 	events.TicketSLABreached: {"ticket_number": float64(42), "priority": "high", "kind": "resolution",
 		"due_at": "2026-11-04T16:00:00Z"},
+	events.ContractExpiring: {"number": "V-2026-017", "stage": float64(30), "due_date": "2026-10-02",
+		"expires_at": "2026-12-31", "days_left": float64(28)},
+	events.AssetWarrantyExpiring: {"name": "Notebook 4711", "inventory_no": "INV-4711", "stage": float64(7),
+		"due_date": "2026-12-31", "expires_at": "2026-12-31", "days_left": float64(5)},
 	events.DocumentScanned: {"document_id": "d-1", "version": float64(2), "result": "infected",
 		"scan_signature": "Win.Test.EICAR_HDB-1", "uploaded_by": "u-7"},
 }
@@ -65,6 +69,55 @@ func TestDocumentScannedAudience(t *testing.T) {
 	if text := Render(events.DocumentScanned, LocaleDE, templateData[events.DocumentScanned]); !strings.Contains(text.Body, "Win.Test.EICAR_HDB-1") ||
 		!strings.Contains(text.Body, "Version 2 ") {
 		t.Errorf("German text %+v", text)
+	}
+}
+
+// TestExpiryAudiences covers the recipients of the expiry.check events
+// (NTF-05 [P2], MGT-12, WP-270): contract.expiring reaches the org_admins
+// with contract:read in the contract's client (organization-wide without
+// one); asset.warranty_expiring the owning user and team and the org_admins
+// with asset:read in the asset's client and site and the owner contacts of
+// the primary CI. Both are not critical, in the categories contract and
+// warranty.
+func TestExpiryAudiences(t *testing.T) {
+	contract := Subscriptions[events.ContractExpiring]
+	if contract.Category != "contract" || contract.Critical || contract.Personal {
+		t.Fatalf("contract.expiring subscription %+v", contract)
+	}
+	want := Audience{Permission: identity.PermContractRead, Roles: []string{"org_admin"}, ClientID: "c-1"}
+	if a := contract.Audience(map[string]any{"id": "k-1", "client_id": "c-1"}); a == nil || !reflect.DeepEqual(*a, want) {
+		t.Errorf("contract audience %+v, want %+v", a, want)
+	}
+	want.ClientID = ""
+	if a := contract.Audience(map[string]any{"id": "k-2"}); a == nil || !reflect.DeepEqual(*a, want) {
+		t.Errorf("organization-wide contract audience %+v, want %+v", a, want)
+	}
+	warranty := Subscriptions[events.AssetWarrantyExpiring]
+	if warranty.Category != "warranty" || warranty.Critical || warranty.Personal {
+		t.Fatalf("asset.warranty_expiring subscription %+v", warranty)
+	}
+	full := Audience{Permission: identity.PermAssetRead, Roles: []string{"org_admin"}, ClientID: "c-1", SiteID: "s-1",
+		UserIDs: []string{"u-1"}, TeamIDs: []string{"t-1"}, CIID: "ci-1", ContactRoles: []string{"owner"}}
+	if a := warranty.Audience(map[string]any{"id": "a-1", "client_id": "c-1", "site_id": "s-1", "owner_user_id": "u-1",
+		"owner_team_id": "t-1", "primary_ci_id": "ci-1"}); a == nil || !reflect.DeepEqual(*a, full) {
+		t.Errorf("warranty audience %+v, want %+v", a, full)
+	}
+	bare := Audience{Permission: identity.PermAssetRead, Roles: []string{"org_admin"}}
+	if a := warranty.Audience(map[string]any{"id": "a-2"}); a == nil || !reflect.DeepEqual(*a, bare) {
+		t.Errorf("warranty audience without owners %+v, want %+v", a, bare)
+	}
+	for typ, words := range map[string][]string{
+		events.ContractExpiring:      {"V-2026-017", "2026-10-02", "28"},
+		events.AssetWarrantyExpiring: {"Notebook 4711", "INV-4711", "2026-12-31", "5 "},
+	} {
+		for _, locale := range []string{LocaleDE, LocaleEN} {
+			text := Render(typ, locale, templateData[typ])
+			for _, w := range words {
+				if !strings.Contains(text.Subject+" "+text.Body, w) {
+					t.Errorf("%s in %s: %+v lacks %q", typ, locale, text, w)
+				}
+			}
+		}
 	}
 }
 

@@ -1401,3 +1401,5 @@ UI-11;[P2];C;frontend/src/components/metamodel/DraftBanner.test.tsx;WP-798
 MET-53;[P2];C;frontend/src/api/client.test.ts;WP-798
 UI-11;[P2];C;frontend/src/pages/MetamodelDraftsPage.test.tsx;WP-799
 MET-53;[P2];C;frontend/src/pages/MetamodelDraftsPage.test.tsx;WP-799
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
+MGT-12;[P2];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
