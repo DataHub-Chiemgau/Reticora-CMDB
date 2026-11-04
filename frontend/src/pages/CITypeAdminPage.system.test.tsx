@@ -1,11 +1,12 @@
 /**
- * System CI types are read-only (MET-06 inheritance is P2): on a fresh
+ * System CI types are read-only (E-10; since WP-313 the attribute editor
+ * writes /attribute-definitions instead of PUT /ci-types/{id}/fields): on a fresh
  * install every CI type is a system type, and "Feld hinzufügen" on it was
  * answered with the 403 of row-level security, shown as "Keine Berechtigung"
  * although the administrator holds every permission.
  *   (+) a system type offers neither "Feld hinzufügen" nor "Deaktivieren",
  *       but "Klonen" and a hint to the two ways that work (a clone, the
- *       organization-wide fields)
+ *       global attributes)
  *   (+) the 422 on ci_type_id of a field on a system type (a stale list or
  *       a direct call) reads as a read-only system type, not as a missing
  *       permission; so does the 403 of a system attribute definition
@@ -73,27 +74,44 @@ const CLONE = {
   is_system: false,
 };
 
-/** The organization's definition inventory_no of ORG_TYPE. */
-const DEFINITION = {
-  id: 'ad-1',
-  key: 'inventory_no',
-  ci_type_id: 't-org',
-  scope: 'type',
-  data_type: 'text',
-  searchable: false,
-  unique: false,
-  unique_scope: 'org',
-  is_system: false,
-};
+function definition(id: string, key: string, ciTypeId: string, isSystem = false) {
+  return {
+    id,
+    key,
+    ci_type_id: ciTypeId,
+    scope: 'type',
+    display_name: { de: key, en: key },
+    data_type: 'text',
+    required: false,
+    multi_value: false,
+    searchable: false,
+    unique: false,
+    unique_scope: 'org',
+    inheritable: true,
+    order: 0,
+    is_system: isSystem,
+    applies_to: 'all',
+    applies_to_categories: [],
+    applies_to_type_ids: [],
+  };
+}
+
+/** The organization's definition inventory_no of ORG_TYPE and the system attribute hostname. */
+const DEFINITION = definition('ad-1', 'inventory_no', 't-org');
+const DEFINITIONS = [
+  DEFINITION,
+  definition('ad-sys', 'hostname', 't-sys', true),
+  definition('ad-clone', 'hostname', 't-clone'),
+];
 
 interface Backend {
-  /** Answer of PUT /ci-types/{id}/fields; default: the saved field. */
-  put?: () => Response;
+  /** Answer of POST /attribute-definitions; default: the saved definition. */
+  post?: () => Response;
   /** Answer of PATCH /attribute-definitions/ad-1; default: the patched definition. */
   patch?: () => Response;
 }
 
-function stubBackend({ put, patch }: Backend = {}): Call[] {
+function stubBackend({ post, patch }: Backend = {}): Call[] {
   const calls: Call[] = [];
   let cloned = false;
   vi.stubGlobal(
@@ -103,8 +121,8 @@ function stubBackend({ put, patch }: Backend = {}): Call[] {
       const method = (init?.method ?? 'GET').toUpperCase();
       const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
       calls.push({ method, url, body });
-      if (method === 'PUT' && /\/ci-types\/[^/]+\/fields$/.test(url)) {
-        return put ? put() : json({ id: 'ad-2', name: 'x', data_type: 'text' });
+      if (method === 'POST' && /\/attribute-definitions$/.test(url)) {
+        return post ? post() : json(definition('ad-2', 'x', 't-org'), 201);
       }
       if (method === 'PATCH' && url.includes('/attribute-definitions/ad-1')) {
         return patch ? patch() : json({ ...DEFINITION, ...(body as object) });
@@ -113,10 +131,12 @@ function stubBackend({ put, patch }: Backend = {}): Call[] {
         cloned = true;
         return json(CLONE, 201);
       }
-      if (url.includes('/attribute-definitions')) {
-        return json({ data: url.includes('ci_type_id=t-org') ? [DEFINITION] : [] });
+      if (url.includes('/attribute-definitions?')) {
+        const typeId = /(?:applicable_to|ci_type_id)=([^&]+)/.exec(url)?.[1];
+        return json({ data: DEFINITIONS.filter((d) => d.ci_type_id === typeId) });
       }
-      if (url.includes('/ci-fields/global')) return json({ data: [] });
+      if (url.includes('/field-permissions/'))
+        return json({ data: [], limit: 200, has_more: false });
       if (url.includes('/me/permissions')) {
         return json({ user_id: 'u1', permissions: ['citype:manage', 'ci_attribute:manage'] });
       }
@@ -146,7 +166,7 @@ function stubBackend({ put, patch }: Backend = {}): Call[] {
         return json({
           data: cloned ? [SYSTEM_TYPE, ORG_TYPE, CLONE] : [SYSTEM_TYPE, ORG_TYPE],
           total: cloned ? 3 : 2,
-          limit: 50,
+          limit: 200,
           offset: 0,
           has_more: false,
         });
@@ -159,7 +179,7 @@ function stubBackend({ put, patch }: Backend = {}): Call[] {
 
 async function openType(name: RegExp) {
   renderWithProviders(<CITypeAdminPage />, { route: '/admin/ci-types' });
-  fireEvent.click(await screen.findByRole('button', { name }));
+  fireEvent.click(await screen.findByRole('treeitem', { name }));
 }
 
 /** saveNewField opens the editor on the organization's type and saves a field. */
@@ -188,7 +208,7 @@ describe('CITypeAdminPage system types', () => {
     const note = screen.getByRole('note');
     expect(note).toHaveTextContent('Systemtyp: schreibgeschützt.');
     expect(note).toHaveTextContent('„Klonen“ legt einen eigenen Typ mit allen Feldern');
-    expect(note).toHaveTextContent('Organisationsweite Felder gelten für alle CI-Typen');
+    expect(note).toHaveTextContent('Globale Attribute gelten für alle CI-Typen');
 
     // The clone is selected: a type of the organization that takes fields.
     fireEvent.click(screen.getByRole('button', { name: 'Klonen' }));
@@ -213,7 +233,7 @@ describe('CITypeAdminPage system types', () => {
 
   it('shows the 422 on ci_type_id as a read-only system type, not as a missing permission', async () => {
     stubBackend({
-      put: () =>
+      post: () =>
         problem(422, {
           title: 'Unprocessable Entity',
           detail: 'ci_type_id: system ci types cannot get organization attributes',
@@ -231,7 +251,7 @@ describe('CITypeAdminPage system types', () => {
 
   it('names the missing permission of the route authorization', async () => {
     stubBackend({
-      put: () =>
+      post: () =>
         problem(403, { title: 'Forbidden', detail: 'missing required permission: citype:manage' }),
     });
     const alert = await saveNewField();
@@ -243,7 +263,7 @@ describe('CITypeAdminPage system types', () => {
 
   it('shows any other 403 with the reason of the server, not as a missing permission', async () => {
     stubBackend({
-      put: () => problem(403, { title: 'Forbidden', detail: 'the operation is not permitted' }),
+      post: () => problem(403, { title: 'Forbidden', detail: 'the operation is not permitted' }),
     });
     const alert = await saveNewField();
 
@@ -266,7 +286,7 @@ describe('CITypeAdminPage system types', () => {
 
     const alert = await within(dialog).findByRole('alert');
     expect(alert).toHaveTextContent(
-      'Index-Einstellungen nicht gespeichert. System-Attribute sind schreibgeschützt.',
+      'Änderungen nicht gespeichert. System-Attribute sind schreibgeschützt.',
     );
     expect(alert).not.toHaveTextContent('Keine Berechtigung');
   });
@@ -291,7 +311,7 @@ describe('CITypeAdminPage dialog text colours', () => {
   it('gives the template names explicit light and dark colours', async () => {
     stubBackend();
     renderWithProviders(<CITypeAdminPage />, { route: '/admin/ci-types' });
-    fireEvent.click(await screen.findByRole('button', { name: 'Aus Vorlage' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Aus Typvorlage' }));
     const dialog = screen.getByRole('dialog');
 
     expect(await within(dialog).findByText('Vorlage Server')).toHaveClass(

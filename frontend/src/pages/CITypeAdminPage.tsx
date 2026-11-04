@@ -1,34 +1,30 @@
-import { useState } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
-  useCIType,
-  useCITypes,
+  useAllCITypes,
+  useApplicableAttributeDefinitions,
   useCITypeTemplates,
-  useCreateCIType,
   useCloneCIType,
-  useSetCITypeActive,
-  useUpsertCITypeField,
-  useDeleteCITypeField,
-  useAttributeDefinitions,
-  useAttributeIndexJob,
-  useSetAttributeIndexFlags,
-  useGlobalFields,
+  useCreateCIType,
+  useDeleteAttributeDefinition,
   useGlobalAttributeDefinitions,
-  useUpsertGlobalField,
-  useDeleteGlobalField,
-  FlagUpdateError,
+  useReindexAttributeDefinition,
+  useSensitiveCIFields,
+  useSetCITypeActive,
+  useTypeAttributeDefinitions,
+  useUpdateCIType,
 } from '../api/cmdbHooks';
 import { useHasPermission } from '../api/hooks';
 import {
   localizedText,
   type AttributeDefinition,
-  type AttributeIndexFlags,
   type CIType,
-  type GlobalFieldDefinition,
+  type CITypeCreateRequest,
+  type CITypeUpdateRequest,
+  type SensitiveField,
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
-import type { FieldDefinition } from '../lib/fieldmeta';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -37,169 +33,113 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { TypeTree, ancestorsOf } from '../components/metamodel/TypeTree';
+import {
+  AttributeEditor,
+  describeFlagRefusal,
+  fieldDetail,
+  fieldErrors,
+  type AttributeEditorTarget,
+} from '../components/metamodel/AttributeEditor';
+import { IndexStatus } from '../components/metamodel/IndexStatus';
 
-// Data types of MET-11: phase 1, then phase 2 (file, json, references).
-export const FIELD_TYPES = [
-  'text',
-  'multiline',
-  'integer',
-  'decimal',
-  'boolean',
-  'date',
-  'datetime',
-  'enum',
-  'multiselect',
-  'ip',
-  'mac',
-  'url',
-  'email',
-  'uuid',
-  'json',
-  'file',
-  'user',
-  'team',
-  'location',
-  'ci_ref',
-  'asset_ref',
-  'contract_ref',
-];
+// Data types of MET-11 (the catalog test labels each of them).
+export { FIELD_TYPES } from '../components/metamodel/AttributeEditor';
 
-// A new field is neither indexed nor unique until the editor says so
-// (MET-15); the flags start the index job (DB-04).
-const NO_INDEX: AttributeIndexFlags = { searchable: false, unique: false, unique_scope: 'org' };
+type TypeLabel = (type: CIType) => string;
 
-/** The existing definition whose flags the editor changes (F-325); none: a new field. */
-interface FlagTarget {
-  definitionId: string;
-  name: string;
-}
+// The refusal of deactivating a type with a deactivated parent and of a parent
+// that is deactivated (WP-249).
+const TYPE_DEACTIVATED = 'the CI type is deactivated';
 
-/**
- * What the field editor writes: a field of the selected CI type or an
- * organization-wide field for every CI type (PUT /ci-fields/global, MET-13).
- */
-type FieldScope = 'type' | 'global';
+/** The origin of an attribute in the catalog of a type (UI-11). */
+type Origin = { kind: 'own' } | { kind: 'inherited'; from: CIType } | { kind: 'global' };
 
-// The 403 detail of the route authorization ("missing required permission:
-// citype:manage") and of a write to a system attribute definition.
-const MISSING_PERMISSION = 'missing required permission';
-const SYSTEM_DEFINITION_READ_ONLY = 'system attribute definitions are read-only';
+/** A dialog of the type: create, or edit an existing type. */
+type TypeDialogState = { mode: 'create' } | { mode: 'edit'; type: CIType };
 
-/**
- * describeFlagRefusal renders the refusal of a field or flag save in the UI
- * language with the server's reason, e.g. the 409 of a unique flag while
- * CIs share a value (MET-15, F-159). A system CI type (422 on ci_type_id)
- * and a system definition (403 read-only) are read-only objects, not a
- * missing permission: "Keine Berechtigung" is only the 403 of the route
- * authorization.
- */
-function describeFlagRefusal(error: unknown, t: TFunction): string {
-  if (error instanceof ApiError) {
-    const raw = error.detail || error.message;
-    // A FieldProblem's detail is "<field>: <message>".
-    const detail =
-      error.field && raw.startsWith(`${error.field}: `) ? raw.slice(error.field.length + 2) : raw;
-    if (error.status === 409 && error.field === 'unique') {
-      return t('citypes.flagErrors.duplicates', { detail });
-    }
-    if (error.status === 422 && error.field === 'ci_type_id') {
-      return t('citypes.flagErrors.systemType');
-    }
-    if (error.status === 403) {
-      if (raw.startsWith(MISSING_PERMISSION)) {
-        const permission = raw.slice(MISSING_PERMISSION.length).replace(/^:\s*/, '').trim();
-        return permission
-          ? t('citypes.flagErrors.forbiddenPermission', { permission })
-          : t('citypes.flagErrors.forbidden');
+/** descendantsOf returns the ids of the types below a type (they cannot be its parent). */
+function descendantsOf(id: string, types: CIType[]): Set<string> {
+  const out = new Set<string>();
+  let added = true;
+  while (added) {
+    added = false;
+    for (const ty of types) {
+      const parent = ty.parent_type_id;
+      if (parent && (parent === id || out.has(parent)) && !out.has(ty.id)) {
+        out.add(ty.id);
+        added = true;
       }
-      if (raw === SYSTEM_DEFINITION_READ_ONLY) return t('citypes.flagErrors.readOnly');
-      return t('citypes.flagErrors.reason', { detail });
     }
-    if (error.status === 404) return t('citypes.flagErrors.notFound');
-    return t('citypes.flagErrors.reason', { detail });
   }
-  return t('citypes.flagErrors.reason', {
-    detail: error instanceof Error ? error.message : String(error),
-  });
+  return out;
 }
 
-/** describeSaveError tells a refused field from a saved field whose flags were refused. */
-function describeSaveError(error: unknown, editing: boolean, t: TFunction): string {
-  if (error instanceof FlagUpdateError) {
-    return t('citypes.flagErrors.partial', {
-      name: error.field.name,
-      reason: describeFlagRefusal(error.refusal, t),
-    });
-  }
-  return editing
-    ? t('citypes.flagErrors.flagsNotSaved', { reason: describeFlagRefusal(error, t) })
-    : t('citypes.flagErrors.fieldNotSaved', { reason: describeFlagRefusal(error, t) });
+/** The message of a refused parent at the parent field (WP-248, WP-249). */
+function parentMessage(error: ApiError, t: TFunction): string {
+  const detail = fieldDetail(error);
+  if (error.status === 409) return t('citypes.typeErrors.parentConflict', { detail });
+  if (detail === TYPE_DEACTIVATED) return t('citypes.typeErrors.parentInactive');
+  return t('citypes.typeErrors.parentInvalid', { detail });
 }
+
+/**
+ * describeActionError renders a refused clone, deactivation or activation
+ * (WP-249): active subtypes (409 on is_active) and a deactivated parent (409
+ * on parent_type_id) by name, every other refusal with the server's reason.
+ */
+function describeActionError(
+  action: 'clone' | 'deactivate' | 'activate',
+  error: unknown,
+  t: TFunction,
+): string {
+  if (error instanceof ApiError && error.status === 409) {
+    if (error.field === 'is_active') return t('citypes.typeErrors.activeSubtypes');
+    if (error.field === 'parent_type_id') {
+      return t(`citypes.typeErrors.${action}ParentInactive`);
+    }
+  }
+  return t(`citypes.typeErrors.${action}Failed`, { reason: describeFlagRefusal(error, t) });
+}
+
+/** isSensitive reports whether a mark of WP-726 covers the attribute in the type chain. */
+function isSensitive(
+  marks: SensitiveField[],
+  definition: AttributeDefinition,
+  chain: string[],
+): boolean {
+  return marks.some(
+    (m) =>
+      m.object_kind === 'ci' &&
+      m.field_key === `attributes.${definition.key}` &&
+      (!m.ci_type_id || chain.includes(m.ci_type_id)),
+  );
+}
+
+const byOrder = (a: AttributeDefinition, b: AttributeDefinition) =>
+  (a.order ?? 0) - (b.order ?? 0) || a.key.localeCompare(b.key);
 
 export function CITypeAdminPage() {
   const { t, i18n } = useTranslation();
-  const label = (ty: CIType) => localizedText(ty.display_name, i18n.language) || ty.name;
+  const label = useCallback<TypeLabel>(
+    (ty) => localizedText(ty.display_name, i18n.language) || ty.name,
+    [i18n.language],
+  );
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [showTemplates, setShowTemplates] = useState(false);
-  const [showFieldEditor, setShowFieldEditor] = useState(false);
-  const [newTypeName, setNewTypeName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
-  const [fieldDraft, setFieldDraft] = useState<FieldDefinition>({ name: '', data_type: 'text' });
-  const [indexDraft, setIndexDraft] = useState<AttributeIndexFlags>(NO_INDEX);
-  const [flagTarget, setFlagTarget] = useState<FlagTarget | null>(null);
-  const [fieldScope, setFieldScope] = useState<FieldScope>('type');
-  // Definitions whose index job the field list follows after a flag change.
-  const [trackedJobs, setTrackedJobs] = useState<string[]>([]);
+  const [typeDialog, setTypeDialog] = useState<TypeDialogState | null>(null);
+  const [editor, setEditor] = useState<AttributeEditorTarget | null>(null);
 
-  const { data, isLoading, error, refetch } = useCITypes({
-    search,
-    include_inactive: showInactive,
-  });
+  // Every type, all pages of 200 (offset paging, WP-466): the tree needs the
+  // whole chain; the search filters in the loaded tree.
+  const { data, isLoading, error, refetch } = useAllCITypes({ include_inactive: showInactive });
+  const types = data ?? [];
   const templates = useCITypeTemplates();
   const createType = useCreateCIType();
-  const cloneType = useCloneCIType();
-  const setActive = useSetCITypeActive();
-  const upsertField = useUpsertCITypeField();
-  const upsertGlobalField = useUpsertGlobalField();
-  const setFlags = useSetAttributeIndexFlags();
-  const deleteField = useDeleteCITypeField();
-  const saveError = flagTarget
-    ? setFlags.error
-    : fieldScope === 'global'
-      ? upsertGlobalField.error
-      : upsertField.error;
-  const saving = upsertField.isPending || upsertGlobalField.isPending || setFlags.isPending;
 
-  const trackJob = (definitionId: string) =>
-    setTrackedJobs((ids) => (ids.includes(definitionId) ? ids : [...ids, definitionId]));
-
-  /** openNewField opens the editor on an empty field of the type or of the organization. */
-  const openNewField = (scope: FieldScope) => {
-    setFieldDraft({ name: '', data_type: 'text', ui_group: 'general' });
-    setIndexDraft(NO_INDEX);
-    setFlagTarget(null);
-    setFieldScope(scope);
-    upsertField.reset();
-    upsertGlobalField.reset();
-    setShowFieldEditor(true);
-  };
-
-  /** openFlagEditor opens the editor on the index flags of an existing definition (F-325). */
-  const openFlagEditor = (def: AttributeDefinition, scope: FieldScope) => {
-    setIndexDraft({
-      searchable: def.searchable,
-      unique: def.unique,
-      unique_scope: def.unique_scope,
-    });
-    setFlagTarget({ definitionId: def.id, name: def.key });
-    setFieldScope(scope);
-    setFlags.reset();
-    setShowFieldEditor(true);
-  };
-
-  const selected = (data?.data ?? []).find((ty) => ty.id === selectedId);
+  const selected = types.find((ty) => ty.id === selectedId);
 
   const instantiateTemplate = (tpl: CIType) => {
     createType.mutate(
@@ -234,10 +174,17 @@ export function CITypeAdminPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setShowTemplates(true)}>
-            {t('citypes.fromTemplate', 'Aus Vorlage')}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              createType.reset();
+              setShowTemplates(true);
+            }}
+          >
+            {t('citypes.fromTemplate')}
           </Button>
-          <Button size="sm" onClick={() => setShowCreate(true)}>
+          <Button size="sm" onClick={() => setTypeDialog({ mode: 'create' })}>
             {t('citypes.create', 'Typ anlegen')}
           </Button>
         </div>
@@ -273,60 +220,31 @@ export function CITypeAdminPage() {
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="space-y-2 lg:col-span-1">
-          {(data?.data ?? []).map((ty) => (
-            <button
-              key={ty.id}
-              onClick={() => setSelectedId(ty.id)}
-              className={`w-full rounded-lg border px-4 py-3 text-left transition ${
-                selectedId === ty.id
-                  ? 'border-primary bg-primary/5'
-                  : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-gray-900 dark:text-gray-100">{label(ty)}</span>
-                <div className="flex gap-1">
-                  {ty.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
-                  {!ty.is_active ? (
-                    <Badge variant="warning">{t('citypes.inactive', 'deaktiviert')}</Badge>
-                  ) : null}
-                  {ty.is_logical ? (
-                    <Badge variant="neutral">{t('citypes.logical', 'logisch')}</Badge>
-                  ) : null}
-                  {ty.is_observable ? (
-                    <Badge variant="neutral">{t('citypes.observable', 'beobachtet')}</Badge>
-                  ) : null}
-                </div>
-              </div>
-              <p className="mt-0.5 text-xs text-muted">
-                {ty.key} · v{ty.version} · {t('citypes.schemaVersion', 'Schema')}{' '}
-                {ty.schema_version}
-                {ty.category ? ` · ${ty.category}` : ''}
-              </p>
-            </button>
-          ))}
+        <div className="lg:col-span-1">
+          {data ? (
+            <TypeTree
+              types={types}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              search={search}
+              label={label}
+            />
+          ) : null}
         </div>
 
         <div className="space-y-4 lg:col-span-2">
           {selected ? (
             <CITypeDetail
+              key={selected.id}
               type={selected}
-              // The clone is a type of the organization: select it so its
-              // fields can be added right away (the way out of a system type).
-              onClone={() =>
-                cloneType.mutate(
-                  { id: selected.id },
-                  { onSuccess: (clone) => setSelectedId(clone.id) },
-                )
+              types={types}
+              label={label}
+              onSelectType={setSelectedId}
+              onEdit={() => setTypeDialog({ mode: 'edit', type: selected })}
+              onAddAttribute={() =>
+                setEditor({ mode: 'create', scope: 'type', ciTypeId: selected.id })
               }
-              onToggleActive={() =>
-                setActive.mutate({ id: selected.id, active: !selected.is_active })
-              }
-              onAddField={() => openNewField('type')}
-              onEditFlags={(def) => openFlagEditor(def, 'type')}
-              trackedJobs={trackedJobs}
-              onDeleteField={(name) => deleteField.mutate({ typeId: selected.id, name })}
+              onEditAttribute={(definition) => setEditor({ mode: 'edit', definition })}
               t={t}
             />
           ) : (
@@ -336,21 +254,18 @@ export function CITypeAdminPage() {
               </p>
             </Card>
           )}
-          <OrgFieldsSection
-            onAddField={() => openNewField('global')}
-            onEditFlags={(def) => openFlagEditor(def, 'global')}
-            trackedJobs={trackedJobs}
+          <GlobalAttributesSection
+            types={types}
+            label={label}
+            onAdd={() => setEditor({ mode: 'create', scope: 'global' })}
+            onEdit={(definition) => setEditor({ mode: 'edit', definition })}
             t={t}
           />
         </div>
       </div>
 
-      {/* Templates modal */}
-      <Modal
-        open={showTemplates}
-        onOpenChange={setShowTemplates}
-        title={t('citypes.templates', 'Typvorlagen')}
-      >
+      {/* Templates modal: the catalog of type templates (GET /ci-types/templates) */}
+      <Modal open={showTemplates} onOpenChange={setShowTemplates} title={t('citypes.templates')}>
         <div className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
           {(templates.data?.data ?? []).map((tpl) => (
             <button
@@ -368,325 +283,321 @@ export function CITypeAdminPage() {
             </button>
           ))}
         </div>
+        {createType.error ? (
+          <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+            {t('citypes.typeErrors.notSaved', {
+              reason: describeFlagRefusal(createType.error, t),
+            })}
+          </p>
+        ) : null}
       </Modal>
 
-      {/* Create modal */}
-      <Modal
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        title={t('citypes.create', 'Typ anlegen')}
-      >
-        <form
-          className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            createType.mutate(
-              { name: newTypeName },
-              {
-                onSuccess: () => {
-                  setShowCreate(false);
-                  setNewTypeName('');
-                },
-              },
-            );
+      {typeDialog ? (
+        <TypeDialog
+          state={typeDialog}
+          types={types}
+          label={label}
+          onClose={() => setTypeDialog(null)}
+          onSaved={(saved) => {
+            setTypeDialog(null);
+            setSelectedId(saved.id);
           }}
-        >
-          <Input
-            label={t('citypes.name', 'Name')}
-            value={newTypeName}
-            onChange={(e) => setNewTypeName(e.target.value)}
-            required
-          />
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>
-              {t('common.cancel', 'Abbrechen')}
-            </Button>
-            <Button type="submit" disabled={createType.isPending}>
-              {t('common.create', 'Anlegen')}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+          t={t}
+        />
+      ) : null}
 
-      {/* Field editor modal: a new field, or the index flags of an existing one */}
-      <Modal
-        open={showFieldEditor}
-        onOpenChange={setShowFieldEditor}
-        title={
-          flagTarget
-            ? t('citypes.editField', { name: flagTarget.name })
-            : fieldScope === 'global'
-              ? t('citypes.orgFields.add')
-              : t('citypes.addField', 'Feld hinzufügen')
-        }
-      >
-        <form
-          className="space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const typeId = fieldScope === 'type' ? selected?.id : undefined;
-            if (fieldScope === 'type' && !typeId) return;
-            if (flagTarget) {
-              setFlags.mutate(
-                { id: flagTarget.definitionId, typeId, flags: indexDraft },
-                {
-                  onSuccess: (def) => {
-                    trackJob(def.id);
-                    setShowFieldEditor(false);
-                  },
-                },
-              );
-              return;
-            }
-            const index = indexDraft.searchable || indexDraft.unique ? indexDraft : undefined;
-            const onSuccess = (saved: { definition?: AttributeDefinition }) => {
-              if (saved.definition) trackJob(saved.definition.id);
-              setShowFieldEditor(false);
-            };
-            if (typeId) {
-              upsertField.mutate({ typeId, field: fieldDraft, index }, { onSuccess });
-            } else {
-              // Organization-wide fields stay optional: the server enforces a
-              // required one on every CI write (ResolveFields org layer), but the
-              // CI form renders type fields only, so nobody could fill it in.
-              upsertGlobalField.mutate(
-                { field: { ...fieldDraft, required: false }, index },
-                { onSuccess },
-              );
-            }
-          }}
-        >
-          {flagTarget ? (
-            <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.editFlagsHint')}</p>
-          ) : (
-            <>
-              {fieldScope === 'global' ? (
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {t('citypes.orgFields.editorHint')}
-                </p>
-              ) : null}
-              <FieldInputs
-                draft={fieldDraft}
-                onChange={setFieldDraft}
-                allowRequired={fieldScope !== 'global'}
-                t={t}
-              />
-            </>
-          )}
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input
-              type="checkbox"
-              checked={indexDraft.searchable}
-              onChange={(e) => setIndexDraft({ ...indexDraft, searchable: e.target.checked })}
-            />
-            {t('citypes.searchable', 'Durchsuchbar (indiziert)')}
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input
-              type="checkbox"
-              checked={indexDraft.unique}
-              onChange={(e) => setIndexDraft({ ...indexDraft, unique: e.target.checked })}
-            />
-            {t('citypes.unique', 'Eindeutig')}
-          </label>
-          {indexDraft.unique ? (
-            <Select
-              label={t('citypes.uniqueScope', 'Eindeutig je')}
-              options={[
-                { value: 'org', label: t('citypes.uniqueScopeOrg', 'Organisation') },
-                { value: 'client', label: t('citypes.uniqueScopeClient', 'Kunde') },
-              ]}
-              value={indexDraft.unique_scope}
-              onChange={(e) =>
-                setIndexDraft({
-                  ...indexDraft,
-                  unique_scope: e.target.value as AttributeIndexFlags['unique_scope'],
-                })
-              }
-            />
-          ) : null}
-          {saveError ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-              {describeSaveError(saveError, !!flagTarget, t)}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setShowFieldEditor(false)}>
-              {t('common.cancel', 'Abbrechen')}
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {t('common.save', 'Speichern')}
-            </Button>
-          </div>
-        </form>
-      </Modal>
+      {editor ? (
+        <AttributeEditor
+          target={editor}
+          onClose={() => setEditor(null)}
+          types={types}
+          typeLabel={label}
+        />
+      ) : null}
     </div>
   );
 }
 
 /**
- * The inputs of a new field: name, label, type, group, values and, unless
- * allowRequired is false (organization-wide fields), required.
+ * TypeDialog creates (POST /ci-types) or edits (PATCH /ci-types/{id}) a
+ * type: name, key (only on creation), labels DE/EN, description, category
+ * and parent (WP-248; system types are parents too). Refusals of the parent
+ * (409 cycle, 422 depth, foreign or deactivated parent, composition) show
+ * at the parent field.
  */
-function FieldInputs({
-  draft,
-  onChange,
-  allowRequired = true,
+function TypeDialog({
+  state,
+  types,
+  label,
+  onClose,
+  onSaved,
   t,
 }: {
-  draft: FieldDefinition;
-  onChange: (draft: FieldDefinition) => void;
-  allowRequired?: boolean;
+  state: TypeDialogState;
+  types: CIType[];
+  label: TypeLabel;
+  onClose: () => void;
+  onSaved: (type: CIType) => void;
   t: TFunction;
 }) {
-  return (
-    <>
-      <Input
-        label={t('citypes.fieldName', 'Feldname')}
-        value={draft.name}
-        required
-        onChange={(e) => onChange({ ...draft, name: e.target.value })}
-      />
-      <Input
-        label={t('citypes.fieldLabel', 'Anzeigename')}
-        value={draft.label ?? ''}
-        onChange={(e) => onChange({ ...draft, label: e.target.value })}
-      />
-      <Select
-        label={t('citypes.fieldType', 'Typ')}
-        options={FIELD_TYPES.map((ft) => ({
-          value: ft,
-          label: t(`citypes.dataTypes.${ft}`, ft),
-        }))}
-        value={draft.data_type}
-        onChange={(e) =>
-          onChange({
-            ...draft,
-            data_type: e.target.value as FieldDefinition['data_type'],
-          })
-        }
-      />
-      <Input
-        label={t('citypes.fieldGroup', 'Gruppe')}
-        value={draft.ui_group ?? ''}
-        onChange={(e) => onChange({ ...draft, ui_group: e.target.value })}
-      />
-      {draft.data_type === 'enum' || draft.data_type === 'multi_enum' ? (
-        <Input
-          label={t('citypes.enumValues', 'Werte (kommagetrennt)')}
-          value={(draft.enum_values ?? []).join(', ')}
-          onChange={(e) =>
-            onChange({
-              ...draft,
-              enum_values: e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-        />
-      ) : null}
-      {allowRequired ? (
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-          <input
-            type="checkbox"
-            checked={!!draft.required}
-            onChange={(e) => onChange({ ...draft, required: e.target.checked })}
-          />
-          {t('citypes.required', 'Pflichtfeld')}
-        </label>
-      ) : null}
-    </>
-  );
-}
+  const editing = state.mode === 'edit' ? state.type : undefined;
+  const [draft, setDraft] = useState({
+    name: editing?.name ?? '',
+    key: editing?.key ?? '',
+    de: editing?.display_name?.de ?? '',
+    en: editing?.display_name?.en ?? '',
+    description: editing?.description ?? '',
+    category: editing?.category ?? '',
+    parent: editing?.parent_type_id ?? '',
+  });
+  const createType = useCreateCIType();
+  const updateType = useUpdateCIType();
+  const mutation = editing ? updateType : createType;
+  const error = mutation.error;
+  const errors = fieldErrors(error);
+  if (error instanceof ApiError && error.field === 'parent_type_id') {
+    errors.parent_type_id = parentMessage(error, t);
+  }
+  const shownAtField = [
+    'name',
+    'key',
+    'parent_type_id',
+    'display_name',
+    'description',
+    'category',
+  ].filter((f) => errors[f]).length;
+  const set = (change: Partial<typeof draft>) => setDraft((d) => ({ ...d, ...change }));
 
-/** IndexJobStatus shows the newest index job of a definition with its status (DB-04). */
-function IndexJobStatus({ definitionId, t }: { definitionId: string; t: TFunction }) {
-  const job = useAttributeIndexJob(definitionId);
-  const status = job.data?.status;
-  const variant =
-    status === 'succeeded'
-      ? 'success'
-      : status === 'failed' || status === 'cancelled'
-        ? 'danger'
-        : 'info';
+  const excluded = editing ? descendantsOf(editing.id, types).add(editing.id) : new Set<string>();
+  const parents = types
+    .filter((ty) => !excluded.has(ty.id))
+    .sort((a, b) => label(a).localeCompare(label(b)));
+
+  const displayName = () => ({
+    ...(draft.de ? { de: draft.de } : {}),
+    ...(draft.en ? { en: draft.en } : {}),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!editing) {
+      const body: CITypeCreateRequest = { name: draft.name };
+      if (draft.key.trim()) body.key = draft.key.trim();
+      if (draft.de || draft.en) body.display_name = displayName();
+      if (draft.description) body.description = draft.description;
+      if (draft.category) body.category = draft.category;
+      if (draft.parent) body.parent_type_id = draft.parent;
+      createType.mutate(body, { onSuccess: onSaved });
+      return;
+    }
+    const patch: CITypeUpdateRequest = {};
+    if (draft.name !== editing.name) patch.name = draft.name;
+    if (
+      draft.de !== (editing.display_name?.de ?? '') ||
+      draft.en !== (editing.display_name?.en ?? '')
+    ) {
+      patch.display_name = displayName();
+    }
+    if (draft.description !== (editing.description ?? '')) patch.description = draft.description;
+    if (draft.category !== (editing.category ?? '')) patch.category = draft.category;
+    if (draft.parent !== (editing.parent_type_id ?? '')) patch.parent_type_id = draft.parent;
+    if (Object.keys(patch).length === 0) {
+      onClose();
+      return;
+    }
+    updateType.mutate({ id: editing.id, ...patch }, { onSuccess: onSaved });
+  };
+
   return (
-    <span role="status" className="ml-2" title={job.data?.error || undefined}>
-      <Badge variant={variant}>
-        {status
-          ? t('citypes.indexJob.label', { status: t(`citypes.indexJob.status.${status}`) })
-          : t('citypes.indexJob.scheduled')}
-      </Badge>
-    </span>
+    <Modal
+      open
+      onOpenChange={(open) => (open ? undefined : onClose())}
+      title={
+        editing ? t('citypes.typeDialog.editTitle', { name: label(editing) }) : t('citypes.create')
+      }
+    >
+      <form className="space-y-3" onSubmit={submit}>
+        <Input
+          label={t('citypes.name')}
+          value={draft.name}
+          required
+          onChange={(e) => set({ name: e.target.value })}
+          error={errors.name}
+        />
+        <Input
+          label={t('citypes.typeDialog.key')}
+          value={draft.key}
+          disabled={!!editing}
+          readOnly={!!editing}
+          onChange={(e) => set({ key: e.target.value })}
+          error={errors.key}
+        />
+        {editing ? (
+          <p className="text-xs text-muted">{t('citypes.typeDialog.keyImmutable')}</p>
+        ) : null}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Input
+            label={t('citypes.labelDe')}
+            value={draft.de}
+            onChange={(e) => set({ de: e.target.value })}
+            error={errors.display_name}
+          />
+          <Input
+            label={t('citypes.labelEn')}
+            value={draft.en}
+            onChange={(e) => set({ en: e.target.value })}
+          />
+        </div>
+        <Input
+          label={t('citypes.description')}
+          value={draft.description}
+          onChange={(e) => set({ description: e.target.value })}
+          error={errors.description}
+        />
+        <Input
+          label={t('citypes.typeDialog.category')}
+          value={draft.category}
+          onChange={(e) => set({ category: e.target.value })}
+          error={errors.category}
+        />
+        <Select
+          label={t('citypes.typeDialog.parent')}
+          options={[
+            { value: '', label: t('citypes.typeDialog.noParent') },
+            ...parents.map((ty) => ({
+              value: ty.id,
+              label: ty.is_system
+                ? t('citypes.typeDialog.systemParent', { name: label(ty) })
+                : label(ty),
+            })),
+          ]}
+          value={draft.parent}
+          onChange={(e) => set({ parent: e.target.value })}
+          error={errors.parent_type_id}
+        />
+        {error ? (
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {shownAtField > 0
+              ? t('citypes.typeErrors.checkFields')
+              : t('citypes.typeErrors.notSaved', { reason: describeFlagRefusal(error, t) })}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {t('common.cancel', 'Abbrechen')}
+          </Button>
+          <Button type="submit" disabled={mutation.isPending}>
+            {editing ? t('common.save', 'Speichern') : t('common.create', 'Anlegen')}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 /**
- * FieldRow is a field of a list: its label, data type, group and flags, and
- * the actions the list offers for it (none: read-only).
+ * AttributeRow is an attribute of the catalog: label, key, data type and
+ * group, its origin, its flags and marks and its index status, and the
+ * actions the list offers for it (none: read-only).
  */
-function FieldRow({
-  field,
+function AttributeRow({
   definition,
-  system,
-  tracked,
+  origin,
+  sensitive,
+  appliesTo,
   onEdit,
   editLabel,
   onDelete,
   deleteLabel,
+  onReindex,
+  reindexing,
+  onOpenOrigin,
   t,
 }: {
-  field: FieldDefinition;
-  definition?: AttributeDefinition;
-  /** A system field (no organization): marked and read-only. */
-  system?: boolean;
-  tracked: boolean;
+  definition: AttributeDefinition;
+  origin?: Origin;
+  sensitive: boolean;
+  appliesTo?: string;
   onEdit?: () => void;
-  editLabel: string;
+  editLabel?: string;
   onDelete?: () => void;
   deleteLabel?: string;
+  onReindex?: () => void;
+  reindexing?: boolean;
+  onOpenOrigin?: () => void;
   t: TFunction;
 }) {
+  const { i18n } = useTranslation();
+  const d = definition;
+  const name = localizedText(d.display_name, i18n.language) || d.key;
   return (
-    <li className="flex items-center justify-between py-2 text-sm">
-      <div>
-        <span className="font-medium">{field.label || field.name}</span>
-        <span className="ml-2 text-xs text-muted">
-          {field.data_type}
-          {field.ui_group ? ` · ${field.ui_group}` : ''}
-        </span>
-        {system ? (
-          <Badge variant="info" className="ml-2">
-            {t('citypes.system')}
-          </Badge>
-        ) : null}
-        {field.required ? (
-          <Badge variant="warning" className="ml-2">
-            *
-          </Badge>
-        ) : null}
-        {field.conditional ? (
-          <Badge variant="info" className="ml-2">
-            {t('citypes.conditional', 'bedingt')}
-          </Badge>
-        ) : null}
-        {definition?.searchable ? (
-          <Badge variant="neutral" className="ml-2">
-            {t('citypes.flagSearchable')}
-          </Badge>
-        ) : null}
-        {definition?.unique ? (
-          <Badge variant="neutral" className="ml-2">
-            {definition.unique_scope === 'client'
-              ? t('citypes.flagUniqueClient')
-              : t('citypes.flagUnique')}
-          </Badge>
-        ) : null}
-        {definition && tracked ? <IndexJobStatus definitionId={definition.id} t={t} /> : null}
+    <li className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
+      <div className="min-w-0 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">{name}</span>
+          {name !== d.key ? <span className="text-xs text-muted">{d.key}</span> : null}
+          <span className="text-xs text-muted">
+            {t(`citypes.dataTypes.${d.data_type}`, d.data_type)}
+            {d.group ? ` · ${d.group}` : ''}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          {origin?.kind === 'own' ? (
+            <Badge variant="neutral">{t('citypes.origin.own')}</Badge>
+          ) : null}
+          {origin?.kind === 'inherited' ? (
+            <Badge variant="info">
+              {t('citypes.origin.inherited', { type: originLabel(origin, i18n.language) })}
+            </Badge>
+          ) : null}
+          {origin?.kind === 'global' ? (
+            <Badge variant="info">{t('citypes.origin.global')}</Badge>
+          ) : null}
+          {d.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
+          {d.required ? <Badge variant="warning">{t('citypes.flagRequired')}</Badge> : null}
+          {d.conditional && Object.keys(d.conditional).length > 0 ? (
+            <Badge variant="info">{t('citypes.conditional')}</Badge>
+          ) : null}
+          {d.searchable ? <Badge variant="neutral">{t('citypes.flagSearchable')}</Badge> : null}
+          {d.unique ? (
+            <Badge variant="neutral">
+              {d.unique_scope === 'client'
+                ? t('citypes.flagUniqueClient')
+                : t('citypes.flagUnique')}
+            </Badge>
+          ) : null}
+          {origin?.kind === 'own' && d.inheritable ? (
+            <Badge variant="neutral">{t('citypes.flagInheritable')}</Badge>
+          ) : null}
+          {d.computed ? <Badge variant="info">{t('citypes.flagComputed')}</Badge> : null}
+          {sensitive ? <Badge variant="danger">{t('citypes.flagSensitive')}</Badge> : null}
+          {appliesTo ? <Badge variant="neutral">{appliesTo}</Badge> : null}
+        </div>
+        <IndexStatus
+          status={d.index_status}
+          attributeKey={d.key}
+          onReindex={onReindex}
+          reindexing={reindexing}
+        />
       </div>
       <div className="flex gap-3">
+        {onOpenOrigin && origin?.kind === 'inherited' ? (
+          <button
+            type="button"
+            className="text-xs text-primary hover:underline"
+            onClick={onOpenOrigin}
+          >
+            {t('citypes.origin.open', { type: originLabel(origin, i18n.language) })}
+          </button>
+        ) : null}
+        {origin?.kind === 'global' ? (
+          <a href="#global-attributes" className="text-xs text-primary hover:underline">
+            {t('citypes.origin.openGlobal')}
+          </a>
+        ) : null}
         {onEdit ? (
           <button
+            type="button"
             className="text-xs text-primary hover:underline"
             aria-label={editLabel}
             onClick={onEdit}
@@ -696,6 +607,7 @@ function FieldRow({
         ) : null}
         {onDelete ? (
           <button
+            type="button"
             className="text-xs text-danger hover:underline"
             aria-label={deleteLabel}
             onClick={onDelete}
@@ -708,52 +620,104 @@ function FieldRow({
   );
 }
 
+function originLabel(origin: Origin, language: string): string {
+  return origin.kind === 'inherited'
+    ? localizedText(origin.from.display_name, language) || origin.from.name
+    : '';
+}
+
 function CITypeDetail({
   type,
-  onClone,
-  onToggleActive,
-  onAddField,
-  onEditFlags,
-  trackedJobs,
-  onDeleteField,
+  types,
+  label,
+  onSelectType,
+  onEdit,
+  onAddAttribute,
+  onEditAttribute,
   t,
 }: {
   type: CIType;
-  onClone: () => void;
-  onToggleActive: () => void;
-  onAddField: () => void;
-  onEditFlags: (definition: AttributeDefinition) => void;
-  trackedJobs: string[];
-  onDeleteField: (name: string) => void;
+  types: CIType[];
+  label: TypeLabel;
+  onSelectType: (id: string) => void;
+  onEdit: () => void;
+  onAddAttribute: () => void;
+  onEditAttribute: (definition: AttributeDefinition) => void;
   t: TFunction;
 }) {
-  const { i18n } = useTranslation();
-  // GET /ci-types lists the types without their fields; the fields come with the
-  // single type (GET /ci-types/{id}), which a field or flag change invalidates.
-  const detail = useCIType(type.id);
-  const fields = detail.data?.fields ?? [];
-  // The definitions carry the id and the index flags of the fields (MET-15).
-  const definitions = useAttributeDefinitions(type.id);
-  const definitionOf = (name: string) =>
-    (definitions.data?.data ?? []).find((d) => d.key === name && !d.is_system);
-  // A system type (no organization) is read-only for the organization until
-  // inheritance (MET-06, P2): the server refuses fields on it (422 on
-  // ci_type_id) and its activation, so the page offers neither but the two
-  // ways that work: a clone, and the organization-wide fields below.
+  const cloneType = useCloneCIType();
+  const setActive = useSetCITypeActive();
+  const deleteDefinition = useDeleteAttributeDefinition();
+  const reindex = useReindexAttributeDefinition();
+  const [lastAction, setLastAction] = useState<'clone' | 'deactivate' | 'activate'>('clone');
+  // The own definitions and the global ones that apply to the type (WP-255).
+  const applicable = useApplicableAttributeDefinitions(type.id);
+  // Of the ancestors only the inheritable definitions (WP-248).
+  const ancestors = ancestorsOf(type.id, types);
+  const ancestorDefinitions = useTypeAttributeDefinitions(ancestors.map((a) => a.id));
+  const sensitive = useSensitiveCIFields();
+  const chain = [type.id, ...ancestors.map((a) => a.id)];
+  const marks = sensitive.data ?? [];
+  const parent = types.find((ty) => ty.id === type.parent_type_id);
+
+  // A system type (no organization) is read-only (E-10): the server refuses
+  // its attributes (422 on ci_type_id) and its activation (403), so the page
+  // offers neither but the clone, the subtype and the global attributes.
   const readOnly = type.is_system;
+  const actionError = lastAction === 'clone' ? cloneType.error : (setActive.error ?? undefined);
+
+  const all = applicable.data?.data ?? [];
+  const own = all.filter((d) => d.scope === 'type' && d.ci_type_id === type.id).sort(byOrder);
+  const globals = all.filter((d) => d.scope === 'global').sort(byOrder);
+  const inherited = ancestors.flatMap((ancestor, i) =>
+    (ancestorDefinitions[i]?.data?.data ?? [])
+      .filter((d) => d.inheritable && d.ci_type_id === ancestor.id)
+      .sort(byOrder)
+      .map((d) => ({ definition: d, from: ancestor })),
+  );
+  const loading = applicable.isLoading || ancestorDefinitions.some((q) => q.isLoading);
+  const failed = applicable.error ?? ancestorDefinitions.find((q) => q.error)?.error;
+  const count = own.length + inherited.length + globals.length;
+
+  const remove = (d: AttributeDefinition) => {
+    if (!window.confirm(t('citypes.attributes.deleteConfirm', { name: d.key }))) return;
+    deleteDefinition.mutate(d);
+  };
+
   return (
     <Card
-      title={localizedText(type.display_name, i18n.language) || type.name}
+      title={label(type)}
       actions={
-        <div className="flex gap-2">
-          <Button size="sm" variant="secondary" onClick={onClone}>
+        <div className="flex flex-wrap justify-end gap-2">
+          {!readOnly ? (
+            <Button size="sm" variant="secondary" onClick={onEdit}>
+              {t('citypes.editType')}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={cloneType.isPending}
+            onClick={() => {
+              setLastAction('clone');
+              setActive.reset();
+              // The clone is a type of the organization: select it so its
+              // attributes can be added right away (the way out of a system type).
+              cloneType.mutate({ id: type.id }, { onSuccess: (clone) => onSelectType(clone.id) });
+            }}
+          >
             {t('citypes.clone', 'Klonen')}
           </Button>
           {!readOnly ? (
             <Button
               size="sm"
               variant={type.is_active ? 'danger' : 'primary'}
-              onClick={onToggleActive}
+              disabled={setActive.isPending}
+              onClick={() => {
+                setLastAction(type.is_active ? 'deactivate' : 'activate');
+                cloneType.reset();
+                setActive.mutate({ id: type.id, active: !type.is_active });
+              }}
             >
               {type.is_active
                 ? t('citypes.deactivate', 'Deaktivieren')
@@ -763,8 +727,18 @@ function CITypeDetail({
         </div>
       }
     >
+      {actionError ? (
+        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+          {describeActionError(lastAction, actionError, t)}
+        </p>
+      ) : null}
       {type.description ? (
         <p className="text-sm text-gray-600 dark:text-gray-300">{type.description}</p>
+      ) : null}
+      {parent ? (
+        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+          {t('citypes.parentOf', { name: label(parent) })}
+        </p>
       ) : null}
       {readOnly ? (
         <div
@@ -779,43 +753,81 @@ function CITypeDetail({
         </div>
       ) : null}
       <div className="mt-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold">
-          {t('citypes.fields', 'Felder')} ({fields.length})
-        </h3>
+        <h4 className="text-sm font-semibold">
+          {t('citypes.attributes.title')} ({count})
+        </h4>
         {!readOnly ? (
-          <Button size="sm" variant="secondary" onClick={onAddField}>
+          <Button size="sm" variant="secondary" onClick={onAddAttribute}>
             {t('citypes.addField', 'Feld hinzufügen')}
           </Button>
         ) : null}
       </div>
-      {detail.isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
-      {detail.error ? (
+      {loading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
+      {failed ? (
         <ErrorState
           title={t('app.error')}
           retryLabel={t('common.retry')}
-          onRetry={() => void detail.refetch()}
+          onRetry={() => {
+            void applicable.refetch();
+            ancestorDefinitions.forEach((q) => void q.refetch());
+          }}
         />
       ) : null}
+      {deleteDefinition.error ? (
+        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {t('citypes.attributes.deleteFailed', {
+            name: deleteDefinition.variables?.key,
+            reason: describeFlagRefusal(deleteDefinition.error, t),
+          })}
+        </p>
+      ) : null}
+      {reindex.error ? (
+        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          {t('citypes.indexStatus.reindexFailed', {
+            reason: describeFlagRefusal(reindex.error, t),
+          })}
+        </p>
+      ) : null}
       <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-        {fields.map((f) => {
-          const def = definitionOf(f.name);
+        {own.map((d) => {
+          const editable = !readOnly && !d.is_system;
           return (
-            <FieldRow
-              key={f.name}
-              field={f}
-              definition={def}
-              tracked={!!def && trackedJobs.includes(def.id)}
-              onEdit={def ? () => onEditFlags(def) : undefined}
-              editLabel={t('citypes.editFieldAction', { name: f.name })}
-              onDelete={!readOnly ? () => onDeleteField(f.name) : undefined}
+            <AttributeRow
+              key={d.id}
+              definition={d}
+              origin={{ kind: 'own' }}
+              sensitive={isSensitive(marks, d, chain)}
+              onEdit={editable ? () => onEditAttribute(d) : undefined}
+              editLabel={t('citypes.editFieldAction', { name: d.key })}
+              onDelete={editable ? () => remove(d) : undefined}
+              deleteLabel={t('citypes.deleteFieldAction', { name: d.key })}
+              onReindex={editable ? () => reindex.mutate(d.id) : undefined}
+              reindexing={reindex.isPending}
               t={t}
             />
           );
         })}
-        {detail.isSuccess && fields.length === 0 ? (
-          <li className="py-2 text-sm text-muted">
-            {t('citypes.noFields', 'Keine Felder definiert.')}
-          </li>
+        {inherited.map(({ definition: d, from }) => (
+          <AttributeRow
+            key={`${from.id}:${d.id}`}
+            definition={d}
+            origin={{ kind: 'inherited', from }}
+            sensitive={isSensitive(marks, d, chain)}
+            onOpenOrigin={() => onSelectType(from.id)}
+            t={t}
+          />
+        ))}
+        {globals.map((d) => (
+          <AttributeRow
+            key={`global:${d.id}`}
+            definition={d}
+            origin={{ kind: 'global' }}
+            sensitive={isSensitive(marks, d, chain)}
+            t={t}
+          />
+        ))}
+        {!loading && !failed && count === 0 ? (
+          <li className="py-2 text-sm text-muted">{t('citypes.noFields')}</li>
         ) : null}
       </ul>
     </Card>
@@ -823,89 +835,119 @@ function CITypeDetail({
 }
 
 /**
- * OrgFieldsSection lists the global fields (GET /ci-fields/global, MET-13):
- * the organization-wide ones apply to every CI type of the organization,
- * the system types and the CIs discovery finds included, which a clone of
- * a system type does not reach. Adding, changing the index flags and
- * deleting need ci_attribute:manage and are offered only once
- * /me/permissions confirmed it; system fields stay read-only.
+ * GlobalAttributesSection lists the global attribute definitions
+ * (GET /attribute-definitions?scope=global, MET-13): the organization's
+ * apply to the types of their applicability (applies_to, WP-255), the system
+ * ones to every type and stay read-only. Adding (POST without ci_type_id),
+ * editing, deleting and rebuilding an index need ci_attribute:manage and are
+ * offered only once /me/permissions confirmed it.
  */
-function OrgFieldsSection({
-  onAddField,
-  onEditFlags,
-  trackedJobs,
+function GlobalAttributesSection({
+  types,
+  label,
+  onAdd,
+  onEdit,
   t,
 }: {
-  onAddField: () => void;
-  onEditFlags: (definition: AttributeDefinition) => void;
-  trackedJobs: string[];
+  types: CIType[];
+  label: TypeLabel;
+  onAdd: () => void;
+  onEdit: (definition: AttributeDefinition) => void;
   t: TFunction;
 }) {
-  const globals = useGlobalFields();
   const definitions = useGlobalAttributeDefinitions();
-  const deleteField = useDeleteGlobalField();
+  const deleteDefinition = useDeleteAttributeDefinition();
+  const reindex = useReindexAttributeDefinition();
+  const sensitive = useSensitiveCIFields();
   const canManage = useHasPermission('ci_attribute:manage');
-  const fields: GlobalFieldDefinition[] = globals.data?.data ?? [];
-  const definitionOf = (name: string) =>
-    (definitions.data?.data ?? []).find((d) => d.key === name && !d.is_system);
-  const remove = (name: string) => {
-    if (!window.confirm(t('citypes.orgFields.deleteConfirm', { name }))) return;
-    deleteField.mutate(name);
+  const marks = sensitive.data ?? [];
+  const list = [...(definitions.data?.data ?? [])].sort(
+    (a, b) => Number(a.is_system) - Number(b.is_system) || byOrder(a, b),
+  );
+  const remove = (d: AttributeDefinition) => {
+    if (!window.confirm(t('citypes.globals.deleteConfirm', { name: d.key }))) return;
+    deleteDefinition.mutate(d);
+  };
+  const typeName = (id: string) => {
+    const ty = types.find((x) => x.id === id);
+    return ty ? label(ty) : id;
+  };
+  const appliesTo = (d: AttributeDefinition) => {
+    if (d.applies_to === 'categories') {
+      return t('citypes.appliesTo.badge.categories', {
+        list: (d.applies_to_categories ?? []).join(', '),
+      });
+    }
+    if (d.applies_to === 'types') {
+      return t('citypes.appliesTo.badge.types', {
+        list: (d.applies_to_type_ids ?? []).map(typeName).join(', '),
+      });
+    }
+    return t('citypes.appliesTo.badge.all');
   };
   return (
-    <Card
-      title={t('citypes.orgFields.title')}
-      actions={
-        canManage ? (
-          <Button size="sm" variant="secondary" onClick={onAddField}>
-            {t('citypes.orgFields.add')}
-          </Button>
-        ) : null
-      }
-    >
-      <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.orgFields.hint')}</p>
-      {canManage === false ? (
-        <p className="mt-1 text-xs text-muted">{t('citypes.orgFields.readOnly')}</p>
-      ) : null}
-      {globals.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
-      {globals.error ? (
-        <ErrorState
-          title={t('app.error')}
-          retryLabel={t('common.retry')}
-          onRetry={() => void globals.refetch()}
-        />
-      ) : null}
-      {deleteField.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          {t('citypes.orgFields.deleteFailed', {
-            name: deleteField.variables,
-            reason: describeFlagRefusal(deleteField.error, t),
-          })}
-        </p>
-      ) : null}
-      <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-        {fields.map((f) => {
-          const system = !!f.is_system;
-          const def = system ? undefined : definitionOf(f.name);
-          return (
-            <FieldRow
-              key={`${system ? 'system' : 'org'}:${f.name}`}
-              field={f}
-              definition={def}
-              system={system}
-              tracked={!!def && trackedJobs.includes(def.id)}
-              onEdit={canManage && def ? () => onEditFlags(def) : undefined}
-              editLabel={t('citypes.orgFields.editAction', { name: f.name })}
-              onDelete={canManage && !system ? () => remove(f.name) : undefined}
-              deleteLabel={t('citypes.orgFields.deleteAction', { name: f.name })}
-              t={t}
-            />
-          );
-        })}
-        {globals.isSuccess && fields.length === 0 ? (
-          <li className="py-2 text-sm text-muted">{t('citypes.orgFields.empty')}</li>
+    <div id="global-attributes">
+      <Card
+        title={t('citypes.globals.title')}
+        actions={
+          canManage ? (
+            <Button size="sm" variant="secondary" onClick={onAdd}>
+              {t('citypes.globals.add')}
+            </Button>
+          ) : null
+        }
+      >
+        <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.globals.hint')}</p>
+        {canManage === false ? (
+          <p className="mt-1 text-xs text-muted">{t('citypes.globals.readOnly')}</p>
         ) : null}
-      </ul>
-    </Card>
+        {definitions.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
+        {definitions.error ? (
+          <ErrorState
+            title={t('app.error')}
+            retryLabel={t('common.retry')}
+            onRetry={() => void definitions.refetch()}
+          />
+        ) : null}
+        {deleteDefinition.error ? (
+          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {t('citypes.attributes.deleteFailed', {
+              name: deleteDefinition.variables?.key,
+              reason: describeFlagRefusal(deleteDefinition.error, t),
+            })}
+          </p>
+        ) : null}
+        {reindex.error ? (
+          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {t('citypes.indexStatus.reindexFailed', {
+              reason: describeFlagRefusal(reindex.error, t),
+            })}
+          </p>
+        ) : null}
+        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+          {list.map((d) => {
+            const editable = !!canManage && !d.is_system;
+            return (
+              <AttributeRow
+                key={d.id}
+                definition={d}
+                sensitive={isSensitive(marks, d, [])}
+                appliesTo={d.is_system ? undefined : appliesTo(d)}
+                onEdit={editable ? () => onEdit(d) : undefined}
+                editLabel={t('citypes.globals.editAction', { name: d.key })}
+                onDelete={editable ? () => remove(d) : undefined}
+                deleteLabel={t('citypes.globals.deleteAction', { name: d.key })}
+                onReindex={editable ? () => reindex.mutate(d.id) : undefined}
+                reindexing={reindex.isPending}
+                t={t}
+              />
+            );
+          })}
+          {definitions.isSuccess && list.length === 0 ? (
+            <li className="py-2 text-sm text-muted">{t('citypes.globals.empty')}</li>
+          ) : null}
+        </ul>
+      </Card>
+    </div>
   );
 }

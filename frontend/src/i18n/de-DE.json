@@ -1374,7 +1374,7 @@
     "select": "Typ auswählen, um Felder zu bearbeiten.",
     "name": "Name",
     "fields": "Felder",
-    "fromTemplate": "Aus Vorlage",
+    "fromTemplate": "Aus Typvorlage",
     "observable": "beobachtet",
     "schemaVersion": "Schema",
     "dataTypes": {
@@ -1415,38 +1415,103 @@
       "forbidden": "Keine Berechtigung, Attribute zu verwalten.",
       "notFound": "Das Attribut existiert nicht mehr.",
       "reason": "Grund: {{detail}}",
-      "partial": "Das Feld „{{name}}“ wurde gespeichert, die Index-Einstellungen aber nicht. {{reason}}",
-      "flagsNotSaved": "Index-Einstellungen nicht gespeichert. {{reason}}",
       "fieldNotSaved": "Feld nicht gespeichert. {{reason}}",
       "forbiddenPermission": "Keine Berechtigung: Ihrer Sitzung fehlt das Recht „{{permission}}“.",
-      "systemType": "Systemtypen sind schreibgeschützt und erhalten keine eigenen Felder. Klonen Sie den Typ oder legen Sie ein organisationsweites Feld an.",
-      "readOnly": "System-Attribute sind schreibgeschützt."
-    },
-    "indexJob": {
-      "scheduled": "Index-Job eingeplant",
-      "label": "Index-Job: {{status}}",
-      "status": {
-        "queued": "wartet",
-        "running": "läuft",
-        "succeeded": "abgeschlossen",
-        "failed": "fehlgeschlagen",
-        "cancelled": "abgebrochen"
-      }
+      "systemType": "Systemtypen sind schreibgeschützt und erhalten keine eigenen Felder. Klonen Sie den Typ, legen Sie einen Untertyp an oder legen Sie ein globales Attribut an.",
+      "readOnly": "System-Attribute sind schreibgeschützt.",
+      "changesNotSaved": "Änderungen nicht gespeichert. {{reason}}"
     },
     "systemReadOnly": "Systemtyp: schreibgeschützt. Felder lassen sich hier nicht hinzufügen, und der Typ lässt sich nicht deaktivieren. Eigene Felder erfassen Sie so:",
     "systemReadOnlyClone": "„Klonen“ legt einen eigenen Typ mit allen Feldern dieses Typs an, den Sie erweitern können. Bestehende und von der Discovery erkannte CIs behalten den Systemtyp.",
-    "systemReadOnlyOrgFields": "Organisationsweite Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und erkannte CIs.",
-    "orgFields": {
-      "title": "Organisationsweite Felder",
-      "hint": "Diese Felder gelten für alle CI-Typen der Organisation, auch für Systemtypen und von der Discovery erkannte CIs. Systemfelder sind schreibgeschützt.",
-      "add": "Neues organisationsweites Feld",
-      "editorHint": "Das Feld gilt für alle CI-Typen der Organisation. Hier angelegte organisationsweite Felder sind optional.",
-      "empty": "Keine organisationsweiten Felder definiert.",
+    "systemReadOnlyOrgFields": "Globale Attribute gelten für alle CI-Typen der Organisation, auch für Systemtypen und erkannte CIs.",
+    "labelDe": "Anzeigename (Deutsch)",
+    "labelEn": "Anzeigename (Englisch)",
+    "description": "Beschreibung",
+    "fieldOrder": "Reihenfolge",
+    "inheritable": "Vererbbar an Untertypen",
+    "editHint": "Speichern übernimmt nur geänderte Eigenschaften; eine Änderung von „Durchsuchbar“ oder „Eindeutig“ startet einen Index-Job im Hintergrund.",
+    "computedHint": "Berechnetes Attribut: Der Wert entsteht aus einem Ausdruck; Pflicht und Eindeutigkeit gibt es dafür nicht.",
+    "flagRequired": "Pflicht",
+    "flagInheritable": "vererbbar",
+    "flagComputed": "berechnet",
+    "flagSensitive": "sensibel",
+    "editType": "Typ bearbeiten",
+    "parentOf": "Elterntyp: {{name}}",
+    "deleteFieldAction": "Löschen: {{name}}",
+    "tree": {
+      "label": "CI-Typen",
+      "noMatch": "Kein Typ passt zur Suche.",
+      "empty": "Keine CI-Typen vorhanden."
+    },
+    "typeDialog": {
+      "editTitle": "Typ „{{name}}“ bearbeiten",
+      "key": "Schlüssel",
+      "keyImmutable": "Der Schlüssel ist nach dem Anlegen unveränderlich.",
+      "category": "Kategorie",
+      "parent": "Elterntyp",
+      "noParent": "Kein Elterntyp (Wurzel)",
+      "systemParent": "{{name}} (System)"
+    },
+    "typeErrors": {
+      "notSaved": "Typ nicht gespeichert. {{reason}}",
+      "checkFields": "Typ nicht gespeichert. Bitte prüfen Sie die markierten Felder.",
+      "parentConflict": "Konflikt in der Typkette, z. B. ein Zyklus. Grund: {{detail}}",
+      "parentInactive": "Der gewählte Elterntyp ist deaktiviert.",
+      "parentInvalid": "Elterntyp nicht zulässig. Grund: {{detail}}",
+      "activeSubtypes": "Deaktivieren nicht möglich: Der Typ hat aktive Untertypen. Deaktivieren Sie diese zuerst.",
+      "cloneParentInactive": "Klonen nicht möglich: Der Elterntyp ist deaktiviert.",
+      "activateParentInactive": "Aktivieren nicht möglich: Der Elterntyp ist deaktiviert.",
+      "deactivateParentInactive": "Deaktivieren nicht möglich: Der Elterntyp ist deaktiviert.",
+      "cloneFailed": "Klonen fehlgeschlagen. {{reason}}",
+      "activateFailed": "Aktivieren fehlgeschlagen. {{reason}}",
+      "deactivateFailed": "Deaktivieren fehlgeschlagen. {{reason}}"
+    },
+    "attributes": {
+      "title": "Attribute",
+      "deleteConfirm": "Attribut „{{name}}“ löschen?",
+      "deleteFailed": "Attribut „{{name}}“ nicht gelöscht. {{reason}}"
+    },
+    "origin": {
+      "own": "eigen",
+      "inherited": "geerbt von {{type}}",
+      "global": "global",
+      "open": "Zum Ursprung: {{type}}",
+      "openGlobal": "Zu den globalen Attributen"
+    },
+    "globals": {
+      "title": "Globale Attribute",
+      "hint": "Globale Attribute gelten für die CI-Typen ihres Geltungsbereichs, auch für Systemtypen und von der Discovery erkannte CIs. System-Attribute sind schreibgeschützt.",
+      "add": "Neues globales Attribut",
+      "editorHint": "Das Attribut gilt für die CI-Typen seines Geltungsbereichs. Hier angelegte globale Attribute sind optional.",
+      "empty": "Keine globalen Attribute definiert.",
       "readOnly": "Nur lesbar: Zum Ändern brauchen Sie das Recht „ci_attribute:manage“.",
-      "editAction": "Organisationsweites Feld bearbeiten: {{name}}",
-      "deleteAction": "Organisationsweites Feld löschen: {{name}}",
-      "deleteConfirm": "Organisationsweites Feld „{{name}}“ löschen? Es entfällt danach bei allen CI-Typen der Organisation.",
-      "deleteFailed": "Feld „{{name}}“ nicht gelöscht. {{reason}}"
+      "editAction": "Globales Attribut bearbeiten: {{name}}",
+      "deleteAction": "Globales Attribut löschen: {{name}}",
+      "deleteConfirm": "Globales Attribut „{{name}}“ löschen? Es entfällt danach bei allen CI-Typen seines Geltungsbereichs."
+    },
+    "appliesTo": {
+      "label": "Gilt für",
+      "modes": {
+        "all": "Alle CI-Typen",
+        "categories": "Typen bestimmter Kategorien",
+        "types": "Bestimmte Typen und ihre Untertypen"
+      },
+      "categories": "Kategorien (kommagetrennt)",
+      "types": "Typen",
+      "badge": {
+        "all": "gilt für alle Typen",
+        "categories": "Kategorien: {{list}}",
+        "types": "Typen: {{list}}"
+      }
+    },
+    "indexStatus": {
+      "label": "Index: {{status}}",
+      "none": "kein Index",
+      "retry": "erneuter Versuch {{attempt}}/{{max}}",
+      "error": "Fehler: {{error}}",
+      "reindex": "Index neu aufbauen",
+      "reindexAction": "Index neu aufbauen: {{name}}",
+      "reindexFailed": "Index nicht neu aufgebaut. {{reason}}"
     }
   },
   "inventory": {
@@ -1827,7 +1892,12 @@
     "cancelNotFound": "Der Job wurde nicht gefunden.",
     "cancelFailed": "Der Job konnte nicht abgebrochen werden: {{error}}",
     "partialReport": "Teilbericht",
-    "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
+    "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
+    "kinds": {
+      "attribute": {
+        "index": "Attributindex"
+      }
+    }
   },
   "provenance": {
     "show": "Herkunft von {{field}}",

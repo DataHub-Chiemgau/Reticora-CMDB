@@ -2,7 +2,13 @@
  * cmdbHooks — TanStack Query hooks for the enterprise CMDB extension API.
  * Mirrors the conventions of api/hooks.ts (query keys, invalidation).
  */
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import {
   attributeDefinitionApi,
   ciTypeApi,
@@ -18,14 +24,17 @@ import {
   historyApi,
   impactApi,
   savedViewApi,
-  ATTRIBUTE_INDEX_JOB_KIND,
+  sensitiveFieldApi,
   type AttributeDefinition,
-  type AttributeIndexFlags,
-  type AttributeIndexJob,
+  type AttributeDefinitionCreate,
+  type AttributeDefinitionFilter,
+  type AttributeDefinitionPatch,
   type CITypeCreateRequest,
+  type CITypeUpdateRequest,
   type LocationUpdateRequest,
   type SavedView,
 } from './cmdb';
+import { ApiError } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 
 /** Query options a caller may set; the CI dialog loads only while open, uncached (MET-04). */
@@ -102,76 +111,31 @@ export function useSetCITypeActive() {
   });
 }
 
-/** The index jobs of the attribute definitions (one shared query). */
-const INDEX_JOBS_KEY = ['jobs', ATTRIBUTE_INDEX_JOB_KIND];
-
-/**
- * FlagUpdateError is a partial success of useUpsertCITypeField: the field
- * is saved, its index flags are not (e.g. 409 while CIs share a value,
- * MET-15). refusal is the answer of PATCH /attribute-definitions/{id}.
- */
-export class FlagUpdateError extends Error {
-  readonly field: FieldDefinition;
-  readonly refusal: unknown;
-
-  constructor(field: FieldDefinition, refusal: unknown) {
-    super(refusal instanceof Error ? refusal.message : String(refusal));
-    this.name = 'FlagUpdateError';
-    this.field = field;
-    this.refusal = refusal;
-  }
+/** PATCH /ci-types/{id}: name, labels, description, category and parent (WP-248, WP-313). */
+export function useUpdateCIType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: CITypeUpdateRequest & { id: string }) =>
+      ciTypeApi.update(id, data),
+    // A new parent changes the inherited attributes of the type and its subtypes.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ci-types'] });
+      qc.invalidateQueries({ queryKey: ['attribute-definitions'] });
+    },
+  });
 }
 
 /** The organization-wide and system fields of GET /ci-fields/global (MET-13). */
 const GLOBAL_FIELDS_KEY = ['ci-fields', 'global'];
 
 /**
- * The changes of an attribute definition: the type (none: a global field),
- * the global fields, the definitions and the index jobs.
+ * The changes of an attribute definition: the types (schema version), the
+ * global fields of the CI form and the definitions.
  */
-function invalidateAttributes(qc: QueryClient, typeId?: string) {
-  if (typeId) qc.invalidateQueries({ queryKey: ['ci-types', typeId] });
+function invalidateAttributes(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ['ci-types'] });
   qc.invalidateQueries({ queryKey: GLOBAL_FIELDS_KEY });
   qc.invalidateQueries({ queryKey: ['attribute-definitions'] });
-  qc.invalidateQueries({ queryKey: INDEX_JOBS_KEY });
-}
-
-/**
- * saveWithIndexFlags saves a field and then, when the editor set them, its
- * index flags (PATCH /attribute-definitions/{id}); a refused flag update is
- * a FlagUpdateError with the saved field.
- */
-async function saveWithIndexFlags(
-  save: () => Promise<FieldDefinition & { id?: string }>,
-  index: AttributeIndexFlags | undefined,
-): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> {
-  const saved = await save();
-  const id = saved.id;
-  if (!index || !id) return { field: saved };
-  try {
-    return { field: saved, definition: await attributeDefinitionApi.setIndexFlags(id, index) };
-  } catch (err) {
-    throw new FlagUpdateError(saved, err);
-  }
-}
-
-export function useUpsertCITypeField() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      typeId,
-      field,
-      index,
-    }: {
-      typeId: string;
-      field: FieldDefinition;
-      index?: AttributeIndexFlags;
-    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
-      saveWithIndexFlags(() => ciTypeApi.upsertField(typeId, field), index),
-    // A refused flag update leaves the field saved: the list reloads either way.
-    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
-  });
 }
 
 /** The global fields: the organization-wide ones and the read-only system ones (MET-13). */
@@ -183,102 +147,103 @@ export function useGlobalFields(options: { enabled?: boolean } = {}) {
   });
 }
 
-/** The global attribute definitions with their index flags (MET-15). */
+/** The pause between two reads of a list while an index job is open (as useJobs). */
+export const INDEX_POLL_INTERVAL_MS = 3_000;
+
+/** indexPending reports whether an index job of a definition is queued or running (DB-04). */
+function indexPending(data: { data: AttributeDefinition[] } | undefined): boolean {
+  return (data?.data ?? []).some(
+    (d) => d.index_status?.state === 'queued' || d.index_status?.state === 'running',
+  );
+}
+
+function attributeDefinitionsQuery(filter: AttributeDefinitionFilter) {
+  return {
+    queryKey: ['attribute-definitions', filter],
+    queryFn: () => attributeDefinitionApi.list(filter),
+    // The list follows its open index jobs until they end (WP-796).
+    refetchInterval: (query: { state: { data?: { data: AttributeDefinition[] } } }) =>
+      indexPending(query.state.data) ? INDEX_POLL_INTERVAL_MS : false,
+  };
+}
+
+/** The global attribute definitions of the organization and the system (MET-13). */
 export function useGlobalAttributeDefinitions() {
-  return useQuery({
-    queryKey: ['attribute-definitions', { scope: 'global' }],
-    queryFn: () => attributeDefinitionApi.list({ scope: 'global' }),
-  });
+  return useQuery(attributeDefinitionsQuery({ scope: 'global' }));
 }
 
 /**
- * PUT /ci-fields/global: an organization-wide field for every CI type of
- * the organization, then its index flags as useUpsertCITypeField does.
+ * The definitions of a CI type and the global definitions that apply to it
+ * (GET /attribute-definitions?applicable_to=, WP-255).
  */
-export function useUpsertGlobalField() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      field,
-      index,
-    }: {
-      field: FieldDefinition;
-      index?: AttributeIndexFlags;
-    }): Promise<{ field: FieldDefinition; definition?: AttributeDefinition }> =>
-      saveWithIndexFlags(() => ciFieldApi.upsertGlobal(field), index),
-    onSettled: () => invalidateAttributes(qc),
-  });
-}
-
-/** DELETE /ci-fields/global/{name}: removes an organization-wide field. */
-export function useDeleteGlobalField() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) => ciFieldApi.deleteGlobal(name),
-    onSuccess: () => invalidateAttributes(qc),
-  });
-}
-
-/** The attribute definitions of a CI type with their index flags (MET-10, MET-15). */
-export function useAttributeDefinitions(ciTypeId: string | undefined) {
+export function useApplicableAttributeDefinitions(ciTypeId: string | undefined) {
   return useQuery({
-    queryKey: ['attribute-definitions', { ci_type_id: ciTypeId }],
-    queryFn: () => attributeDefinitionApi.list({ ci_type_id: ciTypeId, scope: 'type' }),
+    ...attributeDefinitionsQuery({ applicable_to: ciTypeId }),
     enabled: !!ciTypeId,
   });
 }
 
-/**
- * PATCH of the index flags of an existing definition; it queues the index
- * job (DB-04). typeId is the type of the definition, none for a global one.
- */
-export function useSetAttributeIndexFlags() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, flags }: { id: string; typeId?: string; flags: AttributeIndexFlags }) =>
-      attributeDefinitionApi.setIndexFlags(id, flags),
-    onSettled: (_d, _e, v) => invalidateAttributes(qc, v.typeId),
+/** The definitions of each of the given CI types (?ci_type_id=), e.g. the ancestors of a type. */
+export function useTypeAttributeDefinitions(ciTypeIds: string[]) {
+  return useQueries({
+    queries: ciTypeIds.map((id) => attributeDefinitionsQuery({ ci_type_id: id })),
   });
 }
 
-function isActiveJob(job: AttributeIndexJob) {
-  return job.status === 'queued' || job.status === 'running';
+/** POST /attribute-definitions: a definition with its index flags in one request (MET-15). */
+export function useCreateAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: AttributeDefinitionCreate) => attributeDefinitionApi.create(data),
+    onSuccess: () => invalidateAttributes(qc),
+  });
 }
 
-function definitionOf(job: AttributeIndexJob): string {
-  const params = job.params as { definition_id?: unknown } | null | undefined;
-  return typeof params?.definition_id === 'string' ? params.definition_id.toLowerCase() : '';
+/** PATCH /attribute-definitions/{id}; a flag change queues the index job (DB-04). */
+export function useUpdateAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: AttributeDefinitionPatch }) =>
+      attributeDefinitionApi.update(id, patch),
+    onSuccess: () => invalidateAttributes(qc),
+  });
+}
+
+/** DELETE /attribute-definitions/{id}. */
+export function useDeleteAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (definition: AttributeDefinition) => attributeDefinitionApi.delete(definition.id),
+    onSuccess: () => invalidateAttributes(qc),
+  });
+}
+
+/** POST /attribute-definitions/{id}/reindex: rebuilds a failed or cancelled index (WP-796). */
+export function useReindexAttributeDefinition() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => attributeDefinitionApi.reindex(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['attribute-definitions'] }),
+  });
 }
 
 /**
- * useAttributeIndexJob follows the newest index job of a definition: the
- * server queues it before it answers the flag change, the list is newest
- * first. It refreshes while the job is queued or running. The jobs of all
- * definitions share one request.
+ * The sensitive fields of CIs (WP-726). Reading them needs
+ * field_permission:manage; without it (403) the list stays empty and the
+ * catalog shows no mark, without an error.
  */
-export function useAttributeIndexJob(definitionId: string | undefined) {
+export function useSensitiveCIFields() {
   return useQuery({
-    queryKey: INDEX_JOBS_KEY,
-    queryFn: () => attributeDefinitionApi.indexJobs(),
-    enabled: !!definitionId,
+    queryKey: ['field-permissions', 'sensitive-fields', 'ci'],
+    queryFn: async () => {
+      try {
+        return (await sensitiveFieldApi.list({ object_kind: 'ci' })).data;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 403) return [];
+        throw err;
+      }
+    },
     retry: false,
-    select: (page) =>
-      (page.data ?? []).find((job) => definitionOf(job) === definitionId?.toLowerCase()) ?? null,
-    refetchInterval: (query) =>
-      (query.state.data?.data ?? []).some(
-        (job) => definitionOf(job) === definitionId?.toLowerCase() && isActiveJob(job),
-      )
-        ? 2_000
-        : false,
-  });
-}
-
-export function useDeleteCITypeField() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ typeId, name }: { typeId: string; name: string }) =>
-      ciTypeApi.deleteField(typeId, name),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['ci-types', v.typeId] }),
   });
 }
 

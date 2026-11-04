@@ -48,6 +48,8 @@ export interface CIType {
   schema_version: number;
   version: number;
   cloned_from_id?: string;
+  /** Parent in the type chain (MET-06, WP-248); absent for a root. */
+  parent_type_id?: string;
   template_key?: string;
   lifecycle_definition_id?: string;
   capabilities: Record<string, unknown>;
@@ -67,12 +69,20 @@ export interface CITypeCreateRequest {
   category?: string;
   is_logical?: boolean;
   is_observable?: boolean;
+  /** Parent type of the organization or a system type (MET-06, WP-248). */
+  parent_type_id?: string;
   lifecycle_definition_id?: string;
   capabilities?: Record<string, unknown>;
   allowed_relationship_types?: string[];
   ui_schema?: Record<string, unknown>;
   fields?: FieldDefinition[];
 }
+
+/**
+ * The changes of PATCH /ci-types/{id}: the key is immutable; an empty
+ * parent_type_id makes the type a root (WP-248).
+ */
+export type CITypeUpdateRequest = Partial<Omit<CITypeCreateRequest, 'key' | 'fields'>>;
 
 export const ciTypeApi = {
   list(
@@ -103,7 +113,7 @@ export const ciTypeApi = {
   create(data: CITypeCreateRequest): Promise<CIType> {
     return fetchAPI('/ci-types', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: Partial<CITypeCreateRequest>): Promise<CIType> {
+  update(id: string, data: CITypeUpdateRequest): Promise<CIType> {
     return fetchAPI(`/ci-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   clone(id: string, data: { key?: string; name?: string }): Promise<CIType> {
@@ -121,12 +131,6 @@ export const ciTypeApi = {
   listFields(id: string): Promise<{ data: FieldDefinition[] }> {
     return fetchAPI(`/ci-types/${id}/fields`);
   },
-  upsertField(id: string, field: FieldDefinition): Promise<FieldDefinition> {
-    return fetchAPI(`/ci-types/${id}/fields`, { method: 'PUT', body: JSON.stringify(field) });
-  },
-  deleteField(id: string, name: string): Promise<void> {
-    return fetchAPI(`/ci-types/${id}/fields/${encodeURIComponent(name)}`, { method: 'DELETE' });
-  },
 };
 
 // Index flags of an attribute definition (MET-15, DB-04): a change queues
@@ -139,28 +143,60 @@ export interface AttributeIndexFlags {
 }
 
 export type AttributeDefinition = components['schemas']['AttributeDefinition'];
-export type AttributeIndexJob = components['schemas']['Job'];
+export type AttributeDefinitionCreate = components['schemas']['AttributeDefinitionCreate'];
+export type AttributeDefinitionPatch = components['schemas']['AttributeDefinitionPatch'];
+/** The index status of a definition (DB-04, WP-796). */
+export type AttributeIndexStatus = components['schemas']['AttributeIndexStatus'];
+/** The applicability of a global attribute of the organization (MET-13, WP-255). */
+export type AttributeAppliesTo = components['schemas']['AttributeAppliesTo'];
 
-// The job that brings the index of a definition in line with its flags.
-export const ATTRIBUTE_INDEX_JOB_KIND = 'attribute.index';
+/** The filters of GET /attribute-definitions (MET-10, WP-255). */
+export interface AttributeDefinitionFilter {
+  ci_type_id?: string;
+  attribute_set_id?: string;
+  scope?: 'type' | 'global' | 'set';
+  /** A CI type: its definitions and the global definitions that apply to it. */
+  applicable_to?: string;
+}
 
 export const attributeDefinitionApi = {
   // Every definition of the filter: the list pages at 200 (API-02, F-215),
-  // so the field editor follows next_cursor instead of reading one page.
-  async list(params: { ci_type_id?: string; scope?: 'type' | 'global' }): Promise<{
-    data: AttributeDefinition[];
-  }> {
+  // so the catalog follows next_cursor instead of reading one page.
+  async list(params: AttributeDefinitionFilter): Promise<{ data: AttributeDefinition[] }> {
     return { data: await fetchAllPages<AttributeDefinition>('/attribute-definitions', params) };
   },
-  // The index jobs of the organization, newest first (JOB-03, job:read).
-  indexJobs(): Promise<PaginatedResponse<AttributeIndexJob>> {
-    return fetchAPI(`/jobs?kind=${ATTRIBUTE_INDEX_JOB_KIND}&limit=100`);
+  get(id: string): Promise<AttributeDefinition> {
+    return fetchAPI(`/attribute-definitions/${id}`);
   },
-  setIndexFlags(id: string, flags: AttributeIndexFlags): Promise<AttributeDefinition> {
+  /** One POST with the index flags (MET-15); without ci_type_id a global definition. */
+  create(data: AttributeDefinitionCreate): Promise<AttributeDefinition> {
+    return fetchAPI('/attribute-definitions', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: AttributeDefinitionPatch): Promise<AttributeDefinition> {
     return fetchAPI(`/attribute-definitions/${id}`, {
       method: 'PATCH',
-      body: JSON.stringify(flags),
+      body: JSON.stringify(data),
     });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/attribute-definitions/${id}`, { method: 'DELETE' });
+  },
+  /** Queues an index job of the definition (DB-04, WP-796); answers its status. */
+  reindex(id: string): Promise<AttributeIndexStatus> {
+    return fetchAPI(`/attribute-definitions/${id}/reindex`, { method: 'POST', body: '{}' });
+  },
+};
+
+// ─── Sensitive fields (RBA-07, E-43, WP-726) ─────────────────────────────────
+
+export type SensitiveField = components['schemas']['SensitiveField'];
+
+export const sensitiveFieldApi = {
+  /** Every mark of an object kind (cursor pages); field_permission:manage, else 403. */
+  async list(params: { object_kind?: string } = {}): Promise<{ data: SensitiveField[] }> {
+    return {
+      data: await fetchAllPages<SensitiveField>('/field-permissions/sensitive-fields', params),
+    };
   },
 };
 
@@ -180,12 +216,6 @@ export type GlobalFieldDefinition = FieldDefinition & {
 export const ciFieldApi = {
   listGlobal(): Promise<{ data: GlobalFieldDefinition[] }> {
     return fetchAPI('/ci-fields/global');
-  },
-  upsertGlobal(field: FieldDefinition): Promise<GlobalFieldDefinition> {
-    return fetchAPI('/ci-fields/global', { method: 'PUT', body: JSON.stringify(field) });
-  },
-  deleteGlobal(name: string): Promise<void> {
-    return fetchAPI(`/ci-fields/global/${encodeURIComponent(name)}`, { method: 'DELETE' });
   },
   listInstance(ciId: string): Promise<{ data: FieldDefinition[] }> {
     return fetchAPI(`/cis/${ciId}/field-definitions`);
