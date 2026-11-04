@@ -65,13 +65,21 @@ export interface ContractResponse {
 
 const SPEC_URL = new URL('../../../api/openapi.yaml', import.meta.url);
 const DOC_ID = 'openapi.json';
+// api/openapi.yaml references the rule language as ./rules.schema.json; the
+// file is registered under its own $id and the relative references point there.
+const RULES_URL = new URL('../../../api/rules.schema.json', import.meta.url);
+const RULES_REF = './rules.schema.json';
 const METHODS = ['get', 'put', 'post', 'delete', 'patch', 'head', 'options'];
 
 function isJsonType(type: string): boolean {
   return type === 'application/json' || type.endsWith('+json');
 }
 
-/** rewriteRefs points every local $ref at the document's schema ID. */
+const rulesSchema = JSON.parse(readFileSync(RULES_URL, 'utf8')) as JsonObject;
+const rulesId = rulesSchema.$id as string;
+
+/** rewriteRefs points every local $ref at the document's schema ID and the
+ * references to ./rules.schema.json at that schema's $id. */
 function rewriteRefs(value: Json): Json {
   if (Array.isArray(value)) {
     return value.map(rewriteRefs);
@@ -79,10 +87,13 @@ function rewriteRefs(value: Json): Json {
   if (value && typeof value === 'object') {
     const out: JsonObject = {};
     for (const [key, child] of Object.entries(value)) {
-      out[key] =
-        key === '$ref' && typeof child === 'string' && child.startsWith('#/')
-          ? `${DOC_ID}${child}`
-          : rewriteRefs(child);
+      if (key === '$ref' && typeof child === 'string' && child.startsWith('#/')) {
+        out[key] = `${DOC_ID}${child}`;
+      } else if (key === '$ref' && typeof child === 'string' && child.startsWith(RULES_REF)) {
+        out[key] = `${rulesId}${child.slice(RULES_REF.length)}`;
+      } else {
+        out[key] = rewriteRefs(child);
+      }
     }
     return out;
   }
@@ -138,6 +149,7 @@ export class Contract {
       ajv.addFormat('double', { type: 'number', validate: () => true });
       ajv.addFormat('float', { type: 'number', validate: () => true });
       ajv.addFormat('binary', () => true);
+      ajv.addSchema(rulesSchema);
       ajv.addSchema({ $id: DOC_ID, components: this.doc.components } as JsonObject);
     }
     for (const [template, item] of Object.entries(
