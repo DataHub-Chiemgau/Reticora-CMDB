@@ -37,8 +37,8 @@ const (
 	// RuleSiteScope: tables with site_id use SiteScopeGUC in USING and WITH
 	// CHECK of every command (CH25).
 	RuleSiteScope Rule = "site-scope"
-	// RuleTeamScope: tables with team_id use TeamScopeGUC in USING and WITH
-	// CHECK of every command (CH25).
+	// RuleTeamScope: tables with team_id or owner_team_id use TeamScopeGUC
+	// in USING and WITH CHECK of every command (CH25, TEN-05).
 	RuleTeamScope Rule = "team-scope"
 	// RuleOrgColumn: every table of schema public except organization,
 	// schema_migrations and GlobalCatalogTables has an organization_id column.

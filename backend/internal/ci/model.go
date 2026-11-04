@@ -42,6 +42,13 @@ type Item struct {
 	// lifecycle model have one, and it changes through lifecycle
 	// transitions (DB-05).
 	LifecycleState string `json:"lifecycle_state,omitempty"`
+	// OwnerUserID and OwnerTeamID are the user (app_user.id, the
+	// surrogate ID: no personal data at the CI, convention 16) and the
+	// team responsible for the CI in the system (CI-07, WP-280), apart from
+	// the contact role owner (ci_contact). A CI linked to an asset mirrors
+	// the asset's owner (DB-05, trigger ci_mirror_asset_owner).
+	OwnerUserID string `json:"owner_user_id,omitempty"`
+	OwnerTeamID string `json:"owner_team_id,omitempty"`
 	// Health is computed from the monitoring state and read-only (DB-05):
 	// ok, warning, critical or unknown.
 	Health          string         `json:"health"`
@@ -195,6 +202,8 @@ type CreateRequest struct {
 	LocationID      string         `json:"location_id,omitempty"`
 	AssetID         string         `json:"asset_id,omitempty"`
 	ParentCIID      string         `json:"parent_ci_id,omitempty"`
+	OwnerUserID     string         `json:"owner_user_id,omitempty"`
+	OwnerTeamID     string         `json:"owner_team_id,omitempty"`
 	Name            string         `json:"name"`
 	Status          string         `json:"status,omitempty"`
 	Manufacturer    string         `json:"manufacturer,omitempty"`
@@ -224,8 +233,11 @@ type UpdateRequest struct {
 	LocationID *string `json:"location_id,omitempty"`
 	// AssetID links ("" unlinks) the CI to an asset.
 	AssetID *string `json:"asset_id,omitempty"`
-	// ParentCIID sets ("" clears) the containing CI.
+	// ParentCIID sets ("" clears) the containing CI, OwnerUserID and
+	// OwnerTeamID the owner (WP-280; a CI with an asset takes the asset's).
 	ParentCIID      *string        `json:"parent_ci_id,omitempty"`
+	OwnerUserID     *string        `json:"owner_user_id,omitempty"`
+	OwnerTeamID     *string        `json:"owner_team_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
 	Model           *string        `json:"model,omitempty"`
 	SerialNumber    *string        `json:"serial_number,omitempty"`
@@ -282,6 +294,7 @@ type UpdateRequest struct {
 // discovery_source, last_seen_at and change_reason is refused.
 var nullableFields = map[string]bool{
 	"client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true,
+	"owner_user_id": true, "owner_team_id": true,
 	"manufacturer": true, "model": true, "serial_number": true, "hardware_uuid": true,
 	"management_ip": true, "primary_mac": true, "hostname": true, "fqdn": true,
 	"os_name": true, "os_version": true, "firmware_version": true, "sys_object_id": true,
@@ -322,12 +335,38 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 func (r *UpdateRequest) field(name string) **string {
 	return map[string]**string{
 		"client_id": &r.ClientID, "location_id": &r.LocationID, "asset_id": &r.AssetID,
-		"parent_ci_id": &r.ParentCIID, "manufacturer": &r.Manufacturer, "model": &r.Model,
+		"parent_ci_id": &r.ParentCIID, "owner_user_id": &r.OwnerUserID, "owner_team_id": &r.OwnerTeamID,
+		"manufacturer": &r.Manufacturer, "model": &r.Model,
 		"serial_number": &r.SerialNumber, "hardware_uuid": &r.HardwareUUID,
 		"management_ip": &r.ManagementIP, "primary_mac": &r.PrimaryMAC, "hostname": &r.Hostname,
 		"fqdn": &r.FQDN, "os_name": &r.OSName, "os_version": &r.OSVersion,
 		"firmware_version": &r.FirmwareVersion, "sys_object_id": &r.SysObjectID,
 	}[name]
+}
+
+// ownerValues returns the owner fields a CI has (WP-280): projected by the
+// field permissions like the typed columns (RBA-07), but no attributes.
+func ownerValues(item *Item) map[string]any {
+	out := map[string]any{}
+	if item.OwnerUserID != "" {
+		out["owner_user_id"] = item.OwnerUserID
+	}
+	if item.OwnerTeamID != "" {
+		out["owner_team_id"] = item.OwnerTeamID
+	}
+	return out
+}
+
+// ownerPatch returns the owner fields an update sets ("" clears).
+func ownerPatch(req *UpdateRequest) map[string]any {
+	out := map[string]any{}
+	if req.OwnerUserID != nil {
+		out["owner_user_id"] = *req.OwnerUserID
+	}
+	if req.OwnerTeamID != nil {
+		out["owner_team_id"] = *req.OwnerTeamID
+	}
+	return out
 }
 
 // isNull reports whether the request set the member to null.

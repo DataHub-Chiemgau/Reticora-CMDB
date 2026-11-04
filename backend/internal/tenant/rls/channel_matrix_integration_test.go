@@ -146,6 +146,18 @@ func (s seen) and(o seen) seen {
 	return out
 }
 
+// without is the set without the kinds (a CI the team principal sees but
+// may not write, TEN-05).
+func (s seen) without(kinds ...string) seen {
+	out := seen{}
+	for k := range s {
+		if !slices.Contains(kinds, k) {
+			out[k] = true
+		}
+	}
+	return out
+}
+
 // status is ok for a principal that sees the object and 404 otherwise: an
 // object outside the scope or of the other organization is not found, like
 // an unknown one (TEN-06, API-03).
@@ -307,8 +319,10 @@ type channelMatrix struct {
 	env *channelEnv
 	bg  context.Context
 
-	userA, otherA, userB, otherB, team, serverType string
-	clientB, site1, site2                          string
+	// team2 is a team of organization A outside the scope of the team
+	// principal (TEN-05, WP-280).
+	userA, otherA, userB, otherB, team, team2, serverType string
+	clientB, site1, site2                                 string
 
 	// principals runs every channel: one per rls.ScopeKinds and another
 	// user of organization A with an org-wide scope.
@@ -334,6 +348,13 @@ type channelMatrix struct {
 	vrfA, vrfB, roleA, roleB            string
 	contactA, contactB                  string
 	collectorA, collectorB, userForRole string
+
+	// ciT2 is a CI of client 1 at site 1 owned by team2: the team
+	// principal does not see it (TEN-05, WP-280). ci1 is owned by team,
+	// the other CIs have no owner team: the team principal sees them but
+	// writes only the CIs of its team.
+	ciT2 object
+
 	// refTypeB is a CI type of organization B with reference attributes
 	// (ci_ref, location, user), ciRefB a CI of it (WP-254).
 	refTypeB, ciRefB, siteB string
@@ -361,6 +382,7 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 			SELECT $1, $2, id FROM role WHERE organization_id = $1 AND name = 'org_admin'`, org, user)
 	}
 	m.team = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'matrix team') RETURNING id::text`, f.OrgA)
+	m.team2 = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'matrix team 2') RETURNING id::text`, f.OrgA)
 	m.serverType = m.scalar(t, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`)
 	room1, room2 := f.Room(t, f.Client1, "chm-s1"), f.Room(t, f.Client2, "chm-s2")
 	bld1 := m.scalar(t, `SELECT building_id::text FROM room WHERE id = $1`, room1)
@@ -408,19 +430,23 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 
 	// CIs and relationships through the API, so search and the outbox see
 	// them as in production.
-	newCI := func(p *channelPrincipal, name, client, site string) string {
+	newCI := func(p *channelPrincipal, name, client, site, team string) string {
 		body := map[string]any{"ci_type_id": m.serverType, "name": name}
 		if client != "" {
 			body["client_id"], body["location_id"] = client, site
 		}
+		if team != "" {
+			body["owner_team_id"] = team
+		}
 		return m.create(t, p, "/api/v1/cis", body)
 	}
-	m.ci1 = object{newCI(m.org, "chmci-c1-a", f.Client1, m.site1), m.one}
-	m.ci1b = object{newCI(m.org, "chmci-c1-b", f.Client1, m.site1), m.one}
-	m.ci2 = object{newCI(m.org, "chmci-c2-a", f.Client2, m.site2), m.two}
-	m.ci2b = object{newCI(m.org, "chmci-c2-b", f.Client2, m.site2), m.two}
-	m.ciB = object{newCI(m.orgB, "chmci-b-a", "", ""), m.onlyB}
-	m.ciB2 = object{newCI(m.orgB, "chmci-b-b", "", ""), m.onlyB}
+	m.ci1 = object{newCI(m.org, "chmci-c1-a", f.Client1, m.site1, m.team), m.one}
+	m.ci1b = object{newCI(m.org, "chmci-c1-b", f.Client1, m.site1, ""), m.one}
+	m.ci2 = object{newCI(m.org, "chmci-c2-a", f.Client2, m.site2, ""), m.two}
+	m.ci2b = object{newCI(m.org, "chmci-c2-b", f.Client2, m.site2, ""), m.two}
+	m.ciB = object{newCI(m.orgB, "chmci-b-a", "", "", ""), m.onlyB}
+	m.ciB2 = object{newCI(m.orgB, "chmci-b-b", "", "", ""), m.onlyB}
+	m.ciT2 = object{newCI(m.org, "chmci-t2-a", f.Client1, m.site1, m.team2), m.one.without("team")}
 	edge := func(p *channelPrincipal, src, dst object) object {
 		return object{m.create(t, p, "/api/v1/relationships", map[string]any{"source_ci_id": src.id, "target_ci_id": dst.id, "rel_type": "depends_on"}),
 			src.seen.and(dst.seen)}
@@ -609,9 +635,9 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		return matrixProbe{name: name, method: http.MethodPost, path: "/bff/graphql", body: map[string]any{"query": query},
 			want: http.StatusOK, show: show, hide: hide}
 	}
-	cis := []object{m.ci1, m.ci1b, m.ci2, m.ci2b, m.ciB, m.ciB2}
+	cis := []object{m.ci1, m.ci1b, m.ci2, m.ci2b, m.ciB, m.ciB2, m.ciT2}
 	names := map[string]string{m.ci1.id: "chmci-c1-a", m.ci1b.id: "chmci-c1-b", m.ci2.id: "chmci-c2-a", m.ci2b.id: "chmci-c2-b",
-		m.ciB.id: "chmci-b-a", m.ciB2.id: "chmci-b-b"}
+		m.ciB.id: "chmci-b-a", m.ciB2.id: "chmci-b-b", m.ciT2.id: "chmci-t2-a"}
 	// nameOf is the name of a CI of the scenario, none for the unknown id.
 	nameOf := func(id string) []string {
 		if name, ok := names[id]; ok {
@@ -642,11 +668,30 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		},
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 			var out []matrixProbe
-			for _, c := range []object{m.ci1, m.ci2, m.ciB} {
+			// The team principal sees CIs without owner team but writes
+			// only those of its team (TEN-05, E-11): the update policy
+			// hides the others, 404 like a CI outside the scope.
+			for _, c := range []object{m.ci1, {m.ci2.id, m.ci2.seen.without("team")}, m.ciB, m.ciT2} {
 				model := "chm-model-" + p.kind
 				out = append(out, matrixProbe{method: http.MethodPatch, path: "/api/v1/cis/" + c.id, body: map[string]any{"model": model},
 					want: c.seen.status(p, http.StatusOK), after: m.unchanged(c, p, `SELECT COALESCE(model, '') <> $2 FROM ci WHERE id = $1`, model)})
 			}
+			// Handing a CI of the team to the other team: the team
+			// principal may not (WITH CHECK, 403); every principal that
+			// may write it can. The CI goes back to the team afterwards.
+			toTeam2 := m.ci1.seen.status(p, http.StatusOK)
+			if p.kind == "team" {
+				toTeam2 = http.StatusForbidden
+			}
+			out = append(out, matrixProbe{name: "to another team", method: http.MethodPatch, path: "/api/v1/cis/" + m.ci1.id,
+				body: map[string]any{"owner_team_id": m.team2}, want: toTeam2,
+				after: func(t *testing.T) {
+					t.Helper()
+					if got := m.scalar(t, `SELECT COALESCE(owner_team_id::text, '') FROM ci WHERE id = $1`, m.ci1.id); (got == m.team2) != (toTeam2 == http.StatusOK) {
+						t.Errorf("owner team of %s after the PATCH by %s: %s", m.ci1.id, p.kind, got)
+					}
+					m.exec(t, `UPDATE ci SET owner_team_id = $2 WHERE id = $1`, m.ci1.id, m.team)
+				}})
 			// New CIs: at a site outside the scope the location is not found
 			// (422 on location_id, as for an unknown one); a row in a client
 			// outside the scope, or without client or site for a principal
@@ -658,17 +703,28 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 			if !m.one[p.kind] {
 				atSite1, atSite1Field = http.StatusUnprocessableEntity, location
 			}
+			// A CI without owner team or of a team outside the scope is
+			// refused to the team principal (RLS, 403; TEN-05); a team of
+			// organization A fails its composite foreign key for the other
+			// organization (422 on owner_team_id).
+			teamOfA, teamOfAField := http.StatusForbidden, ""
+			if p.org == f.OrgB {
+				teamOfA, teamOfAField = http.StatusUnprocessableEntity, `"field":"owner_team_id"`
+			}
 			for _, c := range []struct {
-				name, client, site string
-				seen               seen
-				refused            int
-				field              string
+				name, client, site, team string
+				seen                     seen
+				refused                  int
+				field                    string
 			}{
-				{"in client 1 at site 1", f.Client1, m.site1, m.one, http.StatusUnprocessableEntity, location},
-				{"in client 2 at site 2", f.Client2, m.site2, m.two, http.StatusUnprocessableEntity, location},
-				{"at site 1 without client", "", m.site1, m.orgWide, atSite1, atSite1Field},
-				{"in client 2 without site", f.Client2, "", m.orgWide, m.foreignRef(p, http.StatusForbidden), ""},
-				{"without client and site", "", "", seenBy("org", "other-user", "team", "other-org"), http.StatusForbidden, ""},
+				{"in client 1 at site 1", f.Client1, m.site1, "", m.one.without("team"), http.StatusUnprocessableEntity, location},
+				{"in client 2 at site 2", f.Client2, m.site2, "", m.two.without("team"), http.StatusUnprocessableEntity, location},
+				{"at site 1 without client", "", m.site1, "", m.orgWide.without("team"), atSite1, atSite1Field},
+				{"in client 2 without site", f.Client2, "", "", m.orgWide.without("team"), m.foreignRef(p, http.StatusForbidden), ""},
+				{"without client and site", "", "", "", seenBy("org", "other-user", "other-org"), http.StatusForbidden, ""},
+				{"in client 1 at site 1 of the team", f.Client1, m.site1, m.team, m.one, http.StatusUnprocessableEntity, location},
+				{"without client and site of the team", "", "", m.team, seenBy("org", "other-user", "team"), teamOfA, teamOfAField},
+				{"without client and site of another team", "", "", m.team2, seenBy("org", "other-user"), teamOfA, teamOfAField},
 			} {
 				name := m.name("chmtmp")
 				body := map[string]any{"ci_type_id": m.serverType, "name": name}
@@ -678,21 +734,29 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 				if c.site != "" {
 					body["location_id"] = c.site
 				}
-				pr := matrixProbe{name: c.name, method: http.MethodPost, path: "/api/v1/cis", body: body, want: c.refused}
+				if c.team != "" {
+					body["owner_team_id"] = c.team
+				}
+				refused, field := c.refused, c.field
+				if p.kind == "team" {
+					refused, field = http.StatusForbidden, ""
+				}
+				pr := matrixProbe{name: c.name, method: http.MethodPost, path: "/api/v1/cis", body: body, want: refused}
 				if c.seen[p.kind] {
 					pr.want = http.StatusCreated
-				} else if c.field != "" {
-					pr.show = []string{c.field}
+				} else if field != "" {
+					pr.show = []string{field}
 				}
 				pr.after = m.count(pr.want == http.StatusCreated, `SELECT count(*) FROM ci WHERE name = $1`, name)
 				out = append(out, pr)
 			}
-			// DELETE of a CI per side.
+			// DELETE of a CI per side; the CI of client 1 belongs to the
+			// team, the team principal may not delete the other one.
 			for _, c := range []struct {
-				org, client, site string
-				seen              seen
-			}{{f.OrgA, f.Client1, m.site1, m.one}, {f.OrgA, f.Client2, m.site2, m.two}, {f.OrgB, "", "", m.onlyB}} {
-				id := m.freshCI(t, c.org, c.client, c.site)
+				org, client, site, team string
+				seen                    seen
+			}{{f.OrgA, f.Client1, m.site1, m.team, m.one}, {f.OrgA, f.Client2, m.site2, "", m.two.without("team")}, {f.OrgB, "", "", "", m.onlyB}} {
+				id := m.freshCI(t, c.org, c.client, c.site, c.team)
 				out = append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/cis/" + id, want: c.seen.status(p, http.StatusNoContent),
 					after: m.count(!c.seen[p.kind], `SELECT count(*) FROM ci WHERE id = $1 AND deleted_at IS NULL`, id)})
 			}
@@ -909,6 +973,9 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 			var out []matrixProbe
 			clientOf, siteOf := [3]string{f.Client1, f.Client2, ""}, [3]string{m.site1, m.site2, ""}
+			// The CIs of organization A belong to the team: the placement
+			// writes their location (TEN-05).
+			teamOf := [3]string{m.team, m.team, ""}
 			for side, r := range m.racks {
 				// Three free units per principal and rack (42U, U1 is taken).
 				pos := 3 + 5*slices.Index(m.principals, p)
@@ -916,7 +983,7 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 				// outside the scope is not found, a CI outside it is a 422 on
 				// ci_id like an unknown one (WP-406).
 				for i, other := range []int{side, (side + 1) % 3} {
-					id := m.freshCI(t, orgOf[other], clientOf[other], siteOf[other])
+					id := m.freshCI(t, orgOf[other], clientOf[other], siteOf[other], teamOf[other])
 					want := r.seen.status(p, http.StatusCreated)
 					var show []string
 					if r.seen[p.kind] && !m.racks[other].seen[p.kind] {
@@ -931,7 +998,7 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 					owner = m.orgB
 				}
 				mount := m.create(t, owner, "/api/v1/racks/"+r.id+"/mounts",
-					map[string]any{"ci_id": m.freshCI(t, orgOf[side], clientOf[side], siteOf[side]), "position_u": pos + 2})
+					map[string]any{"ci_id": m.freshCI(t, orgOf[side], clientOf[side], siteOf[side], teamOf[side]), "position_u": pos + 2})
 				out = append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/mounts/" + mount, want: r.seen.status(p, http.StatusNoContent),
 					after: m.count(!r.seen[p.kind], `SELECT count(*) FROM rack_mount WHERE id = $1`, mount)})
 			}
@@ -1227,7 +1294,9 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 	// which a principal restricted in client or site may not write (RLS,
 	// 403); a record of client 1 needs client 1 and an unrestricted site
 	// scope, and for the other organization it names an unknown client
-	// (422). The CI lands in the caller's organization.
+	// (422). The ingest never sets an owner team (WP-280), so a team-scoped
+	// principal creates no CI (403). The CI lands in the caller's
+	// organization.
 	rows["ingest"] = matrixRow{write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 		var out []matrixProbe
 		for i, r := range []struct {
@@ -1235,8 +1304,8 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 			seen         seen
 			refused      int
 		}{
-			{"without client", "", seenBy("org", "other-user", "team", "other-org"), http.StatusForbidden},
-			{"of client 1", f.Client1, seenBy("org", "other-user", "client", "team"), m.foreignRef(p, http.StatusForbidden)},
+			{"without client", "", seenBy("org", "other-user", "other-org"), http.StatusForbidden},
+			{"of client 1", f.Client1, seenBy("org", "other-user", "client"), m.foreignRef(p, http.StatusForbidden)},
 		} {
 			serial := fmt.Sprintf("CHM-INGEST-%s-%d", p.kind, i)
 			rec := plugins.RecordFromResult("snmp", &plugins.Result{CIType: "server", Name: "chm-ingested-" + serial,
@@ -1532,12 +1601,13 @@ func (m *channelMatrix) create(t *testing.T, p *channelPrincipal, path string, b
 	return out.ID
 }
 
-// freshCI inserts an active server CI in a client and at a site (both may
-// be empty) and returns its id.
-func (m *channelMatrix) freshCI(t *testing.T, org, client, site string) string {
+// freshCI inserts an active server CI in a client, at a site and of an
+// owner team (each may be empty) and returns its id.
+func (m *channelMatrix) freshCI(t *testing.T, org, client, site, team string) string {
 	t.Helper()
-	return m.scalar(t, `INSERT INTO ci (organization_id, client_id, location_id, ci_type_id, name, status)
-		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, $4, $5, 'active') RETURNING id::text`, org, client, site, m.serverType, m.name("chmtmp"))
+	return m.scalar(t, `INSERT INTO ci (organization_id, client_id, location_id, ci_type_id, name, status, owner_team_id)
+		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, $4, $5, 'active', NULLIF($6, '')::uuid) RETURNING id::text`,
+		org, client, site, m.serverType, m.name("chmtmp"), team)
 }
 
 // review inserts an open review item with one candidate CI, or without

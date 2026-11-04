@@ -220,8 +220,13 @@ func loadMatrixColumns(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tb
 // scopeDimensions are the scope dimensions of TEN-04 below the organization.
 var scopeDimensions = []string{"client", "site", "team"}
 
-// scopeDimension returns the dimension a column carries, or "".
+// scopeDimension returns the dimension a column carries, or "". The owning
+// team of a CI or an asset (owner_team_id, WP-280) is the team dimension
+// (TEN-05, E-11).
 func scopeDimension(table, col string) string {
+	if col == "owner_team_id" {
+		return "team"
+	}
 	for _, dim := range scopeDimensions {
 		switch col {
 		case dim + "_id", "source_" + dim + "_id", "target_" + dim + "_id":

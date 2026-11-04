@@ -11385,6 +11385,16 @@ export interface components {
       asset?: components['schemas']['CIAssetFacts'];
       /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
+      /**
+       * Format: uuid
+       * @description User responsible for the CI in the system (CI-07): the ID of the user (app_user.id), no personal data; clients resolve the name. Separate from the contact role owner (GET /api/v1/cis/{id}/contacts). For a CI linked to an asset it mirrors the asset's owner (DB-05). Subject to the field permissions (core.owner_user_id).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Team responsible for the CI (CI-07). A team-scoped principal sees the CIs of its teams and those without a team and writes only those of its teams (TEN-05). For a CI linked to an asset it mirrors the asset's owner (DB-05). Deleting the team clears it. Subject to the field permissions (core.owner_team_id).
+       */
+      owner_team_id?: string;
       /** @description Software lifecycle; only CI types with a lifecycle model have one, and it changes through lifecycle transitions (DB-05). */
       readonly lifecycle_state?: string;
       /**
@@ -11553,6 +11563,16 @@ export interface components {
       asset_id?: string;
       /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning user (WP-280). An unknown user or one of another organization is rejected (422 on owner_user_id). With asset_id the CI takes the asset's owner; another owner is rejected (422).
+       */
+      owner_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Owning team (WP-280). An unknown team or one of another organization is rejected (422 on owner_team_id). A team-scoped principal must name a team of its scope (403 otherwise, TEN-05). With asset_id the CI takes the asset's owner; another owner is rejected (422).
+       */
+      owner_team_id?: string;
       name: string;
       status?: components['schemas']['CIStatus'];
       manufacturer?: string;
@@ -11596,6 +11616,10 @@ export interface components {
       asset_id?: string | null;
       /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
       parent_ci_id?: string | null;
+      /** @description Owning user (empty string or null clears it, WP-280). An unknown user or one of another organization is rejected (422). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_user_id). */
+      owner_user_id?: string | null;
+      /** @description Owning team (empty string or null clears it, WP-280). An unknown team or one of another organization is rejected (422); a team outside the scope of a team-scoped principal is refused (403, TEN-05). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_team_id). */
+      owner_team_id?: string | null;
       manufacturer?: string | null;
       model?: string | null;
       serial_number?: string | null;

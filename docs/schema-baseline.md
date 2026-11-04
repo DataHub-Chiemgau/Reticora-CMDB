@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000236_asset_version
+Stand: Migration 000237_ci_owner
 
 ## Prüfung
 
@@ -172,7 +172,7 @@ Policies für `PUBLIC` oder `reticora_app`:
 | `global-rows` | INSERT/UPDATE/DELETE erreichen keine globalen Zeilen (`organization_id IS NULL`) |
 | `client-scope` | Tabellen mit `client_id` verwenden `app.client_scope` in `USING` und `WITH CHECK` |
 | `site-scope` | Tabellen mit `site_id` verwenden `app.site_scope` in `USING` und `WITH CHECK` (CH25) |
-| `team-scope` | Tabellen mit `team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
+| `team-scope` | Tabellen mit `team_id` oder `owner_team_id` verwenden `app.team_scope` in `USING` und `WITH CHECK` (CH25) |
 | `org-column` | jede Tabelle außer `organization`, `schema_migrations` und den globalen Katalogen hat `organization_id` |
 | `read-only-catalog` | globale Kataloge ohne `organization_id` (`rls.GlobalCatalogTables`) gewähren `reticora_app` kein INSERT/UPDATE/DELETE |
 | `system-only` | Systemtabellen ohne `organization_id` (`rls.SystemTables`) haben ENABLE + FORCE RLS und den TRUNCATE-Schutz, jede Policy verlangt `app.system` (USING und WITH CHECK), keine erlaubt DELETE, `reticora_app` hat kein DELETE/TRUNCATE |
@@ -1229,6 +1229,30 @@ Standortübernahme, Hard-Delete-Job). `entity_change.entity_version`
 (BIGINT, nullable) trägt die Version, die ein Asset-Schreibvorgang
 hinterlassen hat; Index `idx_entity_change_version` auf (`entity_type`,
 `entity_id`, `entity_version`). RLS und Policies bleiben unverändert.
+
+CI-Owner (CI-07, CI-01, TEN-05, DB-05, TLC-04, WP-280, E-11, E-124,
+Migration 000237): `ci` erhält `owner_user_id` und `owner_team_id` (UUID,
+nullable). `ci_owner_user_fkey` (`owner_user_id`, `organization_id`) →
+`app_user` (`id`, `organization_id`) ohne Löschaktion (NO ACTION; der
+Owner eines CI lässt sich nicht löschen), `ci_owner_team_fkey`
+(`owner_team_id`, `organization_id`) → `team` ON DELETE SET NULL
+(`owner_team_id`); Teilindizes `idx_ci_owner_user` (`organization_id`,
+`owner_user_id`) und `idx_ci_owner_team` (`organization_id`,
+`owner_team_id`), je WHERE NOT NULL. Spiegelung nach DB-05: Bestands-CIs
+mit `asset_id` übernehmen den Owner des Assets; der Trigger
+`trg_ci_asset_owner` (BEFORE INSERT OR UPDATE OF `owner_user_id`,
+`owner_team_id`, `asset_id`, Funktion `ci_mirror_asset_owner()`) setzt bei
+einem verknüpften CI den Owner des Assets und lehnt einen direkt
+geschriebenen, abweichenden Owner mit `ci_owner_from_asset` (23514, COLUMN
+nennt das Feld) ab; `trg_asset_propagate_owner` (AFTER UPDATE OF
+`owner_user_id`, `owner_team_id` ON `asset`, Funktion
+`asset_propagate_owner()`) überträgt einen Owner-Wechsel unter der RLS des
+Schreibers auf die verknüpften CIs und lehnt mit 42501
+(`asset_owner_ci_scope`) ab, wenn ein CI außerhalb des Scopes abweichen
+würde. RLS nach TEN-05: `ci_isolation` und `asset_tenant_isolation` tragen
+neben Org-, Client- und Site-Prädikat das Team-Prädikat auf
+`owner_team_id` (USING mit NULL-Ausnahme, WITH CHECK ohne), `ci_scoped_*`
+und `asset_scoped_*` folgen dem neuen WITH CHECK.
 
 ## Tabellen, RLS und Policies
 

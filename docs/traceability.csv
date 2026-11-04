@@ -1386,3 +1386,8 @@ EXP-01;[B], DATEV [P2];C;frontend/src/pages/ExportPage.test.tsx;WP-791
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/discovery/review_ticket_integration_test.go;WP-767
 IMP-IO-01;[P2];C;backend/internal/importer/apikey_integration_test.go;WP-779
 AUT-04;[B];C;backend/internal/importer/apikey_integration_test.go;WP-779
+CI-07;[P2];B;backend/internal/ci/owner_integration_test.go;WP-280
+CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/owner_integration_test.go;WP-280
+TEN-05;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/owner_integration_test.go;WP-280
+TLC-04;[B];B;backend/internal/ci/owner_integration_test.go;WP-280

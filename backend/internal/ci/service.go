@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"regexp"
 	"slices"
 	"sort"
@@ -980,6 +981,9 @@ func checkCreateFields(ctx context.Context, item *Item) error {
 			paths = append(paths, name)
 		}
 	}
+	for name := range ownerValues(item) {
+		paths = append(paths, name)
+	}
 	for key, value := range item.Attributes {
 		if value != nil && value != "" {
 			paths = append(paths, "attributes."+key)
@@ -1005,6 +1009,7 @@ func updatePaths(req *UpdateRequest) map[string]any {
 			out[name] = value
 		}
 	}
+	maps.Copy(out, ownerPatch(req))
 	for key, value := range req.Attributes {
 		out["attributes."+key] = value
 	}
@@ -1050,6 +1055,7 @@ func (s *Service) checkUpdateFields(ctx context.Context, orgID, id string, req *
 	}
 	ref, opts := ciRef(before), permission.WithInstanceKeys(instance)
 	current := typedValues(before)
+	maps.Copy(current, ownerValues(before))
 	var changed []string
 	for path, value := range sent {
 		if !permission.Readable(policy, permission.KindCI, before.CITypeID, ref, path, opts) {
