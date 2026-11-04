@@ -632,12 +632,15 @@ func NewHandler(repo Repository, ciRepo ci.Repository, relRepo ...relationship.R
 	return h
 }
 
-// inTx runs fn in one transaction, or as it is without a TxRunner.
+// inTx runs fn in one transaction, or as it is without a TxRunner. The
+// field definitions the observed-value check resolves in it are those the
+// CI repository computes the computed attributes with (ci.WithFieldsMemo,
+// WP-717): the transaction resolves them once.
 func (h *Handler) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
 	if h.tx == nil {
 		return fn(ctx)
 	}
-	return h.tx.RunInTx(ctx, orgID, fn)
+	return h.tx.RunInTx(ci.WithFieldsMemo(ctx), orgID, fn)
 }
 
 // WithProvenance attaches the field-provenance recorder (spec §13). Without
@@ -1870,6 +1873,40 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 	return nil
 }
 
+// batchProvenanceOf is the provenance of new CI ciID at position p of a
+// CreateMany: the discovered fields from source and the values its
+// computed attributes got (source computed, rank 100, observed at the
+// time of the computation; WP-717) in the same RecordDiscoveredBatch call
+// (NFR-03). A computed key is never recorded as discovered.
+func batchProvenanceOf(ciID string, discovered map[string]any, source string, observedAt time.Time,
+	created *ci.CreateManyResult, p int) []override.DiscoveredValues {
+	var computed map[string]any
+	if p < len(created.Computed) {
+		computed = created.Computed[p]
+	}
+	if len(computed) == 0 {
+		return []override.DiscoveredValues{{CIID: ciID, Values: discovered, Source: source, ObservedAt: observedAt}}
+	}
+	fields := make(map[string]any, len(discovered))
+	values := map[string]any{}
+	for k, v := range discovered {
+		if _, isComputed := computed[k]; !isComputed {
+			fields[k] = v
+		}
+	}
+	for k, v := range computed {
+		if v != nil {
+			values[k] = v
+		}
+	}
+	out := []override.DiscoveredValues{{CIID: ciID, Values: fields, Source: source, ObservedAt: observedAt}}
+	if len(values) > 0 {
+		out = append(out, override.DiscoveredValues{CIID: ciID, Values: values, Source: ci.SourceComputed,
+			ObservedAt: created.ComputedAt, Rank: ci.RankComputed})
+	}
+	return out
+}
+
 // batchProvenance records the fields of several new CIs at once (the
 // server's override adapter, WP-333).
 type batchProvenance interface {
@@ -2169,8 +2206,8 @@ func (h *Handler) createInWindow(ctx context.Context, orgID string, frame *batch
 	for p := range pending {
 		if !refused[p] {
 			rec := &pending[p]
-			provenance = append(provenance, override.DiscoveredValues{CIID: rec.ci.ID, Values: discoveredFields(&rec.item),
-				Source: rec.source, ObservedAt: rec.item.ObservedAt})
+			provenance = append(provenance, batchProvenanceOf(rec.ci.ID, discoveredFields(&rec.item), rec.source, rec.item.ObservedAt,
+				&created, p)...)
 		}
 	}
 	if err := h.recordDiscoveredBatch(ctx, orgID, provenance); err != nil {

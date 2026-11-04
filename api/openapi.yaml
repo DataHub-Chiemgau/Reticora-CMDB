@@ -921,7 +921,10 @@ paths:
             organization) or a deactivated type ("the CI type is
             deactivated"). With templates (WP-710) also an entry the
             assignment rules refuse (templates[i]) or an attribute the
-            schema composed with the templates does not allow.
+            schema composed with the templates does not allow. A computed
+            attribute (MET-10, WP-717) is never written: any key of one in
+            attributes is a violation of attributes.<key> with detail and
+            code computed; the server computes its value.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
@@ -993,7 +996,12 @@ paths:
         then a request without it is 412, like an unknown version.
         Changing the value of an instance attribute of the CI (MET-14)
         additionally requires ci_instance_attribute:manage, otherwise 403;
-        an instance value sent unchanged is allowed.
+        an instance value sent unchanged is allowed. Computed attributes
+        (MET-10, WP-717) are read-only: a computed key sent with its stored
+        value is no change (the full attribute map of a read can be sent
+        back), any other value (null too) is 422. The server computes their
+        values in the transaction of every write from the state it leaves,
+        with the same version and history entry.
       parameters:
         - name: If-Match
           in: header
@@ -1057,7 +1065,8 @@ paths:
           description: >-
             A field value is not allowed; `violations` names the field, e.g.
             null on a required field such as name or status ("must not be
-            null").
+            null") or another value than the stored one for a computed
+            attribute (attributes.<key>, detail and code computed; WP-717).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
@@ -15001,7 +15010,10 @@ paths:
         records the change (change_type override; an attribute counts as the
         field attributes, as for PATCH), so a PATCH of the field with an
         older If-Match is refused with 409. An unknown, not visible or
-        soft-deleted CI is 404 and nothing is written (F-422).
+        soft-deleted CI is 404 and nothing is written (F-422). A computed
+        attribute (MET-10, WP-717) cannot be overridden (422); a changed
+        value the expression of a computed attribute reads recomputes it in
+        the same transaction, as part of this version step.
       requestBody:
         required: true
         content:
@@ -15021,7 +15033,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422':
-          description: The field cannot be overridden
+          description: The field cannot be overridden (a structural column, an instance attribute or a computed attribute)
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -15037,7 +15049,9 @@ paths:
         history records the change, as for PUT. A field without an override
         keeps the version. A reserved namespace as name is 400 (GLO-13). An
         unknown, not visible or soft-deleted CI is 404 and nothing is written
-        (F-422).
+        (F-422). A computed attribute (MET-10, WP-717) has no override: 422;
+        the restored value of an input recomputes the computed attributes
+        in the same transaction.
       responses:
         '200':
           description: Field provenance after the change
@@ -15052,6 +15066,11 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: Unknown, invisible or soft-deleted CI, or the CI has no value of the field
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: The field is a computed attribute (WP-717)
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -27399,10 +27418,13 @@ components:
           description: The source of the shown value; manual_override for an override, asset for asset-canonical fields.
         rank:
           type: integer
-          description: REC-03 rank of the source (100 for manual and overrides).
+          description: REC-03 rank of the source (100 for manual and overrides, 100 for computed values).
         reason:
           type: string
-          enum: [override, source_rank, asset, record]
+          description: >-
+            Why the value is shown; computed for the value of a computed
+            attribute (source computed, rank 100; MET-10, WP-717).
+          enum: [override, source_rank, asset, record, computed]
         recorded_at: { type: string, format: date-time }
         observed_at: { type: string, format: date-time }
         override_author:

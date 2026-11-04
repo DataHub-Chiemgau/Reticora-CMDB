@@ -446,7 +446,7 @@ export interface paths {
     head?: never;
     /**
      * Update a configuration item
-     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version. Changing the value of an instance attribute of the CI (MET-14) additionally requires ci_instance_attribute:manage, otherwise 403; an instance value sent unchanged is allowed.
+     * @description JSON merge patch (RFC 7396, CI-04): null clears a nullable field, absent members stay. 404 only for a CI that does not exist or is not visible; any other failure is 500. Optimistic concurrency (API-07): If-Match names the version the editor read. A stale version is refused with 409 only when a field of the request was changed since by a write of rank >= 92 (manual, import, workflow); observed discovery updates do not change the version. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version. Changing the value of an instance attribute of the CI (MET-14) additionally requires ci_instance_attribute:manage, otherwise 403; an instance value sent unchanged is allowed. Computed attributes (MET-10, WP-717) are read-only: a computed key sent with its stored value is no change (the full attribute map of a read can be sent back), any other value (null too) is 422. The server computes their values in the transaction of every write from the state it leaves, with the same version and history entry.
      */
     patch: operations['updateCI'];
     trace?: never;
@@ -6856,13 +6856,13 @@ export interface paths {
     get?: never;
     /**
      * Set a manual field override
-     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409. An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
+     * @description The CI takes the value at once; automation sources never overwrite it (REC-03). Structural columns (client_id, location_id, ci_type_id, ...) cannot be overridden; a reserved namespace (_overrides, _observed, _provenance, _instance) as name is 400 with the field name (GLO-13). The override is a manual write (API-07): in the same transaction the CI version rises by one and the CI history records the change (change_type override; an attribute counts as the field attributes, as for PATCH), so a PATCH of the field with an older If-Match is refused with 409. An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422). A computed attribute (MET-10, WP-717) cannot be overridden (422); a changed value the expression of a computed attribute reads recomputes it in the same transaction, as part of this version step.
      */
     put: operations['putCisIdFieldsNameOverride'];
     post?: never;
     /**
      * Clear a manual field override
-     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13). An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422).
+     * @description The CI returns to the current observed value, when there is one, in the same transaction; the change is audited. Clearing an override is a manual write (API-07): the CI version rises by one and the CI history records the change, as for PUT. A field without an override keeps the version. A reserved namespace as name is 400 (GLO-13). An unknown, not visible or soft-deleted CI is 404 and nothing is written (F-422). A computed attribute (MET-10, WP-717) has no override: 422; the restored value of an input recomputes the computed attributes in the same transaction.
      */
     delete: operations['deleteCisIdFieldsNameOverride'];
     options?: never;
@@ -13868,10 +13868,13 @@ export interface components {
       value: unknown;
       /** @description The source of the shown value; manual_override for an override, asset for asset-canonical fields. */
       source: string;
-      /** @description REC-03 rank of the source (100 for manual and overrides). */
+      /** @description REC-03 rank of the source (100 for manual and overrides, 100 for computed values). */
       rank: number;
-      /** @enum {string} */
-      reason: 'override' | 'source_rank' | 'asset' | 'record';
+      /**
+       * @description Why the value is shown; computed for the value of a computed attribute (source computed, rank 100; MET-10, WP-717).
+       * @enum {string}
+       */
+      reason: 'override' | 'source_rank' | 'asset' | 'record' | 'computed';
       /** Format: date-time */
       recorded_at?: string;
       /** Format: date-time */
@@ -16298,7 +16301,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). With templates (WP-710) also an entry the assignment rules refuse (templates[i]) or an attribute the schema composed with the templates does not allow. */
+      /** @description A field value is not allowed; `violations` names the field, e.g. ci_type_id that is no UUID ("not the ID (UUID) of a CI type"), names no system type and no type of the organization ("CI type not found", the same for an unknown ID and a type of another organization) or a deactivated type ("the CI type is deactivated"). With templates (WP-710) also an entry the assignment rules refuse (templates[i]) or an attribute the schema composed with the templates does not allow. A computed attribute (MET-10, WP-717) is never written: any key of one in attributes is a violation of attributes.<key> with detail and code computed; the server computes its value. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -16447,7 +16450,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A field value is not allowed; `violations` names the field, e.g. null on a required field such as name or status ("must not be null"). */
+      /** @description A field value is not allowed; `violations` names the field, e.g. null on a required field such as name or status ("must not be null") or another value than the stored one for a computed attribute (attributes.<key>, detail and code computed; WP-717). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -33289,7 +33292,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description The field cannot be overridden */
+      /** @description The field cannot be overridden (a structural column, an instance attribute or a computed attribute) */
       422: {
         headers: {
           [name: string]: unknown;
@@ -33329,6 +33332,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       /** @description Unknown, invisible or soft-deleted CI, or the CI has no value of the field */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The field is a computed attribute (WP-717) */
+      422: {
         headers: {
           [name: string]: unknown;
         };
