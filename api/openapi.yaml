@@ -3376,6 +3376,10 @@ paths:
       operationId: listAssignments
       tags: [Assignments]
       summary: List assignments
+      description: >-
+        Read only (E-38, WP-746): assignments are written through
+        `POST /api/v1/assets/{id}/assign`, `…/return` and `…/transfer`; the
+        assignments of one asset are listed with `asset_id`.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -3408,40 +3412,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
-    post:
-      operationId: createAssignment
-      tags: [Assignments]
-      summary: Create an assignment
-      description: >-
-        Assigns the asset of `asset_id`, or the asset of the CI of `ci_id`
-        (`ci.asset_id`), to the user `assigned_to` through the assignment
-        service (WP-275, until WP-746); `id` is the id of the assignment
-        movement. A CI without asset is 422; an assigned asset 409.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAssignmentRequest'
-      responses:
-        '201':
-          description: Assignment created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Assignment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/assignments/{id}:
     x-phase: P2
@@ -3463,21 +3433,6 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-    delete:
-      operationId: deleteAssignment
-      tags: [Assignments]
-      summary: Delete an assignment
-      description: >-
-        Refused with 409 (`https://reticora.io/problems/assignment-append-only`):
-        the history of assignments is append-only (WP-275); return or transfer
-        the asset instead.
-      responses:
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
 
   /api/v1/documents:
     x-phase: P2
@@ -9291,90 +9246,6 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/InterfaceInUseProblem'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /api/v1/assignments/{id}/return:
-    x-phase: P2
-    x-feature: assets_basic
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: returnAssignment
-      tags: [Assignments]
-      summary: Return an assigned asset or CI
-      description: >-
-        Returns the asset of the assignment (its `asset_id`, or the asset of
-        its CI) from the holder of the assignment through the assignment
-        service (WP-275, until WP-746): the movement `return` is booked and
-        the open assignments of the asset are closed, recording the return
-        condition and timestamp. The optional `notes` field overwrites the
-        assignment notes when non-empty. 409 when the assignment is closed or
-        the asset has another holder.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReturnAssignmentRequest'
-      responses:
-        '200':
-          description: Assignment returned
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Assignment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-  /api/v1/assignments/{id}/transfer:
-    x-phase: P2
-    x-feature: assets_basic
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    post:
-      operationId: transferAssignment
-      tags: [Assignments]
-      summary: Transfer an assignment to a new assignee
-      description: >-
-        Transfers the asset of the assignment from its holder to the user
-        `new_assignee` through the assignment service (WP-275, until WP-746):
-        the open assignments are closed as transferred and a new active
-        assignment is created. 409 when the assignment is closed or the asset
-        has another holder.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TransferAssignmentRequest'
-      responses:
-        '201':
-          description: New assignment created for the new assignee
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Assignment'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -27302,27 +27173,6 @@ components:
         signed_at: { type: string, format: date-time }
         method: { type: string, enum: [touchscreen, drawn, typed] }
 
-    CreateAssignmentRequest:
-      type: object
-      required: [assigned_to]
-      properties:
-        signature:
-          $ref: '#/components/schemas/Signature'
-          description: Digital handover signature (optional).
-        asset_id:
-          type: string
-        ci_id:
-          type: string
-        assigned_to:
-          type: string
-        assignment_type:
-          type: string
-        due_date:
-          type: string
-          format: date-time
-        notes:
-          type: string
-
     AssignmentListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
@@ -32481,27 +32331,6 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/NetworkInterface'
-
-    ReturnAssignmentRequest:
-      type: object
-      description: Payload for returning an assigned asset or CI.
-      properties:
-        signature:
-          $ref: '#/components/schemas/Signature'
-          description: Digital return signature (optional).
-        return_condition:
-          type: string
-        notes:
-          type: string
-
-    TransferAssignmentRequest:
-      type: object
-      required: [new_assignee]
-      properties:
-        new_assignee:
-          type: string
-        notes:
-          type: string
 
     Collector:
       type: object

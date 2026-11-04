@@ -1,7 +1,6 @@
 DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assets/{id}/cis/{ci_id} ci:write
-DELETE /api/v1/assignments/{id} assignment:write
 DELETE /api/v1/attribute-definitions/{id} ci_attribute:manage
 DELETE /api/v1/attribute-sets/{id} citype:manage
 DELETE /api/v1/buildings/{id} location:write
@@ -429,9 +428,6 @@ POST /api/v1/assets/{id}/cis ci:write
 POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition
 POST /api/v1/assets/{id}/return assignment:write
 POST /api/v1/assets/{id}/transfer assignment:write
-POST /api/v1/assignments assignment:write
-POST /api/v1/assignments/{id}/return assignment:write
-POST /api/v1/assignments/{id}/transfer assignment:write
 POST /api/v1/attribute-definitions ci_attribute:manage
 POST /api/v1/attribute-definitions/{id}/reindex ci_attribute:manage
 POST /api/v1/attribute-sets citype:manage

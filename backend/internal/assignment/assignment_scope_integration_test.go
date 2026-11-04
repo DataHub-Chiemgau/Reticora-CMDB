@@ -69,11 +69,12 @@ func TestAssignmentRepositoryClientScope(t *testing.T) {
 }
 
 // TestAssignmentForeignClientReturnAndTransfer covers the writes on an
-// existing assignment (TEN-06, AST-01, WP-537, WP-275): a principal
-// restricted to client 1 can neither return nor transfer the assignment of
-// a client-2 asset, through the handler (404) or through the repository's
-// Update (not found), and the client-2 row stays unchanged. Its own
-// assignments it returns and transfers through the assignment service.
+// existing assignment (TEN-06, AST-01, WP-537, WP-275, WP-746): a principal
+// restricted to client 1 can neither return nor transfer a client-2 asset
+// with its assignment, through POST /api/v1/assets/{id}/return|transfer
+// (404) or through the repository's Update (not found), and the client-2
+// row stays unchanged. Its own assets it assigns, returns and transfers
+// through the assignment service.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
@@ -91,6 +92,11 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 	if err := repo.Create(f.OrgCtx(f.OrgA), foreignA); err != nil {
 		t.Fatalf("org-wide assignment of %s: %v", foreign, err)
 	}
+	// The holder cache of the client-2 asset matches its open row, so only
+	// the scope refuses the foreign return and transfer.
+	if _, err := f.Admin.Exec(bg, `UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, foreign, holder); err != nil {
+		t.Fatal(err)
+	}
 
 	mux := chi.NewRouter()
 	assignment.NewHandler(repo).
@@ -106,7 +112,7 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 	// The own assignments go through the service, which keeps the holder
 	// cache the return and the transfer check.
 	created := func(assetID string) string {
-		w := post("/api/v1/assignments", `{"asset_id":"`+assetID+`","assigned_to":"`+holder+`","notes":"original"}`)
+		w := post("/api/v1/assets/"+assetID+"/assign", `{"assigned_user_id":"`+holder+`","notes":"original"}`)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("client-1 assignment of %s = %d %s, want 201", assetID, w.Code, w.Body)
 		}
@@ -134,13 +140,13 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 	}
 	want := row{status: "active", notes: "original", assetID: foreign}
 
-	if w := post("/api/v1/assignments/"+foreignA.ID+"/return", `{"return_condition":"damaged","notes":"hijacked"}`); w.Code != http.StatusNotFound {
+	if w := post("/api/v1/assets/"+foreign+"/return", `{"expected_holder":"`+holder+`","return_condition":"damaged","notes":"hijacked"}`); w.Code != http.StatusNotFound {
 		t.Errorf("client-1 return of a client-2 assignment = %d %s, want 404", w.Code, w.Body)
 	}
 	if got := stored(foreignA.ID); got != want {
 		t.Errorf("client-2 assignment after foreign return: %+v, want %+v", got, want)
 	}
-	if w := post("/api/v1/assignments/"+foreignA.ID+"/transfer", `{"new_assignee":"`+successor+`"}`); w.Code != http.StatusNotFound {
+	if w := post("/api/v1/assets/"+foreign+"/transfer", `{"expected_holder":"`+holder+`","assigned_user_id":"`+successor+`"}`); w.Code != http.StatusNotFound {
 		t.Errorf("client-1 transfer of a client-2 assignment = %d %s, want 404", w.Code, w.Body)
 	}
 	if got := stored(foreignA.ID); got != want {
@@ -165,13 +171,13 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 
 	// Positive control: the client-1 principal returns and transfers its own
 	// assignments.
-	if w := post("/api/v1/assignments/"+ownReturn+"/return", `{"return_condition":"good","notes":"back"}`); w.Code != http.StatusOK {
+	if w := post("/api/v1/assets/"+ownReturnAsset+"/return", `{"expected_holder":"`+holder+`","return_condition":"good","notes":"back"}`); w.Code != http.StatusOK {
 		t.Fatalf("client-1 return of own assignment = %d %s, want 200", w.Code, w.Body)
 	}
 	if got := stored(ownReturn); got.status != "returned" || got.condition != "good" || got.notes != "back" {
 		t.Errorf("own assignment after return: %+v, want returned/good/back", got)
 	}
-	if w := post("/api/v1/assignments/"+ownTransfer+"/transfer", `{"new_assignee":"`+successor+`"}`); w.Code != http.StatusCreated {
+	if w := post("/api/v1/assets/"+ownTransferAsset+"/transfer", `{"expected_holder":"`+holder+`","assigned_user_id":"`+successor+`"}`); w.Code != http.StatusCreated {
 		t.Fatalf("client-1 transfer of own assignment = %d %s, want 201", w.Code, w.Body)
 	}
 	if got := stored(ownTransfer); got.status != "transferred" {

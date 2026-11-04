@@ -1428,14 +1428,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assignments */
+    /**
+     * List assignments
+     * @description Read only (E-38, WP-746): assignments are written through `POST /api/v1/assets/{id}/assign`, `…/return` and `…/transfer`; the assignments of one asset are listed with `asset_id`.
+     */
     get: operations['listAssignments'];
     put?: never;
-    /**
-     * Create an assignment
-     * @description Assigns the asset of `asset_id`, or the asset of the CI of `ci_id` (`ci.asset_id`), to the user `assigned_to` through the assignment service (WP-275, until WP-746); `id` is the id of the assignment movement. A CI without asset is 422; an assigned asset 409.
-     */
-    post: operations['createAssignment'];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1456,11 +1455,7 @@ export interface paths {
     get: operations['getAssignment'];
     put?: never;
     post?: never;
-    /**
-     * Delete an assignment
-     * @description Refused with 409 (`https://reticora.io/problems/assignment-append-only`): the history of assignments is append-only (WP-275); return or transfer the asset instead.
-     */
-    delete: operations['deleteAssignment'];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -4047,52 +4042,6 @@ export interface paths {
     head?: never;
     /** Update a network interface */
     patch: operations['updateNetworkInterface'];
-    trace?: never;
-  };
-  '/api/v1/assignments/{id}/return': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Return an assigned asset or CI
-     * @description Returns the asset of the assignment (its `asset_id`, or the asset of its CI) from the holder of the assignment through the assignment service (WP-275, until WP-746): the movement `return` is booked and the open assignments of the asset are closed, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty. 409 when the assignment is closed or the asset has another holder.
-     */
-    post: operations['returnAssignment'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/assignments/{id}/transfer': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer an assignment to a new assignee
-     * @description Transfers the asset of the assignment from its holder to the user `new_assignee` through the assignment service (WP-275, until WP-746): the open assignments are closed as transferred and a new active assignment is created. 409 when the assignment is closed or the asset has another holder.
-     */
-    post: operations['transferAssignment'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   '/api/v1/cis/{id}/relationships': {
@@ -12949,17 +12898,6 @@ export interface components {
       /** @enum {string} */
       method?: 'touchscreen' | 'drawn' | 'typed';
     };
-    CreateAssignmentRequest: {
-      /** @description Digital handover signature (optional). */
-      signature?: components['schemas']['Signature'];
-      asset_id?: string;
-      ci_id?: string;
-      assigned_to: string;
-      assignment_type?: string;
-      /** Format: date-time */
-      due_date?: string;
-      notes?: string;
-    };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
     };
@@ -16062,17 +16000,6 @@ export interface components {
     };
     NetworkInterfaceListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['NetworkInterface'][];
-    };
-    /** @description Payload for returning an assigned asset or CI. */
-    ReturnAssignmentRequest: {
-      /** @description Digital return signature (optional). */
-      signature?: components['schemas']['Signature'];
-      return_condition?: string;
-      notes?: string;
-    };
-    TransferAssignmentRequest: {
-      new_assignee: string;
-      notes?: string;
     };
     Collector: {
       id: string;
@@ -19951,36 +19878,6 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  createAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['CreateAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description Assignment created */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
   getAssignment: {
     parameters: {
       query?: never;
@@ -20004,23 +19901,6 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-    };
-  };
-  deleteAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
     };
   };
   listDocuments: {
@@ -26805,72 +26685,6 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
-    };
-  };
-  returnAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: {
-      content: {
-        'application/json': components['schemas']['ReturnAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description Assignment returned */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  transferAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['TransferAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description New assignment created for the new assignee */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
     };
   };
   listCIRelationships: {

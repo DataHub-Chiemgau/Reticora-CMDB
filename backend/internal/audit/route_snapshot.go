@@ -403,7 +403,6 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/agents/enrollment-tokens":    "agent_enrollment_token",
 		"POST /api/v1/ai/conversations":            "ai_conversation",
 		"POST /api/v1/asset-locations":             "asset_location",
-		"POST /api/v1/assignments":                 "assignment",
 		"POST /api/v1/cis/{id}/contacts":           "ci_contact",
 		"POST /api/v1/cis/{id}/interfaces":         "network_interface",
 		"POST /api/v1/collectors/enrollment-codes": "collector_enrollment_code",
@@ -457,9 +456,6 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/assets/{id}/assign":                  "asset", // holder cache (WP-275)
 		"POST /api/v1/assets/{id}/return":                  "asset",
 		"POST /api/v1/assets/{id}/transfer":                "asset",
-		"POST /api/v1/assignments/{id}/return":             "assignment",
-		"POST /api/v1/assignments/{id}/transfer":           "assignment",
-		"DELETE /api/v1/assignments/{id}":                  "assignment",
 		"POST /api/v1/cis/{id}/unmerge":                    "ci",
 		"POST /api/v1/consumables/{id}/movements":          "consumable",
 		"POST /api/v1/desk-bookings/{id}/cancel":           "desk_booking",

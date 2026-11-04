@@ -455,7 +455,6 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/rack-mounts", `{"ci_id":"<ci3>","rack_id":"<id:/api/v1/racks>","position_u":3}`},
 	{"POST /api/v1/security/findings", `{"kind":"vulnerability","title":"a5-finding","ci_id":"<id:/api/v1/cis>"}`},
 	{"POST /api/v1/invitations", `{"email":"a5-invite@example.com","role_id":"<id:/api/v1/roles>"}`},
-	{"POST /api/v1/assignments", `{"assigned_to":"<user>","asset_id":"<asset2>"}`},
 	{"POST /api/v1/inventory/items", `{"name":"a5-item"}`},
 	{"POST /api/v1/credentials/", `{"name":"a5-credential","kind":"snmp_v2c","secret":{"community":"public"}}`},
 	{"POST /api/v1/asset-locations", `{"asset_id":"<id:/api/v1/assets>","lat":47.8,"lon":12.6}`},
@@ -531,12 +530,16 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/documents/{id}/links":                      {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
 	"POST /api/v1/stocktakes/{id}/scans":                     {"", `{"scan_result":"found","asset_id":"<id:/api/v1/assets>"}`},
 	"POST /api/v1/agents/{id}/site":                          {"", `{"site_id":"<id:/api/v1/sites>"}`},
-	"POST /api/v1/assignments/{id}/transfer":                 {"", `{"new_assignee":"<id:/api/v1/users>"}`},
-	"PATCH /api/v1/org":                                      {"", `{}`},
-	"PUT /api/v1/documents/{id}/content":                     {"", `a5 content`},
-	"DELETE /api/v1/ci-fields/global/{name}":                 {"/api/v1/ci-fields/global/a5_global", ""},
-	"DELETE /api/v1/ci-types/{id}/fields/{name}":             {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},
-	"DELETE /api/v1/cis/{id}/field-definitions/{name}":       {"/api/v1/cis/<id:/api/v1/cis>/field-definitions/a5_ci_field", ""},
+	// Assignment through the asset (WP-746): <asset3> is assigned and
+	// returned, <asset4> held by <user> is transferred.
+	"POST /api/v1/assets/{id}/assign":                  {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
+	"POST /api/v1/assets/{id}/return":                  {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
+	"POST /api/v1/assets/{id}/transfer":                {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
+	"PATCH /api/v1/org":                                {"", `{}`},
+	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
+	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
+	"DELETE /api/v1/ci-types/{id}/fields/{name}":       {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},
+	"DELETE /api/v1/cis/{id}/field-definitions/{name}": {"/api/v1/cis/<id:/api/v1/cis>/field-definitions/a5_ci_field", ""},
 	// The value of the instance attribute a5_ci_field (MET-14, WP-256).
 	"PUT /api/v1/cis/{id}/instance-attributes/{key}":    {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", `{"value":"a5 value"}`},
 	"DELETE /api/v1/cis/{id}/instance-attributes/{key}": {"/api/v1/cis/<id:/api/v1/cis>/instance-attributes/a5_ci_field", ""},
@@ -688,6 +691,12 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	// A disposal needs a lifecycle state with a transition to disposed
 	// (WP-278).
 	if _, err = f.Admin.Exec(bg, `UPDATE asset SET lifecycle_state = 'retired' WHERE id = $1`, fixed["<asset2>"]); err != nil {
+		t.Fatal(err)
+	}
+	// Assets for the assignment routes (WP-746): <asset4> has a holder.
+	fixed["<asset3>"] = f.Asset(t, f.OrgA, f.Client1, "a5-asset3")
+	fixed["<asset4>"] = f.Asset(t, f.OrgA, f.Client1, "a5-asset4")
+	if _, err = f.Admin.Exec(bg, `UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, fixed["<asset4>"], user); err != nil {
 		t.Fatal(err)
 	}
 	// A soft-deleted CI for POST /cis/{id}/restore.

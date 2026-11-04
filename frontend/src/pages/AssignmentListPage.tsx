@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ApiError, type Assignment } from '../api/client';
 import { useAssignmentList, useCreateAssignment, useReturnAssignment } from '../api/hooks';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -33,6 +34,41 @@ function statusVariant(status: string) {
   }
 }
 
+type HolderKind = 'user' | 'team';
+
+interface AssignForm {
+  asset_id: string;
+  holder_kind: HolderKind;
+  holder_id: string;
+  due_date: string;
+  notes: string;
+}
+
+const EMPTY_FORM: AssignForm = {
+  asset_id: '',
+  holder_kind: 'user',
+  holder_id: '',
+  due_date: '',
+  notes: '',
+};
+
+/** holderOf is the current holder of a row: its user, else its team. */
+function holderOf(item: Assignment): string | undefined {
+  return item.assigned_to || item.assigned_team_id || undefined;
+}
+
+/** dueAt turns the chosen day into the end of that day in local time. */
+function dueAt(day: string): string | undefined {
+  if (!day) return undefined;
+  const end = new Date(`${day}T23:59:59`);
+  return Number.isNaN(end.getTime()) ? undefined : end.toISOString();
+}
+
+/** isConflict tells the 409 of a holder that changed meanwhile. */
+function isConflict(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 409;
+}
+
 export function AssignmentListPage() {
   const { t } = useTranslation();
   const statusOptions = [
@@ -46,21 +82,58 @@ export function AssignmentListPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data, isLoading } = useAssignmentList({ status, search });
+  const { data, isLoading, refetch } = useAssignmentList({ status, search });
   const createMutation = useCreateAssignment();
   const returnMutation = useReturnAssignment();
 
-  const [form, setForm] = useState({ asset_id: '', assigned_to: '', notes: '' });
+  const [form, setForm] = useState<AssignForm>(EMPTY_FORM);
+  // conflict is the message of a 409 (the holder changed meanwhile); the
+  // list is loaded again so the rows show the current holder.
+  const [conflict, setConflict] = useState('');
+  const onConflict = (error: unknown) => {
+    if (!isConflict(error)) return;
+    setConflict(t('assignment.conflict', 'Der Halter hat sich zwischenzeitlich geändert.'));
+    void refetch();
+  };
 
   const handleCreate = () => {
-    if (!form.assigned_to || !form.asset_id) return;
-    createMutation.mutate(form, {
-      onSuccess: () => {
-        setShowCreate(false);
-        setForm({ asset_id: '', assigned_to: '', notes: '' });
+    if (!form.asset_id || !form.holder_id) return;
+    setConflict('');
+    const holder =
+      form.holder_kind === 'team'
+        ? { assigned_team_id: form.holder_id }
+        : { assigned_user_id: form.holder_id };
+    createMutation.mutate(
+      {
+        assetId: form.asset_id,
+        data: { ...holder, due_at: dueAt(form.due_date), notes: form.notes || undefined },
       },
-    });
+      {
+        onSuccess: () => {
+          setShowCreate(false);
+          setForm(EMPTY_FORM);
+        },
+        onError: (error) => {
+          if (isConflict(error)) setShowCreate(false);
+          onConflict(error);
+        },
+      },
+    );
   };
+
+  const handleReturn = (item: Assignment) => {
+    const holder = holderOf(item);
+    if (!item.asset_id || !holder) return;
+    setConflict('');
+    returnMutation.mutate(
+      { assetId: item.asset_id, data: { expected_holder: holder } },
+      { onError: onConflict },
+    );
+  };
+
+  const writeError = [createMutation.error, returnMutation.error].find(
+    (error) => error && !isConflict(error),
+  );
 
   return (
     <div className="space-y-6">
@@ -70,6 +143,19 @@ export function AssignmentListPage() {
         </h1>
         <Button onClick={() => setShowCreate(true)}>{t('assignment.assign', 'Zuweisen')}</Button>
       </div>
+
+      {conflict ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {conflict}
+        </p>
+      ) : null}
+      {writeError ? (
+        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          {writeError instanceof ApiError
+            ? (writeError.detail ?? writeError.message)
+            : writeError.message}
+        </p>
+      ) : null}
 
       <div className="flex gap-4 flex-wrap">
         <Input
@@ -97,6 +183,7 @@ export function AssignmentListPage() {
                   <th className="pb-2">{t('assignment.assignedTo', 'Zugewiesen an')}</th>
                   <th className="pb-2">{t('ci.status', 'Status')}</th>
                   <th className="pb-2">{t('assignment.assignedAt', 'Datum')}</th>
+                  <th className="pb-2">{t('assignment.dueAt', 'Fällig am')}</th>
                   <th className="pb-2">{t('common.actions', 'Aktionen')}</th>
                 </tr>
               </thead>
@@ -104,7 +191,11 @@ export function AssignmentListPage() {
                 {data?.data.map((item) => (
                   <tr key={item.id} className="text-sm text-gray-700 dark:text-gray-300">
                     <td className="py-2">{item.assignment_type}</td>
-                    <td className="py-2">{item.assigned_to}</td>
+                    <td className="py-2">
+                      {item.assigned_team_id
+                        ? `${t('assignment.team', 'Team')} ${item.assigned_team_id}`
+                        : item.assigned_to}
+                    </td>
                     <td className="py-2">
                       <Badge variant={statusVariant(item.status)}>
                         {t(`assignment.statuses.${item.status}`, item.status)}
@@ -114,21 +205,27 @@ export function AssignmentListPage() {
                       {new Date(item.assigned_at).toLocaleDateString('de-DE')}
                     </td>
                     <td className="py-2">
-                      {item.status === 'active' && (
+                      {item.due_at ? new Date(item.due_at).toLocaleDateString('de-DE') : ''}
+                    </td>
+                    <td className="py-2">
+                      {(item.status === 'active' || item.status === 'overdue') &&
+                      item.asset_id &&
+                      holderOf(item) ? (
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => returnMutation.mutate({ id: item.id, data: {} })}
+                          disabled={returnMutation.isPending}
+                          onClick={() => handleReturn(item)}
                         >
                           {t('assignment.return', 'Rückgabe')}
                         </Button>
-                      )}
+                      ) : null}
                     </td>
                   </tr>
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={5} className="py-4 text-center text-gray-600 dark:text-gray-300">
+                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
                       {t('common.noData', 'Keine Daten')}
                     </td>
                   </tr>
@@ -151,11 +248,30 @@ export function AssignmentListPage() {
             onChange={(e) => setForm({ ...form, asset_id: e.target.value })}
             required
           />
+          <Select
+            label={t('assignment.holderKind', 'Halter')}
+            value={form.holder_kind}
+            onChange={(e) => setForm({ ...form, holder_kind: e.target.value as HolderKind })}
+            options={[
+              { value: 'user', label: t('assignment.holderUser', 'Nutzer') },
+              { value: 'team', label: t('assignment.holderTeam', 'Team') },
+            ]}
+          />
           <Input
-            label={t('assignment.assignedTo', 'Zugewiesen an (User-ID)')}
-            value={form.assigned_to}
-            onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+            label={
+              form.holder_kind === 'team'
+                ? t('assignment.teamId', 'Team-ID')
+                : t('assignment.userId', 'Nutzer-ID')
+            }
+            value={form.holder_id}
+            onChange={(e) => setForm({ ...form, holder_id: e.target.value })}
             required
+          />
+          <Input
+            type="date"
+            label={t('assignment.dueAt', 'Fällig am')}
+            value={form.due_date}
+            onChange={(e) => setForm({ ...form, due_date: e.target.value })}
           />
           <Input
             label={t('common.notes', 'Notizen')}
@@ -166,7 +282,9 @@ export function AssignmentListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate} disabled={createMutation.isPending}>
+              {t('common.save', 'Speichern')}
+            </Button>
           </div>
         </div>
       </Modal>

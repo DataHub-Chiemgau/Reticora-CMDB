@@ -1110,32 +1110,15 @@ export const assetApi = {
 
 // --- Phase 2: Assignment Management ---
 
-export interface Assignment {
-  id: string;
-  organization_id: string;
-  asset_id?: string;
-  ci_id?: string;
-  assigned_to: string;
-  assigned_by: string;
-  assignment_type: string;
-  status: string;
-  assigned_at: string;
-  due_date?: string;
-  returned_at?: string;
-  return_condition?: string;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface AssignmentCreateRequest {
-  asset_id?: string;
-  ci_id?: string;
-  assigned_to: string;
-  assignment_type?: string;
-  due_date?: string;
-  notes?: string;
-}
+// Assignment and the request types of the writes come from the OpenAPI
+// contract (K27, WP-746): the holder is a user (assigned_to) or a team
+// (assigned_team_id), due_at the due date.
+export type Assignment = components['schemas']['Assignment'];
+export type AssignAssetRequest = components['schemas']['AssignAssetRequest'];
+export type ReturnAssetRequest = components['schemas']['ReturnAssetRequest'];
+export type TransferAssetRequest = components['schemas']['TransferAssetRequest'];
+/** The return movement POST /assets/{id}/return answers. */
+export type AssetReturnMovement = components['schemas']['StockMovement'];
 
 export interface AssignmentListParams {
   limit?: number;
@@ -1147,6 +1130,12 @@ export interface AssignmentListParams {
   search?: string;
 }
 
+/**
+ * assignmentApi reads below /assignments (read only, E-38) and writes
+ * through the asset (WP-746): assign, return and transfer take the asset
+ * id; return and transfer name the current holder as expected_holder (409
+ * when it changed meanwhile).
+ */
 export const assignmentApi = {
   list(params: AssignmentListParams = {}): Promise<PaginatedResponse<Assignment>> {
     return fetchAPI(`/assignments${buildQuery(params)}`);
@@ -1154,20 +1143,14 @@ export const assignmentApi = {
   get(id: string): Promise<Assignment> {
     return fetchAPI(`/assignments/${id}`);
   },
-  create(data: AssignmentCreateRequest): Promise<Assignment> {
-    return fetchAPI('/assignments', { method: 'POST', body: JSON.stringify(data) });
+  assign(assetId: string, data: AssignAssetRequest): Promise<Assignment> {
+    return fetchAPI(`/assets/${assetId}/assign`, { method: 'POST', body: JSON.stringify(data) });
   },
-  returnAssignment(
-    id: string,
-    data: { return_condition?: string; notes?: string },
-  ): Promise<Assignment> {
-    return fetchAPI(`/assignments/${id}/return`, { method: 'POST', body: JSON.stringify(data) });
+  returnAsset(assetId: string, data: ReturnAssetRequest): Promise<AssetReturnMovement> {
+    return fetchAPI(`/assets/${assetId}/return`, { method: 'POST', body: JSON.stringify(data) });
   },
-  transfer(id: string, data: { new_assignee: string; notes?: string }): Promise<Assignment> {
-    return fetchAPI(`/assignments/${id}/transfer`, { method: 'POST', body: JSON.stringify(data) });
-  },
-  delete(id: string): Promise<void> {
-    return fetchAPI(`/assignments/${id}`, { method: 'DELETE' });
+  transfer(assetId: string, data: TransferAssetRequest): Promise<Assignment> {
+    return fetchAPI(`/assets/${assetId}/transfer`, { method: 'POST', body: JSON.stringify(data) });
   },
 };
 

@@ -1442,3 +1442,5 @@ AST-07;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
 INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/locations/barcode_integration_test.go;WP-289
 AST-02;[P2];B;backend/internal/assignment/transfer_integration_test.go;WP-275
 AST-07;[P2];B;backend/internal/assignment/transfer_integration_test.go;WP-275
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/server/parity_test.go;WP-746
+AST-02;[P2];B;frontend/src/pages/AssignmentListPage.test.tsx;WP-746
