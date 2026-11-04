@@ -251,7 +251,7 @@ func catalogViolations(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.Cat
 	}
 	required, hidden := map[string]bool{}, map[string]bool{}
 	for i := range defs {
-		state := fieldmeta.Evaluate(defs[i], values)
+		state := fieldmeta.Evaluate(&defs[i], values)
 		switch {
 		case !state.Visible:
 			hidden[defs[i].Name] = true
@@ -317,7 +317,7 @@ func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, exi
 	var violations []Violation
 	for i := range defs {
 		def := &defs[i]
-		state := fieldmeta.Evaluate(*def, values)
+		state := fieldmeta.Evaluate(def, values)
 		value, present := values[def.Name]
 
 		if !state.Visible {
@@ -340,7 +340,7 @@ func attributeViolations(defs []fieldmeta.FieldDefinition, values, incoming, exi
 		if !present || isBlank(value) {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+		if err := fieldmeta.ValidateValue(def, value); err != nil {
 			violations = append(violations, Violation{Field: def.Name, Detail: trimFieldPrefix(def.Name, err.Error())})
 			continue
 		}
@@ -397,7 +397,7 @@ func checkReferences(ctx context.Context, lookup fieldmeta.ReferenceLookup, orgI
 				continue
 			}
 		}
-		if !fieldmeta.Evaluate(*def, values).Visible {
+		if !fieldmeta.Evaluate(def, values).Visible {
 			continue
 		}
 		if !fieldmeta.ReferenceTargetAvailable(target) {
@@ -693,7 +693,7 @@ func validateTypedColumns(typed map[string]any) error {
 			continue
 		}
 		def := fieldmeta.FieldDefinition{Name: name, DataType: typedColumns[name]}
-		if err := fieldmeta.ValidateValue(def, value); err != nil {
+		if err := fieldmeta.ValidateValue(&def, value); err != nil {
 			violations = append(violations, Violation{Field: name, Detail: trimFieldPrefix(name, err.Error())})
 		}
 	}
@@ -767,7 +767,7 @@ func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.C
 		if !ok || isBlank(value) {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(fieldmeta.FieldDefinition{Name: name, DataType: dataType}, value); err != nil {
+		if err := fieldmeta.ValidateValue(&fieldmeta.FieldDefinition{Name: name, DataType: dataType}, value); err != nil {
 			invalid[name] = true
 		}
 	}
@@ -777,7 +777,7 @@ func invalidObservedWith(defs []fieldmeta.FieldDefinition, catalog []fieldmeta.C
 		if !ok || isBlank(value) || invalid[def.Name] {
 			continue
 		}
-		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+		if err := fieldmeta.ValidateValue(def, value); err != nil {
 			invalid[def.Name] = true
 		}
 	}

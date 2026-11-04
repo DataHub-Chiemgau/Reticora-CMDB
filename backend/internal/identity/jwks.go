@@ -148,7 +148,7 @@ func (c *jwksCache) verificationKeys(ctx context.Context, p *OIDCProvider) ([]jw
 
 // getJSON performs a bounded GET request and returns the response body.
 func (p *OIDCProvider) getJSON(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

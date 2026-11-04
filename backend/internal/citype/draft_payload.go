@@ -52,7 +52,8 @@ func CheckUpdateType(req *UpdateTypeRequest) error {
 // (fieldmeta.ValidateDefinition).
 // validation: the texts of fieldmeta.ValidateDefinition.
 func CheckUpsertField(req *UpsertFieldRequest) error {
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(req)); err != nil {
+	fieldDef := fieldFromUpsert(req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
 	return nil

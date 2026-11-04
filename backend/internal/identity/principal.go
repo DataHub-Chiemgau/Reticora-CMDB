@@ -61,7 +61,7 @@ type Principal struct {
 type principalContextKey struct{}
 
 // WithPrincipal stores the authenticated principal in the request context.
-func WithPrincipal(ctx context.Context, p Principal) context.Context {
+func WithPrincipal(ctx context.Context, p Principal) context.Context { //nolint:gocritic // API of about 100 callers (incl. backend/internal/jobs, changed in parallel by WP-301); stores its own copy
 	p.Permissions = append([]Permission(nil), p.Permissions...)
 	p.Groups = append([]string(nil), p.Groups...)
 	return context.WithValue(ctx, principalContextKey{}, p)
@@ -79,7 +79,7 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 }
 
 // Has reports whether the principal holds the given permission.
-func (p Principal) Has(required Permission) bool {
+func (p *Principal) Has(required Permission) bool {
 	return HasPermission(p.Permissions, required)
 }
 

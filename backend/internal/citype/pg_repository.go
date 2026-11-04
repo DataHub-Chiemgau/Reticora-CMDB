@@ -1133,7 +1133,8 @@ func (r *PGRepository) ListGlobalFields(ctx context.Context, orgID string) ([]Fi
 func (r *PGRepository) UpsertField(ctx context.Context, orgID, typeID string, in *UpsertFieldRequest) (*Field, error) {
 	// The scope default below applies to this call only, not to the caller's request.
 	req := *in
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(&req)); err != nil {
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return nil, err
 	}
 	if req.Scope == "" {
@@ -1339,7 +1340,8 @@ func (r *PGRepository) InstanceFieldNames(ctx context.Context, orgID, ciID strin
 // UpsertInstanceField creates or updates an instance field definition and
 // records the change in the audit log (MET-14).
 func (r *PGRepository) UpsertInstanceField(ctx context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error) {
-	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+	fieldDef := instanceFieldFromUpsert(req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return nil, err
 	}
 	enumJSON := "null"

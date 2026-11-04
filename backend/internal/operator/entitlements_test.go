@@ -62,7 +62,7 @@ func TestEntitlementsAreWrittenByOperatorsOnly(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	tenantToken, err := issuer.Issue(identity.SessionClaims{Subject: "admin", OrganizationID: org,
+	tenantToken, err := issuer.Issue(&identity.SessionClaims{Subject: "admin", OrganizationID: org,
 		Permissions: identity.AllPermissions(), IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestEntitlementsAreWrittenByOperatorsOnly(t *testing.T) {
 		t.Fatal("refused write changed the entitlement")
 	}
 
-	operatorToken, err := issuer.Issue(identity.SessionClaims{Subject: "op-1", Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	operatorToken, err := issuer.Issue(&identity.SessionClaims{Subject: "op-1", Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

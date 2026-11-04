@@ -114,7 +114,7 @@ func TestAlertBridgeAdmitsTheAlertTokenOnly(t *testing.T) {
 	now := time.Now().UTC()
 	sign := func(c identity.SessionClaims) string {
 		t.Helper()
-		token, err := issuer.Issue(c)
+		token, err := issuer.Issue(&c)
 		if err != nil {
 			t.Fatal(err)
 		}

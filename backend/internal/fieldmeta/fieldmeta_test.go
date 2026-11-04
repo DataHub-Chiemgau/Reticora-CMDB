@@ -13,20 +13,20 @@ import (
 
 func TestValidateDefinition(t *testing.T) {
 	valid := FieldDefinition{Name: "rack", DataType: TypeText}
-	if err := ValidateDefinition(valid); err != nil {
+	if err := ValidateDefinition(&valid); err != nil {
 		t.Fatalf("expected valid definition, got %v", err)
 	}
 
-	if err := ValidateDefinition(FieldDefinition{Name: "", DataType: TypeText}); err == nil {
+	if err := ValidateDefinition(&FieldDefinition{Name: "", DataType: TypeText}); err == nil {
 		t.Fatal("expected error for empty name")
 	}
-	if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: "bogus"}); err == nil {
+	if err := ValidateDefinition(&FieldDefinition{Name: "x", DataType: "bogus"}); err == nil {
 		t.Fatal("expected error for unknown type")
 	}
-	if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: TypeAssetRef, ReferenceTarget: "bogus"}); err == nil {
+	if err := ValidateDefinition(&FieldDefinition{Name: "x", DataType: TypeAssetRef, ReferenceTarget: "bogus"}); err == nil {
 		t.Fatal("expected error for unknown reference target")
 	}
-	if err := ValidateDefinition(FieldDefinition{
+	if err := ValidateDefinition(&FieldDefinition{
 		Name: "x", DataType: TypeText,
 		Conditional: &ConditionalRules{VisibleWhen: []Predicate{{Field: "kind", Op: "bogus"}}},
 	}); err == nil {
@@ -34,7 +34,7 @@ func TestValidateDefinition(t *testing.T) {
 	}
 	// Legacy aliases from the migration 000002 CHECK constraint keep working.
 	for _, legacy := range []string{"string", "number", "boolean", "date", "enum"} {
-		if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: legacy}); err != nil {
+		if err := ValidateDefinition(&FieldDefinition{Name: "x", DataType: legacy}); err != nil {
 			t.Fatalf("expected legacy type %q to remain valid, got %v", legacy, err)
 		}
 	}
@@ -47,16 +47,16 @@ func TestEvaluateVisibility(t *testing.T) {
 			VisibleWhen: []Predicate{{Field: "server_kind", Op: "eq", Value: "physical"}},
 		},
 	}
-	state := Evaluate(def, map[string]any{"server_kind": "physical"})
+	state := Evaluate(&def, map[string]any{"server_kind": "physical"})
 	if !state.Visible {
 		t.Fatal("expected field visible for physical server")
 	}
-	state = Evaluate(def, map[string]any{"server_kind": "virtual"})
+	state = Evaluate(&def, map[string]any{"server_kind": "virtual"})
 	if state.Visible {
 		t.Fatal("expected field hidden for virtual server")
 	}
 	// Invisible fields are never required.
-	hidden := Evaluate(FieldDefinition{
+	hidden := Evaluate(&FieldDefinition{
 		Name: "rack", DataType: TypeText, Required: true,
 		Conditional: &ConditionalRules{
 			VisibleWhen: []Predicate{{Field: "server_kind", Op: "eq", Value: "physical"}},
@@ -75,15 +75,15 @@ func TestEvaluateRequiredAndReadOnly(t *testing.T) {
 			ReadOnlyWhen: []Predicate{{Field: "locked", Op: "eq", Value: true}},
 		},
 	}
-	state := Evaluate(def, map[string]any{"kind": "physical"})
+	state := Evaluate(&def, map[string]any{"kind": "physical"})
 	if !state.Required {
 		t.Fatal("expected conditional required to apply")
 	}
-	state = Evaluate(def, map[string]any{"kind": "virtual"})
+	state = Evaluate(&def, map[string]any{"kind": "virtual"})
 	if state.Required {
 		t.Fatal("expected conditional required to not apply")
 	}
-	state = Evaluate(def, map[string]any{"locked": true})
+	state = Evaluate(&def, map[string]any{"locked": true})
 	if !state.ReadOnly {
 		t.Fatal("expected conditional read-only to apply")
 	}
@@ -99,11 +99,11 @@ func TestEvaluateAllowedValues(t *testing.T) {
 			},
 		},
 	}
-	state := Evaluate(def, map[string]any{"kind": "virtual"})
+	state := Evaluate(&def, map[string]any{"kind": "virtual"})
 	if len(state.AllowedValues) != 2 {
 		t.Fatalf("expected 2 allowed values, got %v", state.AllowedValues)
 	}
-	state = Evaluate(def, map[string]any{"kind": "physical"})
+	state = Evaluate(&def, map[string]any{"kind": "physical"})
 	if len(state.AllowedValues) != 3 {
 		t.Fatalf("expected all enum values, got %v", state.AllowedValues)
 	}
@@ -152,41 +152,41 @@ func TestPredicateOperators(t *testing.T) {
 }
 
 func TestValidateValueTypes(t *testing.T) {
-	if err := ValidateValue(FieldDefinition{Name: "ip", DataType: TypeIP}, "10.0.0.1"); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "ip", DataType: TypeIP}, "10.0.0.1"); err != nil {
 		t.Fatalf("valid IP rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "ip", DataType: TypeIP}, "not-an-ip"); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "ip", DataType: TypeIP}, "not-an-ip"); err == nil {
 		t.Fatal("invalid IP accepted")
 	}
-	if err := ValidateValue(FieldDefinition{Name: "m", DataType: TypeMAC}, "aa:bb:cc:dd:ee:ff"); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "m", DataType: TypeMAC}, "aa:bb:cc:dd:ee:ff"); err != nil {
 		t.Fatalf("valid MAC rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "m", DataType: TypeMAC}, "xyz"); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "m", DataType: TypeMAC}, "xyz"); err == nil {
 		t.Fatal("invalid MAC accepted")
 	}
-	if err := ValidateValue(FieldDefinition{Name: "e", DataType: TypeEmail}, "a@b.io"); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "e", DataType: TypeEmail}, "a@b.io"); err != nil {
 		t.Fatalf("valid email rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "u", DataType: TypeURL}, "https://example.com/x"); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "u", DataType: TypeURL}, "https://example.com/x"); err != nil {
 		t.Fatalf("valid URL rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "u", DataType: TypeURL}, "notaurl"); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "u", DataType: TypeURL}, "notaurl"); err == nil {
 		t.Fatal("invalid URL accepted")
 	}
-	if err := ValidateValue(FieldDefinition{Name: "d", DataType: TypeDate}, "2026-09-02"); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "d", DataType: TypeDate}, "2026-09-02"); err != nil {
 		t.Fatalf("valid date rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "d", DataType: TypeDate}, "02.09.2026"); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "d", DataType: TypeDate}, "02.09.2026"); err == nil {
 		t.Fatal("invalid date accepted")
 	}
-	if err := ValidateValue(FieldDefinition{Name: "i", DataType: TypeInteger}, 42.0); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "i", DataType: TypeInteger}, 42.0); err != nil {
 		t.Fatalf("valid integer rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "i", DataType: TypeInteger}, 42.5); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "i", DataType: TypeInteger}, 42.5); err == nil {
 		t.Fatal("fractional value accepted as integer")
 	}
 	// Empty values are valid; required enforcement happens at state level.
-	if err := ValidateValue(FieldDefinition{Name: "x", DataType: TypeText, Required: true}, ""); err != nil {
+	if err := ValidateValue(&FieldDefinition{Name: "x", DataType: TypeText, Required: true}, ""); err != nil {
 		t.Fatalf("empty value should pass value validation: %v", err)
 	}
 }
@@ -197,34 +197,34 @@ func TestValidateValueRules(t *testing.T) {
 		Name: "cores", DataType: TypeInteger,
 		Validation: &ValidationRules{Min: &min, Max: &max},
 	}
-	if err := ValidateValue(def, 5.0); err != nil {
+	if err := ValidateValue(&def, 5.0); err != nil {
 		t.Fatalf("in-range value rejected: %v", err)
 	}
-	if err := ValidateValue(def, 20.0); err == nil {
+	if err := ValidateValue(&def, 20.0); err == nil {
 		t.Fatal("out-of-range value accepted")
 	}
 
 	enumDef := FieldDefinition{Name: "os", DataType: TypeEnum, EnumValues: []string{"linux", "windows"}}
-	if err := ValidateValue(enumDef, "linux"); err != nil {
+	if err := ValidateValue(&enumDef, "linux"); err != nil {
 		t.Fatalf("allowed enum rejected: %v", err)
 	}
-	if err := ValidateValue(enumDef, "plan9"); err == nil {
+	if err := ValidateValue(&enumDef, "plan9"); err == nil {
 		t.Fatal("disallowed enum accepted")
 	}
 
 	multi := FieldDefinition{Name: "tags", DataType: TypeMultiEnum, EnumValues: []string{"a", "b"}}
-	if err := ValidateValue(multi, []any{"a", "b"}); err != nil {
+	if err := ValidateValue(&multi, []any{"a", "b"}); err != nil {
 		t.Fatalf("allowed multi-enum rejected: %v", err)
 	}
-	if err := ValidateValue(multi, []any{"a", "c"}); err == nil {
+	if err := ValidateValue(&multi, []any{"a", "c"}); err == nil {
 		t.Fatal("disallowed multi-enum value accepted")
 	}
 
 	pat := FieldDefinition{Name: "code", DataType: TypeText, Validation: &ValidationRules{Pattern: "^[A-Z]{3}$"}}
-	if err := ValidateValue(pat, "ABC"); err != nil {
+	if err := ValidateValue(&pat, "ABC"); err != nil {
 		t.Fatalf("pattern-matching value rejected: %v", err)
 	}
-	if err := ValidateValue(pat, "abc"); err == nil {
+	if err := ValidateValue(&pat, "abc"); err == nil {
 		t.Fatal("pattern-violating value accepted")
 	}
 }
@@ -284,16 +284,16 @@ func TestValidateValuePerMET11Type(t *testing.T) {
 		{"multi_enum", []string{"x"}, []any{"x"}, "x"},
 	} {
 		def := FieldDefinition{Name: "f", DataType: tc.dataType, EnumValues: tc.enum}
-		if err := ValidateDefinition(def); err != nil {
+		if err := ValidateDefinition(&def); err != nil {
 			t.Errorf("%s: definition rejected: %v", tc.dataType, err)
 		}
-		if err := ValidateValue(def, tc.valid); err != nil {
+		if err := ValidateValue(&def, tc.valid); err != nil {
 			t.Errorf("%s: valid value %v rejected: %v", tc.dataType, tc.valid, err)
 		}
 		if tc.invalid == nil {
 			continue
 		}
-		if err := ValidateValue(def, tc.invalid); err == nil {
+		if err := ValidateValue(&def, tc.invalid); err == nil {
 			t.Errorf("%s: invalid value %v accepted", tc.dataType, tc.invalid)
 		}
 	}
@@ -315,11 +315,11 @@ func TestRuleOfDefinition(t *testing.T) {
 		t.Errorf("Rule = %s\nwant   %s", raw, want)
 	}
 	// Without required the empty value passes; lengths count code points.
-	if err := ValidateValue(FieldDefinition{Name: "x", DataType: TypeText,
+	if err := ValidateValue(&FieldDefinition{Name: "x", DataType: TypeText,
 		Validation: &ValidationRules{MaxLength: intPtr(1)}}, "😀"); err != nil {
 		t.Errorf("one code point rejected: %v", err)
 	}
-	if err := ValidateValue(FieldDefinition{Name: "n", DataType: TypeInteger}, "5"); err == nil {
+	if err := ValidateValue(&FieldDefinition{Name: "n", DataType: TypeInteger}, "5"); err == nil {
 		t.Error("numeric string accepted as integer")
 	}
 }
@@ -478,17 +478,17 @@ func TestConditionalMatchesRuleConditions(t *testing.T) {
 		if got := rules.EvaluateCondition(&cond, tc.Values); got != tc.Result {
 			t.Errorf("%s: rules.EvaluateCondition = %v, want %v", tc.Name, got, tc.Result)
 		}
-		if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: "string", Conditional: &ConditionalRules{VisibleWhen: preds}}); err != nil {
+		if err := ValidateDefinition(&FieldDefinition{Name: "x", DataType: "string", Conditional: &ConditionalRules{VisibleWhen: preds}}); err != nil {
 			t.Errorf("%s: predicates refused: %v", tc.Name, err)
 		}
-		visible := Evaluate(FieldDefinition{Name: "x", Conditional: &ConditionalRules{VisibleWhen: preds}}, tc.Values)
+		visible := Evaluate(&FieldDefinition{Name: "x", Conditional: &ConditionalRules{VisibleWhen: preds}}, tc.Values)
 		if visible.Visible != tc.Result {
 			t.Errorf("%s: visible_when = %v, want %v", tc.Name, visible.Visible, tc.Result)
 		}
 		if len(preds) == 0 {
 			continue // an empty list is no condition, all of nothing holds
 		}
-		state := Evaluate(FieldDefinition{Name: "x", Conditional: &ConditionalRules{
+		state := Evaluate(&FieldDefinition{Name: "x", Conditional: &ConditionalRules{
 			RequiredWhen:      preds,
 			ReadOnlyWhen:      preds,
 			AllowedValuesWhen: &ConditionalValues{When: preds, Values: []any{"a"}},
@@ -560,12 +560,12 @@ func TestReferenceValueForm(t *testing.T) {
 			t.Errorf("ReferenceTargetOf(%s) = %q, want %q", dataType, got, target)
 		}
 		for _, valid := range []any{refA, strings.ToUpper(refB)} {
-			if err := ValidateValue(def, valid); err != nil {
+			if err := ValidateValue(&def, valid); err != nil {
 				t.Errorf("%s: %v rejected: %v", dataType, valid, err)
 			}
 		}
 		for _, invalid := range []any{"srv-01", "12345678", refA + "0", 42.0, true, map[string]any{"id": refA}, []any{refA}} {
-			if err := ValidateValue(def, invalid); err == nil {
+			if err := ValidateValue(&def, invalid); err == nil {
 				t.Errorf("%s: %v accepted", dataType, invalid)
 			}
 		}
@@ -607,7 +607,7 @@ func TestReferenceDefinitions(t *testing.T) {
 		{"contract_ref is not available", FieldDefinition{Name: "x", DataType: TypeContractRef}, "data_type"},
 		{"reference to contract is not available", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "contract"}, "reference_target"},
 	} {
-		err := ValidateDefinition(tc.def)
+		err := ValidateDefinition(&tc.def)
 		switch {
 		case tc.attribute == "" && err != nil:
 			t.Errorf("%s: rejected: %v", tc.name, err)
@@ -615,7 +615,7 @@ func TestReferenceDefinitions(t *testing.T) {
 			t.Errorf("%s: err = %v (attribute %q), want a rejection of %s", tc.name, err, definitionAttribute(err), tc.attribute)
 		}
 	}
-	if err := ValidateDefinition(FieldDefinition{Name: "x", DataType: TypeContractRef}); err == nil ||
+	if err := ValidateDefinition(&FieldDefinition{Name: "x", DataType: TypeContractRef}); err == nil ||
 		err.Error() != "reference target contract not available" {
 		t.Errorf("contract_ref: %v", err)
 	}
@@ -640,7 +640,7 @@ func TestReferenceDefinitions(t *testing.T) {
 		{"reference to asset without inventory", FieldDefinition{Name: "x", DataType: TypeReference, ReferenceTarget: "asset"}, "reference_target"},
 		{"file without documents", FieldDefinition{Name: "x", DataType: TypeFile}, "data_type"},
 	} {
-		if got := definitionAttribute(ValidateDefinition(tc.def)); got != tc.attribute {
+		if got := definitionAttribute(ValidateDefinition(&tc.def)); got != tc.attribute {
 			t.Errorf("%s: rejected attribute %q, want %q", tc.name, got, tc.attribute)
 		}
 	}
@@ -648,7 +648,7 @@ func TestReferenceDefinitions(t *testing.T) {
 		{Name: "x", DataType: TypeUser}, {Name: "x", DataType: TypeTeam}, {Name: "x", DataType: TypeLocation},
 		{Name: "x", DataType: TypeCIRef}, {Name: "x", DataType: TypeReference},
 	} {
-		if err := ValidateDefinition(def); err != nil {
+		if err := ValidateDefinition(&def); err != nil {
 			t.Errorf("%s without late modules: %v", def.DataType, err)
 		}
 	}
@@ -664,25 +664,25 @@ func TestReferenceMultiValue(t *testing.T) {
 	yes, no := true, false
 	for dataType := range referenceTypes {
 		list := FieldDefinition{Name: "f", DataType: dataType, MultiValue: &yes}
-		if err := ValidateValue(list, []any{refA, refB}); err != nil {
+		if err := ValidateValue(&list, []any{refA, refB}); err != nil {
 			t.Errorf("%s: list of two ids rejected: %v", dataType, err)
 		}
-		if err := ValidateValue(list, refA); err != nil {
+		if err := ValidateValue(&list, refA); err != nil {
 			t.Errorf("%s: a single id rejected: %v", dataType, err)
 		}
-		if err := ValidateValue(list, []any{refA, strings.ToUpper(refA)}); err == nil || !strings.Contains(err.Error(), "listed twice") {
+		if err := ValidateValue(&list, []any{refA, strings.ToUpper(refA)}); err == nil || !strings.Contains(err.Error(), "listed twice") {
 			t.Errorf("%s: repeated id: %v", dataType, err)
 		}
-		if err := ValidateValue(list, []any{refA, "srv-01"}); err == nil {
+		if err := ValidateValue(&list, []any{refA, "srv-01"}); err == nil {
 			t.Errorf("%s: list with an invalid id accepted", dataType)
 		}
-		if err := ValidateValue(FieldDefinition{Name: "f", DataType: dataType, MultiValue: &no}, []any{refA, refB}); err == nil {
+		if err := ValidateValue(&FieldDefinition{Name: "f", DataType: dataType, MultiValue: &no}, []any{refA, refB}); err == nil {
 			t.Errorf("%s: list without multi_value accepted", dataType)
 		}
 	}
 	// multiselect keeps its list as its value.
 	sel := FieldDefinition{Name: "f", DataType: TypeMultiselect, EnumValues: []string{"a", "b"}, MultiValue: &yes}
-	if err := ValidateValue(sel, []any{"a", "b"}); err != nil {
+	if err := ValidateValue(&sel, []any{"a", "b"}); err != nil {
 		t.Errorf("multiselect with multi_value: %v", err)
 	}
 }

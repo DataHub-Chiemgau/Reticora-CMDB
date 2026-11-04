@@ -127,7 +127,7 @@ func (r *MemoryJobRepository) MarkRunning(_ context.Context, orgID, id string, a
 	return nil
 }
 
-func (r *MemoryJobRepository) CompleteJob(_ context.Context, orgID, id string, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
+func (r *MemoryJobRepository) CompleteJob(_ context.Context, orgID, id, objectKey string, rowCount int, fileSize int64, completedAt, expiresAt time.Time) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	job, ok := r.jobs[id]

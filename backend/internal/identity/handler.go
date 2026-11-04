@@ -344,7 +344,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "stamp session token")
 		return
 	}
-	token, err := h.sessions.Issue(refreshedClaims)
+	token, err := h.sessions.Issue(&refreshedClaims)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "refresh: issue session token", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "issue session token")
@@ -595,7 +595,7 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		return "", time.Time{}, authResult{}, stampErr
 	}
 
-	sessionToken, err := h.sessions.Issue(claims)
+	sessionToken, err := h.sessions.Issue(&claims)
 	if err != nil {
 		return "", time.Time{}, authResult{}, err
 	}

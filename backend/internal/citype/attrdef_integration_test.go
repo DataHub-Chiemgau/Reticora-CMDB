@@ -582,10 +582,10 @@ func TestAttributeDefinitionASTValidation(t *testing.T) {
 			continue
 		}
 		checked = true
-		if verr := fieldmeta.ValidateValue(d, float64(7)); verr == nil {
+		if verr := fieldmeta.ValidateValue(&d, float64(7)); verr == nil {
 			t.Error("value 7 accepted by the resolved range 1..5")
 		}
-		if verr := fieldmeta.ValidateValue(d, float64(3)); verr != nil {
+		if verr := fieldmeta.ValidateValue(&d, float64(3)); verr != nil {
 			t.Errorf("value 3 refused by the resolved range 1..5: %v", verr)
 		}
 	}

@@ -117,7 +117,7 @@ func newDeactivationFixture(t *testing.T) *deactivationFixture {
 func (d *deactivationFixture) session(t *testing.T, subject, org string) string {
 	t.Helper()
 	issued := time.Now().UTC().Add(-2 * time.Second)
-	token, err := d.issuer.Issue(identity.SessionClaims{Subject: subject, OrganizationID: org, ID: "t2-" + subject, IssuedAt: issued, ExpiresAt: issued.Add(15 * time.Minute)})
+	token, err := d.issuer.Issue(&identity.SessionClaims{Subject: subject, OrganizationID: org, ID: "t2-" + subject, IssuedAt: issued, ExpiresAt: issued.Add(15 * time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}

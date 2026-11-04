@@ -317,7 +317,7 @@ func TestSigningKeyRotationOverlap(t *testing.T) {
 	oldPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(oldKey)})
 	oldIssuer := mustSessionIssuer(t, oldPEM)
 	claims := SessionClaims{Subject: "u", OrganizationID: "o", ExpiresAt: time.Now().Add(time.Minute)}
-	oldToken, err := oldIssuer.Issue(claims)
+	oldToken, err := oldIssuer.Issue(&claims)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ func TestSigningKeyRotationOverlap(t *testing.T) {
 	if _, err = newIssuer.Validate(oldToken); err != nil {
 		t.Fatalf("token of the previous key during the overlap: %v", err)
 	}
-	newToken, err := newIssuer.Issue(claims)
+	newToken, err := newIssuer.Issue(&claims)
 	if err != nil {
 		t.Fatal(err)
 	}

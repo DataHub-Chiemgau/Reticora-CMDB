@@ -246,7 +246,7 @@ func TestRefreshAllowsRecentlyExpiredToken(t *testing.T) {
 		IssuedAt:       time.Now().UTC().Add(-2 * time.Hour),
 		ExpiresAt:      time.Now().UTC().Add(-30 * time.Minute),
 	}
-	token, err := sessionIssuer.Issue(expiredClaims)
+	token, err := sessionIssuer.Issue(&expiredClaims)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -818,7 +818,7 @@ func TestLoginBindsOrgAdminOfGroupAndDefaultRoleToMFA(t *testing.T) {
 		WithAccessResolver(standardRoleResolver{"org_admin": allPermissions()}).
 		WithProvisioning(loginProvisioner{assigned: true, holds: "org_admin"}, "org_admin").
 		WithMFA(mfa)
-	token, err := sessionIssuer.Issue(SessionClaims{
+	token, err := sessionIssuer.Issue(&SessionClaims{
 		Subject:        "app-user-1",
 		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
 		Groups:         []string{"/org_admin"},
@@ -874,7 +874,7 @@ func TestRefreshChecksUserStatus(t *testing.T) {
 	now := time.Now().UTC()
 	refresh := func(provisioner UserProvisioner, subject string) int {
 		t.Helper()
-		token, err := sessionIssuer.Issue(SessionClaims{
+		token, err := sessionIssuer.Issue(&SessionClaims{
 			Subject:        subject,
 			OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
 			IssuedAt:       now.Add(-time.Minute),
@@ -906,7 +906,7 @@ func TestValidateRejectsRevokedSessions(t *testing.T) {
 	issuer := testSessionIssuer(t).WithRevocations(revocations)
 	issue := func(subject string, at time.Time) string {
 		t.Helper()
-		token, err := issuer.Issue(SessionClaims{Subject: subject, OrganizationID: "org", IssuedAt: at, ExpiresAt: at.Add(time.Hour)})
+		token, err := issuer.Issue(&SessionClaims{Subject: subject, OrganizationID: "org", IssuedAt: at, ExpiresAt: at.Add(time.Hour)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1035,7 +1035,7 @@ func TestIdPRolesMapToStandardRoles(t *testing.T) {
 func TestSessionPermissionsComeFromDatabaseRoles(t *testing.T) {
 	sessionIssuer := testSessionIssuer(t)
 	resolver := standardRoleResolver{"viewer": {PermCIRead, PermLocationRead}}
-	token, err := sessionIssuer.Issue(SessionClaims{
+	token, err := sessionIssuer.Issue(&SessionClaims{
 		Subject:        "user-123",
 		OrganizationID: "123e4567-e89b-12d3-a456-426614174000",
 		Permissions:    []Permission{PermCredentialRead, PermCredentialManage},

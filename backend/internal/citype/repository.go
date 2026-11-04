@@ -580,7 +580,7 @@ func (r *MemoryRepository) UpsertField(_ context.Context, orgID, typeID string, 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def := fieldFromUpsert(req)
-	if err := fieldmeta.ValidateDefinition(def); err != nil {
+	if err := fieldmeta.ValidateDefinition(&def); err != nil {
 		return nil, err
 	}
 	f := fieldFromDefinition(&def)
@@ -673,7 +673,8 @@ func (r *MemoryRepository) InstanceFieldNames(ctx context.Context, orgID, ciID s
 func (r *MemoryRepository) UpsertInstanceField(_ context.Context, orgID, ciID string, req *UpsertInstanceFieldRequest) (*InstanceField, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(req)); err != nil {
+	fieldDef := instanceFieldFromUpsert(req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return nil, err
 	}
 	f := InstanceField{

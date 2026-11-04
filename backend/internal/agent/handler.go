@@ -69,7 +69,7 @@ type ConflictReviews interface {
 // TokenIssuer signs the agent credential (implemented by
 // identity.SessionIssuer).
 type TokenIssuer interface {
-	Issue(claims identity.SessionClaims) (string, error)
+	Issue(claims *identity.SessionClaims) (string, error)
 }
 
 // AgentTokenLifetime is the validity of an agent credential; an agent is
@@ -100,7 +100,7 @@ func (h *Handler) issueAgentToken(a *Agent) (string, error) {
 		scope.Clients = identity.ScopeSet{IDs: []string{a.ClientID}}
 	}
 	now := time.Now().UTC()
-	return h.tokens.Issue(identity.SessionClaims{
+	return h.tokens.Issue(&identity.SessionClaims{
 		Subject:        AgentSubject(a.AgentID),
 		OrganizationID: a.OrganizationID,
 		ClientScope:    scope.LegacyClientScope(),

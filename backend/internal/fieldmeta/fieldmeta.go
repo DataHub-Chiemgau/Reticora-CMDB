@@ -260,7 +260,7 @@ func definitionError(attribute, format string, args ...any) *DefinitionError {
 // ValidateDefinition checks structural validity of a field definition; a
 // rejection is a *DefinitionError naming the attribute.
 // validation: fixed texts naming the field and the rule.
-func ValidateDefinition(def FieldDefinition) error {
+func ValidateDefinition(def *FieldDefinition) error {
 	if strings.TrimSpace(def.Name) == "" {
 		return definitionError("name", "field name is required")
 	}
@@ -270,7 +270,7 @@ func ValidateDefinition(def FieldDefinition) error {
 	if !ValidFieldTypes[def.DataType] {
 		return definitionError("data_type", "unsupported field type %q", def.DataType)
 	}
-	if err := validateReferenceTarget(&def); err != nil {
+	if err := validateReferenceTarget(def); err != nil {
 		return err
 	}
 	for _, p := range def.Validation.AllPatterns() {
@@ -323,7 +323,7 @@ func validateReferenceTarget(def *FieldDefinition) error {
 	return definitionError(attribute, "reference target %s not available", target)
 }
 
-func (def FieldDefinition) allPredicates() []Predicate {
+func (def *FieldDefinition) allPredicates() []Predicate {
 	if def.Conditional == nil {
 		return nil
 	}
@@ -357,7 +357,7 @@ type FieldState struct {
 // Evaluate resolves the conditional state of a field against the current
 // attribute values. Without conditional rules the field is visible and keeps
 // its static required flag.
-func Evaluate(def FieldDefinition, values map[string]any) FieldState {
+func Evaluate(def *FieldDefinition, values map[string]any) FieldState {
 	state := FieldState{Visible: true, Required: def.Required}
 	c := def.Conditional
 	if c == nil {
@@ -537,7 +537,7 @@ func stringifyAll(values []any) []string {
 // unless the field is required (required checks happen at the form/transition
 // level via FieldState).
 // validation: fixed texts naming the field and the rule.
-func ValidateValue(def FieldDefinition, value any) error {
+func ValidateValue(def *FieldDefinition, value any) error {
 	if isEmpty(value) {
 		return nil
 	}

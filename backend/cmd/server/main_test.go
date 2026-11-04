@@ -234,7 +234,7 @@ func (cs *chainStack) login(t *testing.T, perms ...identity.Permission) (token, 
 	}
 	now := time.Now().UTC()
 	claims.ID, claims.IssuedAt, claims.ExpiresAt = "wp364-jti-"+strconv.Itoa(cs.logins), now, now.Add(15*time.Minute)
-	if token, err = cs.issuer.Issue(claims); err != nil {
+	if token, err = cs.issuer.Issue(&claims); err != nil {
 		t.Fatalf("issue access token: %v", err)
 	}
 	return token, cookie

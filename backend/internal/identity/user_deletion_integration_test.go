@@ -127,7 +127,7 @@ func TestUserDeletionEndsAccess(t *testing.T) {
 		now := time.Now().UTC()
 		claims := identity.SessionClaims{Subject: subject, OrganizationID: f.OrgA, Permissions: perms, Scope: orgWide,
 			ID: "deletion-" + subject + "-" + now.Format("150405.000000000"), IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
-		if token, err = issuer.Issue(claims); err != nil {
+		if token, err = issuer.Issue(&claims); err != nil {
 			t.Fatal(err)
 		}
 		if cookie, err = refresh.Issue(bg, &identity.RefreshGrant{Claims: claims}); err != nil {

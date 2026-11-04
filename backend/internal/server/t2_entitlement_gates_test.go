@@ -570,7 +570,7 @@ func TestT2EntitlementMaxCIsOnRestoreAndReviewNew(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	scope := identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-	token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+	token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 		Scope: &scope, SessionID: "maxcis-sid", ID: "maxcis-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 	if err != nil {
 		t.Fatal(err)
@@ -742,7 +742,7 @@ func TestAuditT2EntitlementAliasPathsGated(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	stamp := strconv.FormatInt(now.UnixNano(), 10)
-	token, err := s.issuer.Issue(identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+	token, err := s.issuer.Issue(&identity.SessionClaims{Subject: userID, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 		Scope:     &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 		SessionID: "alias-sid-" + stamp, ID: "alias-jti-" + stamp, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 	if err != nil {
@@ -904,7 +904,7 @@ func TestT2EntitlementMaxCIsCountsTheWholeOrganization(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 		if err != nil {
 			t.Fatal(err)
@@ -1046,7 +1046,7 @@ func TestEntitlementLimitDetailHidesOrgCountFromScopedCallers(t *testing.T) {
 		t.Helper()
 		now := time.Now().UTC()
 		scope := identity.Scope{Clients: clients, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}}
-		token, err := s.issuer.Issue(identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
+		token, err := s.issuer.Issue(&identity.SessionClaims{Subject: admin, OrganizationID: f.OrgA, Permissions: identity.AllPermissions(),
 			Scope: &scope, SessionID: sid, ID: sid + "-jti", IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)})
 		if err != nil {
 			t.Fatal(err)

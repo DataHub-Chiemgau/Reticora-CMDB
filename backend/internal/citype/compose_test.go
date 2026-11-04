@@ -68,7 +68,7 @@ func TestComposeRules(t *testing.T) {
 	}
 	// Every rule of both layers applies to the composed definition.
 	for value, ok := range map[string]bool{"BX": true, "CY": false, "AX": false} {
-		if verr := fieldmeta.ValidateValue(code, value); (verr == nil) != ok {
+		if verr := fieldmeta.ValidateValue(&code, value); (verr == nil) != ok {
 			t.Errorf("code %q: %v, want ok=%v", value, verr, ok)
 		}
 	}
@@ -413,7 +413,7 @@ func TestCompositionConformanceMatrix(t *testing.T) {
 				{withV(text("k"), fieldmeta.ValidationRules{Pattern: "z$"})}},
 			check: wantField("k", func(d def) bool {
 				return d.Validation.Pattern == "^a" && reflect.DeepEqual(d.Validation.Patterns, []string{"z$"}) &&
-					fieldmeta.ValidateValue(d, "abz") == nil && fieldmeta.ValidateValue(d, "ab") != nil
+					fieldmeta.ValidateValue(&d, "abz") == nil && fieldmeta.ValidateValue(&d, "ab") != nil
 			})},
 		{name: "patterns: a later layer cannot drop one",
 			layers: [][]def{{withV(text("k"), fieldmeta.ValidationRules{Pattern: "^a"})}, {text("k")}},

@@ -35,7 +35,7 @@ func newTestIssuer(t *testing.T) *identity.SessionIssuer {
 func TestAuthMiddlewareWithVerifierAcceptsSignedToken(t *testing.T) {
 	issuer := newTestIssuer(t)
 	now := time.Now().UTC()
-	token, err := issuer.Issue(identity.SessionClaims{
+	token, err := issuer.Issue(&identity.SessionClaims{
 		Subject:        "user-1",
 		OrganizationID: "org-1",
 		IssuedAt:       now,
@@ -80,7 +80,7 @@ func TestAuthMiddlewareWithVerifierRejectsUnsignedAndExpiredTokens(t *testing.T)
 	}
 
 	expired := time.Now().UTC().Add(-2 * time.Hour)
-	token, err := issuer.Issue(identity.SessionClaims{
+	token, err := issuer.Issue(&identity.SessionClaims{
 		Subject:        "user-1",
 		OrganizationID: "org-1",
 		IssuedAt:       expired,

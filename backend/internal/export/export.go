@@ -95,8 +95,8 @@ func (h *Handler) ExportCIs(w http.ResponseWriter, r *http.Request) {
 
 	batch := first
 	for {
-		for _, item := range batch {
-			writer.row(item)
+		for i := range batch {
+			writer.row(&batch[i])
 		}
 		writer.flushHTTP(w)
 
@@ -193,7 +193,7 @@ func (rw *rowWriter) begin() {
 	}
 }
 
-func (rw *rowWriter) row(item ci.Item) {
+func (rw *rowWriter) row(item *ci.Item) {
 	switch rw.format {
 	case "csv":
 		rw.writeCells([]string{
@@ -260,7 +260,7 @@ func (rw *rowWriter) end() {
 		return
 	}
 	if rw.format == "json" {
-		_, _ = io.WriteString(rw.out, fmt.Sprintf(`],"total":%d}`, rw.written))
+		_, _ = fmt.Fprintf(rw.out, `],"total":%d}`, rw.written)
 	}
 }
 

@@ -238,7 +238,8 @@ func (d *AttributeDefinition) Validate() error {
 	if err := d.validateComputed(); err != nil {
 		return err
 	}
-	if err := fieldmeta.ValidateDefinition(d.definition()); err != nil {
+	fieldDef := d.definition()
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		return &api.FieldError{Field: definitionField(err), Message: err.Error()}
 	}
 	if len(d.Default) > 0 && string(d.Default) != "null" {
@@ -248,7 +249,8 @@ func (d *AttributeDefinition) Validate() error {
 		}
 		// With multi_value ValidateValue checks a list element by element
 		// and refuses a repeated value (WP-254).
-		if err := fieldmeta.ValidateValue(d.definition(), value); err != nil {
+		fieldDef := d.definition()
+		if err := fieldmeta.ValidateValue(&fieldDef, value); err != nil {
 			return &api.FieldError{Field: "default", Message: err.Error()}
 		}
 	}

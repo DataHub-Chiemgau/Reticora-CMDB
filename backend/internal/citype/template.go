@@ -298,7 +298,7 @@ func checkTemplateItem(i int, def *AttributeDefinition, item *TemplateVersionIte
 	if err := json.Unmarshal(item.DefaultOverride, &value); err != nil {
 		return itemError(i, "default_override", "default_override must be a JSON value")
 	}
-	if err := fieldmeta.ValidateValue(composed[0], value); err != nil {
+	if err := fieldmeta.ValidateValue(&composed[0], value); err != nil {
 		return itemError(i, "default_override", err.Error())
 	}
 	return nil

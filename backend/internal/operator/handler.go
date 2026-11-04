@@ -132,7 +132,7 @@ func (h *Handler) issue(id *identity.IDTokenClaims) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	claims.ID = jti
-	token, err := h.sessions.Issue(claims)
+	token, err := h.sessions.Issue(&claims)
 	return token, claims.ExpiresAt, err
 }
 

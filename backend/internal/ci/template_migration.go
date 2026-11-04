@@ -250,7 +250,7 @@ func (m *templateMigration) collectDefaults(defs []fieldmeta.FieldDefinition, ke
 			continue
 		}
 		value := typedDefault(def)
-		if err := fieldmeta.ValidateValue(*def, value); err != nil {
+		if err := fieldmeta.ValidateValue(def, value); err != nil {
 			m.result.Findings = append(m.result.Findings, Violation{Field: def.Name,
 				Detail: "default not written: " + trimFieldPrefix(def.Name, err.Error())})
 			continue

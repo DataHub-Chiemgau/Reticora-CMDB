@@ -119,7 +119,7 @@ func TestResolverLayerOrder(t *testing.T) {
 	if lo, hi := bounds(size); size == nil || size.Description != "instance" || lo != 10 || hi != 50 {
 		t.Fatalf("composed wp589_size = %+v, want description instance, range 10..50", size)
 	}
-	if err := fieldmeta.ValidateValue(*size, float64(60)); err == nil {
+	if err := fieldmeta.ValidateValue(size, float64(60)); err == nil {
 		t.Error("60 accepted above the instance maximum 50")
 	}
 

@@ -240,7 +240,7 @@ func parseRSAPublicKey(keyPEM []byte) (*rsa.PublicKey, error) {
 
 // Issue signs the provided claims as an RS256 JWT with the key id in the
 // header.
-func (s *SessionIssuer) Issue(claims SessionClaims) (string, error) {
+func (s *SessionIssuer) Issue(claims *SessionClaims) (string, error) {
 	if s == nil || s.privateKey == nil {
 		return "", errors.New("identity: session issuer is not configured")
 	}

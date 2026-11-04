@@ -97,7 +97,7 @@ func TestT2DeactivationFullChain(t *testing.T) {
 		now := time.Now().UTC()
 		claims := identity.SessionClaims{Subject: subject, OrganizationID: org, Permissions: []identity.Permission{identity.PermCIRead},
 			ID: "t2-fullchain-" + subject + "-" + now.Format("150405.000000000"), IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute)}
-		if token, err = sessions.Issue(claims); err != nil {
+		if token, err = sessions.Issue(&claims); err != nil {
 			t.Fatal(err)
 		}
 		if cookie, err = refresh.Issue(bg, &identity.RefreshGrant{Claims: claims}); err != nil {

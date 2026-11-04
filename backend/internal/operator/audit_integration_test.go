@@ -188,7 +188,7 @@ func TestOperatorGrantIsAtomicWithItsAuditEntry(t *testing.T) {
 	session := func(subject string) map[string]string {
 		t.Helper()
 		now := time.Now().UTC()
-		token, err := issuer.Issue(identity.SessionClaims{Subject: subject, Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+		token, err := issuer.Issue(&identity.SessionClaims{Subject: subject, Operator: true, IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
 		if err != nil {
 			t.Fatal(err)
 		}

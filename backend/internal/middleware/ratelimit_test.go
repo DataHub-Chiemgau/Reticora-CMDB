@@ -318,7 +318,7 @@ func TestRateLimitSessionCredentialIsSid(t *testing.T) {
 	mint := func(sid, jti string) string {
 		t.Helper()
 		now := time.Now().UTC()
-		token, err := issuer.Issue(identity.SessionClaims{
+		token, err := issuer.Issue(&identity.SessionClaims{
 			Subject: "sid-user", OrganizationID: org, Permissions: []identity.Permission{identity.PermCIRead},
 			SessionID: sid, ID: jti, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
 		})
@@ -724,7 +724,7 @@ func preAuthReplicas(t *testing.T, store cache.Store, keyChecks *atomic.Int64) (
 	mint := func(sid string) string {
 		t.Helper()
 		now := time.Now().UTC()
-		token, err := issuer.Issue(identity.SessionClaims{
+		token, err := issuer.Issue(&identity.SessionClaims{
 			Subject: "user-1", OrganizationID: "org-1", Permissions: []identity.Permission{identity.PermCIRead},
 			SessionID: sid, IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
 		})

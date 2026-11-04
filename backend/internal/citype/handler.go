@@ -940,7 +940,8 @@ func (h *Handler) UpsertField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(&req)); err != nil {
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -999,7 +1000,8 @@ func (h *Handler) UpsertGlobalField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Scope = "global"
-	if err := fieldmeta.ValidateDefinition(fieldFromUpsert(&req)); err != nil {
+	fieldDef := fieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -1053,7 +1055,8 @@ func (h *Handler) UpsertInstanceField(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if err := fieldmeta.ValidateDefinition(instanceFieldFromUpsert(&req)); err != nil {
+	fieldDef := instanceFieldFromUpsert(&req)
+	if err := fieldmeta.ValidateDefinition(&fieldDef); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
@@ -1084,7 +1087,8 @@ func (h *Handler) DeleteInstanceField(w http.ResponseWriter, r *http.Request) {
 // validateField checks a field of a CI type.
 // validation: the texts of fieldmeta.ValidateDefinition.
 func validateField(f *Field) error {
-	return fieldmeta.ValidateDefinition(f.Definition())
+	fieldDef := f.Definition()
+	return fieldmeta.ValidateDefinition(&fieldDef)
 }
 
 // writeTypeError reports a failed create or clone of a CI type: a taken key

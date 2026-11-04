@@ -406,7 +406,7 @@ func TestPrincipalCarriesGroupsAndServiceAccount(t *testing.T) {
 	t.Run("session with groups", func(t *testing.T) {
 		issuer := newTestIssuer(t)
 		now := time.Now().UTC()
-		token, err := issuer.Issue(identity.SessionClaims{
+		token, err := issuer.Issue(&identity.SessionClaims{
 			Subject: "user-725", OrganizationID: "org-725", SessionID: "sid-725",
 			Groups:   []string{"/reticora/engineer", "auditor"},
 			IssuedAt: now, ExpiresAt: now.Add(time.Hour),
