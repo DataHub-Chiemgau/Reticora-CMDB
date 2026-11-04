@@ -125,7 +125,7 @@ func TestOpenSearchScopeAgainstRealService(t *testing.T) {
 		o.do(t, http.MethodDelete, "/_index_template/"+o.index, nil, nil)
 	})
 
-	remote := search.NewOpenSearchBackend(search.OpenSearchConfig{URL: osURL, Index: o.index}, nil)
+	remote := search.NewOpenSearchBackend(&search.OpenSearchConfig{URL: osURL, Index: o.index}, nil)
 	if err := remote.Ping(bg); err != nil {
 		t.Fatalf("ping: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestOpenSearchScopeAgainstRealService(t *testing.T) {
 			}
 			return out
 		}
-		raw, err := remote.Query(ctx, q)
+		raw, err := remote.Query(ctx, &q)
 		if err != nil {
 			t.Fatalf("%s: %s principal: OpenSearch query: %v", step, principal, err)
 		}
@@ -243,14 +243,14 @@ func TestOpenSearchScopeAgainstRealService(t *testing.T) {
 		if got := sorted(ids(raw)); got != sorted(want) {
 			t.Errorf("%s: %s principal: OpenSearch hits [%s], want [%s]", step, principal, got, sorted(want))
 		}
-		res, err := hybrid.Query(ctx, q)
+		res, err := hybrid.Query(ctx, &q)
 		if err != nil {
 			t.Fatalf("%s: %s principal: hybrid query: %v", step, principal, err)
 		}
 		if got := sorted(ids(res)); got != sorted(want) || res.Total != len(want) {
 			t.Errorf("%s: %s principal: hybrid hits [%s] (total %d), want [%s]", step, principal, got, res.Total, sorted(want))
 		}
-		pg, err := source.Query(ctx, q)
+		pg, err := source.Query(ctx, &q)
 		if err != nil {
 			t.Fatalf("%s: %s principal: PostgreSQL query: %v", step, principal, err)
 		}
@@ -296,11 +296,11 @@ func TestOpenSearchScopeAgainstRealService(t *testing.T) {
 		name    string
 		backend search.Backend
 	}{{"OpenSearch", remote}, {"hybrid", hybrid}} {
-		if res, err := b.backend.Query(bg, q); !errors.Is(err, database.ErrNoTenantScope) || len(res.Data) != 0 {
+		if res, err := b.backend.Query(bg, &q); !errors.Is(err, database.ErrNoTenantScope) || len(res.Data) != 0 {
 			t.Errorf("%s query without tenant scope: %d hits, error %v; want none and ErrNoTenantScope", b.name, len(res.Data), err)
 		}
 		other := database.ContextWithTenantScope(bg, scopeOf(f.OrgB, "", ""))
-		if res, err := b.backend.Query(other, q); !errors.Is(err, database.ErrTenantMismatch) || len(res.Data) != 0 {
+		if res, err := b.backend.Query(other, &q); !errors.Is(err, database.ErrTenantMismatch) || len(res.Data) != 0 {
 			t.Errorf("%s query for organization A with the scope of organization B: %d hits, error %v; want none and ErrTenantMismatch", b.name, len(res.Data), err)
 		}
 	}

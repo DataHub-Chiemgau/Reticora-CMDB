@@ -38,7 +38,7 @@ func TestDocumentSoftDelete(t *testing.T) {
 		t.Helper()
 		out := map[string]bool{}
 		for _, text := range []string{"softdeletewp", "softdeletekept"} {
-			res, err := repoSearch.Query(w.orgCtx, search.Query{OrganizationID: f.OrgA, Text: text, Limit: 50})
+			res, err := repoSearch.Query(w.orgCtx, &search.Query{OrganizationID: f.OrgA, Text: text, Limit: 50})
 			if err != nil {
 				t.Fatalf("search: %v", err)
 			}

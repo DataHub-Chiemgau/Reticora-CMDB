@@ -38,7 +38,7 @@ func isDeviating(result string) bool {
 
 // Repository defines persistence operations for stocktakes.
 type Repository interface {
-	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error)
+	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Stocktake, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Stocktake, error)
 	Create(ctx context.Context, s *Stocktake) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error)
@@ -79,7 +79,7 @@ func NewMemoryRepository(assets asset.Lookup) *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -104,7 +104,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 
 	column, direction := NormalizeSort(filter)
 	sort.Slice(result, func(i, j int) bool {
-		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		vi, vj := sortValue(&result[i], column), sortValue(&result[j], column)
 		if vi == vj {
 			if direction == "asc" {
 				return result[i].ID < result[j].ID
@@ -122,9 +122,10 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 		}
 		remaining := make([]Stocktake, 0, len(result))
-		for _, item := range result {
+		for i := range result {
+			item := &result[i]
 			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
-				remaining = append(remaining, item)
+				remaining = append(remaining, *item)
 			}
 		}
 		if len(remaining) > page.Limit {
@@ -275,8 +276,9 @@ func (r *MemoryRepository) Difference(ctx context.Context, orgID, stocktakeID st
 	}
 
 	entries := make([]DifferenceEntry, 0, end-start)
-	for _, s := range scans[start:end] {
-		entry := DifferenceEntry{Scan: s}
+	for i := range scans[start:end] {
+		s := &scans[start+i]
+		entry := DifferenceEntry{Scan: *s}
 		if s.AssetID != "" && r.assets != nil {
 			if a, err := r.assets.GetByID(ctx, orgID, s.AssetID); err == nil {
 				entry.Asset = a
@@ -316,7 +318,8 @@ func (r *MemoryRepository) Complete(ctx context.Context, orgID, id string, apply
 	if !applyCorrections || r.assets == nil {
 		return completion, nil
 	}
-	for _, scan := range scans {
+	for i := range scans {
+		scan := &scans[i]
 		if scan.AssetID == "" {
 			continue
 		}
@@ -334,7 +337,7 @@ func (r *MemoryRepository) Complete(ctx context.Context, orgID, id string, apply
 
 // applyCorrection applies the inventory change implied by a deviating scan
 // through the asset repository and records the outcome.
-func (r *MemoryRepository) applyCorrection(ctx context.Context, orgID string, scan StockScan) (Correction, error) {
+func (r *MemoryRepository) applyCorrection(ctx context.Context, orgID string, scan *StockScan) (Correction, error) {
 	a, err := r.assets.GetByID(ctx, orgID, scan.AssetID)
 	if err != nil {
 		return Correction{}, err
@@ -353,7 +356,7 @@ func (r *MemoryRepository) applyCorrection(ctx context.Context, orgID string, sc
 // correctionFor maps a deviating scan result to the asset update that
 // corrects the inventory: missing → lost, surplus → in_stock, damaged →
 // maintenance, wrong_location → move to the found location.
-func correctionFor(a *asset.Asset, scan StockScan) (asset.UpdateRequest, Correction) {
+func correctionFor(a *asset.Asset, scan *StockScan) (asset.UpdateRequest, Correction) {
 	c := Correction{AssetID: a.ID, AssetTag: a.AssetTag, ScanResult: scan.ScanResult, PreviousStatus: a.Status, PreviousLocation: a.Location}
 	var req asset.UpdateRequest
 	switch scan.ScanResult {

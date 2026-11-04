@@ -547,8 +547,8 @@ type authorizingRouter struct {
 	drafts metamodel.Repository
 }
 
-func (a authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
-	return authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor,
+func (a *authorizingRouter) With(middlewares ...func(http.Handler) http.Handler) chi.Router {
+	return &authorizingRouter{Router: a.Router.With(middlewares...), prefix: a.prefix, after: a.after, auditor: a.auditor,
 		modules: a.modules, drafts: a.drafts}
 }
 
@@ -721,14 +721,14 @@ func isWriteMethod(method string) bool {
 	return false
 }
 
-func (a authorizingRouter) fullPattern(pattern string) string {
+func (a *authorizingRouter) fullPattern(pattern string) string {
 	if a.prefix == "" {
 		return pattern
 	}
 	return strings.TrimSuffix(a.prefix, "/") + "/" + strings.TrimPrefix(pattern, "/")
 }
 
-func (a authorizingRouter) handle(method, pattern string, h http.Handler) {
+func (a *authorizingRouter) handle(method, pattern string, h http.Handler) {
 	full := a.fullPattern(pattern)
 	// A switched-off module has no routes: they answer 404 (WP-214).
 	if !a.modules.RouteAllowed(full) {
@@ -820,40 +820,40 @@ func draftGuard(modules *ModuleSet, drafts metamodel.Repository, method, full st
 	}
 }
 
-func (a authorizingRouter) Method(method, pattern string, h http.Handler) {
+func (a *authorizingRouter) Method(method, pattern string, h http.Handler) {
 	a.handle(method, pattern, h)
 }
-func (a authorizingRouter) Get(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Get(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodGet, pattern, h)
 }
-func (a authorizingRouter) Post(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Post(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodPost, pattern, h)
 }
-func (a authorizingRouter) Put(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Put(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodPut, pattern, h)
 }
-func (a authorizingRouter) Patch(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Patch(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodPatch, pattern, h)
 }
-func (a authorizingRouter) Delete(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Delete(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodDelete, pattern, h)
 }
-func (a authorizingRouter) Head(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Head(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodHead, pattern, h)
 }
-func (a authorizingRouter) Options(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Options(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodOptions, pattern, h)
 }
-func (a authorizingRouter) Trace(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Trace(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodTrace, pattern, h)
 }
-func (a authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
+func (a *authorizingRouter) Connect(pattern string, h http.HandlerFunc) {
 	a.handle(http.MethodConnect, pattern, h)
 }
 
-func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
+func (a *authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Router {
 	return a.Router.Route(pattern, func(r chi.Router) {
-		fn(authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor, modules: a.modules,
+		fn(&authorizingRouter{Router: r, prefix: a.fullPattern(pattern), after: a.after, auditor: a.auditor, modules: a.modules,
 			drafts: a.drafts})
 	})
 }
@@ -862,6 +862,6 @@ func (a authorizingRouter) Route(pattern string, fn func(r chi.Router)) chi.Rout
 // sub-router would bypass per-route permission enforcement. Domain handlers
 // must register routes through Get/Post/... or Route so every route resolves
 // to a permission.
-func (a authorizingRouter) Mount(pattern string, h http.Handler) {
+func (a *authorizingRouter) Mount(pattern string, h http.Handler) {
 	panic(fmt.Sprintf("server: Mount(%q) on the authorizing router would bypass authorization; register routes explicitly", pattern))
 }

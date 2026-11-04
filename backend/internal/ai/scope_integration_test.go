@@ -66,7 +66,7 @@ func TestRAGChunksFollowSourceScope(t *testing.T) {
 		if err := repo.UpsertChunk(orgCtx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, Content: title, URL: "/cmdb/" + id}); err != nil {
 			t.Fatalf("chunk %s: %v", title, err)
 		}
-		if err := searchRepo.IndexDocument(orgCtx, search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, URL: "/cmdb/" + id}); err != nil {
+		if err := searchRepo.IndexDocument(orgCtx, &search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, URL: "/cmdb/" + id}); err != nil {
 			t.Fatalf("index %s: %v", title, err)
 		}
 	}

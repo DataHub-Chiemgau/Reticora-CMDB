@@ -284,7 +284,7 @@ var errMergeGone = errors.New("the merge of the job no longer exists")
 // /metrics.
 // agentTypeResolver adapts the discovery repository's CI type lookup for the
 // agent handler's endpoint reconciliation.
-func agentTypeResolver(repos Repositories) agent.CITypeResolver {
+func agentTypeResolver(repos *Repositories) agent.CITypeResolver {
 	r, ok := repos.Discovery.(agent.CITypeResolver)
 	if !ok {
 		return nil
@@ -297,7 +297,7 @@ func agentTypeResolver(repos Repositories) agent.CITypeResolver {
 // manual override open an override_conflict review in the review queue of
 // discovery (REC-12).
 func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflicts agent.ConflictReviews) *agent.Handler {
-	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(*repos)).WithFindings(repos.Security).
+	h := agent.NewHandler(repos.Agent, repos.Metrics, repos.CI, agentTypeResolver(repos)).WithFindings(repos.Security).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflicts)
 	if sessions != nil {
 		h.WithAgentTokens(sessions)
@@ -365,8 +365,8 @@ func userHandler(repos *Repositories, opts *Options) *user.Handler {
 	return h
 }
 
-func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) {
-	if err := validate(repos, opts); err != nil {
+func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) http.Handler, error) { //nolint:gocritic // public constructor with about 480 callers; the configuration is passed by value
+	if err := validate(&repos, &opts); err != nil {
 		return nil, nil, err
 	}
 	if pg, ok := repos.User.(*user.PGRepository); ok && opts.MFA != nil {
@@ -397,7 +397,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// every route is mapped.
 	// The draft service captures metamodel writes with ?draft (WP-720)
 	// and lays a draft over the form preview (E-113).
-	protected := authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
+	protected := &authorizingRouter{Router: mux, after: opts.RouteMiddleware, auditor: routeAuditor(&opts), modules: opts.Modules,
 		drafts: repos.MetamodelDraft}
 
 	identityHandler := identity.NewHandler(opts.OIDC, opts.Sessions).
@@ -608,7 +608,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflowRuns),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
-			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(opts), entitlementLister{svc: opts.Entitlements})),
+			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
 			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
@@ -694,14 +694,14 @@ func accessRequestRuns(modules *ModuleSet, runs *workflow.Executor) iga.RunStart
 // reportAuditVerifier returns the audit-chain verifier for the security
 // report when a database pool exists; without a database the report omits the
 // integrity section instead of failing.
-func reportAuditVerifier(opts Options) compliance.AuditVerifier {
+func reportAuditVerifier(opts *Options) compliance.AuditVerifier {
 	if opts.AuditPool == nil {
 		return nil
 	}
 	return auditVerifier{pool: opts.AuditPool}
 }
 
-func validate(repos Repositories, opts Options) error {
+func validate(repos *Repositories, opts *Options) error {
 	switch {
 	case repos.Permission == nil:
 		return fmt.Errorf("server: permission repository is required")
@@ -777,7 +777,7 @@ func registerOperational(mux *chi.Mux, version string, includeTenantLabel bool, 
 // dedicated registry so the endpoint stays stable regardless of what else is
 // instrumented. It also registers the tenant-aware HTTP request metrics and
 // returns the middleware that records them.
-func metricsHandler(version string, includeTenantLabel bool) (http.Handler, func(http.Handler) http.Handler) {
+func metricsHandler(version string, includeTenantLabel bool) (handler http.Handler, record func(http.Handler) http.Handler) {
 	registry := prometheus.NewRegistry()
 
 	up := prometheus.NewGauge(prometheus.GaugeOpts{

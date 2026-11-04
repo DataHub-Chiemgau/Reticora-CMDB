@@ -48,7 +48,7 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	if limit <= 0 {
 		limit = 5
 	}
-	sr, err := r.search.Query(ctx, search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
+	sr, err := r.search.Query(ctx, &search.Query{OrganizationID: orgID, UserID: userID, Text: question, Limit: 25, Highlight: false})
 	if err != nil {
 		return nil, nil, err
 	}

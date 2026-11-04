@@ -106,7 +106,7 @@ func TestDraftCaptureRunsInnermost(t *testing.T) {
 		}
 	}
 	mux := chi.NewRouter()
-	router := authorizingRouter{Router: mux, after: []func(http.Handler) http.Handler{step("validation"), step("idempotency")},
+	router := &authorizingRouter{Router: mux, after: []func(http.Handler) http.Handler{step("validation"), step("idempotency")},
 		drafts: chainDrafts{trace: &trace}}
 	router.Post("/api/v1/templates/{id}/versions/{version}/publish", func(w http.ResponseWriter, _ *http.Request) {
 		trace = append(trace, "handler")

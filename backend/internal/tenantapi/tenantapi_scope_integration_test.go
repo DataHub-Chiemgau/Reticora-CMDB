@@ -145,7 +145,7 @@ func TestOrganizationAIOptInThroughAPI(t *testing.T) {
 	clientAdmin := f.AppUser(t, f.OrgA, "optin-client-admin")
 	title := "t2aioptinapiprobe"
 	ciID := f.CI(t, f.OrgA, "", title)
-	if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
+	if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, &search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
 		Title: title, URL: "/cis/" + ciID}); err != nil {
 		t.Fatalf("index search document: %v", err)
 	}

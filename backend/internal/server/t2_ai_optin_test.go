@@ -96,7 +96,7 @@ func TestAuditT2AIAskRequiresOrgOptIn(t *testing.T) {
 		}
 		title := "t2aioptinprobe " + name
 		ciID := f.CI(t, orgID, "", title)
-		if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, search.Document{OrganizationID: orgID, EntityType: "ci", EntityID: ciID,
+		if err := search.NewPGRepository(f.App).IndexDocument(orgCtx, &search.Document{OrganizationID: orgID, EntityType: "ci", EntityID: ciID,
 			Title: title, URL: "/cis/" + ciID}); err != nil {
 			t.Fatalf("index search document: %v", err)
 		}

@@ -30,13 +30,16 @@ func (b *HybridBackend) Ping(ctx context.Context) error { return b.Remote.Ping(c
 // call waits for the commit, so the transaction never holds its locks while
 // the remote index answers (NFR-03); a remote failure is then logged, the
 // index can be rebuilt with POST /api/v1/search/reindex.
-func (b *HybridBackend) IndexDocument(ctx context.Context, doc Document) error {
-	pgErr := database.Savepoint(ctx, func(ctx context.Context) error { return b.Source.IndexDocument(ctx, doc) })
+func (b *HybridBackend) IndexDocument(ctx context.Context, in *Document) error {
+	// The remote write after the commit uses this copy, not the caller's
+	// document.
+	doc := *in
+	pgErr := database.Savepoint(ctx, func(ctx context.Context) error { return b.Source.IndexDocument(ctx, &doc) })
 	if !database.InTx(ctx) {
-		return errors.Join(pgErr, b.Remote.IndexDocument(ctx, doc))
+		return errors.Join(pgErr, b.Remote.IndexDocument(ctx, &doc))
 	}
 	database.AfterCommit(ctx, func(ctx context.Context) {
-		if err := b.Remote.IndexDocument(ctx, doc); err != nil {
+		if err := b.Remote.IndexDocument(ctx, &doc); err != nil {
 			slog.WarnContext(ctx, "remote search index update failed; rebuild via POST /api/v1/search/reindex",
 				"entity_id", doc.EntityID, "error", err)
 		}
@@ -58,7 +61,7 @@ func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID 
 // policy uses the current client and site, together with the entity's own
 // policy (hitVisible); hits that PostgreSQL does not return are dropped, for
 // every entity type.
-func (b *HybridBackend) Query(ctx context.Context, q Query) (Result, error) {
+func (b *HybridBackend) Query(ctx context.Context, q *Query) (Result, error) {
 	res, err := b.Remote.Query(ctx, q)
 	if err != nil || len(res.Data) == 0 {
 		return res, err
@@ -171,7 +174,7 @@ func (b *HybridBackend) ReindexPlacement(ctx context.Context, orgID, ciID string
 	}
 	var errs []error
 	for i := range docs {
-		if err := b.Remote.IndexDocument(ctx, docs[i]); err != nil {
+		if err := b.Remote.IndexDocument(ctx, &docs[i]); err != nil {
 			errs = append(errs, fmt.Errorf("%s %s: %w", docs[i].EntityType, docs[i].EntityID, err))
 		}
 	}
@@ -197,12 +200,12 @@ func (b *HybridBackend) ReindexTenant(ctx context.Context, orgID string) (Reinde
 	ctx = database.ContextWithTenantScope(ctx, &orgWide)
 	indexed := 0
 	for offset := 0; ; offset += 100 {
-		res, err := b.Source.Query(ctx, Query{OrganizationID: orgID, Limit: 100, Offset: offset})
+		res, err := b.Source.Query(ctx, &Query{OrganizationID: orgID, Limit: 100, Offset: offset})
 		if err != nil {
 			return ReindexResult{Indexed: indexed}, err
 		}
-		for _, hit := range res.Data {
-			if err := b.Remote.IndexDocument(ctx, hit.Document); err != nil {
+		for i := range res.Data {
+			if err := b.Remote.IndexDocument(ctx, &res.Data[i].Document); err != nil {
 				return ReindexResult{Indexed: indexed}, err
 			}
 			indexed++

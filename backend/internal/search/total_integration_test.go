@@ -52,7 +52,7 @@ func TestSearchTotalForm(t *testing.T) {
 	reindex()
 	query := func(offset int) search.Result {
 		t.Helper()
-		res, err := repo.Query(f.OrgCtx(f.OrgA), search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: "wp839", Limit: 50, Offset: offset})
+		res, err := repo.Query(f.OrgCtx(f.OrgA), &search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: "wp839", Limit: 50, Offset: offset})
 		if err != nil {
 			t.Fatalf("search at offset %d: %v", offset, err)
 		}

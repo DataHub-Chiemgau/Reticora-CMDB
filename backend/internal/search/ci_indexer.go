@@ -26,7 +26,8 @@ func NewCIIndexer(backend Backend) *CIIndexer {
 // IndexDocument upserts a CI document into the search index. Client and site
 // of the CI travel along so remote indexes can filter on them (TEC-12).
 func (a *CIIndexer) IndexDocument(ctx context.Context, doc *ci.Document) error {
-	return a.Backend.IndexDocument(ctx, searchDocument(doc))
+	sdoc := searchDocument(doc)
+	return a.Backend.IndexDocument(ctx, &sdoc)
 }
 
 // BatchBackend is a backend that indexes several documents of one

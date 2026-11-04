@@ -50,7 +50,7 @@ func TestOpenAIProviderHTTP(t *testing.T) {
 }
 func TestRetrievalPermissionScoping(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret"})
+	sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret"})
 	repo := NewMemoryRepository()
 	repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret", Content: "secret text"})
 	perms := permission.NewMemoryRepository()
@@ -80,8 +80,8 @@ func grantPermission(perms *permission.MemoryRepository, orgID, userID, key stri
 
 func TestRetrievalTenantIsolation(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router"})
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
 	repo := NewMemoryRepository()
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router", Content: "org-a router"})
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
@@ -112,7 +112,7 @@ func TestRetrievalDropsForeignSearchHits(t *testing.T) {
 	// Defense in depth: even if a misconfigured search backend returns hits
 	// for another tenant, the retriever must not pass them on.
 	sr := search.NewMemoryRepository()
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
 	repo := NewMemoryRepository()
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
 	perms := permission.NewMemoryRepository()
@@ -135,7 +135,7 @@ func TestRetrievalDropsForeignSearchHits(t *testing.T) {
 
 func TestRetrievalFailsClosedOnUnknownEntityType(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret"})
 	repo := NewMemoryRepository()
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret", Content: "top secret"})
 	perms := permission.NewMemoryRepository()
@@ -158,7 +158,7 @@ func (errPermissionRepo) HasPermission(context.Context, string, string, string) 
 
 func TestRetrievalFailsClosedOnPermissionError(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
 	repo := NewMemoryRepository()
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text"})
 	retr := NewRetriever(repo, sr, errPermissionRepo{}, DisabledProvider{})
@@ -180,7 +180,7 @@ func TestContactPermissionMapping(t *testing.T) {
 
 func TestCitationCompleteness(t *testing.T) {
 	sr := search.NewMemoryRepository()
-	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
+	_ = sr.IndexDocument(context.Background(), &search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
 	repo := NewMemoryRepository()
 	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text", URL: "/cmdb/c1"})
 	perms := permission.NewMemoryRepository()

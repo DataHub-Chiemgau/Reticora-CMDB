@@ -36,7 +36,7 @@ type fakeSearchBackend struct {
 	indexed, deleted int
 }
 
-func (b *fakeSearchBackend) IndexDocument(context.Context, search.Document) error {
+func (b *fakeSearchBackend) IndexDocument(context.Context, *search.Document) error {
 	b.indexed++
 	return nil
 }

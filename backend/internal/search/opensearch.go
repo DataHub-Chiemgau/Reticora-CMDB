@@ -23,7 +23,8 @@ type OpenSearchBackend struct {
 	client *http.Client
 }
 
-func NewOpenSearchBackend(cfg OpenSearchConfig, client *http.Client) *OpenSearchBackend {
+func NewOpenSearchBackend(config *OpenSearchConfig, client *http.Client) *OpenSearchBackend {
+	cfg := *config
 	if cfg.Index == "" {
 		cfg.Index = "reticora-search"
 	}
@@ -40,7 +41,7 @@ func NewOpenSearchBackend(cfg OpenSearchConfig, client *http.Client) *OpenSearch
 	return &OpenSearchBackend{cfg: cfg, client: client}
 }
 func (b *OpenSearchBackend) Ping(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.cfg.URL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("opensearch ping: build request: %w", err)
 	}
@@ -113,7 +114,7 @@ func (b *OpenSearchBackend) EnsureIndexTemplate(ctx context.Context) error {
 	}
 	return nil
 }
-func (b *OpenSearchBackend) IndexDocument(ctx context.Context, doc Document) error {
+func (b *OpenSearchBackend) IndexDocument(ctx context.Context, doc *Document) error {
 	body, err := json.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("opensearch index: marshal document: %w", err)
@@ -135,7 +136,7 @@ func (b *OpenSearchBackend) IndexDocument(ctx context.Context, doc Document) err
 	return nil
 }
 func (b *OpenSearchBackend) Delete(ctx context.Context, orgID, entityType, entityID string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, orgID, entityType, entityID), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fmt.Sprintf("%s/%s/_doc/%s-%s-%s", b.cfg.URL, b.cfg.Index, orgID, entityType, entityID), http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -211,12 +212,12 @@ func buildOpenSearchQuery(q *Query, scope *database.TenantScope) (map[string]any
 	}
 	return body, nil
 }
-func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) {
+func (b *OpenSearchBackend) Query(ctx context.Context, q *Query) (Result, error) {
 	scope, ok := database.TenantScopeFromContext(ctx)
 	if !ok {
 		return Result{}, database.ErrNoTenantScope
 	}
-	body, err := buildOpenSearchQuery(&q, &scope)
+	body, err := buildOpenSearchQuery(q, &scope)
 	if err != nil {
 		return Result{}, err
 	}
@@ -264,7 +265,8 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q Query) (Result, error) 
 	case float64:
 		out.Total = int(v)
 	}
-	for _, item := range parsed.Hits.Hits {
+	for i := range parsed.Hits.Hits {
+		item := &parsed.Hits.Hits[i]
 		// The filters run in OpenSearch; the check repeats them on the
 		// returned documents so a mapping error cannot leak hits.
 		if !visibleTo(&scope, q.OrganizationID, &item.Source) {

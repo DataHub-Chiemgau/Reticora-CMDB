@@ -103,7 +103,7 @@ func newBFFFixture(t *testing.T) *bffFixture {
 		{ID: "d1", OrganizationID: "org-1", EntityType: "ci", EntityID: f.hub, Title: "hub switch"},
 		{ID: "d2", OrganizationID: "org-1", EntityType: "ticket", EntityID: "t1", Title: "hub outage"},
 	} {
-		if err := idx.IndexDocument(bg, doc); err != nil {
+		if err := idx.IndexDocument(bg, &doc); err != nil {
 			t.Fatal(err)
 		}
 	}

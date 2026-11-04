@@ -127,7 +127,7 @@ func TestContactsThroughTheVault(t *testing.T) {
 		t.Fatal("the search index holds contact data in plaintext")
 	}
 	for text, want := range map[string]string{"mustermann": "Erika Mustermann", "Max": "Max Legacy", "e.mustermann@example.org": "Erika Mustermann"} {
-		hits, qerr := searchRepo.Query(ctx, search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text,
+		hits, qerr := searchRepo.Query(ctx, &search.Query{OrganizationID: f.OrgA, UserID: f.User, Text: text,
 			EntityTypes: []string{"contact"}, Limit: 10})
 		if qerr != nil || len(hits.Data) != 1 || hits.Data[0].Title != want {
 			t.Fatalf("search %q = %+v, %v", text, hits.Data, qerr)

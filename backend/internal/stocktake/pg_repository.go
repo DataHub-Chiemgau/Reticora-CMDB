@@ -88,7 +88,7 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 }
 
 // List returns paginated stocktakes filtered by the given parameters.
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
 	var stocktakes []Stocktake
 	var total int
 
@@ -524,7 +524,8 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorr
 				return fmt.Errorf("iterate deviating scans: %w", iterErr)
 			}
 
-			for _, p := range pending {
+			for i := range pending {
+				p := &pending[i]
 				c := Correction{
 					AssetID:          p.assetID,
 					AssetTag:         p.tag,
