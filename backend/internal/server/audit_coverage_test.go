@@ -557,6 +557,8 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PATCH /api/v1/metamodel/drafts/{id}":                  {"", `{"name":"a5 draft renamed"}`},
 	"POST /api/v1/metamodel/drafts/{id}/items":             {"", `{"kind":"ci_type","op":"create","payload":{"key":"a5_draft_type","name":"a5 draft type"}}`},
 	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}": {"/api/v1/metamodel/drafts/<id:/api/v1/metamodel/drafts>/items/<id:/api/v1/metamodel-draft-items>", ""},
+	// The publication (WP-261) of the tested draft of the fixture.
+	"POST /api/v1/metamodel/drafts/{id}/publish": {"/api/v1/metamodel/drafts/<publish_draft>/publish", `{}`},
 	// Document links (WP-267): the link the sub-create returned.
 	"DELETE /api/v1/documents/{id}/links/{link_id}": {"/api/v1/documents/<id:/api/v1/documents>/links/<id:/api/v1/document-links>", ""},
 }
@@ -666,6 +668,19 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixed["<tag_src>"] = tagSource
+	// A tested metamodel draft with one item, a new type, for POST
+	// /metamodel/drafts/{id}/publish (WP-261); the test run sets tested
+	// without blocking conflicts (WP-721).
+	var publishDraft string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO metamodel_draft (organization_id, name, status, items)
+		VALUES ($1, 'a5 publish', 'tested', jsonb_build_array(jsonb_build_object('id', gen_random_uuid(), 'kind', 'ci_type',
+			'op', 'create', 'target_id', NULL, 'target_key', NULL,
+			'payload', '{"key":"a5_published_type","name":"a5 published type"}'::jsonb, 'base', NULL,
+			'schema_versions', '{}'::jsonb, 'route', 'POST /api/v1/ci-types', 'created_by', NULL, 'created_at', now())))
+		RETURNING id::text`, f.OrgA).Scan(&publishDraft); err != nil {
+		t.Fatal(err)
+	}
+	fixed["<publish_draft>"] = publishDraft
 	ids := map[string]string{}
 	fill := func(s string) string {
 		for k, v := range fixed {

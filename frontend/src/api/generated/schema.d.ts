@@ -6492,6 +6492,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/metamodel/drafts/{id}/publish': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Publish a tested metamodel draft (MET-53)
+     * @description Applies the items of a `tested` draft (WP-261) in one transaction and sets it `published` with `published_at`. The draft row is locked; a draft that is not `tested`, or already published or discarded (also a concurrent second publication), is 409. Before the first item the targets of all items are locked and compared with the base the items captured: a target that changed or vanished is 409 with `stale_items`, and nothing changes. Every item runs through its resource route with that route's checks and error contract (422 for a MET-16 composition conflict, also one the schema generator finds when the deferred regeneration runs after the last item; 409 for a unique conflict; 403 for a system row); the problem names the refused item (`item_id`), and every element is rolled back. Item references `{"$item": "<item id>"}` take the id the referenced item created. Each affected type gets at most one new `schema_version`. The audit entries of the elements, the audit entry `metamodel.published` of the draft and one event `metamodel.published` (entity: the draft) are written in the same transaction; the webhook events of the applied types and attributes (`ci_type.*`, `ci_attribute.changed`) follow the commit. Requires metamodel:publish; without the database 503.
+     */
+    post: operations['publishMetamodelDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/ci-types': {
     parameters: {
       query?: never;
@@ -9443,6 +9466,18 @@ export interface components {
       /** @description The key of the violated catalog rule. */
       rule?: string;
       message: string;
+    };
+    /** @description The answer of the publication of a metamodel draft (WP-261): the published draft, the number of applied elements per item kind and the affected CI types with their `schema_version` after the publication. */
+    MetamodelPublication: {
+      draft: components['schemas']['MetamodelDraft'];
+      counts: {
+        [key: string]: number;
+      };
+      types: {
+        /** Format: uuid */
+        id: string;
+        schema_version: number;
+      }[];
     };
     MetamodelTestReportPage: components['schemas']['MetamodelTestReport'] & {
       data: components['schemas']['MetamodelTestViolation'][];
@@ -32515,6 +32550,36 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  publishMetamodelDraft: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The published draft */
+      200: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MetamodelPublication'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

@@ -14340,6 +14340,58 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/metamodel/drafts/{id}/publish:
+    x-phase: P2
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: publishMetamodelDraft
+      tags: [Metamodel]
+      summary: Publish a tested metamodel draft (MET-53)
+      description: >-
+        Applies the items of a `tested` draft (WP-261) in one transaction
+        and sets it `published` with `published_at`. The draft row is
+        locked; a draft that is not `tested`, or already published or
+        discarded (also a concurrent second publication), is 409. Before
+        the first item the targets of all items are locked and compared
+        with the base the items captured: a target that changed or vanished
+        is 409 with `stale_items`, and nothing changes. Every item runs
+        through its resource route with that route's checks and error
+        contract (422 for a MET-16 composition conflict, also one the
+        schema generator finds when the deferred regeneration runs after
+        the last item; 409 for a unique conflict; 403 for a system row);
+        the problem names the refused item (`item_id`), and every element
+        is rolled back. Item references `{"$item": "<item id>"}` take the
+        id the referenced item created. Each affected type gets at most one
+        new `schema_version`. The audit entries of the elements, the audit
+        entry `metamodel.published` of the draft and one event
+        `metamodel.published` (entity: the draft) are written in the same
+        transaction; the webhook events of the applied types and
+        attributes (`ci_type.*`, `ci_attribute.changed`) follow the commit.
+        Requires metamodel:publish; without the database 503.
+      responses:
+        '200':
+          description: The published draft
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetamodelPublication'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/ci-types:
     get:
       operationId: listCiTypes
@@ -20022,6 +20074,30 @@ components:
         code: { type: string }
         rule: { type: string, description: The key of the violated catalog rule. }
         message: { type: string }
+    MetamodelPublication:
+      type: object
+      description: >-
+        The answer of the publication of a metamodel draft (WP-261): the
+        published draft, the number of applied elements per item kind and
+        the affected CI types with their `schema_version` after the
+        publication.
+      required: [draft, counts, types]
+      properties:
+        draft:
+          $ref: '#/components/schemas/MetamodelDraft'
+        counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        types:
+          type: array
+          items:
+            type: object
+            required: [id, schema_version]
+            properties:
+              id: { type: string, format: uuid }
+              schema_version: { type: integer }
     MetamodelTestReportPage:
       allOf:
         - $ref: '#/components/schemas/MetamodelTestReport'

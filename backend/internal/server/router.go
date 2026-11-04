@@ -422,6 +422,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
+	// The publication of a draft (WP-261) applies its items through the
+	// resource routes on repos.CIType, the instance cmd/server/workers.go
+	// gives the index scheduler, and sends their webhook events after the
+	// commit through the dispatcher, as the direct path does.
+	var draftDispatcher citype.EventDispatcher
+	if opts.Dispatcher != nil {
+		draftDispatcher = opts.Dispatcher
+	}
+	draftHandler.WithPublish(repos.CIType, draftDispatcher)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))

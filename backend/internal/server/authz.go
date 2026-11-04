@@ -329,6 +329,8 @@ var routeRules = []routeRule{
 	// the report names CIs of every client, so reading it needs the
 	// publish right as well (E-106: org_admin only).
 	{"*", "metamodel/drafts/*/test", identity.PermMetamodelPublish},
+	// The publication of a tested draft (WP-261, MET-53, E-106).
+	{http.MethodPost, "metamodel/drafts/*/publish", identity.PermMetamodelPublish},
 	// The structured search reads (F-055, SRC-03); the handler also
 	// requires the read right of the queried entity kind. Rebuilding the
 	// index (search/reindex) stays search:write.
@@ -665,6 +667,7 @@ var domainRecordedRoutes = map[string]string{
 	"DELETE /api/v1/metamodel/drafts/{id}":                   "metamodel.PGRepository",
 	"POST /api/v1/metamodel/drafts/{id}/items":               "metamodel.PGRepository",
 	"DELETE /api/v1/metamodel/drafts/{id}/items/{item_id}":   "metamodel.PGRepository",
+	"POST /api/v1/metamodel/drafts/{id}/publish":             "metamodel.PGRepository.Publish (metamodel.published with the entries of its elements)",
 	// Locations and rack placement (DOD-01).
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",

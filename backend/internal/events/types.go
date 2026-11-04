@@ -223,9 +223,24 @@ type TicketData struct {
 }
 
 // MetamodelPublishedData is the data of metamodel.published, the
-// publication (WP-261; its content follows E-37).
+// publication (WP-261; its content follows E-37): the published draft
+// (direct false) or a change through a resource route without a draft
+// (direct true, MET-04), the number of its elements per part (the item
+// kinds of the metamodel drafts) and the affected types with their
+// schema_version after the publication.
 type MetamodelPublishedData struct {
-	ID string `json:"id"`
+	ID      string                   `json:"id"`
+	DraftID string                   `json:"draft_id,omitempty"`
+	Direct  bool                     `json:"direct"`
+	Counts  map[string]int           `json:"counts"`
+	Types   []MetamodelPublishedType `json:"types"`
+}
+
+// MetamodelPublishedType is a type a publication affected, with its
+// ci_type.schema_version after it.
+type MetamodelPublishedType struct {
+	ID            string `json:"id"`
+	SchemaVersion int64  `json:"schema_version"`
 }
 
 // DocumentScannedData is the data of document.scanned (WP-734): the scan

@@ -1330,3 +1330,6 @@ MGT-12;[P2];B;backend/internal/contract/supplier_integration_test.go;WP-736
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/contract/supplier_integration_test.go;WP-736
 SEC-09;[P2];B;backend/internal/document/scan_integration_test.go;WP-734
 MGT-01;[P2];B;backend/internal/document/scan_integration_test.go;WP-734
+MET-53;[P2];B;backend/internal/metamodel/publish_integration_test.go;WP-261
+AUD-07;[B];B;backend/internal/metamodel/publish_integration_test.go;WP-261
+EVT-03;[P2–P3];B;backend/internal/metamodel/publish_integration_test.go;WP-261
