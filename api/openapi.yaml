@@ -1151,6 +1151,14 @@ paths:
                   - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The CI has configuration children that are not deleted (child_mode
+            configuration, WP-273, E-123): move or delete them first; there is
+            no cascade. Standalone children keep their parent_ci_id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/cis/{id}/restore:
     parameters:
@@ -1201,7 +1209,9 @@ paths:
             serial number (MET-15). A value of a unique attribute another
             active CI holds is 409 urn:reticora:problem:conflict with
             `violations` naming the attributes, as POST /cis, also before the
-            unique index exists; the CI stays deleted.
+            unique index exists; the CI stays deleted. A configuration child
+            whose parent is deleted is 409 as well (WP-273, E-123): the
+            parent is restored first.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -24350,6 +24360,24 @@ components:
             relationship contains is projected from it. Cycles are rejected
             (422). The parent is a CI of the same client or an org-wide CI
             (TEN-05).
+        child_mode:
+          type: string
+          enum: [configuration, standalone]
+          description: >-
+            Child contract of a CI with a parent (AST-05, WP-273), absent
+            without one. configuration: no asset of its own; serial number,
+            location, physical lifecycle and inventory data come from the
+            nearest ancestor with an asset and appear read-only under asset
+            (asset_source_ci_id names that CI); the location follows the
+            parent's and cannot be written (422), the client is the
+            parent's. standalone (default): own asset, serial number,
+            location and lifecycle.
+        asset_source_ci_id:
+          type: string
+          description: >-
+            CI whose asset gives the values under asset: the CI itself for
+            a linked CI, the ancestor with the asset for a configuration
+            child (WP-273). Read-only.
         owner_user_id:
           type: string
           format: uuid
@@ -24660,6 +24688,14 @@ components:
             (TEN-05). A CI the principal cannot see, a deleted or unknown CI
             is rejected (422 "parent CI not found"), so is a CI of another
             client (422) and a cycle (422).
+        child_mode:
+          type: string
+          enum: [configuration, standalone]
+          description: >-
+            Child contract (WP-273); only with parent_ci_id (422 on
+            child_mode otherwise), standalone without it. configuration
+            requires the parent's client (422 on parent_ci_id) and rejects
+            asset_id and location_id in the same request (422).
         owner_user_id:
           type: string
           format: uuid
@@ -24784,7 +24820,18 @@ components:
             client or an org-wide CI (TEN-05). A CI the principal cannot see,
             a deleted or unknown CI is rejected (422 "parent CI not found"),
             so is a CI of another client (422) and a cycle (422); the parent
-            is checked again when client_id changes.
+            is checked again when client_id changes. Clearing it clears
+            child_mode.
+        child_mode:
+          type: [string, 'null']
+          description: >-
+            Child contract (WP-273): configuration or standalone; empty
+            string or null gives a CI with a parent the default standalone. Without a parent after the
+            update 422 on child_mode. configuration for a CI with an asset
+            is rejected (422 on child_mode, on asset_id when the request
+            links one); on a configuration child location_id and
+            serial_number cannot be written (422) and the parent must be of
+            the CI's client (422 on parent_ci_id).
         owner_user_id:
           type: [string, 'null']
           description: >-
@@ -30141,6 +30188,12 @@ components:
             Why the value is shown; computed for the value of a computed
             attribute (source computed, rank 100; MET-10, WP-717).
           enum: [override, source_rank, asset, record, computed]
+        source_ci_id:
+          type: string
+          description: >-
+            For reason asset: the CI whose asset gives the value, the CI
+            itself or, for serial_number and location_id of a configuration
+            child, the ancestor with the asset (WP-273).
         recorded_at: { type: string, format: date-time }
         observed_at: { type: string, format: date-time }
         override_author:

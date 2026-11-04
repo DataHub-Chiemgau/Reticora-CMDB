@@ -1417,3 +1417,5 @@ BLK-02;[P2];C;backend/internal/jobs/revert_integration_test.go;WP-305
 JOB-03;[B];C;backend/internal/jobs/revert_integration_test.go;WP-305
 STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
+AST-05;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273
+AST-04;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273

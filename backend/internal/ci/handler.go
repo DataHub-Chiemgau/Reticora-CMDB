@@ -349,6 +349,9 @@ func (h *Handler) Restore(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ErrNotDeleted):
 		api.WriteError(w, http.StatusConflict, "Conflict", "the CI is not deleted")
 		return
+	case errors.Is(err, ErrConfigurationParentDeleted):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConfigurationParentDeleted.Error())
+		return
 	case err != nil && err.Error() == "not found":
 		api.WriteError(w, http.StatusNotFound, "Not Found", "no deleted CI with this id")
 		return
@@ -669,6 +672,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		LocationID:      req.LocationID,
 		AssetID:         req.AssetID,
 		ParentCIID:      req.ParentCIID,
+		ChildMode:       req.ChildMode,
 		OwnerUserID:     req.OwnerUserID,
 		OwnerTeamID:     req.OwnerTeamID,
 		CITypeID:        req.CITypeID,
@@ -816,6 +820,11 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.svc.Delete(r.Context(), t.OrganizationID, id)
+	if errors.Is(err, ErrConfigurationChildren) {
+		// E-123 (b): no cascade to the configuration children.
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrConfigurationChildren.Error())
+		return
+	}
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "CI not found")
 		return

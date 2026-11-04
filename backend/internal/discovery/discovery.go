@@ -1933,9 +1933,11 @@ func (h *Handler) reconcileRecord(ctx context.Context, orgID string, frame *batc
 		// A CI without asset is linked to the asset with its serial number
 		// in this update (WP-741), after its lock (CI → asset). A CI with a
 		// location of its own is not: the link would replace it or hand it
-		// to the asset (E-81), and discovery changes no asset data.
+		// to the asset (E-81), and discovery changes no asset data. Nor is
+		// a configuration child, which has no asset of its own (WP-273):
+		// the record is processed without a link.
 		var link []asset.SerialLink
-		if matched.AssetID == "" && matched.LocationID == "" {
+		if matched.AssetID == "" && matched.LocationID == "" && matched.ChildMode != ci.ChildModeConfiguration {
 			serial := matched.SerialNumber
 			if update.SerialNumber != nil {
 				serial = *update.SerialNumber

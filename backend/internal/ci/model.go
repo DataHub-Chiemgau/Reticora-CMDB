@@ -35,6 +35,15 @@ type Item struct {
 	// ParentCIID is the CI this one is physically part of (chassis → blade,
 	// AST-05); the relationship contains is projected from it (DB-05).
 	ParentCIID string `json:"parent_ci_id,omitempty"`
+	// ChildMode is the child contract of a CI with a parent (AST-05,
+	// WP-273): configuration (no asset of its own; asset data and location
+	// come from the parent, Asset shows the facts of the nearest ancestor
+	// with an asset) or standalone (own asset, serial number, location and
+	// lifecycle; the default). Empty without a parent.
+	ChildMode string `json:"child_mode,omitempty"`
+	// AssetSourceCIID is the CI whose asset Asset shows: the CI itself for
+	// a linked CI, an ancestor for a configuration child. Read-only.
+	AssetSourceCIID string `json:"asset_source_ci_id,omitempty"`
 	// MergedIntoID is the CI this one was merged into (CI-01, CI-12);
 	// only the merge sets it.
 	MergedIntoID string `json:"merged_into_id,omitempty"`
@@ -202,6 +211,7 @@ type CreateRequest struct {
 	LocationID      string         `json:"location_id,omitempty"`
 	AssetID         string         `json:"asset_id,omitempty"`
 	ParentCIID      string         `json:"parent_ci_id,omitempty"`
+	ChildMode       string         `json:"child_mode,omitempty"`
 	OwnerUserID     string         `json:"owner_user_id,omitempty"`
 	OwnerTeamID     string         `json:"owner_team_id,omitempty"`
 	Name            string         `json:"name"`
@@ -235,7 +245,10 @@ type UpdateRequest struct {
 	AssetID *string `json:"asset_id,omitempty"`
 	// ParentCIID sets ("" clears) the containing CI, OwnerUserID and
 	// OwnerTeamID the owner (WP-280; a CI with an asset takes the asset's).
-	ParentCIID      *string        `json:"parent_ci_id,omitempty"`
+	ParentCIID *string `json:"parent_ci_id,omitempty"`
+	// ChildMode sets the child contract (configuration or standalone,
+	// WP-273); "" and null give a CI with a parent the default standalone.
+	ChildMode       *string        `json:"child_mode,omitempty"`
 	OwnerUserID     *string        `json:"owner_user_id,omitempty"`
 	OwnerTeamID     *string        `json:"owner_team_id,omitempty"`
 	Manufacturer    *string        `json:"manufacturer,omitempty"`
@@ -293,7 +306,7 @@ type UpdateRequest struct {
 // name and status are required; null on them, on attributes,
 // discovery_source, last_seen_at and change_reason is refused.
 var nullableFields = map[string]bool{
-	"client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true,
+	"client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "child_mode": true,
 	"owner_user_id": true, "owner_team_id": true,
 	"manufacturer": true, "model": true, "serial_number": true, "hardware_uuid": true,
 	"management_ip": true, "primary_mac": true, "hostname": true, "fqdn": true,
@@ -335,7 +348,7 @@ func (r *UpdateRequest) UnmarshalJSON(data []byte) error {
 func (r *UpdateRequest) field(name string) **string {
 	return map[string]**string{
 		"client_id": &r.ClientID, "location_id": &r.LocationID, "asset_id": &r.AssetID,
-		"parent_ci_id": &r.ParentCIID, "owner_user_id": &r.OwnerUserID, "owner_team_id": &r.OwnerTeamID,
+		"parent_ci_id": &r.ParentCIID, "child_mode": &r.ChildMode, "owner_user_id": &r.OwnerUserID, "owner_team_id": &r.OwnerTeamID,
 		"manufacturer": &r.Manufacturer, "model": &r.Model,
 		"serial_number": &r.SerialNumber, "hardware_uuid": &r.HardwareUUID,
 		"management_ip": &r.ManagementIP, "primary_mac": &r.PrimaryMAC, "hostname": &r.Hostname,

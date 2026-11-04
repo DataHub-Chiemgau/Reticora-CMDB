@@ -181,6 +181,8 @@ func (r *MemoryRepository) Create(ctx context.Context, item *Item) error {
 	if item.Health == "" {
 		item.Health = "unknown"
 	}
+	// The default child mode like migration 000244 (WP-273).
+	applyChildMode(item)
 	r.items[item.ID] = item
 	return nil
 }
@@ -194,6 +196,10 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 		return nil, ErrNotFound
 	}
 	if err := reviveSighted(item, &req); err != nil {
+		return nil, err
+	}
+	// The child contract like the PostgreSQL repository (WP-273).
+	if err := checkChildContract(item, &req); err != nil {
 		return nil, err
 	}
 	// The tag assignment like the PostgreSQL repository (WP-281).
@@ -242,6 +248,10 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	if req.ParentCIID != nil {
 		item.ParentCIID = *req.ParentCIID
 	}
+	if req.ChildMode != nil {
+		item.ChildMode = *req.ChildMode
+	}
+	applyChildMode(item)
 	// The owner (WP-280, WP-752): "" clears it. Without assets the
 	// mirroring of the asset's owner (DB-05) does not apply.
 	if req.OwnerUserID != nil {
@@ -282,6 +292,12 @@ func (r *MemoryRepository) Delete(ctx context.Context, orgID, id string) error {
 	if !ok || item.OrganizationID != orgID || item.DeletedAt != nil {
 		return ErrNotFound
 	}
+	// A parent with configuration children is not deleted (E-123 (b)).
+	for _, child := range r.items {
+		if child.OrganizationID == orgID && child.ParentCIID == id && child.ChildMode == ChildModeConfiguration && child.DeletedAt == nil {
+			return ErrConfigurationChildren
+		}
+	}
 	// A deleted CI is kept for the retention like in PostgreSQL (CI-05):
 	// decommissioned, without its asset link.
 	now := time.Now().UTC()
@@ -305,6 +321,9 @@ func (r *MemoryRepository) RestoreDeleted(_ context.Context, orgID, id string, r
 	}
 	if time.Since(*item.DeletedAt) > retention {
 		return nil, ErrRetentionExpired
+	}
+	if parent, ok := r.items[item.ParentCIID]; ok && item.ChildMode == ChildModeConfiguration && parent.DeletedAt != nil {
+		return nil, ErrConfigurationParentDeleted
 	}
 	item.DeletedAt = nil
 	if prev, ok := r.deleted[id]; ok {

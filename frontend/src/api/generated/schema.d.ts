@@ -11505,6 +11505,13 @@ export interface components {
       /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
       /**
+       * @description Child contract of a CI with a parent (AST-05, WP-273), absent without one. configuration: no asset of its own; serial number, location, physical lifecycle and inventory data come from the nearest ancestor with an asset and appear read-only under asset (asset_source_ci_id names that CI); the location follows the parent's and cannot be written (422), the client is the parent's. standalone (default): own asset, serial number, location and lifecycle.
+       * @enum {string}
+       */
+      child_mode?: 'configuration' | 'standalone';
+      /** @description CI whose asset gives the values under asset: the CI itself for a linked CI, the ancestor with the asset for a configuration child (WP-273). Read-only. */
+      asset_source_ci_id?: string;
+      /**
        * Format: uuid
        * @description User responsible for the CI in the system (CI-07): the ID of the user (app_user.id), no personal data; clients resolve the name. Separate from the contact role owner (GET /api/v1/cis/{id}/contacts). For a CI linked to an asset it mirrors the asset's owner (DB-05). Subject to the field permissions (core.owner_user_id).
        */
@@ -11683,6 +11690,11 @@ export interface components {
       /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
       /**
+       * @description Child contract (WP-273); only with parent_ci_id (422 on child_mode otherwise), standalone without it. configuration requires the parent's client (422 on parent_ci_id) and rejects asset_id and location_id in the same request (422).
+       * @enum {string}
+       */
+      child_mode?: 'configuration' | 'standalone';
+      /**
        * Format: uuid
        * @description Owning user (WP-280). An unknown user or one of another organization is rejected (422 on owner_user_id). With asset_id the CI takes the asset's owner; another owner is rejected (422).
        */
@@ -11733,8 +11745,10 @@ export interface components {
       location_id?: string | null;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string | null;
-      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
+      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. Clearing it clears child_mode. */
       parent_ci_id?: string | null;
+      /** @description Child contract (WP-273): configuration or standalone; empty string or null gives a CI with a parent the default standalone. Without a parent after the update 422 on child_mode. configuration for a CI with an asset is rejected (422 on child_mode, on asset_id when the request links one); on a configuration child location_id and serial_number cannot be written (422) and the parent must be of the CI's client (422 on parent_ci_id). */
+      child_mode?: string | null;
       /** @description Owning user (empty string or null clears it, WP-280). An unknown user or one of another organization is rejected (422). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_user_id). */
       owner_user_id?: string | null;
       /** @description Owning team (empty string or null clears it, WP-280). An unknown team or one of another organization is rejected (422); a team outside the scope of a team-scoped principal is refused (403, TEN-05). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_team_id). */
@@ -14941,6 +14955,8 @@ export interface components {
        * @enum {string}
        */
       reason: 'override' | 'source_rank' | 'asset' | 'record' | 'computed';
+      /** @description For reason asset: the CI whose asset gives the value, the CI itself or, for serial_number and location_id of a configuration child, the ancestor with the asset (WP-273). */
+      source_ci_id?: string;
       /** Format: date-time */
       recorded_at?: string;
       /** Format: date-time */
@@ -17517,6 +17533,15 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description The CI has configuration children that are not deleted (child_mode configuration, WP-273, E-123): move or delete them first; there is no cascade. Standalone children keep their parent_ci_id. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateCI: {
@@ -17631,7 +17656,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. A configuration child whose parent is deleted is 409 as well (WP-273, E-123): the parent is restored first. */
       409: {
         headers: {
           [name: string]: unknown;
