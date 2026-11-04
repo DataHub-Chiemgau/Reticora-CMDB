@@ -685,7 +685,7 @@ type OverrideClearer interface {
 // resolveOverrideConflict accepts the observed value of an override_conflict
 // item: the override is removed and the CI takes the observed value
 // (REC-12). Dismissing keeps the override; the dismissed value is then
-// suppressed until the source reports another (queueOverrideConflict).
+// suppressed until the source reports another (QueueOverrideConflict).
 func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
 	if res.Action != reviews.ActionAccept {
 		res.Note = "override kept"

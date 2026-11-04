@@ -3,10 +3,13 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -832,9 +835,10 @@ func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []
 	return out
 }
 
-// probableDuplicateReview is the review of a new CI that shares its
-// hostname or FQDN with existing CIs.
-func probableDuplicateReview(orgID, newCIID string, incoming *IngestItem, candidates []string) *ReviewItem {
+// ProbableDuplicateReview is the review of a new CI that shares its
+// hostname or FQDN with existing CIs; the import opens it like the ingest
+// (WP-302).
+func ProbableDuplicateReview(orgID, newCIID string, incoming *IngestItem, candidates []string) *ReviewItem {
 	return &ReviewItem{
 		OrganizationID: orgID,
 		Kind:           ReviewKindProbableDuplicate,
@@ -897,16 +901,291 @@ func (h *Handler) resurrectionWith(ctx context.Context, orgID string, item *Inge
 	default:
 		return false, false, nil
 	}
-	// One open review per deleted CI: a device seen again and again is
-	// not queued again (REC-08 deduplication).
-	review := reviewItemFromConflict(orgID, item, &ReconcileResult{CandidateCIIDs: candidates, Criterion: res.Criterion})
-	review.Kind = ReviewKindResurrectedDevice
-	sorted := append([]string(nil), candidates...)
-	sort.Strings(sorted)
-	review.ObjectKey = "ci:" + strings.Join(sorted, ",")
-	opened, err := h.openReview(ctx, review)
+	opened, err := h.openReview(ctx, resurrectedDeviceReview(orgID, item, candidates, res.Criterion))
 	if err != nil {
 		return false, false, err
 	}
 	return true, opened, nil
+}
+
+// resurrectedDeviceReview is the review of a device that matches only
+// soft-deleted CIs (CI-13). One open review per deleted CI: a device seen
+// again and again is not queued again (REC-08 deduplication).
+func resurrectedDeviceReview(orgID string, item *IngestItem, candidates []string, criterion string) *ReviewItem {
+	review := reviewItemFromConflict(orgID, item, &ReconcileResult{CandidateCIIDs: candidates, Criterion: criterion})
+	review.Kind = ReviewKindResurrectedDevice
+	sorted := append([]string(nil), candidates...)
+	sort.Strings(sorted)
+	review.ObjectKey = "ci:" + strings.Join(sorted, ",")
+	return review
+}
+
+// RecordResolution is the identity of one record another channel than the
+// ingest resolves (import, WP-302): the REC-02 result over the live
+// candidates and, for a record without a live match, the soft-deleted CIs
+// it matches (CI-13).
+type RecordResolution struct {
+	Result ReconcileResult
+	// Candidates are the live identity candidates of the record, matched
+	// or not: they hold the identity values a new CI cannot take.
+	Candidates []ci.Item
+	// Resurrected lists the soft-deleted CIs the record matches when no
+	// live CI does; ResurrectedCriterion is the REC-02 criterion. The
+	// device is then held for them (resurrected_device), nothing is
+	// created.
+	Resurrected          []string
+	ResurrectedCriterion string
+}
+
+// Matched returns the matched live CI of a resolution, nil without a
+// match.
+func (r *RecordResolution) Matched() *ci.Item {
+	if r.Result.Action != ReconcileMatched {
+		return nil
+	}
+	return findCI(r.Candidates, r.Result.MatchedCIID)
+}
+
+// IdentityResolver resolves the identity of records for another channel
+// than the ingest (import, WP-302, K21) with the implementation of the
+// ingest: the CI types and the identity context (generic_device, the
+// virtual types, the default VRF) of the organization, the candidate
+// search over BatchIdentityFinder and the check of soft-deleted CIs. The
+// types and the identity context are read before the transaction of a
+// record (NewIdentityResolver, Type); Resolve runs in that transaction
+// after LockIdentities. It is safe for concurrent use.
+type IdentityResolver struct {
+	h     *Handler
+	orgID string
+	ic    *IdentityContext
+	mu    sync.Mutex
+	types map[string]ResolvedType
+}
+
+// NewIdentityResolver returns the identity resolver of orgID: it reads the
+// types of the identity context and the default VRF.
+func (h *Handler) NewIdentityResolver(ctx context.Context, orgID string) (*IdentityResolver, error) {
+	r := &IdentityResolver{h: h, orgID: orgID, types: map[string]ResolvedType{}}
+	if err := r.lookup(ctx, append([]string{ci.GenericDeviceType}, virtualTypeKeys...)); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	types := maps.Clone(r.types)
+	r.mu.Unlock()
+	ic, err := h.identityContext(ctx, orgID, types)
+	if err != nil {
+		return nil, err
+	}
+	r.ic = ic
+	return r, nil
+}
+
+// Context returns the identity context of the resolver.
+func (r *IdentityResolver) Context() *IdentityContext { return r.ic }
+
+// lookup resolves the names not resolved before (lookupTypes); an unknown
+// name is remembered as unknown.
+func (r *IdentityResolver) lookup(ctx context.Context, names []string) error {
+	r.mu.Lock()
+	var missing []string
+	for _, name := range names {
+		if _, ok := r.types[name]; !ok && name != "" && !slices.Contains(missing, name) {
+			missing = append(missing, name)
+		}
+	}
+	r.mu.Unlock()
+	if len(missing) == 0 {
+		return nil
+	}
+	found, err := r.h.lookupTypes(ctx, r.orgID, missing)
+	if err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, name := range missing {
+		r.types[name] = found[name]
+	}
+	return nil
+}
+
+// Type resolves a CI type name, key or UUID like the ingest (an active
+// type before a deactivated one, an org type before a system type); ok is
+// false for an unknown type.
+func (r *IdentityResolver) Type(ctx context.Context, name string) (ResolvedType, bool, error) {
+	name = strings.TrimSpace(name)
+	if err := r.lookup(ctx, []string{name}); err != nil {
+		return ResolvedType{}, false, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t := r.types[name]
+	return t, t.ID != "", nil
+}
+
+// LockIdentities takes the identity locks of items (E-56) in the context
+// transaction; it must be the transaction's first statement
+// (LockIdentityKeys).
+func (r *IdentityResolver) LockIdentities(ctx context.Context, items ...*IngestItem) error {
+	return LockIdentityKeys(ctx, r.orgID, r.ic, items...)
+}
+
+// LockCI locks the row of a matched CI in the context transaction before
+// its provenance and overrides are read, like the ingest (CILocker); a
+// repository without row locks locks nothing.
+func (r *IdentityResolver) LockCI(ctx context.Context, ciID string) error {
+	if locker, ok := r.h.repo.(CILocker); ok {
+		return locker.LockCI(ctx, r.orgID, ciID)
+	}
+	return nil
+}
+
+// Resolve resolves items, whose CITypeName is the resolved type id, with
+// REC-02 against the live CIs and, for a record without a live match that
+// carries an identity value besides host names, against the soft-deleted
+// ones: with the batch candidate queries of the ingest
+// (BatchIdentityFinder) where the repository has them, else record by
+// record.
+func (r *IdentityResolver) Resolve(ctx context.Context, items []IngestItem) ([]RecordResolution, error) {
+	qs, include := make([]IdentityQuery, len(items)), make([]bool, len(items))
+	finder, batch := r.h.repo.(BatchIdentityFinder)
+	for i := range items {
+		qs[i], include[i] = identityQuery(&items[i]), true
+		batch = batch && batchable(&qs[i])
+	}
+	candidates := make([][]ci.Item, len(items))
+	if batch {
+		keys, refs := batchKeys(qs, include)
+		var hits []IdentityHit
+		if !keys.empty() {
+			var err error
+			if hits, err = finder.IdentityHits(ctx, r.orgID, keys); err != nil {
+				return nil, fmt.Errorf("identity candidates: %w", err)
+			}
+		}
+		var err error
+		if candidates, err = r.h.loadCandidates(ctx, r.orgID, assignCandidates(refs, hits)); err != nil {
+			return nil, err
+		}
+	} else {
+		for i := range items {
+			var err error
+			if candidates[i], err = r.h.identityCandidates(ctx, r.orgID, &items[i]); err != nil {
+				return nil, err
+			}
+		}
+	}
+	out := make([]RecordResolution, len(items))
+	held := make([]bool, len(items))
+	for i := range items {
+		out[i] = RecordResolution{Result: ResolveIdentity(candidates[i], &items[i], r.ic), Candidates: candidates[i]}
+		held[i] = out[i].Result.Action == ReconcileCreated && resurrectionGuard(&qs[i])
+	}
+	deleted, err := r.deleted(ctx, qs, held, batch)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if !held[i] {
+			continue
+		}
+		res := ResolveIdentity(deleted[i], &items[i], r.ic)
+		switch res.Action {
+		case ReconcileMatched:
+			out[i].Resurrected, out[i].ResurrectedCriterion = []string{res.MatchedCIID}, res.Criterion
+		case ReconcileConflict:
+			out[i].Resurrected, out[i].ResurrectedCriterion = res.CandidateCIIDs, res.Criterion
+		}
+	}
+	return out, nil
+}
+
+// deleted reads the soft-deleted candidates of the records with held[i]:
+// with one query (DeletedIdentityHits) or record by record
+// (DeletedCandidateFinder); without either none.
+func (r *IdentityResolver) deleted(ctx context.Context, qs []IdentityQuery, held []bool, batch bool) ([][]ci.Item, error) {
+	out := make([][]ci.Item, len(qs))
+	if !slices.Contains(held, true) {
+		return out, nil
+	}
+	if finder, ok := r.h.repo.(BatchIdentityFinder); ok && batch {
+		keys, refs := batchKeys(qs, held)
+		if keys.empty() {
+			return out, nil
+		}
+		hits, err := finder.DeletedIdentityHits(ctx, r.orgID, keys)
+		if err != nil {
+			return nil, fmt.Errorf("deleted identity candidates: %w", err)
+		}
+		return assignDeleted(refs, hits), nil
+	}
+	finder, ok := r.h.repo.(DeletedCandidateFinder)
+	if !ok {
+		return out, nil
+	}
+	for i := range qs {
+		if !held[i] {
+			continue
+		}
+		var err error
+		if out[i], err = finder.DeletedIdentityCandidates(ctx, r.orgID, &qs[i]); err != nil {
+			return nil, fmt.Errorf("deleted identity candidates: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// OpenResurrected opens the resurrected_device review of a record held for
+// soft-deleted CIs, the review of the ingest (CI-13); it reports whether a
+// new review was opened.
+func (r *IdentityResolver) OpenResurrected(ctx context.Context, item *IngestItem, res *RecordResolution) (bool, error) {
+	if len(res.Resurrected) == 0 {
+		return false, nil
+	}
+	return r.h.openReview(ctx, resurrectedDeviceReview(r.orgID, item, res.Resurrected, res.ResurrectedCriterion))
+}
+
+// OpenProbableDuplicate opens the probable_duplicate review of a new CI
+// whose host name or FQDN other CIs share (CH29), the review of the
+// ingest; it reports whether a new review was opened.
+func (r *IdentityResolver) OpenProbableDuplicate(ctx context.Context, newCIID string, item *IngestItem, res *RecordResolution) (bool, error) {
+	if len(res.Result.ProbableDuplicates) == 0 {
+		return false, nil
+	}
+	return r.h.openReview(ctx, ProbableDuplicateReview(r.orgID, newCIID, item, res.Result.ProbableDuplicates))
+}
+
+// ResolveRecords resolves the identity of items for another channel than
+// the ingest (WP-302) with the implementation of the ingest: the type of
+// each item (CITypeName, a name, key or UUID; an item of an unknown type
+// gets the zero resolution), the identity context, the candidate search
+// and the check of soft-deleted CIs.
+func (h *Handler) ResolveRecords(ctx context.Context, orgID string, items []IngestItem) ([]RecordResolution, error) {
+	r, err := h.NewIdentityResolver(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	resolved := make([]IngestItem, 0, len(items))
+	index := make([]int, 0, len(items))
+	for i := range items {
+		t, ok, typeErr := r.Type(ctx, items[i].CITypeName)
+		if typeErr != nil {
+			return nil, typeErr
+		}
+		if !ok {
+			continue
+		}
+		item := items[i]
+		item.CITypeName = t.ID
+		resolved, index = append(resolved, item), append(index, i)
+	}
+	results, err := r.Resolve(ctx, resolved)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RecordResolution, len(items))
+	for k, i := range index {
+		out[i] = results[k]
+	}
+	return out, nil
 }

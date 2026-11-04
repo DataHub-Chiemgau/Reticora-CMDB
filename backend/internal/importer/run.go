@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -33,7 +34,9 @@ const (
 
 // RowResult is what a writer reports for a row: the outcome, a message for
 // the report line of a written or skipped row and the issues of a failed
-// row (its report lines).
+// row (its report lines). The issues of a written or skipped row are notes
+// of it (fields kept or left out, reviews opened, WP-302) and follow its
+// outcome line.
 type RowResult struct {
 	Outcome Outcome
 	Message string
@@ -76,6 +79,9 @@ type RunInfo struct {
 	DryRun         bool
 	Profile        *Profile
 	InitiatedBy    string
+	// StartedAt is the start of the run: the observation time of the
+	// values a row does not date itself (WP-302).
+	StartedAt time.Time
 
 	mu    sync.Mutex
 	state map[any]any
@@ -317,7 +323,10 @@ func (h *ImportHandler) execute(ctx context.Context, job *jobs.Job, p *JobParams
 		return nil, result, err
 	}
 	run := &RunInfo{JobID: job.ID, OrganizationID: orgID, Entity: src.profile.Entity, Mode: p.Mode, DryRun: p.DryRun,
-		Profile: src.profile, InitiatedBy: job.CreatedBy}
+		Profile: src.profile, InitiatedBy: job.CreatedBy, StartedAt: time.Now().UTC()}
+	if job.StartedAt != nil {
+		run.StartedAt = job.StartedAt.UTC()
+	}
 	writer, err := h.precheck(ctx, orgID, src.profile, p.DryRun)
 	if err != nil {
 		return run, result, err
@@ -391,6 +400,11 @@ func writeOutcome(rep *report, line int, res *RowResult) {
 		return
 	}
 	rep.addIssue(&Issue{Line: line, Code: string(res.Outcome), Message: res.Message})
+	for i := range res.Issues {
+		is := res.Issues[i]
+		is.Line = line
+		rep.addIssue(&is)
+	}
 }
 
 // processRow maps a row and writes it in its own transaction: a failed row

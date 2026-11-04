@@ -490,7 +490,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The import runs (WP-301) get the job service in registerJobKinds; the
 	// routes serve in both profiles and answer 503 without it. A run
 	// (WP-775) hands its rows to the writer of the profile's entity:
-	// locations here, CIs with WP-302, assets, contracts, consumables and
+	// locations here, CIs below the discovery handler (WP-302), assets, contracts, consumables and
 	// relationships with WP-776. Before the first row it checks module and
 	// features of the entity with the release and the org gate, and after
 	// its success it reports import.completed.
@@ -636,6 +636,18 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	}
 	if opts.CIService != nil {
 		discoveryHandler.WithMerger(opts.CIService)
+	}
+	// CI rows of an import (WP-302) resolve their identity with the ingest's
+	// implementation under its identity locks, decide every field with
+	// source import (rank 95) and open the ingest's reviews; the policy of
+	// the starter is resolved like a request's.
+	if opts.CIService != nil && repos.Override != nil {
+		ciWriter := importer.NewCIWriter(opts.CIService, discoveryHandler, repos.Override, fieldResolver).
+			WithInstanceFields(repos.CIType).WithFields(repos.CIType).WithLocations(repos.LocationTree)
+		if analyzer, ok := repos.Discovery.(discovery.BulkAnalyzer); ok {
+			ciWriter.WithAnalyzer(analyzer)
+		}
+		importHandler.WithWriter(ciWriter)
 	}
 	topologyHandler := topology.NewHandler(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType).
 		WithCITypes(repos.CIType)
