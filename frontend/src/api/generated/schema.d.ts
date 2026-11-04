@@ -15914,7 +15914,7 @@ export interface components {
       url: string;
       score: number;
       highlights?: string[];
-      /** @description The fields of the hit that matched the search text (SRC-02, WP-786); under field permissions only the fields the caller may read (RBA-07). Absent without a match per field, for a contact hit and with the OpenSearch backend. */
+      /** @description The fields of the hit that matched the search text (SRC-02, WP-786); under field permissions only the fields the caller may read (RBA-07). Absent without a match per field and for a contact hit; an OpenSearch backend without PostgreSQL names only title and summary (WP-787). */
       matched_fields?: components['schemas']['SearchMatchedField'][];
       /** @description For a contact hit: email, phone and role of the contact (each only when set), read at query time from the PII vault and the contact under the caller's scope, like GET /contacts/{id}; the name is the title. The search index itself stores no personal data. */
       metadata?: {

@@ -49,9 +49,8 @@ type Query struct {
 	// restriction of ci, asset, document or ticket, a hit of that type
 	// matches, ranks and shows only its title and the summary fields
 	// readable for its type and scope. The REST handler and the GraphQL
-	// resolver always set it. nil is reserved for internal callers (the
-	// copy of HybridBackend.ReindexTenant, the AI retriever) and answers
-	// without field permissions.
+	// resolver always set it. nil is reserved for internal callers (the AI
+	// retriever) and answers without field permissions.
 	Policy *permission.FieldPolicy
 	// NetworkReadable lets the identifiers network.ip and network.mac (the
 	// addresses and MACs of the interfaces of a CI) count for a hit: the
@@ -185,7 +184,8 @@ type Hit struct {
 	Highlights []string `json:"highlights,omitempty"`
 	// MatchedFields are the fields that matched the search text (SRC-02,
 	// WP-786), with field permissions only the readable ones (RBA-07,
-	// WP-266). Only the PostgreSQL index fills them, for a query with
+	// WP-266). The PostgreSQL index and, from its full documents, the
+	// remote index of HybridBackend (WP-787) fill them, for a query with
 	// highlighting.
 	MatchedFields []MatchedField `json:"matched_fields,omitempty"`
 }

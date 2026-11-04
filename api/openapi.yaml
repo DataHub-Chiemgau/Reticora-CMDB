@@ -32043,8 +32043,9 @@ components:
           description: >-
             The fields of the hit that matched the search text (SRC-02,
             WP-786); under field permissions only the fields the caller may
-            read (RBA-07). Absent without a match per field, for a contact
-            hit and with the OpenSearch backend.
+            read (RBA-07). Absent without a match per field and for a
+            contact hit; an OpenSearch backend without PostgreSQL names only
+            title and summary (WP-787).
         metadata:
           type: object
           additionalProperties: { type: string }

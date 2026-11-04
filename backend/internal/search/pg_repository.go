@@ -752,16 +752,21 @@ func matchedFields(ctx context.Context, tx pgx.Tx, q *Query, restricted []string
 		if len(found[i]) == 0 {
 			continue
 		}
-		entityType := hits[i].EntityType
-		slices.SortStableFunc(found[i], func(x, y MatchedField) int {
-			if c := fieldRank(entityType, x.Field) - fieldRank(entityType, y.Field); c != 0 {
-				return c
-			}
-			return strings.Compare(x.Field+"\x00"+x.Highlight, y.Field+"\x00"+y.Highlight)
-		})
+		sortMatchedFields(hits[i].EntityType, found[i])
 		hits[i].MatchedFields = found[i]
 	}
 	return nil
+}
+
+// sortMatchedFields orders the matched fields of a hit by fieldRank, then
+// by field and highlight.
+func sortMatchedFields(entityType string, fields []MatchedField) {
+	slices.SortStableFunc(fields, func(x, y MatchedField) int {
+		if c := fieldRank(entityType, x.Field) - fieldRank(entityType, y.Field); c != 0 {
+			return c
+		}
+		return strings.Compare(x.Field+"\x00"+x.Highlight, y.Field+"\x00"+y.Highlight)
+	})
 }
 
 // fieldRank orders the matched fields of a hit: the title, the summary,
@@ -1059,4 +1064,119 @@ func contactDetails(ctx context.Context, tx pgx.Tx, orgID string, hits []Hit) er
 		}
 	}
 	return nil
+}
+
+// FullDocument is a document of the PostgreSQL index as a remote index
+// takes it (SRC-02, WP-787): the document, in Fields its field rows of both
+// sources (the indexer's and the triggers': core.<column>,
+// attributes.<key>), and its identifier rows.
+type FullDocument struct {
+	Document
+	Identifiers []IdentifierRow
+}
+
+// IdentifierRow is a row of search_identifier: the identifier field, the
+// normal form and, for an IP, the address (host()).
+type IdentifierRow struct {
+	Field string `json:"field"`
+	Norm  string `json:"norm"`
+	Addr  string `json:"addr,omitempty"`
+}
+
+// DocumentRef names the document of an entity.
+type DocumentRef struct {
+	EntityType, EntityID string
+}
+
+// FullDocuments reads the full documents of the entities with one
+// statement, ordered by document id; an entity without document is left
+// out. Like ReindexTenant it reads organization-wide: the documents go to
+// the remote index, nothing read here is returned to the caller.
+func (r *PGRepository) FullDocuments(ctx context.Context, orgID string, refs []DocumentRef) ([]FullDocument, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	types, ids := make([]string, len(refs)), make([]string, len(refs))
+	for i := range refs {
+		types[i], ids[i] = refs[i].EntityType, strings.ToLower(refs[i].EntityID)
+	}
+	return r.readFullDocuments(ctx, orgID,
+		`(d.entity_type, d.entity_id::text) IN (SELECT * FROM unnest($2::text[], $3::text[])) ORDER BY d.id`, types, ids)
+}
+
+// FullDocumentPage reads up to limit full documents of the organization
+// with a document id after the given one ("" for the first page), ordered
+// by id, with one statement; organization-wide like FullDocuments.
+func (r *PGRepository) FullDocumentPage(ctx context.Context, orgID, after string, limit int) ([]FullDocument, error) {
+	if after == "" {
+		after = "00000000-0000-0000-0000-000000000000"
+	}
+	return r.readFullDocuments(ctx, orgID, `d.id > $2::uuid ORDER BY d.id LIMIT $3`, after, limit)
+}
+
+// placementDocuments reads the full documents of a placed CI and, for a CI
+// bound to an asset, of the asset and all its CIs (HybridBackend.
+// ReindexPlacement) with one statement.
+func (r *PGRepository) placementDocuments(ctx context.Context, orgID, ciID string) ([]FullDocument, error) {
+	return r.readFullDocuments(ctx, orgID, `(
+	      (d.entity_type = 'ci' AND d.entity_id IN (SELECT c.id FROM ci c WHERE c.organization_id = $1 AND c.id::text = $2
+	                                                UNION SELECT c.id FROM ci c JOIN ci p ON c.asset_id = p.asset_id
+	                                                WHERE c.organization_id = $1 AND p.organization_id = $1 AND p.id::text = $2))
+	   OR (d.entity_type = 'asset' AND d.entity_id IN (SELECT c.asset_id FROM ci c WHERE c.organization_id = $1 AND c.id::text = $2)))
+	ORDER BY d.id`, strings.ToLower(ciID))
+}
+
+// readFullDocuments reads the documents of the organization that meet cond
+// (with its ORDER BY and LIMIT; parameter $1 is the organization) with
+// their field rows and identifier rows in one statement, under the
+// organization-wide scope of the context's principal.
+func (r *PGRepository) readFullDocuments(ctx context.Context, orgID, cond string, args ...any) ([]FullDocument, error) {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return nil, database.ErrNoTenantScope
+	}
+	if !strings.EqualFold(scope.OrgID, orgID) {
+		return nil, database.ErrTenantMismatch
+	}
+	orgWide := database.OrgWideScope(scope.OrgID, scope.UserID)
+	var out []FullDocument
+	err := database.WithTenant(ctx, r.pool, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT d.id::text, d.organization_id::text, d.entity_type, d.entity_id::text, d.title, d.summary,
+			       d.url, d.metadata, COALESCE(d.client_id::text, ''), COALESCE(d.site_id::text, ''), d.updated_at,
+			       COALESCE((SELECT jsonb_object_agg(f.field, f.content) FROM search_document_field f
+			                 WHERE f.document_id = d.id AND f.organization_id = d.organization_id), '{}'::jsonb),
+			       COALESCE((SELECT jsonb_agg(jsonb_build_object('field', i.field, 'norm', i.norm, 'addr', i.addr) ORDER BY i.field, i.norm)
+			                 FROM (SELECT DISTINCT si.field, si.norm, COALESCE(host(si.addr), '') AS addr FROM search_identifier si
+			                       WHERE si.organization_id = d.organization_id AND si.entity_type = d.entity_type
+			                         AND si.entity_id = d.entity_id) AS i), '[]'::jsonb)
+			FROM search_document d
+			WHERE d.organization_id = $1 AND `+cond, append([]any{orgID}, args...)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d FullDocument
+			var meta, fields, idents []byte
+			if err := rows.Scan(&d.ID, &d.OrganizationID, &d.EntityType, &d.EntityID, &d.Title, &d.Summary, &d.URL, &meta,
+				&d.ClientID, &d.SiteID, &d.UpdatedAt, &fields, &idents); err != nil {
+				return err
+			}
+			if err := json.Unmarshal(meta, &d.Metadata); err != nil {
+				return fmt.Errorf("unmarshal document metadata for %s: %w", d.ID, err)
+			}
+			if err := json.Unmarshal(fields, &d.Fields); err != nil {
+				return fmt.Errorf("unmarshal field rows of %s: %w", d.ID, err)
+			}
+			if err := json.Unmarshal(idents, &d.Identifiers); err != nil {
+				return fmt.Errorf("unmarshal identifiers of %s: %w", d.ID, err)
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read full search documents: %w", err)
+	}
+	return out, nil
 }
