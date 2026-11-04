@@ -12998,14 +12998,32 @@ paths:
   /api/v1/assets/{id}/children:
     x-phase: P2
     x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listAssetsIdChildren
-      summary: List child composition entries of a parent asset
+      tags: [Assets]
+      summary: List the child CIs of the CIs of an asset
+      description: >-
+        The CIs whose parent_ci_id is a CI linked to the asset (ci.asset_id),
+        each with its child_mode (configuration or standalone; AST-05,
+        WP-742). The legacy composition rows are no longer read. An asset
+        without CIs, or one outside the caller's scope, has no children.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List child composition entries of a parent asset
+          description: One page of the child CIs (API-02)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIListResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/assets/{id}/lifecycle-transitions:
     x-phase: P2
@@ -16219,16 +16237,37 @@ paths:
               schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/cis/{id}/parent:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCisIdParent
+      deprecated: true
+      x-deprecated-at: '2026-11-04'
+      x-sunset: '2027-11-05'
+      x-successor: '/api/v1/cis/{id}'
+      tags: [CIs]
       summary: Get the parent asset owning this CI and the inventory fields it contributes
+      description: >-
+        Deprecated (E-25, API-01; WP-742): GET /api/v1/cis/{id} carries
+        parent_ci_id, child_mode, asset and asset_source_ci_id. The answer
+        keeps the former format and reads ci.parent_ci_id: composition is
+        the child CI (id = child_ci_id) with the flags derived from
+        child_mode (configuration: configuration_only; standalone: the
+        independently_* flags), parent_asset_id the asset of the parent CI,
+        its own or the one it derives as a configuration child (WP-273).
+        inherited_fields lists the inherited fields of a configuration child
+        and is empty for a standalone child. A CI without parent_ci_id, or
+        whose parent has no asset, is 404.
       responses:
         '200':
           description: Parent composition link and the parent asset's read-only inventory identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIParentLegacy' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: CI has no parent asset
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/state:
     get:
@@ -16247,54 +16286,6 @@ paths:
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /api/v1/compositions:
-    x-phase: P2
-    x-feature: assets_basic
-    get:
-      operationId: listCompositions
-      summary: Manage parent-asset/child composition links
-      responses:
-        '200':
-          description: Manage parent-asset/child composition links
-        '401':
-          description: Unauthorized
-    post:
-      operationId: createCompositions
-      summary: Manage parent-asset/child composition links
-      responses:
-        '201':
-          description: Manage parent-asset/child composition links
-        '401':
-          description: Unauthorized
-
-  /api/v1/compositions/{id}:
-    x-phase: P2
-    x-feature: assets_basic
-    get:
-      operationId: getCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '200':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
-    patch:
-      operationId: updateCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '200':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
-    delete:
-      operationId: deleteCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '204':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
 
   /api/v1/history/snapshots:
     post:
@@ -24899,6 +24890,58 @@ components:
         last_seen_at:
           type: string
           format: date-time
+
+    CIParentLegacy:
+      type: object
+      description: >-
+        Answer of the deprecated GET /api/v1/cis/{id}/parent in the format of
+        the former composition handler (API-01, WP-742).
+      required: [composition, inherited_fields]
+      properties:
+        composition:
+          type: object
+          required: [id, organization_id, parent_asset_id, child_ci_id, configuration_only, independently_serialized,
+            independently_assignable, independently_locatable, independently_lifecycle_managed, created_at, updated_at]
+          properties:
+            id:
+              type: string
+              description: ID of the child CI.
+            organization_id: { type: string }
+            parent_asset_id: { type: string }
+            child_ci_id: { type: string }
+            configuration_only: { type: boolean }
+            independently_serialized: { type: boolean }
+            independently_assignable: { type: boolean }
+            independently_locatable: { type: boolean }
+            independently_lifecycle_managed: { type: boolean }
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+        parent_asset:
+          type: object
+          description: Read-only inventory identity of the parent asset; missing when it cannot be read.
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            asset_tag: { type: string }
+            status: { type: string }
+            serial_number: { type: string }
+            barcode: { type: string }
+            rfid_tag: { type: string }
+            purchase_date: { type: string }
+            purchase_cost: { type: number }
+            currency: { type: string }
+            supplier: { type: string }
+            invoice_number: { type: string }
+            warranty_end: { type: string }
+            location: { type: string }
+        inherited_fields:
+          type: array
+          items: { type: string }
 
     CIListResponse:
       allOf:

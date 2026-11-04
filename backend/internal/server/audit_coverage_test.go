@@ -456,7 +456,6 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/security/findings", `{"kind":"vulnerability","title":"a5-finding","ci_id":"<id:/api/v1/cis>"}`},
 	{"POST /api/v1/invitations", `{"email":"a5-invite@example.com","role_id":"<id:/api/v1/roles>"}`},
 	{"POST /api/v1/assignments", `{"assigned_to":"<user>","asset_id":"<asset2>"}`},
-	{"POST /api/v1/compositions", `{"parent_asset_id":"<id:/api/v1/assets>","child_asset_id":"<asset2>"}`},
 	{"POST /api/v1/inventory/items", `{"name":"a5-item"}`},
 	{"POST /api/v1/credentials/", `{"name":"a5-credential","kind":"snmp_v2c","secret":{"community":"public"}}`},
 	{"POST /api/v1/asset-locations", `{"asset_id":"<id:/api/v1/assets>","lat":47.8,"lon":12.6}`},

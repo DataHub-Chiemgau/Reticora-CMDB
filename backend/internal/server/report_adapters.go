@@ -206,17 +206,18 @@ func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, 
 	}, nil
 }
 
-// parentAssetLookup adapts asset.Repository to the composition.AssetLookup
-// port (spec §5: a child CI displays the parent asset's shared inventory
-// identity read-only instead of duplicating it). It is the mirror image of
-// ciLookup, which projects the opposite direction. ParentAssetRef keeps the
-// old names and the float purchase cost until WP-273; the decimal string of
-// the asset is converted here (an empty one is 0).
-type parentAssetLookup struct {
+// ciParentAssetLookup adapts asset.Repository to the ci.ParentAssetLookup
+// port of GET /cis/{id}/parent (spec §5, WP-742: a child CI displays the
+// parent asset's shared inventory identity read-only instead of duplicating
+// it). It is the mirror image of ciLookup, which projects the opposite
+// direction. ParentAssetRef keeps the old names and the float purchase cost
+// of the deprecated path (API-01); the decimal string of the asset is
+// converted here (an empty one is 0).
+type ciParentAssetLookup struct {
 	repo asset.Repository
 }
 
-func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*composition.ParentAssetRef, error) {
+func (l ciParentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*ci.ParentAssetRef, error) {
 	a, err := l.repo.GetByID(ctx, orgID, id)
 	if err != nil {
 		return nil, err
@@ -227,7 +228,7 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 			return nil, err
 		}
 	}
-	return &composition.ParentAssetRef{
+	return &ci.ParentAssetRef{
 		ID:            a.ID,
 		Name:          a.Name,
 		AssetTag:      a.AssetTag,

@@ -355,7 +355,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	all := []string{"POST", "PATCH", "DELETE"}
 	for collection, table := range map[string]string{
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
-		"compliance/rules": "compliance_rule", "compositions": "composition", "consumables": "consumable",
+		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "quantity_item",
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",

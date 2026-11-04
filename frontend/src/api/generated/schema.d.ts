@@ -5914,10 +5914,16 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
-    /** List child composition entries of a parent asset */
+    /**
+     * List the child CIs of the CIs of an asset
+     * @description The CIs whose parent_ci_id is a CI linked to the asset (ci.asset_id), each with its child_mode (configuration or standalone; AST-05, WP-742). The legacy composition rows are no longer read. An asset without CIs, or one outside the caller's scope, has no children.
+     */
     get: operations['listAssetsIdChildren'];
     put?: never;
     post?: never;
@@ -7151,10 +7157,17 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
-    /** Get the parent asset owning this CI and the inventory fields it contributes */
+    /**
+     * Get the parent asset owning this CI and the inventory fields it contributes
+     * @deprecated
+     * @description Deprecated (E-25, API-01; WP-742): GET /api/v1/cis/{id} carries parent_ci_id, child_mode, asset and asset_source_ci_id. The answer keeps the former format and reads ci.parent_ci_id: composition is the child CI (id = child_ci_id) with the flags derived from child_mode (configuration: configuration_only; standalone: the independently_* flags), parent_asset_id the asset of the parent CI, its own or the one it derives as a configuration child (WP-273). inherited_fields lists the inherited fields of a configuration child and is empty for a standalone child. A CI without parent_ci_id, or whose parent has no asset, is 404.
+     */
     get: operations['getCisIdParent'];
     put?: never;
     post?: never;
@@ -7182,43 +7195,6 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
-    trace?: never;
-  };
-  '/api/v1/compositions': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Manage parent-asset/child composition links */
-    get: operations['listCompositions'];
-    put?: never;
-    /** Manage parent-asset/child composition links */
-    post: operations['createCompositions'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/compositions/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read, update or delete a composition link */
-    get: operations['getCompositionsId'];
-    put?: never;
-    post?: never;
-    /** Read, update or delete a composition link */
-    delete: operations['deleteCompositionsId'];
-    options?: never;
-    head?: never;
-    /** Read, update or delete a composition link */
-    patch: operations['updateCompositionsId'];
     trace?: never;
   };
   '/api/v1/history/snapshots': {
@@ -11778,6 +11754,43 @@ export interface components {
       discovery_source?: components['schemas']['CIDiscoverySource'];
       /** Format: date-time */
       last_seen_at?: string;
+    };
+    /** @description Answer of the deprecated GET /api/v1/cis/{id}/parent in the format of the former composition handler (API-01, WP-742). */
+    CIParentLegacy: {
+      composition: {
+        /** @description ID of the child CI. */
+        id: string;
+        organization_id: string;
+        parent_asset_id: string;
+        child_ci_id: string;
+        configuration_only: boolean;
+        independently_serialized: boolean;
+        independently_assignable: boolean;
+        independently_locatable: boolean;
+        independently_lifecycle_managed: boolean;
+        /** Format: date-time */
+        created_at: string;
+        /** Format: date-time */
+        updated_at: string;
+      };
+      /** @description Read-only inventory identity of the parent asset; missing when it cannot be read. */
+      parent_asset?: {
+        id: string;
+        name: string;
+        asset_tag?: string;
+        status?: string;
+        serial_number?: string;
+        barcode?: string;
+        rfid_tag?: string;
+        purchase_date?: string;
+        purchase_cost?: number;
+        currency?: string;
+        supplier?: string;
+        invoice_number?: string;
+        warranty_end?: string;
+        location?: string;
+      };
+      inherited_fields: string[];
     };
     CIListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['CI'][];
@@ -32094,27 +32107,39 @@ export interface operations {
   };
   listAssetsIdChildren: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List child composition entries of a parent asset */
+      /** @description One page of the child CIs (API-02) */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['CIListResponse'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   getAssetsIdLifecycleTransitionOptions: {
@@ -35246,7 +35271,10 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -35256,22 +35284,12 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['CIParentLegacy'];
         };
-        content?: never;
       };
-      /** @description CI has no parent asset */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdState: {
@@ -35298,131 +35316,6 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-    };
-  };
-  listCompositions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Manage parent-asset/child composition links */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  createCompositions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Manage parent-asset/child composition links */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  getCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  deleteCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  updateCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
     };
   };
   createStateSnapshot: {

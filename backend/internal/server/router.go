@@ -805,8 +805,6 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		locationsHandler,
 		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
-		composition.NewHandler(repos.Composition, opts.Dispatcher).
-			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		// The overrides follow the field permissions of the CI (WP-265).
 		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
@@ -1199,6 +1197,8 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	if repos.Override != nil {
 		h.WithProvenance(repos.Override)
 	}
+	// GET /cis/{id}/parent projects the parent asset (WP-742).
+	h.WithParentAssets(ciParentAssetLookup{repo: repos.Asset})
 	return h.WithIncludes(map[string]ci.IncludeFunc{
 		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)

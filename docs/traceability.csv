@@ -1419,3 +1419,5 @@ STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
 AST-05;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273
 AST-04;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273
+AST-05;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-742
+AST-04;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-742

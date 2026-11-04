@@ -16,7 +16,6 @@ DELETE /api/v1/cis/{id}/fields/{name}/override override:write
 DELETE /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
 DELETE /api/v1/clients/{id} user:manage
 DELETE /api/v1/compliance/rules/{id} compliance:write
-DELETE /api/v1/compositions/{id} asset:write
 DELETE /api/v1/consumables/{id} stock:write
 DELETE /api/v1/contacts/{id} contact:write
 DELETE /api/v1/contracts/{id} contract:write
@@ -149,8 +148,6 @@ GET /api/v1/compliance/results compliance:read
 GET /api/v1/compliance/rules compliance:read
 GET /api/v1/compliance/rules/{id} compliance:read
 GET /api/v1/compliance/score compliance:read
-GET /api/v1/compositions asset:read
-GET /api/v1/compositions/{id} asset:read
 GET /api/v1/consumables stock:read
 GET /api/v1/consumables/{id} stock:read
 GET /api/v1/consumables/{id}/movements stock:read
@@ -358,7 +355,6 @@ PATCH /api/v1/cis/{id} ci:write
 PATCH /api/v1/clients/{id} user:manage
 PATCH /api/v1/collectors/{id} collector:manage
 PATCH /api/v1/compliance/rules/{id} compliance:write
-PATCH /api/v1/compositions/{id} asset:write
 PATCH /api/v1/consumables/{id} stock:write
 PATCH /api/v1/contacts/{id} contact:write
 PATCH /api/v1/contracts/{id} contract:write
@@ -463,7 +459,6 @@ POST /api/v1/collectors/enrollment-codes collector:manage
 POST /api/v1/collectors/{id}/heartbeat discovery:ingest
 POST /api/v1/compliance/evaluations compliance:write
 POST /api/v1/compliance/rules compliance:write
-POST /api/v1/compositions asset:write
 POST /api/v1/consumables stock:write
 POST /api/v1/consumables/{id}/movements stock:write
 POST /api/v1/contacts contact:write
