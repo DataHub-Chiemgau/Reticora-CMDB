@@ -1365,3 +1365,4 @@ TST-01;[B], Teilumfang [P2];B;backend/internal/tenant/rls/fieldrights_matrix_int
 AST-01;[P2];B;backend/internal/asset/field_names_integration_test.go;WP-738
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/ticket/attachments_integration_test.go;WP-765
 REL-07;[P2];B;backend/internal/relationship/metadata_integration_test.go;WP-295
+UI-11;[P2];C;frontend/src/components/metamodel/AttributeSetEditor.test.tsx;WP-797

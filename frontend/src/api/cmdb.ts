@@ -187,6 +187,43 @@ export const attributeDefinitionApi = {
   },
 };
 
+// ─── Attribute sets (MET-16, WP-250, WP-797) ─────────────────────────────────
+
+/** A named group of attribute definitions (scope set); a system set is read-only. */
+export type AttributeSet = components['schemas']['AttributeSet'];
+export type AttributeSetCreate = components['schemas']['AttributeSetCreate'];
+export type AttributeSetPatch = components['schemas']['AttributeSetPatch'];
+/** The ordered sets of a CI type (GET/PUT /ci-types/{id}/attribute-sets). */
+export type CITypeAttributeSets = components['schemas']['CITypeAttributeSets'];
+export type AttributeSetAssignment = CITypeAttributeSets['attribute_sets'][number];
+
+export const attributeSetApi = {
+  /** Every set of the organization and the system sets (cursor pages, API-02). */
+  async list(): Promise<{ data: AttributeSet[] }> {
+    return { data: await fetchAllPages<AttributeSet>('/attribute-sets') };
+  },
+  create(data: AttributeSetCreate): Promise<AttributeSet> {
+    return fetchAPI('/attribute-sets', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: AttributeSetPatch): Promise<AttributeSet> {
+    return fetchAPI(`/attribute-sets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** A set assigned to a CI type is 409. */
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/attribute-sets/${id}`, { method: 'DELETE' });
+  },
+  ofType(ciTypeId: string): Promise<CITypeAttributeSets> {
+    return fetchAPI(`/ci-types/${ciTypeId}/attribute-sets`);
+  },
+  /** Replaces the ordered list of the type as a whole. */
+  replaceOfType(ciTypeId: string, sets: AttributeSetAssignment[]): Promise<CITypeAttributeSets> {
+    return fetchAPI(`/ci-types/${ciTypeId}/attribute-sets`, {
+      method: 'PUT',
+      body: JSON.stringify({ ci_type_id: ciTypeId, attribute_sets: sets }),
+    });
+  },
+};
+
 // ─── Sensitive fields (RBA-07, E-43, WP-726) ─────────────────────────────────
 
 export type SensitiveField = components['schemas']['SensitiveField'];

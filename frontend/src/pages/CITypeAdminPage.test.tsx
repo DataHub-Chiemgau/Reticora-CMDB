@@ -17,6 +17,9 @@
  *            global attributes (WP-255)
  *   Index    index_status (WP-796): every state, retry n/3, rebuild, polling
  *            until succeeded
+ *   Sets     WP-797: the section of the attribute sets (create, 409 on
+ *            deleting an assigned set), the note instead of the section with
+ *            the module metamodel off, the origin "Set <name>" in the catalog
  *
  * Retest:
  *   cd frontend && npx vitest run src/pages/CITypeAdminPage.test.tsx
@@ -25,6 +28,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { CITypeAdminPage } from './CITypeAdminPage';
 import { renderWithProviders } from '../test/utils';
+import { useAuthStore } from '../auth/authStore';
 
 interface Call {
   method: string;
@@ -110,12 +114,19 @@ interface Backend {
   reindex?: () => Response;
   /** Changes the definitions before every read of the list (e.g. a job that ends). */
   onRead?: (definitions: Json[], query: URLSearchParams) => Json[];
+  /** Attribute sets (WP-797); without them GET /attribute-sets answers 404. */
+  sets?: Json[];
+  /** The assigned sets per CI type. */
+  assigned?: Record<string, { attribute_set_id: string; position: number }[]>;
+  deleteSet?: () => Response;
+  modules?: Json[];
 }
 
 function stubBackend(b: Backend = {}): Call[] {
   const calls: Call[] = [];
   let types = b.types ?? [NET, ROUTER, EDGE, PRINTER];
   let definitions = b.definitions ?? [];
+  let sets = b.sets;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -130,6 +141,26 @@ function stubBackend(b: Backend = {}): Call[] {
         return json({
           user_id: 'u1',
           permissions: b.permissions ?? ['citype:manage', 'ci_attribute:manage'],
+        });
+      }
+      if (path === '/modules' && b.modules) return json({ data: b.modules });
+      if (path === '/attribute-sets' && sets && method === 'POST') {
+        const created = { ...attributeSet('s-new', String(body.key)), ...body };
+        sets = [...sets, created];
+        return json(created, 201);
+      }
+      if (path === '/attribute-sets' && sets) return json({ data: sets });
+      const setOne = /^\/attribute-sets\/([^/]+)$/.exec(path);
+      if (setOne && sets && method === 'DELETE') {
+        if (b.deleteSet) return b.deleteSet();
+        sets = sets.filter((x) => x.id !== setOne[1]);
+        return new Response(null, { status: 204 });
+      }
+      const typeSets = /^\/ci-types\/([^/]+)\/attribute-sets$/.exec(path);
+      if (typeSets && sets) {
+        return json({
+          ci_type_id: typeSets[1],
+          attribute_sets: b.assigned?.[typeSets[1]!] ?? [],
         });
       }
       if (path === '/field-permissions/sensitive-fields') {
@@ -164,14 +195,19 @@ function stubBackend(b: Backend = {}): Call[] {
         if (b.onRead) definitions = b.onRead(definitions, q);
         const applicable = q.get('applicable_to');
         const typeId = q.get('ci_type_id');
+        const setId = q.get('attribute_set_id');
         const data = definitions.filter((d) =>
-          applicable
-            ? d.ci_type_id === applicable || d.scope === 'global'
-            : typeId
-              ? d.ci_type_id === typeId
-              : q.get('scope') === 'global'
-                ? d.scope === 'global'
-                : true,
+          setId
+            ? d.attribute_set_id === setId
+            : d.scope === 'set'
+              ? false
+              : applicable
+                ? d.ci_type_id === applicable || d.scope === 'global'
+                : typeId
+                  ? d.ci_type_id === typeId
+                  : q.get('scope') === 'global'
+                    ? d.scope === 'global'
+                    : true,
         );
         return json({ data });
       }
@@ -215,6 +251,19 @@ function stubBackend(b: Backend = {}): Call[] {
   return calls;
 }
 
+function attributeSet(id: string, key: string, extra: Json = {}): Json {
+  return {
+    id,
+    key,
+    display_name: { de: key, en: key },
+    is_system: false,
+    is_active: true,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    ...extra,
+  };
+}
+
 const tree = () => screen.findByRole('tree');
 const item = (name: string) => screen.getByRole('treeitem', { name });
 
@@ -232,6 +281,7 @@ async function row(key: string) {
 }
 
 afterEach(() => {
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -776,5 +826,116 @@ describe('CITypeAdminPage index status', () => {
     });
     // Once the index succeeded the list stops polling.
     expect(calls.filter((c) => c.url.includes('applicable_to=t-printer')).length).toBe(before);
+  });
+});
+
+describe('CITypeAdminPage attribute sets', () => {
+  const NETWORK = attributeSet('s-net', 'network', { display_name: { de: 'Netzwerk-Set' } });
+  const BASE = attributeSet('s-base', 'base', { is_system: true });
+
+  it('creates a set and opens its editor', async () => {
+    const calls = stubBackend({ sets: [BASE] });
+    await open();
+    const section = (await screen.findByRole('heading', { name: 'Attribut-Sets' })).closest(
+      'section',
+    )!;
+    expect(await within(section).findByText('base')).toBeInTheDocument();
+    // A system set is read-only: no editing, no deleting.
+    expect(within(section).queryByRole('button', { name: 'Set bearbeiten: base' })).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Set löschen: base' })).toBeNull();
+
+    fireEvent.click(within(section).getByRole('button', { name: 'Neues Set' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Schlüssel'), { target: { value: 'power' } });
+    fireEvent.change(within(dialog).getByLabelText('Anzeigename (Deutsch)'), {
+      target: { value: 'Strom' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Anlegen' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const post = calls.find((c) => c.method === 'POST' && c.url.endsWith('/attribute-sets'))!;
+    expect(post.body).toEqual({ key: 'power', display_name: { de: 'Strom' }, is_active: true });
+    expect(
+      await screen.findByRole('heading', { name: 'Set „Strom“: Attribute' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the 409 of deleting an assigned set at the set', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    stubBackend({
+      sets: [NETWORK],
+      deleteSet: () =>
+        problem(409, { type: 'urn:reticora:problem:conflict', detail: 'set is assigned' }),
+    });
+    await open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Set löschen: Netzwerk-Set' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(
+      'Set „Netzwerk-Set“ nicht gelöscht: Es ist einem CI-Typ zugeordnet.',
+    );
+    expect(alert.closest('li')).toHaveTextContent('network');
+  });
+
+  it('shows a note instead of the sets with the module metamodel off', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      user: { sub: 'u1' },
+    });
+    const calls = stubBackend({
+      sets: [NETWORK],
+      modules: [{ key: 'metamodel', phase: 'P2', nav: [], enabled: false }],
+    });
+    await open('Router');
+
+    expect(
+      await screen.findByText(
+        'Attribut-Sets gehören zum Modul „Metamodell“, das abgeschaltet ist. Typen und Attribute lassen sich weiter pflegen.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Neues Set' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Attribut-Sets dieses Typs')).not.toBeInTheDocument();
+    // Tree and catalog stay.
+    expect(screen.getByRole('button', { name: 'Feld hinzufügen' })).toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes('attribute-sets'))).toBe(false);
+  });
+
+  it('shows the attributes of the assigned sets with the origin "Set <name>"', async () => {
+    stubBackend({
+      sets: [NETWORK, attributeSet('s-off', 'retired', { is_active: false })],
+      assigned: {
+        't-router': [
+          { attribute_set_id: 's-off', position: 1 },
+          { attribute_set_id: 's-net', position: 2 },
+        ],
+      },
+      definitions: [
+        definition('a-own', 'firmware', { ci_type_id: 't-router' }),
+        definition('a-set', 'vlan', { scope: 'set', attribute_set_id: 's-net' }),
+        definition('a-off', 'legacy', { scope: 'set', attribute_set_id: 's-off' }),
+      ],
+    });
+    await open('Router');
+
+    const vlan = await row('vlan');
+    expect(within(vlan).getByText('Set Netzwerk-Set')).toBeInTheDocument();
+    // Read-only at the type; the way leads to the set.
+    expect(within(vlan).queryByRole('button', { name: /bearbeiten/ })).toBeNull();
+    fireEvent.click(within(vlan).getByRole('button', { name: 'Zum Set: Netzwerk-Set' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Set „Netzwerk-Set“: Attribute' }),
+    ).toBeInTheDocument();
+    // An inactive set does not enter the composition.
+    const card = screen.getByRole('heading', { name: /^Attribute \(/ }).closest('section')!;
+    expect(within(card).queryByText('legacy')).not.toBeInTheDocument();
+    expect(within(card).getByRole('heading', { name: 'Attribute (2)' })).toBeInTheDocument();
+    // The assignment of the type lists both sets in order.
+    const assigned = screen.getByRole('list', { name: 'Attribut-Sets von Router' });
+    expect(
+      within(assigned)
+        .getAllByRole('listitem')
+        .map((li) => li.querySelector('.font-medium')?.textContent),
+    ).toEqual(['retired', 'Netzwerk-Set']);
   });
 });

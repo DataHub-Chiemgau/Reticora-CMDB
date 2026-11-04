@@ -1476,7 +1476,9 @@
       "inherited": "geerbt von {{type}}",
       "global": "global",
       "open": "Zum Ursprung: {{type}}",
-      "openGlobal": "Zu den globalen Attributen"
+      "openGlobal": "Zu den globalen Attributen",
+      "set": "Set {{name}}",
+      "openSet": "Zum Set: {{name}}"
     },
     "globals": {
       "title": "Globale Attribute",
@@ -1512,6 +1514,60 @@
       "reindex": "Index neu aufbauen",
       "reindexAction": "Index neu aufbauen: {{name}}",
       "reindexFailed": "Index nicht neu aufgebaut. {{reason}}"
+    },
+    "sets": {
+      "title": "Attribut-Sets",
+      "hint": "Ein Attribut-Set bündelt wiederverwendbare Attribute. Zugeordnete aktive Sets ergänzen die Attribute eines Typs in der Reihenfolge der Zuordnung. System-Sets sind schreibgeschützt.",
+      "create": "Neues Set",
+      "moduleOff": "Attribut-Sets gehören zum Modul „Metamodell“, das abgeschaltet ist. Typen und Attribute lassen sich weiter pflegen.",
+      "empty": "Keine Attribut-Sets definiert.",
+      "attributes": "Attribute",
+      "attributesAction": "Attribute des Sets bearbeiten: {{name}}",
+      "editAction": "Set bearbeiten: {{name}}",
+      "deleteAction": "Set löschen: {{name}}",
+      "deleteConfirm": "Set „{{name}}“ mit seinen Attributen löschen?",
+      "deleteAssigned": "Set „{{name}}“ nicht gelöscht: Es ist einem CI-Typ zugeordnet. Entfernen Sie zuerst die Zuordnung.",
+      "deleteFailed": "Set „{{name}}“ nicht gelöscht. {{reason}}",
+      "editTitle": "Set „{{name}}“ bearbeiten",
+      "key": "Schlüssel",
+      "keyImmutable": "Der Schlüssel ist nach dem Anlegen unveränderlich.",
+      "active": "Aktiv (kann Typen zugeordnet werden)",
+      "notSaved": "Set nicht gespeichert. {{reason}}",
+      "editorTitle": "Set „{{name}}“: Attribute",
+      "addAttribute": "Attribut zum Set hinzufügen",
+      "closeEditor": "Schließen",
+      "systemReadOnly": "System-Set: Attribute und Reihenfolge sind schreibgeschützt.",
+      "orderHint": "Reihenfolge per Ziehen, mit der Tastatur (Leertaste, Pfeiltasten, Leertaste) oder mit den Pfeilknöpfen ändern; sie wird sofort gespeichert.",
+      "reorderFailed": "Reihenfolge nicht gespeichert. {{reason}}",
+      "noAttributes": "Das Set hat noch keine Attribute.",
+      "attributesLabel": "Attribute des Sets {{name}}",
+      "sortable": {
+        "handle": "Verschieben: {{name}}",
+        "up": "Nach oben: {{name}}",
+        "down": "Nach unten: {{name}}",
+        "instructions": "Zum Aufnehmen die Leertaste drücken. Mit den Pfeiltasten verschieben, mit der Leertaste ablegen, mit Escape abbrechen.",
+        "pickedUp": "{{name}} aufgenommen, Position {{position}} von {{total}}.",
+        "movedOver": "{{name}} auf Position {{position}} von {{total}} verschoben.",
+        "outside": "{{name}} ist außerhalb der Liste.",
+        "dropped": "{{name}} auf Position {{position}} von {{total}} abgelegt.",
+        "droppedOutside": "{{name}} abgelegt, die Reihenfolge bleibt.",
+        "cancelled": "Verschieben abgebrochen. {{name}} bleibt auf Position {{position}} von {{total}}."
+      },
+      "assignment": {
+        "title": "Attribut-Sets dieses Typs",
+        "hint": "Die Attribute aktiver Sets folgen den Attributen der Typkette in dieser Reihenfolge. Jede Änderung wird sofort gespeichert.",
+        "systemType": "Systemtypen erhalten keine Attribut-Sets. Klonen Sie den Typ, um Sets zuzuordnen.",
+        "loadFailed": "Zuordnung nicht geladen. {{reason}}",
+        "notSaved": "Zuordnung nicht gespeichert. {{reason}}",
+        "empty": "Keine Sets zugeordnet.",
+        "listLabel": "Attribut-Sets von {{type}}",
+        "remove": "Entfernen",
+        "removeAction": "Set entfernen: {{name}}",
+        "entryError": "Nicht zugeordnet: {{detail}}",
+        "choose": "Aktives Set",
+        "choosePlaceholder": "Set auswählen",
+        "add": "Zuordnen"
+      }
     }
   },
   "inventory": {

@@ -158,13 +158,18 @@ const ROUTES: A11yRoute[] = [
     url: '/ci-types',
     // WP-313: the type tree with parent and child; the child is selected, so
     // its attribute catalog (own, inherited, global; index states none,
-    // queued and failed; the sensitive mark) is checked too.
+    // queued and failed; the sensitive mark) is checked too. WP-797: the
+    // child carries a set of two attributes, whose editor is open.
     prepare: async (page) => {
       await page.getByRole('treeitem', { name: M.ciTypeChild }).click();
       await expect(page.getByRole('treeitem', { name: M.ciTypeChild })).toHaveAttribute(
         'aria-selected',
         'true',
       );
+      await page.locator('#attribute-sets button[aria-expanded]').first().click();
+      const editor = page.locator('#attribute-sets [role="region"]');
+      await expect(editor.getByText('a11y_set_vlan')).toBeVisible();
+      await expect(editor.getByText('a11y_set_speed')).toBeVisible();
     },
     ready: (page) => page.locator('#main-content li').filter({ hasText: 'a11y_inventory' }),
   },
