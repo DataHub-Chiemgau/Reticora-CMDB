@@ -1058,6 +1058,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same JetStream reservation as in tls-domain-pebble: free the runner
+      # before the stack starts.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
@@ -1198,6 +1206,14 @@ jobs:
       REGISTRY: ghcr.io/datahub-chiemgau
     steps:
       - uses: actions/checkout@v4
+
+      # Same JetStream reservation as in tls-domain-pebble: free the runner
+      # before the stack starts.
+      - name: Free disk space for the JetStream reservation
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
 
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
