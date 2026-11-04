@@ -14,6 +14,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
@@ -541,5 +544,59 @@ func TestModulesEndpointListsTheReleaseModules(t *testing.T) {
 		if m.Key == "documents" && !slices.Equal(m.Nav, []string{"documents"}) {
 			t.Errorf("documents nav = %v", m.Nav)
 		}
+	}
+}
+
+// TestBFFFollowsTheModuleGate covers WP-311 (E-03, GQL-04): /bff/graphql
+// belongs to no module prefix, so the BFF gates its fields itself. With
+// the G1 default asset answers UNAVAILABLE; the module keys of the BFF are
+// keys of LateModules.
+func TestBFFFollowsTheModuleGate(t *testing.T) {
+	for _, key := range graphqlbff.ModuleKeys {
+		if _, ok := moduleByKey(key); !ok {
+			t.Errorf("BFF module %q is not in LateModules", key)
+		}
+	}
+	g1, err := ParseModules("")
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
+	}
+	query := func(modules *ModuleSet) map[string]any {
+		mux := testRouterWithModules(t, &audit.Handler{}, modules)
+		req := httptest.NewRequest(http.MethodPost, graphqlbff.Path,
+			strings.NewReader(`{"query":"{ asset(id: \"c0de0000-0000-4000-8000-000000000001\") { id } }"}`))
+		req.Header.Set("Content-Type", "application/json")
+		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", OrganizationID: "org-1",
+			Permissions: []identity.Permission{identity.PermAssetRead}, Type: identity.PrincipalTypeUser})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req.WithContext(ctx))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST %s = %d %s", graphqlbff.Path, rec.Code, rec.Body)
+		}
+		var body map[string]any
+		if decodeErr := json.Unmarshal(rec.Body.Bytes(), &body); decodeErr != nil {
+			t.Fatalf("decode: %v", decodeErr)
+		}
+		return body
+	}
+	code := func(body map[string]any) string {
+		errs, _ := body["errors"].([]any)
+		if len(errs) == 0 {
+			return ""
+		}
+		ext, _ := errs[0].(map[string]any)["extensions"].(map[string]any)
+		c, _ := ext["code"].(string)
+		return c
+	}
+	if got := code(query(g1)); got != "UNAVAILABLE" {
+		t.Errorf("asset with the G1 default: code %q, want UNAVAILABLE", got)
+	}
+	inventory, err := ParseModules(graphqlbff.ModuleInventory)
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
+	}
+	if body := query(inventory); code(body) != "" {
+		t.Errorf("asset with inventory on: %v, want null without error", body)
 	}
 }

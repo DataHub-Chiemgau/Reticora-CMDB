@@ -235,10 +235,12 @@ func (l ciParentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*ci
 }
 
 // bffSources hands the read models of topology, rack layout, search, the
-// review inbox and jobs to the GraphQL BFF (GQL-02). Without the job model
-// (no database) the jobs query is unavailable.
+// review inbox and jobs (GQL-02) and those of the asset detail (asset,
+// movement ledger, documents; GQL-03) to the GraphQL BFF. Without the job
+// model (no database) the jobs query is unavailable.
 func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbff.JobSource) *graphqlbff.Sources {
-	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource}
+	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource,
+		Assets: repos.Asset, Movements: repos.Movement, Documents: repos.Document}
 	if reviewSource, ok := repos.Discovery.(graphqlbff.ReviewSource); ok {
 		sources.Reviews = reviewSource
 	}

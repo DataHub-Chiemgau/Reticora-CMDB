@@ -1433,3 +1433,4 @@ STK-02;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
 STK-03;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
 STK-01;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/stock_integration_test.go;WP-283
+GQL-03;[P2];C;backend/internal/graphqlbff/assets_test.go;WP-311

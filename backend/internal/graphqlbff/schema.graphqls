@@ -26,6 +26,8 @@ type Query {
   reviewInbox(status: String, kind: String, first: Int): [ReviewItem!]!
   "Jobs of the organization."
   jobs(kind: String, status: String, first: Int): [Job!]!
+  "One asset with its CIs, child CIs, movements and documents (GQL-03); null when it is not visible."
+  asset(id: ID!): Asset
 }
 
 input CIFilter {
@@ -75,6 +77,12 @@ type CI {
   attributes: Map
   "The keys of the catalog tags of the CI, sorted (CI-07, WP-754)."
   tags: [String!]!
+  "The asset the CI is linked to (AST-04)."
+  assetId: ID
+  "The CI this one is physically part of (AST-05)."
+  parentCiId: ID
+  "The child contract under the parent: configuration or standalone (AST-05)."
+  childMode: String
 }
 
 type Relationship {
@@ -177,4 +185,95 @@ type User {
   id: ID!
   organizationId: ID!
   clientId: ID
+}
+
+"""
+An asset with the AST-01 names (WP-739). The fields under field permissions
+(RBA-07) are null when the caller may not read them; custom fields without
+read access are left out. The lists are null with an error when their
+permission, feature or module is missing, the asset stays.
+"""
+type Asset {
+  id: ID!
+  name: String!
+  clientId: ID
+  version: Int!
+  createdAt: Time!
+  updatedAt: Time!
+  inventoryNo: String
+  category: String
+  status: String
+  manufacturer: String
+  model: String
+  serialNumber: String
+  purchaseDate: String
+  purchasePrice: String
+  currency: String
+  warrantyUntil: String
+  costCenter: String
+  supplierId: ID
+  contractId: ID
+  ownerUserId: ID
+  ownerTeamId: ID
+  invoiceNumber: String
+  rfidTag: String
+  barcode: String
+  locationId: ID
+  lifecycleState: String
+  "The primary CI (column asset.ci_id, E-122)."
+  primaryCiId: ID
+  notes: String
+  customFields: Map
+  "The keys of the catalog tags of the asset, sorted (WP-755)."
+  tags: [String!]
+  "The CIs linked to the asset (ci.asset_id); at most 100."
+  cis(first: Int): [CI!]
+  "The child CIs of the linked CIs (ci.parent_ci_id with childMode, AST-05); at most 100."
+  children(first: Int): [CI!]
+  "The movements of the asset in the ledger stock_movement, newest first; at most 100 per page."
+  movements(first: Int, after: String): MovementConnection
+  "The documents linked to the asset; at most 100."
+  documents(first: Int): [Document!]
+}
+
+type MovementConnection {
+  nodes: [Movement!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type Movement {
+  id: ID!
+  itemKind: String!
+  movementType: String!
+  assetId: ID
+  fromLocationId: ID
+  toLocationId: ID
+  quantity: Float
+  actorId: ID
+  assigneeUserId: ID
+  assigneeTeamId: ID
+  reason: String
+  ticketId: ID
+  orderId: ID
+  documentId: ID
+  notes: String
+  occurredAt: Time!
+  createdAt: Time!
+}
+
+type Document {
+  id: ID!
+  title: String!
+  description: String
+  fileName: String!
+  fileSize: Int!
+  mimeType: String!
+  version: Int!
+  category: String!
+  tags: [String!]!
+  uploadedBy: ID
+  scanStatus: String
+  createdAt: Time!
+  updatedAt: Time!
 }

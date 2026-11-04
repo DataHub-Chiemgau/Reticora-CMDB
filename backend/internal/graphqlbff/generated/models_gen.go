@@ -4,6 +4,7 @@ package generated
 
 import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
@@ -26,6 +27,12 @@ type CIFilter struct {
 	ClientID *string `json:"clientId,omitempty"`
 	SiteID   *string `json:"siteId,omitempty"`
 	Search   *string `json:"search,omitempty"`
+}
+
+type MovementConnection struct {
+	Nodes      []*movement.Movement `json:"nodes"`
+	PageInfo   *PageInfo            `json:"pageInfo"`
+	TotalCount int                  `json:"totalCount"`
 }
 
 type PageInfo struct {
