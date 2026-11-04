@@ -267,7 +267,7 @@ func TestSavedViewSortAndColumnsAgainstPostgres(t *testing.T) {
 	}
 	mux := chi.NewRouter()
 	savedview.NewHandler(savedview.NewPGRepository(f.App)).WithQueryEngine(savedview.NewPGQueryEngine(f.App)).
-		WithPermissions(grants{"ci:read": true, "asset:read": true}).RegisterRoutes(mux)
+		WithPermissions(grants{"ci:read": true, "asset:read": true}).WithEntitlements(features{"assets_basic": true}).WithInventory(true).RegisterRoutes(mux)
 	call := func(method, path, body string) (int, map[string]any) {
 		t.Helper()
 		ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: owner})

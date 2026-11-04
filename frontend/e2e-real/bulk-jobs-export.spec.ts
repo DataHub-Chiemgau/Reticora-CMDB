@@ -1007,25 +1007,25 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
   test('V01 a saved view created on the saved-views page persists across reload with its filter and stays private to the tenant', async () => {
     const page = a.page;
     const tag = `vw1x${s}`;
-    const preset = 'Production servers without backup relationship';
+    const preset = 'Servers without backup relationship';
     const presets = await ok<List<SavedView>>(a, 'GET', '/saved-views/presets');
     const presetSpec = rows(presets).find((p) => p.name === preset)?.filter_spec;
     expect(presetSpec, `preset ${preset}`).toBeTruthy();
 
-    // CIs the preset distinguishes: type physical_server, environment production vs staging.
+    // CIs the preset distinguishes: type physical_server, without vs with a
+    // backed_up_by relationship (the preset has no attribute, WP-309).
     const phys = await ok<{ id: string }>(a, 'POST', '/ci-types', {
       key: 'physical_server',
       name: `Physical Server ${tag}`,
     });
-    const prod = await newCI(a, {
-      ci_type_id: phys.id,
-      name: `${tag}-prod`,
-      attributes: { environment: 'production' },
-    });
-    const staging = await newCI(a, {
-      ci_type_id: phys.id,
-      name: `${tag}-staging`,
-      attributes: { environment: 'staging' },
+    const prod = await newCI(a, { ci_type_id: phys.id, name: `${tag}-prod` });
+    const staging = await newCI(a, { ci_type_id: phys.id, name: `${tag}-staging` });
+    const backup = await newCI(a, { name: `${tag}-backup` });
+    await ok(a, 'POST', '/relationships', {
+      source_ci_id: staging.id,
+      target_ci_id: backup.id,
+      rel_type: 'backed_up_by',
+      source: 'manual',
     });
 
     await page.goto('/saved-views');

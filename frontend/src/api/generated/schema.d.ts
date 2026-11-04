@@ -7702,7 +7702,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query need asset:read as well. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -10629,11 +10629,26 @@ export interface components {
       and?: components['schemas']['FilterExpr'][];
       or?: components['schemas']['FilterExpr'][];
       not?: components['schemas']['FilterExpr'];
-      /** @description A column of the entity kind, attributes.<key> or (CIs) asset.<field>. */
+      /** @description A column of the entity kind, attributes.<key> (a searchable attribute definition, custom fields for assets), tags (with has_any or has_all only) or, for CIs, asset.<field> and asset.attributes.<key> of the linked asset. */
       field?: string;
-      /** @enum {string} */
-      op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
-      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string); a non-empty list of them for in; true, false or nothing for exists. */
+      /**
+       * @description between compares number and time fields inclusively; has_any and has_all compare the field tags with tag keys (one of them, all of them).
+       * @enum {string}
+       */
+      op?:
+        | 'eq'
+        | 'ne'
+        | 'lt'
+        | 'lte'
+        | 'gt'
+        | 'gte'
+        | 'like'
+        | 'in'
+        | 'exists'
+        | 'between'
+        | 'has_any'
+        | 'has_all';
+      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string; an attribute takes the kind of its definition, a number also as a numeric string); a non-empty list of them for in; a list of exactly two for between; a non-empty list of tag keys for has_any and has_all; true, false or nothing for exists. */
       value?: unknown;
     };
     SavedViewSortKey: {
@@ -36647,6 +36662,16 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The filter of the view reads assets without asset:read, the module inventory or the entitlement assets_basic (feature-not-entitled), or reads a field the caller may not read (FieldForbiddenProblem), as POST /api/v1/search/query checks it (WP-309). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description The caller has a view of this name already. */
       409: {
         headers: {
@@ -36656,7 +36681,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36768,12 +36793,23 @@ export interface operations {
           'application/json': components['schemas']['SavedView'];
         };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The filter of the view reads assets without asset:read, the module inventory or the entitlement assets_basic (feature-not-entitled), or reads a field the caller may not read (FieldForbiddenProblem), as POST /api/v1/search/query checks it (WP-309). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
       };
       404: components['responses']['NotFound'];
       /** @description The owner has another view of this name; the view stays unchanged. */
@@ -36785,7 +36821,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36986,7 +37022,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
+      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), an attribute that is not searchable or searchable with different data types (field names it, the detail gives the hint), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -37000,7 +37036,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read) (ProblemDetail), or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (as attributes.tags), a sort key, a column or, for CIs, asset.<field>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read), or asset:read for asset fields of a CI query (ProblemDetail, "missing permission asset:read"); the organization lacks assets_basic or the module inventory is off for an asset query or asset fields (type https://reticora.io/problems/feature-not-entitled); or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (flat or compared with has_any or has_all, as attributes.tags), a sort key, a column or, for CIs, asset.<field> and asset.attributes.<key>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -37010,7 +37046,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
-      /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */
+      /** @description Invalid filter AST, filter value, sort key or column, an unknown attribute or an unknown tag key; field names it (where.<path>, the flat field, tags[<i>], sort[<i>].field, sort[<i>].dir or columns[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 )
 
 // CompileSQL renders the WHERE clause (without the keyword) and its args for
@@ -19,8 +20,18 @@ import (
 // Field names are fixed allow-listed identifiers — never user input — so the
 // generated SQL is injection-safe; only values are parameterized. The spec
 // is validated first (Validate), so no value fails a cast in SQL.
+//
+// This is the static compilation without the catalog of the organization:
+// dynamic attributes compare by the type of their value and tags are not
+// checked against the tag catalog. PGQueryEngine compiles with the catalog
+// it resolves in the transaction of the query (compile, WP-309).
 func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (where string, whereArgs []any, err error) {
-	if verr := f.Validate(entityKind); verr != nil {
+	return f.compile(entityKind, nil, args, startAt)
+}
+
+// compile is CompileSQL with the catalog cat (nil: static).
+func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startAt int) (where string, whereArgs []any, err error) {
+	if verr := f.validate(entityKind, cat); verr != nil {
 		return "", nil, verr
 	}
 	var parts []string
@@ -169,24 +180,33 @@ func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (whe
 			AND fv.override_value IS NOT NULL AND fv.discovered_value IS NOT NULL
 			AND fv.override_value IS DISTINCT FROM fv.discovered_value)`)
 	}
-	// Each tag is required (AND). CIs and assets carry the keys of the tag
-	// catalog (ci_tag, WP-281; asset_tag_link, WP-755).
+	// Each tag is required (AND), the has_all of the AST (tagExists).
 	for _, tag := range f.Tags {
 		p := next()
-		if table == "ci" {
-			add(fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = %s)`, p), tag)
-		} else {
-			add(fmt.Sprintf(`EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = %s)`, p), tag)
-		}
+		add(tagExists(table, "t.key = "+p), tag)
 	}
-	for k, v := range f.Attributes {
-		// Dynamic attribute predicate: attributes/custom_fields ->> key = value.
-		pk, pv := next(), next()
-		add(fmt.Sprintf(`%s->>%s = %s`, jsonbCol, pk, pv), k, fmt.Sprintf("%v", v))
+	if cat == nil {
+		for k, v := range f.Attributes {
+			// Dynamic attribute predicate: attributes/custom_fields ->> key = value.
+			pk, pv := next(), next()
+			add(fmt.Sprintf(`%s->>%s = %s`, jsonbCol, pk, pv), k, fmt.Sprintf("%v", v))
+		}
+	} else {
+		// With the catalog a flat attribute is the comparison eq of the
+		// AST: typed by its definition, over the expression of the
+		// attribute indexes (API-02, WP-309).
+		for _, k := range sortedKeys(f.Attributes) {
+			clause, attrArgs, nextPos, cerr := (&Expr{Field: "attributes." + k, Op: OpEq, Value: f.Attributes[k]}).compile(entityKind, table, cat, nil, pos)
+			if cerr != nil {
+				return "", nil, cerr
+			}
+			pos = nextPos
+			add(clause, attrArgs...)
+		}
 	}
 
 	if f.Where != nil {
-		clause, astArgs, _, cerr := f.Where.CompileSQL(entityKind, table, nil, pos)
+		clause, astArgs, _, cerr := f.Where.compile(entityKind, table, cat, nil, pos)
 		if cerr != nil {
 			return "", nil, cerr
 		}
@@ -205,6 +225,13 @@ func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (whe
 // (validatePresentation). A violation is a 422 *api.FieldError naming the
 // field, for the AST where.<path> (e.g. where.and[1].value).
 func (f *FilterSpec) Validate(entityKind string) error {
+	return f.validate(entityKind, nil)
+}
+
+// validate is Validate with the catalog cat: with one, the values of the
+// flat attributes and of the attribute comparisons are checked against the
+// kind of their definition (WP-309).
+func (f *FilterSpec) validate(entityKind string, cat *catalog) error {
 	if err := validatePresentation(entityKind, f.Sort, f.Columns); err != nil {
 		return err
 	}
@@ -216,10 +243,29 @@ func (f *FilterSpec) Validate(entityKind string) error {
 			return &api.FieldError{Field: id.field, Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
 		}
 	}
+	for i, tag := range f.Tags {
+		if tag == "" || strings.ContainsRune(tag, 0) {
+			return &api.FieldError{Field: fmt.Sprintf("tags[%d]", i), Message: "must be a tag key", Status: http.StatusUnprocessableEntity}
+		}
+	}
+	for _, k := range sortedKeys(f.Attributes) {
+		if !validAttributeKey(k) {
+			return &api.FieldError{Field: "attributes." + k, Message: "invalid attribute key", Status: http.StatusUnprocessableEntity}
+		}
+		if cat == nil {
+			continue
+		}
+		if a, ok := cat.attrs[attrRef{entityKind, k}]; ok {
+			if msg := valueError(a.kind, f.Attributes[k], true); msg != "" {
+				return &api.FieldError{Field: "attributes." + k, Message: msg, Status: http.StatusUnprocessableEntity}
+			}
+		}
+	}
 	if f.Where == nil {
 		return nil
 	}
-	err := f.Where.Validate(entityKind)
+	nodes := 0
+	err := f.Where.validate(entityKind, "", 1, &nodes, cat)
 	var astErr *ASTError
 	if errors.As(err, &astErr) {
 		return &api.FieldError{Field: "where" + astErr.Path, Message: astErr.Message, Status: http.StatusUnprocessableEntity}
@@ -300,10 +346,11 @@ type FieldRef struct {
 // warranty_until, lifecycle, status and the location filters as
 // location_id, discovery_source, ci_type as ci_type_id, search as name),
 // tags as attributes.tags, the keys of attributes as attributes.<key>,
-// every comparison of the AST in where (asset.<field> of a CI as the
-// asset's field), the sort keys and the columns. The caller decides which
-// of them field permissions cover. Follow-up field kinds of the
-// structured query extend it (WP-309).
+// every comparison of the AST in where (asset.<field> and
+// asset.attributes.<key> of a CI as the asset's field, the tag comparisons
+// as attributes.tags; between and computed attributes are comparisons of
+// their field), the sort keys and the columns. The caller decides which of
+// them field permissions cover (WP-729, WP-309).
 func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 	var out []FieldRef
 	seen := map[FieldRef]bool{}
@@ -318,7 +365,13 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 	field := func(name string) {
 		switch sub, isAsset := strings.CutPrefix(name, "asset."); {
 		case isAsset && entityKind == "ci":
+			// A column of the linked asset or, as asset.attributes.<key>,
+			// one of its custom fields (WP-309).
 			add("asset", sub, name)
+		case name == TagsField:
+			// The tag comparisons (has_any, has_all) read the tags like
+			// the flat tags (WP-309).
+			add(entityKind, "attributes.tags", name)
 		case name == "ci_type":
 			add(entityKind, "ci_type_id", name)
 		default:
@@ -378,9 +431,11 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 // Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and
 // not. A node is either a group (exactly one of And, Or, Not) or a
 // comparison of a whitelisted field with an operator and a value. Fields
-// are the columns of the entity, its dynamic attributes (attributes.<key>)
-// and, for CIs, the fields of the linked asset (asset.<field>). Only values
-// reach the SQL as parameters; columns come from the whitelist.
+// are the columns of the entity, its dynamic attributes (attributes.<key>),
+// its tags (tags with has_any and has_all) and, for CIs, the fields of the
+// linked asset (asset.<field>) and its custom fields
+// (asset.attributes.<key>). Only values reach the SQL as parameters;
+// columns come from the whitelist, attribute keys pass validAttributeKey.
 
 // Expr is one node of the filter AST.
 type Expr struct {
@@ -403,7 +458,17 @@ const (
 	OpLike   = "like"
 	OpIn     = "in"
 	OpExists = "exists"
+	// OpBetween compares a number or a time inclusively with a list of
+	// two values (WP-309).
+	OpBetween = "between"
+	// OpHasAny and OpHasAll compare the tags with a list of tag keys:
+	// one of them or all of them (WP-309).
+	OpHasAny = "has_any"
+	OpHasAll = "has_all"
 )
+
+// TagsField is the field of the tag comparisons (has_any, has_all).
+const TagsField = "tags"
 
 // Limits of one AST.
 const (
@@ -418,6 +483,8 @@ const (
 	kindTime   = "time"
 	kindUUID   = "uuid"
 	kindBool   = "bool"
+	// kindTag is the field tags: has_any and has_all only.
+	kindTag = "tag"
 )
 
 type astField struct{ expr, kind string }
@@ -452,6 +519,11 @@ var astFields = map[string]map[string]astField{
 		"purchase_date": {"%s.purchase_date", kindTime}, "warranty_until": {"%s.warranty_until", kindTime},
 		"warranty_end": {"%s.warranty_until", kindTime}, "client_id": {"%s.client_id", kindUUID},
 		"location_id": {"%s.location_id", kindUUID}, "created_at": {"%s.created_at", kindTime},
+		// AST-01 (WP-271, WP-309).
+		"manufacturer": {"%s.manufacturer", kindText}, "model": {"%s.model", kindText},
+		"cost_center": {"%s.cost_center", kindText}, "currency": {"%s.currency", kindText},
+		"supplier_id": {"%s.supplier_id", kindUUID}, "contract_id": {"%s.contract_id", kindUUID},
+		"owner_user_id": {"%s.owner_user_id", kindUUID}, "owner_team_id": {"%s.owner_team_id", kindUUID},
 	},
 }
 
@@ -478,26 +550,78 @@ func (e *ASTError) Error() string { return "where" + e.Path + ": " + e.Message }
 
 // walk calls visit for the node and every node below it.
 func (e *Expr) walk(visit func(*Expr)) {
-	visit(e)
+	e.walkPaths("", func(n *Expr, _ string) { visit(n) })
+}
+
+// walkPaths calls visit for the node and every node below it with the path
+// of the node (as ASTError names it).
+func (e *Expr) walkPaths(path string, visit func(n *Expr, path string)) {
+	visit(e, path)
 	for i := range e.And {
-		e.And[i].walk(visit)
+		e.And[i].walkPaths(fmt.Sprintf("%s.and[%d]", path, i), visit)
 	}
 	for i := range e.Or {
-		e.Or[i].walk(visit)
+		e.Or[i].walkPaths(fmt.Sprintf("%s.or[%d]", path, i), visit)
 	}
 	if e.Not != nil {
-		e.Not.walk(visit)
+		e.Not.walkPaths(path+".not", visit)
 	}
+}
+
+// catalog is what PGQueryEngine resolves for a spec in the transaction of
+// the query (API-02, WP-309): the definition of each dynamic attribute the
+// spec compares, by the entity whose JSON holds it ("ci": ci.attributes,
+// "asset": asset.custom_fields, also of the linked asset of a CI). A nil
+// catalog is the static compilation: attributes compare by the type of
+// their value.
+type catalog struct {
+	attrs map[attrRef]resolvedAttribute
+}
+
+// attrRef names a dynamic attribute: the entity whose JSON holds it and
+// its key.
+type attrRef struct{ entity, key string }
+
+// resolvedAttribute is the searchable definition of an attribute: the
+// filter kind of its data type (fieldmeta.FilterKind) and the types the
+// filter is restricted to (nil: every type), as attributeFilterOf of the CI
+// list returns them (WP-566).
+type resolvedAttribute struct {
+	kind  string
+	types []string
+}
+
+// attribute returns the definition of the attribute, ok false without a
+// catalog or for an attribute it does not hold.
+func (c *catalog) attribute(entity, key string) (resolvedAttribute, bool) {
+	if c == nil {
+		return resolvedAttribute{}, false
+	}
+	a, ok := c.attrs[attrRef{entity, key}]
+	return a, ok
+}
+
+// attributeRef returns the attribute a field names for the entity kind:
+// attributes.<key> of the entity, asset.attributes.<key> of the linked
+// asset of a CI; ok is false for any other field.
+func attributeRef(entityKind, field string) (ref attrRef, ok bool) {
+	if key, isAttr := strings.CutPrefix(field, "attributes."); isAttr {
+		return attrRef{entityKind, key}, true
+	}
+	if key, isAttr := strings.CutPrefix(field, "asset.attributes."); isAttr && entityKind == "ci" {
+		return attrRef{"asset", key}, true
+	}
+	return attrRef{}, false
 }
 
 // Validate checks the AST against the field whitelist of the entity kind,
 // the operators of each field kind and the size limits.
 func (e *Expr) Validate(entityKind string) error {
 	nodes := 0
-	return e.validate(entityKind, "", 1, &nodes)
+	return e.validate(entityKind, "", 1, &nodes, nil)
 }
 
-func (e *Expr) validate(entityKind, path string, depth int, nodes *int) error {
+func (e *Expr) validate(entityKind, path string, depth int, nodes *int, cat *catalog) error {
 	*nodes++
 	if depth > MaxExprDepth {
 		return &ASTError{path, fmt.Sprintf("nested deeper than %d levels", MaxExprDepth)}
@@ -515,36 +639,40 @@ func (e *Expr) validate(entityKind, path string, depth int, nodes *int) error {
 		return &ASTError{path, "a node is exactly one of and, or, not or a comparison"}
 	}
 	for i := range e.And {
-		if err := e.And[i].validate(entityKind, fmt.Sprintf("%s.and[%d]", path, i), depth+1, nodes); err != nil {
+		if err := e.And[i].validate(entityKind, fmt.Sprintf("%s.and[%d]", path, i), depth+1, nodes, cat); err != nil {
 			return err
 		}
 	}
 	for i := range e.Or {
-		if err := e.Or[i].validate(entityKind, fmt.Sprintf("%s.or[%d]", path, i), depth+1, nodes); err != nil {
+		if err := e.Or[i].validate(entityKind, fmt.Sprintf("%s.or[%d]", path, i), depth+1, nodes, cat); err != nil {
 			return err
 		}
 	}
 	if e.Not != nil {
-		return e.Not.validate(entityKind, path+".not", depth+1, nodes)
+		return e.Not.validate(entityKind, path+".not", depth+1, nodes, cat)
 	}
 	if e.Field == "" {
 		return nil
 	}
-	kind, err := e.fieldKind(entityKind)
+	kind, typed, err := e.fieldKind(entityKind, cat)
 	if err != nil {
 		return &ASTError{path, err.Error()}
 	}
-	return e.validateComparison(kind, path)
+	return e.validateComparison(kind, typed, path)
 }
 
-// fieldKind resolves the comparison's field. Attributes have no declared
-// type and compare by the value's type (for in by the first element's): a
-// number as number, a boolean as bool, a string as text, or as time when
-// it is a time compared with lt, lte, gt or gte.
-func (e *Expr) fieldKind(entityKind string) (string, error) {
-	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
-		if !validAttributeKey(key) {
-			return "", fmt.Errorf("invalid attribute key %q", key)
+// fieldKind resolves the comparison's field. An attribute the catalog holds
+// takes the kind of its definition (typed, WP-309). Without one, an
+// attribute compares by the value's type (for in and between by the first
+// element's): a number as number, a boolean as bool, a string as text, or
+// as time when it is a time compared with lt, lte, gt, gte or between.
+func (e *Expr) fieldKind(entityKind string, cat *catalog) (kind string, typed bool, err error) {
+	if ref, ok := attributeRef(entityKind, e.Field); ok {
+		if !validAttributeKey(ref.key) {
+			return "", false, fmt.Errorf("invalid attribute key %q", ref.key)
+		}
+		if a, resolved := cat.attribute(ref.entity, ref.key); resolved {
+			return a.kind, true, nil
 		}
 		v := e.Value
 		if list, isList := v.([]any); isList && len(list) > 0 {
@@ -552,34 +680,41 @@ func (e *Expr) fieldKind(entityKind string) (string, error) {
 		}
 		switch v := v.(type) {
 		case float64:
-			return kindNumber, nil
+			return kindNumber, false, nil
 		case bool:
-			return kindBool, nil
+			return kindBool, false, nil
 		case string:
-			if ordering(e.Op) && validTime(v) {
-				return kindTime, nil
+			if (ordering(e.Op) || e.Op == OpBetween) && validTime(v) {
+				return kindTime, false, nil
 			}
 		}
-		return kindText, nil
+		return kindText, false, nil
+	}
+	if e.Field == TagsField {
+		return kindTag, false, nil
 	}
 	if sub, ok := strings.CutPrefix(e.Field, "asset."); ok && entityKind == "ci" {
 		f, known := astFields["asset"][sub]
 		if !known {
-			return "", fmt.Errorf("unknown asset field %q", sub)
+			return "", false, fmt.Errorf("unknown asset field %q", sub)
 		}
-		return f.kind, nil
+		return f.kind, false, nil
 	}
 	f, known := astFields[entityKind][e.Field]
 	if !known {
-		return "", fmt.Errorf("unknown field %q", e.Field)
+		return "", false, fmt.Errorf("unknown field %q", e.Field)
 	}
-	return f.kind, nil
+	return f.kind, false, nil
 }
 
 // validateComparison checks the operator for the field kind and every value
-// against it (each element of in), so that no value reaches a cast in SQL
-// that could fail (F-179).
-func (e *Expr) validateComparison(kind, path string) error {
+// against it (each element of in and between), so that no value reaches a
+// cast in SQL that could fail (F-179). typed is an attribute of a resolved
+// definition, whose number values may also be given as strings.
+func (e *Expr) validateComparison(kind string, typed bool, path string) error {
+	if kind == kindTag && e.Op != OpHasAny && e.Op != OpHasAll {
+		return &ASTError{path, "tags take has_any or has_all"}
+	}
 	switch e.Op {
 	case OpExists:
 		if _, isBool := e.Value.(bool); e.Value != nil && !isBool {
@@ -596,29 +731,50 @@ func (e *Expr) validateComparison(kind, path string) error {
 			return &ASTError{path, "like applies to text fields only"}
 		}
 	case OpIn:
-		values, ok := e.Value.([]any)
-		if !ok || len(values) == 0 {
-			return &ASTError{path + ".value", "in needs a non-empty list"}
+		return validateList(kind, typed, path, e.Value, "in needs a non-empty list", func(n int) bool { return n > 0 })
+	case OpBetween:
+		if kind != kindNumber && kind != kindTime {
+			return &ASTError{path, "between applies to number and time fields only"}
 		}
-		for i, v := range values {
-			if msg := valueError(kind, v); msg != "" {
-				return &ASTError{fmt.Sprintf("%s.value[%d]", path, i), msg}
-			}
+		return validateList(kind, typed, path, e.Value, "between needs a list of exactly two values", func(n int) bool { return n == 2 })
+	case OpHasAny, OpHasAll:
+		if kind != kindTag {
+			return &ASTError{path, e.Op + " applies to tags only"}
 		}
-		return nil
+		return validateList(kind, false, path, e.Value, e.Op+" needs a non-empty list of tag keys", func(n int) bool { return n > 0 })
 	default:
 		return &ASTError{path, fmt.Sprintf("unknown operator %q", e.Op)}
 	}
-	if msg := valueError(kind, e.Value); msg != "" {
+	if msg := valueError(kind, e.Value, typed); msg != "" {
 		return &ASTError{path + ".value", msg}
 	}
 	return nil
 }
 
+// validateList checks that value is a list whose length size accepts
+// (otherwise msg) and each element a value of the kind.
+func validateList(kind string, typed bool, path string, value any, msg string, size func(int) bool) error {
+	values, ok := value.([]any)
+	if !ok || !size(len(values)) {
+		return &ASTError{path + ".value", msg}
+	}
+	for i, v := range values {
+		if m := valueError(kind, v, typed); m != "" {
+			return &ASTError{fmt.Sprintf("%s.value[%d]", path, i), m}
+		}
+	}
+	return nil
+}
+
+// numberShape is a number as numeric parses it, for the number values of a
+// typed attribute given as a string.
+var numberShape = regexp.MustCompile(`^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$`)
+
 // valueError reports why v is no value of the field kind, or "" when it is
-// one. Attributes take their kind from the value, so for them only the
-// elements of in after the first can disagree.
-func valueError(kind string, v any) string {
+// one. Untyped attributes take their kind from the value, so for them only
+// the elements of in after the first can disagree; a typed attribute
+// (typed) also takes a number as a string ("16").
+func valueError(kind string, v any, typed bool) string {
 	switch v.(type) {
 	case string, float64, bool:
 	default:
@@ -626,6 +782,9 @@ func valueError(kind string, v any) string {
 	}
 	switch kind {
 	case kindNumber:
+		if s, isString := v.(string); typed && isString && numberShape.MatchString(s) {
+			return ""
+		}
 		if _, ok := v.(float64); !ok {
 			return "must be a number"
 		}
@@ -642,6 +801,8 @@ func valueError(kind string, v any) string {
 		return "must be a string"
 	case strings.ContainsRune(s, 0):
 		return "must not contain NUL characters"
+	case kind == kindTag && s == "":
+		return "must be a tag key"
 	case kind == kindUUID && !isUUID(s):
 		return "must be a UUID"
 	case kind == kindTime && !validTime(s):
@@ -679,8 +840,14 @@ func validTime(s string) bool {
 }
 
 // CompileSQL renders the AST as a SQL predicate on table; args are
-// appended and numbered from startAt.
+// appended and numbered from startAt. It is the static compilation (see
+// FilterSpec.CompileSQL).
 func (e *Expr) CompileSQL(entityKind, table string, args []any, startAt int) (sql string, out []any, next int, err error) {
+	return e.compile(entityKind, table, nil, args, startAt)
+}
+
+// compile is CompileSQL with the catalog cat (nil: static).
+func (e *Expr) compile(entityKind, table string, cat *catalog, args []any, startAt int) (sql string, out []any, next int, err error) {
 	next = startAt
 	param := func(v any) string {
 		args = append(args, v)
@@ -710,11 +877,14 @@ func (e *Expr) CompileSQL(entityKind, table string, args []any, startAt int) (sq
 			s, cerr := compile(n.Not)
 			return "(NOT COALESCE(" + s + ", false))", cerr
 		}
-		kind, ferr := n.fieldKind(entityKind)
+		kind, _, ferr := n.fieldKind(entityKind, cat)
 		if ferr != nil {
 			return "", ferr
 		}
-		col, jsonValue, wrap := n.column(entityKind, table, param)
+		if kind == kindTag {
+			return tagComparison(table, n, param), nil
+		}
+		col, jsonValue, wrap := n.column(entityKind, table, cat, param)
 		return wrap(comparison(col, jsonValue, kind, n, param)), nil
 	}
 	sql, err = compile(e)
@@ -722,41 +892,112 @@ func (e *Expr) CompileSQL(entityKind, table string, args []any, startAt int) (sq
 }
 
 // column returns the SQL expression of the field, for a dynamic attribute
-// also its JSON value (jsonValue), and for asset fields of a CI the
-// wrapper that evaluates the comparison on the linked asset.
-func (e *Expr) column(entityKind, table string, param func(any) string) (col, jsonValue string, wrap func(string) string) {
+// also its JSON value (jsonValue), and the wrapper of the comparison: for
+// fields of the linked asset of a CI the evaluation on that asset, for an
+// attribute whose definitions are restricted to types the restriction to
+// them (WP-566).
+//
+// With the catalog a CI attribute is read with the expression of the
+// attribute indexes, reticora_attr_text with the key as a literal
+// (citype.KeyExpression; E-73 (Korrekturplan), WP-435, WP-607), as the
+// attribute filter of the CI list compares it; the key passed
+// validAttributeKey.
+func (e *Expr) column(entityKind, table string, cat *catalog, param func(any) string) (col, jsonValue string, wrap func(string) string) {
 	wrap = func(s string) string { return s }
-	if key, ok := strings.CutPrefix(e.Field, "attributes."); ok {
-		jsonb := table + ".attributes"
-		if entityKind == "asset" {
-			jsonb = table + ".custom_fields"
-		}
-		p := param(key)
-		return fmt.Sprintf("%s->>%s", jsonb, p), fmt.Sprintf("%s->%s", jsonb, p), wrap
-	}
-	if sub, ok := strings.CutPrefix(e.Field, "asset."); ok && entityKind == "ci" {
+	field := e.Field
+	if sub, ok := strings.CutPrefix(field, "asset."); ok && entityKind == "ci" {
+		outer := table
 		wrap = func(s string) string {
-			return fmt.Sprintf("EXISTS (SELECT 1 FROM asset sa WHERE sa.id = %s.asset_id AND %s)", table, s)
+			return fmt.Sprintf("EXISTS (SELECT 1 FROM asset sa WHERE sa.id = %s.asset_id AND %s)", outer, s)
 		}
-		return fmt.Sprintf(astFields["asset"][sub].expr, "sa"), "", wrap
+		if !strings.HasPrefix(sub, "attributes.") {
+			return fmt.Sprintf(astFields["asset"][sub].expr, "sa"), "", wrap
+		}
+		// asset.attributes.<key>: the custom fields of the linked asset.
+		field, table = sub, "sa"
 	}
-	return fmt.Sprintf(astFields[entityKind][e.Field].expr, table), "", wrap
+	ref, isAttr := attributeRef(entityKind, e.Field)
+	if !isAttr {
+		return fmt.Sprintf(astFields[entityKind][field].expr, table), "", wrap
+	}
+	jsonb, typeCol := table+".attributes", table+".ci_type_id"
+	if ref.entity == "asset" {
+		jsonb, typeCol = table+".custom_fields", table+".asset_type_id"
+	}
+	a, typed := cat.attribute(ref.entity, ref.key)
+	if typed && a.types != nil {
+		inner := wrap
+		restrict := param(a.types)
+		wrap = func(s string) string {
+			return inner(fmt.Sprintf("(%s = ANY(%s::uuid[]) AND %s)", typeCol, restrict, s))
+		}
+	}
+	if typed && ref.entity == "ci" {
+		// The key is a literal here as in the index expression; it passed
+		// validAttributeKey ([a-z0-9_]), so it needs no quoting. No
+		// parameter is added that the SQL might not use.
+		return citype.KeyExpression(ref.key), fmt.Sprintf("%s->'%s'", jsonb, ref.key), wrap
+	}
+	p := param(ref.key)
+	return fmt.Sprintf("%s->>%s", jsonb, p), fmt.Sprintf("%s->%s", jsonb, p), wrap
+}
+
+// tagComparison renders a tag comparison (WP-309) with the building block
+// of the flat tags (tagExists): has_any is one EXISTS over the keys,
+// has_all one EXISTS per key, as filter[tags] with in and all of the CI
+// list (WP-754).
+func tagComparison(table string, e *Expr, param func(any) string) string {
+	values := e.Value.([]any)
+	keys := make([]string, len(values))
+	for i, v := range values {
+		keys[i] = fmt.Sprint(v)
+	}
+	if e.Op == OpHasAny {
+		return tagExists(table, "t.key = ANY("+param(keys)+"::text[])")
+	}
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = tagExists(table, "t.key = "+param(k))
+	}
+	return "(" + strings.Join(parts, " AND ") + ")"
+}
+
+// tagExists is the predicate that the CI or asset (table) carries a tag of
+// the tag catalog whose key matches cond on t.key: ci_tag (WP-281) or
+// asset_tag_link (WP-755).
+func tagExists(table, cond string) string {
+	if table == "asset" {
+		return `EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND ` + cond + `)`
+	}
+	return `EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND ` + cond + `)`
+}
+
+// sortedKeys returns the keys of m in order.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // attributeGuards are the type checks under which comparison casts a
 // dynamic attribute (%[1]s its JSON value, %[2]s its text). None of them
 // can fail, so the result does not depend on the order in which
-// PostgreSQL evaluates the predicates (F-165).
+// PostgreSQL evaluates the predicates (F-165). An attribute typed uuid by
+// its definition is cast only when its text is a uuid.
 var attributeGuards = map[string]string{
 	kindNumber: `jsonb_typeof(%[1]s) = 'number'`,
 	kindBool:   `jsonb_typeof(%[1]s) = 'boolean'`,
 	kindTime:   `jsonb_typeof(%[1]s) = 'string' AND %[2]s ~ '^\d{4}-\d{2}-\d{2}' AND pg_input_is_valid(%[2]s, 'timestamptz')`,
+	kindUUID:   `jsonb_typeof(%[1]s) = 'string' AND pg_input_is_valid(%[2]s, 'uuid')`,
 }
 
 // comparison renders one comparison with the casts of the field kind. A
 // dynamic attribute is cast only under its type check: a value of another
-// type compares as NULL like a missing key, so it matches neither eq, in
-// nor an order comparison, and like a missing key it matches ne (IS
+// type compares as NULL like a missing key, so it matches neither eq, in,
+// between nor an order comparison, and like a missing key it matches ne (IS
 // DISTINCT FROM). The values themselves are validated (validateComparison).
 func comparison(col, jsonValue, kind string, e *Expr, param func(any) string) string {
 	cast := map[string]string{kindText: "", kindNumber: "::numeric", kindTime: "::timestamptz", kindUUID: "::uuid", kindBool: "::boolean"}[kind]
@@ -787,6 +1028,11 @@ func comparison(col, jsonValue, kind string, e *Expr, param func(any) string) st
 			arrayCast = cast + "[]"
 		}
 		return lhs + " = ANY(" + param(texts) + arrayCast + ")"
+	case OpBetween:
+		// Inclusive, with the cast of the field kind (number or time).
+		values := e.Value.([]any)
+		low := value(values[0])
+		return lhs + " BETWEEN " + low + " AND " + value(values[1])
 	}
 	op := map[string]string{OpEq: "=", OpNe: "IS DISTINCT FROM", OpLt: "<", OpLte: "<=", OpGt: ">", OpGte: ">="}[e.Op]
 	return lhs + " " + op + " " + value(e.Value)

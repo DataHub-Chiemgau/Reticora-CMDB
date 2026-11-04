@@ -102,10 +102,11 @@ func Presets() []View {
 			},
 		},
 		{
-			Name: "Production servers without backup relationship", EntityKind: "ci", Shared: true,
+			// No attribute: no migration or seed defines environment, and
+			// an undefined attribute is refused (API-02, WP-309).
+			Name: "Servers without backup relationship", EntityKind: "ci", Shared: true,
 			FilterSpec: map[string]any{
 				"ci_type": "physical_server", "lacks_relationship": "backed_up_by",
-				"attributes": map[string]any{"environment": "production"},
 			},
 		},
 		{
