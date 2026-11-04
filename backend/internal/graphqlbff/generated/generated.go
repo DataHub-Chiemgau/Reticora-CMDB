@@ -35,6 +35,7 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	CI() CIResolver
 	Job() JobResolver
 	Query() QueryResolver
 	RackMount() RackMountResolver
@@ -52,7 +53,7 @@ type ComplexityRoot struct {
 		CITypeID       func(childComplexity int) int
 		ClientID       func(childComplexity int) int
 		CreatedAt      func(childComplexity int) int
-		FQDN           func(childComplexity int) int
+		Fqdn           func(childComplexity int) int
 		Health         func(childComplexity int) int
 		Hostname       func(childComplexity int) int
 		ID             func(childComplexity int) int
@@ -201,6 +202,16 @@ type ComplexityRoot struct {
 
 // region    ************************** generated!.gotpl **************************
 
+type CIResolver interface {
+	Hostname(ctx context.Context, obj *ci.Item) (*string, error)
+	Fqdn(ctx context.Context, obj *ci.Item) (*string, error)
+	SerialNumber(ctx context.Context, obj *ci.Item) (*string, error)
+	Manufacturer(ctx context.Context, obj *ci.Item) (*string, error)
+	Model(ctx context.Context, obj *ci.Item) (*string, error)
+	ManagementIP(ctx context.Context, obj *ci.Item) (*string, error)
+
+	Attributes(ctx context.Context, obj *ci.Item) (map[string]any, error)
+}
 type JobResolver interface {
 	Status(ctx context.Context, obj *jobs.Job) (string, error)
 }
@@ -272,11 +283,11 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.CI.CreatedAt(childComplexity), true
 	case "CI.fqdn":
-		if e.ComplexityRoot.CI.FQDN == nil {
+		if e.ComplexityRoot.CI.Fqdn == nil {
 			break
 		}
 
-		return e.ComplexityRoot.CI.FQDN(childComplexity), true
+		return e.ComplexityRoot.CI.Fqdn(childComplexity), true
 	case "CI.health":
 		if e.ComplexityRoot.CI.Health == nil {
 			break
@@ -1992,18 +2003,18 @@ func (ec *executionContext) _CI_hostname(ctx context.Context, field graphql.Coll
 			return ec.fieldContext_CI_hostname(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Hostname, nil
+			return ec.Resolvers.CI().Hostname(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_hostname(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_fqdn(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2015,18 +2026,18 @@ func (ec *executionContext) _CI_fqdn(ctx context.Context, field graphql.Collecte
 			return ec.fieldContext_CI_fqdn(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.FQDN, nil
+			return ec.Resolvers.CI().Fqdn(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_fqdn(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_serialNumber(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2038,18 +2049,18 @@ func (ec *executionContext) _CI_serialNumber(ctx context.Context, field graphql.
 			return ec.fieldContext_CI_serialNumber(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.SerialNumber, nil
+			return ec.Resolvers.CI().SerialNumber(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_serialNumber(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_manufacturer(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2061,18 +2072,18 @@ func (ec *executionContext) _CI_manufacturer(ctx context.Context, field graphql.
 			return ec.fieldContext_CI_manufacturer(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Manufacturer, nil
+			return ec.Resolvers.CI().Manufacturer(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_manufacturer(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_model(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2084,18 +2095,18 @@ func (ec *executionContext) _CI_model(ctx context.Context, field graphql.Collect
 			return ec.fieldContext_CI_model(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Model, nil
+			return ec.Resolvers.CI().Model(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_model(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_managementIp(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2107,18 +2118,18 @@ func (ec *executionContext) _CI_managementIp(ctx context.Context, field graphql.
 			return ec.fieldContext_CI_managementIp(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.ManagementIP, nil
+			return ec.Resolvers.CI().ManagementIP(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_CI_managementIp(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _CI_lifecycleState(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -2245,7 +2256,7 @@ func (ec *executionContext) _CI_attributes(ctx context.Context, field graphql.Co
 			return ec.fieldContext_CI_attributes(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Attributes, nil
+			return ec.Resolvers.CI().Attributes(ctx, obj)
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
@@ -2256,7 +2267,7 @@ func (ec *executionContext) _CI_attributes(ctx context.Context, field graphql.Co
 	)
 }
 func (ec *executionContext) fieldContext_CI_attributes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type Map does not have child fields"))
+	return graphql.NewScalarFieldContext("CI", field, true, true, errors.New("field of type Map does not have child fields"))
 }
 
 func (ec *executionContext) _CI_tags(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
@@ -5595,102 +5606,333 @@ func (ec *executionContext) _CI(ctx context.Context, sel ast.SelectionSet, obj *
 		case "id":
 			out.Values[i] = ec._CI_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "name":
 			out.Values[i] = ec._CI_name(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "status":
 			out.Values[i] = ec._CI_status(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "ciTypeId":
 			out.Values[i] = ec._CI_ciTypeId(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "clientId":
 			out.Values[i] = ec._CI_clientId(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "siteId":
 			out.Values[i] = ec._CI_siteId(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "locationId":
 			out.Values[i] = ec._CI_locationId(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "hostname":
-			out.Values[i] = ec._CI_hostname(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_hostname(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "fqdn":
-			out.Values[i] = ec._CI_fqdn(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_fqdn(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "serialNumber":
-			out.Values[i] = ec._CI_serialNumber(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_serialNumber(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "manufacturer":
-			out.Values[i] = ec._CI_manufacturer(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_manufacturer(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "model":
-			out.Values[i] = ec._CI_model(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_model(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "managementIp":
-			out.Values[i] = ec._CI_managementIp(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_managementIp(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "lifecycleState":
 			out.Values[i] = ec._CI_lifecycleState(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "health":
 			out.Values[i] = ec._CI_health(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "version":
 			out.Values[i] = ec._CI_version(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "createdAt":
 			out.Values[i] = ec._CI_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "updatedAt":
 			out.Values[i] = ec._CI_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "attributes":
-			out.Values[i] = ec._CI_attributes(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CI_attributes(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "tags":
 			out.Values[i] = ec._CI_tags(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))

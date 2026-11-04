@@ -30,6 +30,9 @@ type Handler struct {
 	// grants reads the field permissions of the export v2 (WP-726); nil:
 	// empty sections.
 	grants GrantExporter
+	// formPolicy makes the field policy of a resolved form (WP-727,
+	// form_handler.go); nil: NoopFieldPolicy.
+	formPolicy FormPolicyFactory
 }
 
 // WithGrantExporter sets the reader of the field permissions for the

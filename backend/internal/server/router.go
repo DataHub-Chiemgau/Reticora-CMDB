@@ -446,7 +446,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
 	var bffJobs graphqlbff.JobSource
-	historyHandler := history.NewHandler(repos.History)
+	// The CI history projects the field values with the policy of the
+	// caller, a queued snapshot with that of its creator (WP-727).
+	historyHandler := history.NewHandler(repos.History).WithCIs(HistoryCIs(&repos)).
+		WithCreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver))
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -693,7 +696,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
-			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}),
+			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}).
+			// The resolved forms follow the field permissions (WP-727).
+			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)),
 		// Administration of the field permissions (RBA-07, WP-726); a write
 		// drops the resolver's snapshot after the commit.
 		permission.NewFieldGrantHandler(repos.FieldGrants, fieldResolver),

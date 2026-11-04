@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff/generated"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -35,6 +36,7 @@ const (
 	codeUnauthenticated = "UNAUTHENTICATED"
 	codeForbidden       = "FORBIDDEN"
 	codeBadInput        = "BAD_USER_INPUT"
+	codeInternal        = "INTERNAL_SERVER_ERROR"
 )
 
 // Resolver resolves the queries of the BFF.
@@ -44,6 +46,10 @@ type Resolver struct {
 	entitlements EntitlementChecker
 	sources      Sources
 }
+
+// CI implements generated.ResolverRoot: the fields under field
+// permissions (RBA-07, WP-727).
+func (r *Resolver) CI() generated.CIResolver { return &ciResolver{r} }
 
 // Query implements generated.ResolverRoot.
 func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
@@ -64,6 +70,7 @@ func (r *Resolver) ReviewItem() generated.ReviewItemResolver { return &reviewIte
 func (r *Resolver) TopologyNode() generated.TopologyNodeResolver { return &topologyNodeResolver{r} }
 
 type (
+	ciResolver           struct{ *Resolver }
 	queryResolver        struct{ *Resolver }
 	jobResolver          struct{ *Resolver }
 	rackMountResolver    struct{ *Resolver }
@@ -413,4 +420,80 @@ func value(p *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*p)
+}
+
+// Field permissions of the BFF (RBA-07, E-43, WP-727): cis, ci and the
+// nested CIs (loadCI: sourceCi, targetCi, candidates, RackMount.ci,
+// TopologyNode.ci) hand out the same ci.Item; the fields under field
+// permissions resolve here with the policy of the request
+// (permission.PolicyFrom, once per request). An unreadable typed field is
+// null, an unreadable attribute key (sensitive without grant, instance
+// attributes as _instance.<key>) is left out of attributes. The structural
+// fields stay as they are. A policy that cannot be resolved fails the
+// field (fail-closed).
+
+// errNoPolicy answers a field whose policy cannot be resolved.
+var errNoPolicy = gqlError(codeInternal, "the field permissions could not be resolved")
+
+// policy returns the field policy of the request.
+func policy(ctx context.Context) (*permission.FieldPolicy, error) {
+	p, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return nil, errNoPolicy
+	}
+	return p, nil
+}
+
+// ciRef is the object reference of a CI for its field permissions.
+func ciRef(item *ci.Item) permission.ObjectRef {
+	return permission.ObjectRef{ID: item.ID, ClientID: item.ClientID, SiteID: item.SiteID}
+}
+
+// typedField returns value when the principal may read the field at path
+// of the CI, null otherwise.
+func typedField(ctx context.Context, item *ci.Item, path, value string) (*string, error) {
+	p, err := policy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !permission.Readable(p, permission.KindCI, item.CITypeID, ciRef(item), path,
+		permission.WithInstanceKeys(item.InstanceKeys)) {
+		return nil, nil //nolint:nilnil // GraphQL null for an unreadable field
+	}
+	return &value, nil
+}
+
+func (c *ciResolver) Hostname(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "hostname", obj.Hostname)
+}
+
+func (c *ciResolver) Fqdn(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "fqdn", obj.FQDN)
+}
+
+func (c *ciResolver) SerialNumber(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "serial_number", obj.SerialNumber)
+}
+
+func (c *ciResolver) Manufacturer(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "manufacturer", obj.Manufacturer)
+}
+
+func (c *ciResolver) Model(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "model", obj.Model)
+}
+
+func (c *ciResolver) ManagementIP(ctx context.Context, obj *ci.Item) (*string, error) {
+	return typedField(ctx, obj, "management_ip", obj.ManagementIP)
+}
+
+// Attributes returns the attributes without the keys the principal may
+// not read; the map itself without a restriction.
+func (c *ciResolver) Attributes(ctx context.Context, obj *ci.Item) (map[string]any, error) {
+	p, err := policy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return permission.ProjectAttributes(p, obj.CITypeID, ciRef(obj), obj.Attributes,
+		permission.WithInstanceKeys(obj.InstanceKeys)), nil
 }

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -184,11 +186,11 @@ func topologyQueryBudget(t *testing.T, objects int) {
 	topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
 		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).WithCITypes(citype.NewPGRepository(pool)).RegisterRoutes(mux)
 	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	get := func(path string, want int) int64 {
+	getIn := func(reqCtx context.Context, path string, want int) int64 {
 		t.Helper()
 		before := counter.n.Load()
 		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(reqCtx))
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET %s: %d %s", path, w.Code, w.Body.String())
 		}
@@ -204,6 +206,10 @@ func topologyQueryBudget(t *testing.T, objects int) {
 			t.Errorf("GET %s: %d nodes, want at least %d", path, got, want)
 		}
 		return counter.n.Load() - before
+	}
+	get := func(path string, want int) int64 {
+		t.Helper()
+		return getIn(ctx, path, want)
 	}
 
 	// Warm the pool: the first connection switches its role.
@@ -250,6 +256,20 @@ func topologyQueryBudget(t *testing.T, objects int) {
 			t.Errorf("%s at depth 20: %d statements, budget %d", c.name, wide, deep)
 		}
 		t.Logf("%s: %d statements per level read, %d with the organization read, %d at depth 20", c.name, counts[400], counts[3000], wide)
+	}
+
+	// Field permissions (WP-727): with a restricted policy in the context
+	// the nodes project management_ip without a statement more.
+	restricted := permission.WithPolicy(ctx, restrictedNodePolicy(t, serverType, f.Client1, f.Client2))
+	for _, path := range []string{
+		"/api/v1/topology?root_ci_id=" + hubs[400] + "&depth=2",
+		"/api/v1/impact/" + hubs[400] + "?depth=" + strconv.Itoa(ladderDepth),
+		"/api/v1/cis/" + hubs[400] + "/blast-radius",
+		"/api/v1/topology?root_ci_id=" + ladders[40] + "&depth=" + strconv.Itoa(ladderDepth),
+	} {
+		if open, projected := get(path, 400), getIn(restricted, path, 400); open != projected {
+			t.Errorf("GET %s: %d statements without grants, %d with a restricted policy", path, open, projected)
+		}
 	}
 
 	// Several failed CIs (WP-840): leaves of the hub with 400 neighbours,
@@ -755,9 +775,14 @@ func impactWorstCase(t *testing.T, objects int) {
 	topology.NewHandler(ci.NewPGRepository(pool), relationship.NewPGRepository(pool)).
 		WithRelationshipTypes(relationshiptype.NewPGRepository(pool)).RegisterRoutes(mux)
 	type answer = impactAnswer
+	// policy is the field policy of the requests (WP-727); nil: none.
+	var policy *permission.FieldPolicy
 	get := func(org, path string) answer {
 		t.Helper()
 		ctx := tenant.WithTenant(f.OrgCtx(org), tenant.TenantInfo{OrganizationID: org, UserID: f.User})
+		if policy != nil {
+			ctx = permission.WithPolicy(ctx, policy)
+		}
 		before := counter.n.Load()
 		w := httptest.NewRecorder()
 		start := time.Now()
@@ -877,6 +902,12 @@ func impactWorstCase(t *testing.T, objects int) {
 			t.Fatalf("path to %s rebuilt from via %+v, full answer %+v", id, rebuilt, e.Path)
 		}
 	}
+
+	checkImpactWithPolicy(t, f, clientsA, full, best, compact, func(p *permission.FieldPolicy, query string) answer {
+		policy = p
+		defer func() { policy = nil }()
+		return get(f.OrgA, "/api/v1/impact/"+core+query)
+	})
 
 	t.Logf("worst case (%d objects, %d impacted): compact %d bytes (%d per CI), best of 5 %v, %d statements; full %d bytes (%d per CI) in %v",
 		objects, best.count, len(best.body), perCI, best.elapsed.Round(time.Millisecond), best.statements,
@@ -1223,5 +1254,54 @@ func TestServiceImpactWorstCase(t *testing.T) {
 		blast.elapsed.Round(time.Millisecond), len(blast.body))
 	if os.Getenv("RETICORA_PERF_BUDGET") == "1" && best.elapsed > 2*time.Second {
 		t.Errorf("service chain with include=services,spof: %v, budget 2 s", best.elapsed)
+	}
+}
+
+// checkImpactWithPolicy runs the worst case with a restricted policy
+// (WP-727): servers of the first client lose management_ip in the full
+// answer, those of the second keep it; the full and the compact answer
+// send the statements of the answers without policy.
+func checkImpactWithPolicy(t *testing.T, f *scopetest.Fixture, clients [2]string, full, compact impactAnswer, compactQuery string,
+	run func(p *permission.FieldPolicy, query string) impactAnswer) {
+	t.Helper()
+	var serverType string
+	if err := f.Admin.QueryRow(context.Background(), `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).
+		Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+	restricted := restrictedNodePolicy(t, serverType, clients[0], clients[1])
+	projected := run(restricted, "?depth=20")
+	if projected.statements != full.statements || projected.count != full.count {
+		t.Errorf("full answer with a restricted policy: %d statements, %d CIs; without %d, %d",
+			projected.statements, projected.count, full.statements, full.count)
+	}
+	if c := run(restricted, compactQuery); c.statements != compact.statements || c.count != compact.count {
+		t.Errorf("compact answer with a restricted policy: %d statements, %d CIs; without %d, %d",
+			c.statements, c.count, compact.statements, compact.count)
+	}
+	for _, entry := range full.impacted {
+		if _, hasIP := entry["management_ip"]; !hasIP {
+			t.Fatalf("management_ip missing without grants: %v", entry)
+		}
+	}
+	hidden, kept := 0, 0
+	for _, entry := range projected.impacted {
+		var typ, client string
+		_ = json.Unmarshal(entry["ci_type"], &typ)
+		_ = json.Unmarshal(entry["client_id"], &client)
+		_, hasIP := entry["management_ip"]
+		switch {
+		case typ == serverType && client == clients[0] && hasIP:
+			t.Fatalf("unreadable management_ip in %v", entry)
+		case typ == serverType && client == clients[0]:
+			hidden++
+		case client == clients[1] && !hasIP:
+			t.Fatalf("readable management_ip missing in %v", entry)
+		case hasIP:
+			kept++
+		}
+	}
+	if hidden == 0 || kept == 0 {
+		t.Errorf("restricted full answer: %d entries without management_ip, %d with", hidden, kept)
 	}
 }

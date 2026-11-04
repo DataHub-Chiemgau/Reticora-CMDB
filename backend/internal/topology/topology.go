@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -156,7 +157,17 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/cis/{id}/blast-radius", h.GetBlastRadius)
 }
 
-func nodeFromCI(n *ci.Node) Node {
+// The nodes of topology and impact carry management_ip, a field under
+// field permissions (RBA-07, E-43, WP-727): nodeFromCI and nodeFromItem
+// leave it out when the policy of the request (permission.PolicyFrom)
+// does not let the principal read it for the type (CIType) and scope
+// (client_id, site_id) of the node, in every answer that builds on them
+// (topology, neighbours, impact in both forms, dependencies, blast
+// radius, the BFF topology). name, status, ci_type, client_id and site_id
+// are structural. The projection reads nothing from the database; a policy
+// that cannot be resolved leaves the field out (fail-closed).
+
+func nodeFromCI(ctx context.Context, n *ci.Node) Node {
 	return Node{
 		ID:           n.ID,
 		Name:         n.Name,
@@ -164,11 +175,11 @@ func nodeFromCI(n *ci.Node) Node {
 		Status:       n.Status,
 		ClientID:     n.ClientID,
 		SiteID:       n.SiteID,
-		ManagementIP: n.ManagementIP,
+		ManagementIP: readableManagementIP(ctx, n.ID, n.CITypeID, n.ClientID, n.SiteID, n.ManagementIP),
 	}
 }
 
-func nodeFromItem(item *ci.Item) Node {
+func nodeFromItem(ctx context.Context, item *ci.Item) Node {
 	return Node{
 		ID:           item.ID,
 		Name:         item.Name,
@@ -176,8 +187,25 @@ func nodeFromItem(item *ci.Item) Node {
 		Status:       item.Status,
 		ClientID:     item.ClientID,
 		SiteID:       item.SiteID,
-		ManagementIP: item.ManagementIP,
+		ManagementIP: readableManagementIP(ctx, item.ID, item.CITypeID, item.ClientID, item.SiteID, item.ManagementIP),
 	}
+}
+
+// readableManagementIP returns ip when the principal may read the field
+// management_ip of the CI, "" otherwise.
+func readableManagementIP(ctx context.Context, id, typeID, clientID, siteID, ip string) string {
+	if ip == "" {
+		return ""
+	}
+	policy, err := permission.PolicyFrom(ctx)
+	if err != nil {
+		return ""
+	}
+	if !permission.Readable(policy, permission.KindCI, typeID,
+		permission.ObjectRef{ID: id, ClientID: clientID, SiteID: siteID}, "management_ip") {
+		return ""
+	}
+	return ip
 }
 
 // GetTopology handles GET /api/v1/topology
@@ -327,7 +355,7 @@ func (h *Handler) buildFull(ctx context.Context, orgID string, filter *ci.Filter
 	for i := range items {
 		item := &items[i]
 		nodeSet[item.ID] = struct{}{}
-		nodes = append(nodes, nodeFromItem(item))
+		nodes = append(nodes, nodeFromItem(ctx, item))
 		ids = append(ids, item.ID)
 	}
 
@@ -489,7 +517,7 @@ func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relations
 	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
 		edges: make([]ciEdge, len(walk.Edges)), truncated: walk.Truncated}
 	for n := range roots {
-		g.nodes[n], g.known[n] = nodeFromItem(&roots[n]), true
+		g.nodes[n], g.known[n] = nodeFromItem(ctx, &roots[n]), true
 	}
 	types := map[string]int32{}
 	for i := range walk.Edges {
@@ -529,7 +557,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 		return nil, nil, err
 	}
 
-	nodes := map[string]Node{root.ID: nodeFromItem(root)}
+	nodes := map[string]Node{root.ID: nodeFromItem(ctx, root)}
 	edges := make([]Edge, 0, len(rels))
 	var ids []string
 	for i := range rels {
@@ -551,7 +579,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 // iterativeGraph performs a breadth-first traversal from root up to depth
 // hops, querying relationships one frontier at a time.
 func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
-	nodes := map[string]Node{root.ID: nodeFromItem(root)}
+	nodes := map[string]Node{root.ID: nodeFromItem(ctx, root)}
 	edgeSet := make(map[string]Edge)
 	visited := map[string]bool{}
 	frontier := []string{root.ID}
@@ -644,7 +672,7 @@ func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]
 		}
 		nodes := make([]Node, len(list))
 		for i := range list {
-			nodes[i] = nodeFromCI(&list[i])
+			nodes[i] = nodeFromCI(ctx, &list[i])
 		}
 		return nodes, nil
 	case ci.BatchReader:
@@ -654,14 +682,14 @@ func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]
 		}
 		nodes := make([]Node, len(items))
 		for i := range items {
-			nodes[i] = nodeFromItem(&items[i])
+			nodes[i] = nodeFromItem(ctx, &items[i])
 		}
 		return nodes, nil
 	}
 	var nodes []Node
 	for _, id := range ids {
 		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
-			nodes = append(nodes, nodeFromItem(item))
+			nodes = append(nodes, nodeFromItem(ctx, item))
 		}
 	}
 	return nodes, nil
