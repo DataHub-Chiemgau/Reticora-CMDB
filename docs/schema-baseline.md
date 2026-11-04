@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000249_asset_tags
+Stand: Migration 000250_asset_history
 
 ## Prüfung
 
@@ -1431,6 +1431,37 @@ Spalte). Die Datenmigration übernimmt die String-Elemente von
 `custom_fields` ohne Änderung von `updated_at` und `version` und
 normalisiert `saved_view.filter_spec.tags` der Sichten mit `entity_kind =
 'asset'`.
+Asset-Wertehistorie mit Client-Scope (AUD-08, SEC-05, TEN-02, TEN-05,
+WP-794, Migration 000250): `entity_change` erhält `client_id` und `site_id`
+(UUID, nullable, ohne Fremdschlüssel, denormalisiert wie bei `ci_change`)
+und den Index `idx_entity_change_org_entity` (`organization_id`,
+`entity_type`, `entity_id`, `created_at`; bei großem Bestand vorab mit
+`CREATE INDEX CONCURRENTLY IF NOT EXISTS` baubar, wenn die Spalten vorab per
+`ADD COLUMN IF NOT EXISTS` angelegt werden). Der Trigger `asset_history`
+(AFTER INSERT OR UPDATE OR DELETE ON `asset`, FOR EACH ROW, Funktion
+`asset_history()` mit `asset_history_form(asset)`) schreibt die Spur der
+typisierten Spalten für jeden Schreiber in der Form des Asset-DTO
+(`ci_id` als `primary_ci_id`, `purchase_price` als Dezimal-String): eine
+create-Zeile mit der ganzen Zeile, eine delete-Zeile mit der ganzen
+Vorgängerzeile (nicht beim Löschen der Organisation), bei UPDATE je
+geänderter Spalte eine Zeile, jeweils mit `actor_id` aus `app.user_id`,
+`entity_version` aus `version` und `client_id`/`site_id` aus NEW bzw. OLD.
+Ausgenommen sind `custom_fields` (versiegelt vom Asset-Repository),
+`created_at`, `updated_at`, `version`, die Spiegelspalten `asset_tag`,
+`purchase_cost`, `warranty_end`, `supplier` und `serial_number_norm`;
+`lifecycle_state` nur in UPDATE-Zeilen (Zeile `lifecycle_transition` aus
+WP-724). `entity_change_derive_scope` (BEFORE INSERT ON `entity_change`)
+setzt bei Zeilen von Assets und CIs Client und Standort der Entität (mit
+erweitertem Scope gelesen); die Zeile eines gelöschten Assets behält den
+geschriebenen Scope. `asset_history_scope_propagation` und
+`ci_history_scope_propagation` (AFTER UPDATE bei geändertem `client_id`
+oder `site_id`, Funktion `propagate_entity_change_scope()`) ziehen die
+Zeilen mit erweitertem Scope nach. Backfill aus Asset bzw. CI, für
+gelöschte Assets aus ihrer letzten delete-Zeile. `entity_change_isolation`
+trägt das Client- und Site-Prädikat von `asset_tenant_isolation` (000151)
+in USING und WITH CHECK, dazu die restriktiven Policies
+`entity_change_scoped_update` und `entity_change_scoped_delete`; Zeilen
+anderer Typen ohne Scope schreiben nur org-weite Prinzipale (E-09).
 
 ## Tabellen, RLS und Policies
 
@@ -1497,7 +1528,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `document_version` | ja | ja | document_version_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
-| `entity_change` | ja | ja | entity_change_isolation (ALL) |
+| `entity_change` | ja | ja | entity_change_isolation (ALL), entity_change_scoped_delete (DELETE), entity_change_scoped_update (UPDATE) |
 | `event_outbox` | ja | ja | event_outbox_isolation (ALL), event_outbox_system_select (SELECT) |
 | `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |

@@ -156,7 +156,9 @@ func TestRetentionRunsAgainstPostgres(t *testing.T) {
 	if n := count(`SELECT count(*) FROM ci_change WHERE ci_id = $1`, ci); n < 1 {
 		t.Errorf("the young ci_change row is gone")
 	}
-	if n := count(`SELECT count(*) FROM entity_change WHERE organization_id = $1`, f.OrgA); n != 1 {
+	// The seeded rows (change_type updated); the trigger asset_history
+	// adds young rows of the fixture asset (WP-794).
+	if n := count(`SELECT count(*) FROM entity_change WHERE organization_id = $1 AND change_type = 'updated'`, f.OrgA); n != 1 {
 		t.Errorf("entity_change rows: %d, want the young one", n)
 	}
 	// CI-05: the hard delete also removes a CI an asset still pointed to;

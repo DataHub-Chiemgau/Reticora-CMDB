@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -97,8 +98,9 @@ func (w *versionWorld) version(t *testing.T, id string) int64 {
 // require_if_match and with an unknown version PATCH is 412; an older
 // version is 409 with fields and current_version only when a field of the
 // request changed since, 200 for an untouched field; a lifecycle
-// transition and a stock movement (writers outside the asset package)
-// raise the version and make any field of the request a conflict; a
+// transition (whose trail row carries no version) raises the version and
+// makes any field of the request a conflict, a stock movement or another
+// direct writer is traced field by field (WP-794); a
 // change that changes nothing keeps the version; entity_change carries
 // entity_version; a principal of client 1 sees the trail of a client-2
 // asset neither through /history/asset/{id} nor through
@@ -172,7 +174,9 @@ func TestAssetVersionConcurrency(t *testing.T) {
 	if fields, _ := conflict(t, w.patchIf(t, a.ID, api.ETag(before), `{"cost_center":"K-1","name":"n"}`, http.StatusConflict)); !slices.Equal(fields, []string{"cost_center", "name"}) {
 		t.Fatalf("after the transition: fields %v", fields)
 	}
-	// A stock movement sets the location the same way.
+	// A stock movement is traced by the trigger asset_history (WP-794):
+	// its rows name location_id and site_id with the version, so a field
+	// of the request it did not change is no conflict, a changed one is.
 	site, err := locations.NewPGRepository(f.App).Create(ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "wp740-site"})
 	if err != nil {
 		t.Fatalf("site: %v", err)
@@ -181,10 +185,11 @@ func TestAssetVersionConcurrency(t *testing.T) {
 	if got := w.version(t, a.ID); got != afterTransition+1 {
 		t.Fatalf("version after the movement: %d, want %d", got, afterTransition+1)
 	}
-	if fields, _ := conflict(t, w.patchIf(t, a.ID, api.ETag(afterTransition), `{"cost_center":"K-1"}`, http.StatusConflict)); !slices.Equal(fields, []string{"cost_center"}) {
-		t.Fatalf("after the movement: fields %v", fields)
+	w.patchIf(t, a.ID, api.ETag(afterTransition), `{"cost_center":"K-1"}`, http.StatusOK)
+	w.admin(t, `UPDATE asset SET cost_center = 'K-2' WHERE id = $1`, a.ID)
+	if fields, _ := conflict(t, w.patchIf(t, a.ID, api.ETag(afterTransition+2), `{"cost_center":"K-3"}`, http.StatusConflict)); !slices.Equal(fields, []string{"cost_center"}) {
+		t.Fatalf("after a direct change of cost_center: fields %v", fields)
 	}
-	w.patchIf(t, a.ID, api.ETag(afterTransition+1), `{"cost_center":"K-1"}`, http.StatusOK)
 
 	// The trail of a client-2 asset stays hidden from a client-1 principal.
 	other := w.create(t, `{"inventory_no":"V-2","name":"Client 2","client_id":"`+f.Client2+`"}`)
@@ -195,6 +200,7 @@ func TestAssetVersionConcurrency(t *testing.T) {
 		scope = tenant.WithTenant(scope, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
 		scope = identity.WithPrincipal(scope, identity.Principal{Subject: f.User, OrganizationID: f.OrgA,
 			Type: identity.PrincipalTypeUser, Permissions: identity.AllPermissions()})
+		scope = permission.WithPolicy(scope, permission.UnrestrictedPolicy(identity.AllPermissions()))
 		rec := httptest.NewRecorder()
 		w.mux.ServeHTTP(rec, req.WithContext(scope))
 		return rec
