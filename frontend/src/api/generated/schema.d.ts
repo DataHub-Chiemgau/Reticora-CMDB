@@ -12674,6 +12674,21 @@ export interface components {
       location?: string;
       /** @description Node of the canonical location tree; changed through stock movements and rack placement only. */
       readonly location_id?: string;
+      /**
+       * Format: uuid
+       * @description Current holder, a user of the organization (holder cache, AST-02, WP-745); at most one of assigned_user_id and assigned_team_id. Not the owner (owner_user_id). Changed through POST /api/v1/assets/{id}/assign, /return and /transfer only.
+       */
+      readonly assigned_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Current holder, a team of the organization (holder cache, AST-02, WP-745). Not the owner (owner_team_id) and no scope of the asset. Changed through POST /api/v1/assets/{id}/assign, /return and /transfer only.
+       */
+      readonly assigned_team_id?: string;
+      /**
+       * Format: date-time
+       * @description Due date of the current assignment; only with a holder (WP-745).
+       */
+      readonly assignment_due_at?: string;
       /** @description State of the effective asset lifecycle model (E-120); changed through POST /api/v1/assets/{id}/lifecycle-transitions only. */
       readonly lifecycle_state?: string;
       notes?: string;
@@ -12761,7 +12776,7 @@ export interface components {
         [key: string]: unknown;
       };
     };
-    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization, an empty purchase_price removes the price. Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
+    /** @description location_id, lifecycle_state and the holder cache assigned_user_id, assigned_team_id and assignment_due_at (WP-745) are read-only: sending one is 422 naming the field and the canonical write path. An empty currency is the currency of the organization, an empty purchase_price removes the price. Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     UpdateAssetRequest: {
       name?: string;
       /** @description Inventory number, unique per organization (409 on inventory_no otherwise; empty is 400). */
@@ -13300,6 +13315,11 @@ export interface components {
       actor_id?: string;
       assignee_user_id?: string;
       assignee_team_id?: string;
+      /**
+       * Format: date-time
+       * @description Due date of an assignment (WP-745); absent for every other movement type.
+       */
+      due_at?: string;
       reason?: string;
       notes?: string;
       /** Format: uuid */
@@ -28088,8 +28108,8 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Records such as tickets still reference the team. */
-      422: {
+      /** @description Records such as tickets or an asset the team holds (assigned_team_id, WP-745) still reference the team. */
+      409: {
         headers: {
           [name: string]: unknown;
         };

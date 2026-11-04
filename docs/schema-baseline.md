@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000250_asset_history
+Stand: Migration 000251_asset_holder_columns
 
 ## Prüfung
 
@@ -1462,6 +1462,23 @@ trägt das Client- und Site-Prädikat von `asset_tenant_isolation` (000151)
 in USING und WITH CHECK, dazu die restriktiven Policies
 `entity_change_scoped_update` und `entity_change_scoped_delete`; Zeilen
 anderer Typen ohne Scope schreiben nur org-weite Prinzipale (E-09).
+Halter-Cache und Fälligkeit (AST-02, E-124, WP-745, Migration 000251):
+`asset` erhält `assigned_user_id`, `assigned_team_id` (UUID) und
+`assignment_due_at` (TIMESTAMPTZ) mit `asset_assigned_user_id_fkey`
+(`assigned_user_id`, `organization_id`) → `app_user` (Schlüssel
+`app_user_id_organization_key`, 000177) und `asset_assigned_team_id_fkey`
+(`assigned_team_id`, `organization_id`) → `team` (Schlüssel
+`team_id_organization_key`, 000150), beide ohne ON-DELETE-Aktion (ein
+haltendes Team lässt sich nicht löschen, 409), CHECK `asset_single_holder`
+(`num_nonnulls(assigned_user_id, assigned_team_id) <= 1`), CHECK
+`asset_holder_due` (`assignment_due_at` nur mit Halter) und Teilindizes
+`idx_asset_assigned_user` (`organization_id`, `assigned_user_id`) und
+`idx_asset_assigned_team` (`organization_id`, `assigned_team_id`), je WHERE
+NOT NULL. `assigned_team_id` ist kein Scope-Merkmal; Policies unverändert.
+`asset_history` schreibt die drei Spalten wie `location_id` in die Spur
+(kein Spiegel einer anderen Spalte). `stock_movement` erhält `due_at`
+(TIMESTAMPTZ) mit CHECK `stock_movement_due_at_assignment` (`due_at IS
+NULL OR movement_type = 'assignment'`). Keine Daten (Backfill WP-275).
 
 ## Tabellen, RLS und Policies
 

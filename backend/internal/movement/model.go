@@ -99,6 +99,10 @@ type Movement struct {
 	SignatureHash  string    `json:"signature_hash,omitempty"`
 	OccurredAt     time.Time `json:"occurred_at"`
 	CreatedAt      time.Time `json:"created_at"`
+
+	// DueAt is the due date of an assignment (CHECK
+	// stock_movement_due_at_assignment, WP-745); nil for every other type.
+	DueAt *time.Time `json:"due_at,omitempty"`
 }
 
 // CreateMovementRequest is the payload for recording a movement.

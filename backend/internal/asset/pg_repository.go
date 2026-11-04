@@ -51,6 +51,9 @@ const assetSelectColumns = `
 	COALESCE(barcode, ''),
 	COALESCE(location, ''),
 	COALESCE(location_id::text, ''),
+	COALESCE(assigned_user_id::text, ''),
+	COALESCE(assigned_team_id::text, ''),
+	assignment_due_at,
 	COALESCE(lifecycle_state, ''),
 	COALESCE(notes, ''),
 	custom_fields,
@@ -857,6 +860,9 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.Barcode,
 		&item.Location,
 		&item.LocationID,
+		&item.AssignedUserID,
+		&item.AssignedTeamID,
+		&item.AssignmentDueAt,
 		&item.LifecycleState,
 		&item.Notes,
 		&item.CustomFields,
@@ -880,6 +886,10 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 	}
 	if warrantyEnd.Valid {
 		item.WarrantyEnd = warrantyEnd.Time.UTC().Format("2006-01-02")
+	}
+	if item.AssignmentDueAt != nil {
+		due := item.AssignmentDueAt.UTC()
+		item.AssignmentDueAt = &due
 	}
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()

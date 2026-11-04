@@ -495,7 +495,15 @@ var readOnlyPaths = []struct {
 		func(req *UpdateRequest) bool { return req.LocationID.Set }},
 	{"lifecycle_state", "is read-only; the state changes through POST /api/v1/assets/{id}/lifecycle-transitions",
 		func(req *UpdateRequest) bool { return req.LifecycleState.Set }},
+	// The holder cache (WP-745) changes with the assignment service (WP-275).
+	{"assigned_user_id", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignedUserID.Set }},
+	{"assigned_team_id", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignedTeamID.Set }},
+	{"assignment_due_at", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignmentDueAt.Set }},
 }
+
+// holderReadOnly is the message of a PATCH that sends a member of the
+// holder cache (WP-745).
+const holderReadOnly = "is read-only; the holder changes through POST /api/v1/assets/{id}/assign, /return or /transfer"
 
 // rejectReadOnly returns the 422 field error of the first read-only member
 // the request sends.

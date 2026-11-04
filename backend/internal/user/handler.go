@@ -723,6 +723,8 @@ func writeTeamError(w http.ResponseWriter, r *http.Request, notFound string, err
 		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
 	case errors.Is(err, ErrConflict):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrConflict.Error())
+	case errors.Is(err, ErrTeamReferenced):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrTeamReferenced.Error())
 	case errors.Is(err, ErrSystemRole):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrSystemRole.Error())
 	case api.WriteFieldError(w, err):

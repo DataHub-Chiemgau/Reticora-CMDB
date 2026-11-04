@@ -33,7 +33,7 @@ const movementSelectColumns = `
 	COALESCE(quantity_item_id::text, ''), movement_type,
 	COALESCE(from_location_id::text, ''), COALESCE(to_location_id::text, ''),
 	quantity::float8, COALESCE(actor_id::text, ''), COALESCE(assignee_user_id::text, ''),
-	COALESCE(assignee_team_id::text, ''), COALESCE(reason, ''),
+	COALESCE(assignee_team_id::text, ''), due_at, COALESCE(reason, ''),
 	COALESCE(ticket_id::text, ''), COALESCE(order_id::text, ''),
 	COALESCE(workflow_run_id::text, ''), COALESCE(document_id::text, ''),
 	COALESCE(notes, ''), COALESCE(signature_hash, ''), occurred_at, created_at
@@ -265,14 +265,14 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 		INSERT INTO stock_movement (
 			organization_id, item_kind, asset_id, quantity_item_id,
 			movement_type, from_location_id, to_location_id, quantity,
-			actor_id, assignee_user_id, assignee_team_id, reason, ticket_id,
+			actor_id, assignee_user_id, assignee_team_id, due_at, reason, ticket_id,
 			order_id, workflow_run_id, document_id, notes
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		RETURNING id::text, client_id::text, site_id::text, occurred_at, created_at`,
 		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.QuantityItemID),
 		m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
 		m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.AssigneeUserID), nilIfEmpty(m.AssigneeTeamID),
-		nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
+		m.DueAt, nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
 		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes),
 	).Scan(&m.ID, &clientID, &siteID, &m.OccurredAt, &m.CreatedAt)
 	if err != nil {
@@ -623,12 +623,16 @@ func scanMovement(scanner movementScanner) (*Movement, error) {
 		&m.ID, &m.OrganizationID, &m.ClientID, &m.SiteID, &m.ItemKind, &m.AssetID,
 		&m.ConsumableID, &m.QuantityItemID, &m.MovementType, &m.FromLocationID,
 		&m.ToLocationID, &m.Quantity, &m.ActorID, &m.AssigneeUserID, &m.AssigneeTeamID,
-		&m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID, &m.DocumentID,
+		&m.DueAt, &m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID, &m.DocumentID,
 		&m.Notes, &m.SignatureHash, &m.OccurredAt, &m.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
 	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
+	if m.DueAt != nil {
+		due := m.DueAt.UTC()
+		m.DueAt = &due
+	}
 	return m, nil
 }
 
