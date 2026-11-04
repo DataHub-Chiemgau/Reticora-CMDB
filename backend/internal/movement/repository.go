@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -24,8 +25,9 @@ var (
 	// ErrConflict: the organization has an item with this SKU already (409).
 	ErrConflict = errors.New("an item with this SKU already exists")
 	// ErrInsufficientStock: the movement would drive the stock level of
-	// the quantity item below zero (409, ProblemInsufficientStock).
-	ErrInsufficientStock = errors.New("the stock level does not cover the movement")
+	// the quantity item or the stock of a bin of the consumable below zero
+	// (409, ProblemInsufficientStock); it is consumable.ErrInsufficientStock.
+	ErrInsufficientStock = consumable.ErrInsufficientStock
 	// ErrHasMovements: the object is kept by movements of the ledger,
 	// which are never deleted (409 with dependencies stock_movement).
 	ErrHasMovements = errors.New("the object has stock movements; it cannot be deleted")
@@ -56,14 +58,31 @@ type Repository interface {
 	DeleteItem(ctx context.Context, orgID, id string) error
 }
 
+// ConsumableStock is the stock per bin of the consumables in the No-DB
+// profile (consumable.MemoryRepository): Book applies a booking with the
+// rules of consumable.ApplyBooking, OnlyBin names the only bin.
+type ConsumableStock interface {
+	Book(ctx context.Context, b *consumable.Booking) error
+	OnlyBin(ctx context.Context, orgID, consumableID string) (string, error)
+}
+
 // MemoryRepository is an in-memory implementation (tests, --no-db). It
 // applies the types, rules and filters of the service, without lock and
-// event.
+// event; consumable movements book on the stock per bin of consumables.
 type MemoryRepository struct {
-	mu        sync.RWMutex
-	movements []Movement
-	items     map[string]*QuantityItem
-	seq       int
+	mu          sync.RWMutex
+	movements   []Movement
+	items       map[string]*QuantityItem
+	consumables ConsumableStock
+	seq         int
+}
+
+// WithConsumables books the consumable movements on stock, the stock per
+// bin of the consumable store of the same profile (WP-756); without it a
+// consumable movement is consumable.ErrNotFound.
+func (r *MemoryRepository) WithConsumables(stock ConsumableStock) *MemoryRepository {
+	r.consumables = stock
+	return r
 }
 
 // NewMemoryRepository creates an empty in-memory movement repository.
@@ -76,16 +95,32 @@ func (r *MemoryRepository) nextID() string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)
 }
 
-// Record appends a movement and adjusts quantity item stock levels like
-// RecordTx: an unknown quantity item is ErrItemNotFound, a shortfall
-// ErrInsufficientStock.
-func (r *MemoryRepository) Record(_ context.Context, m *Movement) error {
+// Record appends a movement and adjusts quantity item stock levels and the
+// stock per bin of a consumable like RecordTx: an unknown quantity item is
+// ErrItemNotFound, an unknown consumable consumable.ErrNotFound, a
+// shortfall ErrInsufficientStock; a refused booking appends nothing.
+func (r *MemoryRepository) Record(ctx context.Context, m *Movement) error {
 	if err := normalizeMovement(m); err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var item *QuantityItem
+	if m.ItemKind == "consumable" {
+		if r.consumables == nil {
+			return consumable.ErrNotFound
+		}
+		if m.onlyBin {
+			bin, err := r.consumables.OnlyBin(ctx, m.OrganizationID, m.ConsumableID)
+			if err != nil {
+				return err
+			}
+			placeOnlyBin(m, bin)
+		}
+		if err := r.consumables.Book(ctx, bookingOf(m)); err != nil {
+			return err
+		}
+	}
 	if m.ItemKind == "quantity_item" {
 		var ok bool
 		if item, ok = r.items[m.QuantityItemID]; !ok || item.OrganizationID != m.OrganizationID {

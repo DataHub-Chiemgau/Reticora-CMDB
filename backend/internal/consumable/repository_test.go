@@ -7,12 +7,11 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 )
 
 // TestMemoryStockPerBin covers the stock per bin of the in-memory store
 // (No-DB profile, WP-283): bookings per type through Book, the shortfall of
-// a bin (ErrInsufficientStock, matching movement.ErrInsufficientStock,
+// a bin (ErrInsufficientStock with the problem type insufficient-stock,
 // nothing changed), the rules per type, the sum as stock_level, low_stock
 // over it, the transitional movements with and without bin and the delete
 // kept by stock.
@@ -51,7 +50,8 @@ func TestMemoryStockPerBin(t *testing.T) {
 	if err := book("correction", "bin-a", "", 2); err != nil {
 		t.Fatalf("correction down: %v", err)
 	}
-	if err := book("retrieval", "bin-b", "", 6); !errors.Is(err, ErrInsufficientStock) || !errors.Is(err, movement.ErrInsufficientStock) {
+	var typed api.TypedProblem
+	if err := book("retrieval", "bin-b", "", 6); !errors.Is(err, ErrInsufficientStock) || !errors.As(err, &typed) || typed.ProblemType() != ProblemInsufficientStock {
 		t.Fatalf("retrieval beyond the bin: %v, want ErrInsufficientStock", err)
 	}
 	if err := book("transfer", "bin-a", "bin-c", 5); !IsInsufficientStock(err) {

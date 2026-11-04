@@ -78,6 +78,9 @@ func MemoryRepositories() Repositories {
 	cis := ci.NewMemoryRepository()
 	users := user.NewMemoryRepository()
 	serviceAccounts := user.NewMemoryServiceAccounts()
+	// Consumable movements book on the stock per bin of the same store
+	// (WP-756).
+	consumables := consumable.NewMemoryRepository()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -93,7 +96,7 @@ func MemoryRepositories() Repositories {
 		RelationshipType:  relationshiptype.NewMemoryRepository(),
 		Lifecycle:         lifecycle.NewMemoryRepository(),
 		LocationTree:      locations.NewMemoryRepository(),
-		Movement:          movement.NewMemoryRepository(),
+		Movement:          movement.NewMemoryRepository().WithConsumables(consumables),
 		Reservation:       reservation.NewMemoryRepository(),
 		// The provenance names override authors as PostgreSQL does from
 		// app_user and service_account (UI-15, WP-850).
@@ -115,7 +118,7 @@ func MemoryRepositories() Repositories {
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
 		Stocktake:         stocktake.NewMemoryRepository(assets),
-		Consumable:        consumable.NewMemoryRepository(),
+		Consumable:        consumables,
 		Order:             order.NewMemoryRepository(),
 		Maintenance:       maintenance.NewMemoryRepository(),
 		Disposal:          disposal.NewMemoryRepository(),

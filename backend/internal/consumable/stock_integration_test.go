@@ -107,7 +107,8 @@ func newConsumable(t *testing.T, f *scopetest.Fixture, clientID, name string) st
 }
 
 // stockAPI serves the consumable routes for an org-wide principal of
-// organization A.
+// organization A; GET and POST /consumables/{id}/movements belong to the
+// movement service since WP-756.
 type stockAPI struct {
 	t      *testing.T
 	router chi.Router
@@ -124,6 +125,7 @@ func newStockAPI(t *testing.T, f *scopetest.Fixture) *stockAPI {
 		})
 	})
 	consumable.NewHandler(consumable.NewPGRepository(f.App)).RegisterRoutes(r)
+	movement.NewHandler(movement.NewService(movement.NewPGRepository(f.App))).RegisterRoutes(r)
 	return &stockAPI{t: t, router: r}
 }
 
@@ -383,8 +385,8 @@ func TestConsumableStockPerBin(t *testing.T) {
 			t.Fatalf("in into the only bin: %d %v", code, body)
 		}
 		code, body = a.do(http.MethodPost, "/api/v1/consumables/"+single+"/movements", `{"direction":"out","quantity":1}`)
-		c, _ := body["consumable"].(map[string]any)
-		if code != http.StatusCreated || c["stock_level"] != 2.0 || onHand(t, f, single, b2.bin) != 2 {
+		mv, _ = body["movement"].(map[string]any)
+		if code != http.StatusCreated || mv["location_id"] != b2.bin || onHand(t, f, single, b2.bin) != 2 {
 			t.Errorf("out of the only bin without location_id: %d %v", code, body)
 		}
 	})

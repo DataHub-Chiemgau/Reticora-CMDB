@@ -276,8 +276,9 @@ func ids(body map[string]any) []string {
 // TestStockMovementAPI covers STK-04 and AST-07 (E-38, WP-274) over the
 // handlers against PostgreSQL: POST /api/v1/stock-movements refuses the
 // types of the domain paths with 422 movement-type-reserved and legacy
-// names, consumable_id, quantity on an asset, an asset type not booked
-// through the route and a missing quantity with 422 on the field; it books
+// names, a consumable receipt without bin, quantity on an asset, an asset
+// type other than transfer (E-142, WP-756) and a missing quantity with 422
+// on the field; it books
 // an asset transfer and a quantity receipt. GET filters by consumable_id,
 // occurred_from/occurred_to (RFC 3339, else 422) and movement_type
 // (unknown 422) and pages with the keyset cursor newest first. DELETE of a
@@ -321,13 +322,14 @@ func TestStockMovementAPI(t *testing.T) {
 		}{
 			"legacy name":           {map[string]any{"movement_type": "warehouse_transfer", "asset_id": asset}, "movement_type"},
 			"unknown type":          {map[string]any{"movement_type": "teleport", "asset_id": asset}, "movement_type"},
-			"consumable":            {map[string]any{"movement_type": "receipt", "consumable_id": cons, "quantity": one}, "consumable_id"},
+			"consumable no bin":     {map[string]any{"movement_type": "receipt", "consumable_id": cons, "quantity": one}, "to_location_id"},
+			"asset correction":      {map[string]any{"movement_type": "correction", "asset_id": asset}, "movement_type"},
 			"asset with quantity":   {map[string]any{"movement_type": "transfer", "asset_id": asset, "quantity": one}, "quantity"},
 			"quantity type":         {map[string]any{"movement_type": "deployment", "quantity_item_id": item, "quantity": one}, "movement_type"},
 			"quantity without qty":  {map[string]any{"movement_type": "receipt", "quantity_item_id": item}, "quantity"},
 			"two objects":           {map[string]any{"movement_type": "receipt", "asset_id": asset, "quantity_item_id": item}, "asset_id"},
 			"foreign item kind":     {map[string]any{"movement_type": "receipt", "asset_id": asset, "item_kind": "quantity_item"}, "item_kind"},
-			"unknown ticket":        {map[string]any{"movement_type": "correction", "asset_id": asset, "ticket_id": f.ID()}, "ticket_id"},
+			"unknown ticket":        {map[string]any{"movement_type": "transfer", "asset_id": asset, "to_location_id": room, "ticket_id": f.ID()}, "ticket_id"},
 			"withdrawal over stock": {map[string]any{"movement_type": "retrieval", "quantity_item_id": item, "quantity": 9.0}, ""},
 		} {
 			code, body := a.do(http.MethodPost, "/api/v1/stock-movements", tc.body)

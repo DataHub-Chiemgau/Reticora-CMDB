@@ -8,26 +8,38 @@ import (
 	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/jackc/pgx/v5"
 )
 
+// The package consumable does not import the movement service: the
+// dependency runs from movement to consumable (WP-756). movement.Service
+// books a consumable movement through ApplyBooking in its transaction and
+// takes over BookingTypes, ProblemInsufficientStock and ErrInsufficientStock
+// as its own.
+
+// BookingTypes are the quantity bookings on the stock per bin, the types
+// POST /api/v1/stock-movements takes for a consumable (E-38, STK-03).
+var BookingTypes = map[string]bool{
+	"receipt": true, "retrieval": true, "correction": true, "transfer": true,
+}
+
+// ProblemInsufficientStock: the booking would drive the stock below zero
+// (409, RFC 7807 type of the movement service).
+const ProblemInsufficientStock = "https://reticora.io/problems/insufficient-stock"
+
 // insufficientStockError is the shortfall of a booking: the available stock
 // (on_hand − reserved) of the bin does not cover the quantity. It is the
-// problem insufficient-stock of the movement service (409, WP-274) and
-// matches movement.ErrInsufficientStock, so the service and its handler
-// treat a shortfall per bin like one of a quantity item.
+// problem insufficient-stock of the movement service (409, WP-274); the
+// service uses ErrInsufficientStock as movement.ErrInsufficientStock, so a
+// shortfall per bin and one of a quantity item are the same error.
 type insufficientStockError struct{}
 
 func (insufficientStockError) Error() string {
-	return "the stock of the bin does not cover the booking"
+	return "the available stock does not cover the booking"
 }
 
 // ProblemType names the RFC 7807 type (api.TypedProblem).
-func (insufficientStockError) ProblemType() string { return movement.ProblemInsufficientStock }
-
-// Is matches movement.ErrInsufficientStock.
-func (insufficientStockError) Is(target error) bool { return target == movement.ErrInsufficientStock }
+func (insufficientStockError) ProblemType() string { return ProblemInsufficientStock }
 
 // ErrInsufficientStock: the booking would take more than the available
 // stock of a bin (STK-03); 409 with the type insufficient-stock.
@@ -52,10 +64,9 @@ type binDelta struct {
 
 // bookingDeltas checks b against the rules per type (STK-02) and returns
 // the changes per bin, ordered by location id, the lock order of
-// ApplyBooking. The types are the quantity bookings of the movement service
-// (movement.QuantityMovementTypes).
+// ApplyBooking. The types are BookingTypes.
 func bookingDeltas(b *Booking) ([]binDelta, error) {
-	if !movement.QuantityMovementTypes[b.MovementType] {
+	if !BookingTypes[b.MovementType] {
 		return nil, fieldError("movement_type", "movement_type must be receipt, retrieval, correction or transfer")
 	}
 	if b.Quantity <= 0 {
@@ -227,6 +238,33 @@ func ApplyBooking(ctx context.Context, tx pgx.Tx, b *Booking) error {
 		}
 	}
 	return nil
+}
+
+// OnlyBin returns, in tx, the bin of the only stock_level row of the
+// consumable the caller sees, after locking the consumable: the bin of
+// POST /api/v1/consumables/{id}/movements without location_id (WP-756).
+// None or several rows are ErrBinRequired (422 on location_id), an
+// invisible consumable ErrNotFound.
+func OnlyBin(ctx context.Context, tx pgx.Tx, orgID, consumableID string) (string, error) {
+	return onlyBin(ctx, tx, orgID, consumableID)
+}
+
+// OnlyBin is OnlyBin of the No-DB profile.
+func (r *MemoryRepository) OnlyBin(_ context.Context, orgID, consumableID string) (string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c, ok := r.consumables[consumableID]
+	if !ok || c.OrganizationID != orgID {
+		return "", ErrNotFound
+	}
+	if len(r.stock[consumableID]) != 1 {
+		return "", ErrBinRequired
+	}
+	var only string
+	for bin := range r.stock[consumableID] {
+		only = bin
+	}
+	return only, nil
 }
 
 // stockSort pins the order of the stock list for the keyset cursor.

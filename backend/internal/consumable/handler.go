@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Handler provides HTTP handlers for the consumable stock module.
@@ -21,7 +21,9 @@ func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
 }
 
-// RegisterRoutes registers consumable routes on the given mux.
+// RegisterRoutes registers consumable routes on the given mux. GET and
+// POST /api/v1/consumables/{id}/movements belong to the movement service
+// (movement.Handler, WP-756), the one writer of stock_movement.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/consumables", h.List)
 	r.Post("/api/v1/consumables", h.Create)
@@ -29,8 +31,20 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/consumables/{id}", h.Update)
 	r.Delete("/api/v1/consumables/{id}", h.Delete)
 	r.Get("/api/v1/consumables/{id}/stock", h.ListStock)
-	r.Get("/api/v1/consumables/{id}/movements", h.ListMovements)
-	r.Post("/api/v1/consumables/{id}/movements", h.AddMovement)
+}
+
+// ledgerDependencyProblem is the 409 of a delete kept by the ledger, the
+// body of movement.WriteLedgerDependency (WP-274).
+type ledgerDependencyProblem struct {
+	api.ProblemDetail
+	Dependencies []string `json:"dependencies"`
+}
+
+// isLedgerReference reports whether err is the violation of a RESTRICT
+// foreign key of stock_movement (WP-744).
+func isLedgerReference(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.TableName == "stock_movement"
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -139,8 +153,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
 		// Movements of the ledger keep the consumable (RESTRICT, WP-744):
 		// 409 with dependencies ["stock_movement"] (WP-274).
-		if movement.IsLedgerReference(err) {
-			movement.WriteLedgerDependency(w, r)
+		if isLedgerReference(err) {
+			api.WriteProblemBody(w, http.StatusConflict, ledgerDependencyProblem{
+				ProblemDetail: api.ProblemDetail{Type: "https://reticora.io/problems/409", Title: "Conflict", Status: http.StatusConflict,
+					Detail: "the object has stock movements, which are kept; it cannot be deleted", Instance: r.URL.Path},
+				Dependencies: []string{"stock_movement"},
+			})
 			return
 		}
 		// Stock in a bin keeps the consumable (WP-283), also a row of a
@@ -153,24 +171,6 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListMovements(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Movement]{
-		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
-		HasMore: page.Offset+page.Limit < total,
-	})
 }
 
 // ListStock answers GET /api/v1/consumables/{id}/stock: the stock per bin
@@ -199,57 +199,4 @@ func (h *Handler) ListStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, StockPage(rows, total, page))
-}
-
-// AddMovement answers POST /api/v1/consumables/{id}/movements, the
-// transitional path until WP-756: in is a receipt into the bin location_id,
-// out a retrieval from it; without location_id the only bin of the
-// consumable. A shortfall is 409 insufficient-stock, a missing, foreign or
-// non-bin location 422 on location_id.
-func (h *Handler) AddMovement(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return
-	}
-	var req CreateMovementRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
-		return
-	}
-	if req.Direction != "in" && req.Direction != "out" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "direction must be in or out")
-		return
-	}
-	if req.Quantity <= 0 {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "quantity must be positive")
-		return
-	}
-	m := &Movement{
-		OrganizationID: t.OrganizationID,
-		ConsumableID:   chi.URLParam(r, "id"),
-		Direction:      req.Direction,
-		LocationID:     req.LocationID,
-		Quantity:       req.Quantity,
-		Reason:         req.Reason,
-		Reference:      req.Reference,
-		ActorID:        t.UserID,
-	}
-	c, err := h.repo.AddMovement(r.Context(), m)
-	if err != nil {
-		var field *api.FieldError
-		switch {
-		case IsInsufficientStock(err):
-			api.WriteTypedProblem(w, http.StatusConflict, err)
-		case errors.Is(err, ErrNotFound):
-			api.WriteError(w, http.StatusNotFound, "Not Found", "consumable not found")
-		case errors.As(err, &field) && (field.Field == "to_location_id" || field.Field == "from_location_id"):
-			// The bin of the transitional path is location_id.
-			api.WriteFieldError(w, &api.FieldError{Field: "location_id", Message: field.Message, Status: field.Status})
-		default:
-			api.WriteRepoError(w, err)
-		}
-		return
-	}
-	api.WriteJSON(w, http.StatusCreated, map[string]any{"movement": m, "consumable": c})
 }

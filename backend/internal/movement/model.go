@@ -5,7 +5,11 @@
 // operations in this package).
 package movement
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
+)
 
 // MovementTypes are the movement types of the ledger stock_movement
 // (STK-04, stock_movement_movement_type_check).
@@ -34,18 +38,21 @@ var ReservedMovementTypes = map[string]bool{
 	"assignment": true, "return": true, "reservation": true, "release": true, "disposal": true,
 }
 
-// AssetMovementTypes are the physical movements POST
-// /api/v1/stock-movements books for an asset, without quantity.
-var AssetMovementTypes = map[string]bool{
-	"receipt": true, "transfer": true, "deployment": true, "retrieval": true, "repair": true, "correction": true,
-}
+// AssetMovementTypes are the movements POST /api/v1/stock-movements books
+// for an asset, without quantity: only transfer, the move of a serial
+// asset to to_location_id (E-142, WP-756). The other physical types arise
+// in their domain paths, which call the service directly.
+var AssetMovementTypes = map[string]bool{"transfer": true}
+
+// ConsumableMovementTypes are the quantity bookings POST
+// /api/v1/stock-movements takes for a consumable, with quantity > 0, on
+// its stock per bin (consumable.ApplyBooking, E-38, WP-756).
+var ConsumableMovementTypes = consumable.BookingTypes
 
 // QuantityMovementTypes are the quantity bookings POST
 // /api/v1/stock-movements takes for a quantity item, with quantity > 0
-// (until the merge into consumable, E-40).
-var QuantityMovementTypes = map[string]bool{
-	"receipt": true, "retrieval": true, "correction": true, "transfer": true,
-}
+// (until the merge into consumable, E-40): those of a consumable.
+var QuantityMovementTypes = consumable.BookingTypes
 
 // Problem types of the movement service (RFC 7807).
 const (
@@ -54,7 +61,7 @@ const (
 	ProblemMovementTypeReserved = "https://reticora.io/problems/movement-type-reserved"
 	// ProblemInsufficientStock: the movement would drive the stock of a
 	// quantity item below zero (409).
-	ProblemInsufficientStock = "https://reticora.io/problems/insufficient-stock"
+	ProblemInsufficientStock = consumable.ProblemInsufficientStock
 )
 
 // stockDelta is the change of the stock level of a quantity item by a
@@ -103,11 +110,36 @@ type Movement struct {
 	// DueAt is the due date of an assignment (CHECK
 	// stock_movement_due_at_assignment, WP-745); nil for every other type.
 	DueAt *time.Time `json:"due_at,omitempty"`
+
+	// onlyBin books a consumable receipt or retrieval without location
+	// into or from the only bin of the consumable (POST
+	// /api/v1/consumables/{id}/movements, WP-756).
+	onlyBin bool
 }
 
-// CreateMovementRequest is the payload for recording a movement.
-// consumable_id is only read to refuse it (consumables book through POST
-// /api/v1/consumables/{id}/movements until WP-283).
+// ConsumableMovement is a consumable movement in the form of the
+// deprecated GET /api/v1/consumables/{id}/movements (E-38, WP-756): the
+// ledger row plus direction (in when it books only into to_location_id,
+// else out), location_id (the bin of that direction) and reference (the
+// notes).
+type ConsumableMovement struct {
+	Movement
+	Direction  string `json:"direction"`
+	LocationID string `json:"location_id,omitempty"`
+	Reference  string `json:"reference,omitempty"`
+}
+
+// LegacyConsumableMovement returns m in the form of the deprecated path.
+func LegacyConsumableMovement(m *Movement) ConsumableMovement {
+	out := ConsumableMovement{Movement: *m, Direction: "out", LocationID: m.FromLocationID, Reference: m.Notes}
+	if m.FromLocationID == "" {
+		out.Direction, out.LocationID = "in", m.ToLocationID
+	}
+	return out
+}
+
+// CreateMovementRequest is the payload for recording a movement of
+// exactly one asset, consumable or quantity item.
 type CreateMovementRequest struct {
 	ItemKind       string   `json:"item_kind,omitempty"`
 	AssetID        string   `json:"asset_id,omitempty"`

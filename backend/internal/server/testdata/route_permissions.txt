@@ -561,7 +561,7 @@ POST /api/v1/signup public
 POST /api/v1/signup/verify public
 POST /api/v1/sites location:write
 POST /api/v1/slas sla:write
-POST /api/v1/stock-movements asset:move
+POST /api/v1/stock-movements stock:write
 POST /api/v1/stocktakes stocktake:write
 POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write

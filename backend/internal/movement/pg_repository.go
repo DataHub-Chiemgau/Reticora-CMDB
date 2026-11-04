@@ -50,9 +50,10 @@ func canonicalMovementType(name string) (string, bool) {
 
 // normalizeMovement checks the type and the object of m and keeps only
 // its object, like migration 000242: without item_kind a movement with an
-// asset is one of the asset, otherwise of the quantity item. An asset
-// movement carries no quantity (callers before WP-274 sent 1), a quantity
-// item movement a positive one. A legacy type name becomes the canonical
+// asset is one of the asset, one with a consumable of the consumable,
+// otherwise of the quantity item. An asset movement carries no quantity
+// (callers before WP-274 sent 1), a consumable or quantity item movement a
+// positive one. A legacy type name becomes the canonical
 // one, which m carries afterwards.
 func normalizeMovement(m *Movement) error {
 	movementType, ok := canonicalMovementType(m.MovementType)
@@ -61,8 +62,12 @@ func normalizeMovement(m *Movement) error {
 	}
 	m.MovementType = movementType
 	if m.ItemKind == "" {
-		m.ItemKind = "asset"
-		if m.AssetID == "" {
+		switch {
+		case m.AssetID != "":
+			m.ItemKind = "asset"
+		case m.ConsumableID != "":
+			m.ItemKind = "consumable"
+		default:
 			m.ItemKind = "quantity_item"
 		}
 	}
@@ -72,19 +77,27 @@ func normalizeMovement(m *Movement) error {
 			return &api.FieldError{Field: "asset_id", Message: "asset_id is required for an asset movement", Status: http.StatusUnprocessableEntity}
 		}
 		m.QuantityItemID = ""
+		m.ConsumableID = ""
 		m.Quantity = nil
+	case "consumable":
+		if m.ConsumableID == "" {
+			return &api.FieldError{Field: "consumable_id", Message: "consumable_id is required for a consumable movement", Status: http.StatusUnprocessableEntity}
+		}
+		m.AssetID, m.QuantityItemID = "", ""
+		if m.Quantity == nil || *m.Quantity <= 0 {
+			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
+		}
 	case "quantity_item":
 		if m.QuantityItemID == "" {
 			return &api.FieldError{Field: "quantity_item_id", Message: "quantity_item_id is required for a quantity item movement", Status: http.StatusUnprocessableEntity}
 		}
-		m.AssetID = ""
+		m.AssetID, m.ConsumableID = "", ""
 		if m.Quantity == nil || *m.Quantity <= 0 {
 			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
 		}
 	default:
-		return &api.FieldError{Field: "item_kind", Message: "item_kind must be asset or quantity_item", Status: http.StatusUnprocessableEntity}
+		return &api.FieldError{Field: "item_kind", Message: "item_kind must be asset, consumable or quantity_item", Status: http.StatusUnprocessableEntity}
 	}
-	m.ConsumableID = ""
 	return nil
 }
 
@@ -222,8 +235,10 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 // and refuse any later change; an asset with to_location_id gets it as
 // location_id (mirrored to its CIs), a quantity item its stock level
 // (receipt and correction add, transfer keeps, the others take away; a
-// shortfall is ErrInsufficientStock); last, stock.movement is appended to
-// the outbox (K20). Any error must abort the calling operation, which
+// shortfall is ErrInsufficientStock); a consumable is locked, checked and
+// booked on its stock per bin by consumable.ApplyBooking before the row
+// is inserted (bookConsumable, WP-756); last, stock.movement is appended
+// to the outbox (K20). Any error must abort the calling operation, which
 // rolls back movement and event together.
 func RecordTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	if err := normalizeMovement(m); err != nil {
@@ -232,16 +247,31 @@ func RecordTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	return recordTx(ctx, tx, events.NewOutbox(), m)
 }
 
-func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement) error {
+// lockAndCheck locks the moved asset or quantity item and checks the
+// locations (lockObject, checkLocation) and returns the stock level of a
+// quantity item; a consumable is locked, checked and booked by
+// bookConsumable.
+func lockAndCheck(ctx context.Context, tx pgx.Tx, m *Movement) (float64, error) {
+	if m.ItemKind == "consumable" {
+		return 0, bookConsumable(ctx, tx, m)
+	}
 	client, level, err := lockObject(ctx, tx, m)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if fromErr := checkLocation(ctx, tx, m, "from_location_id", m.FromLocationID, client); fromErr != nil {
-		return fromErr
+		return 0, fromErr
 	}
 	if toErr := checkLocation(ctx, tx, m, "to_location_id", m.ToLocationID, client); toErr != nil {
-		return toErr
+		return 0, toErr
+	}
+	return level, nil
+}
+
+func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement) error {
+	level, err := lockAndCheck(ctx, tx, m)
+	if err != nil {
+		return err
 	}
 	for _, ref := range []struct{ table, field, id string }{
 		{"ticket", "ticket_id", m.TicketID},
@@ -266,14 +296,14 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 			organization_id, item_kind, asset_id, quantity_item_id,
 			movement_type, from_location_id, to_location_id, quantity,
 			actor_id, assignee_user_id, assignee_team_id, due_at, reason, ticket_id,
-			order_id, workflow_run_id, document_id, notes
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+			order_id, workflow_run_id, document_id, notes, consumable_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 		RETURNING id::text, client_id::text, site_id::text, occurred_at, created_at`,
 		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.QuantityItemID),
 		m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
 		m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.AssigneeUserID), nilIfEmpty(m.AssigneeTeamID),
 		m.DueAt, nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
-		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes),
+		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes), nilIfEmpty(m.ConsumableID),
 	).Scan(&m.ID, &clientID, &siteID, &m.OccurredAt, &m.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("record movement: %w", err)
@@ -282,6 +312,8 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
 	entity := m.AssetID
 	switch {
+	case m.ItemKind == "consumable":
+		entity = m.ConsumableID
 	case m.ItemKind == "quantity_item":
 		entity = m.QuantityItemID
 		if delta != 0 {
@@ -327,6 +359,13 @@ const (
 // type name filters by its canonical type. The policy of stock_movement
 // applies the caller's client and site scope.
 func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter *MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
+	// An id filter that is no UUID names no row (the deprecated consumable
+	// path passes its path id unchecked, WP-756).
+	for _, id := range []string{filter.AssetID, filter.ConsumableID, filter.QuantityItemID, filter.LocationID} {
+		if id != "" && !api.IsUUID(id) {
+			return nil, 0, nil
+		}
+	}
 	var out []Movement
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

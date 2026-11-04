@@ -2400,12 +2400,16 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List stock movements of a consumable */
+    /**
+     * List stock movements of a consumable
+     * @deprecated
+     * @description Deprecated (E-38, WP-756): the successor is GET /api/v1/stock-movements with the filter consumable_id, which returns the same rows and pages. Each row keeps direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
+     */
     get: operations['listConsumableMovements'];
     put?: never;
     /**
      * Record a stock in/out movement and adjust the level atomically
-     * @description The planned successor is POST /api/v1/stock-movements with the quantity bookings receipt and retrieval (E-38); the deprecation follows once the successor is implemented (WP-756). Until then in books a receipt into the bin location_id and out a retrieval from it (WP-283).
+     * @description The successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval (E-38, WP-756); this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The deprecation follows with WP-846.
      */
     post: operations['addConsumableMovement'];
     delete?: never;
@@ -7665,7 +7669,7 @@ export interface paths {
     put?: never;
     /**
      * Book a physical movement
-     * @description Books through the movement service (WP-274): the asset or quantity item is locked, the locations and references are checked, an asset with to_location_id moves there, a quantity item changes its stock level (receipt and correction add, transfer keeps, retrieval takes away), and stock.movement is written to the outbox in the same transaction.
+     * @description Books through the movement service (WP-274, WP-756) in one transaction. A consumable (consumable_id) books receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) or transfer (two different bins) with quantity > 0 on its stock per bin; the consumable and then its stock rows in location order are locked, so opposite transfers do not deadlock and no bin drops below zero. A quantity item (until the merge into consumable, E-40) books the same types on its stock level. An asset moves only by transfer to to_location_id without quantity (E-142), which also needs asset:move. The references are checked and stock.movement is written to the outbox in the same transaction; any error rolls back the whole booking.
      */
     post: operations['createStockMovements'];
     delete?: never;
@@ -13295,21 +13299,13 @@ export interface components {
     ConsumableStockListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ConsumableStock'][];
     };
-    /** @description A stock movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (direction and reference are derived from movement_type and notes of the ledger, WP-744). */
-    ConsumableMovement: {
-      id: string;
-      organization_id: string;
-      consumable_id: string;
+    /** @description A row of the ledger stock_movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (WP-756): the fields of StockMovement plus direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). */
+    ConsumableMovement: components['schemas']['StockMovement'] & {
       /** @enum {string} */
       direction: 'in' | 'out';
       /** @description The bin, target of in and source of out (WP-283). */
       location_id?: string;
-      quantity: number;
-      reason?: string;
       reference?: string;
-      actor_id?: string;
-      /** Format: date-time */
-      created_at: string;
     };
     CreateConsumableMovementRequest: {
       /** @enum {string} */
@@ -13395,12 +13391,14 @@ export interface components {
       /** Format: date-time */
       created_at: string;
     };
-    /** @description A physical movement (E-38, WP-274). For an asset (asset_id) receipt, transfer, deployment, retrieval, repair and correction without quantity; for a quantity item (quantity_item_id, until the merge into consumable, E-40) receipt, retrieval, correction and transfer with quantity > 0. Consumables book through POST /api/v1/consumables/{id}/movements (consumable_id is 422). */
+    /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; for a quantity item (quantity_item_id, until the merge into consumable, E-40) the same types with quantity > 0 on its stock level. For an asset (asset_id) only transfer to to_location_id without quantity. */
     CreateStockMovementRequest: {
       /** @enum {string} */
-      item_kind?: 'asset' | 'quantity_item';
+      item_kind?: 'asset' | 'consumable' | 'quantity_item';
       /** Format: uuid */
       asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
       /** Format: uuid */
       quantity_item_id?: string;
       movement_type: components['schemas']['MovementType'];
@@ -22035,7 +22033,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Paginated movements */
+      /** @description The movements of the consumable, newest first. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -22043,6 +22041,13 @@ export interface operations {
         content: {
           'application/json': components['schemas']['ConsumableMovementListResponse'];
         };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       401: components['responses']['Unauthorized'];
     };
@@ -22063,7 +22068,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Movement recorded; returns movement and updated consumable */
+      /** @description Movement recorded; the body is {"movement": ConsumableMovement} (WP-756). */
       201: {
         headers: {
           [name: string]: unknown;
@@ -36932,21 +36937,28 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      /** @description The caller lacks stock:write, or asset:move for the transfer of an asset (E-142), or the organization is not entitled to stock (feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset, consumable or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description The withdrawal exceeds the stock level of the quantity item (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
+      /** @description The withdrawal exceeds the available stock of the bin or the stock level of the quantity item (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object, consumable_id, quantity on an asset or missing for a quantity item, an id that is no UUID, a location that is not visible or of another client, or a ticket, order, workflow run or document that is not visible. */
+      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable or quantity item, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, or a ticket, order, workflow run or document that is not visible. */
       422: {
         headers: {
           [name: string]: unknown;

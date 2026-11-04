@@ -89,8 +89,10 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	sla2 := w.create(w.orgA, "/api/v1/slas", map[string]any{"name": "t1-err-sla-2", "priority": "high", "response_target_minutes": 30,
 		"resolution_target_minutes": 60, "client_id": f.Client2})
 	form := w.create(w.orgA, "/api/v1/forms", map[string]any{"name": "t1-err-form", "schema": map[string]any{"type": "object"}})
+	// An asset moves through the route only by transfer (E-142, WP-756); the
+	// lock of the asset refuses one outside the scope before the location.
 	movement := func(asset string) map[string]any {
-		return map[string]any{"movement_type": "correction", "asset_id": asset, "reason": "t1"}
+		return map[string]any{"movement_type": "transfer", "asset_id": asset, "to_location_id": room1, "reason": "t1"}
 	}
 	rule := func(ciType string) map[string]any {
 		return map[string]any{"ci_type_id": ciType, "name": "t1-err-rule", "severity": "high", "category": "security",
@@ -231,7 +233,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 			"client_id": unknown}, []int{422}, "a referenced record does not exist"},
 		{"WP-018", "stock movement of an organization-B asset", w.orgA, http.MethodPost, "/api/v1/stock-movements", movement(assetB), []int{404},
 			"asset not found"},
-		{"WP-018", "stock movement to an unknown location", w.orgA, http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "correction",
+		{"WP-018", "stock movement to an unknown location", w.orgA, http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "transfer",
 			"asset_id": asset1, "to_location_id": unknown}, []int{422}, `"field":"to_location_id"`},
 		{"WP-018", "inventory item of an invalid id", w.orgA, http.MethodGet, "/api/v1/inventory/items/not-a-uuid", nil, []int{404},
 			"inventory item not found"},

@@ -107,6 +107,10 @@ var unroutedKeys = map[string]string{
 	// org_admin takes over and deletes shared views of other owners; the
 	// saved-views handler checks it (VIE-02, E-106, WP-307).
 	"saved_view:manage": "checked in the handler (WP-307)",
+	// The transfer of an asset through POST /api/v1/stock-movements
+	// (stock:write) needs it besides; the movement handler checks it
+	// (E-142, WP-756).
+	"asset:move": "checked in the handler (WP-756)",
 }
 
 // unroutedUntil are the phase-2 keys of WP-245 whose first route a later
@@ -182,8 +186,8 @@ func TestRBA01KeysGateTheirActions(t *testing.T) {
 			t.Errorf("catalogue key %s gates no route and is not listed in unroutedKeys or unroutedUntil (F-199)", p.Key)
 		}
 	}
-	if len(unroutedKeys) != 2 {
-		t.Errorf("unroutedKeys %v, want entitlement:manage and saved_view:manage only", unroutedKeys)
+	if len(unroutedKeys) != 3 {
+		t.Errorf("unroutedKeys %v, want entitlement:manage, saved_view:manage and asset:move only", unroutedKeys)
 	}
 	for key := range unroutedUntil {
 		if !slices.Contains(p2Keys, key) {
