@@ -5,19 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -666,6 +675,96 @@ func TestIngestLanesMaxCIs(t *testing.T) {
 	}
 	t.Run("adopt_unlicensed", func(t *testing.T) { maxCIsAdoptNextToLanes(t, f, activeCIs) })
 	t.Run("drain_lanes", func(t *testing.T) { maxCIsDrainLanes(t, f, activeCIs) })
+}
+
+// TestIngestLanesSerialLink covers the automatic serial link of WP-741
+// with lanes (E-56, AST-03, AST-04) against PostgreSQL: three lanes report
+// one device with its serial number in different case at once while the
+// link service of WP-272 (POST /api/v1/assets/{id}/cis) links another CI
+// to the device's asset. In every round no record fails, the device is one
+// CI, the asset gets at most one automatic link, and only one that
+// committed before the manual link: a manual link committed while the
+// ingest waited for the asset row counts (asset_has_linked_ci).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestIngestLanesSerialLink(t *testing.T) {
+	f := scopetest.Seed(t, "75")
+	w := &linkWorld{t: t, f: f, notifier: &countingNotifier{}, seen: time.Now().Add(-time.Hour)}
+	ctx := lanesCtx(f, f.OrgA)
+	h := w.handler(true, true, 3)
+	mux := chi.NewRouter()
+	asset.NewHandler(asset.NewPGRepository(f.App)).
+		WithCILinks(ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()))).
+		RegisterRoutes(mux)
+	perms := []identity.Permission{identity.PermAssetRead, identity.PermAssetWrite, identity.PermCIRead, identity.PermCIWrite}
+	link := func(assetID, ciID string) int {
+		rctx := identity.WithPrincipal(ctx, identity.Principal{Subject: f.User, OrganizationID: f.OrgA, Permissions: perms})
+		rctx = permission.WithPolicy(rctx, permission.UnrestrictedPolicy(perms))
+		rctx = audit.WithRequestInfo(rctx, audit.RequestInfo{RequestID: "wp741", Source: audit.SourceAPI})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/assets/"+assetID+"/cis", strings.NewReader(`{"ci_id":"`+ciID+`"}`)).WithContext(rctx)
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	auto := 0
+	for round := range 8 {
+		serial := fmt.Sprintf("Lane-Link-%d", round)
+		a := w.asset(serial, "", "")
+		manual := f.CI(t, f.OrgA, "", fmt.Sprintf("lane-link-manual-%d", round))
+		variants := []string{serial, strings.ToLower(serial), strings.ToUpper(serial)}
+		recs := make([]plugins.DeviceRecord, len(variants))
+		for i, v := range variants {
+			recs[i] = w.record(v)
+		}
+		var wg sync.WaitGroup
+		for lane := range recs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, err := discovery.ProcessInLane(ctx, h, f.OrgA, lane, recs[lane]); err != nil {
+					t.Errorf("round %d, lane %d: %v", round, lane, err)
+				}
+			}()
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if code := link(a, manual); code != http.StatusCreated {
+				t.Errorf("round %d: manual link %d", round, code)
+			}
+		}()
+		wg.Wait()
+		var device, deviceAsset string
+		n := w.count(`SELECT count(*) FROM ci WHERE organization_id = $1 AND serial_number_lc = $2 AND deleted_at IS NULL`, strings.ToLower(serial))
+		if n != 1 {
+			t.Fatalf("round %d: %d CIs of the device, want 1", round, n)
+		}
+		if err := f.Admin.QueryRow(context.Background(), `SELECT id::text, COALESCE(asset_id::text, '') FROM ci
+			WHERE organization_id = $1 AND serial_number_lc = $2 AND deleted_at IS NULL`, f.OrgA, strings.ToLower(serial)).
+			Scan(&device, &deviceAsset); err != nil {
+			t.Fatal(err)
+		}
+		links := w.autoLinks(a)
+		var autoSeq, manualSeq int64
+		if err := f.Admin.QueryRow(context.Background(), `SELECT
+				COALESCE(max(seq) FILTER (WHERE changes->>'match' = 'serial'), 0),
+				COALESCE(max(seq) FILTER (WHERE changes->>'ci_id' = $3), 0)
+			FROM audit_log WHERE organization_id = $1 AND action = 'asset.linked' AND resource_id = $2`, f.OrgA, a, manual).
+			Scan(&autoSeq, &manualSeq); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case len(links) > 1:
+			t.Errorf("round %d: %d automatic links of the asset, want at most one", round, len(links))
+		case len(links) == 1 && (links[0] != device || deviceAsset != a || autoSeq > manualSeq):
+			t.Errorf("round %d: automatic link to %s (device %s linked to %q), audit seq %d after the manual link at %d",
+				round, links[0], device, deviceAsset, autoSeq, manualSeq)
+		case len(links) == 0 && deviceAsset != "":
+			t.Errorf("round %d: device linked to %s without an automatic link", round, deviceAsset)
+		}
+		auto += len(links)
+	}
+	t.Logf("8 rounds: %d with the automatic link first, %d with the manual link first (no automatic link)", auto, 8-auto)
 }
 
 // limitRecords returns 100 new server records of a lane, each with a serial

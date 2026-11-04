@@ -199,9 +199,9 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	exec(`INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, 'del', $3)`, f.OrgA, f.Client1, stock.ID)
 	expect("/api/v1/locations/"+stock.ID, http.StatusConflict, "quantity_item")
 	moved := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindZone, ParentID: tr.warehouse.ID, Name: "del-moved"})
-	exec(`INSERT INTO asset_movement (organization_id, item_kind, asset_id, movement_type, to_location_id) VALUES ($1, 'asset', $2, 'transfer', $3)`,
+	exec(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, to_location_id) VALUES ($1, 'asset', $2, 'transfer', $3)`,
 		f.OrgA, assetID, moved.ID)
-	expect("/api/v1/locations/"+moved.ID, http.StatusConflict, "asset_movement")
+	expect("/api/v1/locations/"+moved.ID, http.StatusConflict, "stock_movement")
 	scoped := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: "del-scoped"})
 	roleID := f.ID()
 	exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'del-role', '[]')`, roleID, f.OrgA)
@@ -694,8 +694,8 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	}
 	kinds := []string{
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyQuantityItem,
-		locations.DependencyAssetMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
-		locations.DependencyCIAttribute, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
+		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
+		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {
@@ -716,21 +716,27 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The delete rules of 000157, and of 000189 for the enrollment codes
-	// bound to a site by 000187 (F-430).
+	// The delete rules of 000157, of 000189 for the enrollment codes bound
+	// to a site by 000187 (F-430) and of 000247 for the target bin of an
+	// internal order (WP-847).
 	restrict := map[string]bool{
 		"location_site_id_fkey": true, "location_parent_id_fkey": true, "building_site_id_fkey": true,
 		"room_building_id_fkey": true, "room_site_id_fkey": true, "rack_room_id_fkey": true, "rack_site_id_fkey": true,
 		"vlan_site_id_fkey": true, "subnet_site_id_fkey": true, "collector_site_id_fkey": true,
 		"discovery_scope_site_id_fkey": true, "agent_enrollment_token_site_id_fkey": true, "ci_merge_site_id_fkey": true,
 		"collector_enrollment_code_site_fkey": true,
+		// The target bin of an internal order (000247, WP-847).
+		"internal_order_target_location_fkey": true,
 	}
 	// Foreign keys that follow a delete: the specialist row goes with its
 	// location row; a desk loses its room and a review item its site; the
-	// object link of a ticket goes with its location (WP-764).
+	// object link of a ticket goes with its location (WP-764); a bulk
+	// change set row keeps its revert data and loses only the site of its
+	// scope snapshot (WP-305).
 	follow := map[string]string{
 		"site_location_fkey": "c", "building_location_fkey": "c", "room_location_fkey": "c", "rack_location_fkey": "c",
 		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n", "ticket_link_location_fkey": "c",
+		"bulk_change_set_site_fkey": "n",
 	}
 	tree := []string{"location", "building", "room", "rack"}
 	seen := 0
@@ -758,7 +764,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		}
 	}
 	if seen != len(restrict) {
-		t.Errorf("found %d of the %d foreign keys of 000157 and 000189", seen, len(restrict))
+		t.Errorf("found %d of the %d foreign keys of 000157, 000189 and 000247", seen, len(restrict))
 	}
 	if err = locations.DeleteError(&pgconn.PgError{Code: "23503", TableName: "unknown_table"}); errors.As(err, new(*locations.DependencyError)) {
 		t.Errorf("a violation of an unknown table is reported as %v", err)

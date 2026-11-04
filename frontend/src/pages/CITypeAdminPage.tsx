@@ -59,6 +59,7 @@ import { IndexStatus } from '../components/metamodel/IndexStatus';
 import { AttributeSetEditor } from '../components/metamodel/AttributeSetEditor';
 import { TypeSetAssignment } from '../components/metamodel/TypeSetAssignment';
 import { MetamodelTabs } from '../components/metamodel/MetamodelTabs';
+import { MetamodelTransfer } from '../components/metamodel/MetamodelTransfer';
 import {
   DraftMarker,
   draftChangeFor,
@@ -269,7 +270,9 @@ export function CITypeAdminPage() {
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-start gap-2">
+          {/* Export and import of the metamodel (WP-800). */}
+          <MetamodelTransfer />
           <Button
             size="sm"
             variant="secondary"

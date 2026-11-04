@@ -68,6 +68,7 @@ const ciSelectColumns = `
 	COALESCE(merged_into_id::text, ''),
 	COALESCE(owner_user_id::text, ''),
 	COALESCE(owner_team_id::text, ''),
+	COALESCE(child_mode, ''),
 	COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id), '{}')
 `
 
@@ -848,7 +849,8 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				asset_id,
 				parent_ci_id,
 				owner_user_id,
-				owner_team_id
+				owner_team_id,
+				child_mode
 			)
 			SELECT
 				$1, $2, $3, $4, $5,
@@ -856,11 +858,11 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 				$11, $12, $13, $14, $15,
 				$16, $17, $18, $19, $20,
 				$21, $22, $23, $24, $25,
-				$26, $27
+				$26, $27, $28
 			WHERE NOT EXISTS (SELECT 1 FROM ci_type WHERE id = $4 AND NOT is_active)
 			RETURNING id::text, COALESCE(site_id::text, ''), COALESCE(room_id::text, ''),
 				COALESCE(location_id::text, ''), health, version, schema_version, created_at, updated_at,
-				COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, '')
+				COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, ''), COALESCE(child_mode, '')
 		`
 
 		if err := checkOwnerIDs(item.OwnerUserID, item.OwnerTeamID); err != nil {
@@ -910,8 +912,9 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 			nilIfEmpty(item.ParentCIID),
 			nilIfEmpty(item.OwnerUserID),
 			nilIfEmpty(item.OwnerTeamID),
+			nilIfEmpty(item.ChildMode),
 		).Scan(&item.ID, &item.SiteID, &item.RoomID, &item.LocationID, &item.Health, &item.Version, &item.SchemaVersion, &createdAt, &updatedAt,
-			&item.OwnerUserID, &item.OwnerTeamID); err != nil {
+			&item.OwnerUserID, &item.OwnerTeamID, &item.ChildMode); err != nil {
 			// No row: the type is deactivated (MET-05).
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrTypeInactive
@@ -1104,12 +1107,13 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 			ON CONFLICT DO NOTHING
 			RETURNING id, COALESCE(site_id::text, '') AS site_id, COALESCE(room_id::text, '') AS room_id,
 				COALESCE(location_id::text, '') AS location_id, health, version, schema_version, created_at, updated_at,
-				COALESCE(owner_user_id::text, '') AS owner_user_id, COALESCE(owner_team_id::text, '') AS owner_team_id
+				COALESCE(owner_user_id::text, '') AS owner_user_id, COALESCE(owner_team_id::text, '') AS owner_team_id,
+				COALESCE(child_mode, '') AS child_mode
 		)
 		SELECT input.ord, COALESCE(ins.id::text, ''), COALESCE(ins.site_id, ''), COALESCE(ins.room_id, ''),
 			COALESCE(ins.location_id, ''), COALESCE(ins.health, ''), COALESCE(ins.version, 0),
 			COALESCE(ins.schema_version, 0), ins.created_at, ins.updated_at, input.type_inactive,
-			COALESCE(ins.owner_user_id, ''), COALESCE(ins.owner_team_id, '')
+			COALESCE(ins.owner_user_id, ''), COALESCE(ins.owner_team_id, ''), COALESCE(ins.child_mode, '')
 		FROM input LEFT JOIN ins ON ins.id = input.id
 		ORDER BY input.ord`, args...)
 	if err != nil {
@@ -1119,12 +1123,12 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 	inactive := false
 	for rows.Next() {
 		var ord int64
-		var id, siteID, roomID, locationID, health, ownerUser, ownerTeam string
+		var id, siteID, roomID, locationID, health, ownerUser, ownerTeam, childMode string
 		var version, schemaVersion int64
 		var createdAt, updatedAt *time.Time
 		var typeInactive bool
 		if err := rows.Scan(&ord, &id, &siteID, &roomID, &locationID, &health, &version, &schemaVersion,
-			&createdAt, &updatedAt, &typeInactive, &ownerUser, &ownerTeam); err != nil {
+			&createdAt, &updatedAt, &typeInactive, &ownerUser, &ownerTeam, &childMode); err != nil {
 			return nil, nil, err
 		}
 		i := int(ord) - 1
@@ -1141,6 +1145,8 @@ func insertCIs(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) (cre
 		// Ingest and discovery never set the owner; a linked asset gives
 		// its own (ci_mirror_asset_owner, WP-280).
 		item.OwnerUserID, item.OwnerTeamID = ownerUser, ownerTeam
+		// A parent without mode is standalone (ci_child_mode_default, WP-273).
+		item.ChildMode = childMode
 		item.Version, item.SchemaVersion = version, int(schemaVersion)
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
@@ -1250,7 +1256,12 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return err
 		}
 		item = w.after
-		return r.recordUpdate(ctx, tx, orgID, id, w)
+		if err := r.recordUpdate(ctx, tx, orgID, id, w); err != nil {
+			return err
+		}
+		// A bulk revert records which rows of the change set it reverted
+		// and which it skipped, also when no field is left (WP-305).
+		return markRevertTx(ctx, tx, orgID)
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
@@ -1269,6 +1280,10 @@ func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID, id st
 		return err
 	}
 	if err := r.recordTemplatesHistory(ctx, tx, item, w.templates); err != nil {
+		return err
+	}
+	// The change set of a bulk job (WP-305), before audit and outbox (K20).
+	if err := w.bulk.record(ctx, tx, orgID, item); err != nil {
 		return err
 	}
 	if err := r.recordUpdateAudit(ctx, tx, w); err != nil {
@@ -1295,6 +1310,9 @@ type rowUpdate struct {
 	before, after *Item
 	changes       []ciFieldChange
 	templates     *templatesChange
+	// bulk is the change set row capture of a write under a bulk job
+	// (WP-305); nil otherwise.
+	bulk *bulkCapture
 }
 
 // templatesChange is a change of the template list of a CI (WP-710).
@@ -1474,6 +1492,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 		return nil, fmt.Errorf("get ci before update: %w", err)
 	}
+	// A bulk revert leaves every field whose value changed since the bulk
+	// (WP-305), decided on the locked row.
+	applyRevertExpectation(ctx, before, &req)
 	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
 		return nil, reviveErr
 	}
@@ -1497,6 +1518,10 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	}
 	if ownerErr := checkOwnerPatch(&req); ownerErr != nil {
 		return nil, ownerErr
+	}
+	// The child contract on the locked row (WP-273).
+	if childErr := checkChildContract(before, &req); childErr != nil {
+		return nil, childErr
 	}
 	if scopeErr := checkContainmentScope(ctx, tx, orgID, before, &req); scopeErr != nil {
 		return nil, scopeErr
@@ -1555,6 +1580,7 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	addStringField("client_id", req.ClientID)
 	addStringField("asset_id", req.AssetID)
 	addStringField("parent_ci_id", req.ParentCIID)
+	addStringField("child_mode", req.ChildMode)
 	addStringField("owner_user_id", req.OwnerUserID)
 	addStringField("owner_team_id", req.OwnerTeamID)
 	addStringField("location_id", req.LocationID)
@@ -1651,10 +1677,19 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		return nil, err
 	}
 	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item), templates: templates}
+	// Under a bulk job the change set takes the state of the overrides of
+	// the changed fields before recordManualOverrides (WP-305).
+	capture, captureErr := captureBulkChanges(ctx, tx, w, &req, computedKeys)
+	if captureErr != nil {
+		return nil, captureErr
+	}
+	w.bulk = capture
 	if len(w.changes) > 0 && req.Manual != nil {
-		if err := recordManualOverrides(ctx, tx, orgID, before, item, &req, computedKeys); err != nil {
-			return nil, err
+		written, overrideErr := recordManualOverrides(ctx, tx, orgID, before, item, &req, computedKeys)
+		if overrideErr != nil {
+			return nil, overrideErr
 		}
+		w.bulk.overridden(written)
 	}
 	return w, nil
 }
@@ -1939,6 +1974,10 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			}
 			return fmt.Errorf("get ci for delete: %w", err)
 		}
+		// A parent with configuration children is not deleted (E-123 (b)).
+		if cerr := checkNoConfigurationChildren(ctx, tx, orgID, id); cerr != nil {
+			return cerr
+		}
 
 		// CI-05: the CI is decommissioned (its operative status; the
 		// lifecycle state stays, LCY-01) and its asset link is released;
@@ -1996,8 +2035,10 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var deletedAt *time.Time
 		var mergedInto string
-		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, '') FROM ci WHERE id = $1 AND organization_id = $2",
-			id, orgID).Scan(&deletedAt, &mergedInto); err != nil {
+		var parentDeleted bool
+		if err := tx.QueryRow(ctx, "SELECT deleted_at, COALESCE(merged_into_id::text, ''), "+configurationParentDeletedSQL+
+			" FROM ci WHERE id = $1 AND organization_id = $2",
+			id, orgID).Scan(&deletedAt, &mergedInto, &parentDeleted); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -2012,6 +2053,10 @@ func (r *PGRepository) restore(ctx context.Context, orgID, id string, retention 
 		}
 		if retention > 0 && time.Since(*deletedAt) > retention {
 			return ErrRetentionExpired
+		}
+		// A configuration child comes back only with its parent (E-123 (b)).
+		if parentDeleted {
+			return ErrConfigurationParentDeleted
 		}
 		// The status and the asset link of the deletion come back (CI-05).
 		var status, assetID string
@@ -2199,6 +2244,7 @@ func scanCI(scanner ciScanner) (*Item, error) {
 		&item.MergedIntoID,
 		&item.OwnerUserID,
 		&item.OwnerTeamID,
+		&item.ChildMode,
 		&item.Tags,
 	); err != nil {
 		return nil, err
@@ -2423,6 +2469,7 @@ func diffCI(before, after *Item) []ciFieldChange {
 		{"client_id", before.ClientID, after.ClientID},
 		{"asset_id", before.AssetID, after.AssetID},
 		{"parent_ci_id", before.ParentCIID, after.ParentCIID},
+		{"child_mode", before.ChildMode, after.ChildMode},
 		{"owner_user_id", before.OwnerUserID, after.OwnerUserID},
 		{"owner_team_id", before.OwnerTeamID, after.OwnerTeamID},
 		{"location_id", before.LocationID, after.LocationID},
@@ -2513,6 +2560,10 @@ func locationError(err error) error {
 		return &ValidationError{Violations: []Violation{{Field: "owner_user_id", Detail: "user not found"}}}
 	case "ci_owner_team_fkey":
 		return &ValidationError{Violations: []Violation{{Field: "owner_team_id", Detail: "team not found"}}}
+	case "ci_child_mode_check", "ci_child_mode_parent", "ci_configuration_child_asset", "ci_location_from_parent",
+		"ci_configuration_child_client", "ci_configuration_parent_client":
+		// The child contract (WP-273, migration 000244).
+		return childContractError(pgErr)
 	case "ci_owner_from_asset":
 		// The trigger ci_mirror_asset_owner names the field (WP-280).
 		field := "owner_user_id"
@@ -2581,62 +2632,70 @@ func instanceKeys(stored map[string]any) []string {
 }
 
 // loadAssetFacts shows the canonical data of each linked asset on its CIs
-// (DB-05). Assets the principal cannot see are left out. The AST-01
-// columns (inventory_no, warranty_until; WP-738) also fill the deprecated
-// names; status is derived from lifecycle_state (asset_status_from_lifecycle,
-// E-120 (b)).
+// (DB-05), and on a configuration child the data of the asset of its
+// nearest ancestor with one (AST-04, WP-273), with the CI that gives them
+// (AssetSourceCIID): one statement for a page (assetSourceSQL), none
+// without a linked CI or configuration child. Assets the principal cannot
+// see are left out. The AST-01 columns (inventory_no, warranty_until;
+// WP-738) also fill the deprecated names; status is derived from
+// lifecycle_state (asset_status_from_lifecycle, E-120 (b)).
 func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
-	byAsset := map[string][]*Item{}
-	ids := make([]string, 0, len(items))
+	byCI := map[string][]*Item{}
+	var children, parents, linked, assets []string
 	for _, item := range items {
-		if item.AssetID == "" {
+		switch {
+		case item.AssetID != "":
+			linked, assets = append(linked, item.ID), append(assets, item.AssetID)
+		case item.ChildMode == ChildModeConfiguration && item.ParentCIID != "":
+			children, parents = append(children, item.ID), append(parents, item.ParentCIID)
+		default:
 			continue
 		}
-		if _, seen := byAsset[item.AssetID]; !seen {
-			ids = append(ids, item.AssetID)
-		}
-		byAsset[item.AssetID] = append(byAsset[item.AssetID], item)
+		byCI[item.ID] = append(byCI[item.ID], item)
 	}
-	if len(ids) == 0 {
+	if len(byCI) == 0 {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, inventory_no, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
-		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
-		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_until, 'YYYY-MM-DD'), ''),
-		       COALESCE(supplier, ''), COALESCE(invoice_number, ''), COALESCE(asset_type_id::text, ''),
-		       COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
-		       COALESCE(manufacturer, ''), COALESCE(model, ''), COALESCE(cost_center, ''),
-		       COALESCE(owner_user_id::text, ''), COALESCE(owner_team_id::text, ''),
-		       COALESCE(supplier_id::text, ''), COALESCE(contract_id::text, '')
-		FROM asset WHERE id = ANY($1::uuid[])`, ids)
+		WITH src AS (`+assetSourceSQL+`)
+		SELECT src.start, src.ci_id, a.id::text, a.inventory_no, a.name, COALESCE(a.serial_number, ''),
+		       COALESCE(a.location_id::text, ''), COALESCE(a.lifecycle_state, ''), a.status, COALESCE(a.barcode, ''),
+		       COALESCE(a.rfid_tag, ''), COALESCE(to_char(a.purchase_date, 'YYYY-MM-DD'), ''),
+		       COALESCE(to_char(a.warranty_until, 'YYYY-MM-DD'), ''),
+		       COALESCE(a.supplier, ''), COALESCE(a.invoice_number, ''), COALESCE(a.asset_type_id::text, ''),
+		       COALESCE(a.client_id::text, ''), COALESCE(a.site_id::text, ''),
+		       COALESCE(a.manufacturer, ''), COALESCE(a.model, ''), COALESCE(a.cost_center, ''),
+		       COALESCE(a.owner_user_id::text, ''), COALESCE(a.owner_team_id::text, ''),
+		       COALESCE(a.supplier_id::text, ''), COALESCE(a.contract_id::text, '')
+		FROM src JOIN asset a ON a.id = src.asset_id`, children, parents, linked, assets)
 	if err != nil {
 		return fmt.Errorf("load asset facts: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
+		var ciID, sourceID string
 		var a AssetFacts
-		if err := rows.Scan(&a.ID, &a.InventoryNo, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
-			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyUntil, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
+		if err := rows.Scan(&ciID, &sourceID, &a.ID, &a.InventoryNo, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState,
+			&a.Status, &a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyUntil, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
 			&a.ClientID, &a.SiteID, &a.Manufacturer, &a.Model, &a.CostCenter, &a.OwnerUserID, &a.OwnerTeamID,
 			&a.SupplierID, &a.ContractID); err != nil {
 			return fmt.Errorf("scan asset facts: %w", err)
 		}
 		a.AssetTag, a.WarrantyEnd = a.InventoryNo, a.WarrantyUntil
-		for _, item := range byAsset[a.ID] {
+		for _, item := range byCI[ciID] {
 			facts := a
-			item.Asset = &facts
+			item.Asset, item.AssetSourceCIID = &facts, sourceID
 		}
 	}
 	return rows.Err()
 }
 
 // derivedFields are set by the database, not by the writer of a change.
-// The asset link and the owner (WP-280) are structural, not observed
-// values. Tags are no field value (ci_tag, CHECK ci_field_value_no_tags;
-// WP-281).
+// The asset link, the parent with its child mode (WP-273) and the owner
+// (WP-280) are structural, not observed values. Tags are no field value
+// (ci_tag, CHECK ci_field_value_no_tags; WP-281).
 var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attributes": true, "asset_id": true, "parent_ci_id": true,
-	"owner_user_id": true, "owner_team_id": true, "tags": true}
+	"child_mode": true, "owner_user_id": true, "owner_team_id": true, "tags": true}
 
 // recordManualOverrides gives every field a manual change touched a
 // protected override, so discovery never overwrites it (OVR-01, CH9): the
@@ -2645,15 +2704,16 @@ var derivedFields = map[string]bool{"site_id": true, "room_id": true, "attribute
 // the CI get no override (MET-14, CI-04, WP-714): automation never writes
 // them, the central write decision refuses them (ReasonInstanceAttribute).
 // Nor do the computed attributes (computed, WP-717): their values follow
-// their inputs.
-func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest, computed map[string]bool) error {
-	reason := strings.TrimSpace(req.ChangeReason)
-	if reason == "" {
-		reason = DefaultChangeReason
-	}
+// their inputs. It returns the fields it gave an override with their
+// values (the change set of a bulk job, WP-305).
+func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, req *UpdateRequest,
+	computed map[string]bool) (map[string]any, error) {
+	reason := manualReason(req)
+	written := map[string]any{}
 	for _, change := range diffCI(before, after) {
-		if derivedFields[change.Field] || (change.Field == "location_id" && after.AssetID != "") {
-			// The location of a linked CI is the asset's (DB-05).
+		if derivedFields[change.Field] || (change.Field == "location_id" && (after.AssetID != "" || after.ChildMode == ChildModeConfiguration)) {
+			// The location of a linked CI is the asset's (DB-05), that of
+			// a configuration child its parent's (WP-273).
 			continue
 		}
 		value := change.New
@@ -2662,16 +2722,17 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			value = nil
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, change.Field, value, req.Manual.Author, reason, true); err != nil {
-			return err
+			return nil, err
 		}
+		written[change.Field] = value
 	}
 	keys := changedKeys(before.Attributes, after.Attributes)
 	if len(keys) == 0 {
-		return nil
+		return written, nil
 	}
 	names, err := instanceFieldNames(ctx, tx, after.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	instance := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -2684,10 +2745,19 @@ func recordManualOverrides(ctx context.Context, tx pgx.Tx, orgID string, before,
 			continue
 		}
 		if err := override.SetOverrideTx(ctx, tx, orgID, after.ID, key, after.Attributes[key], req.Manual.Author, reason, true); err != nil {
-			return err
+			return nil, err
 		}
+		written[key] = after.Attributes[key]
 	}
-	return nil
+	return written, nil
+}
+
+// manualReason is the override reason of a manual change.
+func manualReason(req *UpdateRequest) string {
+	if reason := strings.TrimSpace(req.ChangeReason); reason != "" {
+		return reason
+	}
+	return DefaultChangeReason
 }
 
 // overrideColumns are CI columns a manual override replaces in the effective
@@ -2711,7 +2781,7 @@ var (
 		"sys_object_id":    func(i *Item, v string) { i.SysObjectID = v },
 	}
 	structuralFields = map[string]bool{
-		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "site_id": true,
+		"id": true, "organization_id": true, "client_id": true, "location_id": true, "asset_id": true, "parent_ci_id": true, "child_mode": true, "site_id": true,
 		"owner_user_id": true, "owner_team_id": true, "room_id": true, "ci_type_id": true, "attributes": true, "discovery_source": true, "is_manual": true,
 		"first_seen_at": true, "last_seen_at": true, "created_at": true, "updated_at": true, "deleted_at": true,
 	}

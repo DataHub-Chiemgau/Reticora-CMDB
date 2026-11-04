@@ -320,8 +320,8 @@ func TestBulkOpsManualWritePath(t *testing.T) {
 		res, _ := e.bulk(map[string]any{"ids": []string{a, foreign, b}, "status": "inactive"}, false)
 		expectItems(t, res, []string{a, foreign, b}, map[string]ci.BulkItemResult{foreign: {Code: http.StatusNotFound}})
 		for _, id := range []string{a, b} {
-			if s := e.text(`SELECT status FROM ci WHERE id = $1`, id); s != "inactive" || e.overrides(id, "status", "bulk") != 1 {
-				t.Errorf("%s: status %s, %d bulk status overrides of the caller, want inactive and 1", id, s, e.overrides(id, "status", "bulk"))
+			if s := e.text(`SELECT status FROM ci WHERE id = $1`, id); s != "inactive" || e.overrides(id, "status", "bulk:"+res.BulkJobID) != 1 {
+				t.Errorf("%s: status %s, %d bulk status overrides of the caller, want inactive and 1", id, s, e.overrides(id, "status", "bulk:"+res.BulkJobID))
 			}
 		}
 		oneWrite("set_status", was)
@@ -339,9 +339,9 @@ func TestBulkOpsManualWritePath(t *testing.T) {
 			if n := e.text(`SELECT attributes->>'note' || '|' || model FROM ci WHERE id = $1`, id); n != "bulk|wp304-model" {
 				t.Errorf("%s after set_fields: %s", id, n)
 			}
-			if e.overrides(id, "note", "bulk") != 1 || e.overrides(id, "model", "bulk") != 1 {
+			if e.overrides(id, "note", "bulk:"+res.BulkJobID) != 1 || e.overrides(id, "model", "bulk:"+res.BulkJobID) != 1 {
 				t.Errorf("%s: overrides of note %d, model %d with reason bulk by the caller, want 1 each", id,
-					e.overrides(id, "note", "bulk"), e.overrides(id, "model", "bulk"))
+					e.overrides(id, "note", "bulk:"+res.BulkJobID), e.overrides(id, "model", "bulk:"+res.BulkJobID))
 			}
 		}
 		oneWrite("set_fields", was)
@@ -431,8 +431,8 @@ func TestBulkOpsUniqueLocationOwner(t *testing.T) {
 	t.Run("set_location", func(t *testing.T) {
 		res, _ := e.bulk(map[string]any{"action": ci.BulkSetLocation, "ids": []string{loose, linked}, "params": map[string]any{"location_id": site.ID}}, false)
 		expectItems(t, res, []string{loose, linked}, map[string]ci.BulkItemResult{linked: {Code: http.StatusUnprocessableEntity, Fields: []string{"location_id"}}})
-		if got := e.text(`SELECT COALESCE(location_id::text, '') FROM ci WHERE id = $1`, loose); got != site.ID || e.overrides(loose, "location_id", "bulk") != 1 {
-			t.Errorf("CI without asset: location %q, %d overrides, want %s and 1", got, e.overrides(loose, "location_id", "bulk"), site.ID)
+		if got := e.text(`SELECT COALESCE(location_id::text, '') FROM ci WHERE id = $1`, loose); got != site.ID || e.overrides(loose, "location_id", "bulk:"+res.BulkJobID) != 1 {
+			t.Errorf("CI without asset: location %q, %d overrides, want %s and 1", got, e.overrides(loose, "location_id", "bulk:"+res.BulkJobID), site.ID)
 		}
 		if got := e.text(`SELECT COALESCE(location_id::text, '') FROM ci WHERE id = $1`, linked); got != "" {
 			t.Errorf("CI with asset took the location %s", got)
@@ -519,8 +519,8 @@ func TestBulkOpsTagsAndArchive(t *testing.T) {
 	t.Run("archive sets inactive and the tag archived", func(t *testing.T) {
 		res, _ := e.bulk(map[string]any{"action": ci.BulkArchive, "ids": []string{a, foreign}}, false)
 		expectItems(t, res, []string{a, foreign}, map[string]ci.BulkItemResult{foreign: {Code: http.StatusNotFound}})
-		if s := e.text(`SELECT status FROM ci WHERE id = $1`, a); s != "inactive" || tags(a) != "archived" || e.overrides(a, "status", "bulk") != 1 {
-			t.Errorf("archived CI: status %s, tags %q, %d status overrides", s, tags(a), e.overrides(a, "status", "bulk"))
+		if s := e.text(`SELECT status FROM ci WHERE id = $1`, a); s != "inactive" || tags(a) != "archived" || e.overrides(a, "status", "bulk:"+res.BulkJobID) != 1 {
+			t.Errorf("archived CI: status %s, tags %q, %d status overrides", s, tags(a), e.overrides(a, "status", "bulk:"+res.BulkJobID))
 		}
 		va := e.version(a)
 		au, ev := e.trail(a)

@@ -48,7 +48,11 @@ type FieldProvenance struct {
 	Rank   int    `json:"rank"`
 	// Reason is why the value is shown: override, source_rank, asset,
 	// record or computed.
-	Reason     string     `json:"reason"`
+	Reason string `json:"reason"`
+	// SourceCIID is the CI whose asset gives a value of reason asset: the
+	// CI itself or, for a configuration child, the ancestor with the asset
+	// (WP-273).
+	SourceCIID string     `json:"source_ci_id,omitempty"`
 	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 	ObservedAt *time.Time `json:"observed_at,omitempty"`
 	// The override, when there is one, and the observed value it covers.
@@ -174,11 +178,19 @@ func BuildProvenance(item *Item, records []override.FieldValue) []FieldProvenanc
 			Reason: ReasonRecord, RecordedAt: recordedAt, ObservedAt: item.LastSeenAt,
 		}
 	}
+	// Serial number and location of a configuration child are those of
+	// the asset of its ancestor (WP-273), whatever a source reported.
+	configuration := item.ChildMode == ChildModeConfiguration && item.Asset != nil
+	if configuration && item.LocationID != "" {
+		byField["location_id"] = FieldProvenance{
+			Field: "location_id", Value: item.LocationID, Source: "asset", Reason: ReasonAsset, SourceCIID: item.AssetSourceCIID,
+		}
+	}
 	for _, f := range typedFields {
 		if f.name == "serial_number" && item.Asset != nil && item.Asset.SerialNumber != "" {
-			if _, ok := byField[f.name]; !ok {
+			if _, ok := byField[f.name]; !ok || configuration {
 				byField[f.name] = FieldProvenance{
-					Field: f.name, Value: item.Asset.SerialNumber, Source: "asset", Reason: ReasonAsset,
+					Field: f.name, Value: item.Asset.SerialNumber, Source: "asset", Reason: ReasonAsset, SourceCIID: item.AssetSourceCIID,
 				}
 			}
 			continue

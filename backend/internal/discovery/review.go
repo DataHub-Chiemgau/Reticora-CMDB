@@ -164,6 +164,39 @@ func (n afterCommitNotifier) ReviewOpened(ctx context.Context, item *reviews.Ite
 	database.AfterCommit(ctx, func(ctx context.Context) { n.next.ReviewOpened(ctx, &opened) })
 }
 
+// SerialMismatchReader reads the serial_mismatch item of a CI that the
+// trigger review_serial_mismatch (migration 000088) opened in the context
+// transaction and writes its review.created (WP-741); the discovery PG
+// repository implements it.
+type SerialMismatchReader interface {
+	OpenedSerialMismatch(ctx context.Context, orgID, ciID string) (*ReviewItem, error)
+}
+
+// announceSerialMismatch announces the serial_mismatch item the ingest's
+// write of a serial number on the linked CI ciID opened by trigger, like
+// the items reviews.Service.Open opens (NTF-05): review.created in the
+// transaction, the notifier after its commit (K20). It reports whether an
+// item was opened.
+func (h *Handler) announceSerialMismatch(ctx context.Context, orgID, ciID string) (bool, error) {
+	reader, ok := h.repo.(SerialMismatchReader)
+	if !ok {
+		return false, nil
+	}
+	item, err := reader.OpenedSerialMismatch(ctx, orgID, ciID)
+	if err != nil || item == nil {
+		return false, err
+	}
+	if h.reviewNotifier != nil {
+		afterCommitNotifier{next: h.reviewNotifier}.ReviewOpened(ctx, item)
+	}
+	id := item.ID
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		slog.InfoContext(ctx, "review item opened", "event", "review.opened", "organization_id", orgID,
+			"review_item_id", id, "kind", ReviewKindSerialMismatch)
+	})
+	return true, nil
+}
+
 // ReasonNoProfileMatch marks an unclassified_device item of a device that
 // no collector profile matched (DIS-02); its generic_device CI exists.
 const ReasonNoProfileMatch = "no_profile_match"

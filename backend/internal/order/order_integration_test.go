@@ -286,7 +286,7 @@ func TestOrderDraftOnlyChanges(t *testing.T) {
 		t.Fatalf("items %+v", got.Items)
 	}
 	var movements int
-	if err := w.f.Admin.QueryRow(ctx, `SELECT count(*) FROM asset_movement WHERE organization_id = $1`, w.f.OrgA).Scan(&movements); err != nil {
+	if err := w.f.Admin.QueryRow(ctx, `SELECT count(*) FROM stock_movement WHERE organization_id = $1`, w.f.OrgA).Scan(&movements); err != nil {
 		t.Fatal(err)
 	}
 	if movements != 0 {

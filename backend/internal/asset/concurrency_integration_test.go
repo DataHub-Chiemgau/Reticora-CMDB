@@ -295,7 +295,7 @@ func TestAssetEventsAndShape(t *testing.T) {
 
 	// Append-only records block the delete (E-121).
 	moved := w.create(t, `{"inventory_no":"E-2","name":"moved"}`)
-	w.admin(t, `INSERT INTO asset_movement (organization_id, asset_id, movement_type) VALUES ($1, $2, 'transfer')`, f.OrgA, moved.ID)
+	w.admin(t, `INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type) VALUES ($1, 'asset', $2, 'transfer')`, f.OrgA, moved.ID)
 	disposed := w.create(t, `{"inventory_no":"E-3","name":"disposed"}`)
 	w.admin(t, `INSERT INTO disposal_record (organization_id, asset_id, method, performed_at) VALUES ($1, $2, 'recycling', now())`, f.OrgA, disposed.ID)
 	for _, id := range []string{moved.ID, disposed.ID} {

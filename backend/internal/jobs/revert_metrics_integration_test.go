@@ -69,17 +69,17 @@ func TestJobRevertAgainstPostgres(t *testing.T) {
 	// The field policy source of the server router: the unmerge checks the
 	// action grants of ci:delete (WP-728).
 	mux.Use(permission.FieldPolicyMiddleware(phase1Resolver{}))
-	jobs.NewAPIHandler(svc).WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
+	jobs.NewAPIHandler(svc).WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
 		_, err := ciSvc.RevertMerge(ctx, job.OrganizationID, job.RefID)
 		for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 			if errors.Is(err, refusal) {
-				return &jobs.RevertRefusedError{Reason: refusal}
+				return nil, &jobs.RevertRefusedError{Reason: refusal}
 			}
 		}
 		if err != nil && err.Error() == "not found" {
-			return &jobs.RevertRefusedError{Reason: errors.New("the merge of the job no longer exists")}
+			return nil, &jobs.RevertRefusedError{Reason: errors.New("the merge of the job no longer exists")}
 		}
-		return err
+		return nil, err
 	}).RegisterRoutes(mux)
 	call := func(ctx context.Context, method, path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()

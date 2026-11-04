@@ -1675,10 +1675,11 @@
       "ci": "CIs",
       "asset": "assets",
       "quantity_item": "stock items",
-      "asset_movement": "movements",
+      "stock_movement": "movements",
       "rack_mount": "rack mounts",
       "role_assignment": "role assignments",
       "ci_attribute": "CI attributes referencing the location",
+      "internal_order": "internal orders (target bin)",
       "vlan": "VLANs",
       "subnet": "subnets",
       "collector": "collectors",
@@ -1958,6 +1959,9 @@
       },
       "metamodel": {
         "test": "Metamodel test"
+      },
+      "template": {
+        "migrate": "Template migration"
       }
     }
   },
@@ -2342,6 +2346,127 @@
       "save": "Save version",
       "saved": "Version saved.",
       "notSaved": "Version not saved. {{reason}}"
+    },
+    "ciSection": {
+      "title": "Templates",
+      "hint": "The templates of the CI in their order; later templates take precedence over earlier ones. The whole list is saved.",
+      "loadError": "The templates of the CI could not be loaded",
+      "empty": "No template is assigned to the CI.",
+      "listLabel": "Templates of the CI",
+      "entryMeta": "Version {{version}} · position {{position}}",
+      "migrate": "Migrate to version {{version}}",
+      "remove": "Remove",
+      "removeAction": "Remove template: {{name}}",
+      "needsWrite": "Changing the assignment needs the permission ci:write.",
+      "reloaded": "The CI was changed meanwhile; the templates were reloaded.",
+      "notSaved": "The templates were not saved",
+      "discard": "Discard",
+      "save": "Save templates",
+      "addTemplate": "Add template",
+      "chooseTemplate": "Choose a template",
+      "addVersion": "Version",
+      "noPublished": "No published version",
+      "add": "Add"
+    },
+    "migrate": {
+      "open": "Migrate",
+      "action": "Migrate template: {{name}}",
+      "title": "Migrate template: {{name}}",
+      "description": "Moves the CIs of a template version to another one. Overrides and instance attributes are kept.",
+      "from": "Source version",
+      "to": "Target version",
+      "none": "No version",
+      "chooseVersions": "Choose the source and the target version.",
+      "sameVersion": "Source and target version must differ.",
+      "selection": "Selection of CIs",
+      "modes": {
+        "all": "All visible CIs on this source version",
+        "view": "Narrowed by a saved view",
+        "ids": "Specific CIs (ids)"
+      },
+      "viewLegend": "Saved views of CIs",
+      "noViews": "There is no saved view of CIs.",
+      "viewNoWhere": "(no filter, cannot be chosen)",
+      "viewMissing": "Choose a saved view with a filter.",
+      "idsLabel": "CI ids, one per line (at most {{max}})",
+      "idsEmpty": "Enter at least one CI id.",
+      "idsTooMany": "At most {{max}} CI ids.",
+      "idInvalid": "Not a valid CI id: {{id}}",
+      "fixedSelection": "Only the chosen CIs are migrated ({{count}}).",
+      "dryRun": "Dry run (writes nothing)",
+      "refused": "The migration was refused",
+      "close": "Close",
+      "startDryRun": "Start dry run",
+      "start": "Start migration",
+      "runLabel": "Run of the migration",
+      "dryRunJob": "Dry run",
+      "realJob": "Migration",
+      "jobsLink": "Open the job center",
+      "jobFailed": "The job failed: {{error}}",
+      "jobCancelled": "The job was cancelled; a cancelled run has no report.",
+      "reportFailed": "The report could not be loaded",
+      "report": "Report of the migration",
+      "reportDryRun": "Report of the dry run",
+      "totals": "Totals",
+      "totalsFields": {
+        "selected": "Selected",
+        "migrated": "Migrated",
+        "skipped": "Skipped",
+        "failed": "Failed",
+        "with_findings": "With findings"
+      },
+      "itemsCaption": "Result per CI",
+      "columns": {
+        "ci": "CI",
+        "outcome": "Outcome",
+        "defaults": "Defaults set",
+        "overridden": "Skipped for an override",
+        "findings": "Findings",
+        "error": "Error"
+      },
+      "outcomes": {
+        "migrated": "Migrated",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      },
+      "errorCodes": {
+        "unique": "Uniqueness violated",
+        "validation": "Validation",
+        "not_found": "Not found",
+        "internal": "Internal error"
+      },
+      "errorText": "{{code}} ({{field}}): {{detail}}",
+      "noItems": "No CI with a change, finding or error.",
+      "truncated": "The report is truncated: it names at most 10,000 CIs."
+    },
+    "transfer": {
+      "export": "Export metamodel",
+      "exportFailed": "The export failed",
+      "import": "Import metamodel",
+      "importFile": "File for the metamodel import",
+      "importFailed": "The import was refused",
+      "notJson": "The file {{name}} contains no valid JSON.",
+      "unchanged": "The file does not differ from the metamodel; no draft was created.",
+      "reportTitle": "Report of the import",
+      "conflicts": "Conflicts",
+      "items": "Changes",
+      "notes": "Notes",
+      "actions": {
+        "create": "New",
+        "update": "Changed",
+        "unchanged": "Unchanged",
+        "resolved": "Resolved"
+      },
+      "conflictCodes": {
+        "datatype-conflict": "Data type conflict",
+        "missing-reference": "Missing reference",
+        "system-key-collision": "Collision with a system key"
+      },
+      "noteCodes": {
+        "history-skipped": "History skipped",
+        "not-imported": "Not imported",
+        "field-permissions-skipped": "Field permissions skipped"
+      }
     }
   }
 }

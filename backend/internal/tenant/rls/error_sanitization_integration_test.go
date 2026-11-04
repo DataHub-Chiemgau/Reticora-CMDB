@@ -392,18 +392,18 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	// names no table or constraint and records nothing; the movement of a
 	// client-1 asset is 201.
 	t.Run("WP-018 stock movement of a client-2 asset by client 1", func(t *testing.T) {
-		before := w.scalar(`SELECT count(*)::text FROM asset_movement WHERE asset_id = $1`, asset2)
+		before := w.scalar(`SELECT count(*)::text FROM stock_movement WHERE asset_id = $1`, asset2)
 		code, body := w.do(client1, http.MethodPost, "/api/v1/stock-movements", movement(asset2))
 		if code != http.StatusNotFound || !strings.Contains(body, "asset not found") {
 			t.Errorf("movement of a client-2 asset by client 1: %d %s, want 404 asset not found", code, trim(body))
 		}
-		for _, m := range append([]string{"asset_movement", "_fkey", "policy for table"}, t1LeakMarkers...) {
+		for _, m := range append([]string{"stock_movement", "_fkey", "policy for table"}, t1LeakMarkers...) {
 			if strings.Contains(body, m) {
 				t.Errorf("movement of a client-2 asset discloses database text %q: %s", m, trim(body))
 			}
 		}
-		if after := w.scalar(`SELECT count(*)::text FROM asset_movement WHERE asset_id = $1`, asset2); after != before {
-			t.Errorf("asset_movement rows of the client-2 asset: %s before, %s after the refusal", before, after)
+		if after := w.scalar(`SELECT count(*)::text FROM stock_movement WHERE asset_id = $1`, asset2); after != before {
+			t.Errorf("stock_movement rows of the client-2 asset: %s before, %s after the refusal", before, after)
 		}
 		if code, body := w.do(client1, http.MethodPost, "/api/v1/stock-movements", movement(asset1)); code != http.StatusCreated {
 			t.Errorf("movement of a client-1 asset by client 1: %d %s, want 201", code, trim(body))

@@ -27,7 +27,8 @@ import (
 // field values.
 var ciStructural = map[string]bool{
 	"id": true, "organization_id": true, "ci_type_id": true, "client_id": true, "location_id": true,
-	"site_id": true, "room_id": true, "parent_ci_id": true, "asset_id": true, "merged_into_id": true,
+	"site_id": true, "room_id": true, "parent_ci_id": true, "child_mode": true, "asset_id": true,
+	"asset_source_ci_id": true, "merged_into_id": true,
 	"name": true, "status": true, "lifecycle_state": true, "health": true, "health_updated_at": true,
 	"discovery_source": true, "first_seen_at": true, "last_seen_at": true, "is_manual": true,
 	"version": true, "schema_version": true, "deleted_at": true, "created_at": true, "updated_at": true,

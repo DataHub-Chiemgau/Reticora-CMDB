@@ -17,14 +17,18 @@ import (
 // ErrNotDraft for a change outside draft, ErrInvalidTransition for a
 // transition the state machine does not allow from the current state,
 // ErrFourEyes for an approval by the requester and *api.FieldError (422)
-// for a supplier, consumable or asset that does not fit the order.
+// for a supplier, target bin, consumable or asset that does not fit the
+// order.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Order, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Order, error)
 	// Create stores o; a non-empty Supplier is resolved to the supplier of
-	// that name, a missing currency is the organization's.
+	// that name, a missing currency is the organization's. A target bin
+	// (TargetLocationID) is a location of kind bin in the scope and, for an
+	// order with a client, of that client (WP-847).
 	Create(ctx context.Context, o *Order) error
-	// Update changes an order in draft.
+	// Update changes an order in draft; a new target bin, or a new client
+	// with a target bin, is checked like on Create.
 	Update(ctx context.Context, orgID, id string, req UpdateOrderRequest) (*Order, error)
 	// Delete removes an order in draft.
 	Delete(ctx context.Context, orgID, id string) error
@@ -49,7 +53,8 @@ func checkFourEyes(requestedBy, actorID string) error {
 }
 
 // MemoryRepository is the in-memory implementation (tests, --no-db). It
-// knows no supplier master data: a supplier alias name is unknown (422).
+// knows no supplier master data and no locations: a supplier alias name and
+// a target bin are unknown (422).
 type MemoryRepository struct {
 	mu     sync.RWMutex
 	orders map[string]*Order
@@ -138,6 +143,9 @@ func (r *MemoryRepository) Create(_ context.Context, o *Order) error {
 	if strings.TrimSpace(o.Supplier) != "" {
 		return fieldError("supplier", "no supplier of the organization has this name")
 	}
+	if strings.TrimSpace(o.TargetLocationID) != "" {
+		return fieldError("target_location_id", msgTargetBin)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	o.ID = r.nextID("ord")
@@ -168,6 +176,12 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	}
 	if supplierName(req.Supplier) != "" {
 		return nil, fieldError("supplier", "no supplier of the organization has this name")
+	}
+	if req.TargetLocationID != nil && strings.TrimSpace(*req.TargetLocationID) != "" {
+		return nil, fieldError("target_location_id", msgTargetBin)
+	}
+	if req.TargetLocationID != nil {
+		o.TargetLocationID = ""
 	}
 	if req.ClientID != nil {
 		o.ClientID = *req.ClientID

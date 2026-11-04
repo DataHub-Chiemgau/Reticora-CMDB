@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -25,6 +26,10 @@ var (
 	// A running bulk job can be cancelled: it stops before its next
 	// checkpoint and keeps the partial report (JOB-03, F-162).
 	bulkJobKind = jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
+	// bulkRevertJobKind (WP-305): the revert of a bulk job writes the old
+	// values per CI and marks each change set row; it is not repeated and
+	// not cancellable while running, and it has no revert itself.
+	bulkRevertJobKind = jobs.Kind{Name: jobs.RevertKind, MaxAttempts: 1, Timeout: 30 * time.Minute}
 	// snapshotJobKind only reads and is idempotent: it is retried. A
 	// running snapshot can be cancelled; its result is dropped.
 	snapshotJobKind = jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 3, Timeout: 15 * time.Minute, Cancellable: true}
@@ -72,22 +77,30 @@ type jobKind struct {
 }
 
 // applicationJobKinds lists the kinds the application submits with their
-// handlers; the bulk kind needs the CI service, the template migration its
+// handlers; the bulk kind needs the CI service, its revert the bulk revert
+// (nil without the change set store, WP-305), the template migration its
 // executor (nil while the module metamodel is off, E-105), the malware scan
 // of documents its scanner (nil while the module documents is off). The
 // test run of a draft runs on the draft handler (without a database its
 // handler fails, the route answers 503 before), an import run on the
 // import handler (WP-775), the rebuild of the search index on the search
 // handler (WP-786).
-func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs,
-	draftHandler *metamodel.Handler, importHandler *importer.ImportHandler, scanner *document.Scanner,
-	searchHandler *search.Handler) []jobKind {
+func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
+	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
+	scanner *document.Scanner, searchHandler *search.Handler) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
 		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
+		// Without the change set store no bulk job is revertible and no
+		// revert job is submitted; a stray one fails.
+		revertHandler := func(context.Context, *jobs.Job) (any, error) { return nil, jobs.ErrNotRevertible }
+		if bulkRevert != nil {
+			revertHandler = bulkRevert.RunJob
+		}
+		kinds = append(kinds, jobKind{kind: bulkRevertJobKind, handler: revertHandler})
 	}
 	if templateJobs != nil {
 		kinds = append(kinds, jobKind{kind: templateMigrateJobKind, handler: templateJobs.RunJob})
@@ -104,21 +117,29 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 // submitters submit there, without it the submitters run their jobs in
 // this process on svc.
 //
+// Every bulk on CIs is a job of svc (WP-305): below BulkJobFromIDs ids it
+// runs in the request, from there on on the queue when there is one. The
+// revert of a bulk job is submitted to the queue as well.
+//
 // The template migration takes progress and cancel from svc in both cases,
 // the test run of a draft the state of a running test, the import run its
 // progress, cancel and result (WP-775). The malware
 // scan of documents runs on the queue only: without it no submitter is
 // wired and new versions stay pending_scan (fail-closed, E-42).
-func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
-	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
-	scanner *document.Scanner, searchHandler *search.Handler) {
+func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
+	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
+	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}
 	draftHandler.WithJobs(svc)
-	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, importHandler, scanner, searchHandler) {
+	if ciService != nil {
+		ciService.WithBulkJobs(svc)
+	}
+	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
+		scanner, searchHandler) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -135,11 +156,11 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		if ciService != nil {
 			ciService.WithBulkQueue(queue)
 		}
+		if bulkRevert != nil {
+			bulkRevert.WithQueue(queue)
+		}
 		return
 	}
 	historyHandler.WithJobs(svc)
 	searchHandler.WithJobs(svc)
-	if ciService != nil {
-		ciService.WithBulkJobs(svc)
-	}
 }

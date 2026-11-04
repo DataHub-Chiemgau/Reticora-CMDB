@@ -256,6 +256,11 @@ func TestActionGrantsOnCIRoutes(t *testing.T) {
 		jl, jo := lockedCI("wp728-job-l"), openCI("wp728-job-o")
 		params, _ := json.Marshal(ci.BulkRequest{Action: ci.BulkSetStatus, IDs: []string{jl, jo}, Status: ci.StatusInactive})
 		job := &jobs.Job{ID: f.ID(), OrganizationID: f.OrgA, Kind: ci.BulkJobKind, CreatedBy: userL, Params: params, Scope: &jobs.Scope{}}
+		// The job row exists: the run records its change set (WP-305).
+		if _, err := f.Admin.Exec(bg, `INSERT INTO job (id, organization_id, kind, status, params, created_by, started_at)
+			VALUES ($1, $2, $3, 'running', $4, $5, now())`, job.ID, f.OrgA, ci.BulkJobKind, params, userL); err != nil {
+			t.Fatalf("job row: %v", err)
+		}
 		result, err := svc.RunBulkJob(bg, job)
 		if err != nil {
 			t.Fatalf("bulk job: %v", err)

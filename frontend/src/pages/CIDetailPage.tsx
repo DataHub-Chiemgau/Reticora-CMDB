@@ -28,6 +28,7 @@ import {
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
 import { ScopeBanner } from '../components/ScopeBanner';
+import { CITemplatesSection } from '../components/metamodel/CITemplatesSection';
 
 export interface NeighborEntry {
   id: string;
@@ -352,6 +353,9 @@ export function CIDetailPage() {
           onChanged={saveAttributes}
           serverError={attributeError}
         />
+        {/* Templates of the CI (WP-800): only with citype:manage and the
+            module metamodel; otherwise neither shown nor read (UI-12). */}
+        <CITemplatesSection ciId={ci.id} ciTypeId={ci.ci_type_id} version={ci.version} />
         <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />

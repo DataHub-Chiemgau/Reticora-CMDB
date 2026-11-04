@@ -65,6 +65,8 @@ type matrixTable struct {
 // a fresh text, "@seq" the running number of the synthesized row.
 var matrixOverrides = map[string]map[string]string{
 	"asset_movement":       {"asset_id": "@uuid"},
+	"stock_movement":       {"asset_id": "@uuid"},
+	"disposal_record":      {"asset_id": "@uuid"},
 	"assignment":           {"asset_id": "@uuid"},
 	"reservation":          {"asset_id": "@uuid"},
 	"composition":          {"child_ci_id": "@uuid"},

@@ -35,12 +35,12 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	}
 	h := NewAPIHandler(f.svc).
 		WithKind("ci.bulk", identity.PermCIWrite, nil).
-		WithKind("ci.merge", identity.PermCIDelete, func(_ context.Context, job *Job) error {
+		WithKind("ci.merge", identity.PermCIDelete, func(_ context.Context, job *Job) (*Job, error) {
 			if job.RefID == "broken" {
-				return errors.New("the snapshot has expired")
+				return nil, errors.New("the snapshot has expired")
 			}
 			f.reverted = append(f.reverted, job.ID)
-			return nil
+			return nil, nil
 		})
 	f.mux = chi.NewRouter()
 	h.RegisterRoutes(f.mux)
@@ -222,8 +222,8 @@ func TestJobAPIRevertErrors(t *testing.T) {
 		svc := NewService(NewMemoryRepository())
 		svc.Register(Kind{Name: "ci.merge", MaxAttempts: 1})
 		f := &apiFixture{svc: svc, mux: chi.NewRouter()}
-		NewAPIHandler(svc).WithKind("ci.merge", identity.PermCIDelete, func(context.Context, *Job) error {
-			return tc.err
+		NewAPIHandler(svc).WithKind("ci.merge", identity.PermCIDelete, func(context.Context, *Job) (*Job, error) {
+			return nil, tc.err
 		}).RegisterRoutes(f.mux)
 		job := f.enqueue(t, "ci.merge", "alice", "")
 		f.finish(t, job, nil)
@@ -238,6 +238,142 @@ func TestJobAPIRevertErrors(t *testing.T) {
 				t.Errorf("%s: body %s contains %q", tc.name, body, leak)
 			}
 		}
+	}
+}
+
+// bulkFixture is the job API with a bulk kind whose reverter queues a
+// revert job (WP-305) next to ci.merge with its synchronous revert.
+type bulkFixture struct {
+	*apiFixture
+	revertErr error
+	calls     int
+}
+
+func newBulkFixture(t *testing.T) *bulkFixture {
+	t.Helper()
+	f := &bulkFixture{apiFixture: &apiFixture{svc: NewService(NewMemoryRepository()), mux: chi.NewRouter()}}
+	for _, k := range []string{"ci.bulk", "ci.merge", RevertKind} {
+		f.svc.Register(Kind{Name: k, MaxAttempts: 1})
+	}
+	NewAPIHandler(f.svc).
+		WithKind("ci.bulk", identity.PermCIWrite, func(ctx context.Context, job *Job) (*Job, error) {
+			f.calls++
+			if f.revertErr != nil {
+				return nil, f.revertErr
+			}
+			revert, _, err := f.svc.Enqueue(ctx, job.OrganizationID, RevertKind, map[string]string{"bulk_job_id": job.ID},
+				EnqueueOptions{IdempotencyKey: "revert:" + job.ID, CreatedBy: tenant.FromContext(ctx).UserID})
+			return revert, err
+		}).
+		WithBulkKind("ci.bulk").
+		WithKind(RevertKind, identity.PermCIWrite, nil).
+		WithKind("ci.merge", identity.PermCIDelete, func(context.Context, *Job) (*Job, error) { return nil, nil }).
+		RegisterRoutes(f.mux)
+	return f
+}
+
+// TestJobAPIBulkRevertContract covers the revert contract of WP-305
+// (BLK-02, JOB-03): a reverter that queues a revert job answers 202 with
+// the job and Location, a repeated POST the same job; a refusal with a
+// problem type is 409 with that type; ci.merge stays 200 with its fields.
+func TestJobAPIBulkRevertContract(t *testing.T) {
+	f := newBulkFixture(t)
+	bulk := f.enqueue(t, "ci.bulk", "alice", "")
+	f.finish(t, bulk, nil)
+	w := f.call("POST", "/api/v1/jobs/"+bulk.ID+"/revert", "alice", identity.PermCIWrite)
+	var revert Job
+	if w.Code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &revert) != nil || revert.Kind != RevertKind ||
+		revert.Status != StatusQueued || w.Header().Get("Location") != "/api/v1/jobs/"+revert.ID {
+		t.Fatalf("bulk revert: %d %s, Location %q", w.Code, w.Body.String(), w.Header().Get("Location"))
+	}
+	w = f.call("POST", "/api/v1/jobs/"+bulk.ID+"/revert", "carol", identity.PermCIWrite)
+	var again Job
+	if w.Code != http.StatusAccepted || json.Unmarshal(w.Body.Bytes(), &again) != nil || again.ID != revert.ID {
+		t.Errorf("repeated bulk revert: %d %s, want the revert job %s", w.Code, w.Body.String(), revert.ID)
+	}
+	// The handler records nothing itself: the revert job does when it ends.
+	if got, _ := f.svc.Get(context.Background(), "org-1", bulk.ID); got.RevertedAt != nil {
+		t.Errorf("the bulk job is reverted before its revert job ran: %v", got.RevertedAt)
+	}
+	// The revert job has no revert.
+	if w = f.call("POST", "/api/v1/jobs/"+revert.ID+"/revert", "alice", identity.PermCIWrite); w.Code != http.StatusConflict {
+		t.Errorf("revert of the revert job: %d %s", w.Code, w.Body.String())
+	}
+
+	// A refusal with a problem type is 409 with that type; a domain
+	// refusal keeps its text.
+	for _, tc := range []struct {
+		name, problem, detail string
+		err                   error
+	}{
+		{"expired", ProblemRevertExpired, "revert window", ErrRevertExpired},
+		{"refused", "https://reticora.io/problems/409", "the bulk action has no revert",
+			&RevertRefusedError{Reason: errors.New("the bulk action has no revert")}},
+	} {
+		g := newBulkFixture(t)
+		g.revertErr = tc.err
+		job := g.enqueue(t, "ci.bulk", "alice", "")
+		g.finish(t, job, nil)
+		w = g.call("POST", "/api/v1/jobs/"+job.ID+"/revert", "alice", identity.PermCIWrite)
+		var problem struct {
+			Type   string `json:"type"`
+			Detail string `json:"detail"`
+		}
+		if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Type != tc.problem ||
+			!strings.Contains(problem.Detail, tc.detail) {
+			t.Errorf("%s: %d %s, want 409 %s", tc.name, w.Code, w.Body.String(), tc.problem)
+		}
+	}
+
+	// ci.merge answers 200 with job_id, reverted, reverted_at, reverted_by.
+	merge := f.enqueue(t, "ci.merge", "alice", "")
+	f.finish(t, merge, nil)
+	w = f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "alice")
+	var merged struct {
+		JobID      string     `json:"job_id"`
+		Reverted   bool       `json:"reverted"`
+		RevertedAt *time.Time `json:"reverted_at"`
+		RevertedBy string     `json:"reverted_by"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &merged) != nil || merged.JobID != merge.ID ||
+		!merged.Reverted || merged.RevertedAt == nil || merged.RevertedBy != "alice" {
+		t.Errorf("merge revert: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestJobAPIBulkRevertNeedsKindPermission: the revert of a bulk kind needs
+// the permission of the kind also from the creator (403 without the
+// reverter running), within 24 hours of the end of the job (409
+// revert-expired); cancel and the revert of ci.merge keep the creator rule
+// (WP-305).
+func TestJobAPIBulkRevertNeedsKindPermission(t *testing.T) {
+	f := newBulkFixture(t)
+	bulk := f.enqueue(t, "ci.bulk", "alice", "")
+	f.finish(t, bulk, nil)
+	if w := f.call("POST", "/api/v1/jobs/"+bulk.ID+"/revert", "alice"); w.Code != http.StatusForbidden || f.calls != 0 {
+		t.Errorf("creator without ci:write reverts a bulk job: %d %s, reverter ran %d times", w.Code, w.Body.String(), f.calls)
+	}
+	merge := f.enqueue(t, "ci.merge", "alice", "")
+	f.finish(t, merge, nil)
+	if w := f.call("POST", "/api/v1/jobs/"+merge.ID+"/revert", "alice"); w.Code != http.StatusOK {
+		t.Errorf("creator without ci:delete reverts a merge: %d %s", w.Code, w.Body.String())
+	}
+	queued := f.enqueue(t, "ci.bulk", "alice", "")
+	if w := f.call("DELETE", "/api/v1/jobs/"+queued.ID, "alice"); w.Code != http.StatusOK {
+		t.Errorf("creator without ci:write cancels a bulk job: %d %s", w.Code, w.Body.String())
+	}
+
+	// 25 hours after the end: 409 revert-expired before the reverter.
+	old := newBulkFixture(t)
+	old.svc.WithClock(func() time.Time { return time.Now().UTC().Add(-25 * time.Hour) })
+	expired := old.enqueue(t, "ci.bulk", "alice", "")
+	old.finish(t, expired, nil)
+	w := old.call("POST", "/api/v1/jobs/"+expired.ID+"/revert", "alice", identity.PermCIWrite)
+	var problem struct {
+		Type string `json:"type"`
+	}
+	if w.Code != http.StatusConflict || json.Unmarshal(w.Body.Bytes(), &problem) != nil || problem.Type != ProblemRevertExpired || old.calls != 0 {
+		t.Errorf("expired bulk revert: %d %s, reverter ran %d times", w.Code, w.Body.String(), old.calls)
 	}
 }
 

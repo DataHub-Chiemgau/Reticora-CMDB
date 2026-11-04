@@ -184,11 +184,15 @@ func TestDocumentLinkTargetsDeriveScope(t *testing.T) {
 		t.Errorf("link to the ticket after the team change: %s, want team A", got)
 	}
 
-	// Registry and doc_link_entity_type_check hold the same values.
+	// Registry and doc_link_entity_type_check hold the same values; the
+	// check admits stock_movement since WP-744, the registry entry follows
+	// with WP-276.
 	def := w.scalar(t, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'doc_link_entity_type_check'`)
 	var inCheck []string
 	for _, m := range regexp.MustCompile(`'([a-z_]+)'::text`).FindAllStringSubmatch(def, -1) {
-		inCheck = append(inCheck, m[1])
+		if m[1] != "stock_movement" || slices.Contains(document.EntityTypes(), "stock_movement") {
+			inCheck = append(inCheck, m[1])
+		}
 	}
 	slices.Sort(inCheck)
 	if !slices.Equal(inCheck, document.EntityTypes()) {

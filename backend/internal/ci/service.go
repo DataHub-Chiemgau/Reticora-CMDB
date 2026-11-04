@@ -661,6 +661,10 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 	if item.AssetID != "" && item.LocationID != "" {
 		return &ValidationError{Violations: []Violation{{Field: "location_id", Detail: locationOwnedByAsset}}}
 	}
+	// The child contract of the composition (WP-273).
+	if err := checkCreateChildMode(item); err != nil {
+		return err
+	}
 	if err := CheckUnique(ctx, s.repo, item.OrganizationID, item.CITypeID, item.ClientID, "", item.Attributes); err != nil {
 		return err
 	}

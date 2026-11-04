@@ -92,12 +92,6 @@ type DerivedScope struct {
 // (for example after the table got client_id and site_id), so the list
 // only shrinks.
 var DerivedScopeTables = map[string]DerivedScope{
-	"asset_movement": {
-		Path: "asset_id -> asset, quantity_item_id -> quantity_item (movement.movementVisible)",
-		Reason: "a movement belongs to its item; from_location_id and to_location_id are history, " +
-			"the visibility follows the item's client and site",
-		TestFile: "internal/movement/movement_scope_integration_test.go", TestName: "TestMovementRepositoryClientScope",
-	},
 	"assignment": {
 		Path:     "asset_id -> asset, ci_id -> ci (assignment.assignmentVisible)",
 		Reason:   "an assignment is visible only when its asset and CI are; it has no location of its own",
@@ -117,6 +111,12 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Path:     "form_id -> form_def, ci_id -> ci, ticket_id -> ticket (form.submissionVisible)",
 		Reason:   "a submission is visible only when its form, CI and ticket are",
 		TestFile: "internal/form/form_scope_integration_test.go", TestName: "TestFormRepositoryClientScope",
+	},
+	"internal_order": {
+		Path: "target_location_id -> location (bin check in the order repository on every write, order.checkTargetBin)",
+		Reason: "the target bin is a delivery target, not a location of the order; " +
+			"the visibility of the order follows its client_id",
+		TestFile: "internal/order/order_target_integration_test.go", TestName: "TestOrderTargetBinMatchesClient",
 	},
 	"metric_sample": {
 		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",
@@ -379,10 +379,6 @@ const (
 	refG1           = "G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329)"
 	refLocationNode = "the specialist row shares its id with its node of the location tree (000157); " +
 		"rest of SR-03, fixed before GA (E-137, WP-329)"
-	refWP274Movement = "asset_movement is replaced by the ledger stock_movement (WP-274, K19); " +
-		"the successor references with the organization"
-	refWP274Stock = "the former stock_movement is replaced by the ledger of WP-274 (K19); " +
-		"the successor references with the organization"
 	refWP275 = "assignment is replaced by the assignment service over stock_movement (WP-275, K19); " +
 		"the successor references with the organization"
 	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
@@ -412,10 +408,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"api_key.rotated_from":                           {Constraint: "api_key_rotated_from_fkey", Target: "api_key", Reason: refG1},
 	"asset.parent_asset_id":                          {Constraint: "asset_parent_asset_id_fkey", Target: "asset", Reason: refWP743},
 	"asset_location.asset_id":                        {Constraint: "asset_location_asset_id_fkey", Target: "asset", Reason: refG1},
-	"asset_movement.asset_id":                        {Constraint: "asset_movement_asset_id_fkey", Target: "asset", Reason: refWP274Movement},
-	"asset_movement.from_location_id":                {Constraint: "asset_movement_from_location_id_fkey", Target: "location", Reason: refWP274Movement},
-	"asset_movement.quantity_item_id":                {Constraint: "asset_movement_quantity_item_fk", Target: "quantity_item", Reason: refWP274Movement},
-	"asset_movement.to_location_id":                  {Constraint: "asset_movement_to_location_id_fkey", Target: "location", Reason: refWP274Movement},
 	"assignment.asset_id":                            {Constraint: "assignment_asset_id_fkey", Target: "asset", Reason: refWP275},
 	"assignment.assigned_by":                         {Constraint: "assignment_assigned_by_fkey", Target: "app_user", Reason: refWP275},
 	"assignment.assigned_to":                         {Constraint: "assignment_assigned_to_fkey", Target: "app_user", Reason: refWP275},
@@ -508,7 +500,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"service_account_role.role_id":                   {Constraint: "service_account_role_role_id_fkey", Target: "role", Reason: refG1},
 	"service_account_role.scope_site_id":             {Constraint: "service_account_role_scope_site_id_fkey", Target: "site", Reason: refG1},
 	"site.id":                                        {Constraint: "site_location_fkey", Target: "location", Reason: refLocationNode},
-	"stock_movement.consumable_id":                   {Constraint: "stock_movement_consumable_id_fkey", Target: "consumable", Reason: refWP274Stock},
 	"stock_scan.asset_id":                            {Constraint: "stock_scan_asset_id_fkey", Target: "asset", Reason: refWP287},
 	"stock_scan.ci_id":                               {Constraint: "stock_scan_ci_id_fkey", Target: "ci", Reason: refWP287},
 	"stock_scan.scanned_by":                          {Constraint: "stock_scan_scanned_by_fkey", Target: "app_user", Reason: refWP287},

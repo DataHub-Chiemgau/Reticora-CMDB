@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
@@ -573,7 +574,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return err
 		}
 		var blocked bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset_movement WHERE asset_id = $1)
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_movement WHERE asset_id = $1)
 			OR EXISTS (SELECT 1 FROM disposal_record WHERE asset_id = $1)`, id).Scan(&blocked); err != nil {
 			return fmt.Errorf("check records of asset: %w", err)
 		}
@@ -602,11 +603,16 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// appendOnly reports whether err is the refusal of an append-only guard
-// (asset_movement, disposal_record) a delete cascaded into.
+// appendOnly reports whether err is the refusal of an append-only guard a
+// delete cascaded into, or of the RESTRICT reference of the ledger
+// stock_movement (WP-744) or of a disposal record (WP-751).
 func appendOnly(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "P0001" && strings.Contains(pgErr.Message, "append-only")
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return (pgErr.Code == "P0001" && strings.Contains(pgErr.Message, "append-only")) ||
+		(pgErr.Code == "23503" && (pgErr.TableName == "stock_movement" || pgErr.TableName == "disposal_record"))
 }
 
 // checkPrecondition enforces If-Match on a PATCH (API-07, API-03; pattern
@@ -973,4 +979,82 @@ func (r *PGRepository) ListDATEV(ctx context.Context, orgID string, q *DATEVQuer
 		return rows.Err()
 	})
 	return out, err
+}
+
+// SerialMatches returns the assets of the organization whose normalized
+// serial number is one of serials (normal forms, NormalizeSerial) in one
+// statement that joins the context transaction and locks them (FOR UPDATE
+// OF asset) until its end (WP-741, E-56). Whether an asset is linked is read
+// after its lock with a fresh snapshot (asset_has_linked_ci, migration
+// 000241): a link committed while the lookup waited for the row counts.
+// Assets the caller may not see or not update are not returned.
+func (r *PGRepository) SerialMatches(ctx context.Context, orgID string, serials []string) ([]SerialMatch, error) {
+	var out []SerialMatch
+	if len(serials) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			WITH locked AS MATERIALIZED (
+				SELECT a.id, a.serial_number_norm, a.client_id, l.client_id AS location_client, a.ci_id
+				FROM asset a
+				LEFT JOIN location l ON l.id = a.location_id AND l.organization_id = a.organization_id
+				WHERE a.organization_id = $1 AND a.serial_number_norm = ANY ($2::text[])
+				ORDER BY a.id
+				FOR UPDATE OF a
+			)
+			SELECT id::text, serial_number_norm, COALESCE(client_id::text, ''), COALESCE(location_client::text, ''),
+				ci_id IS NOT NULL OR asset_has_linked_ci(id)
+			FROM locked`, orgID, serials)
+		if err != nil {
+			return fmt.Errorf("asset serial matches: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var m SerialMatch
+			if err := rows.Scan(&m.AssetID, &m.SerialNorm, &m.ClientID, &m.LocationClientID, &m.Linked); err != nil {
+				return fmt.Errorf("asset serial matches: %w", err)
+			}
+			out = append(out, m)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// RecordSerialLinks completes the automatic links of the ingest once the
+// CIs carry their asset_id, in the context transaction: one statement sets
+// the primary CI of the assets that have none (WHERE ci_id IS NULL), one
+// writes the audit entries asset.linked (ci_id, serial_number, match
+// serial; source collector, AUD-07: the queue ingest has no request) last
+// in the transaction (database.BeforeCommit).
+func (r *PGRepository) RecordSerialLinks(ctx context.Context, orgID string, links []SerialLink) error {
+	if len(links) == 0 {
+		return nil
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		assets, cis := make([]string, len(links)), make([]string, len(links))
+		entries := make([]audit.Entry, len(links))
+		actorID, actorType := linkActor(ctx)
+		for i := range links {
+			l := &links[i]
+			assets[i], cis[i] = l.AssetID, l.CIID
+			entries[i] = audit.Entry{
+				OrganizationID: orgID, ActorID: actorID, ActorType: actorType, Action: ActionLinked,
+				ResourceType: "asset", ResourceID: l.AssetID, Source: audit.SourceCollector,
+				Changes: map[string]any{"ci_id": l.CIID, "serial_number": l.SerialNumber, "match": MatchSerial},
+			}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE asset a SET ci_id = l.ci_id
+			FROM unnest($2::uuid[], $3::uuid[]) AS l(asset_id, ci_id)
+			WHERE a.organization_id = $1 AND a.id = l.asset_id AND a.ci_id IS NULL`, orgID, assets, cis); err != nil {
+			return fmt.Errorf("primary ci of linked assets: %w", err)
+		}
+		return database.BeforeCommit(ctx, func() error {
+			if _, err := audit.NewPGRecorder().RecordMany(ctx, tx, entries); err != nil {
+				return fmt.Errorf("audit %s: %w", ActionLinked, err)
+			}
+			return nil
+		})
+	})
 }

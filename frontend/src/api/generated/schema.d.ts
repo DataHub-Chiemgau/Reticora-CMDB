@@ -1218,7 +1218,7 @@ export interface paths {
     put?: never;
     /**
      * Revert a succeeded job where the revert is defined (E-25)
-     * @description Phase 1 defines the revert of ci.merge (the unmerge within 30 days, CI-12); every other kind, and a job that did not succeed, is 409. The bulk revert follows with BLK-02. A successful revert is recorded on the job (reverted_at, reverted_by); a second revert is 409 "the job is already reverted" (F-329). The revert of ci.merge makes the merged CI active again: with max_cis reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and the merge stays (ENT-03).
+     * @description The revert is defined for ci.merge (the unmerge within 30 days, CI-12, answered 200) and for the bulk kind ci.bulk of the CI field operations set_status, set_fields and set_location (BLK-02, WP-305) within 24 hours of the end of the bulk job. A bulk revert answers 202 with the revert job bulk.revert (Location: its job), which writes the old values back per CI as a manual change, leaves every field changed since the bulk (reported as skipped in its result) and records the revert on the bulk job when it ends; a repeated POST while it runs answers the same revert job. It needs ci:write, also from the creator of the bulk job. Every other kind (bulk.revert and export among them), a bulk job of another action, a bulk job without change set rows the caller sees and a job that did not succeed are 409. A revert is recorded on the job (reverted_at, reverted_by); a further revert is 409 "the job is already reverted" (F-329). The revert of ci.merge makes the merged CI active again: with max_cis reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and the merge stays (ENT-03).
      */
     post: operations['revertJob'];
     delete?: never;
@@ -1746,7 +1746,17 @@ export interface paths {
     /** List revision-safe disposal records (append-only) */
     get: operations['listDisposalRecords'];
     put?: never;
-    /** Record a disposal (revision-safe; records cannot be edited or deleted) */
+    /**
+     * Record a disposal (revision-safe; records cannot be edited or deleted)
+     * @description Records a disposal after DIN 66399 and the BSI recommendation for data
+     *     carriers (E-55). The required fields depend on the method (see
+     *     CreateDisposalRecordRequest); a missing field or a value out of range
+     *     answers 400 naming the field. The names in performed_by and witness are
+     *     stored only as vault surrogates. The database sets record_hash, and the
+     *     audit entry disposal_record.created is written in the same transaction.
+     *     An asset, CI, supplier or evidence document the caller cannot see
+     *     answers 404 without a record.
+     */
     post: operations['createDisposalRecord'];
     delete?: never;
     options?: never;
@@ -10870,6 +10880,8 @@ export interface components {
     CIBulkResult: components['schemas']['BulkResult'];
     /** @description The partial failure report of a bulk operation on CIs or assets (API-08, BLK-01): one item per id, in the order of the ids. */
     BulkResult: {
+      /** @description The job ci.bulk of a bulk on CIs that ran in the request (below 100 ids, WP-305); POST /jobs/{id}/revert undoes it within 24 hours. Absent without a job service. */
+      bulk_job_id?: string;
       action: string;
       total: number;
       succeeded: number;
@@ -11493,6 +11505,13 @@ export interface components {
       /** @description CI this one is physically part of (chassis → blade, AST-05); the relationship contains is projected from it. Cycles are rejected (422). The parent is a CI of the same client or an org-wide CI (TEN-05). */
       parent_ci_id?: string;
       /**
+       * @description Child contract of a CI with a parent (AST-05, WP-273), absent without one. configuration: no asset of its own; serial number, location, physical lifecycle and inventory data come from the nearest ancestor with an asset and appear read-only under asset (asset_source_ci_id names that CI); the location follows the parent's and cannot be written (422), the client is the parent's. standalone (default): own asset, serial number, location and lifecycle.
+       * @enum {string}
+       */
+      child_mode?: 'configuration' | 'standalone';
+      /** @description CI whose asset gives the values under asset: the CI itself for a linked CI, the ancestor with the asset for a configuration child (WP-273). Read-only. */
+      asset_source_ci_id?: string;
+      /**
        * Format: uuid
        * @description User responsible for the CI in the system (CI-07): the ID of the user (app_user.id), no personal data; clients resolve the name. Separate from the contact role owner (GET /api/v1/cis/{id}/contacts). For a CI linked to an asset it mirrors the asset's owner (DB-05). Subject to the field permissions (core.owner_user_id).
        */
@@ -11671,6 +11690,11 @@ export interface components {
       /** @description Containing CI: a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422). */
       parent_ci_id?: string;
       /**
+       * @description Child contract (WP-273); only with parent_ci_id (422 on child_mode otherwise), standalone without it. configuration requires the parent's client (422 on parent_ci_id) and rejects asset_id and location_id in the same request (422).
+       * @enum {string}
+       */
+      child_mode?: 'configuration' | 'standalone';
+      /**
        * Format: uuid
        * @description Owning user (WP-280). An unknown user or one of another organization is rejected (422 on owner_user_id). With asset_id the CI takes the asset's owner; another owner is rejected (422).
        */
@@ -11721,8 +11745,10 @@ export interface components {
       location_id?: string | null;
       /** @description Links the CI to an asset (empty string unlinks on update); the CI then takes the asset's location, a location in the same request is rejected (422). */
       asset_id?: string | null;
-      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. */
+      /** @description Containing CI (empty string clears it): a visible CI of the CI's client or an org-wide CI (TEN-05). A CI the principal cannot see, a deleted or unknown CI is rejected (422 "parent CI not found"), so is a CI of another client (422) and a cycle (422); the parent is checked again when client_id changes. Clearing it clears child_mode. */
       parent_ci_id?: string | null;
+      /** @description Child contract (WP-273): configuration or standalone; empty string or null gives a CI with a parent the default standalone. Without a parent after the update 422 on child_mode. configuration for a CI with an asset is rejected (422 on child_mode, on asset_id when the request links one); on a configuration child location_id and serial_number cannot be written (422) and the parent must be of the CI's client (422 on parent_ci_id). */
+      child_mode?: string | null;
       /** @description Owning user (empty string or null clears it, WP-280). An unknown user or one of another organization is rejected (422). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_user_id). */
       owner_user_id?: string | null;
       /** @description Owning team (empty string or null clears it, WP-280). An unknown team or one of another organization is rejected (422); a team outside the scope of a team-scoped principal is refused (403, TEN-05). A CI linked to an asset has the asset's owner: another value is rejected (422 on owner_team_id). */
@@ -13224,6 +13250,11 @@ export interface components {
        * @description Same as supplier_name; removed with WP-320.
        */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Target bin of the goods receipt (WP-847).
+       */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -13261,6 +13292,11 @@ export interface components {
        * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
        */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Target bin: a location of kind bin visible to the caller and, for an order with client_id, of that client (422 on target_location_id otherwise; an unknown id, a location outside the scope and one of another client get the same answer).
+       */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -13275,6 +13311,8 @@ export interface components {
        * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
        */
       supplier?: string;
+      /** @description Target bin as on create (422 on target_location_id otherwise, also when a new client_id does not fit the bin); empty removes it. Only in status draft. */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -13340,19 +13378,51 @@ export interface components {
         | 'secure_erasure'
         | 'physical_destruction'
         | 'return_to_vendor';
-      /** @description Reference to the revision-safe disposal certificate. */
-      certificate_ref?: string;
-      /** @description Data carrier destruction note (BSI/ISO). */
+      /** @description Protection class after DIN 66399. */
+      protection_class?: number;
+      /** @description Security level after DIN 66399, e.g. P-4. */
+      security_level?: string;
+      /** @description Identification of the data carrier. */
       data_carrier?: string;
+      /**
+       * Format: uuid
+       * @description Service provider that performed the disposal.
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Evidence document (part of record_hash).
+       */
+      evidence_document_id?: string;
+      /** @description Reference to the disposal certificate or the erasure procedure. */
+      certificate_ref?: string;
+      /** @description Name of the performer, resolved from its vault surrogate; empty after crypto-shredding. Records written before the vault surrogates show the stored plaintext. */
       performed_by?: string;
+      /** @description Name of the witness */
+      witness?: string;
       /** Format: date-time */
       performed_at: string;
       notes?: string;
+      /** @description SHA-256 (hex) over the canonical JSON of the business fields incl. the surrogate ids, set by the database; verifiable after crypto-shredding. */
+      record_hash: string;
       /** Format: date-time */
       created_at: string;
     };
+    /**
+     * @description Required fields per method (E-55, the table disposal.RequiredFields of
+     *     the handler; "a|b" means either field):
+     *
+     *     | method | required |
+     *     |---|---|
+     *     | every method | method, performed_at, performed_by, asset_id\|ci_id |
+     *     | destruction, physical_destruction | protection_class, security_level, data_carrier, supplier_id\|witness, evidence_document_id |
+     *     | secure_erasure | data_carrier, certificate_ref\|notes (the procedure), evidence_document_id |
+     *     | reuse, recycling, return_to_vendor | only the fields of every method |
+     */
     CreateDisposalRecordRequest: {
+      /** Format: uuid */
       asset_id?: string;
+      /** Format: uuid */
       ci_id?: string;
       /** @enum {string} */
       method:
@@ -13362,11 +13432,30 @@ export interface components {
         | 'secure_erasure'
         | 'physical_destruction'
         | 'return_to_vendor';
-      certificate_ref?: string;
+      /** @description Protection class after DIN 66399. */
+      protection_class?: number;
+      /** @description Security level after DIN 66399, e.g. P-4. */
+      security_level?: string;
+      /** @description Identification of the data carrier. */
       data_carrier?: string;
-      performed_by?: string;
+      /**
+       * Format: uuid
+       * @description Service provider (GET /api/v1/suppliers).
+       */
+      supplier_id?: string;
+      /**
+       * Format: uuid
+       * @description Evidence document (GET /api/v1/documents).
+       */
+      evidence_document_id?: string;
+      /** @description Reference to the disposal certificate or the erasure procedure. */
+      certificate_ref?: string;
+      /** @description Name of the performer; stored only as vault surrogate. */
+      performed_by: string;
+      /** @description Name of the witness; stored only as vault surrogate. */
+      witness?: string;
       /** Format: date-time */
-      performed_at?: string;
+      performed_at: string;
       notes?: string;
     };
     DisposalRecordListResponse: components['schemas']['PaginationEnvelope'] & {
@@ -14305,16 +14394,17 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). */
       dependencies: (
         | 'location'
         | 'ci'
         | 'asset'
         | 'quantity_item'
-        | 'asset_movement'
+        | 'stock_movement'
         | 'rack_mount'
         | 'role_assignment'
         | 'ci_attribute'
+        | 'internal_order'
         | 'vlan'
         | 'subnet'
         | 'collector'
@@ -14865,6 +14955,8 @@ export interface components {
        * @enum {string}
        */
       reason: 'override' | 'source_rank' | 'asset' | 'record' | 'computed';
+      /** @description For reason asset: the CI whose asset gives the value, the CI itself or, for serial_number and location_id of a configuration child, the ancestor with the asset (WP-273). */
+      source_ci_id?: string;
       /** Format: date-time */
       recorded_at?: string;
       /** Format: date-time */
@@ -17441,6 +17533,15 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description The CI has configuration children that are not deleted (child_mode configuration, WP-273, E-123): move or delete them first; there is no cascade. Standalone children keep their parent_ci_id. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateCI: {
@@ -17555,7 +17656,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. */
+      /** @description The CI is not deleted, it was merged into another CI (it comes back only through POST /cis/{id}/unmerge, CI-12), or another active CI holds one of its unique values meanwhile, such as the serial number (MET-15). A value of a unique attribute another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, as POST /cis, also before the unique index exists; the CI stays deleted. A configuration child whose parent is deleted is 409 as well (WP-273, E-123): the parent is restored first. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -19040,8 +19141,19 @@ export interface operations {
           };
         };
       };
+      /** @description The revert of a bulk job runs as the job bulk.revert; its result reports each CI as reverted, skipped (with the fields changed since the bulk, or 404/403 for a CI no longer visible or refused) or error, each with its RFC 7807 code. */
+      202: {
+        headers: {
+          /** @description The revert job, /api/v1/jobs/{revert_id}. */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind, a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
+      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind (for a bulk kind only a holder of its permission, ci:write for ci.bulk), a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -19052,7 +19164,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
+      /** @description The kind defines no revert, the job did not succeed, the job is already reverted, the bulk job finished more than 24 hours ago (type https://reticora.io/problems/revert-expired), the bulk job is not revertible (an action other than set_status, set_fields or set_location, or no change set row the caller sees), or the reverter refused it: the merge snapshot expired, the merge conflicts with later changes (one of the CIs is locked, or the survivor changed after the merge: the revert is an unmerge without force, E-80), the survivor is part of a later open merge (the detail names that merge; its job is reverted first, F-416), the merge kind has no unmerge, or the merge no longer exists. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -20321,6 +20433,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   getDisposalRecord: {

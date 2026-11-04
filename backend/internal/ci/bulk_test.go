@@ -630,7 +630,8 @@ func TestBulkFieldOperations(t *testing.T) {
 	repo.mu.Lock()
 	req := repo.requests[ids[1]]
 	repo.mu.Unlock()
-	if req.OwnerUserID == nil || *req.OwnerUserID != owner || req.OwnerTeamID != nil || req.ChangeReason != "bulk" || req.Manual == nil {
+	// Every bulk is a job (WP-305): the reason names it.
+	if req.OwnerUserID == nil || *req.OwnerUserID != owner || req.OwnerTeamID != nil || !strings.HasPrefix(req.ChangeReason, "bulk:") || req.Manual == nil {
 		t.Errorf("set_owner request: %+v", req)
 	}
 	if item := get(ids[0]); item.LocationID != loc || item.OwnerUserID != owner {

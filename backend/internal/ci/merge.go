@@ -255,6 +255,10 @@ type mergeSnapshot struct {
 type snapshotRow struct {
 	Table string          `json:"table"`
 	Row   json.RawMessage `json:"row"`
+	// Columns limits what the unmerge writes back to an existing row (the
+	// children of the victim: parent_ci_id and child_mode, WP-273); empty
+	// writes every column.
+	Columns []string `json:"columns,omitempty"`
 }
 
 // rows collects to_jsonb of the rows a query returns.
@@ -291,6 +295,11 @@ type mergeReference struct {
 	prepare string
 	// set adds assignments to the move ($1 victim, $2 survivor).
 	set string
+	// restore limits the columns the unmerge writes back to the moved rows
+	// (snapshotRow.Columns); empty restores every column.
+	restore []string
+	// refused maps an error of the move onto the merge's answer.
+	refused func(error) error
 }
 
 var mergeReferences = []mergeReference{
@@ -330,6 +339,14 @@ var mergeReferences = []mergeReference{
 	{key: "agents", table: "endpoint_agent", column: "ci_id"},
 	// The tags of both CIs are united: a tag the survivor has already is
 	// removed from the victim (snapshot), the rest moves (WP-281).
+	// The children of the victim (ci.parent_ci_id) hang on the survivor
+	// (WP-273); the unmerge gives them back their parent. A cycle (also the
+	// survivor as a child of the victim) or a configuration child of
+	// another client is a conflict (409).
+	{
+		key: "children", table: "ci", column: "parent_ci_id", restore: []string{"parent_ci_id", "child_mode"},
+		refused: mergeChildrenError,
+	},
 	{
 		key: "tags", table: "ci_tag", column: "ci_id",
 		dedupe: `DELETE FROM ci_tag v WHERE v.ci_id = $2 AND EXISTS (SELECT 1 FROM ci_tag s
@@ -571,6 +588,9 @@ func moveReference(ctx context.Context, tx pgx.Tx, ref *mergeReference, survivor
 	if err != nil {
 		return 0, err
 	}
+	for i := range changed {
+		changed[i].Columns = ref.restore
+	}
 	snap.Changed = append(snap.Changed, changed...)
 	if ref.prepare != "" {
 		if _, err = tx.Exec(ctx, ref.prepare, survivorID, victimID); err != nil {
@@ -583,6 +603,11 @@ func moveReference(ctx context.Context, tx pgx.Tx, ref *mergeReference, survivor
 	}
 	tag, err := tx.Exec(ctx, fmt.Sprintf("UPDATE %s SET %s WHERE %s", ref.table, set, where), victimID, survivorID)
 	if err != nil {
+		if ref.refused != nil {
+			if refused := ref.refused(err); errors.Is(refused, ErrMergeConflict) {
+				return 0, refused
+			}
+		}
 		return 0, fmt.Errorf("move %s: %w", ref.table, err)
 	}
 	return int(tag.RowsAffected()), nil
@@ -861,6 +886,12 @@ func restoreRow(ctx context.Context, tx pgx.Tx, cols map[string][]string, row *s
 	}
 	if only, ok := snapshotRestoreColumns[row.Table]; ok && !insert {
 		c = only
+	}
+	if len(row.Columns) > 0 && !insert {
+		c = make([]string, len(row.Columns))
+		for i, col := range row.Columns {
+			c[i] = pgx.Identifier{col}.Sanitize()
+		}
 	}
 	list := strings.Join(c, ", ")
 	table := pgx.Identifier{row.Table}.Sanitize()

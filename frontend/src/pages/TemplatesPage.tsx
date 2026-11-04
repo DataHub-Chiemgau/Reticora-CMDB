@@ -7,8 +7,9 @@
  * versions: "new version" as a draft copy, the TemplateVersionEditor,
  * "publish version" (direct publishing of MET-04/MET-53, only with
  * metamodel:publish) and the comparison of two versions with
- * MetamodelDiff. With an active metamodel draft (WP-798) every write is
- * captured in the draft; the page marks its targets "in draft" and shows
+ * MetamodelDiff. Per template with a published version, "migrate" opens
+ * the MigrateDialog (job template.migrate, WP-800). With an active
+ * metamodel draft (WP-798) every write is captured in the draft; the page marks its targets "in draft" and shows
  * new templates and versions as placeholders (E-113). Templates are no type templates of GET
  * /ci-types/templates ("Typvorlagen"). The page belongs to the module
  * metamodel (E-105); switched off, it shows a note instead.
@@ -64,6 +65,7 @@ import {
   draftItemName,
 } from '../components/metamodel/DraftBanner';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
+import { MigrateDialog } from '../components/metamodel/MigrateDialog';
 
 /** The states of a template version (MET-16); labels templates.versionStatuses.*. */
 export const TEMPLATE_VERSION_STATUSES = ['draft', 'published', 'retired'] as const;
@@ -124,6 +126,7 @@ function TemplateList() {
   const [ciTypeId, setCITypeId] = useState('');
   const [activity, setActivity] = useState<ActivityFilter>('all');
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [migrating, setMigrating] = useState<Template | null>(null);
   const canManage = useHasPermission('citype:manage') === true;
   const query = useTemplates(ciTypeId ? { ci_type_id: ciTypeId } : {});
   const update = useUpdateTemplate();
@@ -291,6 +294,16 @@ function TemplateList() {
                       >
                         {t('templates.clone')}
                       </button>
+                      {tpl.current_version != null ? (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          aria-label={t('templates.migrate.action', { name })}
+                          onClick={() => setMigrating(tpl)}
+                        >
+                          {t('templates.migrate.open')}
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>
@@ -298,6 +311,9 @@ function TemplateList() {
             })}
           </ul>
         </Card>
+      ) : null}
+      {migrating ? (
+        <MigrateDialog open template={migrating} onClose={() => setMigrating(null)} />
       ) : null}
       {dialog ? (
         <TemplateDialog
@@ -490,7 +506,7 @@ function TemplateDetail({ id }: { id: string }) {
   const draft = useMetamodelDraftStore((s) => s.draft);
   const draftItems = useActiveDraftItems();
   const [selected, setSelected] = useState<number | undefined>();
-  const [confirm, setConfirm] = useState<'version' | 'publish' | null>(null);
+  const [confirm, setConfirm] = useState<'version' | 'publish' | 'migrate' | null>(null);
   const [compare, setCompare] = useState<{ from?: number; to?: number }>({});
 
   const list = useMemo(
@@ -580,18 +596,25 @@ function TemplateDetail({ id }: { id: string }) {
               </p>
             ) : null}
           </div>
-          {own && canManage ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                createVersion.reset();
-                setConfirm('version');
-              }}
-            >
-              {t('templates.newVersion')}
-            </Button>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {canManage && tpl.current_version != null ? (
+              <Button size="sm" variant="secondary" onClick={() => setConfirm('migrate')}>
+                {t('templates.migrate.open')}
+              </Button>
+            ) : null}
+            {own && canManage ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  createVersion.reset();
+                  setConfirm('version');
+                }}
+              >
+                {t('templates.newVersion')}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </Card>
 
@@ -742,6 +765,8 @@ function TemplateDetail({ id }: { id: string }) {
           </div>
         </Card>
       ) : null}
+
+      <MigrateDialog open={confirm === 'migrate'} template={tpl} onClose={() => setConfirm(null)} />
 
       <Modal
         open={confirm === 'version'}

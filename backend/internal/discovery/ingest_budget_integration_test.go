@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
@@ -53,6 +54,23 @@ const productionRecordBudget = 15
 // event_outbox, search_document, ci_field_value, COMMIT; with the production
 // extras the field resolution (once per CI type) and the AI chunks.
 const batchBudget = 15
+
+// assetLinkLookup is what the automatic serial link (WP-741) adds to the
+// transaction of a record or a batch without a hit, with the module
+// inventory on: one query reads and locks the assets with the serial
+// numbers of its new or matched CIs without asset
+// (asset.PGRepository.SerialMatches). None for CIs without a serial number
+// or with an asset, none with the module off.
+const assetLinkLookup = 1
+
+// assetLinkWrites is what a transaction with automatic links adds on top of
+// the lookup, for one link as for the many of a batch: the update of the
+// empty primary CIs (WHERE ci_id IS NULL) and the audit entries
+// asset.linked in one statement (the chain lock is taken by its trigger),
+// plus the read of the asset data the CI domain shows on every linked CI it
+// writes (loadAssetFacts in ci.PGRepository Create, CreateMany and Update,
+// DB-05).
+const assetLinkWrites = 3
 
 // frameBudget is the ceiling of the frame statements of a batch: the frame
 // transaction (BEGIN with the GUCs, ledger read, type lookup, default VRF,
@@ -751,6 +769,109 @@ func TestIngestStatementBudget(t *testing.T) {
 			t.Errorf("%d of 20 new devices carry the computed value, %d its provenance; want 20 each", values, rows)
 		}
 		t.Logf("with a computed definition: 20 new devices in one transaction of %d statements", len(tx))
+	})
+
+	// The automatic serial link (WP-741) with the module inventory on:
+	// without a hit one statement more per record and per batch, the
+	// lookup; with hits the update of the primary CIs and the audit entries
+	// on top, for one link as for many; a known device already linked adds
+	// none.
+	t.Run("asset links", func(t *testing.T) {
+		linked := func(batch bool, lanes ...int) http.Handler {
+			mux := chi.NewRouter()
+			build(false, batch, lanes...).WithAssetLinks(asset.NewPGRepository(pool)).RegisterRoutes(mux)
+			return mux
+		}
+		const lookup, primary = `serial_number_norm = any`, `^update asset a set ci_id`
+		assetsFor := func(t *testing.T, records []plugins.DeviceRecord) {
+			t.Helper()
+			for _, rec := range records {
+				if _, err := f.Admin.Exec(bg, `INSERT INTO asset (organization_id, asset_tag, name, serial_number) VALUES ($1, $2, $2, $2)`,
+					f.OrgA, rec.Identity.SerialNumber); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+
+		perRecord := linked(false)
+		ingest(t, perRecord, 1)
+		r := ingest(t, perRecord, 20)
+		largest := checkRecords(t, &r, 20)
+		for _, tx := range r.records {
+			if count(tx, lookup) != assetLinkLookup || count(tx, primary) != 0 {
+				t.Errorf("record transaction without a hit: %d lookups, %d primary CI updates; want %d and 0: %q",
+					count(tx, lookup), count(tx, primary), assetLinkLookup, tx)
+			}
+		}
+		if largest > ingestRecordBudget+assetLinkLookup {
+			t.Errorf("record transaction without a hit: %d statements, budget %d plus the lookup", largest, ingestRecordBudget)
+		}
+
+		batched := linked(true)
+		ingest(t, batched, 1)
+		b := ingest(t, batched, 20)
+		tx := checkBatch(t, &b, 20, false)
+		if count(tx, lookup) != assetLinkLookup || len(tx) > batchBudget+assetLinkLookup {
+			t.Errorf("batch without a hit: %d statements with %d lookups, budget %d plus one lookup: %q", len(tx), count(tx, lookup), batchBudget, tx)
+		}
+
+		withHits := func(t *testing.T, mux http.Handler, n int) []string {
+			t.Helper()
+			records := devices(n)
+			assetsFor(t, records)
+			hit := post(t, mux, records)
+			if hit.resp.Created != n || len(hit.records) != 1 && n > 1 {
+				t.Fatalf("%d new devices with assets: %+v in %d transactions", n, hit.resp, len(hit.records))
+			}
+			var linkedCIs int
+			serials := make([]string, n)
+			for i := range records {
+				serials[i] = records[i].Identity.SerialNumber
+			}
+			if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id AND a.ci_id = c.id
+				WHERE c.organization_id = $1 AND c.serial_number = ANY($2)`, f.OrgA, serials).Scan(&linkedCIs); err != nil || linkedCIs != n {
+				t.Errorf("%d of %d new devices linked as the primary CI of their asset (%v)", linkedCIs, n, err)
+			}
+			largestHit := hit.records[0]
+			for _, rtx := range hit.records {
+				if count(rtx, lookup) != assetLinkLookup || count(rtx, primary) != 1 || count(rtx, `insert into audit_log`) != 2 {
+					t.Errorf("transaction with hits: %d lookups, %d primary CI updates, %d audit statements; want 1, 1, 2: %q",
+						count(rtx, lookup), count(rtx, primary), count(rtx, `insert into audit_log`), rtx)
+				}
+				checkLockedTail(t, rtx)
+				if len(rtx) > len(largestHit) {
+					largestHit = rtx
+				}
+			}
+			return largestHit
+		}
+		if hitTx := withHits(t, batched, 5); len(hitTx) > batchBudget+assetLinkLookup+assetLinkWrites {
+			t.Errorf("batch with 5 links: %d statements, budget %d plus %d: %q", len(hitTx), batchBudget, assetLinkLookup+assetLinkWrites, hitTx)
+		}
+		if hitTx := withHits(t, perRecord, 1); len(hitTx) > ingestRecordBudget+assetLinkLookup+assetLinkWrites {
+			t.Errorf("record with a link: %d statements, budget %d plus %d: %q", len(hitTx), ingestRecordBudget, assetLinkLookup+assetLinkWrites, hitTx)
+		}
+		if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
+			t.Errorf("audit chain after the links: %+v, %v", result, err)
+		}
+
+		// The linked devices again, updated in the window with lanes: no
+		// lookup, no link.
+		again := make([]plugins.DeviceRecord, len(last))
+		for i, rec := range last {
+			rec.RecordID, rec.ObservedAt = plugins.NewRecordID(), time.Now().UTC().Add(-500*time.Millisecond)
+			again[i] = rec
+		}
+		known := post(t, linked(true, 2), again)
+		if known.resp.Updated != len(again) {
+			t.Fatalf("linked devices again: %+v", known.resp)
+		}
+		for _, ktx := range append(append([][]string{}, known.frame...), known.records...) {
+			if count(ktx, lookup) != 0 || count(ktx, primary) != 0 {
+				t.Errorf("update of linked devices looks up assets: %q", ktx)
+			}
+		}
+		t.Logf("asset links: record %d statements without a hit, batch of 20 %d without a hit", largest, len(tx))
 	})
 }
 

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000240_internal_order_states
+Stand: Migration 000247_internal_order_target_bin
 
 ## Prüfung
 
@@ -103,6 +103,17 @@ wird):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_entity_change_version ON entity_change (entity_type, entity_id, entity_version);
+```
+
+Ebenso der Seriennummernindex der automatischen Verknüpfung im Ingest
+(WP-741, Migration 000241; die gespeicherte Spalte `serial_number_norm`
+muss dafür vorab angelegt sein, `ALTER TABLE asset ADD COLUMN IF NOT EXISTS
+serial_number_norm TEXT GENERATED ALWAYS AS (NULLIF(lower(btrim(serial_number)), '')) STORED`,
+was die Tabelle neu schreibt; ohne Vorbau legt die Migration Spalte und Index
+selbst an):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_org_serial_norm ON asset (organization_id, serial_number_norm) WHERE serial_number_norm IS NOT NULL;
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
@@ -244,12 +255,42 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
 
+### Entsorgungsnachweis nach E-55 (WP-751)
+
+Migration 000245 ergänzt `disposal_record` um `protection_class`
+(`smallint`, `disposal_record_protection_class_check`: 1 bis 3),
+`security_level` (`text`, `disposal_record_security_level_check`:
+`^[POTEFH]-[1-7]$`), `supplier_id`, `evidence_document_id`,
+`performer_surrogate` und `witness_surrogate` (`uuid`, Vault-Subjekte der Art
+`person`, ohne FK) sowie `record_hash` (`text NOT NULL`). Die Spalte
+`performed_by` bleibt für Altzeilen und wird nicht mehr geschrieben.
+`record_hash` setzt der BEFORE-INSERT-Trigger `disposal_record_set_hash` über
+`disposal_record_hash(…)` (SHA-256 hex über `convert_to(<kanonisches JSON>,
+'UTF8')` aus `id`, `organization_id`, `asset_id`, `ci_id`, `method`,
+`protection_class`, `security_level`, `data_carrier`, `certificate_ref`,
+`supplier_id`, `evidence_document_id`, `performer_surrogate`,
+`witness_surrogate`, `performed_at`, `notes`, `created_at`; ohne
+`performed_by`, `client_id` und `site_id`). Altzeilen sind unter
+abgeschaltetem `disposal_record_no_update` nachgefüllt. Verweise mit
+Organisation (K19), alle ON DELETE RESTRICT: `disposal_record_asset_id_fkey`
+→ `asset`, `disposal_record_ci_id_fkey` → `ci` (vorher SET NULL),
+`disposal_record_supplier_id_fkey` → `supplier`,
+`disposal_record_evidence_document_id_fkey` → `document`. Dazu
+`disposal_record_object_check` (`asset_id` oder `ci_id`, NOT VALID) und die
+Teilindizes `idx_disposal_record_asset`, `idx_disposal_record_ci`,
+`idx_disposal_record_supplier` und `idx_disposal_record_evidence_document`
+(je Spalte `WHERE … IS NOT NULL`). RLS, Policies und Scope-Trigger aus 000145
+bleiben unverändert.
+
 ### Linkziele von Dokumenten (WP-267)
 
 `document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
-`ticket`, `location`, `disposal_record`, `stocktake` und `contract`
-(`doc_link_entity_type_check`, Migrationen 000217 und 000238); die Registry
-in `backend/internal/document/links.go` hält dieselben Werte.
+`ticket`, `location`, `disposal_record`, `stocktake`, `contract` und
+`stock_movement` (`doc_link_entity_type_check`, Migrationen 000217, 000238
+und 000242); die Registry in `backend/internal/document/links.go` hält
+dieselben Werte außer `stock_movement` (folgt mit WP-276). Für
+`stock_movement` übernimmt `derive_document_link_scope` Client und Standort
+der Bewegung (eingefroren, keine Propagation).
 `derive_document_link_scope` leitet `client_id`/`site_id` auch aus
 Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
 `team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
@@ -345,7 +386,7 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`asset_movement`, `assignment`, `composition`, `form_submission` und
+`assignment`, `composition`, `form_submission` und
 `stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
 Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
@@ -509,7 +550,9 @@ Migration 000194 legt `UNIQUE (id, organization_id)` auf `location` und
 `reservation.asset_id`, `disposal_record.asset_id`, `disposal_record.ci_id`,
 `internal_order_item.asset_id`, `internal_order_item.consumable_id`,
 `location.site_id` und `location.parent_id` um. Constraint-Namen und
-Löschverhalten bleiben (SET NULL als `ON DELETE SET NULL (spalte)`).
+Löschverhalten bleiben (SET NULL als `ON DELETE SET NULL (spalte)`);
+`disposal_record.asset_id` und `disposal_record.ci_id` sind seit 000245
+ON DELETE RESTRICT (WP-751).
 Bestehende Zeilen mit einem Verweis über die Organisationsgrenze stehen danach
 in `migration_quarantine` (Migration `000194`): Nullbare Verweise sind auf NULL
 gesetzt, die ganze Zeile ist protokolliert; Reservierungen sind verschoben
@@ -542,10 +585,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `asset.parent_asset_id` | `asset_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
 | `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `asset_movement.asset_id` | `asset_movement_asset_id_fkey` | `asset` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.from_location_id` | `asset_movement_from_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.quantity_item_id` | `asset_movement_quantity_item_fk` | `quantity_item` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
-| `asset_movement.to_location_id` | `asset_movement_to_location_id_fkey` | `location` | asset_movement is replaced by the ledger stock_movement (WP-274, K19); the successor references with the organization |
 | `assignment.asset_id` | `assignment_asset_id_fkey` | `asset` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `assignment.assigned_by` | `assignment_assigned_by_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `assignment.assigned_to` | `assignment_assigned_to_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
@@ -638,7 +677,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `service_account_role.role_id` | `service_account_role_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `service_account_role.scope_site_id` | `service_account_role_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `site.id` | `site_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
-| `stock_movement.consumable_id` | `stock_movement_consumable_id_fkey` | `consumable` | the former stock_movement is replaced by the ledger of WP-274 (K19); the successor references with the organization |
 | `stock_scan.asset_id` | `stock_scan_asset_id_fkey` | `asset` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
 | `stock_scan.ci_id` | `stock_scan_ci_id_fkey` | `ci` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
 | `stock_scan.scanned_by` | `stock_scan_scanned_by_fkey` | `app_user` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
@@ -1304,6 +1342,68 @@ trägt das Client-Prädikat (USING mit NULL-Ausnahme, WITH CHECK ohne, E-09),
 dazu die RESTRICTIVE-Policies `internal_order_item_scoped_update` und
 `internal_order_item_scoped_delete`.
 
+Kanonisches Bestandsledger (STK-04, AST-07, WP-744, Migration 000242):
+`stock_movement` ersetzt das Consumable-Ledger aus 000045 (umbenannt in
+`stock_movement_legacy`, übernommen und gelöscht). Spalten `id`,
+`organization_id`, `client_id`, `site_id`, `item_kind`
+(`stock_movement_item_kind_check`: `asset`, `consumable`, `quantity_item`),
+`asset_id`, `consumable_id`, `quantity_item_id`
+(`stock_movement_object_check`: genau eine, passend zu `item_kind`),
+`movement_type` (`stock_movement_movement_type_check`: `receipt`,
+`transfer`, `assignment`, `return`, `deployment`, `retrieval`,
+`reservation`, `release`, `repair`, `disposal`, `correction`),
+`from_location_id`, `to_location_id`, `quantity` (`numeric(12,2)`,
+`stock_movement_quantity_check`: NULL bei Assets, sonst > 0), `actor_id`
+(ohne FK), `assignee_user_id`, `assignee_team_id`
+(`stock_movement_assignee_check`: höchstens einer), `occurred_at`
+(Standard `now()`), `reason`, `notes`, `ticket_id`, `order_id`,
+`workflow_run_id`, `document_id` (alle vier ohne FK), `signature_hash`
+(`text`, leer bis WP-276) und `created_at`. Schlüssel
+`stock_movement_id_organization_key` (`id`, `organization_id`). Verweise
+mit Organisation (K19), alle ON DELETE RESTRICT:
+`stock_movement_asset_id_fkey` → `asset`,
+`stock_movement_consumable_id_fkey` → `consumable`,
+`stock_movement_quantity_item_id_fkey` → `quantity_item` (neuer Schlüssel
+`quantity_item_id_organization_key`),
+`stock_movement_from_location_id_fkey` und
+`stock_movement_to_location_id_fkey` → `location`,
+`stock_movement_assignee_user_id_fkey` → `app_user`,
+`stock_movement_assignee_team_id_fkey` → `team`; `organization_id` →
+`organization` ON DELETE CASCADE. Indizes `idx_stock_movement_org`
+(`organization_id`, `occurred_at` DESC), Teilindizes
+`idx_stock_movement_asset`, `idx_stock_movement_consumable`,
+`idx_stock_movement_quantity_item` (Objekt, `occurred_at` DESC),
+`idx_stock_movement_from_location`, `idx_stock_movement_to_location` und
+`idx_stock_movement_type` (`organization_id`, `movement_type`). Trigger
+`stock_movement_append_only` (BEFORE UPDATE OR DELETE,
+`reject_stock_movement_mutation()`) und `stock_movement_derive_scope`
+(BEFORE INSERT, `derive_stock_movement_scope()` unter der RLS des
+Schreibers: Client des Objekts, Standort von `to_location_id`, sonst
+`from_location_id`, sonst des Objekts). RLS mit ENABLE/FORCE,
+TRUNCATE-Schutz `reticora_truncate_guard` und `stock_movement_isolation`
+mit Org-, Client- und Site-Prädikat (USING mit NULL-Ausnahme, WITH CHECK
+ohne, E-09) sowie die RESTRICTIVE-Policies `stock_movement_scoped_update` und
+`stock_movement_scoped_delete` (Muster 000151). Die Zeilen von
+`asset_movement`, des alten `stock_movement` und die Historie von
+`assignment` sind übernommen; ungültige Zeilen stehen in
+`migration_quarantine` (Migration `000242`).
+
+Drop der Alttabelle (AST-07, WP-842, Migration 000246): `asset_movement`
+(000055) und die Triggerfunktion `reject_asset_movement_mutation()` sind
+entfernt. Die Migration bricht ab, solange eine Zeile von `asset_movement`
+weder ID-gleich in `stock_movement` noch in `migration_quarantine`
+(Migration `000242`) steht. LOC-11 meldet Bewegungen als Art
+`stock_movement`.
+
+Ziel-Bin interner Bestellungen (STK-05, LOC-11, WP-847, Migration 000247):
+`internal_order` erhält `target_location_id` (UUID, nullable) mit
+`internal_order_target_location_fkey` (`target_location_id`,
+`organization_id`) → `location` (Schlüssel
+`location_id_organization_key`, 000194) ON DELETE RESTRICT und
+Teilindex `idx_internal_order_target_location` (`target_location_id`,
+`organization_id`) WHERE NOT NULL. Art `bin` und Client der Bestellung
+prüft das Order-Repository; RLS und Policies bleiben unverändert.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1322,13 +1422,13 @@ SECURITY`), Policies mit ihrem Kommando.
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
-| `asset_movement` | ja | ja | asset_movement_isolation (ALL) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `building` | ja | ja | building_isolation (ALL) |
+| `bulk_change_set` | ja | ja | bulk_change_set_isolation (ALL), bulk_change_set_scoped_delete (DELETE), bulk_change_set_scoped_update (UPDATE) |
 | `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |
 | `cable` | ja | ja | org_isolation (ALL) |
 | `ci` | ja | ja | ci_isolation (ALL), ci_scoped_delete (DELETE), ci_scoped_update (UPDATE) |
@@ -1445,7 +1545,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
-| `stock_movement` | ja | ja | stock_movement_isolation (ALL) |
+| `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
 | `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |

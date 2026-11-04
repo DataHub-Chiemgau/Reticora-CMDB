@@ -535,8 +535,21 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		jobTracker = jobService
 		bffJobs = jobService
 		jobs.SetBacklogSource(repos.Jobs)
+		// A bulk job on CIs is reverted by the revert job bulk.revert
+		// within 24 hours, with ci:write also from its creator (BLK-02,
+		// WP-305); only the PostgreSQL job repository keeps the change set,
+		// without it the bulk has no revert (409). The revert job itself
+		// has none.
+		var bulkRevert *ci.BulkRevert
+		var bulkReverter jobs.Reverter
+		if store, ok := repos.Jobs.(jobs.ChangeSetStore); ok && opts.CIService != nil {
+			bulkRevert = ci.NewBulkRevert(opts.CIService, jobService, store)
+			bulkReverter = bulkRevert.Revert
+		}
 		jobAPI = jobs.NewAPIHandler(jobService).
-			WithKind(ci.BulkJobKind, identity.PermCIWrite, nil).
+			WithKind(ci.BulkJobKind, identity.PermCIWrite, bulkReverter).
+			WithBulkKind(ci.BulkJobKind).
+			WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
 			// A running template migration is cancelled with citype:manage
 			// like its start; it has no revert (E-25).
@@ -551,9 +564,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// like its start (WP-786).
 			WithKind(search.ReindexJobKind, identity.PermSearchWrite, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
-			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) error {
+			// It answers 200 (no revert job).
+			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
 				if opts.CIService == nil {
-					return &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
+					return nil, &jobs.RevertRefusedError{Reason: ci.ErrMergeUnsupported}
 				}
 				// The refusals of the unmerge answer with the sentinel's text
 				// (409); like an unmerge without force, a survivor changed
@@ -564,17 +578,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				// the unmerge; the refusal names that merge (F-416).
 				var later *ci.UnmergeLaterMergeError
 				if errors.As(err, &later) {
-					return &jobs.RevertRefusedError{Reason: later}
+					return nil, &jobs.RevertRefusedError{Reason: later}
 				}
 				for _, refusal := range []error{ci.ErrSnapshotExpired, ci.ErrMergeConflict, ci.ErrUnmergeConflict, ci.ErrMergeUnsupported} {
 					if errors.Is(err, refusal) {
-						return &jobs.RevertRefusedError{Reason: refusal}
+						return nil, &jobs.RevertRefusedError{Reason: refusal}
 					}
 				}
 				if err != nil && err.Error() == "not found" {
-					return &jobs.RevertRefusedError{Reason: errMergeGone}
+					return nil, &jobs.RevertRefusedError{Reason: errMergeGone}
 				}
-				return err
+				return nil, err
 			})
 		// A CI merge is a job (CI-12, JOB-01); bulk operations from 100
 		// ids on (API-08, JOB-04) and state snapshots as well, on the job
@@ -588,8 +602,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				opts.CIService.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 			}
 		}
-		registerJobKinds(jobService, opts.JobQueue, opts.CIService, historyHandler, templateJobs, draftHandler, importHandler,
-			documentScanner, searchHandler)
+		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
+			importHandler, documentScanner, searchHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -606,6 +620,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
 		WithLimits(opts.Entitlements)
+	// The ingest links CIs to the asset with their serial number (WP-741),
+	// not while the module inventory is off (WP-214).
+	if links, ok := repos.Asset.(discovery.AssetLinks); ok && opts.Modules.Enabled(ModuleInventory) {
+		discoveryHandler.WithAssetLinks(links)
+	}
 	opts.Entitlements.WithUnlicensed(discoveryHandler)
 	// The collectors' edge data path checks the discovery license like the
 	// entitlement middleware on the HTTP ingest (COL-08, ENT-07).

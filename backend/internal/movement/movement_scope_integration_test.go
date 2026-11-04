@@ -55,7 +55,7 @@ func TestMovementRepositoryClientScope(t *testing.T) {
 		t.Fatalf("client-1 quantity items: %+v err=%v, want only cable-c1", items, err)
 	}
 	var count int
-	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM asset_movement WHERE asset_id = $1`, foreign).Scan(&count); err != nil || count != 1 {
+	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM stock_movement WHERE asset_id = $1`, foreign).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("client-2 movements: count=%d err=%v, want 1", count, err)
 	}
 	if _, _, err = repo.ListMovements(context.Background(), f.OrgA, movement.MovementFilter{}, page); !errors.Is(err, database.ErrNoTenantScope) {
@@ -90,7 +90,7 @@ func TestQuantityItemForeignClientUpdate(t *testing.T) {
 	stored := func(id string) row {
 		var r row
 		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), name, COALESCE(notes, ''), stock_level,
-			(SELECT count(*) FROM asset_movement WHERE quantity_item_id = quantity_item.id) FROM quantity_item WHERE id = $1`, id).
+			(SELECT count(*) FROM stock_movement WHERE quantity_item_id = quantity_item.id) FROM quantity_item WHERE id = $1`, id).
 			Scan(&r.client, &r.name, &r.notes, &r.level, &r.movements); err != nil {
 			t.Fatalf("stored quantity item %s: %v", id, err)
 		}

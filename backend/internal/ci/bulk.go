@@ -19,7 +19,11 @@ import (
 
 // Bulk operations on CIs (API-08, BLK-01, BLK-02): at most 500 ids per
 // request; from 100 ids on the operation runs as a job (JOB-04) and the
-// request answers 202 with the job; the result reports every id on its own,
+// request answers 202 with the job. Below 100 ids it runs in the request,
+// with a job service as a job ci.bulk the request claims and ends (WP-305):
+// the 200 report names it (bulk_job_id), and every bulk job keeps its
+// change set for the revert (bulk_revert.go). The result reports every id
+// on its own,
 // so one failing CI does not fail the others (partial failure report).
 // The action names the operation (default set_status); its parameters
 // other than the status stand in params (WP-304, bulk_ops.go).
@@ -87,6 +91,10 @@ type BulkItemResult struct {
 
 // BulkResult is the partial failure report of a bulk operation.
 type BulkResult struct {
+	// BulkJobID is the job ci.bulk of a bulk that ran in the request
+	// (WP-305): POST /jobs/{id}/revert undoes it. Empty without a job
+	// service.
+	BulkJobID string `json:"bulk_job_id,omitempty"`
 	Action    string `json:"action"`
 	Total     int    `json:"total"`
 	Succeeded int    `json:"succeeded"`
@@ -221,10 +229,11 @@ func validateBulk(req *BulkRequest) error {
 	return validateParams(req)
 }
 
-// Bulk runs the bulk operation synchronously below BulkJobFromIDs ids; from
-// there on it returns a job whose result is the report: submitted to the
-// job queue when there is one (TEC-14), otherwise enqueued and run in the
-// background of this process.
+// Bulk runs the bulk operation synchronously below BulkJobFromIDs ids, with
+// a job service as a job of the request (runSyncJob, WP-305); from there on
+// it returns a job whose result is the report: submitted to the job queue
+// when there is one (TEC-14), otherwise enqueued and run in the background
+// of this process.
 func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*BulkResult, *jobs.Job, error) {
 	if err := validateBulk(req); err != nil {
 		return nil, nil, err
@@ -236,6 +245,9 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 	}
 	if err := s.checkBulkTags(ctx, orgID, req); err != nil {
 		return nil, nil, err
+	}
+	if len(req.IDs) < BulkJobFromIDs && s.bulkJobs != nil {
+		return s.runSyncJob(ctx, orgID, req)
 	}
 	if len(req.IDs) < BulkJobFromIDs || (s.bulkJobs == nil && s.bulkQueue == nil) {
 		result := s.runBulk(ctx, orgID, tenant.FromContext(ctx).UserID, "", req, nil)
@@ -256,6 +268,39 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 	runCtx := context.WithoutCancel(ctx)
 	go s.runBulkJob(runCtx, orgID, job.ID, req)
 	return nil, job, nil
+}
+
+// runSyncJob runs a bulk below BulkJobFromIDs ids as a job ci.bulk in the
+// request (WP-305): it enqueues the job, claims it, runs the operation with
+// the job's id (the reason bulk:<job_id> and the change set) and ends the
+// job with the report. A job a worker of the queue claimed first (its
+// sweep) runs there: the request answers with the job like from 100 ids on.
+func (s *Service) runSyncJob(ctx context.Context, orgID string, req *BulkRequest) (*BulkResult, *jobs.Job, error) {
+	job, _, err := s.bulkJobs.Enqueue(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: tenant.FromContext(ctx).UserID})
+	if err != nil {
+		return nil, nil, fmt.Errorf("enqueue bulk job: %w", err)
+	}
+	claimed, err := s.bulkJobs.ClaimJob(ctx, orgID, job.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("claim bulk job: %w", err)
+	}
+	if claimed == nil {
+		return nil, job, nil
+	}
+	// The report is recorded also when the client goes away.
+	jobCtx := context.WithoutCancel(ctx)
+	result := s.runBulk(ctx, orgID, claimed.CreatedBy, job.ID, req, s.cancelCheck(jobCtx, s.bulkJobs, orgID, job.ID))
+	result.BulkJobID = job.ID
+	if keepCancelled(jobCtx, s.bulkJobs, orgID, job.ID, result) {
+		return result, nil, nil
+	}
+	if _, err = s.bulkJobs.Succeed(jobCtx, orgID, job.ID, result); err != nil {
+		if errors.Is(err, jobs.ErrTransition) && keepCancelled(jobCtx, s.bulkJobs, orgID, job.ID, result) {
+			return result, nil, nil
+		}
+		slog.ErrorContext(ctx, "record bulk job", "job", job.ID, "error", err)
+	}
+	return result, nil, nil
 }
 
 // runBulkJob claims the job, runs the operation and records the report.
@@ -372,6 +417,8 @@ func (s *Service) runBulk(ctx context.Context, orgID, author, jobID string, req 
 	op := bulkOp{orgID: orgID, author: author, reason: bulkReason, req: req}
 	if jobID != "" {
 		op.reason = bulkReason + ":" + jobID
+		// The writes of the run record the change set of the job (WP-305).
+		ctx = jobs.WithChangeSet(ctx, jobID)
 	}
 	// A change under way finishes when ctx ends: its report is accurate.
 	itemCtx := context.WithoutCancel(ctx)
