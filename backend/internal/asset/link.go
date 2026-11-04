@@ -12,7 +12,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -336,10 +335,6 @@ func (r *PGRepository) SetPrimaryCI(ctx context.Context, orgID, assetID, ciID st
 			out = current
 			return nil
 		}
-		before, err := changeForm(current)
-		if err != nil {
-			return err
-		}
 		query := fmt.Sprintf(`UPDATE asset SET ci_id = NULLIF($3, '')::uuid, updated_at = NOW()
 			WHERE id = $1 AND organization_id = $2 RETURNING %s`, assetSelectColumns)
 		out, err = scanAsset(tx.QueryRow(ctx, query, assetID, orgID, ciID))
@@ -349,11 +344,8 @@ func (r *PGRepository) SetPrimaryCI(ctx context.Context, orgID, assetID, ciID st
 		if err != nil {
 			return fmt.Errorf("set primary ci: %w", assetFieldDBError(err, primaryCIConstraintFields))
 		}
-		after, err := pii.Generic(out)
-		if err != nil {
-			return fmt.Errorf("encode asset change: %w", err)
-		}
-		return recordFieldChanges(ctx, tx, orgID, assetID, before, after)
+		// Trail with the version and asset.changed (WP-740).
+		return r.recordUpdate(ctx, tx, orgID, current, out)
 	})
 	return out, err
 }

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000235_asset_ci_link
+Stand: Migration 000236_asset_version
 
 ## Prüfung
 
@@ -93,6 +93,16 @@ Ebenso der Override-Index der Knotenlesung (WP-840, NFR-02):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_field_value_override ON ci_field_value (organization_id, ci_id) WHERE override_at IS NOT NULL;
+```
+
+Ebenso der Versionsindex der Änderungsspur (WP-740, Migration 000236; die
+Spalte `entity_version` legt die Migration an, der Index kann danach vor dem
+übrigen Update gebaut werden, wenn die Spalte vorab per `ALTER TABLE
+entity_change ADD COLUMN IF NOT EXISTS entity_version BIGINT` angelegt
+wird):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_entity_change_version ON entity_change (entity_type, entity_id, entity_version);
 ```
 
 Jede Anweisung einzeln ausführen (nicht in einer Transaktion); ein
@@ -1204,6 +1214,21 @@ erhalten `user` über den Default. Der Fremdschlüssel
 die scoped Policies) und `derive_ticket_comment_scope` bleiben unverändert.
 Die Down-Migration löscht die Systemkommentare und stellt NOT NULL wieder
 her.
+
+Asset-Version und Änderungsspur (AST-01, API-07, EVT-03, WP-740, Migration
+000236): `asset.version` (BIGINT NOT NULL DEFAULT 1) ist die Version hinter
+ETag und If-Match. Der Trigger `asset_version_bump` (BEFORE UPDATE, Funktion
+`asset_version_bump()`) erhöht sie, sobald sich eine Spalte außer
+`updated_at` und `version` ändert (Vergleich `to_jsonb(NEW)` mit
+`to_jsonb(OLD)`); ohne Änderung bleibt sie. Er läuft nach
+`asset_default_currency`, `asset_mirror_legacy_columns` und
+`asset_status_from_lifecycle` (Reihenfolge der Namen), so zählen auch die
+Schreiber außerhalb des Asset-Pakets (Bewegung, Rack-Platzierung,
+Lifecycle, Inventur, CI-Merge, CI-Löschen/-Wiederherstellen,
+Standortübernahme, Hard-Delete-Job). `entity_change.entity_version`
+(BIGINT, nullable) trägt die Version, die ein Asset-Schreibvorgang
+hinterlassen hat; Index `idx_entity_change_version` auf (`entity_type`,
+`entity_id`, `entity_version`). RLS und Policies bleiben unverändert.
 
 ## Tabellen, RLS und Policies
 

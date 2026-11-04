@@ -1373,7 +1373,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assets */
+    /**
+     * List assets
+     * @description The assets visible under the caller's scope (API-02, WP-740). `filter[field][op]` on inventory_no, barcode, rfid_tag, serial_number, manufacturer, model, cost_center, supplier_id, contract_id, owner_user_id, owner_team_id, lifecycle_state, location_id, client_id, purchase_date and warranty_until; `sort` (or sort_by/sort_dir) on created_at (default, descending), updated_at, name, inventory_no, category, status, manufacturer, model, serial_number, lifecycle_state, purchase_date and warranty_until; `fields` selects members of Asset after the field-permission projection (a field the caller cannot read stays missing). An unknown filter, sort or response field is 422. status, category, client_id and search (or q) remain as aliases. total is the count of the filtered list in the caller's scope.
+     */
     get: operations['listAssets'];
     put?: never;
     /**
@@ -1397,15 +1400,24 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get an asset */
+    /**
+     * Get an asset
+     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id).
+     */
     get: operations['getAsset'];
     put?: never;
     post?: never;
-    /** Delete an asset */
+    /**
+     * Delete an asset
+     * @description Deletes the asset for good and writes asset.deleted (WP-740). An asset with stock movements or a disposal record (both append-only) cannot be deleted (409, E-121); its end is a lifecycle state (retired, disposed).
+     */
     delete: operations['deleteAsset'];
     options?: never;
     head?: never;
-    /** Update an asset */
+    /**
+     * Update an asset
+     * @description Optimistic concurrency (API-07, WP-740): If-Match names the version the editor read (ETag of GET, POST or PATCH). A stale version is refused with 409 only when a field of the request changed since; a version written outside the asset API (stock movement, rack placement, lifecycle transition, stocktake, CI merge, delete or restore of a linked CI) counts as a change of every field of the request. An organization can require If-Match (settings.require_if_match); then a request without it is 412, like an unknown version.
+     */
     patch: operations['updateAsset'];
     trace?: never;
   };
@@ -12411,7 +12423,7 @@ export interface components {
     ModuleListResponse: {
       data: components['schemas']['ModuleStatus'][];
     };
-    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). The fields carry the names of AST-01 (WP-739): inventory_no, purchase_price, warranty_until and primary_ci_id; their field keys stay core.asset_tag, core.purchase_cost, core.warranty_end and core.ci_id. */
+    /** @description An asset after AST-01 (WP-271). The fields id, organization_id, client_id, name, custom_fields, version and the timestamps are always present (client_id when set); the others are left out when the field permissions do not let the caller read them (object kind asset, field keys core.<field>, custom fields attributes.<key>, RBA-07). The fields carry the names of AST-01 (WP-739): inventory_no, purchase_price, warranty_until and primary_ci_id; their field keys stay core.asset_tag, core.purchase_cost, core.warranty_end and core.ci_id. */
     Asset: {
       id: string;
       organization_id: string;
@@ -12478,6 +12490,29 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      /**
+       * Format: int64
+       * @description Version of the asset (API-07, WP-740), also the ETag: it rises with every change of the asset, also through stock movements, rack placement, lifecycle transitions and the CI domain. Always present.
+       */
+      readonly version?: number;
+      /** @description Read-only technical identity of the primary CI; only in GET /api/v1/assets/{id}, left out when the caller cannot read primary_ci_id. Under restricted CI field permissions only id, name and status. */
+      readonly primary_ci?: components['schemas']['CIRef'];
+    };
+    /** @description The read-only technical identity of a CI linked to an asset (spec §4, WP-740); the CI stays the source of truth. */
+    CIRef: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      status: string;
+      hostname?: string;
+      fqdn?: string;
+      management_ip?: string;
+      manufacturer?: string;
+      model?: string;
+      serial_number?: string;
+      os_name?: string;
+      os_version?: string;
+      discovery_source?: string;
     };
     /** @description Names of AST-01 (WP-739); the names asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     CreateAssetRequest: {
@@ -19065,6 +19100,30 @@ export interface operations {
         status?: string;
         category?: string;
         client_id?: components['parameters']['ClientID'];
+        /**
+         * @description Field filters of API-02: `filter[field]=value` (exact),
+         *     `filter[field][op]=value` with op `exact`, `gte`, `lte`, `like`
+         *     (`*` as wildcard, otherwise substring) or `in` (comma-separated).
+         *     `filter[attributes.<key>]` filters a JSONB attribute; only searchable
+         *     attributes may be filtered (otherwise 400 with a hint), and they
+         *     compare by their data type. An unknown field yields 422, an unknown
+         *     operator or a malformed value 400.
+         *
+         *     Set fields (the CI list: `tags`, compared by tag key) take `exact`,
+         *     `in` and `all` (E-126): `filter[tags][in]=a,b` matches objects with
+         *     at least one of the tags, `filter[tags][all]=a,b` those with every
+         *     one, and `filter[tags]=a` equals `in` with one key. At most 100
+         *     distinct values; an unknown key matches no tag. `all` is accepted
+         *     only on set fields (elsewhere 400 "unknown operator"); `like`,
+         *     `gte` and `lte` on a set field are 400.
+         */
+        filter?: components['parameters']['ListFilter'];
+        /** @description Sort field from the list's whitelist; a leading `-` sorts descending. An unknown field yields 422. */
+        sort?: components['parameters']['ListSort'];
+        /** @description Comma-separated response fields; `id` is always returned. An unknown field yields 422. */
+        fields?: components['parameters']['ListFields'];
+        /** @description Free-text search. */
+        q?: components['parameters']['ListQ'];
       };
       header?: never;
       path?: never;
@@ -19083,7 +19142,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a status or category filter, a search (inventory_no) or a sort on inventory_no, category or status the caller cannot read in every scope. */
+      /** @description Forbidden: the route permission (ProblemDetail) or the field permissions (RBA-07, WP-271; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the DTO paths): a filter (status, category, filter[...]), a search (inventory_no) or a sort on a field the caller cannot read in every scope. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -19093,6 +19152,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19112,6 +19172,8 @@ export interface operations {
       /** @description Asset created */
       201: {
         headers: {
+          /** @description The asset version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19166,6 +19228,8 @@ export interface operations {
       /** @description Asset details */
       200: {
         headers: {
+          /** @description The asset version (API-07); send it as If-Match with a PATCH. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19197,12 +19261,24 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The asset has stock movements or a disposal record. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateAsset: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -19218,6 +19294,8 @@ export interface operations {
       /** @description Asset updated */
       200: {
         headers: {
+          /** @description The new asset version. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -19237,8 +19315,19 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
+      /** @description Fields of the request changed since the If-Match version (VersionConflictProblem: `fields`, `current_version`), the field is owned by the parent asset of a composition (spec §5), or the inventory number, barcode or rfid_tag is already taken in the organization (`field` names it). */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the asset */
+      412: {
         headers: {
           [name: string]: unknown;
         };

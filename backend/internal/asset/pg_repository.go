@@ -13,9 +13,11 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -52,7 +54,8 @@ const assetSelectColumns = `
 	created_at,
 	updated_at,
 	COALESCE(asset_type_id::text, ''),
-	COALESCE(site_id::text, '')
+	COALESCE(site_id::text, ''),
+	version
 `
 
 // physicalAssetModelID is the system lifecycle model physical_asset
@@ -104,6 +107,16 @@ func assetFieldDBError(err error, fields map[string]string) error {
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// outbox writes asset.created, asset.changed and asset.deleted in the
+	// write transaction (EVT-03, WP-740); nil writes none.
+	outbox *events.Outbox
+}
+
+// WithEvents attaches the event outbox: every create, change and delete
+// writes its asset.* event last in its transaction, after the trail (K20).
+func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
+	r.outbox = outbox
+	return r
 }
 
 // NewPGRepository creates a new PostgreSQL-backed asset repository.
@@ -219,9 +232,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 	var assets []Asset
 	var total int
 
+	if err := checkSort(filter); err != nil {
+		return nil, 0, err
+	}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
-		args := make([]any, 0, 5)
+		args := make([]any, 0, 5+len(filter.Filters))
 		argPos := 1
 
 		if filter.Status != "" {
@@ -244,23 +260,38 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
+		// filter[field][op] (API-02): the field is the column of the
+		// whitelist filterColumns.
+		for _, f := range filter.Filters {
+			kind, ok := filterColumns[f.Field]
+			if !ok {
+				return &api.FieldError{Field: "filter[" + f.Field + "]", Status: http.StatusUnprocessableEntity,
+					Message: fmt.Sprintf("unknown filter field %q", f.Field)}
+			}
+			f.Kind = kind
+			clause, filterArgs := f.SQL(f.Field, argPos)
+			whereParts = append(whereParts, clause)
+			args = append(args, filterArgs...)
+			argPos += len(filterArgs)
+		}
 
 		whereClause := strings.Join(whereParts, " AND ")
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM asset WHERE "+whereClause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count assets: %w", err)
 		}
 
-		sortColumn, sortDirection := NormalizeSort(filter)
+		sortField, sortDirection := NormalizeSort(filter)
+		sortColumn := sortColumns[sortField]
 
 		// Keyset pagination: when a cursor is supplied it replaces the OFFSET
 		// so page boundaries stay stable while rows are inserted or removed.
 		listWhere := whereClause
 		listArgs := append([]any{}, args...)
 		if page.Cursor != nil {
-			if !page.Cursor.Matches(sortColumn, sortDirection) {
+			if !page.Cursor.Matches(sortField, sortDirection) {
 				return fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 			}
-			listWhere += " AND " + api.KeysetClause(sortColumn, sortColumnCasts[sortColumn], sortDirection, argPos)
+			listWhere += " AND " + api.KeysetClause(sortColumn.expr, sortColumn.cast, sortDirection, argPos)
 			listArgs = append(listArgs, page.Cursor.Value, page.Cursor.ID)
 			argPos += 2
 		}
@@ -270,14 +301,14 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
 				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
-				assetSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				assetSelectColumns, listWhere, sortColumn.expr, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
 				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
-				assetSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				assetSelectColumns, listWhere, sortColumn.expr, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
 		}
@@ -413,7 +444,10 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 		if err != nil {
 			return err
 		}
-		return recordChange(ctx, tx, a.OrganizationID, a.ID, "create", "", nil, after)
+		if recErr := recordChange(ctx, tx, a.OrganizationID, a.ID, "create", "", nil, after, created.Version); recErr != nil {
+			return recErr
+		}
+		return r.emit(ctx, tx, events.AssetCreated, created, nil)
 	})
 }
 
@@ -432,6 +466,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			if checkErr := req.Check(current); checkErr != nil {
 				return checkErr
 			}
+		}
+		if preErr := checkPrecondition(ctx, tx, orgID, current, req); preErr != nil {
+			return preErr
 		}
 		if req.CIID != nil {
 			if ciErr := requireCI(ctx, tx, orgID, *req.CIID); ciErr != nil {
@@ -503,12 +540,6 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			return nil
 		}
 
-		// The row before the update for the changed fields of the history
-		// (WP-516).
-		before, err := changeForm(current)
-		if err != nil {
-			return err
-		}
 		setClauses = append(setClauses, "updated_at = NOW()")
 		// Redundant with row-level security, kept as defense in depth.
 		query := fmt.Sprintf("UPDATE asset SET %s WHERE id = $1 AND organization_id = $%d RETURNING %s", strings.Join(setClauses, ", "), argPos, assetSelectColumns)
@@ -524,23 +555,29 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			}
 			return fmt.Errorf("update asset: %w", assetFieldDBError(err, fields))
 		}
-		after, err := pii.Generic(asset)
-		if err != nil {
-			return fmt.Errorf("encode asset change: %w", err)
-		}
-		return recordFieldChanges(ctx, tx, orgID, id, before, after)
+		return r.recordUpdate(ctx, tx, orgID, current, asset)
 	})
 
 	return asset, err
 }
 
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
-// The history keeps the deletion with the asset as it was (WP-516).
+// The history keeps the deletion with the asset as it was (WP-516). An
+// asset with stock movements or a disposal record (both append-only) is
+// ErrDeleteBlocked (409, E-121): its end is a lifecycle state.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		current, err := r.getLocked(ctx, tx, orgID, id, "FOR UPDATE")
 		if err != nil {
 			return err
+		}
+		var blocked bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset_movement WHERE asset_id = $1)
+			OR EXISTS (SELECT 1 FROM disposal_record WHERE asset_id = $1)`, id).Scan(&blocked); err != nil {
+			return fmt.Errorf("check records of asset: %w", err)
+		}
+		if blocked {
+			return ErrDeleteBlocked
 		}
 		before, err := changeForm(current)
 		if err != nil {
@@ -548,13 +585,75 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM asset WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
+			if appendOnly(err) {
+				// A record the caller's scope does not show.
+				return ErrDeleteBlocked
+			}
 			return fmt.Errorf("delete asset: %w", err)
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return ErrNotFound
 		}
-		return recordChange(ctx, tx, orgID, id, "delete", "", before, nil)
+		if recErr := recordChange(ctx, tx, orgID, id, "delete", "", before, nil, current.Version); recErr != nil {
+			return recErr
+		}
+		return r.emit(ctx, tx, events.AssetDeleted, current, nil)
 	})
+}
+
+// appendOnly reports whether err is the refusal of an append-only guard
+// (asset_movement, disposal_record) a delete cascaded into.
+func appendOnly(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "P0001" && strings.Contains(pgErr.Message, "append-only")
+}
+
+// checkPrecondition enforces If-Match on a PATCH (API-07, API-03; pattern
+// of the CI, WP-061): a missing If-Match fails when the organization
+// requires one (412); a version the asset never had fails (412); an older
+// version fails with 409 only when a field of the request changed since:
+// a trail row of a later version names it, or a later version has no
+// trail row at all (a writer outside the asset package, counted by the
+// trigger asset_version_bump), which counts as a change of every field of
+// the request.
+func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *Asset, req *UpdateRequest) error {
+	if req.IfMatch == nil {
+		var required bool
+		if err := tx.QueryRow(ctx, `SELECT COALESCE((settings->>'require_if_match')::boolean, false) FROM organization WHERE id = $1`,
+			orgID).Scan(&required); err != nil {
+			return fmt.Errorf("read if-match setting: %w", err)
+		}
+		if required {
+			return ErrPreconditionRequired
+		}
+		return nil
+	}
+	switch {
+	case *req.IfMatch == current.Version, *req.IfMatch == api.IfMatchAny:
+		return nil
+	case *req.IfMatch > current.Version || *req.IfMatch < 1:
+		return ErrPreconditionFailed
+	}
+	requested := req.requestedFields()
+	if len(requested) == 0 {
+		return nil
+	}
+	var traced int64
+	var fields []string
+	if err := tx.QueryRow(ctx, `SELECT COUNT(DISTINCT entity_version),
+			COALESCE(array_agg(DISTINCT field_name ORDER BY field_name) FILTER (WHERE field_name = ANY($4)), '{}')
+		FROM entity_change
+		WHERE entity_type = 'asset' AND entity_id = $1 AND entity_version > $2 AND entity_version <= $3`,
+		current.ID, *req.IfMatch, current.Version, requested).Scan(&traced, &fields); err != nil {
+		return fmt.Errorf("read changes since if-match: %w", err)
+	}
+	if traced < current.Version-*req.IfMatch {
+		fields = requested
+	}
+	if len(fields) > 0 {
+		return &ConflictError{Fields: fields, Current: current.Version}
+	}
+	return nil
 }
 
 // getLocked reads the asset id in the transaction; lock is the locking
@@ -571,24 +670,83 @@ func (r *PGRepository) getLocked(ctx context.Context, tx pgx.Tx, orgID, id, lock
 	return item, nil
 }
 
-// changeForm returns the asset in the JSON form of the API for its history.
+// changeForm returns the asset in the JSON form of the API for its
+// history; the version is a column of the trail (entity_version), not a
+// field of it.
 func changeForm(item *Asset) (map[string]any, error) {
 	generic, err := pii.Generic(item)
 	if err != nil {
 		return nil, fmt.Errorf("encode asset change: %w", err)
 	}
 	obj, _ := generic.(map[string]any)
+	delete(obj, "version")
+	delete(obj, "primary_ci")
 	return obj, nil
 }
 
 // untracked are the fields of an asset that are no change of their own.
-var untracked = map[string]bool{"updated_at": true}
+var untracked = map[string]bool{"updated_at": true, "version": true}
+
+// recordUpdate writes the trail of an update from before to after (one
+// row per changed field with the version after it) and, when a field
+// changed, asset.changed with the changed fields, last in the
+// transaction (K20).
+func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID string, before, after *Asset) error {
+	beforeForm, err := changeForm(before)
+	if err != nil {
+		return err
+	}
+	afterForm, err := changeForm(after)
+	if err != nil {
+		return err
+	}
+	changed, err := recordFieldChanges(ctx, tx, orgID, after.ID, beforeForm, afterForm, after.Version)
+	if err != nil || len(changed) == 0 {
+		return err
+	}
+	return r.emit(ctx, tx, events.AssetChanged, after, changed)
+}
+
+// emit writes the asset event typ (EVT-03, WP-740) with the asset in the
+// JSON form of the API, its site and, for asset.changed, the changed
+// fields; nothing without an outbox.
+func (r *PGRepository) emit(ctx context.Context, tx pgx.Tx, typ string, a *Asset, changed []string) error {
+	if r.outbox == nil {
+		return nil
+	}
+	data, err := eventData(a, changed)
+	if err != nil {
+		return err
+	}
+	if _, appendErr := r.outbox.Append(ctx, tx, &events.Event{OrgID: a.OrganizationID, Type: typ, EntityID: a.ID, Data: data}); appendErr != nil {
+		return fmt.Errorf("asset event %s: %w", typ, appendErr)
+	}
+	return nil
+}
+
+// eventData is the data of an asset event: the frame events.AssetData
+// (id, client_id, site_id) with the members of the asset DTO, its version
+// and, for asset.changed, changed_fields (events.AssetChangedData).
+func eventData(a *Asset, changed []string) (map[string]any, error) {
+	generic, err := pii.Generic(a)
+	if err != nil {
+		return nil, fmt.Errorf("encode asset event: %w", err)
+	}
+	data, _ := generic.(map[string]any)
+	delete(data, "primary_ci")
+	if a.SiteID != "" {
+		data["site_id"] = a.SiteID
+	}
+	if changed != nil {
+		data["changed_fields"] = changed
+	}
+	return data, nil
+}
 
 // recordFieldChanges writes one update row per field that differs between
 // before and after (JSON forms of the asset), in the order of the field
-// names.
-func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before map[string]any, afterValue any) error {
-	after, _ := afterValue.(map[string]any)
+// names, with the version the write left; it returns the changed fields.
+func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before, after map[string]any, version int64) ([]string, error) {
 	names := make([]string, 0, len(after))
 	seen := map[string]bool{}
 	for _, m := range []map[string]any{before, after} {
@@ -600,21 +758,24 @@ func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before
 		}
 	}
 	sort.Strings(names)
+	var changed []string
 	for _, name := range names {
 		if reflect.DeepEqual(before[name], after[name]) {
 			continue
 		}
-		if err := recordChange(ctx, tx, orgID, id, "update", name, before[name], after[name]); err != nil {
-			return err
+		if err := recordChange(ctx, tx, orgID, id, "update", name, before[name], after[name], version); err != nil {
+			return nil, err
 		}
+		changed = append(changed, name)
 	}
-	return nil
+	return changed, nil
 }
 
 // recordChange appends a change of the asset to the entity_change trail in
 // the transaction of the write (WP-516), with the acting user; personal
 // values are stored as vault surrogates (SEC-05), as in the CI history.
-func recordChange(ctx context.Context, tx pgx.Tx, orgID, id, changeType, field string, oldValue, newValue any) error {
+// version is the asset version the write left (entity_version, WP-740).
+func recordChange(ctx context.Context, tx pgx.Tx, orgID, id, changeType, field string, oldValue, newValue any, version int64) error {
 	values := make([]any, 2)
 	for i, v := range []any{oldValue, newValue} {
 		if v == nil {
@@ -635,9 +796,9 @@ func recordChange(ctx context.Context, tx pgx.Tx, orgID, id, changeType, field s
 		actor = user
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO entity_change (organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value)
-		VALUES ($1, 'asset', $2, $3, $4, $5, $6::jsonb, $7::jsonb)`,
-		orgID, id, actor, changeType, nilIfEmpty(field), values[0], values[1]); err != nil {
+		INSERT INTO entity_change (organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value, entity_version)
+		VALUES ($1, 'asset', $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8)`,
+		orgID, id, actor, changeType, nilIfEmpty(field), values[0], values[1], version); err != nil {
 		return fmt.Errorf("record asset change: %w", err)
 	}
 	return nil
@@ -685,6 +846,7 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.UpdatedAt,
 		&item.AssetTypeID,
 		&item.SiteID,
+		&item.Version,
 	); err != nil {
 		return nil, err
 	}

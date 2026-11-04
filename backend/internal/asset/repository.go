@@ -53,6 +53,9 @@ func NewMemoryRepository() *MemoryRepository {
 }
 
 func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Asset, int, error) {
+	if err := checkSort(filter); err != nil {
+		return nil, 0, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -72,6 +75,9 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterP
 		}
 		if filter.Search != "" && !strings.Contains(strings.ToLower(a.Name), strings.ToLower(filter.Search)) &&
 			!strings.Contains(strings.ToLower(a.AssetTag), strings.ToLower(filter.Search)) {
+			continue
+		}
+		if !matchesFilters(a, filter.Filters) {
 			continue
 		}
 		result = append(result, *a)
@@ -122,6 +128,16 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterP
 	return result[start:end], total, nil
 }
 
+// matchesFilters applies the filter[field][op] conditions to the asset.
+func matchesFilters(a *Asset, filters []api.Filter) bool {
+	for _, f := range filters {
+		if !f.Match(filterValue(a, f.Field)) {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Asset, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -146,6 +162,7 @@ func (r *MemoryRepository) Create(_ context.Context, a *Asset) error {
 		a.Currency = memoryDefaultCurrency
 	}
 	a.LifecycleState = memoryInitialState
+	a.Version = 1
 	now := time.Now().UTC()
 	a.CreatedAt = now
 	a.UpdatedAt = now
@@ -165,6 +182,19 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *Upda
 		if err := req.Check(a); err != nil {
 			return nil, err
 		}
+	}
+	// Without a trail every older version counts as a change of all
+	// requested fields.
+	if req.IfMatch != nil && *req.IfMatch != api.IfMatchAny && *req.IfMatch != a.Version {
+		if *req.IfMatch > a.Version {
+			return nil, ErrPreconditionFailed
+		}
+		if fields := req.requestedFields(); len(fields) > 0 {
+			return nil, &ConflictError{Fields: fields, Current: a.Version}
+		}
+	}
+	if len(req.requestedFields()) > 0 {
+		a.Version++
 	}
 
 	for _, f := range []struct {

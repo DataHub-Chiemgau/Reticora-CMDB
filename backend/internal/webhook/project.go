@@ -78,6 +78,12 @@ var projectionRules = map[string]projectionRule{
 	"relationship.deleted": (*projector).relationship,
 	"relationship.changed": (*projector).relationship,
 
+	// The asset events of WP-740: the asset; asset.changed also names
+	// the changed fields.
+	"asset.created": (*projector).asset,
+	"asset.deleted": (*projector).asset,
+	"asset.changed": (*projector).assetChange,
+
 	"metamodel.published": passThrough,
 	"import.completed":    passThrough,
 	"stock.below_minimum": passThrough,
@@ -536,6 +542,53 @@ func (p *projector) asset(body map[string]json.RawMessage) (map[string]json.RawM
 	}
 	ref := permission.ObjectRef{ID: id, ClientID: client, SiteID: site}
 	return p.assetObject(body, &ref), true
+}
+
+// assetChange is the rule of asset.changed (WP-740): the asset as asset,
+// changed_fields only with readable fields; an event whose changed fields
+// are all unreadable is withheld. custom_fields counts as readable while
+// the projected asset keeps a custom field (the change names no single
+// key).
+func (p *projector) assetChange(body map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
+	if !p.policy.Restricted(permission.KindAsset) {
+		return nil, true
+	}
+	var changed []string
+	if raw, ok := body["changed_fields"]; ok && string(raw) != "null" {
+		if json.Unmarshal(raw, &changed) != nil {
+			return nil, false
+		}
+	}
+	delete(body, "changed_fields")
+	out, ok := p.asset(body)
+	if !ok || changed == nil {
+		return out, ok
+	}
+	id, _ := requiredString(out, "id")
+	client, _, _ := stringMember(out, "client_id")
+	site, _, _ := stringMember(out, "site_id")
+	ref := permission.ObjectRef{ID: id, ClientID: client, SiteID: site}
+	custom, _, _ := objectMember(out, "custom_fields")
+	kept := make([]string, 0, len(changed))
+	for _, name := range changed {
+		readable := false
+		if name == "custom_fields" {
+			readable = len(custom) > 0
+		} else {
+			key, structural, mapped := permission.FieldKeyOf(permission.KindAsset, name)
+			readable = structural || (mapped && p.assetReadable(key, &ref))
+		}
+		if readable {
+			kept = append(kept, name)
+		}
+	}
+	if len(changed) > 0 && len(kept) == 0 {
+		return nil, false
+	}
+	if !setMember(out, "changed_fields", kept) {
+		return nil, false
+	}
+	return out, true
 }
 
 // embeddedAsset is the rule of inventory.*, stock.movement, reservation.*

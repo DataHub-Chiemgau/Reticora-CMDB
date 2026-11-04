@@ -43,10 +43,11 @@ var ciProjected = map[string]bool{
 }
 
 // assetStructural are the members of the asset DTO and of the embedded
-// asset facts the asset policy does not cover: identity, name, client scope
-// and the timestamps (WP-271).
+// asset facts the asset policy does not cover: identity, name, client scope,
+// the timestamps (WP-271) and the version (ETag, WP-740).
 var assetStructural = map[string]bool{
 	"id": true, "organization_id": true, "client_id": true, "name": true, "created_at": true, "updated_at": true,
+	"version": true,
 }
 
 // assetFieldAliases are the AST-01 names of asset fields (WP-738, WP-739)

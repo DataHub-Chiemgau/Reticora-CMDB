@@ -161,6 +161,16 @@ type AssetData struct {
 	SiteID   string `json:"site_id,omitempty"`
 }
 
+// AssetChangedData is the data of asset.changed (WP-740): the frame of
+// AssetData and the fields the change wrote (changed_fields, the members
+// of the asset DTO).
+type AssetChangedData struct {
+	ID            string   `json:"id"`
+	ClientID      string   `json:"client_id,omitempty"`
+	SiteID        string   `json:"site_id,omitempty"`
+	ChangedFields []string `json:"changed_fields"`
+}
+
 // AssetAssignmentData is the data of asset.assigned and asset.returned
 // (WP-275).
 type AssetAssignmentData struct {
@@ -302,7 +312,7 @@ var Payloads = map[string]any{
 	LifecycleChanged:      LifecycleChangedData{},
 	RelationshipChanged:   RelationshipChangedData{},
 	AssetCreated:          AssetData{},
-	AssetChanged:          AssetData{},
+	AssetChanged:          AssetChangedData{},
 	AssetDeleted:          AssetData{},
 	AssetAssigned:         AssetAssignmentData{},
 	AssetReturned:         AssetAssignmentData{},

@@ -47,13 +47,15 @@ var visibleSQL = map[string]string{
 	"asset": "SELECT EXISTS (SELECT 1 FROM asset WHERE id = $1::uuid)",
 }
 
-// Record appends a change row to the entity_change trail.
+// Record appends a change row to the entity_change trail. A CI or an asset
+// must be visible under the transaction's tenant scope (as visibleEntity,
+// WP-740 for assets).
 func (r *PGRepository) Record(ctx context.Context, change *Change) error {
 	return database.WithRequestTenant(ctx, r.pool, change.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if change.EntityType == "ci" {
+		if check, ok := visibleSQL[change.EntityType]; ok {
 			var visible bool
-			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)", change.EntityID).Scan(&visible); err != nil {
-				return fmt.Errorf("check ci visibility: %w", err)
+			if err := tx.QueryRow(ctx, check, change.EntityID).Scan(&visible); err != nil {
+				return fmt.Errorf("check %s visibility: %w", change.EntityType, err)
 			}
 			if !visible {
 				return fmt.Errorf("not found")

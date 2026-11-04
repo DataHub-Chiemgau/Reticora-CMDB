@@ -170,7 +170,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Webhook:           webhook.NewPGRepository(pool),
 		WebhookDeliveries: webhook.NewPGDeliveryStore(pool),
 		Discovery:         discovery.NewPGRepository(pool),
-		Asset:             asset.NewPGRepository(pool),
+		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
