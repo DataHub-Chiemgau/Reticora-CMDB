@@ -2055,6 +2055,65 @@
     "de-DE": "Deutsch",
     "en-US": "English"
   },
+  "metamodelDrafts": {
+    "bannerLabel": "Metamodell-Draft",
+    "directHint": "Änderungen am Metamodell wirken sofort produktiv.",
+    "workInDraft": "In Draft arbeiten",
+    "activeDraft": "Draft „{{name}}“ aktiv",
+    "itemCount": "Änderungen: {{count}}",
+    "switch": "Wechseln oder neu",
+    "leave": "Draft verlassen",
+    "notProductive": "Änderungen am Metamodell werden im Draft erfasst und wirken erst nach dem Publizieren.",
+    "showItems": "Ausstehende Änderungen ({{count}})",
+    "itemsLabel": "Ausstehende Änderungen",
+    "itemLine": "{{kind}} · {{op}} · {{target}}",
+    "noTarget": "neu",
+    "captured": "Im Draft {{name}} erfasst, noch nicht produktiv",
+    "chooserTitle": "Metamodell-Draft wählen",
+    "newName": "Name des neuen Drafts",
+    "create": "Draft anlegen",
+    "createFailed": "Der Draft konnte nicht angelegt werden.",
+    "openDrafts": "Offene Drafts",
+    "noOpenDrafts": "Keine weiteren offenen Drafts.",
+    "switchTo": "Zu Draft {{name}} wechseln",
+    "switchAction": "Wechseln",
+    "newParts": "Neu im Draft",
+    "cloneOf": "Klon von {{name}}",
+    "newVersion": "Neue Version",
+    "statuses": {
+      "draft": "Entwurf",
+      "tested": "Getestet",
+      "published": "Publiziert",
+      "discarded": "Verworfen"
+    },
+    "itemKinds": {
+      "ci_type": "CI-Typ",
+      "ci_type_field": "Typfeld",
+      "global_field": "Globales Feld",
+      "attribute_definition": "Attribut",
+      "attribute_set": "Attribut-Set",
+      "template": "Template",
+      "template_version": "Template-Version",
+      "rule": "Regel",
+      "layout": "Layout"
+    },
+    "ops": {
+      "create": "anlegen",
+      "update": "ändern",
+      "upsert": "anlegen oder ändern",
+      "delete": "löschen",
+      "clone": "klonen",
+      "activate": "aktivieren",
+      "deactivate": "deaktivieren",
+      "assign": "zuordnen",
+      "publish": "publizieren"
+    },
+    "marker": {
+      "created": "im Draft: neu",
+      "updated": "im Draft: geändert",
+      "deleted": "im Draft: gelöscht"
+    }
+  },
   "templates": {
     "tabs": {
       "label": "Metamodell",
@@ -2110,6 +2169,7 @@
     "publish": "Version {{version}} publizieren",
     "publishTitle": "Version {{version}} publizieren",
     "publishText": "Die Version wird sofort produktiv und ist danach die aktuelle Version von „{{name}}“. Veröffentlichte Versionen sind schreibgeschützt.",
+    "publishDraftText": "Die Veröffentlichung wird im Draft „{{draft}}“ erfasst und wirkt erst, wenn der Draft publiziert wird.",
     "publishConfirm": "Publizieren",
     "publishNeedsPermission": "Publizieren erfordert das Recht „metamodel:publish“.",
     "publishFailed": "Version nicht publiziert. {{reason}}",

@@ -6,6 +6,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { NotificationCenter } from './components/NotificationCenter';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
+import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -286,6 +287,8 @@ function App() {
       </header>
       {/* Expiring entitlements (ENT-07, WP-464). */}
       {isAuthenticated ? <EntitlementExpiryBanner /> : null}
+      {/* The active metamodel draft above every page (MET-53, WP-798). */}
+      {isAuthenticated ? <DraftBanner /> : null}
       {/* Focusable by script only: target of the skip link and of the command
           palette after a navigation (UI-10, WP-519). */}
       <main id="main-content" tabIndex={-1} className="p-6 outline-none">

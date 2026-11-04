@@ -1397,3 +1397,5 @@ MGT-12;[P2];B;backend/internal/contract/reference_integration_test.go;WP-737
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/contract/reference_integration_test.go;WP-737
 MET-12;P2/G2;B;backend/internal/contract/reference_integration_test.go;WP-737
 MET-11;B/G1, Teil P2/G2;B;backend/internal/contract/reference_integration_test.go;WP-737
+UI-11;[P2];C;frontend/src/components/metamodel/DraftBanner.test.tsx;WP-798
+MET-53;[P2];C;frontend/src/api/client.test.ts;WP-798

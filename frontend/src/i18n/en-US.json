@@ -2055,6 +2055,65 @@
     "de-DE": "Deutsch",
     "en-US": "English"
   },
+  "metamodelDrafts": {
+    "bannerLabel": "Metamodel draft",
+    "directHint": "Metamodel changes take effect immediately.",
+    "workInDraft": "Work in a draft",
+    "activeDraft": "Draft “{{name}}” active",
+    "itemCount": "Changes: {{count}}",
+    "switch": "Switch or new",
+    "leave": "Leave draft",
+    "notProductive": "Metamodel changes are captured in the draft and take effect only once it is published.",
+    "showItems": "Pending changes ({{count}})",
+    "itemsLabel": "Pending changes",
+    "itemLine": "{{kind}} · {{op}} · {{target}}",
+    "noTarget": "new",
+    "captured": "Captured in draft {{name}}, not yet productive",
+    "chooserTitle": "Choose a metamodel draft",
+    "newName": "Name of the new draft",
+    "create": "Create draft",
+    "createFailed": "The draft could not be created.",
+    "openDrafts": "Open drafts",
+    "noOpenDrafts": "No other open drafts.",
+    "switchTo": "Switch to draft {{name}}",
+    "switchAction": "Switch",
+    "newParts": "New in the draft",
+    "cloneOf": "Clone of {{name}}",
+    "newVersion": "New version",
+    "statuses": {
+      "draft": "Draft",
+      "tested": "Tested",
+      "published": "Published",
+      "discarded": "Discarded"
+    },
+    "itemKinds": {
+      "ci_type": "CI type",
+      "ci_type_field": "Type field",
+      "global_field": "Global field",
+      "attribute_definition": "Attribute",
+      "attribute_set": "Attribute set",
+      "template": "Template",
+      "template_version": "Template version",
+      "rule": "Rule",
+      "layout": "Layout"
+    },
+    "ops": {
+      "create": "create",
+      "update": "change",
+      "upsert": "create or change",
+      "delete": "delete",
+      "clone": "clone",
+      "activate": "activate",
+      "deactivate": "deactivate",
+      "assign": "assign",
+      "publish": "publish"
+    },
+    "marker": {
+      "created": "in draft: new",
+      "updated": "in draft: changed",
+      "deleted": "in draft: deleted"
+    }
+  },
   "templates": {
     "tabs": {
       "label": "Metamodel",
@@ -2110,6 +2169,7 @@
     "publish": "Publish version {{version}}",
     "publishTitle": "Publish version {{version}}",
     "publishText": "The version takes effect at once and becomes the current version of “{{name}}”. Published versions are read-only.",
+    "publishDraftText": "The publication is captured in the draft “{{draft}}” and takes effect only once the draft is published.",
     "publishConfirm": "Publish",
     "publishNeedsPermission": "Publishing requires the permission “metamodel:publish”.",
     "publishFailed": "Version not published. {{reason}}",

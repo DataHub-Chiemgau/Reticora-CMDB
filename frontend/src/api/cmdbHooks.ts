@@ -24,6 +24,8 @@ import {
   overrideApi,
   historyApi,
   impactApi,
+  isDraftItem,
+  metamodelDraftApi,
   savedViewApi,
   sensitiveFieldApi,
   templateApi,
@@ -37,6 +39,7 @@ import {
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
+  type MetamodelDraftItem,
   type SavedView,
   type TemplateClone,
   type TemplateCreate,
@@ -45,6 +48,7 @@ import {
 } from './cmdb';
 import { ApiError } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
+import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
 /** Query options a caller may set; the CI dialog loads only while open, uncached (MET-04). */
 interface QueryControl {
@@ -329,10 +333,78 @@ export function useReplaceCITypeAttributeSets() {
       attributeSetApi.replaceOfType(ciTypeId, sets),
     // The answer is the new list; the schema of the type and its subtypes
     // changes (schema_version).
+    // A write captured in a draft (202) answers the item: the productive
+    // list stays (WP-798).
     onSuccess: (saved, { ciTypeId }) => {
-      qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
+      if (!isDraftItem(saved)) qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
       invalidateAttributes(qc);
     },
+  });
+}
+
+// ─── Metamodel drafts (MET-53, WP-798) ───────────────────────────────────────
+
+const DRAFTS_KEY = ['metamodel-drafts'];
+
+/** One draft (GET /metamodel/drafts/{id}); a 404 is a vanished draft, no retry. */
+export function useMetamodelDraft(id: string | undefined, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, id],
+    queryFn: () => metamodelDraftApi.get(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/**
+ * The items of a draft, all pages; itemRevision (stores/metamodelDraft) is
+ * part of the key, so every captured write reads the list again.
+ */
+export function useMetamodelDraftItems(id: string | undefined, options: QueryControl = {}) {
+  const itemRevision = useMetamodelDraftStore((s) => s.itemRevision);
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, id, 'items', itemRevision],
+    queryFn: () => metamodelDraftApi.items(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+const NO_ITEMS: MetamodelDraftItem[] = [];
+
+/**
+ * The items of the active draft for the marks in the editors (E-113); empty
+ * without an active draft.
+ */
+export function useActiveDraftItems(): MetamodelDraftItem[] {
+  const draft = useMetamodelDraftStore((s) => s.draft);
+  return useMetamodelDraftItems(draft?.id).data ?? NO_ITEMS;
+}
+
+/** The drafts one can switch to: status draft and tested, newest first. */
+export function useOpenMetamodelDrafts(options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, 'open'],
+    queryFn: async () => {
+      const [open, tested] = await Promise.all([
+        metamodelDraftApi.list('draft'),
+        metamodelDraftApi.list('tested'),
+      ]);
+      return [...open, ...tested].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    },
+    ...options,
+    retry: false,
+  });
+}
+
+/** POST /metamodel/drafts with a name. */
+export function useCreateMetamodelDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => metamodelDraftApi.create(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
   });
 }
 
