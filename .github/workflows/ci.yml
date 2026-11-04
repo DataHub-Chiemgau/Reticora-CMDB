@@ -184,6 +184,17 @@ jobs:
           GRANT reticora_app TO reticora_test_runtime;
           SQL
 
+      # The service logs are printed after the last step; with the default
+      # log level the expected errors of the tests (RLS refusals, constraint
+      # checks) fill thousands of lines and push the test output out of the
+      # retrievable tail of the job log. Only PANIC is logged from here on.
+      - name: Quiet the PostgreSQL service log
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET log_min_messages = 'panic'" \
+            -c "ALTER SYSTEM SET log_min_error_statement = 'panic'" \
+            -c "SELECT pg_reload_conf()"
+
       # INS-05/OPS-01 (WP-604): update of the TimescaleDB extension of an
       # existing database (scripts/ops/timescaledb-update.sh, start_stack of
       # install-cloud.sh) with stubs, and against a database of its own that
