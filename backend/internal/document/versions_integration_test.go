@@ -48,7 +48,7 @@ func newVersionWorld(t *testing.T, enforce bool) *versionWorld {
 // grant stores the documents row of organization A with plan and limits.
 func (w *versionWorld) grant(t *testing.T, plan entitlement.Plan, limits map[string]int64) {
 	t.Helper()
-	if _, err := w.ents.Grant(context.Background(), entitlement.Entitlement{OrganizationID: w.f.OrgA,
+	if _, err := w.ents.Grant(context.Background(), &entitlement.Entitlement{OrganizationID: w.f.OrgA,
 		FeatureKey: entitlement.FeatureDocuments, Plan: plan, Enabled: true, Limits: limits}); err != nil {
 		t.Fatalf("grant documents: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestStorageLimitBytes(t *testing.T) {
 		svc := entitlement.NewService(nil, entitlement.Options{Enforce: c.enforce})
 		if c.ent != nil {
 			c.ent.OrganizationID, c.ent.FeatureKey, c.ent.Enabled = org, entitlement.FeatureDocuments, true
-			if _, err := svc.Grant(ctx, *c.ent); err != nil {
+			if _, err := svc.Grant(ctx, c.ent); err != nil {
 				t.Fatal(err)
 			}
 		}

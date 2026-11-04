@@ -111,7 +111,7 @@ func TestAuditT2AIAskRequiresOrgOptIn(t *testing.T) {
 	}
 	grantAI := func(orgID string) {
 		t.Helper()
-		if _, err := entitlements.Grant(f.OrgCtx(orgID), entitlement.Entitlement{OrganizationID: orgID, FeatureKey: entitlement.FeatureAI,
+		if _, err := entitlements.Grant(f.OrgCtx(orgID), &entitlement.Entitlement{OrganizationID: orgID, FeatureKey: entitlement.FeatureAI,
 			Plan: entitlement.PlanEssential, Enabled: true, Source: "manual"}); err != nil {
 			t.Fatalf("grant ai add-on: %v", err)
 		}

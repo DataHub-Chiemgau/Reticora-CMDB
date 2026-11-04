@@ -720,7 +720,7 @@ func (h *Handler) resolveUnlicensed(ctx context.Context, item *ReviewItem, res *
 // matched CI into a review item (spec §5.3: Konfliktlösung nach
 // Quellenvertrauen + Aktualität; Unklarheiten in Review-Queue). It returns
 // nil when there is nothing to review.
-func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming IngestItem, result ReconcileResult) *ReviewItem {
+func reviewItemFromValueConflicts(orgID string, matched *ci.Item, incoming *IngestItem, result *ReconcileResult) *ReviewItem {
 	if len(result.ValueConflicts) == 0 {
 		return nil
 	}
@@ -731,7 +731,7 @@ func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming Ingest
 		case "serial_number":
 			incomingValues[field] = incoming.SerialNumber
 		case "hardware_uuid":
-			incomingValues[field] = incomingUUID(&incoming)
+			incomingValues[field] = incomingUUID(incoming)
 		}
 	}
 	payload := map[string]any{
@@ -745,7 +745,7 @@ func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming Ingest
 		"model":              incoming.Model,
 		"serial_number":      incoming.SerialNumber,
 		"management_ip":      incoming.ManagementIP,
-		"hardware_uuid":      incomingUUID(&incoming),
+		"hardware_uuid":      incomingUUID(incoming),
 		"primary_mac":        incoming.PrimaryMAC,
 		"hostname":           incoming.Hostname,
 		"fqdn":               incoming.FQDN,
@@ -768,7 +768,7 @@ func reviewItemFromValueConflicts(orgID string, matched ci.Item, incoming Ingest
 
 // identitySnapshot captures the stored identity fields of a matched CI for
 // side-by-side comparison in the review queue.
-func identitySnapshot(item ci.Item) map[string]any {
+func identitySnapshot(item *ci.Item) map[string]any {
 	return map[string]any{
 		"name":          item.Name,
 		"manufacturer":  item.Manufacturer,
@@ -784,11 +784,11 @@ func identitySnapshot(item ci.Item) map[string]any {
 
 // reviewItemFromConflict maps a conflicting reconciliation result into a review
 // item capturing the candidate CIs and the matching criterion.
-func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileResult) *ReviewItem {
+func reviewItemFromConflict(orgID string, incoming *IngestItem, result *ReconcileResult) *ReviewItem {
 	if len(result.CandidateCIIDs) == 0 {
 		return nil
 	}
-	payload := devicePayload(&incoming)
+	payload := devicePayload(incoming)
 	payload["criterion"] = result.Criterion
 	return &ReviewItem{
 		OrganizationID: orgID,
@@ -796,7 +796,7 @@ func reviewItemFromConflict(orgID string, incoming IngestItem, result ReconcileR
 		Status:         ReviewStatusOpen,
 		Payload:        payload,
 		CandidateCIIDs: result.CandidateCIIDs,
-		ObjectKey:      deviceKey(&incoming),
+		ObjectKey:      deviceKey(incoming),
 	}
 }
 

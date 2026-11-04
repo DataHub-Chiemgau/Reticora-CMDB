@@ -156,7 +156,7 @@ func TestOrganizationAIOptInThroughAPI(t *testing.T) {
 	if _, err := entitlements.Provision(orgCtx, f.OrgA, entitlement.PlanEssential); err != nil {
 		t.Fatalf("provision: %v", err)
 	}
-	if _, err := entitlements.Grant(orgCtx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureAI,
+	if _, err := entitlements.Grant(orgCtx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureAI,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "manual"}); err != nil {
 		t.Fatalf("grant ai add-on: %v", err)
 	}

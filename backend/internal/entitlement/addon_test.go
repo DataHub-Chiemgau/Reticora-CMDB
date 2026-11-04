@@ -43,7 +43,7 @@ func TestAddonsNeedTheirOwnEntitlement(t *testing.T) {
 		t.Errorf("enterprise module: %d, want 204", got)
 	}
 
-	if _, err := svc.Grant(context.Background(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureAI,
+	if _, err := svc.Grant(context.Background(), &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureAI,
 		Plan: PlanEnterprise, Enabled: true, Source: "billing"}); err != nil {
 		t.Fatal(err)
 	}

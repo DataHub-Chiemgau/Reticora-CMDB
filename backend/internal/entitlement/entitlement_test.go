@@ -49,7 +49,7 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	if svc.IsEnabled(ctx, "org-1", FeatureTicketingStandard) {
 		t.Error("second provisioning changed the plan")
 	}
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureExportCSV, Plan: PlanEssential}); err != nil {
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureExportCSV, Plan: PlanEssential}); err != nil {
 		t.Fatal(err)
 	}
 	added, err := svc.Provision(ctx, "org-1", PlanStandard)
@@ -66,7 +66,7 @@ func TestGrantEnablesFeatureForSingleTenant(t *testing.T) {
 	svc := testService(t, PlanEssential)
 	ctx := context.Background()
 
-	if _, err := svc.Grant(ctx, Entitlement{
+	if _, err := svc.Grant(ctx, &Entitlement{
 		OrganizationID: "org-1",
 		FeatureKey:     FeatureTicketingStandard,
 		Plan:           PlanStandard,
@@ -89,7 +89,7 @@ func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 	svc := testService(t, PlanEnterprise)
 	ctx := context.Background()
 
-	if _, err := svc.Grant(ctx, Entitlement{
+	if _, err := svc.Grant(ctx, &Entitlement{
 		OrganizationID: "org-1",
 		FeatureKey:     FeatureIGA,
 		Plan:           PlanEnterprise,
@@ -102,7 +102,7 @@ func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 	}
 
 	expired := time.Now().UTC().Add(-time.Hour)
-	if _, err := svc.Grant(ctx, Entitlement{
+	if _, err := svc.Grant(ctx, &Entitlement{
 		OrganizationID: "org-1",
 		FeatureKey:     FeatureIGA,
 		Plan:           PlanEnterprise,
@@ -115,7 +115,7 @@ func TestDisabledAndExpiredEntitlementsDeny(t *testing.T) {
 		t.Error("expiry stopped a feature other than discovery (CH21)")
 	}
 
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanEnterprise,
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanEnterprise,
 		Enabled: true, ValidUntil: &expired}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 	ctx := context.Background()
 
 	limit := int64(2)
-	if _, err := svc.Grant(ctx, Entitlement{
+	if _, err := svc.Grant(ctx, &Entitlement{
 		OrganizationID: "org-1",
 		FeatureKey:     FeatureCMDBCore,
 		Plan:           PlanEssential,
@@ -166,7 +166,7 @@ func TestAllowCreateEnforcesLimit(t *testing.T) {
 // numbers. The fields keep both for the callers in code.
 func TestLimitExceededDetailFollowsCallerScope(t *testing.T) {
 	svc := NewService(NewMemoryRepository(), Options{Enforce: true})
-	if _, err := svc.Grant(context.Background(), Entitlement{OrganizationID: "org-1", FeatureKey: FeatureCMDBCore,
+	if _, err := svc.Grant(context.Background(), &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureCMDBCore,
 		Plan: PlanEssential, Enabled: true, Limits: map[string]int64{LimitMaxCIs: 7}}); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestRequireFeatureAndChecker(t *testing.T) {
 	if code, problem := serve(); code != http.StatusForbidden || problem != api.ProblemFeatureNotEntitled {
 		t.Errorf("without ticketing_standard: %d %q, want 403 feature-not-entitled", code, problem)
 	}
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingStandard,
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureTicketingStandard,
 		Plan: PlanStandard, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestMiddlewareRequiresEveryKeyOfARule(t *testing.T) {
 		if code := serve(); code != http.StatusForbidden {
 			t.Errorf("label before %s: %d, want 403", feature, code)
 		}
-		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: feature, Plan: PlanStandard, Enabled: true}); err != nil {
+		if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: feature, Plan: PlanStandard, Enabled: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -437,7 +437,7 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 	if err := svc.AllowCreate(ctx, "org-1", LimitMaxCollectors, 1000); err != nil {
 		t.Errorf("collector without a stored limit refused: %v", err)
 	}
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanStandard, Enabled: true,
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDiscovery, Plan: PlanStandard, Enabled: true,
 		Limits: map[string]int64{LimitMaxCollectors: 8}, Source: "billing"}); err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +456,7 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		"negative":      {OrganizationID: "org-1", FeatureKey: FeatureCMDBCore, Enabled: true, Limits: map[string]int64{LimitMaxCIs: -1}},
 	} {
 		var validation *ValidationError
-		if _, err := svc.Grant(ctx, ent); !errors.As(err, &validation) {
+		if _, err := svc.Grant(ctx, &ent); !errors.As(err, &validation) {
 			t.Errorf("%s: %v, want a validation error", name, err)
 		}
 	}
@@ -516,7 +516,7 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	} {
 		tc.ent.OrganizationID = "org-1"
 		var validation *ValidationError
-		if _, err := svc.Grant(ctx, tc.ent); !errors.As(err, &validation) || validation.Field != tc.field {
+		if _, err := svc.Grant(ctx, &tc.ent); !errors.As(err, &validation) || validation.Field != tc.field {
 			t.Errorf("%s: %v, want a validation error of %s", name, err, tc.field)
 		}
 	}
@@ -525,12 +525,12 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	}
 
 	for _, f := range keys {
-		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: f, Enabled: true}); err != nil {
+		if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: f, Enabled: true}); err != nil {
 			t.Errorf("grant %s: %v", f, err)
 		}
 	}
 	for _, quota := range Quotas {
-		if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: QuotaFeature[quota], Enabled: true,
+		if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: QuotaFeature[quota], Enabled: true,
 			Limits: map[string]int64{quota: 3}}); err != nil {
 			t.Errorf("quota %s: %v", quota, err)
 		}
@@ -602,7 +602,7 @@ func TestStorageQuotaBelongsToDocuments(t *testing.T) {
 		}
 	}
 	svc := testService(t, PlanEssential)
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
 		Enabled: true, Limits: map[string]int64{LimitMaxStorageMB: 1000}}); err != nil {
 		t.Fatalf("max_storage_mb on documents: %v", err)
 	}
@@ -610,7 +610,7 @@ func TestStorageQuotaBelongsToDocuments(t *testing.T) {
 		t.Errorf("stored max_storage_mb %v, %v; want 1000", deref(got), err)
 	}
 	// Without documents the quota allows nothing.
-	if _, err := svc.Grant(ctx, Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
+	if _, err := svc.Grant(ctx, &Entitlement{OrganizationID: "org-1", FeatureKey: FeatureDocuments, Plan: PlanEssential,
 		Limits: map[string]int64{LimitMaxStorageMB: 1000}}); err != nil {
 		t.Fatal(err)
 	}

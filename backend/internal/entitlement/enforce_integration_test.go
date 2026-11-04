@@ -189,7 +189,7 @@ func TestEntitlementEnforcement(t *testing.T) {
 	before := entitlement.RefusedIngest()
 	expired := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 	for _, feature := range []string{entitlement.FeatureDiscovery, entitlement.FeatureExportCSV} {
-		if _, err = replicaA.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+		if _, err = replicaA.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
 			Plan: entitlement.PlanEssential, Enabled: true, ValidUntil: &expired, Source: "billing"}); err != nil {
 			t.Fatal(err)
 		}
@@ -219,7 +219,7 @@ func TestEntitlementEnforcement(t *testing.T) {
 	}
 
 	// Renewal resumes ingest.
-	if _, err = replicaB.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
+	if _, err = replicaB.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureDiscovery,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "billing"}); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestEntitlementEnforcement(t *testing.T) {
 	}
 
 	// Quotas: an exhausted limit has its own problem type.
-	if _, err = replicaA.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+	if _, err = replicaA.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 		Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: 3}}); err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +555,7 @@ func TestEntitlementGatesRackAPIAccessEmail(t *testing.T) {
 	}
 	grant := func(feature string, enabled bool) {
 		t.Helper()
-		if _, grantErr := replicaA.Grant(f.OrgCtx(f.OrgA), entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
+		if _, grantErr := replicaA.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: feature,
 			Plan: entitlement.PlanEssential, Enabled: enabled, Source: "manual"}); grantErr != nil {
 			t.Fatal(grantErr)
 		}

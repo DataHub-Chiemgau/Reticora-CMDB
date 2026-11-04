@@ -54,7 +54,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 
 // Upsert stores an entitlement, replacing an existing row for the same
 // (organization, feature) pair.
-func (r *PGRepository) Upsert(ctx context.Context, ent Entitlement) (Entitlement, error) {
+func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement, error) {
+	ent := *in
 	var stored Entitlement
 	if ent.Limits == nil {
 		ent.Limits = map[string]int64{}

@@ -22,7 +22,7 @@ type Consumable struct {
 }
 
 // LowStock reports whether the stock level is at or below the minimum.
-func (c Consumable) LowStock() bool { return c.StockLevel <= c.MinLevel }
+func (c *Consumable) LowStock() bool { return c.StockLevel <= c.MinLevel }
 
 // Movement is one stock in/out event.
 type Movement struct {

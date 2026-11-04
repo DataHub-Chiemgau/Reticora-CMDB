@@ -47,7 +47,7 @@ func gateEntitlements(t *testing.T) *entitlement.Service {
 // revoke switches a feature of an organization off.
 func revoke(t *testing.T, svc *entitlement.Service, org, feature string) {
 	t.Helper()
-	if _, err := svc.Grant(context.Background(), entitlement.Entitlement{OrganizationID: org, FeatureKey: feature,
+	if _, err := svc.Grant(context.Background(), &entitlement.Entitlement{OrganizationID: org, FeatureKey: feature,
 		Plan: entitlement.PlanStandard, Enabled: false, Source: "manual"}); err != nil {
 		t.Fatalf("revoke %s for %s: %v", feature, org, err)
 	}

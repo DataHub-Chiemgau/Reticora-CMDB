@@ -59,7 +59,7 @@ func (e *quotaEnv) grant(limit int64) {
 	if limit >= 0 {
 		limits[entitlement.LimitMaxCollectors] = limit
 	}
-	if _, err := e.svc.Grant(e.admin, entitlement.Entitlement{OrganizationID: e.org, FeatureKey: entitlement.FeatureDiscovery,
+	if _, err := e.svc.Grant(e.admin, &entitlement.Entitlement{OrganizationID: e.org, FeatureKey: entitlement.FeatureDiscovery,
 		Plan: entitlement.PlanEssential, Enabled: true, Source: "manual", Limits: limits}); err != nil {
 		e.t.Fatal(err)
 	}

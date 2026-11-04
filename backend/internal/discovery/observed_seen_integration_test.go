@@ -112,7 +112,7 @@ func TestHeldDeviceFirstSeenAtObservedAt(t *testing.T) {
 	bg := context.Background()
 	setLimit := func(limit int64) {
 		t.Helper()
-		if _, err := s.limits.Grant(s.f.OrgCtx(s.f.OrgA), entitlement.Entitlement{OrganizationID: s.f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, err := s.limits.Grant(s.f.OrgCtx(s.f.OrgA), &entitlement.Entitlement{OrganizationID: s.f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: limit}}); err != nil {
 			t.Fatal(err)
 		}

@@ -55,7 +55,7 @@ func TestUnlicensedCIs(t *testing.T) {
 	}
 	setLimit := func(limit int) {
 		t.Helper()
-		if _, err := svc.Grant(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+		if _, err := svc.Grant(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 			Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: int64(limit)}}); err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +256,7 @@ func TestUnlicensedCINotifiesOrgAdmins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Grant(ctx, entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
+	if _, err = svc.Grant(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureCMDBCore,
 		Plan: entitlement.PlanEssential, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxCIs: int64(total)}}); err != nil {
 		t.Fatal(err)
 	}

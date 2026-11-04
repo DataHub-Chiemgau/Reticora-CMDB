@@ -19,7 +19,7 @@ type Repository interface {
 	// and filter.EntityID it returns only the documents linked to that
 	// target; an entity type outside the registry fails with a 422 field
 	// error, an invisible or missing target with api.ErrNotFound (WP-811).
-	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error)
+	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Document, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Document, error)
 	// GetWritable returns the document only when the caller may change it
 	// (WP-341: all links visible, or an org-wide principal); otherwise it
@@ -141,7 +141,7 @@ func (r *MemoryRepository) view(d *Document) *Document {
 	return &cp
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Document, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -180,7 +180,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 
 	column, direction := NormalizeSort(filter)
 	sort.Slice(result, func(i, j int) bool {
-		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		vi, vj := sortValue(&result[i], column), sortValue(&result[j], column)
 		if vi == vj {
 			if direction == "asc" {
 				return result[i].ID < result[j].ID
@@ -198,9 +198,10 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 		}
 		remaining := make([]Document, 0, len(result))
-		for _, item := range result {
+		for i := range result {
+			item := &result[i]
 			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
-				remaining = append(remaining, item)
+				remaining = append(remaining, *item)
 			}
 		}
 		if len(remaining) > page.Limit {

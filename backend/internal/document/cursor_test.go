@@ -126,13 +126,13 @@ func TestListRejectsCursorFromDifferentSortOrder(t *testing.T) {
 
 func TestNextCursorEmptyOnPartialPage(t *testing.T) {
 	items := []Document{{ID: "a", Title: "a", CreatedAt: time.Now().UTC()}}
-	if got := NextCursor(items, FilterParams{}, 10); got != "" {
+	if got := NextCursor(items, &FilterParams{}, 10); got != "" {
 		t.Errorf("expected no cursor for a partial page, got %q", got)
 	}
-	if got := NextCursor(nil, FilterParams{}, 10); got != "" {
+	if got := NextCursor(nil, &FilterParams{}, 10); got != "" {
 		t.Errorf("expected no cursor for an empty page, got %q", got)
 	}
-	if got := NextCursor(items, FilterParams{}, 1); got == "" {
+	if got := NextCursor(items, &FilterParams{}, 1); got == "" {
 		t.Error("expected a cursor for a full page")
 	}
 }
@@ -144,7 +144,7 @@ func TestNextCursorEmptyOnPartialPage(t *testing.T) {
 func TestGetLinksIsCursorPaged(t *testing.T) {
 	repo := NewMemoryRepository()
 	seedDocuments(t, repo, 2)
-	docs, _, err := repo.List(context.Background(), "org-1", FilterParams{}, api.PaginationParams{Limit: 10})
+	docs, _, err := repo.List(context.Background(), "org-1", &FilterParams{}, api.PaginationParams{Limit: 10})
 	if err != nil || len(docs) != 2 {
 		t.Fatalf("seeded documents: %d, %v", len(docs), err)
 	}

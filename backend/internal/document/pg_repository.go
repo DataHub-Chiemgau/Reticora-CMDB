@@ -119,7 +119,7 @@ func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) e
 // tenant scope (registry of links.go, api.ErrNotFound otherwise) and then
 // keeps the documents with a link to it (idx_doc_link_entity); the policies
 // of document_link hide the links outside the scope.
-func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Document, int, error) {
+func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Document, int, error) {
 	var docs []Document
 	var total int
 

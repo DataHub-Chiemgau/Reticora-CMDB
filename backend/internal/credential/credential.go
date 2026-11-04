@@ -135,7 +135,7 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 
 // Create stores a new encrypted credential. It retrieves (or creates) the org DEK,
 // encrypts the secret, and stores the ciphertext.
-func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, error) {
+func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, error) { //nolint:gocritic // API of credential.Service used by iga, discovery and jobs (WP-301 changes jobs in parallel)
 	if !validKinds[req.Kind] {
 		return nil, ErrInvalidKind
 	}
