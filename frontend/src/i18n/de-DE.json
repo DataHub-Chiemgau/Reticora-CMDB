@@ -1679,6 +1679,7 @@
       "rack_mount": "Rack-Montagen",
       "role_assignment": "Rollenzuweisungen",
       "ci_attribute": "CI-Attribute mit Standortverweis",
+      "internal_order": "interne Bestellungen (Ziel-Bin)",
       "vlan": "VLANs",
       "subnet": "Subnetze",
       "collector": "Collectors",

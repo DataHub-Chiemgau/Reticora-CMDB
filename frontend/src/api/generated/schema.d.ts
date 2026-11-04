@@ -13226,6 +13226,11 @@ export interface components {
        * @description Same as supplier_name; removed with WP-320.
        */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Target bin of the goods receipt (WP-847).
+       */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -13263,6 +13268,11 @@ export interface components {
        * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
        */
       supplier?: string;
+      /**
+       * Format: uuid
+       * @description Target bin: a location of kind bin visible to the caller and, for an order with client_id, of that client (422 on target_location_id otherwise; an unknown id, a location outside the scope and one of another client get the same answer).
+       */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -13277,6 +13287,8 @@ export interface components {
        * @description Name of an existing supplier of the organization (resolved to supplier_id, 422 if unknown or contradicting supplier_id); an empty value is not set. Removed with WP-320.
        */
       supplier?: string;
+      /** @description Target bin as on create (422 on target_location_id otherwise, also when a new client_id does not fit the bin); empty removes it. Only in status draft. */
+      target_location_id?: string;
       total_cost?: number;
       currency?: string;
       notes?: string;
@@ -14307,7 +14319,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -14317,6 +14329,7 @@ export interface components {
         | 'rack_mount'
         | 'role_assignment'
         | 'ci_attribute'
+        | 'internal_order'
         | 'vlan'
         | 'subnet'
         | 'collector'

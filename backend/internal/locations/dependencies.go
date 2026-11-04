@@ -28,6 +28,10 @@ const (
 	// location names the location (MET-12, WP-713).
 	DependencyCIAttribute = "ci_attribute"
 
+	// DependencyInternalOrder is an internal order whose target bin is the
+	// location (STK-05, WP-847), RESTRICT since 000247.
+	DependencyInternalOrder = "internal_order"
+
 	// Network and discovery objects bound to a site (E-71); the kind is the
 	// name of their table.
 	DependencyVLAN            = "vlan"
@@ -63,6 +67,7 @@ var dependencies = []dependency{
 	{DependencyRackMount, `EXISTS (SELECT 1 FROM rack_mount rm WHERE rm.rack_id = $1)`},
 	{DependencyRoleAssignment, `EXISTS (SELECT 1 FROM role_assignment ra WHERE ra.scope_site_id = $1)`},
 	{DependencyCIAttribute, ciAttributeReference},
+	{DependencyInternalOrder, `EXISTS (SELECT 1 FROM internal_order o WHERE o.target_location_id = $1)`},
 }
 
 // ciAttributeReference is the condition of DependencyCIAttribute (MET-12,

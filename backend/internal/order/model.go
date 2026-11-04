@@ -81,6 +81,12 @@ var (
 	ErrFourEyes = errors.New("four-eyes rule: an order must be approved by a user other than its requester (requested_by)")
 )
 
+// msgTargetBin is the 422 message for a target_location_id that names no bin the
+// order may use. An unknown id, a location outside the scope and a bin of
+// another client than the order get the same answer, so the check reveals
+// nothing about locations the order cannot use.
+const msgTargetBin = "target_location_id does not name a location visible for the order's client"
+
 // fieldError is a 422 on a request field.
 func fieldError(field, message string) error {
 	return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
@@ -101,13 +107,17 @@ type Order struct {
 	SupplierName string `json:"supplier_name,omitempty"`
 	// Supplier is the deprecated alias of supplier_name (until WP-320). On
 	// a write it is the name of an existing supplier of the organization.
-	Supplier  string    `json:"supplier,omitempty"`
-	TotalCost float64   `json:"total_cost,omitempty"`
-	Currency  string    `json:"currency,omitempty"`
-	Notes     string    `json:"notes,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Items     []Item    `json:"items,omitempty"`
+	Supplier string `json:"supplier,omitempty"`
+	// TargetLocationID is the bin the goods receipt books into (WP-847):
+	// a location of kind bin within the scope and, for an order with a
+	// client, of that client.
+	TargetLocationID string    `json:"target_location_id,omitempty"`
+	TotalCost        float64   `json:"total_cost,omitempty"`
+	Currency         string    `json:"currency,omitempty"`
+	Notes            string    `json:"notes,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Items            []Item    `json:"items,omitempty"`
 }
 
 // Item is one position of an internal order: a consumable position
@@ -142,10 +152,11 @@ type CreateOrderRequest struct {
 	SupplierID  string `json:"supplier_id,omitempty"`
 	// Supplier is deprecated: the name of an existing supplier; empty is
 	// not set.
-	Supplier  string  `json:"supplier,omitempty"`
-	TotalCost float64 `json:"total_cost,omitempty"`
-	Currency  string  `json:"currency,omitempty"`
-	Notes     string  `json:"notes,omitempty"`
+	Supplier         string  `json:"supplier,omitempty"`
+	TargetLocationID string  `json:"target_location_id,omitempty"`
+	TotalCost        float64 `json:"total_cost,omitempty"`
+	Currency         string  `json:"currency,omitempty"`
+	Notes            string  `json:"notes,omitempty"`
 }
 
 // UpdateOrderRequest is the payload for updating an order.
@@ -156,10 +167,12 @@ type UpdateOrderRequest struct {
 	SupplierID *string `json:"supplier_id,omitempty"`
 	// Supplier is deprecated: the name of an existing supplier; empty is
 	// not set.
-	Supplier  *string  `json:"supplier,omitempty"`
-	TotalCost *float64 `json:"total_cost,omitempty"`
-	Currency  *string  `json:"currency,omitempty"`
-	Notes     *string  `json:"notes,omitempty"`
+	Supplier *string `json:"supplier,omitempty"`
+	// TargetLocationID sets the target bin; an empty value removes it.
+	TargetLocationID *string  `json:"target_location_id,omitempty"`
+	TotalCost        *float64 `json:"total_cost,omitempty"`
+	Currency         *string  `json:"currency,omitempty"`
+	Notes            *string  `json:"notes,omitempty"`
 }
 
 // supplierName returns the trimmed alias name, empty when not set.

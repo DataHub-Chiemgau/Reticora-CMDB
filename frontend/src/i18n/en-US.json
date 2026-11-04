@@ -1679,6 +1679,7 @@
       "rack_mount": "rack mounts",
       "role_assignment": "role assignments",
       "ci_attribute": "CI attributes referencing the location",
+      "internal_order": "internal orders (target bin)",
       "vlan": "VLANs",
       "subnet": "subnets",
       "collector": "collectors",

@@ -14,7 +14,7 @@ import (
 
 // orderCols reads an order with the name of its supplier; the subquery
 // also works in RETURNING.
-const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier_id::text,''), COALESCE((SELECT s.name FROM supplier s WHERE s.id = internal_order.supplier_id), ''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at`
+const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier_id::text,''), COALESCE((SELECT s.name FROM supplier s WHERE s.id = internal_order.supplier_id), ''), COALESCE(target_location_id::text,''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at`
 
 const itemCols = `id::text, organization_id::text, order_id::text, description, quantity, received_quantity, COALESCE(unit_price,0), COALESCE(consumable_id::text,''), COALESCE(asset_id::text,''), created_at`
 
@@ -31,7 +31,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 func scanOrder(s pgx.Row) (*Order, error) {
 	o := &Order{}
 	if err := s.Scan(&o.ID, &o.OrganizationID, &o.ClientID, &o.OrderNumber, &o.Title, &o.Status, &o.RequestedBy, &o.ApprovedBy,
-		&o.SupplierID, &o.SupplierName, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		&o.SupplierID, &o.SupplierName, &o.TargetLocationID, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
 		return nil, err
 	}
 	// The deprecated alias carries the name until WP-320.
@@ -109,6 +109,34 @@ func checkSupplier(ctx context.Context, tx pgx.Tx, orgID, clientID, supplierID, 
 	}
 	if !clientFits(client, clientID) {
 		return fieldError(field, "the supplier belongs to another client than the order")
+	}
+	return nil
+}
+
+// checkTargetBin verifies the target bin of an order (WP-847): binID names
+// a location of kind bin visible under the scope and, for an order with a
+// client, of that client (422 on target_location_id). Without a client of
+// the order every bin in the scope fits, since every location has a client.
+// An unknown id, a location outside the scope and one of another client
+// get the same answer (msgTargetBin); only a usable location that is no bin
+// is reported as such.
+func checkTargetBin(ctx context.Context, tx pgx.Tx, orgID, orderClient, binID string) error {
+	if !api.IsUUID(binID) {
+		return fieldError("target_location_id", msgTargetBin)
+	}
+	var kind, client string
+	err := tx.QueryRow(ctx, `SELECT kind::text, client_id::text FROM location WHERE organization_id = $1 AND id = $2`, orgID, binID).Scan(&kind, &client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fieldError("target_location_id", msgTargetBin)
+	}
+	if err != nil {
+		return fmt.Errorf("read target location: %w", err)
+	}
+	if orderClient != "" && !strings.EqualFold(client, orderClient) {
+		return fieldError("target_location_id", msgTargetBin)
+	}
+	if kind != "bin" {
+		return fieldError("target_location_id", "the target location must be a location of kind bin")
 	}
 	return nil
 }
@@ -260,16 +288,22 @@ func (r *PGRepository) Create(ctx context.Context, o *Order) error {
 				return supErr
 			}
 		}
+		o.TargetLocationID = strings.TrimSpace(o.TargetLocationID)
+		if o.TargetLocationID != "" {
+			if binErr := checkTargetBin(ctx, tx, o.OrganizationID, o.ClientID, o.TargetLocationID); binErr != nil {
+				return binErr
+			}
+		}
 		if o.OrderNumber == "" {
 			if err = tx.QueryRow(ctx, "SELECT 'ORD-' || LPAD((COUNT(*)+1)::text, 6, '0') FROM internal_order WHERE organization_id = $1", o.OrganizationID).Scan(&o.OrderNumber); err != nil {
 				return fmt.Errorf("assign order number: %w", err)
 			}
 		}
 		created, err := scanOrder(tx.QueryRow(ctx, `
-			INSERT INTO internal_order (organization_id, client_id, order_number, title, status, requested_by, supplier_id, total_cost, currency, notes)
-			VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid, $8, $9, $10)
+			INSERT INTO internal_order (organization_id, client_id, order_number, title, status, requested_by, supplier_id, target_location_id, total_cost, currency, notes)
+			VALUES ($1, NULLIF($2,'')::uuid, $3, $4, $5, NULLIF($6,'')::uuid, NULLIF($7,'')::uuid, NULLIF($8,'')::uuid, $9, $10, $11)
 			RETURNING `+orderCols,
-			o.OrganizationID, o.ClientID, o.OrderNumber, o.Title, o.Status, o.RequestedBy, supplierID, o.TotalCost, o.Currency, o.Notes))
+			o.OrganizationID, o.ClientID, o.OrderNumber, o.Title, o.Status, o.RequestedBy, supplierID, o.TargetLocationID, o.TotalCost, o.Currency, o.Notes))
 		if err != nil {
 			return err
 		}
@@ -317,6 +351,16 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateO
 		if supplierID != "" && (clientChanged || req.SupplierID != nil || alias != "") {
 			if supErr := checkSupplier(ctx, tx, orgID, client, supplierID, field); supErr != nil {
 				return supErr
+			}
+		}
+		target := current.TargetLocationID
+		if req.TargetLocationID != nil {
+			target = strings.TrimSpace(*req.TargetLocationID)
+			set("target_location_id", nilIfEmpty(target))
+		}
+		if target != "" && (clientChanged || req.TargetLocationID != nil) {
+			if binErr := checkTargetBin(ctx, tx, orgID, client, target); binErr != nil {
+				return binErr
 			}
 		}
 		if clientChanged {

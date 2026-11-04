@@ -118,6 +118,12 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Reason:   "a submission is visible only when its form, CI and ticket are",
 		TestFile: "internal/form/form_scope_integration_test.go", TestName: "TestFormRepositoryClientScope",
 	},
+	"internal_order": {
+		Path: "target_location_id -> location (bin check in the order repository on every write, order.checkTargetBin)",
+		Reason: "the target bin is a delivery target, not a location of the order; " +
+			"the visibility of the order follows its client_id",
+		TestFile: "internal/order/order_target_integration_test.go", TestName: "TestOrderTargetBinMatchesClient",
+	},
 	"metric_sample": {
 		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",
 		Reason:   "TimescaleDB hypertable without row level security (ViewProtectedTables)",

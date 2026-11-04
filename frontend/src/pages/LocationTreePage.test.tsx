@@ -477,6 +477,7 @@ describe('LocationTreePage', () => {
         rack_mount: true,
         role_assignment: true,
         ci_attribute: true,
+        internal_order: true,
         vlan: true,
         subnet: true,
         collector: true,

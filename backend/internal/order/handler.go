@@ -106,17 +106,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	o := &Order{
-		OrganizationID: t.OrganizationID,
-		ClientID:       req.ClientID,
-		OrderNumber:    req.OrderNumber,
-		Title:          req.Title,
-		Status:         StatusDraft,
-		RequestedBy:    t.UserID,
-		SupplierID:     req.SupplierID,
-		Supplier:       strings.TrimSpace(req.Supplier),
-		TotalCost:      req.TotalCost,
-		Currency:       req.Currency,
-		Notes:          req.Notes,
+		OrganizationID:   t.OrganizationID,
+		ClientID:         req.ClientID,
+		OrderNumber:      req.OrderNumber,
+		Title:            req.Title,
+		Status:           StatusDraft,
+		RequestedBy:      t.UserID,
+		SupplierID:       req.SupplierID,
+		Supplier:         strings.TrimSpace(req.Supplier),
+		TargetLocationID: strings.TrimSpace(req.TargetLocationID),
+		TotalCost:        req.TotalCost,
+		Currency:         req.Currency,
+		Notes:            req.Notes,
 	}
 	if err := h.repo.Create(r.Context(), o); err != nil {
 		writeError(w, err)

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000243_bulk_change_set
+Stand: Migration 000247_internal_order_target_bin
 
 ## Prüfung
 
@@ -1362,6 +1362,15 @@ ohne, E-09) sowie die RESTRICTIVE-Policies `stock_movement_scoped_update` und
 `asset_movement` (bleibt bis WP-842), des alten `stock_movement` und die
 Historie von `assignment` sind übernommen; ungültige Zeilen stehen in
 `migration_quarantine` (Migration `000242`).
+
+Ziel-Bin interner Bestellungen (STK-05, LOC-11, WP-847, Migration 000247):
+`internal_order` erhält `target_location_id` (UUID, nullable) mit
+`internal_order_target_location_fkey` (`target_location_id`,
+`organization_id`) → `location` (Schlüssel
+`location_id_organization_key`, 000194) ON DELETE RESTRICT und
+Teilindex `idx_internal_order_target_location` (`target_location_id`,
+`organization_id`) WHERE NOT NULL. Art `bin` und Client der Bestellung
+prüft das Order-Repository; RLS und Policies bleiben unverändert.
 
 ## Tabellen, RLS und Policies
 

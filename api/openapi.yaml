@@ -27558,6 +27558,7 @@ components:
           type: string
           deprecated: true
           description: Same as supplier_name; removed with WP-320.
+        target_location_id: { type: string, format: uuid, description: Target bin of the goods receipt (WP-847). }
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -27595,6 +27596,14 @@ components:
             Name of an existing supplier of the organization (resolved to
             supplier_id, 422 if unknown or contradicting supplier_id); an empty
             value is not set. Removed with WP-320.
+        target_location_id:
+          type: string
+          format: uuid
+          description: >-
+            Target bin: a location of kind bin visible to the caller and, for an
+            order with client_id, of that client (422 on target_location_id
+            otherwise; an unknown id, a location outside the scope and one of
+            another client get the same answer).
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -27611,6 +27620,12 @@ components:
             Name of an existing supplier of the organization (resolved to
             supplier_id, 422 if unknown or contradicting supplier_id); an empty
             value is not set. Removed with WP-320.
+        target_location_id:
+          type: string
+          description: >-
+            Target bin as on create (422 on target_location_id otherwise, also
+            when a new client_id does not fit the bin); empty removes it. Only
+            in status draft.
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -29208,10 +29223,11 @@ components:
                 (neither used nor expired) and ci_merge (tombstone within
                 tombstone_until) are bound to a site (E-71). ci_attribute
                 means a visible CI whose reference attribute with target
-                location names the location (MET-12).
+                location names the location (MET-12). internal_order means an
+                internal order whose target bin is the location (STK-05).
               items:
                 type: string
-                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment, ci_attribute, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge]
+                enum: [location, ci, asset, quantity_item, asset_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]
