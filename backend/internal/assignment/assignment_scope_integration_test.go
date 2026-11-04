@@ -46,7 +46,7 @@ func TestAssignmentRepositoryClientScope(t *testing.T) {
 	if err := repo.Create(ctx, ownA); err != nil {
 		t.Fatalf("client-1 assignment of own asset: %v", err)
 	}
-	list, total, err := repo.List(ctx, f.OrgA, assignment.FilterParams{}, api.PaginationParams{Limit: 100})
+	list, total, err := repo.List(ctx, f.OrgA, &assignment.FilterParams{}, api.PaginationParams{Limit: 100})
 	if err != nil || total != 1 || len(list) != 1 || list[0].ID != ownA.ID {
 		t.Fatalf("client-1 assignments: total=%d %+v err=%v, want only the own one", total, list, err)
 	}
@@ -60,7 +60,7 @@ func TestAssignmentRepositoryClientScope(t *testing.T) {
 	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM assignment WHERE id = $1`, foreignA.ID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("client-2 assignment: count=%d err=%v, want 1", count, err)
 	}
-	if _, _, err = repo.List(context.Background(), f.OrgA, assignment.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.List(context.Background(), f.OrgA, &assignment.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

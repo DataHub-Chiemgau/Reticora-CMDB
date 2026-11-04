@@ -63,7 +63,7 @@ func TestRAGChunksFollowSourceScope(t *testing.T) {
 	searchRepo := search.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
 	for id, title := range map[string]string{own: "rag-own-firewall", foreign: "rag-foreign-loadbalancer"} {
-		if err := repo.UpsertChunk(orgCtx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, Content: title, URL: "/cmdb/" + id}); err != nil {
+		if err := repo.UpsertChunk(orgCtx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, Content: title, URL: "/cmdb/" + id}); err != nil {
 			t.Fatalf("chunk %s: %v", title, err)
 		}
 		if err := searchRepo.IndexDocument(orgCtx, search.Document{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: title, URL: "/cmdb/" + id}); err != nil {

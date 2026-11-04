@@ -167,21 +167,22 @@ func (r *MemoryRepository) Register(_ context.Context, a *Agent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, existing := range r.agents {
-		if existing.OrganizationID == a.OrganizationID && existing.AgentID == a.AgentID {
-			// re-enrollment refreshes the record
-			existing.Hostname = a.Hostname
-			existing.Version = a.Version
-			existing.OS = a.OS
-			existing.Arch = a.Arch
-			existing.ClientID, existing.SiteID = a.ClientID, a.SiteID
-			existing.NetworkFingerprint, existing.SiteConfirmedAt = a.NetworkFingerprint, a.SiteConfirmedAt
-			existing.Status = "online"
-			existing.UpdatedAt = time.Now().UTC()
-			now := existing.UpdatedAt
-			existing.LastHeartbeat = &now
-			*a = *existing
-			return nil
+		if existing.OrganizationID != a.OrganizationID || existing.AgentID != a.AgentID {
+			continue
 		}
+		// re-enrollment refreshes the record
+		existing.Hostname = a.Hostname
+		existing.Version = a.Version
+		existing.OS = a.OS
+		existing.Arch = a.Arch
+		existing.ClientID, existing.SiteID = a.ClientID, a.SiteID
+		existing.NetworkFingerprint, existing.SiteConfirmedAt = a.NetworkFingerprint, a.SiteConfirmedAt
+		existing.Status = "online"
+		existing.UpdatedAt = time.Now().UTC()
+		now := existing.UpdatedAt
+		existing.LastHeartbeat = &now
+		*a = *existing
+		return nil
 	}
 	r.seq++
 	a.ID = fmt.Sprintf("agent-%08d", r.seq)
@@ -237,15 +238,16 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, agentID string) e
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, a := range r.agents {
-		if a.OrganizationID == orgID && a.AgentID == agentID {
-			now := time.Now().UTC()
-			a.LastHeartbeat = &now
-			if a.Status == "offline" {
-				a.Status = "online"
-			}
-			a.UpdatedAt = now
-			return nil
+		if a.OrganizationID != orgID || a.AgentID != agentID {
+			continue
 		}
+		now := time.Now().UTC()
+		a.LastHeartbeat = &now
+		if a.Status == "offline" {
+			a.Status = "online"
+		}
+		a.UpdatedAt = now
+		return nil
 	}
 	return fmt.Errorf("agent not found")
 }

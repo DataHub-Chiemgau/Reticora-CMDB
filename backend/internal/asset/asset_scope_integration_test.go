@@ -23,7 +23,7 @@ func TestAssetRepositoryClientScope(t *testing.T) {
 
 	repo := asset.NewPGRepository(f.App)
 	ctx := f.ClientCtx(f.Client1)
-	assets, _, err := repo.List(ctx, f.OrgA, asset.FilterParams{}, api.PaginationParams{Limit: 100})
+	assets, _, err := repo.List(ctx, f.OrgA, &asset.FilterParams{}, api.PaginationParams{Limit: 100})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestAssetRepositoryClientScope(t *testing.T) {
 	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM asset WHERE id = $1`, foreign).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("client-2 asset: count=%d err=%v, want 1", count, err)
 	}
-	if _, _, err = repo.List(context.Background(), f.OrgA, asset.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.List(context.Background(), f.OrgA, &asset.FilterParams{}, api.PaginationParams{Limit: 10}); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

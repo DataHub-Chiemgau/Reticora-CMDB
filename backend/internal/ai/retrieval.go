@@ -54,7 +54,8 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	}
 	var ids, types []string
 	seen := map[string]bool{}
-	for _, h := range sr.Data {
+	for i := range sr.Data {
+		h := &sr.Data[i]
 		// Defense in depth: never trust a search backend hit that belongs to a
 		// different tenant, even if the backend is misconfigured.
 		if h.OrganizationID != "" && h.OrganizationID != orgID {
@@ -88,7 +89,8 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	}
 	var scoredChunks []scored
 	qlower := strings.ToLower(question)
-	for _, ch := range chunks {
+	for i := range chunks {
+		ch := &chunks[i]
 		// Defense in depth: only rank chunks owned by the requesting tenant.
 		if ch.OrganizationID != "" && ch.OrganizationID != orgID {
 			continue
@@ -97,7 +99,7 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 		if len(qvec) > 0 && len(ch.Embedding) > 0 {
 			s = Cosine(qvec, ch.Embedding)
 		}
-		scoredChunks = append(scoredChunks, scored{ch, s})
+		scoredChunks = append(scoredChunks, scored{*ch, s})
 	}
 	sort.Slice(scoredChunks, func(i, j int) bool { return scoredChunks[i].score > scoredChunks[j].score })
 	if len(scoredChunks) > limit {
@@ -105,7 +107,8 @@ func (r *Retriever) Retrieve(ctx context.Context, orgID, userID, question string
 	}
 	out := make([]Chunk, 0, len(scoredChunks))
 	cites := make([]Citation, 0, len(scoredChunks))
-	for _, s := range scoredChunks {
+	for i := range scoredChunks {
+		s := &scoredChunks[i]
 		out = append(out, s.ch)
 		cites = append(cites, Citation{EntityType: s.ch.EntityType, EntityID: s.ch.EntityID, Title: s.ch.Title, URL: s.ch.URL, Score: s.score})
 	}

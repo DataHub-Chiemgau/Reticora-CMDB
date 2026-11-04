@@ -155,7 +155,7 @@ type LimitGuard interface {
 // CI mutation, because the index can always be rebuilt with
 // POST /api/v1/search/reindex.
 type Indexer interface {
-	IndexDocument(ctx context.Context, doc Document) error
+	IndexDocument(ctx context.Context, doc *Document) error
 	DeleteDocument(ctx context.Context, orgID, entityType, entityID string) error
 }
 

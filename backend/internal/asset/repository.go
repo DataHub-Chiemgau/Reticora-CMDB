@@ -18,10 +18,10 @@ var ErrNotFound = errors.New("asset not found")
 
 // Repository defines persistence operations for assets.
 type Repository interface {
-	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error)
+	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Asset, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Asset, error)
 	Create(ctx context.Context, a *Asset) error
-	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error)
+	Update(ctx context.Context, orgID, id string, req *UpdateRequest) (*Asset, error)
 	Delete(ctx context.Context, orgID, id string) error
 }
 
@@ -29,7 +29,7 @@ type Repository interface {
 // (e.g. stocktake completion). Both Repository implementations satisfy it.
 type Lookup interface {
 	GetByID(ctx context.Context, orgID, id string) (*Asset, error)
-	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Asset, error)
+	Update(ctx context.Context, orgID, id string, req *UpdateRequest) (*Asset, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -44,7 +44,7 @@ func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{assets: make(map[string]*Asset)}
 }
 
-func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Asset, int, error) {
+func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Asset, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -73,7 +73,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 
 	column, direction := NormalizeSort(filter)
 	sort.Slice(result, func(i, j int) bool {
-		vi, vj := sortValue(result[i], column), sortValue(result[j], column)
+		vi, vj := sortValue(&result[i], column), sortValue(&result[j], column)
 		if vi == vj {
 			if direction == "asc" {
 				return result[i].ID < result[j].ID
@@ -91,9 +91,10 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter FilterPa
 			return nil, 0, fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 		}
 		remaining := make([]Asset, 0, len(result))
-		for _, item := range result {
+		for i := range result {
+			item := &result[i]
 			if api.KeysetCompare(sortValue(item, column), item.ID, *page.Cursor, direction) {
-				remaining = append(remaining, item)
+				remaining = append(remaining, *item)
 			}
 		}
 		if len(remaining) > page.Limit {
@@ -138,7 +139,7 @@ func (r *MemoryRepository) Create(_ context.Context, a *Asset) error {
 	return nil
 }
 
-func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Asset, error) {
+func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req *UpdateRequest) (*Asset, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

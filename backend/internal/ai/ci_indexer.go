@@ -93,10 +93,10 @@ func (x *CIChunkIndexer) mayEmbed() bool {
 }
 
 // IndexDocument upserts the retrieval chunk for a CI document.
-func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) error {
-	chunk := chunkOf(&doc)
+func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc *ci.Document) error {
+	chunk := chunkOf(doc)
 	if !x.mayEmbed() {
-		return x.repo.UpsertChunk(ctx, chunk)
+		return x.repo.UpsertChunk(ctx, &chunk)
 	}
 	if !database.InTx(ctx) {
 		// The provider is called only for organizations that opted in and
@@ -104,20 +104,20 @@ func (x *CIChunkIndexer) IndexDocument(ctx context.Context, doc ci.Document) err
 		if x.consent.AllowsExternalAI(ctx, doc.OrganizationID) {
 			x.embed(&chunk)
 		}
-		return x.repo.UpsertChunk(ctx, chunk)
+		return x.repo.UpsertChunk(ctx, &chunk)
 	}
 	// Inside a context transaction the chunk is written lexically with the
 	// CI; the consent (entitlement cache, opt-in) and the embedding, an
 	// external HTTP call, follow after the commit: the transaction never
 	// holds its locks while Redis or the provider answers (NFR-03).
-	if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+	if err := x.repo.UpsertChunk(ctx, &chunk); err != nil {
 		return err
 	}
 	database.AfterCommit(ctx, func(ctx context.Context) {
 		if !x.consent.AllowsExternalAI(ctx, chunk.OrganizationID) || !x.embed(&chunk) {
 			return
 		}
-		if err := x.repo.UpsertChunk(ctx, chunk); err != nil {
+		if err := x.repo.UpsertChunk(ctx, &chunk); err != nil {
 			slog.WarnContext(ctx, "AI chunk embedding not stored", "entity_id", chunk.EntityID, "error", err)
 		}
 	})
@@ -151,7 +151,7 @@ func (x *CIChunkIndexer) IndexDocuments(ctx context.Context, docs []ci.Document)
 	batch, ok := x.repo.(ChunkBatchWriter)
 	if !ok || len(docs) == 0 {
 		for i := range docs {
-			if err := x.IndexDocument(ctx, docs[i]); err != nil {
+			if err := x.IndexDocument(ctx, &docs[i]); err != nil {
 				return err
 			}
 		}

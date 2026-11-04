@@ -346,7 +346,7 @@ func (r *indexingRepository) index(ctx context.Context, item *Item) {
 	if doc.OrganizationID == "" || doc.EntityID == "" {
 		return
 	}
-	if err := r.indexer.IndexDocument(ctx, doc); err != nil {
+	if err := r.indexer.IndexDocument(ctx, &doc); err != nil {
 		slog.WarnContext(ctx, "search index update failed; rebuild via POST /api/v1/search/reindex", "ci_id", item.ID, "error", err)
 	}
 }

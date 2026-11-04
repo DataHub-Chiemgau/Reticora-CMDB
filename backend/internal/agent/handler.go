@@ -358,7 +358,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, payload)
+	ciID, err := h.reconcileCI(r.Context(), t.OrganizationID, ag, &payload)
 	if err != nil {
 		if errors.Is(err, errLinkedCIUnreadable) {
 			// Nothing was written: the collector sends the telemetry again.
@@ -420,7 +420,7 @@ func (h *Handler) IngestTelemetry(w http.ResponseWriter, r *http.Request) {
 // hostname, and only when exactly one CI carries it (AGT-05, E-20). Every
 // attribute of an existing CI goes through the central write decision with
 // rank 85.
-func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload TelemetryPayload) (string, error) {
+func (h *Handler) reconcileCI(ctx context.Context, orgID string, ag *Agent, payload *TelemetryPayload) (string, error) {
 	if h.cis == nil {
 		return "", nil
 	}

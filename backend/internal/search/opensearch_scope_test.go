@@ -139,7 +139,8 @@ func TestCIIndexerCarriesScope(t *testing.T) {
 
 	indexer := NewCIIndexer(NewOpenSearchBackend(OpenSearchConfig{URL: srv.URL, Index: "idx"}, srv.Client()))
 	item := &ci.Item{ID: "ci-1", OrganizationID: osOrg, ClientID: osClient1, SiteID: osSite1, Name: "router"}
-	if err := indexer.IndexDocument(context.Background(), ci.IndexDocumentFor(item)); err != nil {
+	doc := ci.IndexDocumentFor(item)
+	if err := indexer.IndexDocument(context.Background(), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if indexed.ClientID != osClient1 || indexed.SiteID != osSite1 {

@@ -18,7 +18,7 @@ type ProviderConfig struct {
 type DisabledProvider struct{}
 
 func (DisabledProvider) Enabled() bool { return false }
-func (DisabledProvider) Chat([]Message) (string, int, int, error) {
+func (DisabledProvider) Chat([]Message) (answer string, promptTokens, completionTokens int, err error) {
 	return "", 0, 0, fmt.Errorf("LLM provider is not configured")
 }
 func (DisabledProvider) Embed(string) ([]float64, error) {
@@ -37,10 +37,11 @@ func NewProvider(cfg *ProviderConfig, airGapped bool, client *http.Client) Provi
 	if airGapped {
 		return DisabledProvider{}
 	}
-	return NewOpenAIProvider(*cfg, client)
+	return NewOpenAIProvider(cfg, client)
 }
 
-func NewOpenAIProvider(cfg ProviderConfig, client *http.Client) Provider {
+func NewOpenAIProvider(config *ProviderConfig, client *http.Client) Provider {
+	cfg := *config
 	if strings.TrimSpace(cfg.BaseURL) == "" || strings.TrimSpace(cfg.ChatModel) == "" {
 		return DisabledProvider{}
 	}
@@ -58,7 +59,7 @@ func NewOpenAIProvider(cfg ProviderConfig, client *http.Client) Provider {
 }
 func (p *OpenAIProvider) Enabled() bool           { return true }
 func (p *OpenAIProvider) EmbeddingsEnabled() bool { return p.cfg.EmbeddingModel != "" }
-func (p *OpenAIProvider) Chat(messages []Message) (string, int, int, error) {
+func (p *OpenAIProvider) Chat(messages []Message) (answer string, promptTokens, completionTokens int, err error) {
 	body := map[string]any{"model": p.cfg.ChatModel, "messages": messages, "temperature": 0.2}
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -90,8 +91,8 @@ func (p *OpenAIProvider) Chat(messages []Message) (string, int, int, error) {
 			CompletionTokens int `json:"completion_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return "", 0, 0, err
+	if uerr := json.Unmarshal(raw, &out); uerr != nil {
+		return "", 0, 0, uerr
 	}
 	if len(out.Choices) == 0 {
 		return "", 0, 0, fmt.Errorf("chat completion returned no choices")

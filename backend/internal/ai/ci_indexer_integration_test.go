@@ -71,7 +71,7 @@ func TestCIChunkIndexerEmbedsAfterCommit(t *testing.T) {
 
 	committed := doc("embed-committed")
 	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
-		if err := indexer.IndexDocument(ctx, committed); err != nil {
+		if err := indexer.IndexDocument(ctx, &committed); err != nil {
 			return err
 		}
 		if provider.calls.Load() != 0 {
@@ -92,7 +92,7 @@ func TestCIChunkIndexerEmbedsAfterCommit(t *testing.T) {
 	rolledBack := doc("embed-rolled-back")
 	errAbort := errors.New("abort")
 	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
-		if err := indexer.IndexDocument(ctx, rolledBack); err != nil {
+		if err := indexer.IndexDocument(ctx, &rolledBack); err != nil {
 			return err
 		}
 		return errAbort
@@ -104,7 +104,7 @@ func TestCIChunkIndexerEmbedsAfterCommit(t *testing.T) {
 	}
 
 	direct := doc("embed-direct")
-	if err := indexer.IndexDocument(ctx, direct); err != nil {
+	if err := indexer.IndexDocument(ctx, &direct); err != nil {
 		t.Fatal(err)
 	}
 	if found, embedded := chunk(ctx, direct.EntityID); provider.calls.Load() != 2 || !embedded || !found {
@@ -134,7 +134,7 @@ func TestCIChunkIndexerEmbedsAfterCommit(t *testing.T) {
 	// Without consent the chunk stays lexical.
 	denied := doc("embed-denied")
 	if err := database.WithRequestTenantTx(ctx, f.App, f.OrgA, func(ctx context.Context) error {
-		return ai.NewCIChunkIndexer(repo, provider).WithConsent(consentNone{}).IndexDocument(ctx, denied)
+		return ai.NewCIChunkIndexer(repo, provider).WithConsent(consentNone{}).IndexDocument(ctx, &denied)
 	}); err != nil {
 		t.Fatal(err)
 	}

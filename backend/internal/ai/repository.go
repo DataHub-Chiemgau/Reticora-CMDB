@@ -63,9 +63,10 @@ func (r *MemoryRepository) AddMessage(_ context.Context, orgID, conversationID, 
 	r.conversations[conversationID] = c
 	return nil
 }
-func (r *MemoryRepository) UpsertChunk(_ context.Context, ch Chunk) error {
+func (r *MemoryRepository) UpsertChunk(_ context.Context, chunk *Chunk) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	ch := *chunk
 	if ch.ID == "" {
 		ch.ID = ch.EntityType + ":" + ch.EntityID
 	}
@@ -82,20 +83,22 @@ func (r *MemoryRepository) DeleteChunk(_ context.Context, orgID, entityType, ent
 	// entityType + ":" + entityID when unset. Match by identity fields rather
 	// than relying on a single key format so explicitly-ID'd chunks are found
 	// too.
-	for k, ch := range r.chunks {
+	for k := range r.chunks {
+		ch := r.chunks[k]
 		if ch.OrganizationID == orgID && ch.EntityType == entityType && ch.EntityID == entityID {
 			delete(r.chunks, k)
 		}
 	}
 	return nil
 }
-func (r *MemoryRepository) CandidateChunks(_ context.Context, orgID string, entityTypes []string, entityIDs []string, limit int) ([]Chunk, error) {
+func (r *MemoryRepository) CandidateChunks(_ context.Context, orgID string, entityTypes, entityIDs []string, limit int) ([]Chunk, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	types := set(entityTypes)
 	ids := set(entityIDs)
 	var out []Chunk
-	for _, ch := range r.chunks {
+	for k := range r.chunks {
+		ch := r.chunks[k]
 		if ch.OrganizationID != orgID {
 			continue
 		}

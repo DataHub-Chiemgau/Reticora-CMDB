@@ -24,7 +24,7 @@ func TestAIChunkScope(t *testing.T) {
 	repo := ai.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
 	for _, id := range []string{own, foreign} {
-		if err := repo.UpsertChunk(orgCtx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: id, Content: "server"}); err != nil {
+		if err := repo.UpsertChunk(orgCtx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: id, Title: id, Content: "server"}); err != nil {
 			t.Fatalf("org-wide chunk %s: %v", id, err)
 		}
 	}
@@ -58,7 +58,7 @@ func TestAIChunkWritesClientScope(t *testing.T) {
 	foreignNew := f.CI(t, f.OrgA, f.Client2, "ai-w-c2-new")
 	repo := ai.NewPGRepository(f.App)
 	bg := context.Background()
-	if err := repo.UpsertChunk(f.OrgCtx(f.OrgA), ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreign, Title: "c2", Content: "client 2 original"}); err != nil {
+	if err := repo.UpsertChunk(f.OrgCtx(f.OrgA), &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreign, Title: "c2", Content: "client 2 original"}); err != nil {
 		t.Fatalf("org-wide chunk of the client-2 CI: %v", err)
 	}
 	chunkOf := func(entityID string) string {
@@ -79,10 +79,10 @@ func TestAIChunkWritesClientScope(t *testing.T) {
 	}
 
 	ctx := f.ClientCtx(f.Client1)
-	if err := repo.UpsertChunk(ctx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreign, Title: "hijacked", Content: "client 1"}); err == nil {
+	if err := repo.UpsertChunk(ctx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreign, Title: "hijacked", Content: "client 1"}); err == nil {
 		t.Error("client-1 principal overwrote the chunk of a client-2 CI")
 	}
-	if err := repo.UpsertChunk(ctx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreignNew, Title: "planted", Content: "client 1"}); err == nil {
+	if err := repo.UpsertChunk(ctx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: foreignNew, Title: "planted", Content: "client 1"}); err == nil {
 		t.Error("client-1 principal created a chunk for a client-2 CI")
 	}
 	if err := repo.UpsertChunks(ctx, []ai.Chunk{
@@ -105,7 +105,7 @@ func TestAIChunkWritesClientScope(t *testing.T) {
 	}
 
 	// The own CI: write, overwrite, delete.
-	if err := repo.UpsertChunk(ctx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: own, Title: "c1", Content: "first"}); err != nil {
+	if err := repo.UpsertChunk(ctx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: own, Title: "c1", Content: "first"}); err != nil {
 		t.Fatalf("client-1 chunk of the own CI: %v", err)
 	}
 	if err := repo.UpsertChunks(ctx, []ai.Chunk{{OrganizationID: f.OrgA, EntityType: "ci", EntityID: own, Title: "c1", Content: "second"}}); err != nil {

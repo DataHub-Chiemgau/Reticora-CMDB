@@ -149,7 +149,7 @@ func TestOrganizationAIOptInThroughAPI(t *testing.T) {
 		Title: title, URL: "/cis/" + ciID}); err != nil {
 		t.Fatalf("index search document: %v", err)
 	}
-	if err := ai.NewPGRepository(f.App).UpsertChunk(orgCtx, ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
+	if err := ai.NewPGRepository(f.App).UpsertChunk(orgCtx, &ai.Chunk{OrganizationID: f.OrgA, EntityType: "ci", EntityID: ciID,
 		Title: title, Content: title + " runs the billing database", URL: "/cis/" + ciID}); err != nil {
 		t.Fatalf("upsert chunk: %v", err)
 	}

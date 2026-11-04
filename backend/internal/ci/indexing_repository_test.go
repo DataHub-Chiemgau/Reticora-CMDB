@@ -17,11 +17,11 @@ type recordingIndexer struct {
 	err     error
 }
 
-func (r *recordingIndexer) IndexDocument(_ context.Context, doc Document) error {
+func (r *recordingIndexer) IndexDocument(_ context.Context, doc *Document) error {
 	if r.err != nil {
 		return r.err
 	}
-	r.indexed = append(r.indexed, doc)
+	r.indexed = append(r.indexed, *doc)
 	return nil
 }
 

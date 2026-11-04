@@ -77,7 +77,7 @@ func TestAskWithoutChunksSkipsProviderAndCitesNothing(t *testing.T) {
 func TestAskWithChunksReturnsCitations(t *testing.T) {
 	mux := setupAsk(t, func(sr *search.MemoryRepository, repo *MemoryRepository) {
 		_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
-		_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router", URL: "/cmdb/c1"})
+		_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router", URL: "/cmdb/c1"})
 	})
 	// No permission granted -> the retriever filters the chunk out, so the
 	// answer is ungrounded and carries no citations.
@@ -125,7 +125,7 @@ func TestAskWithoutConsentIsForbidden(t *testing.T) {
 			repo := NewMemoryRepository()
 			sr := search.NewMemoryRepository()
 			_ = sr.IndexDocument(ctx, search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
-			_ = repo.UpsertChunk(ctx, Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router", URL: "/cmdb/c1"})
+			_ = repo.UpsertChunk(ctx, &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router", URL: "/cmdb/c1"})
 			perms := permission.NewMemoryRepository()
 			grantPermission(perms, "org", "user", "ci:read")
 			provider := &recordingProvider{}
@@ -171,7 +171,7 @@ func TestRetrieverEmbedsQuestionOnlyWithConsent(t *testing.T) {
 	repo := NewMemoryRepository()
 	sr := search.NewMemoryRepository()
 	_ = sr.IndexDocument(ctx, search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
-	_ = repo.UpsertChunk(ctx, Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router"})
+	_ = repo.UpsertChunk(ctx, &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "core router"})
 	perms := permission.NewMemoryRepository()
 	grantPermission(perms, "org", "user", "ci:read")
 	provider := &recordingProvider{}

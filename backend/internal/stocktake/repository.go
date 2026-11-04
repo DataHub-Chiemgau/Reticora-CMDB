@@ -343,7 +343,7 @@ func (r *MemoryRepository) applyCorrection(ctx context.Context, orgID string, sc
 	if c.Detail != "" {
 		return c, nil
 	}
-	if _, err := r.assets.Update(ctx, orgID, a.ID, req); err != nil {
+	if _, err := r.assets.Update(ctx, orgID, a.ID, &req); err != nil {
 		return Correction{}, err
 	}
 	c.Applied = true

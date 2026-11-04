@@ -18,7 +18,7 @@ func TestCosine(t *testing.T) {
 	}
 }
 func TestDisabledProvider(t *testing.T) {
-	p := NewOpenAIProvider(ProviderConfig{}, nil)
+	p := NewOpenAIProvider(&ProviderConfig{}, nil)
 	if p.Enabled() {
 		t.Fatal("provider should be disabled")
 	}
@@ -38,7 +38,7 @@ func TestOpenAIProviderHTTP(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	p := NewOpenAIProvider(ProviderConfig{BaseURL: srv.URL, ChatModel: "chat", EmbeddingModel: "emb"}, srv.Client())
+	p := NewOpenAIProvider(&ProviderConfig{BaseURL: srv.URL, ChatModel: "chat", EmbeddingModel: "emb"}, srv.Client())
 	ans, pt, ct, err := p.Chat([]Message{{Role: "user", Content: "hi"}})
 	if err != nil || ans != "ok" || pt != 3 || ct != 2 {
 		t.Fatalf("%q %d %d %v", ans, pt, ct, err)
@@ -52,7 +52,7 @@ func TestRetrievalPermissionScoping(t *testing.T) {
 	sr := search.NewMemoryRepository()
 	sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret"})
 	repo := NewMemoryRepository()
-	repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret", Content: "secret text"})
+	repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ticket", EntityID: "t1", Title: "Secret", Content: "secret text"})
 	perms := permission.NewMemoryRepository()
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})
 	chunks, _, err := retr.Retrieve(context.Background(), "org", "user", "Secret", 5)
@@ -83,8 +83,8 @@ func TestRetrievalTenantIsolation(t *testing.T) {
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router"})
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
 	repo := NewMemoryRepository()
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router", Content: "org-a router"})
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-a", EntityType: "ci", EntityID: "a1", Title: "Router", Content: "org-a router"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
 	perms := permission.NewMemoryRepository()
 	grantPermission(perms, "org-a", "user", "ci:read")
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})
@@ -114,7 +114,7 @@ func TestRetrievalDropsForeignSearchHits(t *testing.T) {
 	sr := search.NewMemoryRepository()
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router"})
 	repo := NewMemoryRepository()
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org-b", EntityType: "ci", EntityID: "b1", Title: "Router", Content: "org-b router"})
 	perms := permission.NewMemoryRepository()
 	grantPermission(perms, "org-a", "user", "ci:read")
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})
@@ -137,7 +137,7 @@ func TestRetrievalFailsClosedOnUnknownEntityType(t *testing.T) {
 	sr := search.NewMemoryRepository()
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret"})
 	repo := NewMemoryRepository()
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret", Content: "top secret"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "secret", EntityID: "s1", Title: "Secret", Content: "top secret"})
 	perms := permission.NewMemoryRepository()
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})
 
@@ -160,7 +160,7 @@ func TestRetrievalFailsClosedOnPermissionError(t *testing.T) {
 	sr := search.NewMemoryRepository()
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
 	repo := NewMemoryRepository()
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text"})
 	retr := NewRetriever(repo, sr, errPermissionRepo{}, DisabledProvider{})
 
 	chunks, _, err := retr.Retrieve(context.Background(), "org", "user", "Router", 5)
@@ -182,7 +182,7 @@ func TestCitationCompleteness(t *testing.T) {
 	sr := search.NewMemoryRepository()
 	_ = sr.IndexDocument(context.Background(), search.Document{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router"})
 	repo := NewMemoryRepository()
-	_ = repo.UpsertChunk(context.Background(), Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text", URL: "/cmdb/c1"})
+	_ = repo.UpsertChunk(context.Background(), &Chunk{OrganizationID: "org", EntityType: "ci", EntityID: "c1", Title: "Router", Content: "router text", URL: "/cmdb/c1"})
 	perms := permission.NewMemoryRepository()
 	grantPermission(perms, "org", "user", "ci:read")
 	retr := NewRetriever(repo, sr, perms, DisabledProvider{})

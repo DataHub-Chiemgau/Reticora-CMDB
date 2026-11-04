@@ -20,7 +20,7 @@ type fakeAIRepository struct {
 	upserts, deletes int
 }
 
-func (r *fakeAIRepository) UpsertChunk(context.Context, ai.Chunk) error {
+func (r *fakeAIRepository) UpsertChunk(context.Context, *ai.Chunk) error {
 	r.upserts++
 	return nil
 }

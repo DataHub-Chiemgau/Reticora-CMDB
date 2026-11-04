@@ -35,7 +35,7 @@ type TicketActivityLister interface {
 // AssignmentLister gathers the assignments a person received or issued for
 // the GDPR data export (implemented by assignment.Repository).
 type AssignmentLister interface {
-	List(ctx context.Context, orgID string, filter assignment.FilterParams, page api.PaginationParams) ([]assignment.Assignment, int, error)
+	List(ctx context.Context, orgID string, filter *assignment.FilterParams, page api.PaginationParams) ([]assignment.Assignment, int, error)
 }
 
 // SessionRevoker ends every session of a user issued up to the given time
@@ -400,11 +400,11 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 	received := []assignment.Assignment{}
 	issued := []assignment.Assignment{}
 	if h.assignments != nil {
-		if received, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedTo: id}, all); err != nil {
+		if received, _, err = h.assignments.List(r.Context(), t.OrganizationID, &assignment.FilterParams{AssignedTo: id}, all); err != nil {
 			api.WriteRepoError(w, err)
 			return
 		}
-		if issued, _, err = h.assignments.List(r.Context(), t.OrganizationID, assignment.FilterParams{AssignedBy: id}, all); err != nil {
+		if issued, _, err = h.assignments.List(r.Context(), t.OrganizationID, &assignment.FilterParams{AssignedBy: id}, all); err != nil {
 			api.WriteRepoError(w, err)
 			return
 		}
