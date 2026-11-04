@@ -199,6 +199,23 @@ func customFieldPaths(fields map[string]any) []string {
 // key is attributes.<key> (permission.ParseFieldKey).
 const customFieldsPrefix = "custom_fields."
 
+// LinkCIRequest is the body of POST /api/v1/assets/{id}/cis (AST-04,
+// WP-272): the CI to link and, when sent, whether it is the primary CI
+// (true makes it the primary CI, false clears the primary CI when it is
+// this one; absent leaves the primary CI as it is).
+type LinkCIRequest struct {
+	CIID    string `json:"ci_id"`
+	Primary *bool  `json:"primary,omitempty"`
+}
+
+// CILink is a CI linked to an asset (ci.asset_id) and whether it is the
+// asset's primary CI (asset.ci_id, API name primary_ci_id).
+type CILink struct {
+	AssetID string `json:"asset_id"`
+	CIID    string `json:"ci_id"`
+	Primary bool   `json:"primary"`
+}
+
 // FilterParams holds filter parameters for listing assets.
 type FilterParams struct {
 	Status   string

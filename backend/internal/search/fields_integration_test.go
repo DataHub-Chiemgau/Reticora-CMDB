@@ -259,7 +259,9 @@ func TestSearchFields(t *testing.T) {
 	w.expect(t, "old inventory number", w.open(t, "INV-38-A"), nil, []string{w.asset, w.beta, w.gamma})
 	w.exec(t, `UPDATE asset SET ci_id = $2 WHERE id = $1`, w.asset, w.alpha)
 	w.expect(t, "asset.ci_id set", w.open(t, "INV-38-B"), []string{w.asset, w.alpha, w.beta, w.gamma}, nil)
-	w.exec(t, `UPDATE asset SET ci_id = NULL WHERE id = $1`, w.asset)
+	// Clearing asset.ci_id keeps the CI linked (WP-272); unlinking the CI
+	// clears asset.ci_id (ci_sync_asset_primary).
+	w.exec(t, `UPDATE ci SET asset_id = NULL WHERE id = $1`, w.alpha)
 	w.expect(t, "asset.ci_id cleared", w.open(t, "INV-38-B"), []string{w.asset, w.beta, w.gamma}, []string{w.alpha})
 
 	// The indexer: a CI read back and indexed like the CI service does.

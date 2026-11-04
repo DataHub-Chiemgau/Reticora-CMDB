@@ -689,7 +689,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
 			WithComposition(compositionParentLookup{repo: repos.Composition}).
-			WithCIs(ciLookup{repo: repos.CI}),
+			WithCIs(ciLookup{repo: repos.CI}).
+			// Links write ci.asset_id through the CI service (WP-272).
+			WithCILinks(opts.CIService),
 		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),

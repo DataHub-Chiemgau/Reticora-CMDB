@@ -8271,13 +8271,13 @@ export interface paths {
     };
     /**
      * List the CIs linked to an asset
-     * @description Planned (E-38); WP-272 implements the operation.
+     * @description Planned (E-38). The CIs of an asset are listed by GET /api/v1/cis?filter[asset_id]= (WP-272).
      */
     get: operations['listAssetCIs'];
     put?: never;
     /**
      * Link a CI to an asset
-     * @description Planned (E-38); WP-272 implements the operation.
+     * @description Links the CI ci_id to the asset (AST-04, AST-03, WP-272): ci.asset_id is the link, an asset has n CIs. A CI of another asset moves to this one, as with PATCH /api/v1/cis/{id}; when it was the primary CI of the other asset, that asset's primary_ci_id is cleared. primary true makes the CI the primary CI (primary_ci_id) of the asset, false clears the primary CI when it is this CI, absent leaves it; the previous primary CI stays linked. The link is a manual change of the CI in the same transaction: its version rises, the history records asset_id, the event ci.changed and the audit entries ci.updated and asset.linked (changes ci_id, primary) are written. An asset without location takes the location of the CI (E-81). Requires ci:write (route) and asset:write.
      */
     post: operations['linkAssetCI'];
     delete?: never;
@@ -8303,7 +8303,7 @@ export interface paths {
     post?: never;
     /**
      * Unlink a CI from an asset
-     * @description Planned (E-38); WP-272 implements the operation.
+     * @description Unlinks the CI from the asset (AST-04, WP-272) as a manual change of the CI (version, history asset_id, ci.changed, audit ci.updated and asset.unlinked with changes ci_id, primary). When the CI is the primary CI of the asset, primary_ci_id is cleared with it. Requires ci:write (route) and asset:write.
      */
     delete: operations['unlinkAssetCI'];
     options?: never;
@@ -12461,7 +12461,7 @@ export interface components {
       client_id?: string;
       /**
        * Format: uuid
-       * @description Primary CI; an unknown CI or one outside the caller's scope is 422 on primary_ci_id.
+       * @description Primary CI; linked in the same transaction as a manual change of the CI (version, history, ci.changed; requires ci:write). An unknown CI or one outside the caller's scope, or a CI of another client than the asset, is 422 on primary_ci_id.
        */
       primary_ci_id?: string;
       /** @description Inventory number, unique per organization (409 on inventory_no otherwise). */
@@ -12539,11 +12539,26 @@ export interface components {
       /** @deprecated */
       location?: string;
       notes?: string;
-      /** @description Primary CI; an empty string unlinks it. An unknown CI or one outside the caller's scope is 422 on primary_ci_id. */
+      /** @description Primary CI; linked in the same transaction as a manual change of the CI (version, history, ci.changed; requires ci:write); the previous primary CI stays linked. An empty string clears the primary CI, the CI stays linked (DELETE /api/v1/assets/{id}/cis/{ci_id} unlinks it). An unknown CI or one outside the caller's scope, or a CI of another client than the asset, is 422 on primary_ci_id. */
       primary_ci_id?: string;
       custom_fields?: {
         [key: string]: unknown;
       };
+    };
+    /** @description The CI to link to the asset (WP-272). */
+    LinkAssetCIRequest: {
+      /** Format: uuid */
+      ci_id: string;
+      /** @description true makes the CI the primary CI of the asset (primary_ci_id), false clears the primary CI when it is this CI; absent leaves the primary CI unchanged. */
+      primary?: boolean;
+    };
+    /** @description A CI linked to an asset (ci.asset_id) and whether it is the asset's primary CI. */
+    AssetCILink: {
+      /** Format: uuid */
+      asset_id: string;
+      /** Format: uuid */
+      ci_id: string;
+      primary: boolean;
     };
     AssetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Asset'][];
@@ -37887,7 +37902,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with WP-272. */
+      /** @description List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with a later WP. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -37910,20 +37925,60 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LinkAssetCIRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The request and response schemas come with WP-272. */
+      /** @description The CI is linked to the asset. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AssetCILink'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The caller lacks ci:write or asset:write, the field permissions do not let it edit asset_id of the CI (FieldForbiddenProblem), or it may not change an asset whose primary CI the link would set or clear (a client-scoped caller and an org-wide asset, TEN-05); nothing is changed. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      /** @description The asset or the CI is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI and the asset belong to different clients (both set; a missing client on either side is compatible), or the asset has no location and the caller may not let it take the CI's location; `field` is asset_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI domain is not available to the asset API. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   unlinkAssetCI: {
@@ -37940,7 +37995,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Deleted. */
+      /** @description The CI is unlinked. */
       204: {
         headers: {
           [name: string]: unknown;
@@ -37948,8 +38003,34 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
+      /** @description The caller lacks ci:write or asset:write, the field permissions do not let it edit asset_id of the CI (FieldForbiddenProblem), or the CI is the primary CI of an asset the caller may not change (a client-scoped caller and an org-wide asset, TEN-05); nothing is changed. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
+      /** @description The asset or the CI is unknown, of another organization or outside the caller's scope, or the CI is not linked to the asset. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The CI domain is not available to the asset API. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getAssetLabel: {

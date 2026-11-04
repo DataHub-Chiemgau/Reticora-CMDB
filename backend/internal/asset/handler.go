@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -55,6 +56,8 @@ type Handler struct {
 	repo        Repository
 	composition ParentLookup
 	cis         CILookup
+	// links writes the asset↔CI links through the CI domain (WP-272).
+	links CILinker
 }
 
 // NewHandler creates a new asset handler.
@@ -102,6 +105,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Direct-access label (spec §13): printable SVG label with asset tag,
 	// barcode/RFID marker and CMDB deep link.
 	r.Get("/api/v1/assets/{id}/label.svg", h.Label)
+	// Asset↔CI links (AST-04, WP-272); the CIs of an asset are listed by
+	// GET /api/v1/cis?filter[asset_id]=.
+	r.Post("/api/v1/assets/{id}/cis", h.LinkCI)
+	r.Delete("/api/v1/assets/{id}/cis/{ci_id}", h.UnlinkCI)
 }
 
 // requestContext returns the organization and the field policy of the
@@ -336,7 +343,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = h.repo.Create(r.Context(), a); err != nil {
+	// A primary CI is linked through the CI domain (WP-272), which needs
+	// ci:write as PATCH /cis/{id} does.
+	if store, linked := h.linkStore(); linked && a.CIID != "" {
+		if !requirePermission(w, r, identity.PermCIWrite) {
+			return
+		}
+		err = h.createLinked(r.Context(), store, a)
+	} else {
+		err = h.repo.Create(r.Context(), a)
+	}
+	if err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
@@ -396,7 +413,8 @@ func (e *ParentOwnedFieldError) Error() string {
 // writeAssetError answers a failed asset request: an asset that is unknown,
 // of another organization or outside the caller's scope is 404 (TEN-04), a
 // parent-owned field of a composition child 409 with its domain message, a
-// linked CI that is no UUID or not visible 422 on primary_ci_id, a reference that is
+// linked CI that is no UUID or not visible 422 on primary_ci_id (on the link
+// routes 404), an asset the caller may not change 403, a reference that is
 // not usable 422 on its field, a taken inventory number, barcode or RFID tag
 // 409 on its field, a field the principal may not edit 403 with the fields.
 // Database errors go through api.WriteRepoError; no table, constraint,
@@ -407,6 +425,10 @@ func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.Is(err, ErrCINotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrCINotFound.Error())
+	case errors.Is(err, ErrNotWritable):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrNotWritable.Error())
 	case errors.As(err, &owned):
 		api.WriteError(w, http.StatusConflict, "Conflict", owned.Error())
 	case api.WriteFieldError(w, err):
@@ -487,8 +509,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A primary CI is linked through the CI domain (WP-272), which needs
+	// ci:write as PATCH /cis/{id} does; clearing it writes no CI.
+	if _, linked := h.linkStore(); linked && req.CIID != nil && strings.TrimSpace(*req.CIID) != "" &&
+		!requirePermission(w, r, identity.PermCIWrite) {
+		return
+	}
 	req.Check = checkUpdate(policy, &req)
-	item, err := h.repo.Update(r.Context(), orgID, id, &req)
+	item, err := h.update(r.Context(), orgID, id, &req)
 	if err != nil {
 		writeAssetError(w, r, err)
 		return

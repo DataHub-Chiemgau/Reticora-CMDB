@@ -18552,20 +18552,22 @@ paths:
   /api/v1/assets/{id}/cis:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listAssetCIs
+      x-status: planned
       tags: [Assets]
       summary: List the CIs linked to an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Planned (E-38). The CIs of an asset are listed by GET
+        /api/v1/cis?filter[asset_id]= (WP-272).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with WP-272.
+          description: List the CIs linked to an asset. The page follows the cursor contract (API-02); the item schema comes with a later WP.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -18578,25 +18580,74 @@ paths:
       operationId: linkAssetCI
       tags: [Assets]
       summary: Link a CI to an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Links the CI ci_id to the asset (AST-04, AST-03, WP-272): ci.asset_id
+        is the link, an asset has n CIs. A CI of another asset moves to this
+        one, as with PATCH /api/v1/cis/{id}; when it was the primary CI of
+        the other asset, that asset's primary_ci_id is cleared. primary true
+        makes the CI the primary CI (primary_ci_id) of the asset, false
+        clears the primary CI when it is this CI, absent leaves it; the
+        previous primary CI stays linked. The link is a manual change of the
+        CI in the same transaction: its version rises, the history records
+        asset_id, the event ci.changed and the audit entries ci.updated and
+        asset.linked (changes ci_id, primary) are written. An asset without
+        location takes the location of the CI (E-81). Requires ci:write
+        (route) and asset:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkAssetCIRequest'
       responses:
         '201':
-          description: Created. The request and response schemas come with WP-272.
+          description: The CI is linked to the asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetCILink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The caller lacks ci:write or asset:write, the field permissions do
+            not let it edit asset_id of the CI (FieldForbiddenProblem), or it
+            may not change an asset whose primary CI the link would set or
+            clear (a client-scoped caller and an org-wide asset, TEN-05);
+            nothing is changed.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The asset or the CI is unknown, of another organization or outside
+            the caller's scope (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            The CI and the asset belong to different clients (both set; a
+            missing client on either side is compatible), or the asset has no
+            location and the caller may not let it take the CI's location;
+            `field` is asset_id.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          description: The CI domain is not available to the asset API.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assets/{id}/cis/{ci_id}:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - name: ci_id
@@ -18604,21 +18655,48 @@ paths:
         required: true
         schema:
           type: string
+          format: uuid
         description: CI identifier.
     delete:
       operationId: unlinkAssetCI
       tags: [Assets]
       summary: Unlink a CI from an asset
-      description: Planned (E-38); WP-272 implements the operation.
+      description: >-
+        Unlinks the CI from the asset (AST-04, WP-272) as a manual change of
+        the CI (version, history asset_id, ci.changed, audit ci.updated and
+        asset.unlinked with changes ci_id, primary). When the CI is the
+        primary CI of the asset, primary_ci_id is cleared with it. Requires
+        ci:write (route) and asset:write.
       responses:
         '204':
-          description: Deleted.
+          description: The CI is unlinked.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The caller lacks ci:write or asset:write, the field permissions do
+            not let it edit asset_id of the CI (FieldForbiddenProblem), or the
+            CI is the primary CI of an asset the caller may not change (a
+            client-scoped caller and an org-wide asset, TEN-05); nothing is
+            changed.
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The asset or the CI is unknown, of another organization or outside
+            the caller's scope, or the CI is not linked to the asset.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          description: The CI domain is not available to the asset API.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assets/{id}/label:
     x-phase: P2
@@ -25863,7 +25941,11 @@ components:
         primary_ci_id:
           type: string
           format: uuid
-          description: Primary CI; an unknown CI or one outside the caller's scope is 422 on primary_ci_id.
+          description: >-
+            Primary CI; linked in the same transaction as a manual change of
+            the CI (version, history, ci.changed; requires ci:write). An
+            unknown CI or one outside the caller's scope, or a CI of another
+            client than the asset, is 422 on primary_ci_id.
         inventory_no:
           type: string
           description: Inventory number, unique per organization (409 on inventory_no otherwise).
@@ -25994,11 +26076,46 @@ components:
         primary_ci_id:
           type: string
           description: >-
-            Primary CI; an empty string unlinks it. An unknown CI or one
-            outside the caller's scope is 422 on primary_ci_id.
+            Primary CI; linked in the same transaction as a manual change of
+            the CI (version, history, ci.changed; requires ci:write); the
+            previous primary CI stays linked. An empty string clears the
+            primary CI, the CI stays linked (DELETE
+            /api/v1/assets/{id}/cis/{ci_id} unlinks it). An unknown CI or one
+            outside the caller's scope, or a CI of another client than the
+            asset, is 422 on primary_ci_id.
         custom_fields:
           type: object
           additionalProperties: true
+
+    LinkAssetCIRequest:
+      type: object
+      description: The CI to link to the asset (WP-272).
+      required: [ci_id]
+      additionalProperties: false
+      properties:
+        ci_id:
+          type: string
+          format: uuid
+        primary:
+          type: boolean
+          description: >-
+            true makes the CI the primary CI of the asset (primary_ci_id),
+            false clears the primary CI when it is this CI; absent leaves the
+            primary CI unchanged.
+
+    AssetCILink:
+      type: object
+      description: A CI linked to an asset (ci.asset_id) and whether it is the asset's primary CI.
+      required: [asset_id, ci_id, primary]
+      properties:
+        asset_id:
+          type: string
+          format: uuid
+        ci_id:
+          type: string
+          format: uuid
+        primary:
+          type: boolean
 
     AssetListResponse:
       allOf:

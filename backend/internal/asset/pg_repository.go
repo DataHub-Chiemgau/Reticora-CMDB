@@ -71,11 +71,27 @@ var constraintFields = map[string]string{
 	"asset_contract_id_fkey":   "contract_id",
 	"asset_owner_user_id_fkey": "owner_user_id",
 	"asset_owner_team_id_fkey": "owner_team_id",
+	// A client that differs from the client of a linked CI (WP-272,
+	// trigger ci_asset_client of migration 000235).
+	"ci_asset_client": "client_id",
 }
 
-// assetDBError maps a constraint violation onto its request field.
-func assetDBError(err error) error {
-	mapped := api.FieldDBError(err, constraintFields)
+// primaryCIConstraintFields are constraintFields for a write of the primary
+// CI (asset.ci_id): the trigger asset_sync_primary_ci links the CI, so a
+// client conflict of that link is one of primary_ci_id.
+var primaryCIConstraintFields = func() map[string]string {
+	out := make(map[string]string, len(constraintFields))
+	for k, v := range constraintFields {
+		out[k] = v
+	}
+	out["ci_asset_client"] = fieldPrimaryCI
+	return out
+}()
+
+// assetFieldDBError maps a constraint violation onto its request field by
+// fields.
+func assetFieldDBError(err error, fields map[string]string) error {
+	mapped := api.FieldDBError(err, fields)
 	var fe *api.FieldError
 	if errors.As(mapped, &fe) && fe.Status == 0 {
 		// A reference that does not hold is 422 like the check before
@@ -384,7 +400,7 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			nilIfEmpty(a.AssetTypeID),
 			physicalAssetModelID,
 		).Scan(&a.ID); err != nil {
-			return fmt.Errorf("create asset: %w", assetDBError(err))
+			return fmt.Errorf("create asset: %w", assetFieldDBError(err, primaryCIConstraintFields))
 		}
 		// The row as stored: currency, lifecycle state and site come from
 		// the database.
@@ -502,7 +518,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
 			}
-			return fmt.Errorf("update asset: %w", assetDBError(err))
+			fields := constraintFields
+			if req.CIID != nil {
+				fields = primaryCIConstraintFields
+			}
+			return fmt.Errorf("update asset: %w", assetFieldDBError(err, fields))
 		}
 		after, err := pii.Generic(asset)
 		if err != nil {
