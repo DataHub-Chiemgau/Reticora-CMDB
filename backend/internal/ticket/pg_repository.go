@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -40,7 +41,9 @@ const ticketSelectColumns = `
 	created_at,
 	updated_at,
 	COALESCE(client_id::text, ''),
-	COALESCE(site_id::text, '')
+	COALESCE(site_id::text, ''),
+	COALESCE(external_provider, ''),
+	COALESCE(external_ref, '')
 `
 
 // ticketTagsColumn are the sorted keys of the catalog tags of a ticket
@@ -57,8 +60,32 @@ const ticketCommentSelectColumns = `
 	content,
 	is_internal,
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(external_provider, ''),
+	COALESCE(external_ref, '')
 `
+
+// externalRefConstraintFields map the unique indexes of the foreign
+// references (000239) to the field of their conflict (409, WP-293).
+var externalRefConstraintFields = map[string]string{
+	"uq_ticket_org_external_ref":             "external_ref",
+	"uq_ticket_comment_org_external_ref":     "external_ref",
+	"ticket_external_ref_pair_check":         "external_ref",
+	"ticket_comment_external_ref_pair_check": "external_ref",
+}
+
+// externalRefError returns the field error of a violated foreign reference
+// constraint (a duplicate is *api.ConflictError on external_ref) or err
+// wrapped with op.
+func externalRefError(op string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		if _, known := externalRefConstraintFields[pgErr.ConstraintName]; known {
+			return api.FieldDBError(err, externalRefConstraintFields)
+		}
+	}
+	return fmt.Errorf("%s: %w", op, err)
+}
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -346,10 +373,12 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 				team_id,
 				related_ci_id,
 				related_asset_id,
-				due_date
+				due_date,
+				external_provider,
+				external_ref
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12
+				$8, $9, $10, $11, $12, $13, $14
 			)
 			RETURNING id::text, ticket_number, created_at, updated_at,
 				COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
@@ -372,8 +401,10 @@ func (r *PGRepository) Create(ctx context.Context, t *Ticket) error {
 			nilIfEmpty(t.RelatedCIID),
 			nilIfEmpty(t.RelatedAssetID),
 			dueDate,
+			nilIfEmpty(t.ExternalProvider),
+			nilIfEmpty(t.ExternalRef),
 		).Scan(&t.ID, &t.TicketNumber, &t.CreatedAt, &t.UpdatedAt, &clientID, &siteID); err != nil {
-			return fmt.Errorf("create ticket: %w", err)
+			return externalRefError("create ticket", err)
 		}
 		if err := requireVisible(ctx, tx, "ticket", ticketVisible, t.ID); err != nil {
 			return err
@@ -560,8 +591,10 @@ func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 				author_id,
 				author_type,
 				content,
-				is_internal
-			) VALUES ($1, $2, $3, $4, $5, $6)
+				is_internal,
+				external_provider,
+				external_ref
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING id::text, created_at, updated_at
 		`
 		if c.AuthorType == "" {
@@ -576,8 +609,10 @@ func (r *PGRepository) AddComment(ctx context.Context, c *Comment) error {
 			c.AuthorType,
 			c.Content,
 			c.IsInternal,
+			nilIfEmpty(c.ExternalProvider),
+			nilIfEmpty(c.ExternalRef),
 		).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return fmt.Errorf("add ticket comment: %w", err)
+			return externalRefError("add ticket comment", err)
 		}
 		internal := c.IsInternal
 		return r.recordEvent(ctx, tx, c.OrganizationID, &ticketEvent{
@@ -1005,6 +1040,108 @@ func (r *PGRepository) RecordOrigin(ctx context.Context, t *Ticket, origin Targe
 	})
 }
 
+// ─── Foreign references (TKT-03, WP-293) ──────────────────────────────────────
+
+// GetByExternalRef implements Repository: the ticket with the reference,
+// read under the ticket RLS and ticketVisible.
+func (r *PGRepository) GetByExternalRef(ctx context.Context, orgID, provider, ref string) (*Ticket, error) {
+	if provider == "" || ref == "" {
+		return nil, ErrNotFound
+	}
+	var item *Ticket
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		item, err = scanTicket(tx.QueryRow(ctx, fmt.Sprintf(
+			"SELECT %s FROM ticket WHERE "+ticketVisible+" AND organization_id = $1 AND external_provider = $2 AND external_ref = $3",
+			ticketSelectColumns), orgID, provider, ref))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get ticket by external ref: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// SetExternalRef implements Repository; the change writes ticket.updated
+// naming external_provider and external_ref.
+func (r *PGRepository) SetExternalRef(ctx context.Context, orgID, ticketID, provider, ref string) error {
+	if err := checkExternalRefPair(provider, ref); err != nil {
+		return err
+	}
+	if !api.IsUUID(ticketID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var clientID, siteID string
+		err := tx.QueryRow(ctx, `UPDATE ticket SET external_provider = $3, external_ref = $4, updated_at = NOW()
+			WHERE `+ticketVisible+` AND id = $1 AND organization_id = $2
+			RETURNING COALESCE(client_id::text, ''), COALESCE(site_id::text, '')`,
+			ticketID, orgID, nilIfEmpty(provider), nilIfEmpty(ref)).Scan(&clientID, &siteID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return externalRefError("set ticket external ref", err)
+		}
+		return r.recordEvent(ctx, tx, orgID, &ticketEvent{ID: ticketID, ClientID: clientID, SiteID: siteID,
+			Change: changeUpdated, ChangedFields: []string{"external_provider", "external_ref"}})
+	})
+}
+
+// GetCommentByExternalRef implements Repository: the comment with the
+// reference, visible with its ticket (commentVisible).
+func (r *PGRepository) GetCommentByExternalRef(ctx context.Context, orgID, provider, ref string) (*Comment, error) {
+	if provider == "" || ref == "" {
+		return nil, ErrNotFound
+	}
+	var item *Comment
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		item, err = scanComment(tx.QueryRow(ctx, fmt.Sprintf(
+			"SELECT %s FROM ticket_comment WHERE "+commentVisible+" AND organization_id = $1 AND external_provider = $2 AND external_ref = $3",
+			ticketCommentSelectColumns), orgID, provider, ref))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("get ticket comment by external ref: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// SetCommentExternalRef implements Repository.
+func (r *PGRepository) SetCommentExternalRef(ctx context.Context, orgID, commentID, provider, ref string) error {
+	if err := checkExternalRefPair(provider, ref); err != nil {
+		return err
+	}
+	if !api.IsUUID(commentID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE ticket_comment SET external_provider = $3, external_ref = $4, updated_at = NOW()
+			WHERE `+commentVisible+` AND id = $1 AND organization_id = $2`,
+			commentID, orgID, nilIfEmpty(provider), nilIfEmpty(ref))
+		if err != nil {
+			return externalRefError("set ticket comment external ref", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -1037,6 +1174,8 @@ func scanTicket(scanner scanner) (*Ticket, error) {
 		&item.UpdatedAt,
 		&item.ClientID,
 		&item.SiteID,
+		&item.ExternalProvider,
+		&item.ExternalRef,
 	}
 	if err := scanner.Scan(dest...); err != nil {
 		return nil, err
@@ -1068,6 +1207,8 @@ func scanComment(scanner scanner) (*Comment, error) {
 		&item.IsInternal,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.ExternalProvider,
+		&item.ExternalRef,
 	); err != nil {
 		return nil, err
 	}

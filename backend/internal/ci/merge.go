@@ -410,6 +410,17 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 		for _, col := range []string{"management_ip", "hardware_uuid", "primary_mac"} {
 			sets = append(sets, fmt.Sprintf("%[1]s = COALESCE(s.%[1]s, v.%[1]s)", col))
 		}
+		// The owner (CI-07, WP-752): without an asset the survivor keeps
+		// its own and takes the victim's where it has none. With an asset
+		// the merge leaves the columns alone: the owner is the asset's
+		// (DB-05), mirrored by ci_mirror_asset_owner when the asset passes
+		// to the survivor, which would refuse another value
+		// (ci_owner_from_asset).
+		if assetID == "" {
+			for _, col := range []string{"owner_user_id", "owner_team_id"} {
+				sets = append(sets, fmt.Sprintf("%[1]s = COALESCE(s.%[1]s, v.%[1]s)", col))
+			}
+		}
 		_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE ci s SET %s,
 				attributes = s.attributes - (SELECT coalesce(array_agg(k), '{}') FROM jsonb_object_keys(s.attributes) k WHERE left(k, 1) <> '_') || $3::jsonb,
 				asset_id = NULLIF($4, '')::uuid,

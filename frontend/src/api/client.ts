@@ -1,5 +1,6 @@
 import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
+import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 import type { components } from './generated/schema';
 
 const API_BASE = '/api/v1';
@@ -311,6 +312,11 @@ export class ApiError extends Error {
   readonly conflictFields: string[];
   /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
   readonly field?: string;
+  /**
+   * problem is the parsed problem body as sent, for the extension members
+   * of one operation (e.g. stale_items of a refused metamodel publication).
+   */
+  readonly problem: Record<string, unknown>;
 
   constructor(
     status: number,
@@ -323,6 +329,7 @@ export class ApiError extends Error {
       traceId?: string;
       conflictFields?: string[];
       field?: string;
+      problem?: Record<string, unknown>;
     } = {},
   ) {
     super(message);
@@ -335,6 +342,7 @@ export class ApiError extends Error {
     this.traceId = options.traceId;
     this.conflictFields = options.conflictFields ?? [];
     this.field = options.field;
+    this.problem = options.problem ?? {};
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -408,6 +416,7 @@ export class ApiError extends Error {
       traceId,
       conflictFields,
       field,
+      problem: body as Record<string, unknown>,
     });
   }
 }
@@ -452,8 +461,84 @@ export function withScope(path: string, method = 'GET'): string {
   return next ? `${base}?${next}` : base;
 }
 
+/**
+ * DRAFT_PREFIXES are the metamodel resources whose writes a draft captures
+ * (MET-53, WP-720): every POST, PUT, PATCH and DELETE below them is in
+ * DraftCapableRoutes of the backend, except DRAFT_EXEMPT. Instance fields
+ * (/cis/{id}/field-definitions, MET-14) and /metamodel/* are no metamodel
+ * resource routes.
+ */
+export const DRAFT_PREFIXES = [
+  '/ci-types',
+  '/attribute-definitions',
+  '/ci-fields/global',
+  '/attribute-sets',
+  '/templates',
+  '/rules',
+  '/layouts',
+] as const;
+
+/**
+ * DRAFT_EXEMPT are the writes below DRAFT_PREFIXES that change no metamodel
+ * (DraftExemptRoutes): the template migration (job template.migrate) and
+ * the rebuild of an index (job attribute.index). The backend refuses
+ * ?draft there with 400 draft-unsupported.
+ */
+const DRAFT_EXEMPT = [
+  /^\/templates\/[^/]+\/migrations$/,
+  /^\/attribute-definitions\/[^/]+\/reindex$/,
+];
+
+const DRAFT_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** draftCapable reports whether a write of path can be captured in a draft. */
+export function draftCapable(path: string, method = 'GET'): boolean {
+  if (!DRAFT_METHODS.has(method.toUpperCase())) return false;
+  const base = path.split('?', 1)[0] ?? '';
+  if (DRAFT_EXEMPT.some((re) => re.test(base))) return false;
+  return DRAFT_PREFIXES.some((prefix) => base === prefix || base.startsWith(`${prefix}/`));
+}
+
+/**
+ * withDraft adds the active metamodel draft (stores/metamodelDraft) as
+ * `draft=<id>` to a capturable metamodel write, unless the caller set the
+ * parameter itself; without an active draft the path stays as it is.
+ */
+export function withDraft(path: string, method = 'GET'): string {
+  const { draft } = useMetamodelDraftStore.getState();
+  if (!draft || !draftCapable(path, method)) return path;
+  const [base, query = ''] = path.split('?', 2) as [string, string?];
+  const params = new URLSearchParams(query);
+  if (params.has('draft')) return path;
+  params.set('draft', draft.id);
+  return `${base}?${params.toString()}`;
+}
+
+/** apiURL is the URL of an API path with the scope and the active draft. */
+function apiURL(path: string, method?: string): string {
+  return `${API_BASE}${withDraft(withScope(path, method), method)}`;
+}
+
+/**
+ * noteDraftCapture counts a write the backend captured in a draft (202 on a
+ * request with ?draft): the item list of the draft is read again.
+ */
+function noteDraftCapture(url: string, res: Response) {
+  if (res.status !== 202) return;
+  const query = url.split('?', 2)[1];
+  if (query && new URLSearchParams(query).has('draft')) {
+    useMetamodelDraftStore.getState().bumpItemRevision();
+  }
+}
+
 export async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  return fetchURL<T>(`${API_BASE}${withScope(path, options?.method)}`, options);
+  const url = apiURL(path, options?.method);
+  const res = await fetchResponse(url, options);
+  noteDraftCapture(url, res);
+  if (res.status === 204) {
+    return undefined as T;
+  }
+  return res.json();
 }
 
 /** Versioned is a response body with the ETag the server sent along. */
@@ -468,7 +553,9 @@ export async function fetchAPIVersioned<T>(
   path: string,
   options?: RequestInit,
 ): Promise<Versioned<T>> {
-  const res = await fetchResponse(`${API_BASE}${withScope(path, options?.method)}`, options);
+  const url = apiURL(path, options?.method);
+  const res = await fetchResponse(url, options);
+  noteDraftCapture(url, res);
   const data = (res.status === 204 ? undefined : await res.json()) as T;
   return { data, etag: res.headers.get('ETag') ?? undefined };
 }

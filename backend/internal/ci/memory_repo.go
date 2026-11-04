@@ -242,6 +242,14 @@ func (r *MemoryRepository) Update(ctx context.Context, orgID, id string, req Upd
 	if req.ParentCIID != nil {
 		item.ParentCIID = *req.ParentCIID
 	}
+	// The owner (WP-280, WP-752): "" clears it. Without assets the
+	// mirroring of the asset's owner (DB-05) does not apply.
+	if req.OwnerUserID != nil {
+		item.OwnerUserID = *req.OwnerUserID
+	}
+	if req.OwnerTeamID != nil {
+		item.OwnerTeamID = *req.OwnerTeamID
+	}
 	if req.LocationID != nil {
 		// Without the location tree, site and room cannot be derived.
 		item.LocationID, item.SiteID, item.RoomID = *req.LocationID, "", ""

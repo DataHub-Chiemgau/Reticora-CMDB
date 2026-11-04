@@ -6,6 +6,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { ScopeSwitcher } from './components/ScopeSwitcher';
 import { NotificationCenter } from './components/NotificationCenter';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
+import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { Button } from './components/ui/Button';
@@ -83,6 +84,10 @@ const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'Maint
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
 const CITypeAdminPage = lazyPage(() => import('./pages/CITypeAdminPage'), 'CITypeAdminPage');
 const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
+const MetamodelDraftsPage = lazyPage(
+  () => import('./pages/MetamodelDraftsPage'),
+  'MetamodelDraftsPage',
+);
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
@@ -286,6 +291,8 @@ function App() {
       </header>
       {/* Expiring entitlements (ENT-07, WP-464). */}
       {isAuthenticated ? <EntitlementExpiryBanner /> : null}
+      {/* The active metamodel draft above every page (MET-53, WP-798). */}
+      {isAuthenticated ? <DraftBanner /> : null}
       {/* Focusable by script only: target of the skip link and of the command
           palette after a navigation (UI-10, WP-519). */}
       <main id="main-content" tabIndex={-1} className="p-6 outline-none">
@@ -334,6 +341,8 @@ function App() {
               <Route path="/ci-types" element={<CITypeAdminPage />} />
               <Route path="/ci-types/templates" element={<TemplatesPage />} />
               <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
+              <Route path="/ci-types/drafts" element={<MetamodelDraftsPage />} />
+              <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
               <Route path="/assignments" element={<AssignmentListPage />} />
               <Route path="/documents" element={<DocumentListPage />} />
               <Route path="/stocktake" element={<StocktakeListPage />} />

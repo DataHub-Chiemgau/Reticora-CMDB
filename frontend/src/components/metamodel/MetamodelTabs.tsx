@@ -3,8 +3,9 @@
  * WP-314) in the head of CITypeAdminPage and TemplatesPage: links with
  * aria-current, since components/ui has no tabs component. The menu entry
  * "CI types" stays active through its prefix match; there is no menu entry
- * of its own. "Templates" belongs to the module metamodel (E-105) and is
- * hidden while the module is off; an unknown module counts as on.
+ * of its own. "Templates" and "Drafts" (WP-799) belong to the module
+ * metamodel (E-105) and are hidden while the module is off; an unknown
+ * module counts as on.
  */
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -30,9 +31,14 @@ export function MetamodelTabs() {
         {t('templates.tabs.types')}
       </NavLink>
       {templatesOn ? (
-        <NavLink to="/ci-types/templates" className={tabClass}>
-          {t('templates.tabs.templates')}
-        </NavLink>
+        <>
+          <NavLink to="/ci-types/templates" className={tabClass}>
+            {t('templates.tabs.templates')}
+          </NavLink>
+          <NavLink to="/ci-types/drafts" className={tabClass}>
+            {t('templates.tabs.drafts')}
+          </NavLink>
+        </>
       ) : null}
     </nav>
   );

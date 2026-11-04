@@ -63,7 +63,9 @@ func TestOrderRepositoryClientScope(t *testing.T) {
 // TestOrderForeignClientUpdateAndApprove covers the writes on an existing
 // order (TEN-06, WP-537): a principal restricted to client 1 can neither
 // update a client-2 order nor submit, approve or reject it (not found), and
-// the client-2 row stays unchanged; its own order it updates and approves.
+// the client-2 row stays unchanged; its own order it updates, submits and
+// approves. Since WP-286 the supplier names existing suppliers, changes need
+// draft and the approver differs from the requester.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestOrderForeignClientUpdateAndApprove(t *testing.T) {
@@ -71,8 +73,11 @@ func TestOrderForeignClientUpdateAndApprove(t *testing.T) {
 	bg := context.Background()
 	approver := f.AppUser(t, f.OrgA, "approver")
 	repo := order.NewPGRepository(f.App)
-	own := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client1, Title: "order-c1", Status: "submitted", Supplier: "acme"}
-	foreign := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client2, Title: "order-c2", Status: "submitted", Supplier: "acme"}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO supplier (organization_id, name) VALUES ($1, 'acme'), ($1, 'evil')`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	own := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client1, Title: "order-c1", Status: "draft", Supplier: "acme", RequestedBy: f.User}
+	foreign := &order.Order{OrganizationID: f.OrgA, ClientID: f.Client2, Title: "order-c2", Status: "draft", Supplier: "acme", RequestedBy: f.User}
 	for _, o := range []*order.Order{own, foreign} {
 		if err := repo.Create(f.OrgCtx(f.OrgA), o); err != nil {
 			t.Fatalf("org-wide order %s: %v", o.Title, err)
@@ -81,13 +86,13 @@ func TestOrderForeignClientUpdateAndApprove(t *testing.T) {
 	type row struct{ client, title, status, supplier, approvedBy string }
 	stored := func(id string) row {
 		var r row
-		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), title, status, COALESCE(supplier, ''), COALESCE(approved_by::text, '') FROM internal_order WHERE id = $1`, id).
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(client_id::text, ''), title, status, COALESCE((SELECT s.name FROM supplier s WHERE s.id = supplier_id), ''), COALESCE(approved_by::text, '') FROM internal_order WHERE id = $1`, id).
 			Scan(&r.client, &r.title, &r.status, &r.supplier, &r.approvedBy); err != nil {
 			t.Fatalf("stored order %s: %v", id, err)
 		}
 		return r
 	}
-	want := row{client: f.Client2, title: "order-c2", status: "submitted", supplier: "acme"}
+	want := row{client: f.Client2, title: "order-c2", status: "draft", supplier: "acme"}
 	title, supplier, client1 := "hijacked", "evil", f.Client1
 	req := order.UpdateOrderRequest{Title: &title, Supplier: &supplier}
 
@@ -107,10 +112,13 @@ func TestOrderForeignClientUpdateAndApprove(t *testing.T) {
 		t.Errorf("client-2 order after foreign writes: %+v, want %+v", got, want)
 	}
 
-	// Positive control: the client-1 principal updates and approves its own
-	// order.
+	// Positive control: the client-1 principal updates, submits and
+	// approves its own order.
 	if o, err := repo.Update(ctx, f.OrgA, own.ID, req); err != nil || o.Title != title {
 		t.Fatalf("client-1 update of own order: %+v err=%v", o, err)
+	}
+	if o, err := repo.SetStatus(ctx, f.OrgA, own.ID, "submitted", f.User); err != nil || o.Status != "submitted" {
+		t.Fatalf("client-1 submission of own order: %+v err=%v", o, err)
 	}
 	if o, err := repo.SetStatus(ctx, f.OrgA, own.ID, "approved", approver); err != nil || o.Status != "approved" {
 		t.Fatalf("client-1 approval of own order: %+v err=%v", o, err)

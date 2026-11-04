@@ -1391,3 +1391,19 @@ CI-01;[B], Teilfelder [P2]/[P3];B;backend/internal/ci/owner_integration_test.go;
 TEN-05;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
 DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/ci/owner_integration_test.go;WP-280
 TLC-04;[B];B;backend/internal/ci/owner_integration_test.go;WP-280
+CI-07;[P2];B;backend/internal/ci/owner_query_integration_test.go;WP-752
+TKT-03;[O];B;backend/internal/ticket/provider_test.go;WP-293
+MGT-12;[P2];B;backend/internal/contract/reference_integration_test.go;WP-737
+DB-05;nicht geliefert, CH12/PRI-10;B;backend/internal/contract/reference_integration_test.go;WP-737
+MET-12;P2/G2;B;backend/internal/contract/reference_integration_test.go;WP-737
+MET-11;B/G1, Teil P2/G2;B;backend/internal/contract/reference_integration_test.go;WP-737
+UI-11;[P2];C;frontend/src/components/metamodel/DraftBanner.test.tsx;WP-798
+MET-53;[P2];C;frontend/src/api/client.test.ts;WP-798
+UI-11;[P2];C;frontend/src/pages/MetamodelDraftsPage.test.tsx;WP-799
+MET-53;[P2];C;frontend/src/pages/MetamodelDraftsPage.test.tsx;WP-799
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
+MGT-12;[P2];B;backend/internal/jobs/expiry_check_integration_test.go;WP-270
+STK-05;[P2];B;backend/internal/order/order_integration_test.go;WP-286
+BLK-02;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
+CI-08;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304
+OVR-03;[P2];C;backend/internal/ci/bulk_ops_integration_test.go;WP-304

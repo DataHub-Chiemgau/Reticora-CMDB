@@ -3,6 +3,7 @@
  * Mirrors the conventions of api/hooks.ts (query keys, invalidation).
  */
 import {
+  useInfiniteQuery,
   useMutation,
   useQueries,
   useQuery,
@@ -24,6 +25,8 @@ import {
   overrideApi,
   historyApi,
   impactApi,
+  isDraftItem,
+  metamodelDraftApi,
   savedViewApi,
   sensitiveFieldApi,
   templateApi,
@@ -37,6 +40,8 @@ import {
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
+  type MetamodelDraftItem,
+  type MetamodelTestReportPage,
   type SavedView,
   type TemplateClone,
   type TemplateCreate,
@@ -45,6 +50,7 @@ import {
 } from './cmdb';
 import { ApiError } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
+import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
 /** Query options a caller may set; the CI dialog loads only while open, uncached (MET-04). */
 interface QueryControl {
@@ -329,9 +335,148 @@ export function useReplaceCITypeAttributeSets() {
       attributeSetApi.replaceOfType(ciTypeId, sets),
     // The answer is the new list; the schema of the type and its subtypes
     // changes (schema_version).
+    // A write captured in a draft (202) answers the item: the productive
+    // list stays (WP-798).
     onSuccess: (saved, { ciTypeId }) => {
-      qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
+      if (!isDraftItem(saved)) qc.setQueryData(['ci-types', ciTypeId, 'attribute-sets'], saved);
       invalidateAttributes(qc);
+    },
+  });
+}
+
+// ─── Metamodel drafts (MET-53, WP-798) ───────────────────────────────────────
+
+const DRAFTS_KEY = ['metamodel-drafts'];
+
+/** One draft (GET /metamodel/drafts/{id}); a 404 is a vanished draft, no retry. */
+export function useMetamodelDraft(id: string | undefined, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, id],
+    queryFn: () => metamodelDraftApi.get(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/**
+ * The items of a draft, all pages; itemRevision (stores/metamodelDraft) is
+ * part of the key, so every captured write reads the list again.
+ */
+export function useMetamodelDraftItems(id: string | undefined, options: QueryControl = {}) {
+  const itemRevision = useMetamodelDraftStore((s) => s.itemRevision);
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, id, 'items', itemRevision],
+    queryFn: () => metamodelDraftApi.items(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+const NO_ITEMS: MetamodelDraftItem[] = [];
+
+/**
+ * The items of the active draft for the marks in the editors (E-113); empty
+ * without an active draft.
+ */
+export function useActiveDraftItems(): MetamodelDraftItem[] {
+  const draft = useMetamodelDraftStore((s) => s.draft);
+  return useMetamodelDraftItems(draft?.id).data ?? NO_ITEMS;
+}
+
+/** The drafts one can switch to: status draft and tested, newest first. */
+export function useOpenMetamodelDrafts(options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, 'open'],
+    queryFn: async () => {
+      const [open, tested] = await Promise.all([
+        metamodelDraftApi.list('draft'),
+        metamodelDraftApi.list('tested'),
+      ]);
+      return [...open, ...tested].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    },
+    ...options,
+    retry: false,
+  });
+}
+
+/** POST /metamodel/drafts with a name. */
+export function useCreateMetamodelDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => metamodelDraftApi.create(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
+  });
+}
+
+/** Every draft of every status (WP-799); the page filters by status. */
+export function useMetamodelDrafts(options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, 'all'],
+    queryFn: () => metamodelDraftApi.listAll(),
+    ...options,
+    retry: false,
+  });
+}
+
+/** DELETE /metamodel/drafts/{id}: the draft becomes discarded. */
+export function useDiscardMetamodelDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version?: number }) =>
+      metamodelDraftApi.discard(id, version),
+    onSettled: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
+  });
+}
+
+/** DELETE /metamodel/drafts/{id}/items/{item_id} with If-Match of the draft version. */
+export function useRemoveMetamodelDraftItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, itemId, version }: { id: string; itemId: string; version: number }) =>
+      metamodelDraftApi.removeItem(id, itemId, version),
+    onSettled: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
+  });
+}
+
+/** The current state of the target of an item (patch list, WP-799). */
+export function useDraftItemTarget(item: MetamodelDraftItem, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...DRAFTS_KEY, 'target', item.kind, item.target_id, item.target_key],
+    queryFn: async () => (await metamodelDraftApi.target(item)) ?? null,
+    ...options,
+    retry: false,
+  });
+}
+
+/** POST /metamodel/drafts/{id}/test: 202 with the job metamodel.test. */
+export function useTestMetamodelDraft() {
+  return useMutation({ mutationFn: (id: string) => metamodelDraftApi.test(id) });
+}
+
+/** The test report of a draft, page by page over next_cursor (metamodel:publish). */
+export function useMetamodelDraftTestReport(id: string, options: QueryControl = {}) {
+  return useInfiniteQuery({
+    queryKey: [...DRAFTS_KEY, id, 'test'],
+    queryFn: ({ pageParam }) => metamodelDraftApi.testReport(id, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: MetamodelTestReportPage) => last.next_cursor || undefined,
+    ...options,
+    retry: false,
+  });
+}
+
+/** POST /metamodel/drafts/{id}/publish: the metamodel changes, every editor reads again. */
+export function usePublishMetamodelDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => metamodelDraftApi.publish(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: DRAFTS_KEY }),
+    onSuccess: () => {
+      invalidateAttributes(qc);
+      qc.invalidateQueries({ queryKey: TEMPLATES_KEY });
+      qc.invalidateQueries({ queryKey: ATTRIBUTE_SETS_KEY });
     },
   });
 }

@@ -216,6 +216,34 @@ var Templates = map[string]map[string]render{
 					") was due at " + str(d, "due_at") + " and has passed."}
 		},
 	},
+	events.ContractExpiring: {
+		// A reached stage of a contract (WP-270): number, due date, days
+		// left, end date.
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Vertrag läuft ab: " + str(d, "number"),
+				"Der Vertrag " + str(d, "number") + " endet am " + str(d, "expires_at") + ". Stichtag für die Kündigung ist der " +
+					str(d, "due_date") + ", noch " + fmt.Sprint(d["days_left"]) + " Tage."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Contract expiring: " + str(d, "number"),
+				"Contract " + str(d, "number") + " ends on " + str(d, "expires_at") + ". The notice deadline is " +
+					str(d, "due_date") + ", " + fmt.Sprint(d["days_left"]) + " days left."}
+		},
+	},
+	events.AssetWarrantyExpiring: {
+		// A reached stage of an asset warranty (WP-270): name, inventory
+		// number, due date, days left.
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Garantie läuft ab: " + str(d, "name"),
+				"Die Garantie des Assets " + str(d, "name") + " (" + str(d, "inventory_no") + ") endet am " + str(d, "due_date") +
+					", noch " + fmt.Sprint(d["days_left"]) + " Tage."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Warranty expiring: " + str(d, "name"),
+				"The warranty of asset " + str(d, "name") + " (" + str(d, "inventory_no") + ") ends on " + str(d, "due_date") +
+					", " + fmt.Sprint(d["days_left"]) + " days left."}
+		},
+	},
 	events.APIKeyCreatorDeactivated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Service-Account-Keys rotieren: Ersteller deaktiviert",

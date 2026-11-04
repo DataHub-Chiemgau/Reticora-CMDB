@@ -28,16 +28,18 @@ const (
 // to (WP-267). Each entry returns the EXISTS predicate that a target with
 // the id expression id is visible under the transaction's tenant scope: the
 // policies of the target tables filter the subqueries. Every value must also
-// stand in doc_link_entity_type_check (migration 000217), and
+// stand in doc_link_entity_type_check (migrations 000217, 000238), and
 // derive_document_link_scope derives client, site and team from the target:
 //
 //   - ci, asset, ticket and location are checked directly;
 //   - assignment through its asset and CI, like assignmentVisible in
 //     assignment/pg_repository.go (assignment has no scope columns);
 //   - disposal_record directly (its own client and site since 000145);
+//   - contract directly (its own client; org-wide with client_id NULL,
+//     WP-737);
 //   - stocktake on existence only (org-wide).
 //
-// contract (WP-737) and stock_movement (WP-744, WP-276) follow.
+// stock_movement (WP-744, WP-276) follows.
 var linkTargets = map[string]func(id string) string{
 	"ci": func(id string) string {
 		return "EXISTS (SELECT 1 FROM ci WHERE ci.id = " + id + ")"
@@ -58,6 +60,9 @@ var linkTargets = map[string]func(id string) string{
 	},
 	"disposal_record": func(id string) string {
 		return "EXISTS (SELECT 1 FROM disposal_record WHERE disposal_record.id = " + id + ")"
+	},
+	"contract": func(id string) string {
+		return "EXISTS (SELECT 1 FROM contract WHERE contract.id = " + id + ")"
 	},
 	"stocktake": func(id string) string {
 		return "EXISTS (SELECT 1 FROM stocktake WHERE stocktake.id = " + id + ")"

@@ -481,7 +481,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			if !page.Cursor.Matches(sortColumn, sortDirection) {
 				return fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
 			}
-			listWhere += " AND " + api.KeysetClause(sortColumn, sortColumnCasts[sortColumn], sortDirection, argPos)
+			listWhere += " AND " + api.KeysetClause(sortExpr(sortColumn), sortColumnCasts[sortColumn], sortDirection, argPos)
 			listArgs = append(listArgs, page.Cursor.Value, page.Cursor.ID)
 			argPos += 2
 		}
@@ -499,15 +499,15 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint)",
-				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, ci.id %s LIMIT (SELECT $%d::bigint)",
+				ciSelectColumns, listWhere, sortExpr(sortColumn), strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			listQuery = fmt.Sprintf(
-				"SELECT %s FROM ci WHERE %s ORDER BY ci.%s %s, ci.id %s LIMIT (SELECT $%d::bigint) OFFSET $%d",
-				ciSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
+				"SELECT %s FROM ci WHERE %s ORDER BY %s %s, ci.id %s LIMIT (SELECT $%d::bigint) OFFSET $%d",
+				ciSelectColumns, listWhere, sortExpr(sortColumn), strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
 		}

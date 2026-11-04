@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"sort"
 	"strings"
@@ -59,6 +60,42 @@ type Repository interface {
 	// RecordOrigin writes the audit entry ticket.create of a ticket created
 	// for origin as the last write of the context transaction (WP-766).
 	RecordOrigin(ctx context.Context, t *Ticket, origin Target) error
+
+	// Foreign references (TKT-03, WP-293): a reference (provider, ref) is
+	// unique per organization; a duplicate is *api.ConflictError on
+	// external_ref. The lookups read under the caller's scope; a reference
+	// that is unknown, of another organization or outside the scope is
+	// ErrNotFound.
+
+	// GetByExternalRef returns the ticket with the reference.
+	GetByExternalRef(ctx context.Context, orgID, provider, ref string) (*Ticket, error)
+	// SetExternalRef sets the reference of ticket ticketID; empty provider
+	// and ref remove it.
+	SetExternalRef(ctx context.Context, orgID, ticketID, provider, ref string) error
+	// GetCommentByExternalRef returns the comment with the reference.
+	GetCommentByExternalRef(ctx context.Context, orgID, provider, ref string) (*Comment, error)
+	// SetCommentExternalRef sets the reference of comment commentID; empty
+	// provider and ref remove it.
+	SetCommentExternalRef(ctx context.Context, orgID, commentID, provider, ref string) error
+}
+
+// Errors of a foreign reference: both parts are set together (422, as
+// ticket_external_ref_pair_check), and a reference is taken once per
+// organization (409, as uq_ticket_org_external_ref and
+// uq_ticket_comment_org_external_ref).
+var (
+	errExternalRefPair = &api.FieldError{Field: "external_ref", Status: http.StatusUnprocessableEntity,
+		Message: "external_provider and external_ref are set together"}
+	errExternalRefTaken = &api.ConflictError{Field: "external_ref", Message: "the value is already taken"}
+)
+
+// checkExternalRefPair validates that provider and ref are both set or both
+// empty.
+func checkExternalRefPair(provider, ref string) error {
+	if (provider == "") != (ref == "") {
+		return errExternalRefPair
+	}
+	return nil
 }
 
 // ValidLinkEntityType reports whether entityType is an entity type of a
@@ -234,8 +271,14 @@ func (r *MemoryRepository) Create(_ context.Context, t *Ticket) error {
 	if err := CheckInitialStatus(t.Status); err != nil {
 		return err
 	}
+	if err := checkExternalRefPair(t.ExternalProvider, t.ExternalRef); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if t.ExternalRef != "" && r.ticketByRef(t.OrganizationID, t.ExternalProvider, t.ExternalRef) != nil {
+		return errExternalRefTaken
+	}
 
 	t.Tags = NormalizeTags(t.Tags)
 	r.nextID++
@@ -429,6 +472,9 @@ func (r *MemoryRepository) DeleteLink(_ context.Context, orgID, ticketID, linkID
 }
 
 func (r *MemoryRepository) AddComment(_ context.Context, c *Comment) error {
+	if err := checkExternalRefPair(c.ExternalProvider, c.ExternalRef); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -436,6 +482,9 @@ func (r *MemoryRepository) AddComment(_ context.Context, c *Comment) error {
 	t, ok := r.tickets[c.TicketID]
 	if !ok || t.OrganizationID != c.OrganizationID {
 		return ErrNotFound
+	}
+	if c.ExternalRef != "" && r.commentByRef(c.OrganizationID, c.ExternalProvider, c.ExternalRef) != nil {
+		return errExternalRefTaken
 	}
 
 	if c.AuthorType == "" {
@@ -477,6 +526,13 @@ func (r *MemoryRepository) ListComments(_ context.Context, orgID, ticketID strin
 // time, and when fn fails the tickets, comments and links it wrote are
 // removed again, so a ticket and its links appear together or not at all.
 func (r *MemoryRepository) RunInTx(ctx context.Context, _ string, fn func(ctx context.Context) error) error {
+	// A nested call joins the running one, as the PostgreSQL repository
+	// joins the context transaction (ticket.Provider around the service,
+	// WP-293).
+	if ctx.Value(memoryTxKey{}) == r {
+		return fn(ctx)
+	}
+	ctx = context.WithValue(ctx, memoryTxKey{}, r)
 	r.txMu.Lock()
 	defer r.txMu.Unlock()
 	r.mu.RLock()
@@ -490,6 +546,9 @@ func (r *MemoryRepository) RunInTx(ctx context.Context, _ string, fn func(ctx co
 	}
 	return nil
 }
+
+// memoryTxKey marks the context of a running MemoryRepository.RunInTx.
+type memoryTxKey struct{}
 
 // LockOpenTicket implements Repository (RunInTx serializes the callers).
 func (r *MemoryRepository) LockOpenTicket(_ context.Context, orgID string, target Target) (*LinkedTicket, error) {
@@ -536,5 +595,94 @@ func (r *MemoryRepository) LinkedTickets(_ context.Context, orgID, entityType st
 
 // RecordOrigin implements Repository; the memory profile has no audit log.
 func (r *MemoryRepository) RecordOrigin(context.Context, *Ticket, Target) error {
+	return nil
+}
+
+// ticketByRef returns the ticket of the organization with the reference or
+// nil; the caller holds the lock.
+func (r *MemoryRepository) ticketByRef(orgID, provider, ref string) *Ticket {
+	for _, t := range r.tickets {
+		if t.OrganizationID == orgID && t.ExternalProvider == provider && t.ExternalRef == ref {
+			return t
+		}
+	}
+	return nil
+}
+
+// commentByRef returns the comment of the organization with the reference
+// or nil; the caller holds the lock.
+func (r *MemoryRepository) commentByRef(orgID, provider, ref string) *Comment {
+	for _, c := range r.comments {
+		if c.OrganizationID == orgID && c.ExternalProvider == provider && c.ExternalRef == ref {
+			return c
+		}
+	}
+	return nil
+}
+
+// GetByExternalRef implements Repository.
+func (r *MemoryRepository) GetByExternalRef(_ context.Context, orgID, provider, ref string) (*Ticket, error) {
+	if provider == "" || ref == "" {
+		return nil, ErrNotFound
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	t := r.ticketByRef(orgID, provider, ref)
+	if t == nil {
+		return nil, ErrNotFound
+	}
+	return t, nil
+}
+
+// SetExternalRef implements Repository.
+func (r *MemoryRepository) SetExternalRef(_ context.Context, orgID, ticketID, provider, ref string) error {
+	if err := checkExternalRefPair(provider, ref); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, err := r.ticketOf(orgID, ticketID)
+	if err != nil {
+		return err
+	}
+	if other := r.ticketByRef(orgID, provider, ref); ref != "" && other != nil && other.ID != t.ID {
+		return errExternalRefTaken
+	}
+	t.ExternalProvider, t.ExternalRef = provider, ref
+	t.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+// GetCommentByExternalRef implements Repository.
+func (r *MemoryRepository) GetCommentByExternalRef(_ context.Context, orgID, provider, ref string) (*Comment, error) {
+	if provider == "" || ref == "" {
+		return nil, ErrNotFound
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c := r.commentByRef(orgID, provider, ref)
+	if c == nil {
+		return nil, ErrNotFound
+	}
+	out := *c
+	return &out, nil
+}
+
+// SetCommentExternalRef implements Repository.
+func (r *MemoryRepository) SetCommentExternalRef(_ context.Context, orgID, commentID, provider, ref string) error {
+	if err := checkExternalRefPair(provider, ref); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.comments[commentID]
+	if !ok || c.OrganizationID != orgID {
+		return ErrNotFound
+	}
+	if other := r.commentByRef(orgID, provider, ref); ref != "" && other != nil && other.ID != c.ID {
+		return errExternalRefTaken
+	}
+	c.ExternalProvider, c.ExternalRef = provider, ref
+	c.UpdatedAt = time.Now().UTC()
 	return nil
 }

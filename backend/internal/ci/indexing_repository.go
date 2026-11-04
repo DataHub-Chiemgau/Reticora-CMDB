@@ -76,12 +76,16 @@ func (r *indexingRepository) CreateMany(ctx context.Context, orgID string, items
 	return res, nil
 }
 
+// Update forwards the update and indexes the CI again, after the commit
+// of a context transaction (K20): a bulk archive writes status and tag in
+// one (WP-304), and a rollback indexes nothing.
 func (r *indexingRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // signature of Repository
 	item, err := r.Repository.Update(ctx, orgID, id, req)
 	if err != nil {
 		return nil, err
 	}
-	r.index(ctx, item)
+	indexed := snapshot(item)
+	database.AfterCommit(ctx, func(ctx context.Context) { r.index(ctx, indexed) })
 	return item, nil
 }
 

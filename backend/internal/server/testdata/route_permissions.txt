@@ -536,7 +536,10 @@ POST /api/v1/notifications/read-all authenticated
 POST /api/v1/notifications/{id}/read authenticated
 POST /api/v1/orders order:write
 POST /api/v1/orders/{id}/approve order:approve
+POST /api/v1/orders/{id}/cancel order:write
+POST /api/v1/orders/{id}/close order:write
 POST /api/v1/orders/{id}/items order:write
+POST /api/v1/orders/{id}/place order:write
 POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
 POST /api/v1/privacy/erasure user:manage

@@ -425,7 +425,9 @@ type astField struct{ expr, kind string }
 // astFields are the whitelisted fields per entity kind; %s is the table.
 // The asset fields asset_tag, purchase_cost and warranty_end are the
 // deprecated aliases of inventory_no, purchase_price and warranty_until
-// (AST-01, WP-738) and read the new columns.
+// (AST-01, WP-738) and read the new columns. The owner of a CI
+// (owner_user_id, owner_team_id; WP-752) is the basis of "my devices"
+// (WP-307); has_owner of the spec stays the assignment of an asset.
 var astFields = map[string]map[string]astField{
 	"ci": {
 		"name": {"%s.name", kindText}, "status": {"%s.status", kindText}, "hostname": {"%s.hostname", kindText},
@@ -436,6 +438,7 @@ var astFields = map[string]map[string]astField{
 		"discovery_source": {"%s.discovery_source", kindText}, "health": {"%s.health", kindText},
 		"ci_type":   {"(SELECT COALESCE(t.key, t.name) FROM ci_type t WHERE t.id = %s.ci_type_id)", kindText},
 		"client_id": {"%s.client_id", kindUUID}, "site_id": {"%s.site_id", kindUUID}, "location_id": {"%s.location_id", kindUUID},
+		"owner_user_id": {"%s.owner_user_id", kindUUID}, "owner_team_id": {"%s.owner_team_id", kindUUID},
 		"is_manual": {"%s.is_manual", kindBool}, "created_at": {"%s.created_at", kindTime},
 		"updated_at": {"%s.updated_at", kindTime}, "last_seen_at": {"%s.last_seen_at", kindTime},
 	},

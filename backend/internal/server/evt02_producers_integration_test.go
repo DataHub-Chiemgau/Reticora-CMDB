@@ -243,6 +243,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
 		certCollector                      string
+		expiringContract, expiringAsset    string
 		creator                            string
 		exportWorker                       = export.NewJobWorker(e.Repos.ExportJobs, e.Repos.CI, blobs)
 		exportJobs                         = export.NewPGJobRepository(f.App)
@@ -665,6 +666,36 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				return certCollector
 			},
 			data: sameID("collector_id")},
+		// The expiry.check run (WP-270) reports a contract and a warranty
+		// five days ahead at the stage of 7 days.
+		{typ: events.ContractExpiring,
+			setup: func(t *testing.T) {
+				expiringContract = scalar(t, `INSERT INTO contract (organization_id, number, end_date, currency)
+					VALUES ($1, 'evt02-contract', (now() + interval '5 days')::date, 'EUR') RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := jobs.NewExpiryCheck(f.App).Run(bg)
+				failed(t, "expiry check", err, refused)
+				if refused {
+					unchanged(t, "notices sent", noticesSent(t, events.ContractExpiring, expiringContract), "0")
+				}
+				return expiringContract
+			},
+			data: sameID("id")},
+		{typ: events.AssetWarrantyExpiring,
+			setup: func(t *testing.T) {
+				expiringAsset = scalar(t, `INSERT INTO asset (organization_id, inventory_no, name, warranty_until)
+					VALUES ($1, 'evt02-warranty', 'evt02-warranty', (now() + interval '5 days')::date) RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := jobs.NewExpiryCheck(f.App).Run(bg)
+				failed(t, "expiry check", err, refused)
+				if refused {
+					unchanged(t, "notices sent", noticesSent(t, events.AssetWarrantyExpiring, expiringAsset), "0")
+				}
+				return expiringAsset
+			},
+			data: sameID("id")},
 		{typ: events.APIKeyCreatorDeactivated,
 			setup: func(t *testing.T) {
 				creator = f.AppUser(t, f.OrgA, "evt02-creator")
@@ -1024,6 +1055,13 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 			for _, allowed := range rule.([]any) {
 				if allowed == v {
 					found = true
+				}
+				// A number of the instance (json.Number) against a
+				// number of the schema (float64), e.g. stage of WP-270.
+				if n, isNum := v.(json.Number); isNum {
+					if f, err := n.Float64(); err == nil && allowed == any(f) {
+						found = true
+					}
 				}
 			}
 			if !found {

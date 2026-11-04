@@ -399,6 +399,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			}
 			systemJobs = append(systemJobs, slaCheck.Schedule())
 		}
+		// Contract and warranty expiry: daily each reached stage once as
+		// contract.expiring or asset.warranty_expiring (NTF-05 [P2],
+		// MGT-12, WP-270); module inventory, assets_basic only.
+		if d.modules.Enabled(server.ModuleInventory) {
+			expiry := jobs.NewExpiryCheck(pool)
+			expiry.Licensed = func(ctx context.Context, orgID string) (bool, error) {
+				_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureAssetsBasic)
+				return status == entitlement.StatusActive, serr
+			}
+			systemJobs = append(systemJobs, expiry.Schedule())
+		}
 		// Ad-hoc discovery jobs without a report from their collector within
 		// discovery.JobDeadline fail with cause timeout (JOB-01, F-358).
 		if reaper := discovery.NewJobReaper(pool, d.repos.Discovery); reaper != nil {

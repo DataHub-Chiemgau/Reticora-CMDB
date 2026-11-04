@@ -11,6 +11,8 @@ import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
+import { DRAFT_ITEM_KINDS, DRAFT_OPS } from '../stores/metamodelDraft';
+import { DRAFT_STATUSES } from '../pages/MetamodelDraftsPage';
 import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
@@ -164,6 +166,17 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['templates.diff.changes', DIFF_CHANGES],
   ['jobs.statuses', JOB_STATUSES],
   ['citypes.indexStatus', ['none']],
+  // WP-798: kinds and operations of metamodel draft items and the draft states.
+  ['metamodelDrafts.itemKinds', DRAFT_ITEM_KINDS],
+  ['metamodelDrafts.itemKinds', specEnum('MetamodelDraftItem', 'kind')],
+  ['metamodelDrafts.ops', DRAFT_OPS],
+  ['metamodelDrafts.ops', specEnum('MetamodelDraftItem', 'op')],
+  ['metamodelDrafts.statuses', DRAFT_STATUSES],
+  ['metamodelDrafts.statuses', specEnum('MetamodelDraft', 'status')],
+  // WP-799: the job kind of the draft test (nested, JobCenterPage) and the
+  // reasons of stale items of a refused publication (metamodel.StaleItem).
+  ['jobs.kinds.metamodel', ['test']],
+  ['metamodelDrafts.page.staleReasons', ['changed', 'missing']],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
@@ -200,7 +213,9 @@ describe('i18n catalog', () => {
       'approved',
       'rejected',
       'ordered',
+      'partially_received',
       'received',
+      'closed',
       'cancelled',
     ]);
     expect(specEnum('KeyItem', 'status')).toEqual(['available', 'issued', 'lost', 'retired']);
@@ -259,6 +274,12 @@ describe('i18n catalog', () => {
     expect(Object.keys(metamodelSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
   });
 
+  it('offers exactly the draft item kinds, operations and states of the OpenAPI types (WP-798)', () => {
+    expect([...DRAFT_ITEM_KINDS]).toEqual(specEnum('MetamodelDraftItem', 'kind'));
+    expect([...DRAFT_OPS]).toEqual(specEnum('MetamodelDraftItem', 'op'));
+    expect([...DRAFT_STATUSES]).toEqual(specEnum('MetamodelDraft', 'status'));
+  });
+
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
@@ -283,6 +304,8 @@ describe('i18n catalog', () => {
     '../pages/CITypeAdminPage.tsx',
     '../pages/TopologyPage.tsx',
     '../pages/TemplatesPage.tsx',
+    // WP-799: the work area of the metamodel drafts.
+    '../pages/MetamodelDraftsPage.tsx',
     ...Object.keys(metamodelSources),
   ])('%s has no literal option labels', (file) => {
     const source = pageSources[file] ?? metamodelSources[file];

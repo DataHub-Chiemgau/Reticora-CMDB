@@ -40,14 +40,14 @@ type AttachmentReader interface {
 type Handler struct {
 	svc  *Service
 	repo Repository
-	sla  SLAHooks
 	docs AttachmentReader
 }
 
 // NewHandler creates a new ticket handler; tickets and comments are created
-// through svc only (WP-766), reads and changes go to its repository.
+// through svc only (WP-766), ticket changes too (WP-293); reads go to its
+// repository.
 func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc, repo: svc.repo, sla: svc.sla}
+	return &Handler{svc: svc, repo: svc.repo}
 }
 
 // WithDocuments gives the handler the document repository the attachments
@@ -369,59 +369,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !h.checkUpdate(w, r, t.OrganizationID, id, &req) {
 		return
 	}
-	reapply, ok := h.slaReapplyNeeded(w, r, t.OrganizationID, id, &req)
-	if !ok {
-		return
-	}
 
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, &req)
+	// The service checks the transition and keeps the SLA clocks (WP-293).
+	item, err := h.svc.Update(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeTicketError(w, r, err)
 		return
 	}
-	// SLA hooks: new→open is no first response; a change to open resets
-	// the resolution clock of a resolved ticket (reopen, WP-769); a new
-	// priority or object chooses the SLA again (WP-769).
-	if h.sla != nil {
-		now := time.Now().UTC()
-		if req.Status != nil {
-			switch *req.Status {
-			case "in_progress", "waiting":
-				_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
-			case "resolved", "closed":
-				_ = h.sla.MarkFirstResponse(r.Context(), t.OrganizationID, id, now)
-				_ = h.sla.MarkResolved(r.Context(), t.OrganizationID, id, now)
-			case StatusOpen:
-				if hookErr := h.sla.MarkReopened(r.Context(), t.OrganizationID, id, now); hookErr != nil {
-					slog.WarnContext(r.Context(), "ticket reopen: reset sla", "ticket_id", id, "error", hookErr)
-				}
-			}
-		}
-		if reapply {
-			if hookErr := h.sla.ReapplyForTicket(r.Context(), t.OrganizationID, item); hookErr != nil {
-				slog.WarnContext(r.Context(), "ticket update: choose sla again", "ticket_id", id, "error", hookErr)
-			}
-		}
-	}
-
 	writeTicket(w, r, http.StatusOK, item)
-}
-
-// slaReapplyNeeded reports whether the PATCH changes the priority or the
-// object (related_ci_id, related_asset_id) of the ticket, so that its SLA
-// is chosen again after the update (WP-769). Only then it reads the
-// ticket; a ticket outside the scope is 404.
-func (h *Handler) slaReapplyNeeded(w http.ResponseWriter, r *http.Request, orgID, id string, req *UpdateRequest) (reapply, ok bool) {
-	if h.sla == nil || req.Priority == nil && req.RelatedCIID == nil && req.RelatedAssetID == nil {
-		return false, true
-	}
-	current, err := h.repo.GetByID(r.Context(), orgID, id)
-	if err != nil {
-		writeTicketError(w, r, err)
-		return false, false
-	}
-	changes := req.changes(current)
-	return changes["priority"] || changes["related_ci_id"] || changes["related_asset_id"], true
 }
 
 // checkUpdate checks a PATCH against the field permissions of the kind

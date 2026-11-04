@@ -1220,7 +1220,9 @@
       "approved": "Genehmigt",
       "rejected": "Abgelehnt",
       "ordered": "Bestellt",
+      "partially_received": "Teilweise geliefert",
       "received": "Geliefert",
+      "closed": "Abgeschlossen",
       "cancelled": "Storniert"
     }
   },
@@ -1953,6 +1955,9 @@
     "kinds": {
       "attribute": {
         "index": "Attributindex"
+      },
+      "metamodel": {
+        "test": "Metamodell-Test"
       }
     }
   },
@@ -2055,11 +2060,158 @@
     "de-DE": "Deutsch",
     "en-US": "English"
   },
+  "metamodelDrafts": {
+    "bannerLabel": "Metamodell-Draft",
+    "directHint": "Änderungen am Metamodell wirken sofort produktiv.",
+    "workInDraft": "In Draft arbeiten",
+    "activeDraft": "Draft „{{name}}“ aktiv",
+    "itemCount": "Änderungen: {{count}}",
+    "switch": "Wechseln oder neu",
+    "leave": "Draft verlassen",
+    "notProductive": "Änderungen am Metamodell werden im Draft erfasst und wirken erst nach dem Publizieren.",
+    "showItems": "Ausstehende Änderungen ({{count}})",
+    "itemsLabel": "Ausstehende Änderungen",
+    "itemLine": "{{kind}} · {{op}} · {{target}}",
+    "noTarget": "neu",
+    "captured": "Im Draft {{name}} erfasst, noch nicht produktiv",
+    "chooserTitle": "Metamodell-Draft wählen",
+    "newName": "Name des neuen Drafts",
+    "create": "Draft anlegen",
+    "createFailed": "Der Draft konnte nicht angelegt werden.",
+    "openDrafts": "Offene Drafts",
+    "noOpenDrafts": "Keine weiteren offenen Drafts.",
+    "switchTo": "Zu Draft {{name}} wechseln",
+    "switchAction": "Wechseln",
+    "newParts": "Neu im Draft",
+    "cloneOf": "Klon von {{name}}",
+    "newVersion": "Neue Version",
+    "statuses": {
+      "draft": "Entwurf",
+      "tested": "Getestet",
+      "published": "Publiziert",
+      "discarded": "Verworfen"
+    },
+    "itemKinds": {
+      "ci_type": "CI-Typ",
+      "ci_type_field": "Typfeld",
+      "global_field": "Globales Feld",
+      "attribute_definition": "Attribut",
+      "attribute_set": "Attribut-Set",
+      "template": "Template",
+      "template_version": "Template-Version",
+      "rule": "Regel",
+      "layout": "Layout"
+    },
+    "ops": {
+      "create": "anlegen",
+      "update": "ändern",
+      "upsert": "anlegen oder ändern",
+      "delete": "löschen",
+      "clone": "klonen",
+      "activate": "aktivieren",
+      "deactivate": "deaktivieren",
+      "assign": "zuordnen",
+      "publish": "publizieren"
+    },
+    "marker": {
+      "created": "im Draft: neu",
+      "updated": "im Draft: geändert",
+      "deleted": "im Draft: gelöscht"
+    },
+    "open": "Öffnen",
+    "page": {
+      "subtitle": "Drafts sammeln Metamodelländerungen, die erst nach Test und Publizieren produktiv werden.",
+      "filterStatus": "Status",
+      "empty": "Keine Drafts.",
+      "listLabel": "Metamodell-Drafts",
+      "isActive": "aktiver Draft",
+      "meta": "Änderungen: {{count}} · angelegt {{created}}",
+      "chooseActive": "Als aktiven Draft wählen",
+      "chooseActiveAction": "Draft {{name}} als aktiven Draft wählen",
+      "discard": "Verwerfen",
+      "discardAction": "Draft {{name}} verwerfen",
+      "discardTitle": "Draft „{{name}}“ verwerfen?",
+      "discardText": "Der Draft wird als verworfen markiert und kann danach nicht mehr geändert oder publiziert werden.",
+      "discardFailed": "Der Draft konnte nicht verworfen werden.",
+      "notFound": "Diesen Draft gibt es nicht.",
+      "back": "Zurück zur Draft-Liste",
+      "detailMeta": "Änderungen: {{count}} · Version {{version}} · angelegt {{created}}",
+      "publishedAt": "Publiziert {{at}}",
+      "readOnly": "Dieser Draft ist abgeschlossen und schreibgeschützt.",
+      "needsPublish": "Testen und Publizieren erfordern das Recht metamodel:publish.",
+      "test": "Testen",
+      "publish": "Publizieren",
+      "reloaded": "Der Draft wurde zwischenzeitlich geändert und neu geladen. Bitte prüfen Sie die Änderungen erneut.",
+      "removeFailed": "Die Änderung konnte nicht entfernt werden.",
+      "publishFailed": "Der Draft konnte nicht publiziert werden.",
+      "testTitle": "Draft „{{name}}“ testen",
+      "testText": "Der Test wendet die Änderungen probeweise an und prüft alle betroffenen CIs der Organisation. Er läuft als Job im Hintergrund.",
+      "testConfirm": "Test starten",
+      "publishTitle": "Draft „{{name}}“ publizieren",
+      "publishText": "Die folgenden Änderungen werden in einer Transaktion produktiv:",
+      "publishConfirm": "Jetzt publizieren",
+      "summaryLabel": "Änderungen je Art",
+      "summaryLine": "{{kind}}: {{count}}",
+      "publishedTitle": "Der Draft wurde publiziert.",
+      "schemaVersion": "{{type}}: Schemaversion {{version}}",
+      "noTypes": "Kein CI-Typ hat eine neue Schemaversion.",
+      "staleTitle": "Veraltete Änderungen: Ihre Ziele wurden seit der Erfassung geändert oder gelöscht. Es wurde nichts publiziert.",
+      "staleLine": "{{kind}} · {{op}} · {{name}} ({{reason}})",
+      "staleReasons": {
+        "changed": "geändert",
+        "missing": "nicht mehr vorhanden"
+      },
+      "removeItem": "Entfernen",
+      "removeItemAction": "Änderung {{name}} aus dem Draft entfernen",
+      "noItems": "Der Draft enthält keine Änderungen.",
+      "patchList": "Änderungen",
+      "groupTitle": "{{kind}} ({{count}})",
+      "targetMissing": "Das Ziel existiert nicht mehr.",
+      "targetUnreadable": "Der aktuelle Stand des Ziels ist nicht lesbar.",
+      "diffCaption": "{{op}}: {{name}}",
+      "testSection": "Test",
+      "testFailed": "Der Test konnte nicht gestartet werden.",
+      "testRunning": "Der Test läuft ({{progress}} %).",
+      "testJob": "Test-Job: {{status}}",
+      "notTested": "Noch kein Testergebnis.",
+      "blocked": "Der Test ist blockiert: Die Komposition hat Konflikte. Der Draft bleibt im Status Entwurf.",
+      "conflicts": "Blockierende Konflikte",
+      "conflictLine": "{{code}} · {{key}}: {{message}}",
+      "outdated": "Die Änderungen wurden während des Tests geändert; bitte erneut testen.",
+      "totals": {
+        "types": "Typen",
+        "cis": "CIs",
+        "invalid_cis": "Ungültige CIs",
+        "violations": "Verstöße"
+      },
+      "perType": "Zähler je Typ",
+      "columns": {
+        "type": "Typ",
+        "attributes": "Verstöße je Attribut",
+        "ci": "CI",
+        "field": "Feld",
+        "message": "Meldung"
+      },
+      "attributeCount": "{{key}}: {{count}}",
+      "reportFailed": "Der Testbericht konnte nicht geladen werden.",
+      "noViolations": "Keine Verstöße.",
+      "violations": "Verstöße",
+      "openCI": "CI {{id}} öffnen",
+      "violationCount": "{{shown}} von {{total}} Verstößen",
+      "truncated": "Gespeichert sind höchstens 10000 Verstöße.",
+      "more": "Weitere laden"
+    },
+    "problem": {
+      "detail": "Fehler {{status}}: {{detail}}",
+      "traceId": "Trace-ID: {{traceId}}"
+    }
+  },
   "templates": {
     "tabs": {
       "label": "Metamodell",
       "types": "Typen",
-      "templates": "Templates"
+      "templates": "Templates",
+      "drafts": "Drafts"
     },
     "subtitle": "Templates bündeln Attribute eines CI-Typs in versionierter Reihenfolge mit verschärfenden Overrides.",
     "hint": "Ein Template verweist auf einen vorhandenen CI-Typ und ist keine Typvorlage. System-Templates sind schreibgeschützt und lassen sich klonen.",
@@ -2110,6 +2262,7 @@
     "publish": "Version {{version}} publizieren",
     "publishTitle": "Version {{version}} publizieren",
     "publishText": "Die Version wird sofort produktiv und ist danach die aktuelle Version von „{{name}}“. Veröffentlichte Versionen sind schreibgeschützt.",
+    "publishDraftText": "Die Veröffentlichung wird im Draft „{{draft}}“ erfasst und wirkt erst, wenn der Draft publiziert wird.",
     "publishConfirm": "Publizieren",
     "publishNeedsPermission": "Publizieren erfordert das Recht „metamodel:publish“.",
     "publishFailed": "Version nicht publiziert. {{reason}}",

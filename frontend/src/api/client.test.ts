@@ -523,3 +523,146 @@ describe('agentApi and the enrollment contract (WP-560, F-189, AGT-06)', () => {
     expect(clientSource).not.toMatch(/\/agents\/enroll['"`]/);
   });
 });
+
+// writeRoutesOfSpec reads every POST, PUT, PATCH and DELETE route of the
+// generated schema as "METHOD /path" without /api/v1.
+function writeRoutesOfSpec(schema: string): string[] {
+  const out: string[] = [];
+  let path = '';
+  for (const line of schema.split('\n')) {
+    if (/^export interface operations \{/.test(line)) break;
+    const p = /^ {2}'\/api\/v1(\/[^']+)': \{\s*$/.exec(line);
+    if (p?.[1]) path = p[1];
+    const m = /^ {4}(post|put|patch|delete): operations\[/.exec(line);
+    if (m?.[1] && path) out.push(`${m[1].toUpperCase()} ${path}`);
+  }
+  return out;
+}
+
+const DRAFT_ID = '7f1c2a9e-0b1d-4c55-9a51-3e0f2b6d8c11';
+
+async function importClientWithDraft(active = true) {
+  // The active draft lives in sessionStorage: a fresh store reads it again.
+  if (!active) window.sessionStorage.removeItem('reticora-metamodel-draft');
+  const imported = await importClientWithSession();
+  const { useMetamodelDraftStore } = await import('../stores/metamodelDraft');
+  if (active) useMetamodelDraftStore.getState().setDraft({ id: DRAFT_ID, name: 'Umbau' });
+  const { fetchAPIVersioned, withDraft } = await import('./client');
+  return { ...imported, fetchAPIVersioned, withDraft, useMetamodelDraftStore };
+}
+
+describe('metamodel draft parameter (WP-798, MET-53)', () => {
+  const affected: [string, string][] = [
+    ['POST', '/attribute-definitions'],
+    ['PATCH', '/ci-types/t-1'],
+    ['POST', '/ci-types/t-1/clone'],
+    ['DELETE', '/ci-fields/global/serial'],
+    ['POST', '/templates/tp-1/versions/2/publish'],
+  ];
+  const unaffected: [string, string][] = [
+    ['GET', '/ci-types'],
+    ['GET', '/attribute-definitions?scope=global'],
+    ['PUT', '/cis/c-1/field-definitions'],
+    ['POST', '/metamodel/drafts'],
+    ['POST', `/metamodel/drafts/${DRAFT_ID}/items`],
+    ['POST', '/templates/tp-1/migrations'],
+    ['POST', '/attribute-definitions/ad-1/reindex'],
+  ];
+
+  it('adds draft={id} to the metamodel writes while a draft is active', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPI } = await importClientWithDraft();
+
+    for (const [method, path] of affected) {
+      await fetchAPI(path, { method, body: method === 'DELETE' ? undefined : '{}' });
+    }
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(
+      affected.map(([, path]) => `/api/v1${path}?draft=${DRAFT_ID}`),
+    );
+  });
+
+  it('leaves reads, instance fields, the draft routes and the job routes unchanged', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPI } = await importClientWithDraft();
+
+    for (const [method, path] of unaffected) {
+      await fetchAPI(path, method === 'GET' ? undefined : { method, body: '{}' });
+    }
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual(
+      unaffected.map(([, path]) => `/api/v1${path}`),
+    );
+  });
+
+  it('keeps a draft the caller set and changes no URL without an active draft', async () => {
+    const { withDraft } = await importClientWithDraft();
+    expect(withDraft('/ci-types?draft=other', 'POST')).toBe('/ci-types?draft=other');
+    expect(withDraft('/ci-types?x=1', 'POST')).toBe(`/ci-types?x=1&draft=${DRAFT_ID}`);
+
+    expect(JSON.parse(window.sessionStorage.getItem('reticora-metamodel-draft') ?? '{}')).toEqual({
+      id: DRAFT_ID,
+      name: 'Umbau',
+    });
+    const inactive = await importClientWithDraft(false);
+    for (const [method, path] of [...affected, ...unaffected]) {
+      expect(inactive.withDraft(path, method)).toBe(path);
+    }
+  });
+
+  it('adds the draft in fetchAPIVersioned as well', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPIVersioned } = await importClientWithDraft();
+    await fetchAPIVersioned('/layouts/l-1', { method: 'PATCH', body: '{}' });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/v1/layouts/l-1?draft=${DRAFT_ID}`);
+  });
+
+  it('raises itemRevision after a write captured in the draft (202), not after another 202', async () => {
+    const item = {
+      id: 'item-1',
+      kind: 'ci_type',
+      op: 'update',
+      route: 'PATCH /api/v1/ci-types/{id}',
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(item, 202))
+      .mockResolvedValueOnce(jsonResponse({ state: 'queued' }, 202))
+      .mockResolvedValueOnce(jsonResponse({ id: 't-1' }, 200));
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchAPI, useMetamodelDraftStore } = await importClientWithDraft();
+    const before = useMetamodelDraftStore.getState().itemRevision;
+
+    await expect(fetchAPI('/ci-types/t-1', { method: 'PATCH', body: '{}' })).resolves.toEqual(item);
+    expect(useMetamodelDraftStore.getState().itemRevision).toBe(before + 1);
+    // The index job of reindex answers 202 without ?draft: no item.
+    await fetchAPI('/attribute-definitions/ad-1/reindex', { method: 'POST', body: '{}' });
+    await fetchAPI('/ci-types/t-1');
+    expect(useMetamodelDraftStore.getState().itemRevision).toBe(before + 1);
+  });
+
+  it('follows the capturable routes of the API: every metamodel write but the two jobs', async () => {
+    const { draftCapable, DRAFT_PREFIXES } = await import('./client');
+    const writes = writeRoutesOfSpec(spec);
+    // Guards the parser.
+    expect(writes).toContain('POST /attribute-definitions');
+    expect(writes).toContain('POST /templates/{id}/versions/{version}/publish');
+    const under = (path: string) =>
+      [...DRAFT_PREFIXES, '/ci-fields'].some((p) => path === p || path.startsWith(`${p}/`));
+    const split = (route: string) => route.split(' ') as [string, string];
+    const exempt = writes.filter((route) => {
+      const [method, path] = split(route);
+      return under(path) && !draftCapable(path, method);
+    });
+    expect(exempt.sort()).toEqual([
+      'POST /attribute-definitions/{id}/reindex',
+      'POST /templates/{id}/migrations',
+    ]);
+    const outside = writes.filter((route) => {
+      const [method, path] = split(route);
+      return !under(path) && draftCapable(path, method);
+    });
+    expect(outside).toEqual([]);
+  });
+});

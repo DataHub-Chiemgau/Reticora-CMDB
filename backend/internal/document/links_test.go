@@ -16,9 +16,10 @@ import (
 )
 
 // TestEntityTypesRegistry: the registry holds exactly the link targets of
-// WP-267; contact (a dead branch of the former linkVisible) is not one.
+// WP-267 and contract (WP-737); contact (a dead branch of the former
+// linkVisible) is not one.
 func TestEntityTypesRegistry(t *testing.T) {
-	want := []string{"asset", "assignment", "ci", "disposal_record", "location", "stocktake", "ticket"}
+	want := []string{"asset", "assignment", "ci", "contract", "disposal_record", "location", "stocktake", "ticket"}
 	if got := document.EntityTypes(); !slices.Equal(got, want) {
 		t.Errorf("EntityTypes() = %v, want %v", got, want)
 	}

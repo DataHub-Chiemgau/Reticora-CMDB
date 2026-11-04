@@ -4,7 +4,7 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
+import { ApiError, fetchAllPages, fetchAPI, type PaginatedResponse } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
@@ -15,6 +15,173 @@ function qs(params: Record<string, string | number | boolean | undefined> = {}):
   }
   const s = q.toString();
   return s ? `?${s}` : '';
+}
+
+// ─── Metamodel drafts (MET-53, WP-260, WP-720, WP-798) ──────────────────────
+
+export type MetamodelDraft = components['schemas']['MetamodelDraft'];
+/** A typed operation of a draft: what a write with ?draft answers (202). */
+export type MetamodelDraftItem = components['schemas']['MetamodelDraftItem'];
+
+/**
+ * Drafted is the answer of a metamodel write: the resource, or the item of
+ * the active draft when withDraft (client.ts) captured the write (202).
+ */
+export type Drafted<T> = T | MetamodelDraftItem;
+
+/**
+ * isDraftItem tells a captured write (202 with the draft item) from the
+ * resource: an item carries kind, op, route and schema_versions. A caller
+ * that would go on with the id of the resource stops there; the id of an
+ * item names no resource (WP-798).
+ */
+export function isDraftItem(value: unknown): value is MetamodelDraftItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.kind === 'string' &&
+    typeof v.op === 'string' &&
+    typeof v.route === 'string' &&
+    typeof v.schema_versions === 'object' &&
+    v.schema_versions !== null
+  );
+}
+
+export const metamodelDraftApi = {
+  /** Every draft of a status (cursor pages, API-02), newest first, without items. */
+  async list(status: MetamodelDraft['status']): Promise<MetamodelDraft[]> {
+    return fetchAllPages<MetamodelDraft>('/metamodel/drafts', { status });
+  },
+  get(id: string): Promise<MetamodelDraft> {
+    return fetchAPI(`/metamodel/drafts/${id}`);
+  },
+  create(name: string): Promise<MetamodelDraft> {
+    return fetchAPI('/metamodel/drafts', { method: 'POST', body: JSON.stringify({ name }) });
+  },
+  /** Every item of a draft, all pages over next_cursor (API-02). */
+  async items(id: string): Promise<MetamodelDraftItem[]> {
+    return fetchAllPages<MetamodelDraftItem>(`/metamodel/drafts/${id}/items`);
+  },
+  /** Every draft of every status, all pages over next_cursor (WP-799). */
+  async listAll(): Promise<MetamodelDraft[]> {
+    return fetchAllPages<MetamodelDraft>('/metamodel/drafts');
+  },
+  /**
+   * Discards a draft (status discarded); with the version read, If-Match
+   * refuses a change in between with 412 (API-07).
+   */
+  discard(id: string, version?: number): Promise<MetamodelDraft> {
+    return fetchAPI(`/metamodel/drafts/${id}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    });
+  },
+  /** Removes an item; If-Match names the draft version the page read (412 otherwise). */
+  removeItem(id: string, itemId: string, version: number): Promise<MetamodelDraft> {
+    return fetchAPI(`/metamodel/drafts/${id}/items/${itemId}`, {
+      method: 'DELETE',
+      headers: ifMatch(version),
+    });
+  },
+  /** Starts the test run (job metamodel.test, WP-721); needs metamodel:publish. */
+  test(id: string): Promise<MetamodelTestStart> {
+    return fetchAPI(`/metamodel/drafts/${id}/test`, { method: 'POST' });
+  },
+  /** One page of the test report with its violations; needs metamodel:publish. */
+  testReport(id: string, cursor?: string): Promise<MetamodelTestReportPage> {
+    return fetchAPI(`/metamodel/drafts/${id}/test${qs({ limit: 50, cursor })}`);
+  },
+  /** Publishes a tested draft (WP-261); needs metamodel:publish. */
+  publish(id: string): Promise<MetamodelPublication> {
+    return fetchAPI(`/metamodel/drafts/${id}/publish`, { method: 'POST' });
+  },
+  /**
+   * The current state of the target of an item, for the diff of the patch
+   * list: the resource the item changes or deletes, the field of a type or
+   * the global field of that name. null: the target does not exist (a new
+   * part or a vanished target); undefined: no route reads it (a template
+   * version by its id).
+   */
+  async target(item: MetamodelDraftItem): Promise<Record<string, unknown> | null | undefined> {
+    const id = item.target_id ?? '';
+    const key = item.target_key ?? '';
+    const path = TARGET_PATHS[item.kind];
+    try {
+      if (item.kind === 'ci_type_field') {
+        if (!id || !key) return null;
+        const fields = await fetchAPI<{ data: FieldDefinition[] }>(`/ci-types/${id}/fields`);
+        return asRecord(fields.data.find((f) => f.name === key));
+      }
+      if (item.kind === 'global_field') {
+        if (!key) return null;
+        const fields = await fetchAPI<{ data: FieldDefinition[] }>('/ci-fields/global');
+        return asRecord(fields.data.find((f) => f.name === key));
+      }
+      if (!path) return undefined;
+      if (!id) return null;
+      return await fetchAPI<Record<string, unknown>>(`${path}/${id}`);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+  },
+};
+
+/** The routes that read the target of an item by its id (template_version has none). */
+const TARGET_PATHS: Partial<Record<MetamodelDraftItem['kind'], string>> = {
+  ci_type: '/ci-types',
+  attribute_definition: '/attribute-definitions',
+  attribute_set: '/attribute-sets',
+  template: '/templates',
+  rule: '/rules',
+  layout: '/layouts',
+};
+
+function asRecord(value: object | undefined): Record<string, unknown> | null {
+  return value ? (value as Record<string, unknown>) : null;
+}
+
+function ifMatch(version: number | undefined): HeadersInit | undefined {
+  return version !== undefined ? { 'If-Match': `"${version}"` } : undefined;
+}
+
+/** The answer of POST /metamodel/drafts/{id}/test: the job of the run. */
+export interface MetamodelTestStart {
+  job_id: string;
+  status: string;
+  kind: 'metamodel.test';
+}
+/** The counters of a test run without its violations (WP-721). */
+export type MetamodelTestReport = components['schemas']['MetamodelTestReport'];
+export type MetamodelTestReportPage = components['schemas']['MetamodelTestReportPage'];
+export type MetamodelTestViolation = components['schemas']['MetamodelTestViolation'];
+/** The answer of a publication: the draft, counts per kind, the new schema versions. */
+export type MetamodelPublication = components['schemas']['MetamodelPublication'];
+
+/** An item of a draft whose target changed or vanished since its capture (409 of publish). */
+export interface StaleDraftItem {
+  item_id: string;
+  kind: string;
+  op: string;
+  target_id?: string | null;
+  target_key?: string | null;
+  reason: string;
+}
+
+/**
+ * staleItemsOf reads the stale items of a refused publication (409 with
+ * stale_items, WP-261); empty for every other failure.
+ */
+export function staleItemsOf(error: unknown): StaleDraftItem[] {
+  if (!(error instanceof ApiError) || error.status !== 409) return [];
+  const raw = error.problem.stale_items;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (entry): entry is StaleDraftItem =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as Record<string, unknown>).item_id === 'string',
+  );
 }
 
 // ─── CI types (§1) ───────────────────────────────────────────────────────────
@@ -110,19 +277,19 @@ export const ciTypeApi = {
   get(id: string): Promise<CIType> {
     return fetchAPI(`/ci-types/${id}`);
   },
-  create(data: CITypeCreateRequest): Promise<CIType> {
+  create(data: CITypeCreateRequest): Promise<Drafted<CIType>> {
     return fetchAPI('/ci-types', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: CITypeUpdateRequest): Promise<CIType> {
+  update(id: string, data: CITypeUpdateRequest): Promise<Drafted<CIType>> {
     return fetchAPI(`/ci-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
-  clone(id: string, data: { key?: string; name?: string }): Promise<CIType> {
+  clone(id: string, data: { key?: string; name?: string }): Promise<Drafted<CIType>> {
     return fetchAPI(`/ci-types/${id}/clone`, { method: 'POST', body: JSON.stringify(data) });
   },
-  deactivate(id: string): Promise<CIType> {
+  deactivate(id: string): Promise<Drafted<CIType>> {
     return fetchAPI(`/ci-types/${id}/deactivate`, { method: 'POST', body: '{}' });
   },
-  activate(id: string): Promise<CIType> {
+  activate(id: string): Promise<Drafted<CIType>> {
     return fetchAPI(`/ci-types/${id}/activate`, { method: 'POST', body: '{}' });
   },
   versions(id: string): Promise<{ data: CIType[] }> {
@@ -169,10 +336,10 @@ export const attributeDefinitionApi = {
     return fetchAPI(`/attribute-definitions/${id}`);
   },
   /** One POST with the index flags (MET-15); without ci_type_id a global definition. */
-  create(data: AttributeDefinitionCreate): Promise<AttributeDefinition> {
+  create(data: AttributeDefinitionCreate): Promise<Drafted<AttributeDefinition>> {
     return fetchAPI('/attribute-definitions', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: AttributeDefinitionPatch): Promise<AttributeDefinition> {
+  update(id: string, data: AttributeDefinitionPatch): Promise<Drafted<AttributeDefinition>> {
     return fetchAPI(`/attribute-definitions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -202,10 +369,10 @@ export const attributeSetApi = {
   async list(): Promise<{ data: AttributeSet[] }> {
     return { data: await fetchAllPages<AttributeSet>('/attribute-sets') };
   },
-  create(data: AttributeSetCreate): Promise<AttributeSet> {
+  create(data: AttributeSetCreate): Promise<Drafted<AttributeSet>> {
     return fetchAPI('/attribute-sets', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: AttributeSetPatch): Promise<AttributeSet> {
+  update(id: string, data: AttributeSetPatch): Promise<Drafted<AttributeSet>> {
     return fetchAPI(`/attribute-sets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   /** A set assigned to a CI type is 409. */
@@ -216,7 +383,10 @@ export const attributeSetApi = {
     return fetchAPI(`/ci-types/${ciTypeId}/attribute-sets`);
   },
   /** Replaces the ordered list of the type as a whole. */
-  replaceOfType(ciTypeId: string, sets: AttributeSetAssignment[]): Promise<CITypeAttributeSets> {
+  replaceOfType(
+    ciTypeId: string,
+    sets: AttributeSetAssignment[],
+  ): Promise<Drafted<CITypeAttributeSets>> {
     return fetchAPI(`/ci-types/${ciTypeId}/attribute-sets`, {
       method: 'PUT',
       body: JSON.stringify({ ci_type_id: ciTypeId, attribute_sets: sets }),
@@ -248,15 +418,15 @@ export const templateApi = {
     return fetchAPI(`/templates/${id}`);
   },
   /** Version 1 is created as an empty draft. */
-  create(data: TemplateCreate): Promise<Template> {
+  create(data: TemplateCreate): Promise<Drafted<Template>> {
     return fetchAPI('/templates', { method: 'POST', body: JSON.stringify(data) });
   },
   /** Display name, description and is_active; key and ci_type_id are immutable. */
-  update(id: string, data: TemplatePatch): Promise<Template> {
+  update(id: string, data: TemplatePatch): Promise<Drafted<Template>> {
     return fetchAPI(`/templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   /** Copies a template, a system template as well, under a new key. */
-  clone(id: string, data: TemplateClone): Promise<Template> {
+  clone(id: string, data: TemplateClone): Promise<Drafted<Template>> {
     return fetchAPI(`/templates/${id}/clone`, { method: 'POST', body: JSON.stringify(data) });
   },
   /** Every version, newest first, each with its items. */
@@ -264,7 +434,7 @@ export const templateApi = {
     return { data: await fetchAllPages<TemplateVersion>(`/templates/${id}/versions`) };
   },
   /** The next version as a draft copy of the current one. */
-  createVersion(id: string): Promise<TemplateVersion> {
+  createVersion(id: string): Promise<Drafted<TemplateVersion>> {
     return fetchAPI(`/templates/${id}/versions`, { method: 'POST' });
   },
   /** Replaces the items of a draft version as a whole. */
@@ -272,14 +442,18 @@ export const templateApi = {
     id: string,
     version: number,
     data: TemplateVersionItemsUpdate,
-  ): Promise<TemplateVersion> {
+  ): Promise<Drafted<TemplateVersion>> {
     return fetchAPI(`/templates/${id}/versions/${version}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
-  /** Publishes a draft directly (MET-04, MET-53); needs metamodel:publish. */
-  publishVersion(id: string, version: number): Promise<TemplateVersion> {
+  /**
+   * Publishes a draft version directly (MET-04, MET-53); with an active
+   * metamodel draft the publication is captured as template_version/publish.
+   * Needs metamodel:publish.
+   */
+  publishVersion(id: string, version: number): Promise<Drafted<TemplateVersion>> {
     return fetchAPI(`/templates/${id}/versions/${version}/publish`, { method: 'POST' });
   },
 };

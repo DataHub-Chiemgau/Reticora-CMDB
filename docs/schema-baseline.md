@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000237_ci_owner
+Stand: Migration 000240_internal_order_states
 
 ## Prüfung
 
@@ -247,9 +247,9 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
 ### Linkziele von Dokumenten (WP-267)
 
 `document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
-`ticket`, `location`, `disposal_record` und `stocktake`
-(`doc_link_entity_type_check`, Migration 000217); die Registry in
-`backend/internal/document/links.go` hält dieselben Werte.
+`ticket`, `location`, `disposal_record`, `stocktake` und `contract`
+(`doc_link_entity_type_check`, Migrationen 000217 und 000238); die Registry
+in `backend/internal/document/links.go` hält dieselben Werte.
 `derive_document_link_scope` leitet `client_id`/`site_id` auch aus
 Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
 `team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
@@ -1118,6 +1118,17 @@ Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
 und die RESTRICTIVE-Policies `contract_scoped_update` und
 `contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
 
+Verträge als Linkziel von Dokumenten (MGT-12, WP-737, Migration 000238):
+`derive_document_link_scope` übernimmt für `entity_type = 'contract'` den
+`client_id` des Vertrags (org-weit bei NULL; kein Standort, kein Team). Der
+AFTER-UPDATE-Trigger `contract_scope_propagation` (bei geändertem
+`client_id`) ruft `propagate_contract_scope()` und leitet die Links neu ab;
+der AFTER-DELETE-Trigger `contract_document_links` ruft
+`delete_contract_document_links()` und entfernt die Links eines gelöschten
+Vertrags in derselben Transaktion (`document.link_count` folgt über
+`count_document_links`, die Dokumente bleiben). Beide Funktionen laufen mit
+erweitertem Scope (`app_scope_widen`) und festem `search_path`.
+
 Attributschema der Beziehungstypen (REL-07, WP-295, Migration 000232):
 `relationship_type` erhält `metadata_schema` (jsonb NOT NULL DEFAULT `'[]'`,
 CHECK `relationship_type_metadata_schema_array`: `jsonb_typeof` = `array`),
@@ -1254,6 +1265,45 @@ neben Org-, Client- und Site-Prädikat das Team-Prädikat auf
 `owner_team_id` (USING mit NULL-Ausnahme, WITH CHECK ohne), `ci_scoped_*`
 und `asset_scoped_*` folgen dem neuen WITH CHECK.
 
+Fremdreferenz von Tickets und Kommentaren (TKT-03 [O], CH17, WP-293, E-47,
+Migration 000239): `ticket` und `ticket_comment` erhalten
+`external_provider` und `external_ref` (TEXT, nullable, benannt wie
+`client.external_ref`). Je Tabelle verlangt
+`ticket_external_ref_pair_check` bzw.
+`ticket_comment_external_ref_pair_check` beide Spalten gemeinsam oder
+keine (23514); die Teil-Unique-Indizes `uq_ticket_org_external_ref` bzw.
+`uq_ticket_comment_org_external_ref` (`organization_id`,
+`external_provider`, `external_ref`) WHERE `external_ref` IS NOT NULL
+machen die Referenz je Organisation und Provider eindeutig (23505, ohne
+Ausdruck, K22). RLS und Policies bleiben unverändert.
+
+Interne Bestellungen (STK-05, WP-286, E-41, Migration 000240):
+`internal_order_status_check` erlaubt `draft`, `submitted`, `approved`,
+`rejected`, `ordered`, `partially_received`, `received`, `closed` und
+`cancelled`. `internal_order` erhält `supplier_id` (UUID, nullable) mit
+`internal_order_supplier_id_fkey` (`supplier_id`, `organization_id`) →
+`supplier` ohne Löschaktion und Teilindex `idx_internal_order_supplier`
+(`supplier_id`, `organization_id`) WHERE NOT NULL; die Freitextspalte
+`supplier` entfällt nach der Überführung in org-weite Lieferanten
+(gleichnamige Zeilen werden wiederverwendet). `currency` hat keinen
+Standard mehr (das Repository setzt `organization.currency`).
+`internal_order_item` erhält `received_quantity` (`numeric(12,2)`, NOT
+NULL, Standard 0, `internal_order_item_received_quantity_check`: 0 bis
+`quantity`; Positionen empfangener Bestellungen sind voll empfangen),
+`internal_order_item_reference_check` (nicht `consumable_id` und
+`asset_id` zugleich; Bestandszeilen mit beiden stehen in
+`migration_quarantine`, `asset_id` geleert) und `client_id` (UUID) mit
+`internal_order_item_client_id_fkey` (`client_id`, `organization_id`) →
+`client` und Index `idx_internal_order_item_client` (`organization_id`,
+`client_id`). Den Client leitet `internal_order_item_client` (BEFORE INSERT
+OR UPDATE, Funktion `internal_order_item_client()`) aus der Bestellung ab;
+`internal_order_client_items` (AFTER UPDATE OF `client_id` ON
+`internal_order`, Funktion `internal_order_client_items()`) führt einen
+Client-Wechsel der Bestellung nach. RLS: `internal_order_item_isolation`
+trägt das Client-Prädikat (USING mit NULL-Ausnahme, WITH CHECK ohne, E-09),
+dazu die RESTRICTIVE-Policies `internal_order_item_scoped_update` und
+`internal_order_item_scoped_delete`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1337,7 +1387,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `import_profile` | ja | ja | import_profile_isolation (ALL) |
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
-| `internal_order_item` | ja | ja | internal_order_item_isolation (ALL) |
+| `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
 | `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |

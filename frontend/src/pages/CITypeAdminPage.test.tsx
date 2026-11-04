@@ -20,6 +20,9 @@
  *   Sets     WP-797: the section of the attribute sets (create, 409 on
  *            deleting an assigned set), the note instead of the section with
  *            the module metamodel off, the origin "Set <name>" in the catalog
+ *   Draft    WP-798: with an active draft one write with ?draft= and no
+ *            follow-up call, the marks "im Draft" at type and attribute and
+ *            the placeholder row of a new attribute (E-113)
  *
  * Retest:
  *   cd frontend && npx vitest run src/pages/CITypeAdminPage.test.tsx
@@ -29,6 +32,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { CITypeAdminPage } from './CITypeAdminPage';
 import { renderWithProviders } from '../test/utils';
 import { useAuthStore } from '../auth/authStore';
+import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
 interface Call {
   method: string;
@@ -120,6 +124,8 @@ interface Backend {
   assigned?: Record<string, { attribute_set_id: string; position: number }[]>;
   deleteSet?: () => Response;
   modules?: Json[];
+  /** The items of the active draft (WP-798); a write with ?draft adds one (202). */
+  draftItems?: Json[];
 }
 
 function stubBackend(b: Backend = {}): Call[] {
@@ -127,6 +133,7 @@ function stubBackend(b: Backend = {}): Call[] {
   let types = b.types ?? [NET, ROUTER, EDGE, PRINTER];
   let definitions = b.definitions ?? [];
   let sets = b.sets;
+  let draftItems = b.draftItems ?? [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -137,6 +144,35 @@ function stubBackend(b: Backend = {}): Call[] {
       const u = new URL(url, 'http://localhost');
       const q = u.searchParams;
       const path = u.pathname.replace(/^\/api\/v1/, '');
+      if (q.has('draft') && method !== 'GET') {
+        // The capture of WP-720: the item instead of the resource.
+        const captured = {
+          id: `item-${draftItems.length + 1}`,
+          kind: 'attribute_definition',
+          op: 'create',
+          target_id: null,
+          target_key: null,
+          payload: body,
+          base: null,
+          schema_versions: {},
+          route: `${method} /api/v1${path}`,
+          created_by: 'u1',
+          created_at: '2026-11-01T10:00:00Z',
+        };
+        draftItems = [...draftItems, captured];
+        return json(captured, 202);
+      }
+      const draftOne = /^\/metamodel\/drafts\/([^/]+)(\/items)?$/.exec(path);
+      if (draftOne) {
+        return draftOne[2]
+          ? json({ data: draftItems })
+          : json({
+              id: draftOne[1],
+              name: 'Umbau',
+              status: 'draft',
+              item_count: draftItems.length,
+            });
+      }
       if (path === '/me/permissions') {
         return json({
           user_id: 'u1',
@@ -281,6 +317,7 @@ async function row(key: string) {
 }
 
 afterEach(() => {
+  act(() => useMetamodelDraftStore.getState().clear());
   useAuthStore.setState({ token: null, expiresAt: null, user: null });
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -937,5 +974,82 @@ describe('CITypeAdminPage attribute sets', () => {
         .getAllByRole('listitem')
         .map((li) => li.querySelector('.font-medium')?.textContent),
     ).toEqual(['retired', 'Netzwerk-Set']);
+  });
+});
+
+describe('CITypeAdminPage in a metamodel draft (WP-798)', () => {
+  const DRAFT = '44444444-4444-4444-8444-444444444444';
+
+  it('creates an attribute with one write with ?draft= and no follow-up call', async () => {
+    const calls = stubBackend();
+    act(() => useMetamodelDraftStore.getState().setDraft({ id: DRAFT, name: 'Umbau' }));
+    await open('Drucker');
+    fireEvent.click(await screen.findByRole('button', { name: 'Feld hinzufügen' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Feldname'), { target: { value: 'serial' } });
+    fireEvent.click(within(dialog).getByLabelText('Eindeutig'));
+    const before = calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const writes = calls.slice(before).filter((c) => c.method !== 'GET');
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.method).toBe('POST');
+    expect(writes[0]!.url).toBe(`/api/v1/attribute-definitions?draft=${DRAFT}`);
+    expect(writes[0]!.body).toMatchObject({ key: 'serial', ci_type_id: 't-printer', unique: true });
+    // The productive catalog is unchanged; the new attribute is a placeholder row.
+    const card = (await screen.findByRole('heading', { name: /^Attribute/ })).closest('section')!;
+    const placeholder = await within(card).findByText('serial');
+    expect(placeholder.closest('li')).toHaveAttribute('data-draft-item', 'item-1');
+    expect(placeholder.closest('li')).toHaveTextContent('im Draft: neu');
+    expect(within(card).getByRole('heading', { name: 'Attribute (0)' })).toBeInTheDocument();
+    expect(useMetamodelDraftStore.getState().itemRevision).toBeGreaterThan(0);
+  });
+
+  it('marks the type and the attribute an item changes "im Draft"', async () => {
+    stubBackend({
+      definitions: [
+        definition('ad-toner', 'toner', { ci_type_id: 't-printer' }),
+        definition('ad-paper', 'paper', { ci_type_id: 't-printer' }),
+      ],
+      draftItems: [
+        {
+          id: 'item-a',
+          kind: 'ci_type',
+          op: 'update',
+          target_id: 't-printer',
+          target_key: null,
+          payload: { description: 'neu' },
+          base: '2026-01-01T00:00:00Z',
+          schema_versions: {},
+          route: 'PATCH /api/v1/ci-types/{id}',
+          created_by: 'u1',
+          created_at: '2026-11-01T10:00:00Z',
+        },
+        {
+          id: 'item-b',
+          kind: 'attribute_definition',
+          op: 'delete',
+          target_id: 'ad-toner',
+          target_key: null,
+          payload: {},
+          base: '2026-01-01T00:00:00Z',
+          schema_versions: {},
+          route: 'DELETE /api/v1/attribute-definitions/{id}',
+          created_by: 'u1',
+          created_at: '2026-11-01T10:00:00Z',
+        },
+      ],
+    });
+    act(() => useMetamodelDraftStore.getState().setDraft({ id: DRAFT, name: 'Umbau' }));
+    await open('Drucker');
+
+    const card = (await screen.findByRole('heading', { name: 'Drucker', level: 3 })).closest(
+      'section',
+    )!;
+    expect(await within(card).findByText('im Draft: geändert')).toBeInTheDocument();
+    // The productive row stays, with the mark of the deletion.
+    expect(await row('toner')).toHaveTextContent('im Draft: gelöscht');
+    expect(await row('paper')).not.toHaveTextContent('im Draft');
   });
 });

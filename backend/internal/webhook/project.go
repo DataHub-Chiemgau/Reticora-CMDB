@@ -84,6 +84,9 @@ var projectionRules = map[string]projectionRule{
 	"asset.deleted": (*projector).asset,
 	"asset.changed": (*projector).assetChange,
 
+	// The expiry notice of a contract (WP-270): the contract's fields.
+	"contract.expiring": (*projector).contractExpiring,
+
 	"metamodel.published": passThrough,
 	"import.completed":    passThrough,
 	"stock.below_minimum": passThrough,
@@ -480,9 +483,53 @@ func (p *projector) assetReadable(key string, ref *permission.ObjectRef) bool {
 }
 
 // assetMembers are members of asset payloads without a column of the
-// asset DTO: the site is structural ("" ), expires_at of
-// asset.warranty_expiring is the warranty end.
-var assetMembers = map[string]string{"site_id": "", "expires_at": "core.warranty_end"}
+// asset DTO: the site is structural ("" ); expires_at, due_date, stage and
+// days_left of asset.warranty_expiring (WP-270) derive from the warranty
+// end.
+var assetMembers = map[string]string{"site_id": "", "expires_at": "core.warranty_end", "due_date": "core.warranty_end",
+	"stage": "core.warranty_end", "days_left": "core.warranty_end"}
+
+// contractExpiringMembers are the members of contract.expiring (WP-270)
+// with the contract fields they derive from; id, client_id and number are
+// structural. The due date, its stage and the days left derive from the
+// end date and the notice period.
+var contractExpiringMembers = map[string][]string{
+	"id": nil, "client_id": nil, "number": nil,
+	"kind": {"core.kind"}, "supplier_id": {"core.supplier_id"}, "notice_period_days": {"core.notice_period_days"},
+	"expires_at": {"core.end_date"},
+	"due_date":   {"core.end_date", "core.notice_period_days"},
+	"stage":      {"core.end_date", "core.notice_period_days"},
+	"days_left":  {"core.end_date", "core.notice_period_days"},
+}
+
+// contractExpiring is the rule of contract.expiring: a member stays when
+// every contract field it derives from is readable for the contract; a
+// member without mapping is left out.
+func (p *projector) contractExpiring(body map[string]json.RawMessage) (map[string]json.RawMessage, bool) {
+	if !p.policy.Restricted(permission.KindContract) {
+		return nil, true
+	}
+	id, okID := requiredString(body, "id")
+	client, _, okClient := stringMember(body, "client_id")
+	if !okID || !okClient {
+		return nil, false
+	}
+	ref := permission.ObjectRef{ID: id, ClientID: client}
+	for member := range body {
+		keys, ok := contractExpiringMembers[member]
+		if !ok {
+			delete(body, member)
+			continue
+		}
+		for _, key := range keys {
+			if !p.policy.Level(permission.KindContract, "", key, ref).Readable() {
+				delete(body, member)
+				break
+			}
+		}
+	}
+	return body, true
+}
 
 // assetObject projects asset fields (an asset payload or embedded asset
 // facts) with the asset policy: structural members stay, columns and

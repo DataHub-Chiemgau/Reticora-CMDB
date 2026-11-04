@@ -7,7 +7,9 @@
  * versions: "new version" as a draft copy, the TemplateVersionEditor,
  * "publish version" (direct publishing of MET-04/MET-53, only with
  * metamodel:publish) and the comparison of two versions with
- * MetamodelDiff. Templates are no type templates of GET
+ * MetamodelDiff. With an active metamodel draft (WP-798) every write is
+ * captured in the draft; the page marks its targets "in draft" and shows
+ * new templates and versions as placeholders (E-113). Templates are no type templates of GET
  * /ci-types/templates ("Typvorlagen"). The page belongs to the module
  * metamodel (E-105); switched off, it shows a note instead.
  */
@@ -15,6 +17,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
+  isDraftItem,
   localizedText,
   type CIType,
   type Template,
@@ -23,6 +26,7 @@ import {
   type TemplateVersion,
 } from '../api/cmdb';
 import {
+  useActiveDraftItems,
   useAllCITypes,
   useCloneTemplate,
   useCreateTemplate,
@@ -53,6 +57,13 @@ import {
 import { TemplateVersionEditor, rulesOf } from '../components/metamodel/TemplateVersionEditor';
 import { ancestorsOf } from '../components/metamodel/TypeTree';
 import { describeFlagRefusal, fieldErrors } from '../components/metamodel/AttributeEditor';
+import {
+  DraftMarker,
+  draftChangeFor,
+  draftCreations,
+  draftItemName,
+} from '../components/metamodel/DraftBanner';
+import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
 /** The states of a template version (MET-16); labels templates.versionStatuses.*. */
 export const TEMPLATE_VERSION_STATUSES = ['draft', 'published', 'retired'] as const;
@@ -117,6 +128,8 @@ function TemplateList() {
   const query = useTemplates(ciTypeId ? { ci_type_id: ciTypeId } : {});
   const update = useUpdateTemplate();
   const { types, nameOf } = useTypes();
+  const draftItems = useActiveDraftItems();
+  const newTemplates = draftCreations(draftItems, 'template');
 
   const rows = (query.data?.data ?? []).filter((tpl) =>
     activity === 'all' ? true : activity === 'active' ? tpl.is_active : !tpl.is_active,
@@ -176,8 +189,26 @@ function TemplateList() {
           {t('templates.notSaved', { reason: describeFlagRefusal(update.error, t) })}
         </p>
       ) : null}
-      {query.isSuccess && rows.length === 0 ? (
+      {query.isSuccess && rows.length === 0 && newTemplates.length === 0 ? (
         <p className="text-sm text-muted">{t('templates.empty')}</p>
+      ) : null}
+      {newTemplates.length > 0 ? (
+        <Card title={t('metamodelDrafts.newParts')}>
+          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+            {newTemplates.map((item) => (
+              <li
+                key={item.id}
+                data-draft-item={item.id}
+                className="flex flex-wrap items-center gap-2 py-2 text-sm"
+              >
+                <span className="font-medium">
+                  {draftItemName(item, i18n.language) || t('metamodelDrafts.noTarget')}
+                </span>
+                <DraftMarker change="created" />
+              </li>
+            ))}
+          </ul>
+        </Card>
       ) : null}
       {rows.length > 0 ? (
         <Card>
@@ -188,6 +219,10 @@ function TemplateList() {
             {rows.map((tpl) => {
               const name = templateName(tpl, i18n.language);
               const own = !tpl.is_system;
+              const change = draftChangeFor(draftItems, {
+                kinds: ['template', 'template_version'],
+                id: tpl.id,
+              });
               return (
                 <li
                   key={tpl.id}
@@ -206,6 +241,7 @@ function TemplateList() {
                       {!tpl.is_active ? (
                         <Badge variant="neutral">{t('templates.inactive')}</Badge>
                       ) : null}
+                      {change ? <DraftMarker change={change} /> : null}
                     </div>
                     <div className="text-xs text-muted">
                       {t('templates.typeAndVersion', {
@@ -451,6 +487,8 @@ function TemplateDetail({ id }: { id: string }) {
   const createVersion = useCreateTemplateVersion();
   const publish = usePublishTemplateVersion();
   const { types, nameOf } = useTypes();
+  const draft = useMetamodelDraftStore((s) => s.draft);
+  const draftItems = useActiveDraftItems();
   const [selected, setSelected] = useState<number | undefined>();
   const [confirm, setConfirm] = useState<'version' | 'publish' | null>(null);
   const [compare, setCompare] = useState<{ from?: number; to?: number }>({});
@@ -501,6 +539,13 @@ function TemplateDetail({ id }: { id: string }) {
       ? describeFlagRefusal(publish.error, t)
       : null;
   const own = !tpl.is_system;
+  const templateChange = draftChangeFor(draftItems, {
+    kinds: ['template', 'template_version'],
+    id: tpl.id,
+  });
+  const newVersions = draftItems.filter(
+    (item) => item.kind === 'template_version' && item.op === 'create' && item.target_id === tpl.id,
+  );
 
   return (
     <div className="space-y-4">
@@ -514,6 +559,7 @@ function TemplateDetail({ id }: { id: string }) {
               {name}
               {tpl.is_system ? <Badge variant="info">{t('templates.system')}</Badge> : null}
               {!tpl.is_active ? <Badge variant="neutral">{t('templates.inactive')}</Badge> : null}
+              {templateChange ? <DraftMarker change={templateChange} /> : null}
             </h3>
             <p className="text-xs text-muted">
               {t('templates.detailMeta', {
@@ -561,7 +607,7 @@ function TemplateDetail({ id }: { id: string }) {
             onRetry={() => void versions.refetch()}
           />
         ) : null}
-        {versions.isSuccess && list.length === 0 ? (
+        {versions.isSuccess && list.length === 0 && newVersions.length === 0 ? (
           <p className="mt-2 text-sm text-muted">{t('templates.noVersions')}</p>
         ) : null}
         {list.length > 0 ? (
@@ -590,7 +636,24 @@ function TemplateDetail({ id }: { id: string }) {
                   >
                     {t(`templates.versionStatuses.${v.status}`)}
                   </Badge>
+                  <VersionDraftMarker
+                    change={draftChangeFor(draftItems, { kinds: ['template_version'], id: v.id })}
+                  />
                 </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {newVersions.length > 0 ? (
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {newVersions.map((item) => (
+              <li
+                key={item.id}
+                data-draft-item={item.id}
+                className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+              >
+                {t('metamodelDrafts.newVersion')}
+                <DraftMarker change="created" />
               </li>
             ))}
           </ul>
@@ -705,7 +768,8 @@ function TemplateDetail({ id }: { id: string }) {
             onClick={() =>
               createVersion.mutate(tpl.id, {
                 onSuccess: (created) => {
-                  setSelected(created.version);
+                  // Captured in the draft (202): the item stands for the version.
+                  if (!isDraftItem(created)) setSelected(created.version);
                   setConfirm(null);
                 },
               })
@@ -720,7 +784,11 @@ function TemplateDetail({ id }: { id: string }) {
         open={confirm === 'publish' && !!version}
         onOpenChange={(open) => (open ? undefined : setConfirm(null))}
         title={t('templates.publishTitle', { version: version?.version })}
-        description={t('templates.publishText', { name })}
+        description={
+          draft
+            ? t('templates.publishDraftText', { draft: draft.name })
+            : t('templates.publishText', { name })
+        }
       >
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => setConfirm(null)}>
@@ -740,4 +808,9 @@ function TemplateDetail({ id }: { id: string }) {
       </Modal>
     </div>
   );
+}
+
+/** VersionDraftMarker marks a version a draft changes or publishes. */
+function VersionDraftMarker({ change }: { change: ReturnType<typeof draftChangeFor> }) {
+  return change ? <DraftMarker change={change} /> : null;
 }

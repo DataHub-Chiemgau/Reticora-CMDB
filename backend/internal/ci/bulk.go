@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -16,17 +17,19 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
-// Bulk operations on CIs (API-08, BLK-01): at most 500 ids per request;
-// from 100 ids on the operation runs as a job (JOB-04) and the request
-// answers 202 with the job; the result reports every id on its own, so one
-// failing CI does not fail the others (partial failure report).
+// Bulk operations on CIs (API-08, BLK-01, BLK-02): at most 500 ids per
+// request; from 100 ids on the operation runs as a job (JOB-04) and the
+// request answers 202 with the job; the result reports every id on its own,
+// so one failing CI does not fail the others (partial failure report).
+// The action names the operation (default set_status); its parameters
+// other than the status stand in params (WP-304, bulk_ops.go).
 //
-// A bulk status change is a manual change like a PATCH (CI-04, OVR-01): it
-// sets the status over an existing override, gives it a new protected
-// override with the initiating user as author and raises the version
-// (API-07). It names no version per id, so it is a deliberate overwrite
-// with If-Match "*" and needs none where the organization requires one
-// (E-66 option 1, transition rule of WP-368).
+// A bulk write of CI fields is a manual change like a PATCH (CI-04,
+// OVR-01, OVR-03): it sets the fields over an existing override, gives
+// each changed one a new protected override with the initiating user as
+// author and raises the version (API-07). It names no version per id, so
+// it is a deliberate overwrite with If-Match "*" and needs none where the
+// organization requires one (E-66 option 1, transition rule of WP-368).
 
 // Bulk limits of API-08.
 const (
@@ -41,9 +44,9 @@ const (
 	// bulkCancelEvery: a bulk job asks whether it was cancelled before
 	// every bulkCancelEvery-th id, at most one query per 25 ids.
 	bulkCancelEvery = 25
-	// bulkStatusReason is the reason of the overrides a bulk status
-	// change creates.
-	bulkStatusReason = "bulk set_status"
+	// bulkReason is the reason of the overrides a bulk write creates;
+	// a job adds its id (bulk:<job_id>, WP-304).
+	bulkReason = "bulk"
 	// bulkMalformedID is the report error of an id that is no UUID, a
 	// client error like in the single change (400, F-327).
 	bulkMalformedID = "invalid CI id"
@@ -53,8 +56,13 @@ const (
 type BulkRequest struct {
 	Action string   `json:"action"`
 	IDs    []string `json:"ids"`
-	// Status is the target of set_status.
+	// Status is the target of set_status; no other action takes it.
 	Status string `json:"status,omitempty"`
+	// Params are the parameters of the actions other than set_status
+	// (bulk_ops.go); kept as sent, so a job decodes them again.
+	Params json.RawMessage `json:"params,omitempty"`
+	// params are the decoded Params (validateBulk).
+	params *bulkParams
 	// malformed holds the ids that are no UUID (validateBulk): each is an
 	// error of its own in the report and never reaches the database.
 	malformed map[string]bool
@@ -68,6 +76,13 @@ type BulkItemResult struct {
 	// 0 for an id skipped after a cancel.
 	Code  int    `json:"code"`
 	Error string `json:"error,omitempty"`
+	// Type is the problem type of an error (WP-304): the type of an
+	// api.TypedProblem, otherwise https://reticora.io/problems/<code>
+	// like api.WriteError.
+	Type string `json:"type,omitempty"`
+	// Fields are the fields the error names (violations, a taken unique
+	// attribute, a stale field, refused field permissions).
+	Fields []string `json:"fields,omitempty"`
 }
 
 // BulkResult is the partial failure report of a bulk operation.
@@ -154,7 +169,8 @@ func CreatorPolicyOf(resolver *permission.FieldResolver, users permission.Creato
 }
 
 // validateBulk normalizes and checks a bulk request: known action, 1–500
-// distinct ids, a valid status for set_status. It checks every id as a
+// distinct ids, a valid status for set_status, the parameters of the other
+// actions (validateParams, 422 on params.<name>). It checks every id as a
 // UUID: a malformed id does not fail the request, it is reported on its own
 // with 400 while the other ids are applied (API-08, F-327). A UUID is
 // distinct in its canonical lower-case form: the same CI in another letter
@@ -163,8 +179,8 @@ func validateBulk(req *BulkRequest) error {
 	if req.Action == "" {
 		req.Action = BulkSetStatus
 	}
-	if req.Action != BulkSetStatus {
-		return &api.FieldError{Field: "action", Message: "must be " + BulkSetStatus, Status: http.StatusUnprocessableEntity}
+	if _, known := bulkActionPermissions[req.Action]; !known {
+		return &api.FieldError{Field: "action", Message: "must be one of " + strings.Join(BulkActions(), ", "), Status: http.StatusUnprocessableEntity}
 	}
 	seen := map[string]bool{}
 	ids := make([]string, 0, len(req.IDs))
@@ -193,10 +209,16 @@ func validateBulk(req *BulkRequest) error {
 			req.malformed[id] = true
 		}
 	}
+	if req.Action != BulkSetStatus {
+		if req.Status != "" {
+			return &api.FieldError{Field: "status", Message: "only " + BulkSetStatus + " takes a status", Status: http.StatusUnprocessableEntity}
+		}
+		return validateParams(req)
+	}
 	if !IsValidStatus(req.Status) {
 		return &api.FieldError{Field: "status", Message: "must be one of " + strings.Join(Statuses(), ", "), Status: http.StatusUnprocessableEntity}
 	}
-	return nil
+	return validateParams(req)
 }
 
 // Bulk runs the bulk operation synchronously below BulkJobFromIDs ids; from
@@ -207,8 +229,16 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 	if err := validateBulk(req); err != nil {
 		return nil, nil, err
 	}
+	// The rights of the action beyond ci:write and the catalog keys of the
+	// tags, for the whole request before any change and before a job.
+	if err := checkBulkPermission(ctx, req.Action); err != nil {
+		return nil, nil, err
+	}
+	if err := s.checkBulkTags(ctx, orgID, req); err != nil {
+		return nil, nil, err
+	}
 	if len(req.IDs) < BulkJobFromIDs || (s.bulkJobs == nil && s.bulkQueue == nil) {
-		result := s.runBulk(ctx, orgID, tenant.FromContext(ctx).UserID, req, nil)
+		result := s.runBulk(ctx, orgID, tenant.FromContext(ctx).UserID, "", req, nil)
 		return result, nil, nil
 	}
 	if s.bulkQueue != nil {
@@ -238,7 +268,7 @@ func (s *Service) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 		slog.ErrorContext(ctx, "claim bulk job", "job", jobID, "error", err)
 		return
 	}
-	result := s.runBulk(ctx, orgID, claimed.CreatedBy, req, s.cancelCheck(ctx, s.bulkJobs, orgID, jobID))
+	result := s.runBulk(ctx, orgID, claimed.CreatedBy, jobID, req, s.cancelCheck(ctx, s.bulkJobs, orgID, jobID))
 	if keepCancelled(ctx, s.bulkJobs, orgID, jobID, result) {
 		return
 	}
@@ -287,7 +317,7 @@ func (s *Service) RunBulkJob(ctx context.Context, job *jobs.Job) (any, error) {
 		return nil, fmt.Errorf("%w: %w", ErrNoCreatorPolicy, err)
 	}
 	runCtx = permission.WithPolicy(runCtx, policy)
-	result := s.runBulk(runCtx, job.OrganizationID, job.CreatedBy, &req,
+	result := s.runBulk(runCtx, job.OrganizationID, job.CreatedBy, job.ID, &req,
 		s.cancelCheck(jobCtx, cancels, job.OrganizationID, job.ID))
 	if cancels != nil && keepCancelled(jobCtx, cancels, job.OrganizationID, job.ID, result) {
 		return nil, nil
@@ -331,14 +361,18 @@ func keepCancelled(ctx context.Context, c bulkCancels, orgID, jobID string, resu
 const bulkWorkers = 8
 
 // runBulk applies the operation to every id as a manual change of author
-// and reports each, in the order of the ids. An id is ok only when the CI
-// stores the requested status afterwards. cancelled (nil: none) is asked
-// before every bulkCancelEvery-th id; once it reports a cancel, or ctx
-// ends, no further id is started, the changes under way finish and the
-// remaining ids are reported skipped (JOB-03, F-162).
-func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRequest, cancelled func() bool) *BulkResult {
+// and reports each, in the order of the ids (bulkApply). jobID names the
+// job of the run ("" for a synchronous one) in the reason of the overrides.
+// cancelled (nil: none) is asked before every bulkCancelEvery-th id; once
+// it reports a cancel, or ctx ends, no further id is started, the changes
+// under way finish and the remaining ids are reported skipped (JOB-03,
+// F-162).
+func (s *Service) runBulk(ctx context.Context, orgID, author, jobID string, req *BulkRequest, cancelled func() bool) *BulkResult {
 	result := &BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]BulkItemResult, len(req.IDs))}
-	status := req.Status
+	op := bulkOp{orgID: orgID, author: author, reason: bulkReason, req: req}
+	if jobID != "" {
+		op.reason = bulkReason + ":" + jobID
+	}
 	// A change under way finishes when ctx ends: its report is accurate.
 	itemCtx := context.WithoutCancel(ctx)
 	var wg sync.WaitGroup
@@ -352,27 +386,15 @@ func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRe
 			break
 		}
 		if req.malformed[id] {
-			result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusBadRequest, Error: bulkMalformedID}
+			result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusBadRequest, Error: bulkMalformedID,
+				Type: problemType(nil, http.StatusBadRequest)}
 			continue
 		}
 		wg.Add(1)
 		slots <- struct{}{}
 		go func(i int, id string) {
 			defer func() { <-slots; wg.Done() }()
-			anyVersion := api.IfMatchAny
-			item, err := s.Update(itemCtx, orgID, id, UpdateRequest{Status: &status, ChangeReason: bulkStatusReason,
-				IfMatch: &anyVersion, Manual: &ManualChange{Author: author}})
-			switch {
-			case err != nil:
-				code, msg := bulkError(err)
-				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: code, Error: msg}
-			case item.Status != status:
-				// A write that left the status is no success (API-08).
-				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusConflict,
-					Error: fmt.Sprintf("the status was not applied, the CI keeps status %s", item.Status)}
-			default:
-				result.Items[i] = BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK}
-			}
+			result.Items[i] = s.bulkApply(itemCtx, &op, id)
 		}(i, id)
 	}
 	wg.Wait()
@@ -389,39 +411,103 @@ func (s *Service) runBulk(ctx context.Context, orgID, author string, req *BulkRe
 	return result
 }
 
-// bulkError maps the error of one id onto the status and message the
-// single operation would answer: 403 for a refusal of the action or field
-// permissions, database errors like the single PATCH
-// (api.ClassifyDBError, sanitized details), an unreachable dependency 503;
-// internal errors stay generic.
-func bulkError(err error) (code int, msg string) {
+// bulkOK is the report of an id the operation applied.
+func bulkOK(id string) BulkItemResult {
+	return BulkItemResult{ID: id, Result: bulkResultOK, Code: http.StatusOK}
+}
+
+// bulkFailed is the report of an id whose change failed with err.
+func bulkFailed(id string, err error) BulkItemResult {
+	f := bulkError(err)
+	return BulkItemResult{ID: id, Result: bulkResultError, Code: f.code, Error: f.msg, Type: problemType(err, f.code), Fields: f.fields}
+}
+
+// bulkNotApplied is the report of an id whose CI does not hold the value
+// the operation wrote afterwards: no success (API-08).
+func bulkNotApplied(id, detail string) BulkItemResult {
+	return BulkItemResult{ID: id, Result: bulkResultError, Code: http.StatusConflict, Error: detail,
+		Type: problemType(nil, http.StatusConflict)}
+}
+
+// problemType is the problem type of the report of an id (WP-304): the
+// type of an api.TypedProblem, otherwise the one api.WriteError gives the
+// status.
+func problemType(err error, code int) string {
+	var typed api.TypedProblem
+	if err != nil && errors.As(err, &typed) && typed.ProblemType() != "" {
+		return typed.ProblemType()
+	}
+	return fmt.Sprintf("https://reticora.io/problems/%d", code)
+}
+
+// bulkFailure is the report of a failed id: status, message and the
+// fields the error names.
+type bulkFailure struct {
+	code   int
+	msg    string
+	fields []string
+}
+
+// bulkError maps the error of one id onto the status, message and fields
+// the single operation would answer: 403 for a refusal of the action or
+// field permissions (with the fields), 409 for a taken unique attribute
+// and a stale field (with the fields), 422 for violations (with their
+// fields), database errors like the single PATCH (api.ClassifyDBError,
+// sanitized details), an unreachable dependency 503; internal errors stay
+// generic.
+func bulkError(err error) bulkFailure {
 	var fe *api.FieldError
 	var ve *ValidationError
 	var forbidden *api.FieldForbiddenError
+	var unique *UniqueError
+	var conflict *ConflictError
+	var reserved *ReservedKeyError
+	var legacy *LegacyTagsError
 	switch {
 	case errors.Is(err, ErrNotFound) || err.Error() == "not found":
-		return http.StatusNotFound, "CI not found"
+		return bulkFailure{code: http.StatusNotFound, msg: "CI not found"}
 	case errors.As(err, &forbidden):
 		// An action grant or a field permission refuses the id (RBA-07,
 		// WP-728); the other ids go on (BLK-01).
-		return http.StatusForbidden, forbidden.Error()
+		return bulkFailure{code: http.StatusForbidden, msg: forbidden.Error(), fields: forbidden.Fields}
+	case errors.Is(err, ErrInstanceAttributeForbidden):
+		return bulkFailure{code: http.StatusForbidden, msg: instanceForbiddenDetail}
+	case errors.As(err, &unique):
+		return bulkFailure{code: http.StatusConflict, msg: unique.Error(), fields: unique.Fields}
+	case errors.As(err, &conflict):
+		return bulkFailure{code: http.StatusConflict, msg: conflict.Error(), fields: conflict.Fields}
+	case errors.As(err, &reserved):
+		return bulkFailure{code: http.StatusBadRequest, msg: reserved.Error(), fields: reserved.Fields}
+	case errors.As(err, &legacy):
+		return bulkFailure{code: http.StatusBadRequest, msg: legacy.Error(), fields: []string{"attributes." + LegacyTagsKey}}
 	case errors.As(err, &fe):
 		if fe.Status != 0 {
-			return fe.Status, fe.Error()
+			return bulkFailure{code: fe.Status, msg: fe.Error(), fields: []string{fe.Field}}
 		}
-		return http.StatusBadRequest, fe.Error()
+		return bulkFailure{code: http.StatusBadRequest, msg: fe.Error(), fields: []string{fe.Field}}
 	case errors.As(err, &ve):
-		return http.StatusUnprocessableEntity, ve.Error()
+		return bulkFailure{code: http.StatusUnprocessableEntity, msg: ve.Error(), fields: violationFields(ve.Violations)}
 	case errors.Is(err, ErrPreconditionRequired):
-		return http.StatusPreconditionRequired, err.Error()
+		return bulkFailure{code: http.StatusPreconditionRequired, msg: err.Error()}
 	case errors.Is(err, ErrPreconditionFailed):
-		return http.StatusPreconditionFailed, err.Error()
+		return bulkFailure{code: http.StatusPreconditionFailed, msg: err.Error()}
 	}
 	if status, _, detail, ok := api.ClassifyDBError(err); ok {
-		return status, detail
+		return bulkFailure{code: status, msg: detail}
 	}
 	if api.IsUnavailable(err) {
-		return http.StatusServiceUnavailable, "a required service is temporarily unavailable, try again later"
+		return bulkFailure{code: http.StatusServiceUnavailable, msg: "a required service is temporarily unavailable, try again later"}
 	}
-	return http.StatusInternalServerError, "the CI could not be updated"
+	return bulkFailure{code: http.StatusInternalServerError, msg: "the CI could not be updated"}
+}
+
+// violationFields returns the distinct fields of violations in order.
+func violationFields(violations []Violation) []string {
+	var out []string
+	for i := range violations {
+		if !slices.Contains(out, violations[i].Field) {
+			out = append(out, violations[i].Field)
+		}
+	}
+	return out
 }

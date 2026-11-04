@@ -377,6 +377,64 @@ func TestFilterASTLegacyAssetNames(t *testing.T) {
 	}
 }
 
+// TestFilterASTOwnerFields covers CI-07 (WP-752): owner_user_id and
+// owner_team_id of a CI compile with eq, ne and in as uuid parameters, are
+// valid sort keys and columns of a view, map onto their field keys and
+// take only UUIDs and no ordering; on assets and for unknown fields the
+// AST still refuses them.
+func TestFilterASTOwnerFields(t *testing.T) {
+	const user, team, other = "0b1e5c1a-0000-4000-8000-00000000a001", "0b1e5c1a-0000-4000-8000-00000000b002", "0b1e5c1a-0000-4000-8000-00000000c003"
+	ast := mustAST(t, `{"or": [{"field": "owner_user_id", "op": "eq", "value": "`+user+`"},
+		{"field": "owner_team_id", "op": "in", "value": ["`+team+`", "`+other+`"]},
+		{"field": "owner_user_id", "op": "ne", "value": "`+other+`"}]}`)
+	if err := ast.Validate("ci"); err != nil {
+		t.Fatal(err)
+	}
+	sql, args, next, err := ast.CompileSQL("ci", "ci", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "((ci.owner_user_id)::uuid = $2::uuid OR (ci.owner_team_id)::uuid = ANY($3::uuid[]) OR (ci.owner_user_id)::uuid IS DISTINCT FROM $4::uuid)"; sql != want {
+		t.Errorf("SQL %q, want %q", sql, want)
+	}
+	if strings.Contains(sql, user) || strings.Contains(sql, team) || next != 5 || len(args) != 4 || args[1] != user {
+		t.Errorf("not parameterized: %q, args %v, next %d", sql, args, next)
+	}
+	// Sort and columns of a saved view (viewField, WP-555).
+	req := &UpsertRequest{Name: "my devices", EntityKind: "ci",
+		FilterSpec: map[string]any{"where": map[string]any{"field": "owner_user_id", "op": "eq", "value": user}},
+		Sort:       []SortKey{{Field: "owner_team_id", Dir: "desc"}, {Field: "owner_user_id"}},
+		Columns:    []string{"owner_user_id", "owner_team_id"}}
+	if err := ValidateView("ci", req); err != nil {
+		t.Fatalf("view with the owner: %v", err)
+	}
+	columns, orderBy, _ := presentationSQL("ci", req.Sort, req.Columns, nil)
+	if !strings.Contains(columns, "ci.owner_user_id") || !strings.Contains(columns, "ci.owner_team_id") ||
+		orderBy != "ci.owner_team_id DESC NULLS LAST, ci.owner_user_id ASC NULLS LAST, ci.id ASC" {
+		t.Errorf("presentation: %q, %q", columns, orderBy)
+	}
+	for _, field := range []string{"owner_user_id", "owner_team_id"} {
+		if key, checked, known := fieldKey("ci", field); key != "core."+field || !checked || !known {
+			t.Errorf("fieldKey(ci, %s) = %q, %v, %v; want core.%s", field, key, checked, known, field)
+		}
+	}
+	for name, c := range map[string]struct{ kind, raw string }{
+		"no uuid":           {"ci", `{"field": "owner_user_id", "op": "eq", "value": "alice"}`},
+		"order on a uuid":   {"ci", `{"field": "owner_team_id", "op": "gt", "value": "` + team + `"}`},
+		"like on a uuid":    {"ci", `{"field": "owner_user_id", "op": "like", "value": "0b1e*"}`},
+		"owner of an asset": {"asset", `{"field": "owner_user_id", "op": "eq", "value": "` + user + `"}`},
+		"unknown field":     {"ci", `{"field": "owner_name", "op": "eq", "value": "x"}`},
+	} {
+		var astErr *ASTError
+		if err := mustAST(t, c.raw).Validate(c.kind); !errors.As(err, &astErr) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := ValidateView("ci", &UpsertRequest{Name: "x", Sort: []SortKey{{Field: "owner_name"}}}); err == nil {
+		t.Error("sort on an unknown field accepted")
+	}
+}
+
 // TestFilterASTValuesPerFieldKind covers F-179 (WP-405): Validate checks
 // every value against the kind of its field (uuid, RFC 3339 time or date,
 // number, bool, text), each element of in included, before any SQL runs,

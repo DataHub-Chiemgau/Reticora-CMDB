@@ -13,7 +13,9 @@ import (
 
 // filterColumns maps the filterable CI fields (API-02) onto their SQL
 // expression and kind. Only expressions from this map are interpolated
-// into SQL.
+// into SQL. The owner (WP-752) compares with = and = ANY, both strict, so
+// the partial indexes idx_ci_owner_user/idx_ci_owner_team (WP-280) carry
+// the filter.
 var filterColumns = map[string]struct{ expr, kind string }{
 	"name":             {"name", api.KindText},
 	"status":           {"status", api.KindText},
@@ -37,6 +39,8 @@ var filterColumns = map[string]struct{ expr, kind string }{
 	"location_id":      {"location_id", api.KindUUID},
 	"parent_ci_id":     {"parent_ci_id", api.KindUUID},
 	"asset_id":         {"asset_id", api.KindUUID},
+	"owner_user_id":    {"owner_user_id", api.KindUUID},
+	"owner_team_id":    {"owner_team_id", api.KindUUID},
 	"is_manual":        {"is_manual", api.KindBool},
 	"created_at":       {"created_at", api.KindTime},
 	"updated_at":       {"updated_at", api.KindTime},
@@ -56,7 +60,7 @@ var ListFields = func() api.ListFields {
 	for field, c := range filterColumns {
 		spec.Filterable[field] = c.kind
 	}
-	spec.Sortable = []string{"created_at", "updated_at", "name", "status"}
+	spec.Sortable = []string{"created_at", "updated_at", "name", "status", "owner_user_id", "owner_team_id"}
 	t := reflect.TypeFor[Item]()
 	for i := range t.NumField() {
 		if name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ","); name != "" && name != "-" {
@@ -205,6 +209,10 @@ func fieldValue(item *Item, field string) string {
 		return item.ParentCIID
 	case "asset_id":
 		return item.AssetID
+	case "owner_user_id":
+		return item.OwnerUserID
+	case "owner_team_id":
+		return item.OwnerTeamID
 	case "is_manual":
 		return strconv.FormatBool(item.IsManual)
 	case "created_at":

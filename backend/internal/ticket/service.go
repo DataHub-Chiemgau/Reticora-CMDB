@@ -203,7 +203,11 @@ func (s *Service) AddComment(ctx context.Context, c *Comment) error {
 		return err
 	}
 	if s.sla != nil && !c.IsInternal && c.AuthorType == AuthorUser {
-		_ = s.sla.MarkFirstResponse(ctx, c.OrganizationID, c.TicketID, time.Now().UTC())
+		// Under a savepoint: in a context transaction (ticket.Provider,
+		// WP-293) a failed hook must not abort it.
+		_ = database.Savepoint(ctx, func(ctx context.Context) error {
+			return s.sla.MarkFirstResponse(ctx, c.OrganizationID, c.TicketID, time.Now().UTC())
+		})
 	}
 	return nil
 }

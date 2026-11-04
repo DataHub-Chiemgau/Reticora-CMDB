@@ -18,12 +18,14 @@ import {
   useSetAttributeDefinitions,
   useSetCITypeActive,
   useTypeAttributeDefinitions,
+  useActiveDraftItems,
   useUpdateAttributeSet,
   useUpdateCIType,
 } from '../api/cmdbHooks';
 import { useHasPermission } from '../api/hooks';
 import { useModules } from '../hooks/useEntitlements';
 import {
+  isDraftItem,
   localizedText,
   type AttributeDefinition,
   type AttributeSet,
@@ -32,6 +34,8 @@ import {
   type CIType,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
+  type Drafted,
+  type MetamodelDraftItem,
   type SensitiveField,
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
@@ -55,6 +59,13 @@ import { IndexStatus } from '../components/metamodel/IndexStatus';
 import { AttributeSetEditor } from '../components/metamodel/AttributeSetEditor';
 import { TypeSetAssignment } from '../components/metamodel/TypeSetAssignment';
 import { MetamodelTabs } from '../components/metamodel/MetamodelTabs';
+import {
+  DraftMarker,
+  draftChangeFor,
+  draftCreations,
+  draftItemName,
+  type DraftChange,
+} from '../components/metamodel/DraftBanner';
 
 // Data types of MET-11 (the catalog test labels each of them).
 export { FIELD_TYPES } from '../components/metamodel/AttributeEditor';
@@ -143,6 +154,50 @@ function isSensitive(
 
 const byOrder = (a: AttributeDefinition, b: AttributeDefinition) =>
   (a.order ?? 0) - (b.order ?? 0) || a.key.localeCompare(b.key);
+
+/** The draft mark of an attribute row: the definition or the field of its key (E-113). */
+function attributeChange(
+  items: readonly MetamodelDraftItem[],
+  d: AttributeDefinition,
+): DraftChange | undefined {
+  return d.scope === 'global'
+    ? draftChangeFor(items, {
+        kinds: ['attribute_definition', 'global_field'],
+        id: d.id,
+        key: d.key,
+      })
+    : draftChangeFor(items, {
+        kinds: ['attribute_definition', 'ci_type_field'],
+        id: d.id,
+        key: d.key,
+        typeId: d.ci_type_id,
+      });
+}
+
+/**
+ * DraftPlaceholders lists the parts a draft creates as placeholder rows
+ * from the item payload (E-113): they exist only in the draft.
+ */
+function DraftPlaceholders({ items, t }: { items: MetamodelDraftItem[]; t: TFunction }) {
+  const { i18n } = useTranslation();
+  if (items.length === 0) return null;
+  return (
+    <>
+      {items.map((item) => (
+        <li
+          key={`draft:${item.id}`}
+          data-draft-item={item.id}
+          className="flex flex-wrap items-center gap-2 py-2 text-sm"
+        >
+          <span className="font-medium">
+            {draftItemName(item, i18n.language) || t('metamodelDrafts.noTarget')}
+          </span>
+          <DraftMarker change="created" />
+        </li>
+      ))}
+    </>
+  );
+}
 
 export function CITypeAdminPage() {
   const { t, i18n } = useTranslation();
@@ -272,6 +327,7 @@ export function CITypeAdminPage() {
               label={label}
             />
           ) : null}
+          <DraftTypes types={types} label={label} t={t} />
         </div>
 
         <div className="space-y-4 lg:col-span-2">
@@ -355,7 +411,8 @@ export function CITypeAdminPage() {
           onClose={() => setTypeDialog(null)}
           onSaved={(saved) => {
             setTypeDialog(null);
-            setSelectedId(saved.id);
+            // A write captured in the draft (202) answers its item, no type.
+            if (!isDraftItem(saved)) setSelectedId(saved.id);
           }}
           t={t}
         />
@@ -392,7 +449,7 @@ function TypeDialog({
   types: CIType[];
   label: TypeLabel;
   onClose: () => void;
-  onSaved: (type: CIType) => void;
+  onSaved: (type: Drafted<CIType>) => void;
   t: TFunction;
 }) {
   const editing = state.mode === 'edit' ? state.type : undefined;
@@ -567,9 +624,11 @@ function AttributeRow({
   onReindex,
   reindexing,
   onOpenOrigin,
+  draftChange,
   t,
 }: {
   definition: AttributeDefinition;
+  draftChange?: DraftChange;
   origin?: Origin;
   sensitive: boolean;
   appliesTo?: string;
@@ -632,6 +691,7 @@ function AttributeRow({
           {d.computed ? <Badge variant="info">{t('citypes.flagComputed')}</Badge> : null}
           {sensitive ? <Badge variant="danger">{t('citypes.flagSensitive')}</Badge> : null}
           {appliesTo ? <Badge variant="neutral">{appliesTo}</Badge> : null}
+          {draftChange ? <DraftMarker change={draftChange} /> : null}
         </div>
         <IndexStatus
           status={d.index_status}
@@ -744,6 +804,13 @@ function CITypeDetail({
     { enabled: setsEnabled },
   );
   const sensitive = useSensitiveCIFields();
+  const draftItems = useActiveDraftItems();
+  const typeChange = draftChangeFor(draftItems, { kinds: ['ci_type'], id: type.id });
+  const newAttributes = draftCreations(
+    draftItems,
+    'attribute_definition',
+    (payload) => payload.ci_type_id === type.id,
+  );
   const chain = [type.id, ...ancestors.map((a) => a.id)];
   const marks = sensitive.data ?? [];
   const parent = types.find((ty) => ty.id === type.parent_type_id);
@@ -797,7 +864,10 @@ function CITypeDetail({
               setActive.reset();
               // The clone is a type of the organization: select it so its
               // attributes can be added right away (the way out of a system type).
-              cloneType.mutate({ id: type.id }, { onSuccess: (clone) => onSelectType(clone.id) });
+              cloneType.mutate(
+                { id: type.id },
+                { onSuccess: (clone) => (isDraftItem(clone) ? undefined : onSelectType(clone.id)) },
+              );
             }}
           >
             {t('citypes.clone', 'Klonen')}
@@ -824,6 +894,11 @@ function CITypeDetail({
       {actionError ? (
         <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
           {describeActionError(lastAction, actionError, t)}
+        </p>
+      ) : null}
+      {typeChange ? (
+        <p className="mb-2">
+          <DraftMarker change={typeChange} />
         </p>
       ) : null}
       {type.description ? (
@@ -892,6 +967,7 @@ function CITypeDetail({
               key={d.id}
               definition={d}
               origin={{ kind: 'own' }}
+              draftChange={attributeChange(draftItems, d)}
               sensitive={isSensitive(marks, d, chain)}
               onEdit={editable ? () => onEditAttribute(d) : undefined}
               editLabel={t('citypes.editFieldAction', { name: d.key })}
@@ -928,11 +1004,13 @@ function CITypeDetail({
             key={`global:${d.id}`}
             definition={d}
             origin={{ kind: 'global' }}
+            draftChange={attributeChange(draftItems, d)}
             sensitive={isSensitive(marks, d, chain)}
             t={t}
           />
         ))}
-        {!loading && !failed && count === 0 ? (
+        <DraftPlaceholders items={newAttributes} t={t} />
+        {!loading && !failed && count === 0 && newAttributes.length === 0 ? (
           <li className="py-2 text-sm text-muted">{t('citypes.noFields')}</li>
         ) : null}
       </ul>
@@ -966,6 +1044,12 @@ function GlobalAttributesSection({
   const reindex = useReindexAttributeDefinition();
   const sensitive = useSensitiveCIFields();
   const canManage = useHasPermission('ci_attribute:manage');
+  const draftItems = useActiveDraftItems();
+  const newGlobals = draftCreations(
+    draftItems,
+    'attribute_definition',
+    (payload) => !payload.ci_type_id && !payload.attribute_set_id,
+  );
   const marks = sensitive.data ?? [];
   const list = [...(definitions.data?.data ?? [])].sort(
     (a, b) => Number(a.is_system) - Number(b.is_system) || byOrder(a, b),
@@ -1038,6 +1122,7 @@ function GlobalAttributesSection({
                 key={d.id}
                 definition={d}
                 sensitive={isSensitive(marks, d, [])}
+                draftChange={attributeChange(draftItems, d)}
                 appliesTo={d.is_system ? undefined : appliesTo(d)}
                 onEdit={editable ? () => onEdit(d) : undefined}
                 editLabel={t('citypes.globals.editAction', { name: d.key })}
@@ -1049,7 +1134,8 @@ function GlobalAttributesSection({
               />
             );
           })}
-          {definitions.isSuccess && list.length === 0 ? (
+          <DraftPlaceholders items={newGlobals} t={t} />
+          {definitions.isSuccess && list.length === 0 && newGlobals.length === 0 ? (
             <li className="py-2 text-sm text-muted">{t('citypes.globals.empty')}</li>
           ) : null}
         </ul>
@@ -1087,6 +1173,7 @@ function AttributeSetsSection({
 }) {
   const { i18n } = useTranslation();
   const deleteSet = useDeleteAttributeSet();
+  const draftItems = useActiveDraftItems();
   const [dialog, setDialog] = useState<SetDialogState | null>(null);
   const list = [...sets].sort(
     (a, b) =>
@@ -1149,6 +1236,7 @@ function AttributeSetsSection({
                       {!set.is_active ? (
                         <Badge variant="warning">{t('citypes.inactive')}</Badge>
                       ) : null}
+                      <SetDraftMarker items={draftItems} id={set.id} />
                     </div>
                     {set.description ? (
                       <p className="text-xs text-gray-600 dark:text-gray-300">{set.description}</p>
@@ -1200,6 +1288,7 @@ function AttributeSetsSection({
               </li>
             );
           })}
+          <DraftPlaceholders items={draftCreations(draftItems, 'attribute_set')} t={t} />
           {!loading && !error && list.length === 0 ? (
             <li className="py-2 text-sm text-muted">{t('citypes.sets.empty')}</li>
           ) : null}
@@ -1214,7 +1303,7 @@ function AttributeSetsSection({
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
             setDialog(null);
-            onOpenSet(saved.id);
+            if (!isDraftItem(saved)) onOpenSet(saved.id);
           }}
           t={t}
         />
@@ -1236,7 +1325,7 @@ function SetDialog({
 }: {
   state: SetDialogState;
   onClose: () => void;
-  onSaved: (set: AttributeSet) => void;
+  onSaved: (set: Drafted<AttributeSet>) => void;
   t: TFunction;
 }) {
   const editing = state.mode === 'edit' ? state.set : undefined;
@@ -1352,5 +1441,46 @@ function SetDialog({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** SetDraftMarker marks an attribute set a draft changes or deletes. */
+function SetDraftMarker({ items, id }: { items: readonly MetamodelDraftItem[]; id: string }) {
+  const change = draftChangeFor(items, { kinds: ['attribute_set'], id });
+  return change ? <DraftMarker change={change} /> : null;
+}
+
+/**
+ * DraftTypes lists the types an active draft creates or clones (E-113):
+ * they are not in the tree until the draft is published; the marks of the
+ * changed types stand in their detail card.
+ */
+function DraftTypes({ types, label, t }: { types: CIType[]; label: TypeLabel; t: TFunction }) {
+  const { i18n } = useTranslation();
+  const created = draftCreations(useActiveDraftItems(), 'ci_type');
+  if (created.length === 0) return null;
+  const nameOf = (item: MetamodelDraftItem) => {
+    const name = draftItemName(item, i18n.language);
+    if (name) return name;
+    const source = item.op === 'clone' ? types.find((ty) => ty.id === item.target_id) : undefined;
+    return source
+      ? t('metamodelDrafts.cloneOf', { name: label(source) })
+      : t('metamodelDrafts.noTarget');
+  };
+  return (
+    <Card title={t('metamodelDrafts.newParts')} className="mt-4">
+      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+        {created.map((item) => (
+          <li
+            key={item.id}
+            data-draft-item={item.id}
+            className="flex flex-wrap items-center gap-2 py-2 text-sm"
+          >
+            <span className="font-medium">{nameOf(item)}</span>
+            <DraftMarker change="created" />
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
