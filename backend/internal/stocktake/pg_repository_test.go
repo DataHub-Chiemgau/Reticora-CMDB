@@ -103,7 +103,9 @@ func TestCompleteAppliesCorrections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotWL.Location != "Raum B" || gotWL.Status != "assigned" {
+	// status follows lifecycle_state (E-120 (b), WP-738): a new asset starts
+	// in ordered, its status is in_stock whatever the create sent.
+	if gotWL.Location != "Raum B" || gotWL.Status != "in_stock" {
 		t.Fatalf("wrong_location asset should have moved to Raum B: %#v", gotWL)
 	}
 

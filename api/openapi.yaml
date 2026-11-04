@@ -20170,8 +20170,10 @@ components:
       description: >-
         The expression of a computed attribute (MET-10 computed, WP-258):
         $defs/expr of api/rules.schema.json — field (an attribute of the CI,
-        or asset.<field> of the asset linked through ci.asset_id: warranty_end,
-        purchase_date, purchase_cost, asset_tag, serial_number, status),
+        or asset.<field> of the asset linked through ci.asset_id:
+        warranty_until, purchase_date, purchase_price, inventory_no,
+        serial_number, status; deprecated: warranty_end, purchase_cost,
+        asset_tag),
         literal, add, sub, mul, div, today, days_between, concat, lower,
         upper and coalesce. Absent for an entered attribute. A computed
         attribute is neither required nor unique and has no default; its
@@ -23956,10 +23958,16 @@ components:
       type: object
       readOnly: true
       description: Canonical data of the linked asset, shown read-only on the CI (DB-05).
-      required: [id, asset_tag, name, status]
+      required: [id, inventory_no, asset_tag, name, status]
       properties:
         id: { type: string }
-        asset_tag: { type: string }
+        inventory_no:
+          type: string
+          description: Inventory number of the asset (AST-01, WP-738).
+        asset_tag:
+          type: string
+          deprecated: true
+          description: Deprecated name of inventory_no (API-01, E-120 (c)).
         name: { type: string }
         serial_number: { type: string }
         location_id: { type: string }
@@ -23968,8 +23976,19 @@ components:
         barcode: { type: string }
         rfid_tag: { type: string }
         purchase_date: { type: string, format: date }
-        warranty_end: { type: string, format: date }
-        supplier: { type: string }
+        warranty_until:
+          type: string
+          format: date
+          description: End of the warranty of the asset (AST-01, WP-738).
+        warranty_end:
+          type: string
+          format: date
+          deprecated: true
+          description: Deprecated name of warranty_until (API-01, E-120 (c)).
+        supplier:
+          type: string
+          deprecated: true
+          description: Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)).
         invoice_number: { type: string }
         manufacturer: { type: string, description: Manufacturer of the asset (AST-01, WP-271). }
         model: { type: string, description: Model of the asset (AST-01, WP-271). }

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000230_ticket_links
+Stand: Migration 000231_asset_field_names
 
 ## Prüfung
 
@@ -1153,6 +1153,24 @@ Lieferanten aus dem Freitext `supplier` (org-weit, gleichnamige Zeilen
 werden wiederverwendet), `lifecycle_state` aus `status` (E-120 (a); ohne
 Zustand, z. B. `lost`, als Kopie in `migration_quarantine`) und
 `location_id` aus `custom_fields.location_id`.
+
+Asset-Spaltennamen nach AST-01 (WP-738, E-41, E-120, Migration 000231):
+`asset.asset_tag` heißt `inventory_no`, `purchase_cost` heißt
+`purchase_price` (jetzt NUMERIC(14,2)) und `warranty_end` heißt
+`warranty_until`; `NOT NULL` und der Index `idx_asset_tag_org` (Name
+unverändert, jetzt auf `organization_id`, `inventory_no`) gehen mit. Die
+Altnamen bestehen als abgekündigte Spiegelspalten `asset_tag` (TEXT),
+`purchase_cost` (NUMERIC(14,2)) und `warranty_end` (DATE); der Trigger
+`asset_mirror_legacy_columns` (BEFORE INSERT OR UPDATE, Funktion
+`asset_mirror_legacy_columns()`) hält beide Seiten gleich und setzt
+`supplier` auf `supplier.name` des gesetzten `supplier_id`;
+`supplier_name_asset_mirror` (AFTER UPDATE OF `name` ON `supplier`) zieht
+den Spiegel nach einer Umbenennung nach. `asset_status_from_lifecycle`
+(BEFORE INSERT OR UPDATE OF `lifecycle_state`) leitet `status` aus
+`lifecycle_state` ab (`deployed` → `assigned`, `repair` → `maintenance`,
+`retired`, `disposed`, sonst `in_stock`; bei NULL unverändert).
+Datenmigration: `saved_view.filter_spec` (`where`, `sort`, `columns`) und
+`attribute_definition.computed` verwenden die neuen Namen.
 
 ## Tabellen, RLS und Policies
 

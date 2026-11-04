@@ -100,7 +100,7 @@ func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (whe
 	}
 	if f.WarrantyWithinDays > 0 && table == "asset" {
 		p := next()
-		add(fmt.Sprintf("%s.warranty_end IS NOT NULL AND %s.warranty_end <= CURRENT_DATE + (%s || ' days')::interval", table, table, p), fmt.Sprintf("%d", f.WarrantyWithinDays))
+		add(fmt.Sprintf("%s.warranty_until IS NOT NULL AND %s.warranty_until <= CURRENT_DATE + (%s || ' days')::interval", table, table, p), fmt.Sprintf("%d", f.WarrantyWithinDays))
 	}
 	if f.HasOwner != nil && table == "asset" {
 		if *f.HasOwner {
@@ -120,8 +120,10 @@ func (f *FilterSpec) CompileSQL(entityKind string, args []any, startAt int) (whe
 	}
 	if f.AvailableOnly && table == "asset" {
 		add(`NOT EXISTS (SELECT 1 FROM reservation rv WHERE rv.asset_id = asset.id AND rv.state = 'active')`)
-		add(`(asset.lifecycle_state IS NULL OR asset.lifecycle_state IN ('in_stock', 'received', 'ordered'))
-			AND asset.status IN ('in_stock')`)
+		// The state is lifecycle_state (E-120 (b), WP-738); only an asset
+		// without a state falls back to the deprecated status.
+		add(`(asset.lifecycle_state IN ('in_stock', 'received', 'ordered')
+			OR (asset.lifecycle_state IS NULL AND asset.status = 'in_stock'))`)
 	}
 	if f.HasRelationship != "" && table == "ci" {
 		p := next()
@@ -295,7 +297,7 @@ type FieldRef struct {
 // ReferencedFields returns every field the spec reads for the entity kind,
 // in the order of the spec and without duplicates: the flat fields on
 // columns (asset_category as category, warranty_within_days as
-// warranty_end, lifecycle, status and the location filters as
+// warranty_until, lifecycle, status and the location filters as
 // location_id, discovery_source, ci_type as ci_type_id, search as name),
 // tags as attributes.tags, the keys of attributes as attributes.<key>,
 // every comparison of the AST in where (asset.<field> of a CI as the
@@ -338,7 +340,7 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 		{f.LocationID != "", "location_id", "location_id"},
 		{f.LocationSubtree != "", "location_id", "location_subtree"},
 		{f.LocationSearch != "", "location_id", "location_search"},
-		{f.WarrantyWithinDays > 0 && isAsset, "warranty_end", "warranty_within_days"},
+		{f.WarrantyWithinDays > 0 && isAsset, "warranty_until", "warranty_within_days"},
 		{f.AvailableOnly && isAsset, "status", "available_only"},
 		{f.AvailableOnly && isAsset, "lifecycle_state", "available_only"},
 	} {
@@ -421,6 +423,9 @@ const (
 type astField struct{ expr, kind string }
 
 // astFields are the whitelisted fields per entity kind; %s is the table.
+// The asset fields asset_tag, purchase_cost and warranty_end are the
+// deprecated aliases of inventory_no, purchase_price and warranty_until
+// (AST-01, WP-738) and read the new columns.
 var astFields = map[string]map[string]astField{
 	"ci": {
 		"name": {"%s.name", kindText}, "status": {"%s.status", kindText}, "hostname": {"%s.hostname", kindText},
@@ -435,12 +440,14 @@ var astFields = map[string]map[string]astField{
 		"updated_at": {"%s.updated_at", kindTime}, "last_seen_at": {"%s.last_seen_at", kindTime},
 	},
 	"asset": {
-		"name": {"%s.name", kindText}, "asset_tag": {"%s.asset_tag", kindText}, "category": {"%s.category", kindText},
+		"name": {"%s.name", kindText}, "inventory_no": {"%s.inventory_no", kindText},
+		"asset_tag": {"%s.inventory_no", kindText}, "category": {"%s.category", kindText},
 		"status": {"%s.status", kindText}, "serial_number": {"%s.serial_number", kindText},
 		"supplier": {"%s.supplier", kindText}, "lifecycle_state": {"%s.lifecycle_state", kindText},
 		"barcode": {"%s.barcode", kindText}, "rfid_tag": {"%s.rfid_tag", kindText},
-		"purchase_cost": {"%s.purchase_cost", kindNumber}, "purchase_date": {"%s.purchase_date", kindTime},
-		"warranty_end": {"%s.warranty_end", kindTime}, "client_id": {"%s.client_id", kindUUID},
+		"purchase_price": {"%s.purchase_price", kindNumber}, "purchase_cost": {"%s.purchase_price", kindNumber},
+		"purchase_date": {"%s.purchase_date", kindTime}, "warranty_until": {"%s.warranty_until", kindTime},
+		"warranty_end": {"%s.warranty_until", kindTime}, "client_id": {"%s.client_id", kindUUID},
 		"location_id": {"%s.location_id", kindUUID}, "created_at": {"%s.created_at", kindTime},
 	},
 }

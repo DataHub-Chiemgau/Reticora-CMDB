@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -181,7 +182,7 @@ func TestCompileSQLAssetLifecycleAndOwner(t *testing.T) {
 	if !strings.Contains(where, "NOT EXISTS (SELECT 1 FROM assignment") {
 		t.Fatalf("expected has_owner=false predicate, got %s", where)
 	}
-	if !strings.Contains(where, "warranty_end <= CURRENT_DATE") {
+	if !strings.Contains(where, "asset.warranty_until <= CURRENT_DATE") {
 		t.Fatalf("expected warranty predicate, got %s", where)
 	}
 }
@@ -282,7 +283,7 @@ func TestFilterASTCompilesAndOrNot(t *testing.T) {
 	for _, want := range []string{
 		"((ci.status = $2 OR ci.status = $3) AND (NOT COALESCE(ci.name ILIKE $4, false)) AND " +
 			"CASE WHEN jsonb_typeof(ci.attributes->$5) = 'number' THEN (ci.attributes->>$5)::numeric END >= $6::numeric",
-		"EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND (sa.warranty_end)::timestamptz < $7::timestamptz)",
+		"EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND (sa.warranty_until)::timestamptz < $7::timestamptz)",
 		"(SELECT COALESCE(t.key, t.name) FROM ci_type t WHERE t.id = ci.ci_type_id) = ANY($8::text[])",
 		"(ci.created_at)::timestamptz > $9::timestamptz",
 		"ci.hostname = $10)",
@@ -329,6 +330,50 @@ func TestFilterASTValidation(t *testing.T) {
 	}
 	if err := mustAST(t, `{"field": "warranty_end", "op": "lte", "value": "2027-01-01"}`).Validate("asset"); err != nil {
 		t.Errorf("asset field: %v", err)
+	}
+}
+
+// TestFilterASTLegacyAssetNames covers AST-01 (WP-738): the deprecated
+// names asset_tag, purchase_cost and warranty_end are aliases of
+// inventory_no, purchase_price and warranty_until, on assets and as
+// asset.<field> of a CI, in where, sort and columns; the field permission
+// check maps both names onto the same field key.
+func TestFilterASTLegacyAssetNames(t *testing.T) {
+	for old, name := range map[string]string{"asset_tag": "inventory_no", "purchase_cost": "purchase_price", "warranty_end": "warranty_until"} {
+		value := `"x"`
+		switch name {
+		case "purchase_price":
+			value = `100`
+		case "warranty_until":
+			value = `"2027-01-01"`
+		}
+		compile := func(kind, field string) string {
+			t.Helper()
+			ast := mustAST(t, fmt.Sprintf(`{"field": %q, "op": "eq", "value": %s}`, field, value))
+			if err := ast.Validate(kind); err != nil {
+				t.Fatalf("%s %s: %v", kind, field, err)
+			}
+			sql, _, _, err := ast.CompileSQL(kind, kind, []any{"org"}, 2)
+			if err != nil {
+				t.Fatalf("%s %s: %v", kind, field, err)
+			}
+			return sql
+		}
+		if a, b := compile("asset", old), compile("asset", name); a != b || !strings.Contains(a, "asset."+name) || strings.Contains(a, old) {
+			t.Errorf("asset %s: %q, %s: %q; want the same SQL on asset.%s", old, a, name, b, name)
+		}
+		if a, b := compile("ci", "asset."+old), compile("ci", "asset."+name); a != b || !strings.Contains(a, "sa."+name) {
+			t.Errorf("ci asset.%s: %q, asset.%s: %q; want the same SQL on sa.%s", old, a, name, b, name)
+		}
+		columns, orderBy, _ := presentationSQL("asset", []SortKey{{Field: old}}, []string{old}, nil)
+		if !strings.Contains(columns, "asset."+name) || !strings.HasPrefix(orderBy, "asset."+name+" ") {
+			t.Errorf("sort and column %s: %q, %q; want asset.%s", old, columns, orderBy, name)
+		}
+		for _, field := range []string{old, name} {
+			if key, checked, known := fieldKey("asset", field); key != "core."+old || !checked || !known {
+				t.Errorf("fieldKey(asset, %s) = %q, %v, %v; want core.%s", field, key, checked, known, old)
+			}
+		}
 	}
 }
 

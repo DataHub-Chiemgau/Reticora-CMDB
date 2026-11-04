@@ -1362,3 +1362,4 @@ RBA-07;[P2];B;backend/internal/search/fieldrights_integration_test.go;WP-266
 SRC-01;[B];B;backend/internal/search/fieldrights_integration_test.go;WP-266
 RBA-07;[P2];B;backend/internal/tenant/rls/fieldrights_matrix_integration_test.go;WP-730
 TST-01;[B], Teilumfang [P2];B;backend/internal/tenant/rls/fieldrights_matrix_integration_test.go;WP-730
+AST-01;[P2];B;backend/internal/asset/field_names_integration_test.go;WP-738

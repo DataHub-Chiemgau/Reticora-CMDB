@@ -321,7 +321,16 @@ func TestAssetAST01Migration(t *testing.T) {
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		return string(b)
+		// 000231 (WP-738) builds on the columns of 000229: it goes down
+		// first and up last.
+		names, readErr := os.ReadFile("../../migrations/000231_asset_field_names." + name + ".sql")
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if name == "down" {
+			return string(names) + "\n" + string(b)
+		}
+		return string(b) + "\n" + string(names)
 	}
 	tx, err := f.Admin.Begin(bg)
 	if err != nil {

@@ -2502,7 +2502,10 @@ func instanceKeys(stored map[string]any) []string {
 }
 
 // loadAssetFacts shows the canonical data of each linked asset on its CIs
-// (DB-05). Assets the principal cannot see are left out.
+// (DB-05). Assets the principal cannot see are left out. The AST-01
+// columns (inventory_no, warranty_until; WP-738) also fill the deprecated
+// names; status is derived from lifecycle_state (asset_status_from_lifecycle,
+// E-120 (b)).
 func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 	byAsset := map[string][]*Item{}
 	ids := make([]string, 0, len(items))
@@ -2519,9 +2522,9 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT id::text, asset_tag, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
+		SELECT id::text, inventory_no, name, COALESCE(serial_number, ''), COALESCE(location_id::text, ''),
 		       COALESCE(lifecycle_state, ''), status, COALESCE(barcode, ''), COALESCE(rfid_tag, ''),
-		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_end, 'YYYY-MM-DD'), ''),
+		       COALESCE(to_char(purchase_date, 'YYYY-MM-DD'), ''), COALESCE(to_char(warranty_until, 'YYYY-MM-DD'), ''),
 		       COALESCE(supplier, ''), COALESCE(invoice_number, ''), COALESCE(asset_type_id::text, ''),
 		       COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
 		       COALESCE(manufacturer, ''), COALESCE(model, ''), COALESCE(cost_center, ''),
@@ -2534,12 +2537,13 @@ func loadAssetFacts(ctx context.Context, tx pgx.Tx, items []*Item) error {
 	defer rows.Close()
 	for rows.Next() {
 		var a AssetFacts
-		if err := rows.Scan(&a.ID, &a.AssetTag, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
-			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyEnd, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
+		if err := rows.Scan(&a.ID, &a.InventoryNo, &a.Name, &a.SerialNumber, &a.LocationID, &a.LifecycleState, &a.Status,
+			&a.Barcode, &a.RFIDTag, &a.PurchaseDate, &a.WarrantyUntil, &a.Supplier, &a.InvoiceNumber, &a.AssetTypeID,
 			&a.ClientID, &a.SiteID, &a.Manufacturer, &a.Model, &a.CostCenter, &a.OwnerUserID, &a.OwnerTeamID,
 			&a.SupplierID, &a.ContractID); err != nil {
 			return fmt.Errorf("scan asset facts: %w", err)
 		}
+		a.AssetTag, a.WarrantyEnd = a.InventoryNo, a.WarrantyUntil
 		for _, item := range byAsset[a.ID] {
 			facts := a
 			item.Asset = &facts

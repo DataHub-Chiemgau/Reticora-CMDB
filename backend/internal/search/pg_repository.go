@@ -404,7 +404,9 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 
 // reindexFields writes the field rows of the ci, asset, document and
 // ticket documents of the organization from the columns of their summary
-// (WP-266, backfill of migration 000228); an empty value gets no row.
+// (WP-266, backfill of migration 000228); an empty value gets no row. The
+// inventory number is the column inventory_no under the field key
+// core.asset_tag until WP-739 renames the key (AST-01, WP-738).
 const reindexFields = `INSERT INTO search_document_field (organization_id, document_id, field, content)
 SELECT d.organization_id, d.id, f.field, f.content
   FROM search_document d JOIN ci e ON e.id = d.entity_id AND e.organization_id = d.organization_id
@@ -414,7 +416,7 @@ SELECT d.organization_id, d.id, f.field, f.content
 UNION ALL
 SELECT d.organization_id, d.id, f.field, f.content
   FROM search_document d JOIN asset e ON e.id = d.entity_id AND e.organization_id = d.organization_id
- CROSS JOIN LATERAL (VALUES ('core.asset_tag', e.asset_tag), ('core.category', e.category), ('core.status', e.status),
+ CROSS JOIN LATERAL (VALUES ('core.asset_tag', e.inventory_no), ('core.category', e.category), ('core.status', e.status),
        ('core.supplier', e.supplier), ('core.serial_number', e.serial_number), ('core.location', e.location),
        ('core.notes', e.notes)) AS f(field, content)
  WHERE d.organization_id = $1 AND d.entity_type = 'asset' AND f.content <> ''
@@ -456,7 +458,7 @@ func (r *PGRepository) ReindexTenant(ctx context.Context, orgID string) (Reindex
 		}
 		cmd, err := tx.Exec(ctx, `INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata)
 SELECT organization_id,'ci',id,name,concat_ws(' ',hostname,manufacturer,model,serial_number,os_name,os_version),'/cmdb/'||id,'{}'::jsonb FROM ci WHERE organization_id=$1 AND deleted_at IS NULL
-UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',asset_tag,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
+UNION ALL SELECT organization_id,'asset',id,name,concat_ws(' ',inventory_no,category,status,supplier,serial_number,location,notes),'/assets','{}'::jsonb FROM asset WHERE organization_id=$1
 UNION ALL SELECT organization_id,'document',id,title,concat_ws(' ',description,file_name,category,array_to_string(tags,' ')),'/documents','{}'::jsonb FROM document WHERE organization_id=$1 AND deleted_at IS NULL
 UNION ALL SELECT organization_id,'ticket',id,title,concat_ws(' ',description,status,priority,category,(SELECT string_agg(tg.key,' ' ORDER BY tg.key) FROM ticket_tag tt JOIN tag tg ON tg.id=tt.tag_id WHERE tt.ticket_id=ticket.id)),'/tickets','{}'::jsonb FROM ticket WHERE organization_id=$1
 UNION ALL SELECT organization_id,'contact',id,COALESCE(display_name,''),concat_ws(' ',email,phone,role,department,notes),'','{}'::jsonb FROM contact WHERE organization_id=$1

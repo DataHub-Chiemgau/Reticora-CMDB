@@ -436,6 +436,7 @@ test('CI detail: the location path, the asset card and the edit dialog fit the p
           asset_id: ASSET,
           asset: {
             id: ASSET,
+            inventory_no: `INV-${RUN}`,
             asset_tag: `INV-${RUN}`,
             name: `sim-access-${RUN} hardware`,
             status: 'assigned',
@@ -445,6 +446,7 @@ test('CI detail: the location path, the asset card and the edit dialog fit the p
             rfid_tag: `RFID-E200-${RUN}`,
             barcode: `BC-${RUN}`,
             purchase_date: '2025-03-15',
+            warranty_until: '2028-03-14',
             warranty_end: '2028-03-14',
             supplier: `Lieferant-${RUN}-GmbH`,
             invoice_number: `RE-${RUN}`,

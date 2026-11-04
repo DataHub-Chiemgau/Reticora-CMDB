@@ -59,13 +59,19 @@ const (
 const AssetPrefix = "asset."
 
 // AssetFields is the whitelist of asset fields an expression can read, as
-// asset.<field>.
-var AssetFields = []string{"warranty_end", "purchase_date", "purchase_cost", "asset_tag", "serial_number", "status"}
+// asset.<field>. warranty_end, purchase_cost and asset_tag are the
+// deprecated names of warranty_until, purchase_price and inventory_no
+// (AST-01, WP-738) and read the same values.
+var AssetFields = []string{
+	"warranty_until", "purchase_date", "purchase_price", "inventory_no", "serial_number", "status",
+	"warranty_end", "purchase_cost", "asset_tag",
+}
 
 // assetFieldTypes are the result types of the asset fields.
 var assetFieldTypes = map[string]string{
-	"warranty_end": ResultDate, "purchase_date": ResultDate, "purchase_cost": ResultNumber,
-	"asset_tag": ResultString, "serial_number": ResultString, "status": ResultString,
+	"warranty_until": ResultDate, "purchase_date": ResultDate, "purchase_price": ResultNumber,
+	"inventory_no": ResultString, "serial_number": ResultString, "status": ResultString,
+	"warranty_end": ResultDate, "purchase_cost": ResultNumber, "asset_tag": ResultString,
 }
 
 // maxExprDepth bounds the nesting of an expression.

@@ -3,7 +3,6 @@ package savedview
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -112,7 +111,7 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpe
 // kind and in this order.
 var summaryColumns = map[string][]string{
 	"ci":    {"hostname", "manufacturer", "model", "serial_number", "os_name"},
-	"asset": {"asset_tag", "category", "status", "supplier", "serial_number", "location"},
+	"asset": {"inventory_no", "category", "status", "supplier", "serial_number", "location"},
 }
 
 // joinSummary joins the parts like concat_ws(' ', ...); keep, when set,
@@ -225,8 +224,11 @@ func fieldKey(entityKind, path string) (key string, checked, known bool) {
 		if name, ok := strings.CutPrefix(path, "attributes."); ok && name != "" {
 			return permission.NamespaceAttributes + "." + name, true, true
 		}
-		if slices.Contains(permission.CoreFields(permission.KindAsset), path) {
-			return permission.NamespaceCore + "." + path, true, true
+		// A core column, also by its AST-01 name (inventory_no covered by
+		// core.asset_tag until WP-739, WP-738).
+		if k, structural, ok := permission.FieldKeyOf(permission.KindAsset, path); ok && !structural &&
+			strings.HasPrefix(k, permission.NamespaceCore+".") {
+			return k, true, true
 		}
 		return "", false, true
 	}

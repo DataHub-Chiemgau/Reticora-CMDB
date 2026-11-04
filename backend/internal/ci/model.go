@@ -154,7 +154,10 @@ func (i *Item) ObservationChanged(field string, value any) bool {
 // AssetFacts are the canonical data of the asset a CI is linked to, shown
 // read-only on the CI (DB-05).
 type AssetFacts struct {
-	ID             string `json:"id"`
+	ID string `json:"id"`
+	// InventoryNo and WarrantyUntil are the AST-01 names (WP-738);
+	// AssetTag, WarrantyEnd and Supplier are deprecated (API-01, E-120 (c)).
+	InventoryNo    string `json:"inventory_no"`
 	AssetTag       string `json:"asset_tag"`
 	Name           string `json:"name"`
 	SerialNumber   string `json:"serial_number,omitempty"`
@@ -164,6 +167,7 @@ type AssetFacts struct {
 	Barcode        string `json:"barcode,omitempty"`
 	RFIDTag        string `json:"rfid_tag,omitempty"`
 	PurchaseDate   string `json:"purchase_date,omitempty"`
+	WarrantyUntil  string `json:"warranty_until,omitempty"`
 	WarrantyEnd    string `json:"warranty_end,omitempty"`
 	Supplier       string `json:"supplier,omitempty"`
 	InvoiceNumber  string `json:"invoice_number,omitempty"`

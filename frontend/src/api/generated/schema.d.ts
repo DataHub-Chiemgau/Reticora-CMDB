@@ -9012,7 +9012,7 @@ export interface components {
       components['schemas']['rule'] | components['schemas']['AttributeValidationLegacy'];
     /** @description A rule of the JSON rule language of the metamodel (MET-45, phase 1: required, pattern, range and enum, combined with all), defined by api/rules.schema.json. */
     RuleAST: components['schemas']['rule'];
-    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_end, purchase_date, purchase_cost, asset_tag, serial_number, status), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
+    /** @description The expression of a computed attribute (MET-10 computed, WP-258): $defs/expr of api/rules.schema.json — field (an attribute of the CI, or asset.<field> of the asset linked through ci.asset_id: warranty_until, purchase_date, purchase_price, inventory_no, serial_number, status; deprecated: warranty_end, purchase_cost, asset_tag), literal, add, sub, mul, div, today, days_between, concat, lower, upper and coalesce. Absent for an entered attribute. A computed attribute is neither required nor unique and has no default; its data type is integer, decimal, text, multiline, date or boolean (single-valued) and takes the result type of the expression. 422 on computed for an invalid expression, a result type that does not fit, an asset field outside the list, a reference to the attribute itself or to another computed attribute, and computed together with required, default or unique. The composition (MET-16) keeps the expression of a layer; a different expression of another layer (code computed-conflict) and required, a default or unique from another layer (computed-constraint) are 422 on key. The generated attribute_schema marks the attribute readOnly with x-computed (the AST). The CI write path computes the values with WP-717. */
     ComputedExpression: components['schemas']['expr'];
     /** @description The former validation structure, translated into the AST: options → enum, pattern and patterns → pattern, min/max → range, min_length/max_length → range of length; several rules are combined with all. {} is no rule. */
     AttributeValidationLegacy: {
@@ -11429,6 +11429,12 @@ export interface components {
     /** @description Canonical data of the linked asset, shown read-only on the CI (DB-05). */
     CIAssetFacts: {
       id: string;
+      /** @description Inventory number of the asset (AST-01, WP-738). */
+      inventory_no: string;
+      /**
+       * @deprecated
+       * @description Deprecated name of inventory_no (API-01, E-120 (c)).
+       */
       asset_tag: string;
       name: string;
       serial_number?: string;
@@ -11440,8 +11446,21 @@ export interface components {
       rfid_tag?: string;
       /** Format: date */
       purchase_date?: string;
-      /** Format: date */
+      /**
+       * Format: date
+       * @description End of the warranty of the asset (AST-01, WP-738).
+       */
+      warranty_until?: string;
+      /**
+       * Format: date
+       * @deprecated
+       * @description Deprecated name of warranty_until (API-01, E-120 (c)).
+       */
       warranty_end?: string;
+      /**
+       * @deprecated
+       * @description Deprecated name of the supplier record supplier_id (E-41, API-01, E-120 (c)).
+       */
       supplier?: string;
       invoice_number?: string;
       /** @description Manufacturer of the asset (AST-01 */
@@ -15833,12 +15852,15 @@ export interface components {
         | string
         | unknown
         | (
-            | 'asset.warranty_end'
+            | 'asset.warranty_until'
             | 'asset.purchase_date'
-            | 'asset.purchase_cost'
-            | 'asset.asset_tag'
+            | 'asset.purchase_price'
+            | 'asset.inventory_no'
             | 'asset.serial_number'
             | 'asset.status'
+            | 'asset.warranty_end'
+            | 'asset.purchase_cost'
+            | 'asset.asset_tag'
           );
     };
     /** @description A constant string, number or boolean. */

@@ -168,8 +168,9 @@ func loadComputeEnv(ctx context.Context, tx pgx.Tx, orgID string, defs []fieldme
 	var raw []byte
 	if err := tx.QueryRow(ctx, `SELECT CASE WHEN $3 THEN (SELECT timezone FROM organization WHERE id = $1) END,
 		COALESCE((SELECT jsonb_object_agg(a.id::text, jsonb_build_object(
-			'warranty_end', to_char(a.warranty_end, 'YYYY-MM-DD'), 'purchase_date', to_char(a.purchase_date, 'YYYY-MM-DD'),
-			'purchase_cost', a.purchase_cost, 'asset_tag', a.asset_tag, 'serial_number', a.serial_number, 'status', a.status))
+			'warranty_until', to_char(a.warranty_until, 'YYYY-MM-DD'), 'purchase_date', to_char(a.purchase_date, 'YYYY-MM-DD'),
+			'purchase_price', a.purchase_price, 'inventory_no', a.inventory_no, 'serial_number', a.serial_number, 'status', a.status,
+			'warranty_end', to_char(a.warranty_until, 'YYYY-MM-DD'), 'purchase_cost', a.purchase_price, 'asset_tag', a.inventory_no))
 			FROM asset a WHERE a.id = ANY($2::uuid[])), '{}'::jsonb)`, orgID, ids, today).Scan(&tz, &raw); err != nil {
 		return nil, fmt.Errorf("read inputs of computed attributes: %w", err)
 	}

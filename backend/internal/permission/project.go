@@ -49,6 +49,13 @@ var assetStructural = map[string]bool{
 	"id": true, "organization_id": true, "client_id": true, "name": true, "created_at": true, "updated_at": true,
 }
 
+// assetFieldAliases are the AST-01 names of asset columns (WP-738) whose
+// field key is still that of the deprecated name until WP-739 renames the
+// keys: a grant on core.asset_tag also covers inventory_no.
+var assetFieldAliases = map[string]string{
+	"inventory_no": "asset_tag", "purchase_price": "purchase_cost", "warranty_until": "warranty_end",
+}
+
 // assetCustomFields is the member of the asset DTO with the custom fields;
 // custom_fields.<key> has the field key attributes.<key> (WP-271).
 const (
@@ -148,6 +155,8 @@ func (c *projectConfig) fieldKey(kind ObjectKind, path string) (key string, stru
 			return "", true, true
 		case slices.Contains(coreFields[KindAsset], path):
 			return NamespaceCore + "." + path, false, true
+		case assetFieldAliases[path] != "":
+			return NamespaceCore + "." + assetFieldAliases[path], false, true
 		case strings.HasPrefix(path, assetCustomFieldsPrefix):
 			if name := strings.TrimPrefix(path, assetCustomFieldsPrefix); name != "" {
 				return NamespaceAttributes + "." + name, false, true
