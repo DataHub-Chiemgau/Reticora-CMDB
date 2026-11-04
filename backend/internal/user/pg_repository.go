@@ -66,16 +66,6 @@ const customRoleSelectColumns = `
 	updated_at
 `
 
-const userRoleAssignmentSelectColumns = `
-	user_custom_role.id::text,
-	user_id::text,
-	custom_role_id::text,
-	scope_type,
-	COALESCE(scope_id::text, ''),
-	granted_at,
-	COALESCE(granted_by::text, '')
-`
-
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool  *pgxpool.Pool
@@ -1386,22 +1376,6 @@ func scanCustomRole(scanner userScanner) (*CustomRole, error) {
 	}
 	if item.Permissions == nil {
 		item.Permissions = []string{}
-	}
-	return item, nil
-}
-
-func scanUserRoleAssignment(scanner userScanner) (*UserRoleAssignment, error) {
-	item := &UserRoleAssignment{}
-	if err := scanner.Scan(
-		&item.ID,
-		&item.UserID,
-		&item.CustomRoleID,
-		&item.ScopeType,
-		&item.ScopeID,
-		&item.GrantedAt,
-		&item.GrantedBy,
-	); err != nil {
-		return nil, err
 	}
 	return item, nil
 }

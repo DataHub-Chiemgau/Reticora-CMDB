@@ -248,24 +248,6 @@ func identityConflicts(item ci.Item, incoming IngestItem) []string {
 	return conflicts
 }
 
-func matchingItems(existing []ci.Item, match func(ci.Item) bool) []ci.Item {
-	var matches []ci.Item
-	for _, item := range existing {
-		if match(item) {
-			matches = append(matches, item)
-		}
-	}
-	return matches
-}
-
-func collectIDs(items []ci.Item) []string {
-	ids := make([]string, 0, len(items))
-	for _, item := range items {
-		ids = append(ids, item.ID)
-	}
-	return ids
-}
-
 func normalizedEqual(left, right string) bool {
 	left = strings.TrimSpace(strings.ToLower(left))
 	right = strings.TrimSpace(strings.ToLower(right))
@@ -367,22 +349,6 @@ func normalizeSlice(values []string) []string {
 		}
 	}
 	return result
-}
-
-func macAddressOverlap(existing, incoming []string) bool {
-	if len(existing) == 0 || len(incoming) == 0 {
-		return false
-	}
-	seen := make(map[string]struct{}, len(existing))
-	for _, value := range existing {
-		seen[value] = struct{}{}
-	}
-	for _, value := range incoming {
-		if _, ok := seen[value]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // InstanceFieldSource lists the names of the instance attributes defined for

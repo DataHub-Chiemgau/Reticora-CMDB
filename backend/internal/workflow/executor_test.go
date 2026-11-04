@@ -86,7 +86,7 @@ func TestExecutorListStepsFailureFailsRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when ListSteps fails")
 	}
-	runs, _, lerr := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, lerr := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
@@ -106,7 +106,7 @@ func TestExecutorUpdateStepFailurePropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when UpdateStep fails")
 	}
-	runs, _, _ := repo.MemoryRepository.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed after UpdateStep failure, got %+v", runs)
 	}

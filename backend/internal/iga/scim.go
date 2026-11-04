@@ -20,7 +20,6 @@ const scimUserSchema = "urn:ietf:params:scim:schemas:core:2.0:User"
 const scimGroupSchema = "urn:ietf:params:scim:schemas:core:2.0:Group"
 const scimListSchema = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 const scimErrorSchema = "urn:ietf:params:scim:api:messages:2.0:Error"
-const scimPatchSchema = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 
 var userNameFilterRE = regexp.MustCompile(`(?i)^\s*userName\s+eq\s+"([^"]+)"\s*$`)
 

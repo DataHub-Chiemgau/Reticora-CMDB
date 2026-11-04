@@ -128,7 +128,8 @@ func TestAnonymizeUnknownUserReturns404(t *testing.T) {
 }
 
 func TestSurrogatesAreDeterministicAndDistinct(t *testing.T) {
-	if SurrogateEmail("a") != SurrogateEmail("a") {
+	first, second := SurrogateEmail("a"), SurrogateEmail("a")
+	if first != second {
 		t.Fatal("surrogate e-mail must be deterministic")
 	}
 	if SurrogateEmail("a") == SurrogateEmail("b") {
