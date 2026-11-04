@@ -43,12 +43,13 @@ var (
 	// not repeated, a lost worker leaves the draft untested. A running
 	// test can be cancelled; the draft stays draft.
 	metamodelTestJobKind = jobs.Kind{Name: metamodel.TestJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
-	// importJobKind (WP-301): an import run is not repeated; its run ends
-	// on its own within importer.RunTimeout, before the reaper fails it
-	// after the timeout of the kind. A holder of import:run cancels a
-	// running import (WP-514); it stops at its next progress report. Like
-	// exportJobKind it has no queue handler yet: the run goes in the
-	// process that accepted it (the queue handler follows with WP-775).
+	// importJobKind (WP-301, WP-775): an import run is not repeated, so a
+	// second attempt writes no row twice; its run ends on its own within
+	// importer.RunTimeout, before the reaper fails it after the timeout of
+	// the kind. A holder of import:run cancels a running import (WP-514);
+	// it stops before its next row. With NATS it runs on the job queue
+	// (importer.ImportHandler.RunJob), without in the process that
+	// accepted it.
 	importJobKind = jobs.Kind{Name: importer.JobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
 	// documentScanJobKind (WP-734, SEC-09, E-42): the malware scan of a
 	// document version only reads the blob and stores its result once; it
@@ -69,11 +70,13 @@ type jobKind struct {
 // executor (nil while the module metamodel is off, E-105), the malware scan
 // of documents its scanner (nil while the module documents is off). The
 // test run of a draft runs on the draft handler (without a database its
-// handler fails, the route answers 503 before).
+// handler fails, the route answers 503 before), an import run on the
+// import handler (WP-775).
 func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs,
-	draftHandler *metamodel.Handler, scanner *document.Scanner) []jobKind {
+	draftHandler *metamodel.Handler, importHandler *importer.ImportHandler, scanner *document.Scanner) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
-		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob}}
+		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
+		{kind: importJobKind, handler: importHandler.RunJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -86,28 +89,27 @@ func applicationJobKinds(ciService *ci.Service, historyHandler *history.Handler,
 	return kinds
 }
 
-// registerJobKinds registers the submitted kinds, the export kind and the
-// import kind with svc, the job service of the requests, and wires their
+// registerJobKinds registers the submitted kinds and the export kind with
+// svc, the job service of the requests, and wires their
 // submitters: with queue (NATS) the handlers run on the queue and the
 // submitters submit there, without it the submitters run their jobs in
 // this process on svc.
 //
 // The template migration takes progress and cancel from svc in both cases,
-// the test run of a draft the state of a running test, the import its
-// jobs (it runs in this process also with a queue, WP-301). The malware
+// the test run of a draft the state of a running test, the import run its
+// progress, cancel and result (WP-775). The malware
 // scan of documents runs on the queue only: without it no submitter is
 // wired and new versions stay pending_scan (fail-closed, E-42).
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner) {
 	svc.Register(exportJobKind)
-	svc.Register(importJobKind)
 	importHandler.WithJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}
 	draftHandler.WithJobs(svc)
-	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, scanner) {
+	for _, k := range applicationJobKinds(ciService, historyHandler, templateJobs, draftHandler, importHandler, scanner) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -116,6 +118,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	if queue != nil {
 		historyHandler.WithQueue(queue)
 		draftHandler.WithQueue(queue)
+		importHandler.WithQueue(queue)
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}

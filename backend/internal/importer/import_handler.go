@@ -12,7 +12,9 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/go-chi/chi/v5"
@@ -25,22 +27,81 @@ import (
 //
 // The routes are registered in both profiles; without job service (no
 // database) or blob store they answer 503.
+//
+// A run (WP-775) maps every row with the profile and hands it to the
+// writer of the profile's entity, each row in a transaction of its own
+// (RunInTx of the profile store); the writers are registered with
+// WithWriter (router.go).
 type ImportHandler struct {
 	profiles Repository
 	docs     document.Repository
 	blobs    blob.Store
 	jobs     *jobs.Service
+	queue    JobQueue
+	writers  map[string]Writer
+	tx       RowTx
+	// transactional: tx rolls a row back (dry run possible).
+	transactional bool
+	modules       ModuleGate
+	features      FeatureGate
+	events        events.Emitter
+	// users and grants restore the starter of a run (jobContext); without
+	// them every run fails with import-principal-missing.
+	users  UserStatus
+	grants GrantSource
 }
 
 // NewImportHandler returns the handler of the import runs over the
 // profiles, the documents and the blob store (nil: content routes 503).
+// A profile store with RunInTx (PGRepository) runs every row in a
+// transaction of its own.
 func NewImportHandler(profiles Repository, docs document.Repository, blobs blob.Store) *ImportHandler {
-	return &ImportHandler{profiles: profiles, docs: docs, blobs: blobs}
+	h := &ImportHandler{profiles: profiles, docs: docs, blobs: blobs, writers: map[string]Writer{}, tx: directTx{}}
+	if tx, ok := profiles.(RowTx); ok {
+		h.tx, h.transactional = tx, true
+	}
+	return h
 }
 
-// WithJobs runs the imports as jobs of svc (registerJobKinds).
+// WithJobs runs the imports as jobs of svc (registerJobKinds): without
+// job queue in this process, with one the job service records progress,
+// cancel and result.
 func (h *ImportHandler) WithJobs(svc *jobs.Service) *ImportHandler {
 	h.jobs = svc
+	return h
+}
+
+// WithQueue submits the import jobs to the job queue (TEC-14), whose
+// workers run them with RunJob.
+func (h *ImportHandler) WithQueue(q JobQueue) *ImportHandler {
+	h.queue = q
+	return h
+}
+
+// WithWriter registers the writer of an entity.
+func (h *ImportHandler) WithWriter(w Writer) *ImportHandler {
+	h.writers[w.Entity()] = w
+	return h
+}
+
+// WithGates sets the release gate of the modules and the org gate of the
+// features a run checks before its first row; nil gates pass.
+func (h *ImportHandler) WithGates(modules ModuleGate, features FeatureGate) *ImportHandler {
+	h.modules, h.features = modules, features
+	return h
+}
+
+// WithEvents reports import.completed through e after a run succeeded.
+func (h *ImportHandler) WithEvents(e events.Emitter) *ImportHandler {
+	h.events = e
+	return h
+}
+
+// WithStarters restores the user who started a run from the job row: the
+// status of the user (users) and their current role assignments (grants),
+// read when the run begins (jobContext).
+func (h *ImportHandler) WithStarters(users UserStatus, grants GrantSource) *ImportHandler {
+	h.users, h.grants = users, grants
 	return h
 }
 
@@ -125,11 +186,13 @@ func scanRefusal(status string) *refusal {
 		detail: "the document content has not been scanned clean yet"}
 }
 
-// source is the checked document version an import reads.
+// source is the checked document version an import reads and, for a
+// run, its profile.
 type source struct {
 	doc     *document.Document
 	version *document.Version
 	format  string
+	profile *Profile
 }
 
 // lookupDocument returns the document when it lies in the caller's scope
@@ -186,9 +249,11 @@ func (h *ImportHandler) openSource(ctx context.Context, orgID string, src *sourc
 var errForeignKey = errors.New("the document content is stored outside the organization")
 
 // Start handles POST /api/v1/imports: it checks document scope (404),
-// profile (404), scan status (409), size (422) and format (422) in this
-// order, queues a job of kind import.run with the caller as creator and
-// answers 202 with the job.
+// profile (404), the write right of the profile's entity (403), scan
+// status (409), size (422) and format (422) in this order, queues a job of
+// kind import.run with the caller as creator (the run reloads their
+// rights, jobContext) and answers 202 with the job. With a job queue the job is
+// submitted there, otherwise it runs in this process.
 func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -228,6 +293,11 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", errProfileNotFound.Error())
 		return
 	}
+	principal, hasPrincipal := identity.PrincipalFromContext(ctx)
+	if perm := EntityWritePermissions[profile.Entity]; !hasPrincipal || perm == "" || !principal.Has(perm) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "importing "+profile.Entity+" requires "+string(perm))
+		return
+	}
 	want := profile.Format
 	if want != FormatCSV && want != FormatXLSX {
 		// JSON rows come through the API import (WP-303); a document
@@ -241,21 +311,28 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params := JobParams{DocumentID: doc.ID, DocumentVersion: src.version.Version, ProfileID: profile.ID,
-		Mode: profile.Mode, DryRun: req.DryRun}
+		Mode: profile.Mode, DryRun: req.DryRun, ScopeParams: jobs.CaptureScope(ctx)}
 	if req.Mode != "" {
 		params.Mode = req.Mode
 	}
 	if profile.Sheet != nil {
 		params.Sheet = *profile.Sheet
 	}
-	job, _, err := h.jobs.Enqueue(ctx, t.OrganizationID, JobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
+	var job *jobs.Job
+	if h.queue != nil {
+		job, _, err = h.queue.Submit(ctx, t.OrganizationID, JobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
+	} else {
+		job, _, err = h.jobs.Enqueue(ctx, t.OrganizationID, JobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
+	}
 	if err != nil {
 		slog.ErrorContext(ctx, "import: enqueue job", "error", err)
 		api.WriteRepoError(w, err)
 		return
 	}
-	// The run keeps the caller's tenant and scope, after the request.
-	go h.run(context.WithoutCancel(ctx), t.OrganizationID, job.ID, &params)
+	if h.queue == nil {
+		// The run restores the caller from the job, after the request.
+		go h.run(context.WithoutCancel(ctx), t.OrganizationID, job.ID)
+	}
 	w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 }
@@ -424,7 +501,7 @@ func (h *ImportHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	var result JobResult
 	if len(job.Result) > 0 && json.Unmarshal(job.Result, &result) == nil {
-		run.RowsTotal, run.RowsFailed = &result.RowsTotal, &result.RowsFailed
+		run.RowsTotal, run.RowsFailed = &result.Total, &result.Failed
 	}
 	if job.Error != "" {
 		msg := job.Error

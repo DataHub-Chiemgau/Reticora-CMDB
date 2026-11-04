@@ -466,8 +466,22 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		templateJobs = ci.NewTemplateMigrationJobs(repos.CI, repos.CIType)
 	}
 	// The import runs (WP-301) get the job service in registerJobKinds; the
-	// routes serve in both profiles and answer 503 without it.
-	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs)
+	// routes serve in both profiles and answer 503 without it. A run
+	// (WP-775) hands its rows to the writer of the profile's entity:
+	// locations here, CIs with WP-302, assets, contracts, consumables and
+	// relationships with WP-776. Before the first row it checks module and
+	// features of the entity with the release and the org gate, and after
+	// its success it reports import.completed.
+	importHandler := importer.NewImportHandler(repos.Import, repos.Document, opts.Blobs).
+		WithWriter(importer.NewLocationWriter(repos.LocationTree)).
+		WithGates(opts.Modules, importFeatureGate(&opts)).
+		WithEvents(opts.Events)
+	// The run reloads its starter from the job row: user status and
+	// current role assignments (no rights in the job parameters). Without
+	// them (in-memory user store) runs fail closed.
+	if users, ok := repos.User.(importer.UserStatus); ok && repos.Permission != nil {
+		importHandler.WithStarters(users, repos.Permission)
+	}
 	// The malware scan of document versions (WP-734, SEC-09, E-42) is the
 	// job kind document.scan of the module documents on the job queue:
 	// clamd from opts.Documents, status, audit and event in a transaction
@@ -982,6 +996,15 @@ func exportLifecycleModel(d *lifecycle.Definition) citype.ExportLifecycleModelV2
 			FromStateKey: t.FromStateKey, ToStateKey: t.ToStateKey, RequiredFields: t.RequiredFields, Validation: t.Validation})
 	}
 	return citype.ExportLifecycleModelV2{ID: d.ID, Key: d.Key, IsSystem: d.IsSystem, ExportLifecycleModelBody: body}
+}
+
+// importFeatureGate is the org gate of an import run (WP-775): the
+// entitlements; nil without them, so a run checks no feature.
+func importFeatureGate(opts *Options) importer.FeatureGate {
+	if opts.Entitlements == nil {
+		return nil
+	}
+	return opts.Entitlements
 }
 
 // metamodelImportHandler serves POST /api/v1/metamodel/import (WP-722) in

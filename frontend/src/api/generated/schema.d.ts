@@ -8853,7 +8853,7 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file with line, column, code and message of every parse and limit error. While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
     put?: never;

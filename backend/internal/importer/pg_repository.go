@@ -24,6 +24,17 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
+// RunInTx runs fn in one transaction of the request tenant (K20, WP-775):
+// the repositories fn calls with its context join it
+// (database.WithRequestTenantTx), so an import row is written or rolled
+// back as a whole and its database.AfterCommit callbacks (indexing,
+// notifications) run only after its commit.
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+var _ RowTx = (*PGRepository)(nil)
+
 // profileColumns are the columns of a Profile (scanProfile).
 const profileColumns = `id::text, organization_id::text, name, description, entity, format, mode, sheet, mapping, identity_keys, created_by::text, created_at, updated_at`
 

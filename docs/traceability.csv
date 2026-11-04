@@ -1344,3 +1344,5 @@ MET-10;B/G1, Teil P2/G2;B;backend/internal/permission/fields_integration_test.go
 SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-325
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/permission/fields_handler_integration_test.go;WP-726
 MET-54;B/G1, Teil P2/G2;B;backend/internal/citype/export_grants_test.go;WP-726
+IMP-IO-01;[P2];C;backend/internal/importer/run_integration_test.go;WP-775
+JOB-01;[B];C;backend/internal/importer/run_integration_test.go;WP-775

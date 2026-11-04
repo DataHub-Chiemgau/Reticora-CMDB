@@ -1287,20 +1287,79 @@
       ]
     },
     "import.completed": {
-      "description": "Data frame of import.completed. entity_id: the import run. Origin: plan addition. Producer: WP-302. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of import.completed, reported after an import run succeeded, also for a dry run (dry_run true). entity_id: the import run (the job). A run that failed for good reports job.failed instead. Origin: plan addition. Producer: WP-775.",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "profile_id", "entity", "mode", "dry_run", "total", "created", "updated", "skipped", "failed"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
-          "description": "The import run."
+          "description": "The import run (job of kind import.run)."
+        },
+        "profile_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The mapping profile of the run."
+        },
+        "entity": {
+          "type": "string",
+          "enum": ["ci", "asset", "contract", "consumable", "location", "relationship"],
+          "description": "The entity the profile imports."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["create_missing", "update_existing", "both"],
+          "description": "The write mode of the run."
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "True for a dry run: every row ran in a transaction that was rolled back, nothing was written."
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Data rows read."
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows that created an object (dry run: would have created one)."
+        },
+        "updated": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows that changed an object."
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows left without a change (e.g. known objects with mode create_missing)."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows with an error; the report lists them."
+        },
+        "initiated_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "User who started the run; absent for a run without a user."
         }
       },
       "examples": [
         {
-          "id": "66666666-6666-4666-8666-666666666666"
+          "id": "66666666-6666-4666-8666-666666666666",
+          "profile_id": "77777777-7777-4777-8777-777777777777",
+          "entity": "location",
+          "mode": "both",
+          "dry_run": false,
+          "total": 120,
+          "created": 100,
+          "updated": 0,
+          "skipped": 17,
+          "failed": 3,
+          "initiated_by": "88888888-8888-4888-8888-888888888888"
         }
       ]
     }
