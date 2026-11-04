@@ -102,6 +102,9 @@ type Repositories struct {
 	Discovery         discovery.Repository
 	Asset             asset.Repository
 	Assignment        assignment.Repository
+	// AssignmentService writes assignments over the ledger (WP-275); nil
+	// (profile without database): the writing assignment routes answer 501.
+	AssignmentService *assignment.Service
 	Document          document.Repository
 	Stocktake         stocktake.Repository
 	Consumable        consumable.Repository
@@ -726,10 +729,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
-	// The one writer of the ledger stock_movement (WP-274): the route, the
-	// best-effort booking of assignment (until WP-275) and the disposal in
-	// its transaction (WP-278) lock, check and write stock.movement to the
-	// outbox.
+	// The one writer of the ledger stock_movement (WP-274): the route and
+	// the disposal in its transaction (WP-278) lock, check and write
+	// stock.movement to the outbox; assignments book through
+	// repos.AssignmentService (WP-275).
 	movements := movement.NewService(repos.Movement)
 	// One lifecycle service for the transition routes and the disposal
 	// (WP-278).
@@ -755,7 +758,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithCIs(ciLookup{repo: repos.CI}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
-		assignment.NewHandler(repos.Assignment).WithMovements(movements),
+		assignment.NewHandler(repos.Assignment).WithService(repos.AssignmentService),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),

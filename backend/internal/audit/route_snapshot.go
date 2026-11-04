@@ -454,6 +454,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/agents/{id}/enable":                  "endpoint_agent",
 		"PATCH /api/v1/agents/{id}/policy":                 "endpoint_agent",
 		"POST /api/v1/agents/{id}/site":                    "endpoint_agent",
+		"POST /api/v1/assets/{id}/assign":                  "asset", // holder cache (WP-275)
+		"POST /api/v1/assets/{id}/return":                  "asset",
+		"POST /api/v1/assets/{id}/transfer":                "asset",
 		"POST /api/v1/assignments/{id}/return":             "assignment",
 		"POST /api/v1/assignments/{id}/transfer":           "assignment",
 		"DELETE /api/v1/assignments/{id}":                  "assignment",

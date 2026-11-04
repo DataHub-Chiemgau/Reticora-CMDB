@@ -173,6 +173,8 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Discovery:         discovery.NewPGRepository(pool),
 		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
+		// The assignment service books over the movement service (WP-275).
+		AssignmentService: assignment.NewService(pool, movement.NewService(movement.NewPGRepository(pool)), events.NewOutbox()),
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
 		Consumable:        consumable.NewPGRepository(pool),

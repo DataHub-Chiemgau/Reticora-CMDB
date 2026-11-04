@@ -2,6 +2,7 @@ package assignment_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,8 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -66,34 +69,33 @@ func TestAssignmentRepositoryClientScope(t *testing.T) {
 }
 
 // TestAssignmentForeignClientReturnAndTransfer covers the writes on an
-// existing assignment (TEN-06, AST-01, WP-537): a principal restricted to
-// client 1 can neither return nor transfer the assignment of a client-2
-// asset, through the handler (404) or through the repository's Update the
-// handlers call (not found), and the client-2 row stays unchanged. Its own
-// assignments it returns and transfers.
+// existing assignment (TEN-06, AST-01, WP-537, WP-275): a principal
+// restricted to client 1 can neither return nor transfer the assignment of
+// a client-2 asset, through the handler (404) or through the repository's
+// Update (not found), and the client-2 row stays unchanged. Its own
+// assignments it returns and transfers through the assignment service.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 	f := scopetest.Seed(t, "2c")
 	bg := context.Background()
-	own := f.Asset(t, f.OrgA, f.Client1, "scopetest-2c-own")
+	ownReturnAsset := f.Asset(t, f.OrgA, f.Client1, "scopetest-2c-own")
+	ownTransferAsset := f.Asset(t, f.OrgA, f.Client1, "scopetest-2c-own2")
 	foreign := f.Asset(t, f.OrgA, f.Client2, "scopetest-2c-foreign")
 	holder := f.AppUser(t, f.OrgA, "holder")
 	successor := f.AppUser(t, f.OrgA, "successor")
 
 	repo := assignment.NewPGRepository(f.App)
-	mk := func(assetID string) *assignment.Assignment {
-		return &assignment.Assignment{OrganizationID: f.OrgA, AssetID: assetID, AssignedTo: holder, AssignedBy: holder, Status: "active", AssignmentType: "assignment", Notes: "original"}
-	}
-	foreignA, ownReturn, ownTransfer := mk(foreign), mk(own), mk(own)
-	for _, a := range []*assignment.Assignment{foreignA, ownReturn, ownTransfer} {
-		if err := repo.Create(f.OrgCtx(f.OrgA), a); err != nil {
-			t.Fatalf("org-wide assignment of %s: %v", a.AssetID, err)
-		}
+	foreignA := &assignment.Assignment{OrganizationID: f.OrgA, AssetID: foreign, AssignedTo: holder, AssignedBy: holder,
+		Status: "active", AssignmentType: "assignment", Notes: "original"}
+	if err := repo.Create(f.OrgCtx(f.OrgA), foreignA); err != nil {
+		t.Fatalf("org-wide assignment of %s: %v", foreign, err)
 	}
 
 	mux := chi.NewRouter()
-	assignment.NewHandler(repo).RegisterRoutes(mux)
+	assignment.NewHandler(repo).
+		WithService(assignment.NewService(f.App, movement.NewService(movement.NewPGRepository(f.App)), events.NewOutbox())).
+		RegisterRoutes(mux)
 	ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, ClientID: f.Client1, UserID: holder})
 	post := func(path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)).WithContext(ctx)
@@ -101,6 +103,20 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 		mux.ServeHTTP(w, r)
 		return w
 	}
+	// The own assignments go through the service, which keeps the holder
+	// cache the return and the transfer check.
+	created := func(assetID string) string {
+		w := post("/api/v1/assignments", `{"asset_id":"`+assetID+`","assigned_to":"`+holder+`","notes":"original"}`)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("client-1 assignment of %s = %d %s, want 201", assetID, w.Code, w.Body)
+		}
+		var a assignment.Assignment
+		if err := json.Unmarshal(w.Body.Bytes(), &a); err != nil {
+			t.Fatal(err)
+		}
+		return a.ID
+	}
+	ownReturn, ownTransfer := created(ownReturnAsset), created(ownTransferAsset)
 	type row struct{ status, notes, condition, assetID string }
 	stored := func(id string) row {
 		var r row
@@ -149,16 +165,16 @@ func TestAssignmentForeignClientReturnAndTransfer(t *testing.T) {
 
 	// Positive control: the client-1 principal returns and transfers its own
 	// assignments.
-	if w := post("/api/v1/assignments/"+ownReturn.ID+"/return", `{"return_condition":"good","notes":"back"}`); w.Code != http.StatusOK {
+	if w := post("/api/v1/assignments/"+ownReturn+"/return", `{"return_condition":"good","notes":"back"}`); w.Code != http.StatusOK {
 		t.Fatalf("client-1 return of own assignment = %d %s, want 200", w.Code, w.Body)
 	}
-	if got := stored(ownReturn.ID); got.status != "returned" || got.condition != "good" || got.notes != "back" {
+	if got := stored(ownReturn); got.status != "returned" || got.condition != "good" || got.notes != "back" {
 		t.Errorf("own assignment after return: %+v, want returned/good/back", got)
 	}
-	if w := post("/api/v1/assignments/"+ownTransfer.ID+"/transfer", `{"new_assignee":"`+successor+`"}`); w.Code != http.StatusCreated {
+	if w := post("/api/v1/assignments/"+ownTransfer+"/transfer", `{"new_assignee":"`+successor+`"}`); w.Code != http.StatusCreated {
 		t.Fatalf("client-1 transfer of own assignment = %d %s, want 201", w.Code, w.Body)
 	}
-	if got := stored(ownTransfer.ID); got.status != "transferred" {
+	if got := stored(ownTransfer); got.status != "transferred" {
 		t.Errorf("own assignment after transfer: %+v, want transferred", got)
 	}
 	if n := transfers(); n != 1 {

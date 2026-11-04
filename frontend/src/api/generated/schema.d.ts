@@ -1431,7 +1431,10 @@ export interface paths {
     /** List assignments */
     get: operations['listAssignments'];
     put?: never;
-    /** Create an assignment */
+    /**
+     * Create an assignment
+     * @description Assigns the asset of `asset_id`, or the asset of the CI of `ci_id` (`ci.asset_id`), to the user `assigned_to` through the assignment service (WP-275, until WP-746); `id` is the id of the assignment movement. A CI without asset is 422; an assigned asset 409.
+     */
     post: operations['createAssignment'];
     delete?: never;
     options?: never;
@@ -1453,7 +1456,10 @@ export interface paths {
     get: operations['getAssignment'];
     put?: never;
     post?: never;
-    /** Delete an assignment */
+    /**
+     * Delete an assignment
+     * @description Refused with 409 (`https://reticora.io/problems/assignment-append-only`): the history of assignments is append-only (WP-275); return or transfer the asset instead.
+     */
     delete: operations['deleteAssignment'];
     options?: never;
     head?: never;
@@ -4057,7 +4063,7 @@ export interface paths {
     put?: never;
     /**
      * Return an assigned asset or CI
-     * @description Marks the assignment as returned, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty.
+     * @description Returns the asset of the assignment (its `asset_id`, or the asset of its CI) from the holder of the assignment through the assignment service (WP-275, until WP-746): the movement `return` is booked and the open assignments of the asset are closed, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty. 409 when the assignment is closed or the asset has another holder.
      */
     post: operations['returnAssignment'];
     delete?: never;
@@ -4080,7 +4086,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer an assignment to a new assignee
-     * @description Marks the existing assignment as transferred and creates a new active assignment of the same asset/CI for the new assignee.
+     * @description Transfers the asset of the assignment from its holder to the user `new_assignee` through the assignment service (WP-275, until WP-746): the open assignments are closed as transferred and a new active assignment is created. 409 when the assignment is closed or the asset has another holder.
      */
     post: operations['transferAssignment'];
     delete?: never;
@@ -8241,7 +8247,7 @@ export interface paths {
     put?: never;
     /**
      * Assign an asset
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
      */
     post: operations['assignAsset'];
     delete?: never;
@@ -8264,7 +8270,7 @@ export interface paths {
     put?: never;
     /**
      * Return an assigned asset
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Takes the asset back from its holder `expected_holder` in one transaction (WP-275): the movement `return` with the previous holder and `reason` = `return_condition` is booked, the holder cache is emptied, the open assignments of the asset are closed and `asset.returned` is written to the outbox. 409 when the asset has no holder (`https://reticora.io/problems/asset-not-assigned`) or another one (`https://reticora.io/problems/holder-mismatch`).
      */
     post: operations['returnAsset'];
     delete?: never;
@@ -8287,7 +8293,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer an assigned asset to another assignee
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Changes the holder from `expected_holder` to exactly one new holder, a user or a team, in one transaction (WP-275): the pair `return` (old holder) and `assignment` (new holder) with the same `occurred_at` is booked, the holder cache is set, the open assignments are closed as transferred and `asset.returned` and then `asset.assigned` are written to the outbox. 409 when the asset has no holder or another one than `expected_holder`.
      */
     post: operations['transferAsset'];
     delete?: never;
@@ -12856,12 +12862,19 @@ export interface components {
     AssetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Asset'][];
     };
+    /** @description An assignment of an asset to a user (`assigned_to`) or a team (`assigned_team_id`). Written by the assignment service (WP-275), its `id` is the id of the assignment movement in the ledger. */
     Assignment: {
       id: string;
       organization_id: string;
       asset_id?: string;
       ci_id?: string;
-      assigned_to: string;
+      /** @description The user holder; absent for a team holder. */
+      assigned_to?: string;
+      /**
+       * Format: uuid
+       * @description The team holder (WP-275); absent for a user holder.
+       */
+      assigned_team_id?: string;
       assigned_by: string;
       assignment_type: string;
       status: string;
@@ -12869,6 +12882,11 @@ export interface components {
       assigned_at: string;
       /** Format: date-time */
       due_date?: string;
+      /**
+       * Format: date-time
+       * @description The due date of the assignment (WP-275); `due_date` is its day in the time zone of the organization.
+       */
+      due_at?: string;
       /** Format: date-time */
       returned_at?: string;
       return_condition?: string;
@@ -12877,6 +12895,47 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description Exactly one of `assigned_user_id` and `assigned_team_id` (WP-275). */
+    AssignAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The user (`app_user.id`) the asset is assigned to.
+       */
+      assigned_user_id?: string;
+      /**
+       * Format: uuid
+       * @description The team the asset is assigned to.
+       */
+      assigned_team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
+    };
+    ReturnAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The current holder (user or team); another one is 409.
+       */
+      expected_holder: string;
+      /** @description Booked as `reason` of the return movement. */
+      return_condition?: string;
+      notes?: string;
+    };
+    /** @description The current holder and exactly one new holder, a user or a team (WP-275). */
+    TransferAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The current holder (user or team); another one is 409.
+       */
+      expected_holder: string;
+      /** Format: uuid */
+      assigned_user_id?: string;
+      /** Format: uuid */
+      assigned_team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
     };
     /** @description Digital signature captured at handover/return. */
     Signature: {
@@ -19916,6 +19975,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19956,15 +20018,9 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Assignment deleted */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listDocuments: {
@@ -26779,6 +26835,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -26810,6 +26868,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -38512,19 +38572,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
-      200: {
+      /** @description Assigned; `id` is the id of the assignment movement. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38538,19 +38605,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReturnAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
+      /** @description Returned; the booked return movement. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StockMovement'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38564,19 +38638,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TransferAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
-      200: {
+      /** @description Transferred; the new assignment, `id` is the id of its assignment movement. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

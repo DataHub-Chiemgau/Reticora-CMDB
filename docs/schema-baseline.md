@@ -1475,6 +1475,11 @@ NOT NULL. `assigned_team_id` ist kein Scope-Merkmal; Policies unverändert.
 (kein Spiegel einer anderen Spalte). `stock_movement` erhält `due_at`
 (TIMESTAMPTZ) mit CHECK `stock_movement_due_at_assignment` (`due_at IS
 NULL OR movement_type = 'assignment'`). Keine Daten (Backfill WP-275).
+Backfill des Halter-Caches (AST-02, WP-275, Migration 000254, nur Daten):
+je Asset bestimmt die jüngste offene `assignment`-Zeile (`active`/`overdue`)
+`assigned_user_id` und `assignment_due_at` (Tagesende von `due_date` in
+`organization.timezone`), Zeilen nur mit `ci_id` über `ci.asset_id`, nur
+Nutzer derselben Organisation; Down leert die drei Spalten.
 
 Bestand von Mengenartikeln je Bin (STK-01, STK-02, STK-03, API-06, WP-283,
 E-40, E-41, Migration 000252): `consumable` erhält `barcode` (TEXT, partieller

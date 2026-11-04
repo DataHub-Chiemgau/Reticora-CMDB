@@ -424,8 +424,11 @@ POST /api/v1/api-keys apikey:manage
 POST /api/v1/api-keys/{id}/rotate apikey:manage
 POST /api/v1/asset-locations asset:write
 POST /api/v1/assets asset:write
+POST /api/v1/assets/{id}/assign assignment:write
 POST /api/v1/assets/{id}/cis ci:write
 POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition
+POST /api/v1/assets/{id}/return assignment:write
+POST /api/v1/assets/{id}/transfer assignment:write
 POST /api/v1/assignments assignment:write
 POST /api/v1/assignments/{id}/return assignment:write
 POST /api/v1/assignments/{id}/transfer assignment:write
