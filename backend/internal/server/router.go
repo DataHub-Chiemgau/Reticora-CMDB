@@ -896,6 +896,43 @@ func (a reviewTickets) LinkedTickets(ctx context.Context, orgID string, itemIDs 
 	return out, nil
 }
 
+// The resolution of an item is commented on its open tickets (WP-767).
+var _ reviews.ResolutionCommenter = reviewTickets{}
+
+// OpenTickets names the tickets of the item that are not closed and that
+// the caller sees under ticket RLS (WP-767).
+func (a reviewTickets) OpenTickets(ctx context.Context, orgID, itemID string) ([]reviews.TicketRef, error) {
+	linked, err := a.svc.LinkedTickets(ctx, orgID, ticket.LinkReviewItem, []string{itemID})
+	if err != nil {
+		return nil, err
+	}
+	var out []reviews.TicketRef
+	for _, list := range linked {
+		for i := range list {
+			if list[i].Status != ticket.StatusClosed {
+				out = append(out, reviews.TicketRef{ID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status})
+			}
+		}
+	}
+	return out, nil
+}
+
+// CommentTicket adds the internal comment on the resolution of an item: by
+// the resolver, or a system comment when the resolution has no actor or the
+// actor is a service account (its API key acts as the account, which is no
+// app_user and cannot author a user comment).
+func (a reviewTickets) CommentTicket(ctx context.Context, orgID, ticketID, authorID, content string) error {
+	if p, ok := identity.PrincipalFromContext(ctx); ok && p.ServiceAccountID != "" && p.Subject == authorID {
+		authorID = ""
+	}
+	if authorID == "" {
+		_, err := a.svc.AddSystemComment(ctx, orgID, ticketID, content)
+		return err
+	}
+	return a.svc.AddComment(ctx, &ticket.Comment{OrganizationID: orgID, TicketID: ticketID, AuthorID: authorID,
+		AuthorType: ticket.AuthorUser, Content: content, IsInternal: true})
+}
+
 // CIName returns the name of a CI the caller sees, "" for none.
 func (a reviewTickets) CIName(ctx context.Context, orgID, ciID string) (string, error) {
 	item, err := a.cis.GetByID(ctx, orgID, ciID)

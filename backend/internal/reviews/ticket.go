@@ -3,12 +3,14 @@ package reviews
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
 // Tickets from review items (TKT-01, WP-291): POST
@@ -292,4 +294,63 @@ func (s *Service) attachTickets(ctx context.Context, orgID string, items []Item)
 func TicketConflict(id string, number int) error {
 	return &Error{Status: http.StatusConflict,
 		Message: "an open ticket is already linked to the review item: #" + strconv.Itoa(number) + " (" + id + ")"}
+}
+
+// Ticket comment on resolution (TKT-01, WP-767): when an item with a linked
+// ticket that is not closed is resolved or dismissed, the ticket gets one
+// internal comment naming the type, action, status and note of the
+// resolution. It is written once the resolution has committed and never
+// undoes it: a failed comment is logged.
+
+// ResolutionCommenter comments the resolution of an item on its tickets;
+// the TicketCreator of the server implements it, a TicketCreator without
+// it comments nothing.
+type ResolutionCommenter interface {
+	// OpenTickets returns the tickets linked to the item that are not
+	// closed and that the caller sees (ticket RLS).
+	OpenTickets(ctx context.Context, orgID, itemID string) ([]TicketRef, error)
+	// CommentTicket adds an internal comment to the ticket, authored by
+	// authorID, or a system comment without author when authorID is "".
+	CommentTicket(ctx context.Context, orgID, ticketID, authorID, content string) error
+}
+
+// CommentResolved comments the resolution of item on its open tickets with
+// authorID as author ("" for a system comment), once the transaction of
+// ctx has committed (at once without one). The item carries the stored
+// resolution (status, action, note). Without a ticket side that comments
+// (module ticketing off), nothing happens.
+func (s *Service) CommentResolved(ctx context.Context, item *Item, authorID string) {
+	commenter, ok := s.tickets.(ResolutionCommenter)
+	if !ok || item == nil || (item.Status != StatusResolved && item.Status != StatusDismissed) {
+		return
+	}
+	orgID, itemID, content := item.OrganizationID, item.ID, resolutionComment(item)
+	database.AfterCommit(ctx, func(ctx context.Context) {
+		tickets, err := commenter.OpenTickets(ctx, orgID, itemID)
+		if err != nil {
+			slog.WarnContext(ctx, "review resolution not commented on its tickets", "organization_id", orgID,
+				"review_item_id", itemID, "error", err)
+			return
+		}
+		for i := range tickets {
+			if err = commenter.CommentTicket(ctx, orgID, tickets[i].ID, authorID, content); err != nil {
+				slog.WarnContext(ctx, "review resolution not commented on its ticket", "organization_id", orgID,
+					"review_item_id", itemID, "ticket_id", tickets[i].ID, "error", err)
+			}
+		}
+	})
+}
+
+// resolutionComment is the text of the comment on a resolution: type,
+// action, status and note.
+func resolutionComment(item *Item) string {
+	var b strings.Builder
+	b.WriteString("Review item " + item.ID + " " + item.Status + ".\n")
+	b.WriteString("Type: " + item.Kind + "\n")
+	b.WriteString("Action: " + item.Action + "\n")
+	b.WriteString("Status: " + item.Status)
+	if item.Resolution != "" {
+		b.WriteString("\nNote: " + item.Resolution)
+	}
+	return b.String()
 }

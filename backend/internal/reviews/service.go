@@ -272,10 +272,16 @@ func (s *Service) Resolve(ctx context.Context, orgID, id string, res *Resolution
 		}
 		if resolved {
 			out, err = s.repo.GetReviewItem(ctx, orgID, id)
+		} else {
+			out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
+		}
+		if err != nil {
 			return err
 		}
-		out, err = s.repo.ResolveReviewItem(ctx, orgID, id, res)
-		return err
+		// The open tickets of the item are commented once the resolution
+		// has committed, also when the effect stored it (WP-767).
+		s.CommentResolved(ctx, out, res.ResolvedBy)
+		return nil
 	})
 	if tracked {
 		s.finishMerge(ctx, item, err)
