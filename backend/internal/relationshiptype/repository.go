@@ -112,6 +112,9 @@ func (r *MemoryRepository) Create(_ context.Context, typ *Type) error {
 	if typ.Cardinality == "" {
 		typ.Cardinality = CardinalityManyToMany
 	}
+	if typ.MetadataSchema == nil {
+		typ.MetadataSchema = []AttributeDefinition{}
+	}
 	if err := typ.Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -143,6 +146,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, key string, req *Ups
 	}
 	next := *t
 	req.apply(&next)
+	if next.MetadataSchema == nil {
+		next.MetadataSchema = []AttributeDefinition{}
+	}
 	if err := next.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

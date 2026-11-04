@@ -189,11 +189,13 @@ var SystemSources = map[string]bool{"discovery": true, "agent": true}
 var ErrSystemSource = errors.New("discovery and agent are reserved to the discovery and agent paths")
 
 // ProvenanceAttribute is the attribute that records actor, actor type,
-// source and time of an edge (REL-08). Create sets it; PATCH refuses it
-// (ErrProvenanceReserved, F-270) and the repositories keep the stored one.
+// source and time of an edge (REL-08). Create sets it; POST and PATCH
+// refuse it (ErrProvenanceReserved, F-270, REL-07) and the repositories
+// keep the stored one.
 const ProvenanceAttribute = "provenance"
 
-// ErrProvenanceReserved refuses attributes.provenance on PATCH (F-270).
+// ErrProvenanceReserved refuses attributes.provenance on POST and PATCH
+// (F-270, REL-07).
 var ErrProvenanceReserved = errors.New("provenance is recorded by the system and cannot be changed")
 
 // ErrForceRequired refuses deleting a discovery edge without force=true
@@ -1070,11 +1072,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		SourceCIID:     req.SourceCIID,
 		TargetCIID:     req.TargetCIID,
 		RelType:        req.RelType,
-		Attributes:     req.Attributes,
-		Source:         req.Source,
-		Confidence:     req.Confidence,
-		SourceSystem:   req.SourceSystem,
-		Notes:          req.Notes,
+		// A copy: req.Attributes stays the attributes of the request.
+		Attributes:   maps.Clone(req.Attributes),
+		Source:       req.Source,
+		Confidence:   req.Confidence,
+		SourceSystem: req.SourceSystem,
+		Notes:        req.Notes,
 
 		SourceInterfaceID: req.SourceInterfaceID,
 		TargetInterfaceID: req.TargetInterfaceID,
@@ -1112,6 +1115,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if rel.VerificationState == "verified" {
 		rel.VerifiedBy = t.UserID
 	}
+	// Reserved attribute keys (422, REL-07): provenance is recorded by the
+	// server, a field name of the edge is no attribute.
+	if violations := reservedViolations(req.Attributes); len(violations) > 0 {
+		writeViolations(w, violations...)
+		return
+	}
 
 	// The fields of the request against the field permissions (RBA-07):
 	// after the checks of the request form (400), before the write.
@@ -1125,6 +1134,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 			api.WriteRepoError(w, err)
 			return
 		}
+	}
+	// The attributes against the schema of the type (422, REL-07), after
+	// the field permissions; a schema that cannot be read is 500.
+	if err = h.checkMetadata(r.Context(), t.OrganizationID, rel.RelType, req.Attributes, req.Attributes, nil); err != nil {
+		if writeSchemaError(w, err) {
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
 	}
 
 	if err = h.repo.Create(r.Context(), rel); err != nil {
@@ -1270,9 +1288,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
 		return
 	}
-	if _, reserved := req.Attributes[ProvenanceAttribute]; reserved {
-		// Actor and time of the edge are recorded by the system (F-270).
-		writeViolations(w, violation{Field: "attributes." + ProvenanceAttribute, Detail: ErrProvenanceReserved.Error()})
+	if violations := reservedViolations(req.Attributes); len(violations) > 0 {
+		// Actor and time of the edge are recorded by the system (F-270), a
+		// field name of the edge is no attribute (REL-07).
+		writeViolations(w, violations...)
 		return
 	}
 
@@ -1282,15 +1301,33 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	if rights != nil {
+	// Only a PATCH with attributes checks the schema: a PATCH of the
+	// verification state keeps working on an edge that a later schema
+	// change made invalid (REL-07).
+	checkSchema := req.Attributes != nil && h.hasSchemaSource()
+	if rights != nil || checkSchema {
 		// The repository calls it with the stored edge under the lock of
-		// the write (RBA-07, WP-770).
+		// the write: the field permissions (RBA-07, WP-770), then the
+		// attributes after the merge against the schema of the type, read
+		// in the same transaction (REL-07).
 		req.Check = func(ctx context.Context, current *Relationship) error {
-			return rights.checkUpdate(ctx, &req, current)
+			if rights != nil {
+				if checkErr := rights.checkUpdate(ctx, &req, current); checkErr != nil {
+					return checkErr
+				}
+			}
+			if !checkSchema {
+				return nil
+			}
+			return h.checkMetadata(ctx, t.OrganizationID, current.RelType,
+				mergedAttributes(current.Attributes, req.Attributes), req.Attributes, current.Attributes)
 		}
 	}
 	rel, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		if writeSchemaError(w, err) {
+			return
+		}
 		var forbidden *api.FieldForbiddenError
 		if errors.As(err, &forbidden) {
 			api.WriteFieldError(w, forbidden)

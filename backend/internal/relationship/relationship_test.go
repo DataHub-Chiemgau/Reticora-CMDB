@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -582,5 +583,177 @@ func TestMemoryUpdateCheckUnderLock(t *testing.T) {
 		strings.NewReader(`{"notes":"patched"}`))))
 	if w.Code != http.StatusOK {
 		t.Fatalf("unrestricted PATCH: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestReservedAttributeKeysAreRelationshipFields covers REL-07 (WP-295):
+// the reserved attribute keys are provenance and exactly the JSON field
+// names of Relationship.
+func TestReservedAttributeKeysAreRelationshipFields(t *testing.T) {
+	want := []string{ProvenanceAttribute}
+	typ := reflect.TypeFor[Relationship]()
+	for i := range typ.NumField() {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			want = append(want, name)
+		}
+	}
+	got := slices.Clone(relationshiptype.ReservedAttributeKeys)
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("reserved attribute keys %v, want %v", got, want)
+	}
+}
+
+// schemaMux returns a mux of a relationship handler whose types come from
+// a memory catalogue with the type cabled of org-1 (REL-07): cable is
+// required with a pattern, media an enum, mode fast asks for speed.
+func schemaMux(t *testing.T) (*chi.Mux, *MemoryRepository, *relationshiptype.MemoryRepository) {
+	t.Helper()
+	types := relationshiptype.NewMemoryRepository()
+	var schema []relationshiptype.AttributeDefinition
+	if err := json.Unmarshal([]byte(`[
+		{"key":"cable","data_type":"text","required":true,"validation":{"pattern":"^C-[0-9]+$"}},
+		{"key":"media","data_type":"enum","enum_values":["copper","fiber"]},
+		{"key":"mode","data_type":"text"},
+		{"key":"speed","data_type":"text","conditional":{"required_when":[{"field":"mode","op":"eq","value":"fast"}]}}
+	]`), &schema); err != nil {
+		t.Fatal(err)
+	}
+	if err := types.Create(context.Background(), &relationshiptype.Type{OrganizationID: "org-1", Key: "cabled",
+		DisplayName: "cabled", ReverseName: "cabled", Directed: true, Category: "logical",
+		ImpactDirection: relationshiptype.ImpactNone, MetadataSchema: schema}); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMemoryRepository()
+	mux := chi.NewRouter()
+	NewHandler(repo, types).RegisterRoutes(mux)
+	return mux, repo, types
+}
+
+func postRel(mux http.Handler, rel, attrs string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/relationships", strings.NewReader(
+		`{"source_ci_id":"ci-1","target_ci_id":"ci-2","rel_type":"`+rel+`","attributes":`+attrs+`}`))))
+	return w
+}
+
+// TestHandler_MetadataSchema covers REL-07 (WP-295) in the memory
+// repository: POST checks the attributes, PATCH the merged state under the
+// lock of the repository, reserved keys are 422 on attributes.<key>, keys
+// without definition are accepted, a PATCH without attributes is not
+// checked and the repository itself checks nothing.
+func TestHandler_MetadataSchema(t *testing.T) {
+	mux, repo, types := schemaMux(t)
+	for _, c := range []struct {
+		attrs string
+		want  []string
+	}{
+		{`{}`, []string{"cable"}},
+		{`{"cable":"X","media":"radio"}`, []string{"cable", "media"}},
+		{`{"cable":"C-1","mode":"fast"}`, []string{"speed"}},
+		{`{"provenance":"forged","source_ci_id":"x"}`, []string{"attributes.provenance", "attributes.source_ci_id"}},
+		{`{"verified_by":"x","cable":"C-1"}`, []string{"attributes.verified_by"}},
+	} {
+		w := postRel(mux, "cabled", c.attrs)
+		if w.Code != http.StatusUnprocessableEntity || !slices.Equal(violationFields(t, w), c.want) {
+			t.Errorf("POST %s: %d %s, want 422 on %v", c.attrs, w.Code, w.Body.String(), c.want)
+		}
+	}
+	if _, total, _ := repo.List(context.Background(), "org-1", "", api.PaginationParams{Limit: 10}); total != 0 {
+		t.Fatalf("refused POSTs stored %d edges", total)
+	}
+	w := postRel(mux, "cabled", `{"cable":"C-1","media":"fiber","label":"free"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST valid: %d %s", w.Code, w.Body.String())
+	}
+	var rel Relationship
+	if err := json.Unmarshal(w.Body.Bytes(), &rel); err != nil {
+		t.Fatal(err)
+	}
+	// Reserved keys also on another type and on PATCH.
+	if w = postRel(mux, "depends_on", `{"notes":"x"}`); w.Code != http.StatusUnprocessableEntity ||
+		!slices.Equal(violationFields(t, w), []string{"attributes.notes"}) {
+		t.Errorf("POST depends_on with attributes.notes: %d %s", w.Code, w.Body.String())
+	}
+	for _, c := range []struct {
+		body string
+		code int
+		want []string
+	}{
+		{`{"attributes":{"source_ci_id":"x"}}`, http.StatusUnprocessableEntity, []string{"attributes.source_ci_id"}},
+		{`{"attributes":{"cable":null}}`, http.StatusUnprocessableEntity, []string{"cable"}},
+		{`{"attributes":{"mode":"fast"}}`, http.StatusUnprocessableEntity, []string{"speed"}},
+		// The stored cable satisfies the requirement.
+		{`{"attributes":{"media":"copper"}}`, http.StatusOK, nil},
+		{`{"attributes":{"mode":"fast","speed":"10G"}}`, http.StatusOK, nil},
+	} {
+		w = patchRel(t, mux, rel.ID, c.body)
+		if w.Code != c.code || (c.want != nil && !slices.Equal(violationFields(t, w), c.want)) {
+			t.Errorf("PATCH %s: %d %s, want %d %v", c.body, w.Code, w.Body.String(), c.code, c.want)
+		}
+	}
+	// A schema change: the verification state stays patchable, attributes
+	// are checked against the new schema.
+	rack := []relationshiptype.AttributeDefinition{{Key: "rack", DataType: "text", Required: true}}
+	if _, err := types.Update(context.Background(), "org-1", "cabled", &relationshiptype.UpsertRequest{MetadataSchema: &rack}); err != nil {
+		t.Fatal(err)
+	}
+	if w = patchRel(t, mux, rel.ID, `{"verification_state":"disputed"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH verification_state after the schema change: %d %s", w.Code, w.Body.String())
+	}
+	if w = patchRel(t, mux, rel.ID, `{"attributes":{"media":"fiber"}}`); w.Code != http.StatusUnprocessableEntity ||
+		!slices.Equal(violationFields(t, w), []string{"rack"}) {
+		t.Errorf("PATCH attributes after the schema change: %d %s, want 422 on rack", w.Code, w.Body.String())
+	}
+	// The repository stores what it is given (discovery).
+	direct := &Relationship{OrganizationID: "org-1", SourceCIID: "a", TargetCIID: "b", RelType: "cabled",
+		Attributes: map[string]any{"media": "radio"}}
+	if err := repo.Create(context.Background(), direct); err != nil || direct.Attributes["media"] != "radio" {
+		t.Fatalf("repository create: %v %+v", err, direct.Attributes)
+	}
+}
+
+// failingTypes resolves every key with a read error.
+type failingTypes struct{}
+
+func (failingTypes) Exists(context.Context, string, string) (bool, error) { return true, nil }
+func (failingTypes) GetByKey(context.Context, string, string) (*relationshiptype.Type, error) {
+	return nil, errors.New("catalogue unavailable")
+}
+
+// TestHandler_MetadataSchemaFailsClosed covers REL-07 (WP-295): a schema
+// that cannot be read is 500 on POST and on a PATCH with attributes (no
+// check without it); a PATCH without attributes reads none. A handler
+// without TypeChecker checks no schema.
+func TestHandler_MetadataSchemaFailsClosed(t *testing.T) {
+	repo := NewMemoryRepository()
+	rel := &Relationship{OrganizationID: "org-1", SourceCIID: "ci-1", TargetCIID: "ci-2", RelType: "depends_on", Attributes: map[string]any{}}
+	if err := repo.Create(context.Background(), rel); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	NewHandler(repo, failingTypes{}).RegisterRoutes(mux)
+	if w := postRel(mux, "depends_on", `{"port":"eth0"}`); w.Code != http.StatusInternalServerError {
+		t.Errorf("POST with a failing schema source: %d %s, want 500", w.Code, w.Body.String())
+	}
+	if w := patchRel(t, mux, rel.ID, `{"attributes":{"port":"eth0"}}`); w.Code != http.StatusInternalServerError {
+		t.Errorf("PATCH attributes with a failing schema source: %d %s, want 500", w.Code, w.Body.String())
+	}
+	if w := patchRel(t, mux, rel.ID, `{"verification_state":"verified"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH verification_state with a failing schema source: %d %s, want 200", w.Code, w.Body.String())
+	}
+
+	plain := chi.NewRouter()
+	NewHandler(repo).RegisterRoutes(plain)
+	if w := postRel(plain, "uses", `{"anything":{"nested":true}}`); w.Code != http.StatusCreated {
+		t.Errorf("POST without TypeChecker: %d %s, want 201", w.Code, w.Body.String())
+	}
+	if w := patchRel(t, plain, rel.ID, `{"attributes":{"port":""}}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH without TypeChecker: %d %s, want 200", w.Code, w.Body.String())
+	}
+	if w := postRel(plain, "uses", `{"rel_type":"x"}`); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("POST reserved key without TypeChecker: %d %s, want 422", w.Code, w.Body.String())
 	}
 }

@@ -6,8 +6,18 @@
 package relationshiptype
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
 // Categories of REL-01.
@@ -55,23 +65,27 @@ var ProjectedKeys = []string{"in_subnet", "in_vlan"}
 // and a target CI of these types only, an empty list allows every type
 // (E-95, F-313), subtypes of a listed type included (MET-06, WP-294).
 // Cardinality bounds the edges of the type per end (REL-06, WP-294).
+// MetadataSchema describes the attributes of its edges (REL-07, WP-295);
+// a system type has none.
 type Type struct {
-	ID                 string    `json:"id"`
-	OrganizationID     string    `json:"organization_id,omitempty"`
-	Key                string    `json:"key"`
-	DisplayName        string    `json:"display_name"`
-	ReverseName        string    `json:"reverse_name"`
-	Directed           bool      `json:"directed"`
-	Category           string    `json:"category"`
-	ImpactDirection    string    `json:"impact_direction"`
-	Redundant          bool      `json:"redundant"`
-	AllowedSourceTypes []string  `json:"allowed_source_types"`
-	AllowedTargetTypes []string  `json:"allowed_target_types"`
-	Cardinality        string    `json:"cardinality"`
-	IsSystem           bool      `json:"is_system"`
-	Description        string    `json:"description,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID                 string   `json:"id"`
+	OrganizationID     string   `json:"organization_id,omitempty"`
+	Key                string   `json:"key"`
+	DisplayName        string   `json:"display_name"`
+	ReverseName        string   `json:"reverse_name"`
+	Directed           bool     `json:"directed"`
+	Category           string   `json:"category"`
+	ImpactDirection    string   `json:"impact_direction"`
+	Redundant          bool     `json:"redundant"`
+	AllowedSourceTypes []string `json:"allowed_source_types"`
+	AllowedTargetTypes []string `json:"allowed_target_types"`
+	Cardinality        string   `json:"cardinality"`
+	IsSystem           bool     `json:"is_system"`
+	Description        string   `json:"description,omitempty"`
+	// MetadataSchema is never nil: [] without definitions.
+	MetadataSchema []AttributeDefinition `json:"metadata_schema"`
+	CreatedAt      time.Time             `json:"created_at"`
+	UpdatedAt      time.Time             `json:"updated_at"`
 }
 
 // UpsertRequest is the payload for creating or updating a relationship type.
@@ -87,6 +101,9 @@ type UpsertRequest struct {
 	AllowedTargetTypes []string `json:"allowed_target_types,omitempty"`
 	Cardinality        string   `json:"cardinality,omitempty"`
 	Description        string   `json:"description,omitempty"`
+	// MetadataSchema replaces the schema; nil (absent) keeps the stored
+	// one, [] clears it (REL-07).
+	MetadataSchema *[]AttributeDefinition `json:"metadata_schema,omitempty"`
 }
 
 // ciTypeList is a request field that names CI type keys (REL-01, E-95).
@@ -137,7 +154,10 @@ func (t *Type) Validate() error {
 	if contains(ProjectedKeys, t.Key) {
 		return fmt.Errorf("%s is projected from the IPAM tables and cannot be defined", t.Key)
 	}
-	return nil
+	if t.IsSystem && len(t.MetadataSchema) > 0 {
+		return fmt.Errorf("a system type has no metadata_schema")
+	}
+	return validateSchema(t.MetadataSchema)
 }
 
 // apply sets the fields of req on t.
@@ -172,6 +192,9 @@ func (req *UpsertRequest) apply(t *Type) {
 	if req.Description != "" {
 		t.Description = req.Description
 	}
+	if req.MetadataSchema != nil {
+		t.MetadataSchema = *req.MetadataSchema
+	}
 }
 
 // Catalogue returns the built-in relationship type catalogue with the
@@ -183,7 +206,7 @@ func Catalogue() []Type {
 			Key: key, DisplayName: name, ReverseName: reverse,
 			Directed: impact != ImpactUndirected, Category: category, ImpactDirection: impact, Redundant: redundant,
 			Cardinality: CardinalityManyToMany, IsSystem: true,
-			AllowedSourceTypes: []string{}, AllowedTargetTypes: []string{},
+			AllowedSourceTypes: []string{}, AllowedTargetTypes: []string{}, MetadataSchema: []AttributeDefinition{},
 		}
 	}
 	return []Type{
@@ -216,4 +239,191 @@ func Catalogue() []Type {
 		def("mounted_in", "mounted in", "mounts", "physical", ImpactSourceDependsOnTarget, false),
 		def("located_in", "located in", "contains", "physical", ImpactNone, false),
 	}
+}
+
+// ReservedAttributeKeys are the keys no attribute of an edge may have
+// (REL-07, WP-295): provenance, which only the server records (REL-08),
+// and every JSON field name of an edge (relationship.Relationship). A
+// definition with such a key is 400; POST and PATCH /relationships refuse
+// such an attribute with 422 on attributes.<key>.
+var ReservedAttributeKeys = []string{
+	"provenance",
+	"id", "organization_id", "source_ci_id", "target_ci_id", "rel_type", "attributes", "source",
+	"confidence", "first_seen_at", "last_seen_at", "verification_state", "source_system", "notes",
+	"source_interface_id", "target_interface_id", "last_confirmed_at", "verified_by", "verified_at",
+	"created_at", "updated_at", "projected", "target_location_id",
+}
+
+// maxAttributeKeyLength is the longest key of a definition, as of
+// attribute_definition.
+const maxAttributeKeyLength = 100
+
+// AttributeDefinition is one definition of the attribute schema of a
+// relationship type (REL-07, WP-295) in the format of attribute_definition
+// (citype.AttributeDefinition), limited to key, display_name, data_type,
+// required, default, enum_values, validation and conditional. data_type is
+// a phase 1 type of MET-11 (fieldmeta.Phase1Types). validation is a rule
+// AST of MET-45; a request may send the legacy form, which is translated
+// (fieldmeta.ParseValidation). default only prefills a form; the server
+// does not set it.
+type AttributeDefinition struct {
+	Key         string                      `json:"key"`
+	DisplayName citype.LocalizedText        `json:"display_name,omitempty"`
+	DataType    string                      `json:"data_type"`
+	Required    bool                        `json:"required"`
+	Default     json.RawMessage             `json:"default,omitempty"`
+	EnumValues  []string                    `json:"enum_values,omitempty"`
+	Validation  *rules.Rule                 `json:"validation,omitempty"`
+	Conditional *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
+	// validationErr is the error of reading the validation of a request;
+	// Validate reports it (400).
+	validationErr error
+}
+
+// attributeDefinitionJSON is the wire form of an AttributeDefinition with
+// the validation not yet read.
+type attributeDefinitionJSON struct {
+	Key         string                      `json:"key"`
+	DisplayName citype.LocalizedText        `json:"display_name,omitempty"`
+	DataType    string                      `json:"data_type"`
+	Required    bool                        `json:"required"`
+	Default     json.RawMessage             `json:"default,omitempty"`
+	EnumValues  []string                    `json:"enum_values,omitempty"`
+	Validation  json.RawMessage             `json:"validation,omitempty"`
+	Conditional *fieldmeta.ConditionalRules `json:"conditional,omitempty"`
+}
+
+func (w *attributeDefinitionJSON) definition() AttributeDefinition {
+	return AttributeDefinition{
+		Key: w.Key, DisplayName: w.DisplayName, DataType: w.DataType, Required: w.Required,
+		Default: w.Default, EnumValues: w.EnumValues, Conditional: w.Conditional,
+	}
+}
+
+// UnmarshalJSON reads a definition of a request strictly: an unknown member
+// is an error (as api.ReadJSON), the validation is read with
+// fieldmeta.ParseValidation (rule AST or legacy form).
+func (d *AttributeDefinition) UnmarshalJSON(b []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	var w attributeDefinitionJSON
+	if err := dec.Decode(&w); err != nil {
+		return fmt.Errorf("metadata_schema: %w", err)
+	}
+	*d = w.definition()
+	d.Validation, d.validationErr = fieldmeta.ParseValidation(w.Validation)
+	return nil
+}
+
+// decodeSchema reads a stored metadata_schema; a stored validation is read
+// like fieldmeta.StoredValidation, without the checks of a request.
+func decodeSchema(raw []byte) ([]AttributeDefinition, error) {
+	out := []AttributeDefinition{}
+	if len(raw) == 0 {
+		return out, nil
+	}
+	var stored []attributeDefinitionJSON
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return nil, fmt.Errorf("read metadata_schema: %w", err)
+	}
+	for i := range stored {
+		def := stored[i].definition()
+		if len(stored[i].Validation) > 0 {
+			def.Validation = fieldmeta.StoredValidation(stored[i].Validation)
+		}
+		out = append(out, def)
+	}
+	return out, nil
+}
+
+// Field returns the definition in the shared form of the field metadata
+// (fieldmeta.FieldDefinition): key as name, the validation as the
+// structure of fieldmeta.ValidationFromRule.
+func (d *AttributeDefinition) Field() fieldmeta.FieldDefinition {
+	validation, _, _ := fieldmeta.ValidationFromRule(d.Validation)
+	return fieldmeta.FieldDefinition{
+		Name: d.Key, Label: d.DisplayName.WithFallback(d.Key)["en"], DataType: d.DataType,
+		Required: d.Required, EnumValues: d.EnumValues, Validation: validation, Conditional: d.Conditional,
+	}
+}
+
+// Fields returns the definitions of a schema as fieldmeta definitions.
+func Fields(schema []AttributeDefinition) []fieldmeta.FieldDefinition {
+	out := make([]fieldmeta.FieldDefinition, len(schema))
+	for i := range schema {
+		out[i] = schema[i].Field()
+	}
+	return out
+}
+
+// validate checks a definition as citype.AttributeDefinition.Validate does
+// and normalizes it: the key trimmed, display_name with both languages,
+// required set by a required rule of the validation. It returns the member
+// a rejection concerns.
+// validation: fixed texts naming the member and the rule.
+func (d *AttributeDefinition) validate() (string, error) {
+	d.Key = strings.TrimSpace(d.Key)
+	if d.Key == "" || utf8.RuneCountInString(d.Key) > maxAttributeKeyLength {
+		return "key", fmt.Errorf("key is required (at most %d characters)", maxAttributeKeyLength)
+	}
+	if contains(ReservedAttributeKeys, d.Key) {
+		return "key", fmt.Errorf("%q is reserved for the relationship itself", d.Key)
+	}
+	if err := d.DisplayName.Validate(); err != nil {
+		return "display_name", err
+	}
+	d.DisplayName = d.DisplayName.WithFallback(d.Key)
+	// Exactly the phase 1 types: json is not checked by
+	// fieldmeta.ValidateValue, file and the references only as an id.
+	if !slices.Contains(fieldmeta.Phase1Types, d.DataType) {
+		return "data_type", fmt.Errorf("data_type must be one of %v", fieldmeta.Phase1Types)
+	}
+	if d.validationErr != nil {
+		return "validation", d.validationErr
+	}
+	if d.Validation != nil {
+		if err := d.Validation.Validate(); err != nil {
+			return "validation", err
+		}
+		_, required, err := fieldmeta.ValidationFromRule(d.Validation)
+		if err != nil {
+			return "validation", err
+		}
+		d.Required = d.Required || required
+	}
+	field := d.Field()
+	if err := fieldmeta.ValidateDefinition(&field); err != nil {
+		attribute := "data_type"
+		var de *fieldmeta.DefinitionError
+		if errors.As(err, &de) {
+			attribute = de.Attribute
+		}
+		return attribute, err
+	}
+	if len(d.Default) > 0 && string(d.Default) != "null" {
+		var value any
+		if err := json.Unmarshal(d.Default, &value); err != nil {
+			return "default", fmt.Errorf("default must be a JSON value")
+		}
+		if err := fieldmeta.ValidateValue(&field, value); err != nil {
+			return "default", err
+		}
+	}
+	return "", nil
+}
+
+// validateSchema checks the definitions of a schema; the keys are unique.
+func validateSchema(schema []AttributeDefinition) error {
+	seen := make(map[string]bool, len(schema))
+	for i := range schema {
+		member, err := schema[i].validate()
+		if err != nil {
+			return fmt.Errorf("metadata_schema[%d].%s: %v", i, member, err)
+		}
+		if seen[schema[i].Key] {
+			return fmt.Errorf("metadata_schema[%d].key: %q is defined twice", i, schema[i].Key)
+		}
+		seen[schema[i].Key] = true
+	}
+	return nil
 }

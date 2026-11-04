@@ -1942,6 +1942,18 @@ paths:
             outgoing and the target one incoming edge of the type,
             one_to_many the target one incoming, many_to_one the source one
             outgoing; nothing is stored (REL-06, E-125).
+            A reserved key in attributes (provenance, which the server
+            records, or a field name of the edge such as source_ci_id or
+            notes) names attributes.<key>, one violation per key; checked
+            after 400 and before the field permissions (403, REL-07,
+            WP-295). Attributes that violate the metadata_schema of the
+            relationship type (the organization's row before the system
+            row) name the attribute key, sorted by field: a required
+            attribute that is missing, a value of another type, one the
+            validation rule refuses or one not among the allowed values;
+            checked after the field permissions. A key without definition
+            is accepted; nothing is stored (REL-07, WP-295). A schema that
+            cannot be read is 500.
             Without violations: a structural relationship type, which is
             projected and cannot be stored, or an interface of another CI.
           content:
@@ -2006,8 +2018,19 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           description: >-
-            attributes carries the reserved key provenance; `violations`
-            names attributes.provenance and nothing is changed (F-270).
+            attributes carries a reserved key: provenance (F-270) or a
+            field name of the edge such as source_ci_id or notes (REL-07);
+            `violations` names attributes.<key> per such key, checked after
+            400 and before the field permissions (403). Or the attributes
+            after the merge (the stored ones with those of the request)
+            violate the metadata_schema of the relationship type:
+            `violations` names the attribute keys, sorted by field (a
+            required attribute that is missing, a value of another type, one
+            the validation rule refuses, one not among the allowed values or
+            a read-only one changed), checked after the field permissions
+            under the lock of the write. A PATCH without attributes is not
+            checked against the schema. Nothing is changed (REL-07, WP-295).
+            A schema that cannot be read is 500.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
@@ -24417,7 +24440,7 @@ components:
       type: object
       description: Relationship type metadata (REL-01). contains, mounted_in and located_in are projected, not stored (CH27).
       required: [id, key, display_name, reverse_name, directed, category, impact_direction, redundant,
-        allowed_source_types, allowed_target_types, cardinality, is_system, created_at, updated_at]
+        allowed_source_types, allowed_target_types, cardinality, is_system, metadata_schema, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string, description: Empty for a system type. }
@@ -24449,8 +24472,57 @@ components:
         cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         is_system: { type: boolean, readOnly: true }
         description: { type: string }
+        metadata_schema:
+          type: array
+          items: { $ref: '#/components/schemas/RelationshipAttributeDefinition' }
+          description: >-
+            Schema of the attributes of the edges of the type (REL-07,
+            WP-295). A system type has none ([]).
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    RelationshipAttributeDefinition:
+      type: object
+      description: >-
+        A definition of the attribute schema of a relationship type (REL-07,
+        WP-295) in the format of AttributeDefinition, limited to these
+        members (another member is 400). POST and PATCH /relationships check
+        the attributes of an edge against the definitions as CI attributes
+        are checked: visible, required, read only, type and validation rule,
+        allowed values (422); a key without definition is allowed.
+        Discovery, agent and import edges are not checked.
+      required: [key, data_type]
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+          maxLength: 100
+          description: >-
+            Attribute key, unique in the schema. provenance and the field
+            names of a Relationship (id, source_ci_id, notes …) are reserved
+            (400).
+        display_name:
+          $ref: '#/components/schemas/LocalizedText'
+        data_type:
+          type: string
+          enum: [text, multiline, integer, decimal, boolean, date, datetime, enum, multiselect, ip, mac, url, email, uuid]
+          description: >-
+            A phase 1 type of MET-11. file, json, the reference types and
+            the former type names are 400.
+        required: { type: boolean }
+        default:
+          description: >-
+            Prefills a form; valid for the data type. The server does not
+            set it.
+        enum_values:
+          type: array
+          items: { type: string }
+        validation:
+          $ref: '#/components/schemas/AttributeValidation'
+        conditional:
+          type: object
+          additionalProperties: true
+          description: visible_when, required_when, read_only_when and allowed_values_when (as AttributeDefinition).
 
     RelationshipTypeUpsert:
       type: object
@@ -24477,6 +24549,14 @@ components:
           description: CI type keys the organization sees (system types and its own), their subtypes included on POST /relationships; an unknown key is 400. Empty allows every type.
         cardinality: { $ref: '#/components/schemas/RelationshipTypeCardinality' }
         description: { type: string }
+        metadata_schema:
+          type: array
+          items: { $ref: '#/components/schemas/RelationshipAttributeDefinition' }
+          description: >-
+            Replaces the attribute schema of the type (REL-07, WP-295);
+            missing keeps it, [] clears it. An invalid definition (data type,
+            reserved or repeated key, validation rule) is 400. Existing
+            edges are not checked again.
 
     RelationshipTypeCardinality:
       type: string
@@ -24592,6 +24672,17 @@ components:
         attributes:
           type: object
           additionalProperties: true
+          description: >-
+            Checked against the metadata_schema of the relationship type
+            (422, REL-07). Reserved keys are 422 on attributes.<key>, as
+            attributes.provenance: provenance (recorded by the server,
+            REL-08) and the field names of a Relationship (id,
+            organization_id, source_ci_id, target_ci_id, rel_type,
+            attributes, source, confidence, first_seen_at, last_seen_at,
+            verification_state, source_system, notes, source_interface_id,
+            target_interface_id, last_confirmed_at, verified_by,
+            verified_at, created_at, updated_at, projected,
+            target_location_id).
         source:
           type: string
           default: manual
@@ -24619,8 +24710,16 @@ components:
           type: object
           additionalProperties: true
           description: >-
-            Merged into the existing attributes. The key provenance is
-            reserved to the system (422, F-270).
+            Merged into the existing attributes; the merged attributes are
+            checked against the metadata_schema of the relationship type
+            (422, REL-07). Reserved keys are 422 on attributes.<key>:
+            provenance (reserved to the system, F-270) and the field names
+            of a Relationship (id, organization_id, source_ci_id,
+            target_ci_id, rel_type, attributes, source, confidence,
+            first_seen_at, last_seen_at, verification_state, source_system,
+            notes, source_interface_id, target_interface_id,
+            last_confirmed_at, verified_by, verified_at, created_at,
+            updated_at, projected, target_location_id).
         confidence:
           type: number
           format: double

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000231_asset_field_names
+Stand: Migration 000232_relationship_metadata_schema
 
 ## Prüfung
 
@@ -1092,6 +1092,13 @@ AFTER-DELETE-Trigger `contract_object_grants` ruft
 Client-gescopte Prinzipale zu, WITH CHECK nur Zeilen im Client-Scope, E-09)
 und die RESTRICTIVE-Policies `contract_scoped_update` und
 `contract_scoped_delete`, TRUNCATE-Schutz `reticora_truncate_guard`.
+
+Attributschema der Beziehungstypen (REL-07, WP-295, Migration 000232):
+`relationship_type` erhält `metadata_schema` (jsonb NOT NULL DEFAULT `'[]'`,
+CHECK `relationship_type_metadata_schema_array`: `jsonb_typeof` = `array`),
+die Liste der Definitionen für `ci_relationship.attributes`. Systemzeilen
+und bestehende Mandantentypen erhalten `[]` über den Default; RLS bleibt
+unverändert (Policies `relationship_type_isolation_*` aus 000059).
 
 Objektbezug und Tags von Tickets (TKT-01, WP-764, E-39, E-127, Migration
 000230): `ticket` und `review_item` erhalten `ticket_id_organization_key` bzw.

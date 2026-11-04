@@ -11696,10 +11696,46 @@ export interface components {
       cardinality: components['schemas']['RelationshipTypeCardinality'];
       readonly is_system: boolean;
       description?: string;
+      /** @description Schema of the attributes of the edges of the type (REL-07, WP-295). A system type has none ([]). */
+      metadata_schema: components['schemas']['RelationshipAttributeDefinition'][];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description A definition of the attribute schema of a relationship type (REL-07, WP-295) in the format of AttributeDefinition, limited to these members (another member is 400). POST and PATCH /relationships check the attributes of an edge against the definitions as CI attributes are checked: visible, required, read only, type and validation rule, allowed values (422); a key without definition is allowed. Discovery, agent and import edges are not checked. */
+    RelationshipAttributeDefinition: {
+      /** @description Attribute key, unique in the schema. provenance and the field names of a Relationship (id, source_ci_id, notes …) are reserved (400). */
+      key: string;
+      display_name?: components['schemas']['LocalizedText'];
+      /**
+       * @description A phase 1 type of MET-11. file, json, the reference types and the former type names are 400.
+       * @enum {string}
+       */
+      data_type:
+        | 'text'
+        | 'multiline'
+        | 'integer'
+        | 'decimal'
+        | 'boolean'
+        | 'date'
+        | 'datetime'
+        | 'enum'
+        | 'multiselect'
+        | 'ip'
+        | 'mac'
+        | 'url'
+        | 'email'
+        | 'uuid';
+      required?: boolean;
+      /** @description Prefills a form; valid for the data type. The server does not set it. */
+      default?: unknown;
+      enum_values?: string[];
+      validation?: components['schemas']['AttributeValidation'];
+      /** @description visible_when, required_when, read_only_when and allowed_values_when (as AttributeDefinition). */
+      conditional?: {
+        [key: string]: unknown;
+      };
     };
     /** @description Create (key, display_name, reverse_name required; defaults directed, logical, source_depends_on_target, many_to_many) or change a relationship type. impact_direction undirected belongs to undirected types of the category network only (400, REL-06). */
     RelationshipTypeUpsert: {
@@ -11716,6 +11752,8 @@ export interface components {
       allowed_target_types?: string[];
       cardinality?: components['schemas']['RelationshipTypeCardinality'];
       description?: string;
+      /** @description Replaces the attribute schema of the type (REL-07, WP-295); missing keeps it, [] clears it. An invalid definition (data type, reserved or repeated key, validation rule) is 400. Existing edges are not checked again. */
+      metadata_schema?: components['schemas']['RelationshipAttributeDefinition'][];
     };
     /**
      * @description Enforced on POST /relationships (REL-06): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing edge; many_to_many has no bound. Another value is 400. Discovery edges are not checked.
@@ -11769,6 +11807,7 @@ export interface components {
       source_ci_id: string;
       target_ci_id: string;
       rel_type: components['schemas']['RelationshipType'];
+      /** @description Checked against the metadata_schema of the relationship type (422, REL-07). Reserved keys are 422 on attributes.<key>, as attributes.provenance: provenance (recorded by the server, REL-08) and the field names of a Relationship (id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state, source_system, notes, source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at, created_at, updated_at, projected, target_location_id). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -11785,7 +11824,7 @@ export interface components {
     };
     /** @description All properties are optional; only the supplied ones are changed. */
     UpdateRelationshipRequest: {
-      /** @description Merged into the existing attributes. The key provenance is reserved to the system (422, F-270). */
+      /** @description Merged into the existing attributes; the merged attributes are checked against the metadata_schema of the relationship type (422, REL-07). Reserved keys are 422 on attributes.<key>: provenance (reserved to the system, F-270) and the field names of a Relationship (id, organization_id, source_ci_id, target_ci_id, rel_type, attributes, source, confidence, first_seen_at, last_seen_at, verification_state, source_system, notes, source_interface_id, target_interface_id, last_confirmed_at, verified_by, verified_at, created_at, updated_at, projected, target_location_id). */
       attributes?: {
         [key: string]: unknown;
       };
@@ -17826,7 +17865,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, a subtype of a listed CI type (parent_type_id) is allowed, nothing is stored (REL-01, REL-06, E-95, F-313). An edge that would exceed the cardinality of the relationship type names rel_type ("the edge would exceed the cardinality of the relationship type"): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing; nothing is stored (REL-06, E-125). Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
+      /** @description The source or target CI is not visible to the caller: a CI of another organization, of a client or site outside the scope, an unknown ID or a soft-deleted CI (CI-05, F-424). `violations` names source_ci_id, target_ci_id or both ("source CI not found", "target CI not found"), the same answer for a foreign and an unknown CI; nothing is stored (F-145). A source reserved to the system (discovery, agent) names `source`: those edges come only from the discovery and agent paths, nothing is stored (F-271). A visible source or target CI whose type is not in allowed_source_types or allowed_target_types of the relationship type names source_ci_id, target_ci_id or both ("the type of the source CI is not in allowed_source_types of the relationship type"); an empty list allows every type, a subtype of a listed CI type (parent_type_id) is allowed, nothing is stored (REL-01, REL-06, E-95, F-313). An edge that would exceed the cardinality of the relationship type names rel_type ("the edge would exceed the cardinality of the relationship type"): one_to_one allows the source one outgoing and the target one incoming edge of the type, one_to_many the target one incoming, many_to_one the source one outgoing; nothing is stored (REL-06, E-125). A reserved key in attributes (provenance, which the server records, or a field name of the edge such as source_ci_id or notes) names attributes.<key>, one violation per key; checked after 400 and before the field permissions (403, REL-07, WP-295). Attributes that violate the metadata_schema of the relationship type (the organization's row before the system row) name the attribute key, sorted by field: a required attribute that is missing, a value of another type, one the validation rule refuses or one not among the allowed values; checked after the field permissions. A key without definition is accepted; nothing is stored (REL-07, WP-295). A schema that cannot be read is 500. Without violations: a structural relationship type, which is projected and cannot be stored, or an interface of another CI. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -17917,7 +17956,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description attributes carries the reserved key provenance; `violations` names attributes.provenance and nothing is changed (F-270). */
+      /** @description attributes carries a reserved key: provenance (F-270) or a field name of the edge such as source_ci_id or notes (REL-07); `violations` names attributes.<key> per such key, checked after 400 and before the field permissions (403). Or the attributes after the merge (the stored ones with those of the request) violate the metadata_schema of the relationship type: `violations` names the attribute keys, sorted by field (a required attribute that is missing, a value of another type, one the validation rule refuses, one not among the allowed values or a read-only one changed), checked after the field permissions under the lock of the write. A PATCH without attributes is not checked against the schema. Nothing is changed (REL-07, WP-295). A schema that cannot be read is 500. */
       422: {
         headers: {
           [name: string]: unknown;
