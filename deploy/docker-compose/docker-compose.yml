@@ -455,6 +455,9 @@ services:
       RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED:-true}"
       # CI offline detector (REC-09, LCY-05), a system job of the scheduler.
       RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED:-true}"
+      # Hourly refresh of computed attributes (JOB-02, WP-718), a system job
+      # of the scheduler.
+      RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_WORKER_COMPUTED_REFRESH_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
       # Names on the server certificate of nats-edge. A collector connects to

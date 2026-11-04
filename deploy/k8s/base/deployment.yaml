@@ -143,6 +143,10 @@ spec:
             # scheduler.
             - name: RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
               value: "true"
+            # Hourly refresh of computed attributes (JOB-02, WP-718), a
+            # system job of the scheduler.
+            - name: RETICORA_WORKER_COMPUTED_REFRESH_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

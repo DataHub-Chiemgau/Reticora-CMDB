@@ -48,6 +48,7 @@ stop a single worker during an incident, without touching the API.
 | `discovery_scopes` | `RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED` | Serves the collectors' discovery scopes over the NATS endpoint (DIS-09): `collector.<org>.<id>.scopes.request` returns the enabled scopes of a collector that is not disabled with their run state (`last_run_at`, `next_run_at`) and the organization's `timezone` (a (re)started collector schedules each sweep from them instead of at once; a cron schedule is evaluated in that zone, DIS-10), `…scopes.result` records a run (`last_run_at`, `last_result`, `next_run_at`), `…subnets.report` turns the local subnets a collector reports after enrollment into `scope_suggested` review items (accepting one creates the scope). It also runs the ad-hoc discovery jobs (`POST /api/v1/discovery/jobs`, JOB-01): `…jobs.request` hands the collector its oldest pending jobs (at most 20; jobs with a `kind` in their config, e.g. `iga_relay`, are not handed out), `…jobs.status` records `running` for a pending job of the collector (only then does the collector run it) and `completed` or `failed` with the result for a running one; the status reaches the job center (`discovery.<job_type>`). The collector runs a `sweep` job with the sweep, a `poll` job with the other plugins and a `full` job with all plugins of each of its scopes. A request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Needs `RETICORA_NATS_URL`. |
 | `jobs` | `RETICORA_WORKER_JOBS_ENABLED` | Consumes the `JOBS` work-queue stream on NATS (`jobs.<kind>`, TEC-14): one durable consumer per job kind, the database claim runs each job once, a job whose instance died is taken over after its timeout. Runs the bulk changes (`ci.bulk`), state snapshots (`history.snapshot`) and, with the module `documents`, the malware scan of uploads (`document.scan`, clamd at `RETICORA_CLAMD_ADDR`), see "Job queue and timeout reaper". Only active with NATS; with NATS at least one instance must run it, or these jobs stay queued (uploads stay locked as `pending_scan`). |
 | `offline_detector` | `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` | The CI offline detector (REC-09, LCY-05), the system job `ci.offline_detector` of the scheduler (every 5 minutes, on the leading replica): an observable, discovered CI whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` (`ci.offline`), and `active` again once seen (`ci.online`). Switched off, the job is not registered on this instance; since a replica with the switch on can lead, switch it off on every instance. The former switch `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies while `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` is not set and is logged as deprecated; next to it, it is ignored. Needs the database. |
+| `computed_refresh` | `RETICORA_WORKER_COMPUTED_REFRESH_ENABLED` | The refresh of computed attributes (JOB-02 [P2], WP-718), the system job `attribute.computed_refresh` of the scheduler (every hour, at most one missed slot caught up, on the leading replica): expressions with `today` or an asset field (`asset.<field>` of the asset linked through `ci.asset_id`) age without a write of the CI. Per organization, in tenant transactions of at most 100 CIs, it recomputes the computed values of the CIs whose type has computed definitions (and of CIs with templates, instance definitions or a computed value whose definition is gone); "today" is the date in `organization.timezone`, so a value is current at most an hour after local midnight. Only changed values are written, per batch one statement for the values and one for their provenance (`ci_field_value`, source `computed`, rank 100); `ci.version` stays, and there is no history or audit entry, no `ci.changed` and no outbox event. A CI a write holds is skipped (the write computes it). The log line `computed attributes refreshed` names the organizations and the checked and changed CIs. The backfill after a change of a computed definition (`attribute.computed_backfill`, see "Computed attributes") runs without this switch. Switched off, the job is not registered on this instance; switch it off on every instance. Needs the database. |
 
 ## Destinations of the notifier (SEC-08)
 
@@ -418,8 +419,9 @@ exceeded the timeout of the job by more than 30 s (jobs without a timeout,
 the tracked export, discovery and merge jobs, are left to their own
 workers) and fails the attempt with `worker lost`:
 
-- the kinds of the job queue (with NATS) and the attribute index jobs
-  (`attribute.index*`, run again by the scheduler) go back to the queue
+- the kinds of the job queue (with NATS), the attribute index jobs
+  (`attribute.index*`) and the backfill of computed attributes
+  (`attribute.computed_backfill`), both run again by the scheduler, go back to the queue
   while attempts remain and fail after `max_attempts`;
 - every other kind fails at once, among them `ci.bulk` and
   `history.snapshot` without NATS: no executor would run them again.
@@ -721,6 +723,34 @@ above); the offline status of the collectors is the system job
 worker exists, its switch has no effect and is logged as a configuration
 warning.
 
+## Computed attributes
+
+The write path computes the values of computed attributes (MET-10,
+WP-717) in the transaction of every CI write. Two jobs keep them current
+without such a write (WP-718):
+
+- `attribute.computed_refresh`, the worker `computed_refresh` (see above),
+  every hour.
+- `attribute.computed_backfill`: creating a computed definition
+  (`POST /api/v1/attribute-definitions`), changing its expression, data
+  type or reach (`PATCH …/{id}`) or deleting it (`DELETE …/{id}`, also
+  `DELETE /api/v1/ci-types/{id}/fields/{name}`) queues one job of the
+  organization. The scheduler runs the due jobs every minute like the
+  attribute index jobs; a job recomputes the CIs of the organization in
+  batches of 100 (for a type definition the subtree of its type and every
+  CI with a computed value of its key) and removes values and provenance of
+  a deleted definition. A failed job is retried (3 attempts). It runs
+  without a module condition (E-105) and independently of the switch of
+  `computed_refresh`. The removal of a set with computed set attributes
+  queues no job; the next refresh removes their values.
+
+The migration `000225_computed_seed` adds the system definition
+`warranty_days_left` (integer, global, searchable): the days from today to
+`warranty_end` of the asset linked through `ci.asset_id`, empty without an
+asset or date. The first refresh fills it. It has no attribute index: a
+system definition gets its index only from its migration, and this one
+creates none (K22, SR-04).
+
 ## Example: dedicated worker instance
 
 API instances switch every worker off:
@@ -738,6 +768,7 @@ RETICORA_WORKER_NATS_EDGE_ENABLED=false
 RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED=false
 RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED=false
 RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED=false
+RETICORA_WORKER_COMPUTED_REFRESH_ENABLED=false
 ```
 
 In the Compose installation each of these is read from `.env`; in

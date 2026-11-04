@@ -1150,6 +1150,7 @@ func (r *PGRepository) CreateAttributeDefinition(ctx context.Context, orgID stri
 	})
 	if err == nil {
 		r.scheduleIndex(ctx, orgID, nil, d)
+		r.scheduleComputed(ctx, orgID, nil, d)
 	}
 	return err
 }
@@ -1186,6 +1187,7 @@ func (r *PGRepository) UpdateAttributeDefinition(ctx context.Context, orgID, id 
 	})
 	if err == nil {
 		r.scheduleIndex(ctx, orgID, prev, out)
+		r.scheduleComputed(ctx, orgID, prev, out)
 	}
 	return out, err
 }
@@ -1206,6 +1208,7 @@ func (r *PGRepository) DeleteAttributeDefinition(ctx context.Context, orgID, id 
 	})
 	if err == nil {
 		r.scheduleIndex(ctx, orgID, deleted, nil)
+		r.scheduleComputed(ctx, orgID, deleted, nil)
 	}
 	return err
 }
@@ -1259,6 +1262,66 @@ func (r *PGRepository) scheduleIndex(ctx context.Context, orgID string, before, 
 	}
 	if err := r.indexes.ScheduleIndex(context.WithoutCancel(ctx), orgID, id); err != nil {
 		slog.Error("schedule attribute index job", "definition", id, "error", err)
+	}
+}
+
+// ComputedBackfillJobKind recomputes the values of the computed attributes
+// of an organization's CIs after a computed definition was created, its
+// expression changed or it was deleted (WP-718, JOB-02); the CI package
+// runs it (ci.ComputedRefresh).
+const ComputedBackfillJobKind = "attribute.computed_backfill"
+
+// ComputedBackfill names the definition whose change a backfill follows
+// (the params of ComputedBackfillJobKind): its key and, for a type
+// definition, its type, which narrow the CIs to recompute to the subtree of
+// the type and the CIs with a computed value of the key.
+type ComputedBackfill struct {
+	DefinitionID string `json:"definition_id"`
+	Key          string `json:"key"`
+	CITypeID     string `json:"ci_type_id,omitempty"`
+	Deleted      bool   `json:"deleted,omitempty"`
+}
+
+// ComputedScheduler queues the backfill of computed values after a change
+// of a computed definition (WP-718); the CI package implements it
+// (ci.ComputedRefresh), so citype does not import it.
+type ComputedScheduler interface {
+	ScheduleBackfill(ctx context.Context, orgID string, b ComputedBackfill) error
+}
+
+// computedRelevant reports whether a change from before to after (nil for
+// a missing definition) changes computed values of CIs: a computed
+// definition was created or deleted, or its expression, data type or reach
+// (inheritable, applicability) changed.
+func computedRelevant(before, after *AttributeDefinition) bool {
+	computed := func(d *AttributeDefinition) bool { return d != nil && d.Computed != nil }
+	switch {
+	case !computed(before) && !computed(after):
+		return false
+	case !computed(before) || !computed(after):
+		return true
+	}
+	return !before.Computed.Equal(after.Computed) || before.DataType != after.DataType ||
+		before.Inheritable != after.Inheritable || before.AppliesTo != after.AppliesTo ||
+		!slices.Equal(before.AppliesToCategories, after.AppliesToCategories) ||
+		!slices.Equal(before.AppliesToTypeIDs, after.AppliesToTypeIDs)
+}
+
+// scheduleComputed queues the backfill of the computed values when the
+// change touches them (WP-718). The change is stored already; a job that
+// cannot be queued is logged, and the hourly refresh brings the values in
+// line (ci.ComputedRefresh).
+func (r *PGRepository) scheduleComputed(ctx context.Context, orgID string, before, after *AttributeDefinition) {
+	if r.computed == nil || !computedRelevant(before, after) {
+		return
+	}
+	d := after
+	if d == nil {
+		d = before
+	}
+	b := ComputedBackfill{DefinitionID: d.ID, Key: d.Key, CITypeID: d.CITypeID, Deleted: after == nil}
+	if err := r.computed.ScheduleBackfill(context.WithoutCancel(ctx), orgID, b); err != nil {
+		slog.Error("schedule computed attribute backfill", "definition", d.ID, "error", err)
 	}
 }
 
