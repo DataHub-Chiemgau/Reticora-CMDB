@@ -136,8 +136,8 @@ func parseTrap(data []byte) (*TrapEvent, error) {
 	}
 	p := &berParser{data: message}
 	// version
-	if _, err := p.readTLV(); err != nil {
-		return nil, err
+	if _, versionErr := p.readTLV(); versionErr != nil {
+		return nil, versionErr
 	}
 	community, err := p.readTLV()
 	if err != nil {
@@ -171,8 +171,8 @@ func parseV1Trap(content []byte, ev *TrapEvent) (*TrapEvent, error) {
 		return nil, err
 	}
 	ev.TrapOID = decodeOIDValue(enterprise)
-	if _, err := p.readTLV(); err != nil { // agent address
-		return nil, err
+	if _, agentErr := p.readTLV(); agentErr != nil { // agent address
+		return nil, agentErr
 	}
 	generic, err := p.readTLV() // generic trap type
 	if err != nil {

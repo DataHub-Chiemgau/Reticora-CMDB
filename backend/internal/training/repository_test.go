@@ -16,7 +16,7 @@ func TestTrainingAssignComplete(t *testing.T) {
 		t.Fatalf("assign: %+v err=%v", a, err)
 	}
 	// duplicate assignment rejected
-	if _, err := repo.Assign(context.Background(), &Assignment{OrganizationID: "org-1", TrainingID: c.ID, UserID: "u1"}); err == nil {
+	if _, assignErr := repo.Assign(context.Background(), &Assignment{OrganizationID: "org-1", TrainingID: c.ID, UserID: "u1"}); assignErr == nil {
 		t.Fatal("expected already assigned")
 	}
 	// complete with proof

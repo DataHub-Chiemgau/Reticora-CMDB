@@ -67,8 +67,8 @@ func TestDiscoverFindsReachableTarget(t *testing.T) {
 	defer ln.Close()
 	go func() {
 		for {
-			conn, err := ln.Accept()
-			if err != nil {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			conn.Close()
@@ -150,8 +150,8 @@ func TestCollectReportsOpenPorts(t *testing.T) {
 	defer ln.Close()
 	go func() {
 		for {
-			conn, err := ln.Accept()
-			if err != nil {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			conn.Close()

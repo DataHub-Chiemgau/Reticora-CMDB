@@ -127,12 +127,12 @@ func TestExecutorApproveListStepsFailure(t *testing.T) {
 		t.Fatalf("want waiting, got %s", run.Status)
 	}
 	repo.listStepsErr = errors.New("db down")
-	if _, err := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); err == nil {
+	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
 		t.Fatal("expected error when ListSteps fails during approval")
 	}
 	repo.listStepsErr = nil
 	repo.updateStepErr = errors.New("write denied")
-	if _, err := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); err == nil {
+	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
 		t.Fatal("expected error when UpdateStep fails during approval")
 	}
 	repo.updateStepErr = nil

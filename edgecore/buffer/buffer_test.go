@@ -293,8 +293,8 @@ func TestReplayCycleEnqueuePeekAck(t *testing.T) {
 		}
 	}
 
-	if err := b.Ack(ctx, ids); err != nil {
-		t.Fatalf("Ack: %v", err)
+	if ackErr := b.Ack(ctx, ids); ackErr != nil {
+		t.Fatalf("Ack: %v", ackErr)
 	}
 	n, err := b.Len(ctx)
 	if err != nil {
@@ -763,9 +763,9 @@ func TestStatsReportsCountsAndOldestAge(t *testing.T) {
 		t.Fatalf("readdir: %v", err)
 	}
 	for _, e := range entries {
-		info, err := e.Info()
-		if err != nil {
-			t.Fatalf("info: %v", err)
+		info, infoErr := e.Info()
+		if infoErr != nil {
+			t.Fatalf("info: %v", infoErr)
 		}
 		wantBytes += info.Size()
 	}

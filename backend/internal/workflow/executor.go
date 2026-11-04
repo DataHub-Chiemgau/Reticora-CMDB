@@ -174,13 +174,13 @@ func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, ru
 			return nil, err
 		}
 		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
-		if err := e.repo.AppendStep(ctx, step); err != nil {
-			return nil, err
+		if appendErr := e.repo.AppendStep(ctx, step); appendErr != nil {
+			return nil, appendErr
 		}
 		out, wait, err := e.executeAction(ctx, orgID, run, action)
 		if wait {
-			if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, out, ""); err != nil {
-				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", err)
+			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, out, ""); markErr != nil {
+				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
 			}
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}

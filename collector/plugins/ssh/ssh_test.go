@@ -204,8 +204,8 @@ func TestDiscoverReadsOnlyFirstBannerLine(t *testing.T) {
 	t.Cleanup(func() { ln.Close() })
 	go func() {
 		for {
-			conn, err := ln.Accept()
-			if err != nil {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			go func(c net.Conn) {

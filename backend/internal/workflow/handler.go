@@ -165,8 +165,8 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req TriggerRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, 400, "Bad Request", err.Error())
+	if readErr := api.ReadJSON(r, &req); readErr != nil {
+		api.WriteError(w, 400, "Bad Request", readErr.Error())
 		return
 	}
 	if req.Trigger == "" {

@@ -126,11 +126,11 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 
 	// Build IPMI Get Channel Authentication Capabilities request
 	ipmiMsg := buildGetChannelAuthCap()
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return nil, fmt.Errorf("ipmi: set deadline: %w", err)
+	if deadlineErr := conn.SetDeadline(time.Now().Add(timeout)); deadlineErr != nil {
+		return nil, fmt.Errorf("ipmi: set deadline: %w", deadlineErr)
 	}
-	if _, err := conn.Write(ipmiMsg); err != nil {
-		return nil, fmt.Errorf("ipmi: write: %w", err)
+	if _, writeErr := conn.Write(ipmiMsg); writeErr != nil {
+		return nil, fmt.Errorf("ipmi: write: %w", writeErr)
 	}
 
 	buf := make([]byte, 1024)
@@ -187,10 +187,10 @@ func (p *Plugin) probeRMCP(target string, timeout time.Duration) bool {
 
 	// ASF Presence Ping message
 	ping := buildASFPing()
-	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+	if deadlineErr := conn.SetDeadline(time.Now().Add(timeout)); deadlineErr != nil {
 		return false
 	}
-	if _, err := conn.Write(ping); err != nil {
+	if _, writeErr := conn.Write(ping); writeErr != nil {
 		return false
 	}
 

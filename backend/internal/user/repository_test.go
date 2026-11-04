@@ -26,7 +26,7 @@ func TestMemoryRepositoryUserCRUD(t *testing.T) {
 	if got.Email != "a@example.com" {
 		t.Fatalf("unexpected user: %+v", got)
 	}
-	if _, err := repo.GetUser(context.Background(), "org-2", u.ID); err == nil {
+	if _, getErr := repo.GetUser(context.Background(), "org-2", u.ID); getErr == nil {
 		t.Fatal("expected not-found for wrong tenant")
 	}
 
@@ -72,13 +72,13 @@ func TestMemoryRepositoryTeamsAndRoles(t *testing.T) {
 	if len(members) != 1 || members[0].UserID != "user-1" {
 		t.Fatalf("unexpected members: %+v", members)
 	}
-	if err := repo.RemoveTeamMember(context.Background(), "org-1", team.ID, "user-1"); err != nil {
-		t.Fatal(err)
+	if removeErr := repo.RemoveTeamMember(context.Background(), "org-1", team.ID, "user-1"); removeErr != nil {
+		t.Fatal(removeErr)
 	}
 
 	role := &CustomRole{OrganizationID: "org-1", Name: "auditor", Permissions: []string{"ci:read"}}
-	if err := repo.CreateRole(context.Background(), role); err != nil {
-		t.Fatal(err)
+	if roleErr := repo.CreateRole(context.Background(), role); roleErr != nil {
+		t.Fatal(roleErr)
 	}
 	a := &UserRoleAssignment{UserID: "user-1", CustomRoleID: role.ID, ScopeType: "organization"}
 	// The grant ceiling holds in memory as well: a caller without the role's

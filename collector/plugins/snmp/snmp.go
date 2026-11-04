@@ -169,10 +169,10 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 
 			// Send an SNMP v2c GET request for sysObjectID
 			pkt := buildSNMPv2cGet(community, oidSysObjectID)
-			if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			if deadlineErr := conn.SetDeadline(time.Now().Add(timeout)); deadlineErr != nil {
 				return
 			}
-			if _, err := conn.Write(pkt); err != nil {
+			if _, writeErr := conn.Write(pkt); writeErr != nil {
 				return
 			}
 
