@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -34,6 +33,10 @@ const (
 	// assignmentDropMigration drops the table assignment (WP-843); the
 	// replay of 000242 rebuilds it first.
 	assignmentDropMigration = "../../migrations/000266_assignment_drop"
+	// quantityItemDropMigration drops quantity_item (WP-758); the replays
+	// of 000242 and 000246 rebuild it first, since the down part of 000256
+	// needs it.
+	quantityItemDropMigration = "../../migrations/000269_quantity_item_drop"
 )
 
 // readMigration returns the up and the down part of the migration path.
@@ -90,7 +93,8 @@ func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 
 // TestStockMovementCanonicalMigration covers the data migration of 000242
 // (STK-04, AST-07, WP-744) in a rolled-back transaction: after the down
-// parts of 000266 (which rebuilds assignment, WP-843), of 000257 (the view
+// parts of 000269 (which rebuilds quantity_item, WP-758), of 000266 (which
+// rebuilds assignment, WP-843), of 000257 (the view
 // on the ledger, WP-747), of 000256 (which
 // restores quantity_item_id, WP-757), of 000246
 // (which restores asset_movement, WP-842) and of 000242 the legacy
@@ -111,6 +115,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	_, mergeDown := readMigration(t, mergeMigration)
 	_, projectionDown := readMigration(t, projectionMigration)
 	_, assignmentDropDown := readMigration(t, assignmentDropMigration)
+	_, quantityItemDropDown := readMigration(t, quantityItemDropMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig242-a1")
 	asset2 := f.Asset(t, f.OrgA, f.Client1, "mig242-a2")
 	foreign := f.Asset(t, f.OrgB, "", "mig242-foreign")
@@ -129,6 +134,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
+	exec(quantityItemDropDown)
 	exec(assignmentDropDown)
 	exec(projectionDown)
 	exec(mergeDown)
@@ -337,7 +343,8 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 }
 
 // TestDropAssetMovementMigration covers 000246 (AST-07, WP-842) in a
-// rolled-back transaction after the down part of 000256 (WP-757): the down
+// rolled-back transaction after the down parts of 000269 (WP-758) and
+// 000256 (WP-757): the down
 // part restores asset_movement (state
 // after 000075: append-only, ENABLE + FORCE RLS, truncate guard, RESTRICT
 // on the locations) from the ledger with the former type names, without
@@ -352,6 +359,7 @@ func TestDropAssetMovementMigration(t *testing.T) {
 	ctx := context.Background()
 	up, down := readMigration(t, dropMigration)
 	_, mergeDown := readMigration(t, mergeMigration)
+	_, quantityItemDropDown := readMigration(t, quantityItemDropMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig246-a1")
 	room := f.Room(t, f.Client1, "mig246-room")
 
@@ -375,6 +383,7 @@ func TestDropAssetMovementMigration(t *testing.T) {
 		return n
 	}
 
+	exec(quantityItemDropDown)
 	exec(mergeDown)
 	item, cons := f.ID(), f.ID()
 	exec(`INSERT INTO quantity_item (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'mig246')`, item, f.OrgA, f.Client1)
@@ -666,7 +675,6 @@ func TestStockMovementLedgerRules(t *testing.T) {
 
 	t.Run("scope", func(t *testing.T) {
 		repo := movement.NewPGRepository(f.App)
-		consumables := consumable.NewPGRepository(f.App)
 		orgCtx := f.OrgCtx(f.OrgA)
 		mv := func(assetID, to string) *movement.Movement {
 			return &movement.Movement{OrganizationID: f.OrgA, AssetID: assetID, MovementType: "warehouse_transfer", ToLocationID: to}
@@ -715,8 +723,9 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			t.Errorf("site-1 movements %v: want %s and not %s", got, own.ID, otherSite.ID)
 		}
 		out := func(ctx context.Context) error {
-			_, err := consumables.AddMovement(ctx, &consumable.Movement{OrganizationID: f.OrgA, ConsumableID: cons, Direction: "out", Quantity: 1, Reference: "ledger"})
-			return err
+			one := 1.0
+			return repo.Record(ctx, &movement.Movement{OrganizationID: f.OrgA, ItemKind: "consumable", ConsumableID: cons,
+				MovementType: "retrieval", FromLocationID: consBin, Quantity: &one, Notes: "ledger"})
 		}
 		if err := out(site1Ctx); err == nil {
 			t.Error("site-restricted principal booked a consumable movement without site")
@@ -724,9 +733,9 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		if err := out(orgCtx); err != nil {
 			t.Fatalf("org-wide consumable movement: %v", err)
 		}
-		list, _, err := consumables.ListMovements(orgCtx, f.OrgA, cons, page)
-		if err != nil || len(list) != 1 || list[0].Direction != "out" || list[0].Reference != "ledger" {
-			t.Errorf("consumable movements: %+v, %v; want one out with reference ledger", list, err)
+		list, _, err := repo.ListMovements(orgCtx, f.OrgA, &movement.MovementFilter{ConsumableID: cons}, page)
+		if err != nil || len(list) != 1 || list[0].MovementType != "retrieval" || list[0].Notes != "ledger" {
+			t.Errorf("consumable movements: %+v, %v; want one retrieval with notes ledger", list, err)
 		}
 		var level float64
 		if err = f.Admin.QueryRow(ctx, `SELECT on_hand::float8 FROM stock_level WHERE consumable_id = $1 AND location_id = $2`, cons, consBin).Scan(&level); err != nil || level != 9 {

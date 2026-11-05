@@ -30,15 +30,15 @@ const mergeMigration = "../../migrations/000256_quantity_item_merge"
 
 // TestQuantityItemMergeMigration covers the data migration of 000256 (E-40,
 // E-26, WP-757) in one transaction that is always rolled back: after the
-// down part, quantity items with stock in a bin, in a bin without client
-// restriction, at a room, without location, in a bin of another client,
-// with a negative level, with a SKU an existing consumable holds and with
-// attributes, and a ledger row of kind quantity_item are seeded. The up
-// part takes every item over with its id; only the stock in a compatible
-// bin becomes a stock_level row, the rest goes to migration_quarantine with
-// its reason (stock and location in the row); the colliding SKU becomes
-// NULL; the ledger row is a consumable movement and quantity_item_id is
-// gone. Down restores the ledger row, removes the merged consumable and
+// down parts of 000269 (WP-758) and 000256, quantity items with stock in a
+// bin, in a bin without client restriction, at a room, without location,
+// in a bin of another client, with a negative level, with a SKU an
+// existing consumable holds and with attributes, and a ledger row of kind
+// quantity_item are seeded. The up part takes every item over with its id;
+// only the stock in a compatible bin becomes a stock_level row, the rest
+// goes to migration_quarantine with its reason (stock and location in the
+// row); the colliding SKU becomes NULL; the ledger row is a consumable
+// movement and quantity_item_id is gone. Down restores the ledger row, removes the merged consumable and
 // stock rows and the quarantine entries; up again gives the same state.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
@@ -54,6 +54,12 @@ func TestQuantityItemMergeMigration(t *testing.T) {
 		return string(raw)
 	}
 	up, down := readPart("up"), readPart("down")
+	// quantity_item is dropped by 000269 (WP-758); its down part rebuilds
+	// the table the down part of 000256 works on.
+	rawDrop, readErr := os.ReadFile(dropMigration + ".down.sql")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
 	bin1 := binTree(t, f, f.OrgA, f.Client1, "merge-c1").bin
 	bin2 := binTree(t, f, f.OrgA, f.Client2, "merge-c2").bin
 	room := f.Room(t, f.Client1, "merge-room")
@@ -81,6 +87,7 @@ func TestQuantityItemMergeMigration(t *testing.T) {
 		}
 		return n
 	}
+	exec(string(rawDrop))
 	exec(down)
 
 	type item struct {

@@ -2,6 +2,7 @@ package notify
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -244,6 +245,21 @@ var Templates = map[string]map[string]render{
 					", " + fmt.Sprint(d["days_left"]) + " days left."}
 		},
 	},
+	events.StockBelowMinimum: {
+		// The total stock of a consumable below its minimum level (WP-285,
+		// WP-845): name, SKU, total stock and minimum level with the unit.
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Mindestbestand unterschritten: " + str(d, "name"),
+				"Der Gesamtbestand des Artikels " + str(d, "name") + skuLabel(d, "Artikelnummer") + " beträgt " +
+					quantity(d, "on_hand_total", LocaleDE) + " und liegt unter dem Mindestbestand von " +
+					quantity(d, "min_level", LocaleDE) + "."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Stock below minimum: " + str(d, "name"),
+				"The total stock of article " + str(d, "name") + skuLabel(d, "SKU") + " is " +
+					quantity(d, "on_hand_total", LocaleEN) + ", below the minimum level of " + quantity(d, "min_level", LocaleEN) + "."}
+		},
+	},
 	events.APIKeyCreatorDeactivated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Service-Account-Keys rotieren: Ersteller deaktiviert",
@@ -384,4 +400,29 @@ func (b *Branding) Mail(locale string, t Text) Text {
 		t.Body = strings.TrimRight(t.Body, "\n") + "\n\n-- \n" + footer
 	}
 	return t
+}
+
+// skuLabel names the SKU of a stock.below_minimum event in parentheses,
+// labelled; nothing for an article without SKU.
+func skuLabel(d map[string]any, label string) string {
+	if sku := str(d, "sku"); sku != "" {
+		return " (" + label + " " + sku + ")"
+	}
+	return ""
+}
+
+// quantity renders a quantity of a stock.below_minimum event with the
+// article's unit; German texts take a decimal comma (2,5 l).
+func quantity(d map[string]any, key, locale string) string {
+	n := fmt.Sprint(d[key])
+	if v, ok := d[key].(float64); ok {
+		n = strconv.FormatFloat(v, 'f', -1, 64)
+	}
+	if locale == LocaleDE {
+		n = strings.Replace(n, ".", ",", 1)
+	}
+	if unit := str(d, "unit"); unit != "" {
+		return n + " " + unit
+	}
+	return n
 }

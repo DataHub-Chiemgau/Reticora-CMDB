@@ -185,6 +185,18 @@ var Subscriptions = map[string]Subscription{
 			return a
 		},
 	},
+	events.StockBelowMinimum: {
+		// The total stock of a consumable fell below its minimum level
+		// (STK-01, NTF-05 [P2], WP-285, WP-845): every active user with
+		// stock:write in the article's client, organization-wide grants
+		// only for an article without client. A consumable has no site (its
+		// bins have one each): a grant for single sites does not cover it.
+		// Not critical: quiet hours, muted categories and the digest apply.
+		Category: "stock",
+		Audience: func(d map[string]any) *Audience {
+			return &Audience{Permission: identity.PermStockWrite, AllWithPermission: true, ClientID: str(d, "client_id")}
+		},
+	},
 	events.DocumentScanned: {
 		// A finding quarantines the version (SEC-09, E-42, WP-734): its
 		// uploader and the org_admins who read the document are told. A

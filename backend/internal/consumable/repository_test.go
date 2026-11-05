@@ -17,8 +17,7 @@ import (
 // (No-DB profile, WP-283): bookings per type through Book, the shortfall of
 // a bin (ErrInsufficientStock with the problem type insufficient-stock,
 // nothing changed), the rules per type, the sum as stock_level, low_stock
-// over it, the transitional movements with and without bin and the delete
-// kept by stock.
+// over it, the only bin of a consumable and the delete kept by stock.
 func TestMemoryStockPerBin(t *testing.T) {
 	ctx := context.Background()
 	repo := NewMemoryRepository()
@@ -98,14 +97,17 @@ func TestMemoryStockPerBin(t *testing.T) {
 		t.Fatalf("9 > 5: %d low-stock items, want none", n)
 	}
 
-	// The transitional path: several bins need location_id.
+	// Without location_id the only bin is needed (OnlyBin): two bins are a
+	// 422 on location_id.
 	var fe *api.FieldError
-	if _, err = repo.AddMovement(ctx, &Movement{OrganizationID: "org-1", ConsumableID: c.ID, Direction: "out", Quantity: 1}); !errors.As(err, &fe) || fe.Field != "location_id" {
-		t.Fatalf("out without bin on two bins: %v, want 422 on location_id", err)
+	if _, err = repo.OnlyBin(ctx, "org-1", c.ID); !errors.As(err, &fe) || fe.Field != "location_id" {
+		t.Fatalf("only bin of two bins: %v, want 422 on location_id", err)
 	}
-	updated, err := repo.AddMovement(ctx, &Movement{OrganizationID: "org-1", ConsumableID: c.ID, Direction: "out", LocationID: "bin-b", Quantity: 5})
-	if err != nil || updated.StockLevel != 4 {
-		t.Fatalf("out of bin-b: %+v, %v; want stock_level 4", updated, err)
+	if err = book("retrieval", "bin-b", "", 5); err != nil {
+		t.Fatal(err)
+	}
+	if got, getErr := repo.GetByID(ctx, "org-1", c.ID); getErr != nil || got.StockLevel != 4 {
+		t.Fatalf("retrieval from bin-b: %+v, %v; want stock_level 4", got, getErr)
 	}
 	if n := low(); n != 1 {
 		t.Fatalf("4 < 5: %d low-stock items, want one", n)
@@ -122,19 +124,19 @@ func TestMemoryStockPerBin(t *testing.T) {
 		t.Fatalf("delete with empty bins: %v", err)
 	}
 
-	// A consumable with exactly one bin books without location_id.
+	// A consumable with exactly one bin names it as its only bin.
 	one := &Consumable{OrganizationID: "org-1", Name: "Toner"}
 	if err = repo.Create(ctx, one); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = repo.AddMovement(ctx, &Movement{OrganizationID: "org-1", ConsumableID: one.ID, Direction: "in", Quantity: 1}); !errors.As(err, &fe) {
-		t.Fatalf("in without any bin: %v, want 422", err)
+	if _, err = repo.OnlyBin(ctx, "org-1", one.ID); !errors.As(err, &fe) {
+		t.Fatalf("only bin without any bin: %v, want 422", err)
 	}
-	if _, err = repo.AddMovement(ctx, &Movement{OrganizationID: "org-1", ConsumableID: one.ID, Direction: "in", LocationID: "bin-x", Quantity: 3}); err != nil {
+	if err = repo.Book(ctx, &Booking{OrganizationID: "org-1", ConsumableID: one.ID, MovementType: "receipt", ToLocationID: "bin-x", Quantity: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if updated, err = repo.AddMovement(ctx, &Movement{OrganizationID: "org-1", ConsumableID: one.ID, Direction: "out", Quantity: 2}); err != nil || updated.StockLevel != 1 {
-		t.Fatalf("out of the only bin: %+v, %v; want 1", updated, err)
+	if bin, binErr := repo.OnlyBin(ctx, "org-1", one.ID); binErr != nil || bin != "bin-x" {
+		t.Fatalf("only bin: %q, %v; want bin-x", bin, binErr)
 	}
 }
 

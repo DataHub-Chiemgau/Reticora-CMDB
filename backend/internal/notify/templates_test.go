@@ -39,6 +39,47 @@ var templateData = map[string]map[string]any{
 		"due_date": "2026-12-31", "expires_at": "2026-12-31", "days_left": float64(5)},
 	events.DocumentScanned: {"document_id": "d-1", "version": float64(2), "result": "infected",
 		"scan_signature": "Win.Test.EICAR_HDB-1", "uploaded_by": "u-7"},
+	events.StockBelowMinimum: {"id": "k-1", "client_id": "c-1", "sku": "TON-415", "name": "Toner HP 415A", "unit": "Stk",
+		"on_hand_total": float64(2.5), "min_level": float64(4)},
+}
+
+// TestStockBelowMinimumAudience covers the recipients and texts of
+// stock.below_minimum (STK-01, NTF-05 [P2], WP-845): every user with
+// stock:write in the article's client, organization-wide without client,
+// never by site; not critical in the category stock, which the digest may
+// bundle. The texts name article, SKU, total stock and minimum level with
+// the unit, in German with a decimal comma.
+func TestStockBelowMinimumAudience(t *testing.T) {
+	sub := Subscriptions[events.StockBelowMinimum]
+	if sub.Category != "stock" || sub.Critical || sub.Personal {
+		t.Fatalf("stock.below_minimum subscription %+v, want category stock, not critical", sub)
+	}
+	if !slices.Contains(DigestCategories(), "stock") || !slices.Contains(Categories(), "stock") {
+		t.Errorf("stock in categories %v, digest categories %v", Categories(), DigestCategories())
+	}
+	want := Audience{Permission: identity.PermStockWrite, AllWithPermission: true, ClientID: "c-1"}
+	if a := sub.Audience(templateData[events.StockBelowMinimum]); a == nil || !reflect.DeepEqual(*a, want) {
+		t.Errorf("audience %+v, want %+v", a, want)
+	}
+	want.ClientID = ""
+	if a := sub.Audience(map[string]any{"id": "k-2", "site_id": "s-1"}); a == nil || !reflect.DeepEqual(*a, want) {
+		t.Errorf("audience without client %+v, want %+v (organization-wide, no site)", a, want)
+	}
+	for locale, words := range map[string][]string{
+		LocaleDE: {"Toner HP 415A", "TON-415", "2,5 Stk", "4 Stk", "Mindestbestand"},
+		LocaleEN: {"Toner HP 415A", "TON-415", "2.5 Stk", "4 Stk", "minimum"},
+	} {
+		text := Render(events.StockBelowMinimum, locale, templateData[events.StockBelowMinimum])
+		for _, w := range words {
+			if !strings.Contains(text.Subject+" "+text.Body, w) {
+				t.Errorf("%s: %+v lacks %q", locale, text, w)
+			}
+		}
+	}
+	bare := map[string]any{"id": "k-3", "name": "Kabelbinder", "unit": "", "on_hand_total": float64(0), "min_level": float64(10)}
+	if text := Render(events.StockBelowMinimum, LocaleEN, bare); text.Body != "The total stock of article Kabelbinder is 0, below the minimum level of 10." {
+		t.Errorf("text without SKU and unit: %q", text.Body)
+	}
 }
 
 // TestDocumentScannedAudience covers SEC-09 (WP-734, E-42): a finding

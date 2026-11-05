@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -573,38 +574,250 @@ func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityI
 			if !visible {
 				return nil
 			}
-			trail, err := ciTrailTx(ctx, tx, orgID, entityID, at)
-			if err != nil {
-				return err
-			}
-			out = trail
-			return reveal(ctx, tx, orgID, out)
 		}
+		var err error
+		out, err = trailTx(ctx, tx, orgID, entityType, entityID, at, true)
+		return err
+	})
+	return out, err
+}
+
+// trailTx reads the trail of an entity up to at in tx, oldest first: for a
+// CI ciTrail, for another type its entity_change rows under visibleEntity.
+// revealValues resolves the surrogates of the values (deleted ones are null).
+func trailTx(ctx context.Context, tx pgx.Tx, orgID, entityType, entityID string, at time.Time, revealValues bool) ([]Change, error) {
+	var out []Change
+	if entityType == "ci" {
+		trail, err := ciTrailTx(ctx, tx, orgID, entityID, at)
+		if err != nil {
+			return nil, err
+		}
+		out = trail
+	} else {
 		rows, err := tx.Query(ctx, fmt.Sprintf(
 			"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
 			selectColumns, visibleEntity), orgID, entityType, entityID, at)
 		if err != nil {
-			return fmt.Errorf("list entity trail: %w", err)
+			return nil, fmt.Errorf("list entity trail: %w", err)
 		}
 		defer rows.Close()
+		out = []Change{}
 		for rows.Next() {
 			c := Change{}
 			var oldRaw, newRaw []byte
 			if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
 				&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.ChangeKind); err != nil {
-				return err
+				return nil, err
 			}
 			if err := decodeValues(&c, oldRaw, newRaw); err != nil {
-				return err
+				return nil, err
 			}
 			out = append(out, c)
 		}
 		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	if !revealValues {
+		return out, nil
+	}
+	return out, reveal(ctx, tx, orgID, out)
+}
+
+// stateVisibleSQL is the visibility check of StateAt ($1: the entity id):
+// the row under the caller's tenant scope, for a CI also a ci_snapshot, so
+// a CI deleted for good (CI-05) stays readable until the retention.
+var stateVisibleSQL = map[string]string{
+	"ci":    "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid) OR EXISTS (SELECT 1 FROM ci_snapshot WHERE ci_id = $1::uuid)",
+	"asset": visibleSQL["asset"],
+}
+
+// StateAt implements Repository: the state of the entity at req.At from
+// its trail (trailTx) in one tenant transaction, for a CI with the
+// ci_snapshot it started from and, with req.Relationships, its edges
+// (edgesAt).
+func (r *PGRepository) StateAt(ctx context.Context, orgID string, req *StateRequest) (*StateSnapshot, error) {
+	check, ok := stateVisibleSQL[req.EntityType]
+	if !ok || !api.IsUUID(req.EntityID) {
+		return nil, api.ErrNotFound
+	}
+	var out *StateSnapshot
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, check, req.EntityID).Scan(&visible); err != nil {
+			return fmt.Errorf("check %s visibility: %w", req.EntityType, err)
+		}
+		if !visible {
+			return api.ErrNotFound
+		}
+		trail, err := trailTx(ctx, tx, orgID, req.EntityType, req.EntityID, req.At, req.Reveal)
+		if err != nil {
 			return err
 		}
-		return reveal(ctx, tx, orgID, out)
+		if len(trail) == 0 {
+			return &NoRecordedStateError{At: req.At}
+		}
+		s := Replay(trail)
+		var base *Change
+		if trail[0].Source == SourceCISnapshot {
+			base = &trail[0]
+			takenAt := base.CreatedAt
+			s.BasedOnSnapshotAt = &takenAt
+		}
+		if req.Relationships && req.EntityType == "ci" {
+			edges, eerr := edgesAt(ctx, tx, orgID, req.EntityID, base, req.At)
+			if eerr != nil {
+				return eerr
+			}
+			s.Relationships = &edges
+		}
+		out = &s
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// scopedSnapshotEdges reads the edges of a ci_snapshot ($2) whose stored
+// endpoint scopes lie in the caller's scope, with the predicate of
+// ci_relationship_isolation (000063, IMP-07): the weekly job reads
+// organization-wide, so the snapshot may hold edges the caller does not
+// see.
+const scopedSnapshotEdges = `
+	SELECT e.id::text, COALESCE(e.rel_type, ''), e.source_ci_id::text, e.target_ci_id::text
+	FROM ci_snapshot s, jsonb_to_recordset(COALESCE(s.relationships, '[]'::jsonb))
+		AS e(id uuid, rel_type text, source_ci_id uuid, target_ci_id uuid,
+		     source_client_id uuid, source_site_id uuid, target_client_id uuid, target_site_id uuid)
+	WHERE s.organization_id = $1 AND s.id = $2::uuid
+	  AND (NULLIF(current_setting('app.client_scope', true), '') IS NULL
+	       OR ((e.source_client_id IS NULL OR e.source_client_id = ANY (string_to_array(current_setting('app.client_scope', true), ',')::uuid[]))
+	           AND (e.target_client_id IS NULL OR e.target_client_id = ANY (string_to_array(current_setting('app.client_scope', true), ',')::uuid[]))))
+	  AND (NULLIF(current_setting('app.site_scope', true), '') IS NULL
+	       OR ((e.source_site_id IS NULL OR e.source_site_id = ANY (string_to_array(current_setting('app.site_scope', true), ',')::uuid[]))
+	           AND (e.target_site_id IS NULL OR e.target_site_id = ANY (string_to_array(current_setting('app.site_scope', true), ',')::uuid[]))))`
+
+// edgesAt reconstructs the edges of the CI ciID at at (WP-793): the edges
+// of the base snapshot in the caller's scope (scopedSnapshotEdges), each
+// with the values of its last relationship_change row up to the snapshot,
+// replayed with the rows of relationship_change whose source or target is
+// the CI and with taken_at < observed_at <= at (ReplayEdges); without a
+// snapshot every row up to at. The row level security of
+// relationship_change hides a row with an endpoint outside the caller's
+// scope; the values are revealed (relationship.ChangesTx) and projected by
+// the relationship grant of the principal of ctx
+// (relationship.ProjectChanges). An edge a merge or an unmerge rewired
+// away from the CI is not part of the snapshot those write in the same
+// transaction.
+func edgesAt(ctx context.Context, tx pgx.Tx, orgID, ciID string, base *Change, at time.Time) ([]EdgeState, error) {
+	var edges []EdgeState
+	var since *time.Time
+	if base != nil {
+		since = &base.CreatedAt
+		rows, err := tx.Query(ctx, scopedSnapshotEdges, orgID, base.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read snapshot edges: %w", err)
+		}
+		edges, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (EdgeState, error) {
+			var id, relType, source, target string
+			scanErr := row.Scan(&id, &relType, &source, &target)
+			return EdgeState{edgeID: id, edgeRelType: relType, edgeSourceCI: source, edgeTargetCI: target}, scanErr
+		})
+		if err != nil {
+			return nil, fmt.Errorf("read snapshot edges: %w", err)
+		}
+		if verr := edgeValues(ctx, tx, orgID, edges, base.CreatedAt); verr != nil {
+			return nil, verr
+		}
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM relationship_change
+		WHERE organization_id = $1 AND (source_ci_id = $2::uuid OR target_ci_id = $2::uuid)
+		  AND observed_at > COALESCE($3::timestamptz, '-infinity') AND observed_at <= $4`, orgID, ciID, since, at)
+	if err != nil {
+		return nil, fmt.Errorf("read edge changes: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read edge changes: %w", err)
+	}
+	changes, err := projectedEdgeChanges(ctx, tx, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(changes, func(i, j int) bool {
+		if !changes[i].ObservedAt.Equal(changes[j].ObservedAt) {
+			return changes[i].ObservedAt.Before(changes[j].ObservedAt)
+		}
+		return changes[i].ID < changes[j].ID
+	})
+	replay := make([]EdgeChange, len(changes))
+	for i := range changes {
+		c := &changes[i]
+		replay[i] = EdgeChange{RelationshipID: c.RelationshipID, Kind: c.ChangeKind, RelType: c.RelType,
+			SourceCIID: c.SourceCIID, TargetCIID: c.TargetCIID, After: c.After}
+	}
+	return ReplayEdges(ciID, edges, replay), nil
+}
+
+// edgeValues fills the edges of a snapshot with the values of their last
+// relationship_change row up to takenAt that recorded the edge after it;
+// an edge without one keeps its id, type and endpoints.
+func edgeValues(ctx context.Context, tx pgx.Tx, orgID string, edges []EdgeState, takenAt time.Time) error {
+	if len(edges) == 0 {
+		return nil
+	}
+	relIDs := make([]string, len(edges))
+	for i, e := range edges {
+		relIDs[i], _ = e[edgeID].(string)
+	}
+	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (relationship_id) id::text FROM relationship_change
+		WHERE organization_id = $1 AND relationship_id = ANY ($2::uuid[]) AND observed_at <= $3 AND after IS NOT NULL
+		ORDER BY relationship_id, observed_at DESC, id DESC`, orgID, relIDs, takenAt)
+	if err != nil {
+		return fmt.Errorf("read edge values: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("read edge values: %w", err)
+	}
+	changes, err := projectedEdgeChanges(ctx, tx, orgID, ids)
+	if err != nil {
+		return err
+	}
+	byEdge := make(map[string]map[string]any, len(changes))
+	for i := range changes {
+		byEdge[changes[i].RelationshipID] = changes[i].After
+	}
+	for i, e := range edges {
+		after := byEdge[relIDs[i]]
+		if after == nil {
+			continue
+		}
+		filled := EdgeState{}
+		for k, v := range after {
+			filled[k] = v
+		}
+		for _, k := range []string{edgeID, edgeRelType, edgeSourceCI, edgeTargetCI} {
+			filled[k] = e[k]
+		}
+		edges[i] = filled
+	}
+	return nil
+}
+
+// projectedEdgeChanges reads the rows of relationship_change with the ids
+// (relationship.ChangesTx, values revealed) projected by the relationship
+// grant of the principal of ctx.
+func projectedEdgeChanges(ctx context.Context, tx pgx.Tx, orgID string, ids []string) ([]relationship.Change, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	changes, err := relationship.ChangesTx(ctx, tx, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	return relationship.ProjectChanges(ctx, orgID, changes, nil)
 }
 
 // ciTrailTx reads the trail of a CI up to at in tx (ciTrail), oldest first,

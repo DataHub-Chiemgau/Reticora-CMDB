@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -223,7 +224,6 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		"/api/v1/consumables":             FeatureStock,
 		"/api/v1/stocktakes":              FeatureStocktakeStandard,
 		"/api/v1/stocktakes/s1/complete":  FeatureStocktakeStandard,
-		"/api/v1/stocktake/scan":          FeatureStocktakeStandard,
 		"/api/v1/orders":                  FeatureInternalOrders,
 		"/api/v1/orders/o1":               FeatureInternalOrders,
 		"/api/v1/documents":               FeatureDocuments,
@@ -297,6 +297,27 @@ func TestRequiredFeatureMapping(t *testing.T) {
 			t.Errorf("RequiredFeature(%s, %q) = (%q, %v), want (%q, true)", c.method, c.path, got, gated, c.want)
 		}
 	}
+	// WP-288 (INV-02, E-44): every stocktake path and method is
+	// stocktake_standard; the prefix /api/v1/stocktake without a route is
+	// no longer gated, the consumables stay stock.
+	for _, path := range []string{"/api/v1/stocktakes", "/api/v1/stocktakes/s1", "/api/v1/stocktakes/s1/start",
+		"/api/v1/stocktakes/s1/items", "/api/v1/stocktakes/s1/scans", "/api/v1/stocktakes/s1/differences",
+		"/api/v1/stocktakes/s1/difference", "/api/v1/stocktakes/s1/complete", "/api/v1/stocktakes/s1/cancel"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodPut, http.MethodDelete} {
+			if got, gated := RequiredFeature(method, path); !gated || got != FeatureStocktakeStandard {
+				t.Errorf("RequiredFeature(%s, %q) = (%q, %v), want (stocktake_standard, true)", method, path, got, gated)
+			}
+		}
+	}
+	for _, path := range []string{"/api/v1/stocktake", "/api/v1/stocktake/scan"} {
+		if got, gated := RequiredFeature(http.MethodGet, path); gated {
+			t.Errorf("RequiredFeature(GET, %q) = %q, want ungated", path, got)
+		}
+	}
+	if got, _ := RequiredFeature(http.MethodPost, "/api/v1/consumables"); got == FeatureStocktakeStandard {
+		t.Error("/api/v1/consumables is stocktake_standard, want stock")
+	}
+
 	// A label needs barcode and assets_basic (E-44).
 	if got := RequiredFeatures(http.MethodGet, "/api/v1/assets/a1/label.svg"); !slices.Equal(got, []string{FeatureBarcode, FeatureAssetsBasic}) {
 		t.Errorf("RequiredFeatures(label.svg) = %v, want [barcode assets_basic]", got)
@@ -584,6 +605,31 @@ func TestPlanMatrixFollowsE44(t *testing.T) {
 	// An unknown plan provisions the essential plan.
 	if !slices.Equal(PlanFeatures("trial"), PlanFeatures(PlanEssential)) {
 		t.Errorf("unknown plan: %v", PlanFeatures("trial"))
+	}
+}
+
+// TestStocktakeStandardIsTheOnlyStocktakeKey covers WP-288 (INV-02,
+// ENT-06): phase 2 creates no stocktake_pro; stocktake_standard is the
+// only key with the prefix stocktake in any plan, pro and enterprise
+// include it, essential includes none.
+func TestStocktakeStandardIsTheOnlyStocktakeKey(t *testing.T) {
+	if slices.Contains(FeatureKeys(), "stocktake_pro") {
+		t.Error("stocktake_pro is a feature key in phase 2")
+	}
+	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
+		var keys []string
+		for _, f := range PlanFeatures(plan) {
+			if strings.HasPrefix(f, "stocktake") {
+				keys = append(keys, f)
+			}
+		}
+		want := []string{FeatureStocktakeStandard}
+		if plan == PlanEssential {
+			want = nil
+		}
+		if !slices.Equal(keys, want) {
+			t.Errorf("plan %s: stocktake keys %v, want %v", plan, keys, want)
+		}
 	}
 }
 

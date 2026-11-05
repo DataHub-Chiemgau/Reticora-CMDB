@@ -24,6 +24,26 @@ type Repository interface {
 	// Visible reports whether the entity of a state snapshot exists under
 	// the caller's tenant scope (JOB-04).
 	Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error)
+	// StateAt reconstructs the state of an entity at req.At in one tenant
+	// transaction (AUD-08, WP-793): base, trail, edges and the resolution
+	// of the personal values. An entity the caller sees neither as row nor,
+	// for a CI, as ci_snapshot is api.ErrNotFound; one without a recorded
+	// change up to req.At is a *NoRecordedStateError.
+	StateAt(ctx context.Context, orgID string, req *StateRequest) (*StateSnapshot, error)
+}
+
+// StateRequest asks StateAt for the state of an entity (ci or asset) at a
+// point in time. Reveal resolves the vault surrogates of the values (a
+// deleted vault entry becomes null, SEC-05); without it the state keeps
+// them (the result of the snapshot job). Relationships adds the edges of a
+// CI at At, visible under the caller's scope and projected by the
+// relationship grant of the principal of the context.
+type StateRequest struct {
+	EntityType    string
+	EntityID      string
+	At            time.Time
+	Reveal        bool
+	Relationships bool
 }
 
 // CITimeline reads the timeline of a CI for the GraphQL BFF (ciHistory,
@@ -130,6 +150,31 @@ func (r *MemoryRepository) TrailUpTo(_ context.Context, orgID, entityType, entit
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+// StateAt replays the in-memory trail of the entity up to req.At: it
+// keeps no snapshots, no surrogates and no edges, so a CI has an empty
+// edge list under req.Relationships.
+func (r *MemoryRepository) StateAt(ctx context.Context, orgID string, req *StateRequest) (*StateSnapshot, error) {
+	visible, err := r.Visible(ctx, orgID, req.EntityType, req.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		return nil, api.ErrNotFound
+	}
+	trail, err := r.TrailUpTo(ctx, orgID, req.EntityType, req.EntityID, req.At)
+	if err != nil {
+		return nil, err
+	}
+	if len(trail) == 0 {
+		return nil, &NoRecordedStateError{At: req.At}
+	}
+	s := Replay(trail)
+	if req.Relationships && req.EntityType == "ci" {
+		s.Relationships = &[]EdgeState{}
+	}
+	return &s, nil
 }
 
 // Visible reports whether a change of the entity was recorded: the

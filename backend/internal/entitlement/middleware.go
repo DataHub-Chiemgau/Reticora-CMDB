@@ -102,8 +102,9 @@ var featureRules = []featureRule{
 	gate("/api/v1/consumables", FeatureStock),
 	gate("/api/v1/inventory", FeatureStock),
 	gate("/api/v1/labels", FeatureBarcode),
+	// Every stocktake path and method is stocktake_standard (INV-02,
+	// WP-288); Pro and delegated stocktake (P4) have no route and no key.
 	gate("/api/v1/stocktakes", FeatureStocktakeStandard),
-	gate("/api/v1/stocktake", FeatureStocktakeStandard),
 	gate("/api/v1/orders", FeatureInternalOrders),
 	gate("/api/v1/documents", FeatureDocuments),
 	gate("/api/v1/import-profiles", FeatureImport),

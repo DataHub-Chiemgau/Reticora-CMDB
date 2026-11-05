@@ -65,7 +65,10 @@ func NewHandler(repo Repository) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/history/{entityType}/{id}", h.List)
 	r.Get("/api/v1/assets/{id}/state", h.AssetState)
-	r.Get("/api/v1/cis/{id}/state", h.CIState)
+	r.Get("/api/v1/cis/{id}/as-of", h.CIAsOf)
+	// The former path of the CI state stays an alias of as-of (E-38,
+	// WP-793), deprecated in api/openapi.yaml.
+	r.Get("/api/v1/cis/{id}/state", h.CIAsOf)
 	r.Post("/api/v1/history/snapshots", h.CreateSnapshot)
 }
 
@@ -129,7 +132,9 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	run := func(ctx context.Context) (any, error) { return h.projectedSnapshot(ctx, orgID, &params, policy) }
+	run := func(ctx context.Context) (any, error) {
+		return h.projectedSnapshot(ctx, orgID, &params, policy, stateOptions{})
+	}
 	if h.jobs == nil && h.queue == nil {
 		snapshot, serr := run(r.Context())
 		if serr != nil {
@@ -153,35 +158,39 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 }
 
-// snapshot replays the state of the entity of req at req.At from its
-// change trail (TrailUpTo). An entity the caller cannot see is
-// api.ErrNotFound; one without a recorded change up to req.At (before its
-// creation or before the first recorded change) is a
-// *NoRecordedStateError, not an empty state (F-164).
-func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest) (*StateSnapshot, error) {
-	visible, err := h.repo.Visible(ctx, orgID, req.EntityType, req.EntityID)
+// stateOptions are what a state carries besides its fields: reveal
+// resolves the vault surrogates (the direct reads; the snapshot job keeps
+// them, so job.result holds no personal value), relationships the edges
+// of a CI (relationship:read, WP-793).
+type stateOptions struct {
+	reveal        bool
+	relationships bool
+}
+
+// snapshot replays the state of the entity of req at req.At
+// (Repository.StateAt: the last ci_snapshot of a CI and its trail after
+// it). An entity the caller cannot see is api.ErrNotFound; one without a
+// recorded change up to req.At (before its creation or before the first
+// recorded change) is a *NoRecordedStateError, not an empty state
+// (F-164). The state of a CI names the fields it does not hold
+// (not_historized, AUD-03).
+func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest, opts stateOptions) (*StateSnapshot, error) {
+	snapshot, err := h.repo.StateAt(ctx, orgID, &StateRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: *req.At,
+		Reveal: opts.reveal, Relationships: opts.relationships && req.EntityType == "ci"})
 	if err != nil {
 		return nil, err
 	}
-	if !visible {
-		return nil, api.ErrNotFound
-	}
-	trail, err := h.repo.TrailUpTo(ctx, orgID, req.EntityType, req.EntityID, *req.At)
-	if err != nil {
-		return nil, err
-	}
-	if len(trail) == 0 {
-		return nil, &NoRecordedStateError{At: *req.At}
-	}
-	snapshot := Replay(trail)
 	snapshot.EntityType, snapshot.EntityID, snapshot.At = req.EntityType, req.EntityID, *req.At
-	return &snapshot, nil
+	if req.EntityType == "ci" {
+		snapshot.NotHistorized = NotHistorizedCIFields
+	}
+	return snapshot, nil
 }
 
 // projectedSnapshot is the snapshot of req projected with policy (nil:
 // the structural fields only; a CI since WP-727, an asset since WP-794).
-func (h *Handler) projectedSnapshot(ctx context.Context, orgID string, req *SnapshotRequest, policy *permission.FieldPolicy) (*StateSnapshot, error) {
-	snapshot, err := h.snapshot(ctx, orgID, req)
+func (h *Handler) projectedSnapshot(ctx context.Context, orgID string, req *SnapshotRequest, policy *permission.FieldPolicy, opts stateOptions) (*StateSnapshot, error) {
+	snapshot, err := h.snapshot(ctx, orgID, req, opts)
 	if err != nil {
 		return snapshot, err
 	}
@@ -220,7 +229,8 @@ func writeSnapshotError(w http.ResponseWriter, err error) {
 // history.snapshot) with the tenant and scope of its creator
 // (jobs.CreatorContext) and projects the snapshot with the field policy
 // of the creator (WithCreatorPolicy, WP-727, WP-794); it only reads, so a
-// repeated attempt is harmless.
+// repeated attempt is harmless. The result keeps the vault surrogates and
+// carries no edges (WP-793): job.result holds no personal value.
 func (h *Handler) RunSnapshotJob(ctx context.Context, job *jobs.Job) (any, error) {
 	var req SnapshotRequest
 	if err := json.Unmarshal(job.Params, &req); err != nil {
@@ -234,7 +244,7 @@ func (h *Handler) RunSnapshotJob(ctx context.Context, job *jobs.Job) (any, error
 	if err != nil {
 		return nil, err
 	}
-	return h.projectedSnapshot(ctx, job.OrganizationID, &req, policy)
+	return h.projectedSnapshot(ctx, job.OrganizationID, &req, policy, stateOptions{})
 }
 
 // ListResponse is a page of a history, api.ListResponse plus
@@ -350,15 +360,22 @@ func (h *Handler) AssetState(w http.ResponseWriter, r *http.Request) {
 	h.state(w, r, "asset")
 }
 
-// CIState handles GET /api/v1/cis/{id}/state?at=...
-func (h *Handler) CIState(w http.ResponseWriter, r *http.Request) {
+// CIAsOf handles GET /api/v1/cis/{id}/as-of?at=... and its deprecated
+// alias GET /api/v1/cis/{id}/state (AUD-08, E-38, WP-793): the state of
+// the CI at the time of recording at, with its edges only for a principal
+// with relationship:read (as GET /cis/{id}/relationships). A deleted or
+// merged CI answers its state with deleted (and merged_into_id) instead of
+// a redirect; a CI deleted for good answers from its last ci_snapshot
+// until the retention.
+func (h *Handler) CIAsOf(w http.ResponseWriter, r *http.Request) {
 	h.state(w, r, "ci")
 }
 
 // state reconstructs the entity state at the requested point in time
 // (spec §16). Without an "at" parameter the current replay of the full trail
 // is returned. An entity the caller cannot see and one without a recorded
-// change up to at are 404 (JOB-04, F-164).
+// change up to at are 404 (JOB-04, F-164). The values are those its history
+// shows: a deleted vault entry is null (SEC-05).
 func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType string) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -381,8 +398,12 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 		api.WriteRepoError(w, err)
 		return
 	}
+	opts := stateOptions{reveal: true}
+	if principal, ok := identity.PrincipalFromContext(r.Context()); ok {
+		opts.relationships = principal.Has(identity.PermRelationshipRead)
+	}
 	snapshot, err := h.projectedSnapshot(r.Context(), t.OrganizationID,
-		&SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: &at}, policy)
+		&SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: &at}, policy, opts)
 	if err != nil {
 		writeSnapshotError(w, err)
 		return

@@ -31,8 +31,9 @@ import (
 // TestStateSnapshotContentAgainstPostgres covers JOB-04 (WP-516, retest of
 // F-164) as reticora_app: the state snapshot replays the real change trail.
 // A CI renamed by PATCH has its new name in the snapshot of now and its old
-// name at a time between its creation and the rename, with the personal
-// value of its creation unsealed as GET /history/ci/{id} shows it; an asset
+// name at a time between its creation and the rename; the personal value
+// of its creation stays a surrogate in the job result (WP-793) and is
+// unsealed on GET /cis/{id}/as-of as GET /history/ci/{id} shows it; an asset
 // writes its creation, update and deletion to entity_change in the
 // transaction of the write and replays the same way. An unknown id and the
 // client-1 CI for a client-2 principal are 404 without a job, also on GET
@@ -171,10 +172,17 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 	}
 	mid := between(createdAt, renamedAt)
 
+	// The job result keeps the surrogate (WP-793): job.result holds no
+	// personal value; the direct read reveals it.
 	now := fields(snapshotJob("ci", created.ID, nil))
-	attrs, _ := now.Fields["attributes"].(map[string]any)
-	if now.EntityID != created.ID || now.Fields["name"] != "snap-ci-renamed" || now.Deleted || attrs["contact_email"] != "snap-owner@example.invalid" {
-		t.Errorf("CI snapshot now: %+v, want the new name and the unsealed contact_email", now)
+	jobAttrs, _ := now.Fields["attributes"].(map[string]any)
+	if _, sealedRef := pii.RefID(jobAttrs["contact_email"]); now.EntityID != created.ID || now.Fields["name"] != "snap-ci-renamed" || now.Deleted || !sealedRef {
+		t.Errorf("CI snapshot now: %+v, want the new name and contact_email as surrogate", now)
+	}
+	_, direct := state(orgCtx, "/api/v1/cis/"+created.ID+"/as-of", nil)
+	attrs, _ := direct.Fields["attributes"].(map[string]any)
+	if attrs["contact_email"] != "snap-owner@example.invalid" {
+		t.Errorf("GET /cis/{id}/as-of: %+v, want the unsealed contact_email", direct)
 	}
 	if old := fields(snapshotJob("ci", created.ID, &mid)); old.Fields["name"] != "snap-ci" || !old.At.Equal(mid) {
 		t.Errorf("CI snapshot between creation and rename: %+v, want the old name", old)
@@ -195,7 +203,7 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 			v, _ := c.NewValue.(map[string]any)
 			a, _ := v["attributes"].(map[string]any)
 			if a["contact_email"] != attrs["contact_email"] {
-				t.Errorf("history of the creation shows contact_email %v, the snapshot %v", a["contact_email"], attrs["contact_email"])
+				t.Errorf("history of the creation shows contact_email %v, the state %v", a["contact_email"], attrs["contact_email"])
 			}
 		}
 	}

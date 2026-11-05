@@ -132,7 +132,8 @@ func TestCILocationDerivation(t *testing.T) {
 // 000074 against references into location_node and checks the mapping, the
 // derivation, the archive and the down migration. It works inside one
 // transaction that is always rolled back: it first restores asset_movement
-// (dropped by 000246) and reverts 000074, seeds the side tree and its
+// (dropped by 000246) and quantity_item (dropped by 000269) and reverts
+// 000074, seeds the side tree and its
 // references, then migrates up and down again.
 func TestMigration74MovesReferencesToLocation(t *testing.T) {
 	f := scopetest.Seed(t, "58")
@@ -158,6 +159,14 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 	if !found {
 		t.Fatal("000246 down: no rows section")
 	}
+	// 000269 dropped quantity_item (WP-758), which the SQL of 000074
+	// changes; its down part recreates the table in the state before the
+	// drop.
+	raw, err = os.ReadFile("../../migrations/000269_quantity_item_drop.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quantityItemTable := string(raw)
 	ctx := context.Background()
 	roomID := f.Room(t, f.Client1, "mig74")
 	var siteID string
@@ -175,6 +184,13 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 		if _, execErr := tx.Exec(ctx, sql, args...); execErr != nil {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
+	}
+	var dropped bool
+	if err = tx.QueryRow(ctx, `SELECT to_regclass('quantity_item') IS NULL`).Scan(&dropped); err != nil {
+		t.Fatal(err)
+	}
+	if dropped {
+		exec(quantityItemTable)
 	}
 	exec(legacyTable)
 	exec(down)
