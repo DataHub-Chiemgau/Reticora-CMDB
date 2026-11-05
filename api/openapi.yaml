@@ -5172,6 +5172,11 @@ paths:
       operationId: createStocktake
       tags: [Stocktake]
       summary: Create a stocktake
+      description: >-
+        Creates a planned stocktake. location_id names its area, a node of
+        the location tree whose subtree (bins included) is counted (WP-848);
+        client_id and site_id follow the node. status and the totals are not
+        writable (400).
       requestBody:
         required: true
         content:
@@ -5189,6 +5194,15 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: >-
+            location_id is no UUID or names no node of the location tree
+            visible to the caller (unknown, of another organization or
+            outside the scope alike); `field` is location_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -5216,6 +5230,10 @@ paths:
       operationId: updateStocktake
       tags: [Stocktake]
       summary: Update a stocktake
+      description: >-
+        Changes title, description, due_date and, while the stocktake is
+        planned, its area location_id (WP-848). status and the totals are
+        not writable (400); start and cancel are the transitions.
       requestBody:
         required: true
         content:
@@ -5235,15 +5253,30 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
-            The principal is restricted in the client or site scope: a
-            stocktake belongs to the whole organization, so only a principal
-            with an organization-wide scope may change it (E-09).
+            The stocktake has no area and the principal is restricted in the
+            client or site scope: such a stocktake belongs to the whole
+            organization, so only a principal with an organization-wide scope
+            may change it (E-09).
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: location_id changes while the stocktake is not planned.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            location_id is no UUID or names no node of the location tree
+            visible to the caller; `field` is location_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
     delete:
       operationId: deleteStocktake
       tags: [Stocktake]
@@ -5255,9 +5288,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
-            The principal is restricted in the client or site scope: a
-            stocktake belongs to the whole organization, so only a principal
-            with an organization-wide scope may delete it (E-09).
+            The stocktake has no area and the principal is restricted in the
+            client or site scope: such a stocktake belongs to the whole
+            organization, so only a principal with an organization-wide scope
+            may delete it (E-09).
           content:
             application/problem+json:
               schema:
@@ -5372,9 +5406,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: >-
-            The principal is restricted in the client or site scope: a
-            stocktake belongs to the whole organization, so only a principal
-            with an organization-wide scope may complete it (E-09).
+            The stocktake has no area and the principal is restricted in the
+            client or site scope: such a stocktake belongs to the whole
+            organization, so only a principal with an organization-wide scope
+            may complete it (E-09).
           content:
             application/problem+json:
               schema:
@@ -19702,53 +19737,99 @@ paths:
   /api/v1/stocktakes/{id}/start:
     x-phase: P2
     x-feature: stocktake_standard
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: startStocktake
       tags: [Stocktake]
       summary: Start a stocktake
-      description: Planned (E-38); WP-287 implements the operation.
+      description: >-
+        Moves a planned stocktake to in_progress and freezes the expected
+        stock of its area in the same transaction (INV-01, WP-848): one item
+        per asset whose location_id lies in the subtree of the area (expected
+        quantity 1) and one per stock of a consumable in a bin of the subtree
+        (expected quantity on_hand). Assets with a free-text location only
+        are not part of it; the snapshot holds the objects the caller sees
+        and does not follow later movements. started_at, started_by and
+        total_expected (the number of items) are set. The operation has no
+        request body.
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-287.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The started stocktake.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stocktake'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The stocktake has no area and the principal is restricted in the
+            client or site scope: only a principal with an organization-wide
+            scope may start it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The stocktake is not planned.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: The stocktake has no area; `field` is location_id.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '501':
+          description: >-
+            Profile --no-db: the in-memory repository reaches neither the
+            location tree nor the stock of the bins.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/items:
     x-phase: P2
     x-feature: stocktake_standard
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listStocktakeItems
       tags: [Stocktake]
       summary: List the expected items of a stocktake
-      description: Planned (E-38); WP-287 implements the operation.
+      description: >-
+        The expected stock frozen by POST …/start (INV-01, WP-848), ordered
+        by id; empty before the start.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the expected items of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287.
+          description: A page of the expected items (cursor contract, API-02).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeItemListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: >-
+            Profile --no-db: the in-memory repository freezes no expected
+            stock.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/differences:
     x-phase: P2
@@ -19779,27 +19860,41 @@ paths:
   /api/v1/stocktakes/{id}/cancel:
     x-phase: P2
     x-feature: stocktake_standard
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: cancelStocktake
       tags: [Stocktake]
       summary: Cancel a stocktake
-      description: Planned (E-38); WP-287 implements the operation.
+      description: >-
+        Moves a planned or in-progress stocktake to cancelled (WP-848); the
+        frozen expected stock stays. The operation has no request body.
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-287.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The cancelled stocktake.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stocktake'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The stocktake has no area and the principal is restricted in the
+            client or site scope: only a principal with an organization-wide
+            scope may cancel it (E-09).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '409':
+          description: The stocktake is completed or cancelled already.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/documents/usage:
     x-phase: P2
@@ -27629,8 +27724,26 @@ components:
           type: string
         status:
           type: string
+          enum: [planned, in_progress, completed, cancelled]
         scope:
           type: string
+          deprecated: true
+          description: Free-text scope of earlier releases; location_id names the area (WP-848).
+        location_id:
+          type: string
+          format: uuid
+          description: >-
+            The area, a node of the location tree whose subtree (bins
+            included) is counted; absent for an organization-wide stocktake
+            of an earlier release.
+        client_id:
+          type: string
+          format: uuid
+          description: Client of the area, derived from location_id.
+        site_id:
+          type: string
+          format: uuid
+          description: Site of the area, derived from location_id.
         started_by:
           type: string
         started_at:
@@ -27660,6 +27773,7 @@ components:
     CreateStocktakeRequest:
       type: object
       required: [title]
+      additionalProperties: false
       properties:
         title:
           type: string
@@ -27667,26 +27781,82 @@ components:
           type: string
         scope:
           type: string
+          deprecated: true
+          description: Free-text scope of earlier releases; location_id names the area (WP-848).
+        location_id:
+          type: string
+          format: uuid
+          description: The area, a node of the location tree (WP-848).
         due_date:
           type: string
           format: date-time
-        total_expected:
-          type: integer
 
     UpdateStocktakeRequest:
       type: object
+      additionalProperties: false
       properties:
         title:
           type: string
         description:
           type: string
-        status:
+        location_id:
           type: string
+          description: >-
+            The area, a node of the location tree; only while the stocktake
+            is planned (409 otherwise), an empty value removes it (WP-848).
         due_date:
           type: string
           format: date-time
-        total_expected:
-          type: integer
+
+    StocktakeItem:
+      type: object
+      required: [id, stocktake_id, item_kind, location_id, expected_quantity, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        stocktake_id:
+          type: string
+          format: uuid
+        item_kind:
+          type: string
+          enum: [asset, consumable]
+        asset_id:
+          type: string
+          format: uuid
+          description: Set for item_kind asset.
+        consumable_id:
+          type: string
+          format: uuid
+          description: Set for item_kind consumable.
+        location_id:
+          type: string
+          format: uuid
+          description: The location of the asset or the bin of the stock at the start.
+        expected_quantity:
+          type: number
+          description: 1 for an asset, on_hand of the bin at the start for a consumable.
+        counted_quantity:
+          type: number
+          description: Set when the stocktake is completed (WP-287).
+        classification:
+          type: string
+          enum: [found, missing, unexpected]
+          description: Set when the stocktake is completed (WP-287).
+        created_at:
+          type: string
+          format: date-time
+
+    StocktakeItemListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/StocktakeItem'
 
     StocktakeListResponse:
       allOf:
@@ -30265,9 +30435,12 @@ components:
                 means a visible CI whose reference attribute with target
                 location names the location (MET-12). internal_order means an
                 internal order whose target bin is the location (STK-05).
+                stocktake, stocktake_item and stock_scan mean a stocktake
+                whose area, an item of whose frozen expected stock or a scan
+                whose place found is the location (INV-01).
               items:
                 type: string
-                enum: [location, ci, asset, quantity_item, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge]
+                enum: [location, ci, asset, quantity_item, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]

@@ -32,6 +32,13 @@ const (
 	// location (STK-05, WP-847), RESTRICT since 000247.
 	DependencyInternalOrder = "internal_order"
 
+	// Stocktake references (INV-01, WP-848), RESTRICT since 000260: the
+	// area of a stocktake, a location of its frozen expected stock and the
+	// place found of a scan.
+	DependencyStocktake     = "stocktake"
+	DependencyStocktakeItem = "stocktake_item"
+	DependencyStockScan     = "stock_scan"
+
 	// Network and discovery objects bound to a site (E-71); the kind is the
 	// name of their table.
 	DependencyVLAN            = "vlan"
@@ -70,6 +77,9 @@ var dependencies = []dependency{
 	{DependencyRoleAssignment, `EXISTS (SELECT 1 FROM role_assignment ra WHERE ra.scope_site_id = $1)`},
 	{DependencyCIAttribute, ciAttributeReference},
 	{DependencyInternalOrder, `EXISTS (SELECT 1 FROM internal_order o WHERE o.target_location_id = $1)`},
+	{DependencyStocktake, `EXISTS (SELECT 1 FROM stocktake st WHERE st.location_id = $1)`},
+	{DependencyStocktakeItem, `EXISTS (SELECT 1 FROM stocktake_item si WHERE si.location_id = $1)`},
+	{DependencyStockScan, `EXISTS (SELECT 1 FROM stock_scan ss WHERE ss.location_id = $1)`},
 }
 
 // ciAttributeReference is the condition of DependencyCIAttribute (MET-12,

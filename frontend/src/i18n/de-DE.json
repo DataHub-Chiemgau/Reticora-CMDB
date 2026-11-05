@@ -1696,7 +1696,10 @@
       "discovery_scope": "Discovery-Scopes",
       "agent_enrollment_token": "gültige Agent-Enrollment-Tokens",
       "collector_enrollment_code": "gültige Collector-Enrollment-Codes",
-      "ci_merge": "CI-Zusammenführungen (Tombstones)"
+      "ci_merge": "CI-Zusammenführungen (Tombstones)",
+      "stocktake": "Inventuren (Bereich)",
+      "stocktake_item": "Inventur-Sollbestände",
+      "stock_scan": "Inventur-Scans (Fundort)"
     }
   },
   "savedviews": {

@@ -485,6 +485,9 @@ describe('LocationTreePage', () => {
         agent_enrollment_token: true,
         collector_enrollment_code: true,
         ci_merge: true,
+        stocktake: true,
+        stocktake_item: true,
+        stock_scan: true,
       };
       for (const lng of ['de-DE', 'en-US']) {
         for (const kind of Object.keys(kinds)) {

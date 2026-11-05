@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -23,6 +24,9 @@ const stocktakeSelectColumns = `
 	COALESCE(description, ''),
 	status,
 	scope,
+	COALESCE(location_id::text, ''),
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, ''),
 	COALESCE(started_by::text, ''),
 	started_at,
 	completed_at,
@@ -65,13 +69,36 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 const scanVisible = `(stock_scan.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = stock_scan.asset_id))
 	AND (stock_scan.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = stock_scan.ci_id))`
 
-// stocktakeWritable admits a stocktake for UPDATE and DELETE and for its
-// completion (F-365): a stocktake has no client column and is a row of the
-// whole organization (migration 000012), so only an org-wide principal
-// changes, completes or deletes it (E-09). A principal restricted in the
-// client or site scope records scans of its own assets (AddScan) but gets
-// ErrNotFound for the stocktake itself.
-const stocktakeWritable = database.OrgWideScopeSQL
+// stocktakeWritable admits a stocktake for UPDATE and DELETE, its
+// transitions and its completion (F-365, WP-848): a stocktake without area
+// (location_id NULL, client_id and site_id NULL) is a row of the whole
+// organization (migration 000012), so only an org-wide principal changes,
+// starts, cancels, completes or deletes it (E-09). A principal restricted in
+// the client or site scope records scans of its own assets (AddScan) but
+// gets ErrNotFound for such a stocktake. A stocktake with area carries the
+// client and site of its node; the restrictive policies
+// stocktake_scoped_update and stocktake_scoped_delete (000260) admit the
+// principals whose scope covers both.
+const stocktakeWritable = "(location_id IS NOT NULL OR " + database.OrgWideScopeSQL + ")"
+
+// itemSort is the sort of the keyset cursor of the snapshot items.
+const itemSort = "id"
+
+// areaFields maps the constraint of the area onto its request field.
+var areaFields = map[string]string{"stocktake_location_fkey": "location_id"}
+
+// areaError maps the refused area of a write (an unknown node, one of
+// another organization or outside the scope, 23503 of
+// stocktake_derive_location) to a 422 *api.FieldError on location_id; other
+// errors are returned unchanged.
+func areaError(err error) error {
+	var fe *api.FieldError
+	if errors.As(api.FieldDBError(err, areaFields), &fe) {
+		fe.Status = http.StatusUnprocessableEntity
+		return fe
+	}
+	return err
+}
 
 // requireVisible fails with ErrNotFound when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
@@ -199,10 +226,12 @@ func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 		query := `
 			INSERT INTO stocktake (
 				organization_id, title, description, status, scope, started_by, started_at,
-				completed_at, due_date, total_expected, total_scanned, total_missing, total_surplus
+				completed_at, due_date, total_expected, total_scanned, total_missing, total_surplus,
+				location_id
 			) VALUES (
 				$1, $2, $3, $4, $5, $6, $7,
-				$8, $9, $10, $11, $12, $13
+				$8, $9, $10, $11, $12, $13,
+				$14
 			)
 			RETURNING ` + stocktakeSelectColumns
 		created, err := scanStocktake(tx.QueryRow(ctx, query,
@@ -219,8 +248,12 @@ func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 			s.TotalScanned,
 			s.TotalMissing,
 			s.TotalSurplus,
+			nilIfEmpty(s.LocationID),
 		))
 		if err != nil {
+			if mapped := areaError(err); mapped != err {
+				return mapped
+			}
 			return fmt.Errorf("create stocktake: %w", err)
 		}
 		*s = *created
@@ -228,16 +261,30 @@ func (r *PGRepository) Create(ctx context.Context, s *Stocktake) error {
 	})
 }
 
-// Update modifies an existing stocktake; only an org-wide principal may
-// (stocktakeWritable), any other gets ErrNotFound.
+// Update modifies title, description, due date and, while the stocktake
+// is planned, its area (WP-848). Only principals that may write the
+// stocktake (stocktakeWritable and the restrictive policies of 000260) get
+// it; any other gets ErrNotFound.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error) {
 	var stocktake *Stocktake
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		setClauses := make([]string, 0, 7)
+		current, err := lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		setClauses := make([]string, 0, 5)
 		args := []any{id}
 		argPos := 2
 
+		if req.LocationID != nil {
+			if current.Status != StatusPlanned {
+				return ErrInvalidTransition
+			}
+			setClauses = append(setClauses, fmt.Sprintf("location_id = $%d", argPos))
+			args = append(args, nilIfEmpty(*req.LocationID))
+			argPos++
+		}
 		if req.Title != nil {
 			setClauses = append(setClauses, fmt.Sprintf("title = $%d", argPos))
 			args = append(args, *req.Title)
@@ -248,47 +295,24 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			args = append(args, nilIfEmpty(*req.Description))
 			argPos++
 		}
-		if req.Status != nil {
-			setClauses = append(setClauses, fmt.Sprintf("status = $%d", argPos))
-			args = append(args, *req.Status)
-			argPos++
-			if *req.Status == "in_progress" {
-				setClauses = append(setClauses, "started_at = COALESCE(started_at, NOW())")
-			}
-			if *req.Status == "completed" {
-				setClauses = append(setClauses, "completed_at = NOW()")
-			}
-		}
 		if req.DueDate != nil {
 			setClauses = append(setClauses, fmt.Sprintf("due_date = $%d", argPos))
 			args = append(args, nilIfEmpty(*req.DueDate))
-			argPos++
 		}
-		if req.TotalExpected != nil {
-			setClauses = append(setClauses, fmt.Sprintf("total_expected = $%d", argPos))
-			args = append(args, *req.TotalExpected)
-		}
-
 		if len(setClauses) == 0 {
-			query := fmt.Sprintf("SELECT %s FROM stocktake WHERE id = $1 AND %s", stocktakeSelectColumns, stocktakeWritable)
-			var err error
-			stocktake, err = scanStocktake(tx.QueryRow(ctx, query, id))
-			if err != nil {
-				if err == pgx.ErrNoRows {
-					return ErrNotFound
-				}
-				return fmt.Errorf("get stocktake for update: %w", err)
-			}
+			stocktake = current
 			return nil
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
 		query := fmt.Sprintf("UPDATE stocktake SET %s WHERE id = $1 AND %s RETURNING %s", strings.Join(setClauses, ", "), stocktakeWritable, stocktakeSelectColumns)
-		var err error
 		stocktake, err = scanStocktake(tx.QueryRow(ctx, query, args...))
 		if err != nil {
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
+			}
+			if mapped := areaError(err); mapped != err {
+				return mapped
 			}
 			return fmt.Errorf("update stocktake: %w", err)
 		}
@@ -296,6 +320,188 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	})
 
 	return stocktake, err
+}
+
+// lockStocktake reads the stocktake id for a write (stocktakeWritable) and
+// locks its row; a stocktake the principal may not write is ErrNotFound.
+func lockStocktake(ctx context.Context, tx pgx.Tx, id string) (*Stocktake, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	st, err := scanStocktake(tx.QueryRow(ctx,
+		"SELECT "+stocktakeSelectColumns+" FROM stocktake WHERE id = $1 AND "+stocktakeWritable+" FOR UPDATE", id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock stocktake: %w", err)
+	}
+	return st, nil
+}
+
+// Start moves a planned stocktake with area to in_progress and freezes the
+// expected stock of the area in the same transaction (WP-848): one row per
+// asset whose location_id lies in the subtree of the area (location.path
+// <@ the path of the area, expected quantity 1) and one per stock_level
+// row of a bin in the subtree (expected quantity on_hand). Assets with a
+// free-text location only belong to no snapshot. The rows are those the
+// starting principal sees (row level security of asset and stock_level);
+// later movements do not change them. started_at, started_by and
+// total_expected (the number of snapshot rows) are set as well.
+func (r *PGRepository) Start(ctx context.Context, orgID, id, userID string) (*Stocktake, error) {
+	var stocktake *Stocktake
+
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusPlanned {
+			return ErrInvalidTransition
+		}
+		if current.LocationID == "" {
+			return ErrNoArea
+		}
+		var area string
+		if err = tx.QueryRow(ctx, `SELECT path::text FROM location WHERE id = $1`, current.LocationID).Scan(&area); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("read stocktake area: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO stocktake_item (organization_id, stocktake_id, item_kind, asset_id, location_id, expected_quantity)
+			SELECT a.organization_id, $1, 'asset', a.id, a.location_id, 1
+			  FROM asset a
+			  JOIN location l ON l.id = a.location_id AND l.organization_id = a.organization_id
+			 WHERE l.path <@ $2::ltree`, id, area)
+		if err != nil {
+			return fmt.Errorf("freeze expected assets: %w", err)
+		}
+		expected := tag.RowsAffected()
+		tag, err = tx.Exec(ctx, `
+			INSERT INTO stocktake_item (organization_id, stocktake_id, item_kind, consumable_id, location_id, expected_quantity)
+			SELECT s.organization_id, $1, 'consumable', s.consumable_id, s.location_id, s.on_hand
+			  FROM stock_level s
+			  JOIN location l ON l.id = s.location_id AND l.organization_id = s.organization_id
+			 WHERE l.path <@ $2::ltree`, id, area)
+		if err != nil {
+			return fmt.Errorf("freeze expected consumables: %w", err)
+		}
+		expected += tag.RowsAffected()
+		stocktake, err = scanStocktake(tx.QueryRow(ctx, `
+			UPDATE stocktake SET status = 'in_progress', started_at = NOW(), started_by = $2,
+			       total_expected = $3, updated_at = NOW()
+			 WHERE id = $1 AND `+stocktakeWritable+` RETURNING `+stocktakeSelectColumns,
+			id, nilIfEmpty(userID), expected))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("start stocktake: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stocktake, nil
+}
+
+// Cancel moves a planned or in-progress stocktake to cancelled (WP-848);
+// the snapshot stays.
+func (r *PGRepository) Cancel(ctx context.Context, orgID, id string) (*Stocktake, error) {
+	var stocktake *Stocktake
+
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if current.Status != StatusPlanned && current.Status != StatusInProgress {
+			return ErrInvalidTransition
+		}
+		stocktake, err = scanStocktake(tx.QueryRow(ctx,
+			"UPDATE stocktake SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND "+stocktakeWritable+" RETURNING "+stocktakeSelectColumns, id))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("cancel stocktake: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return stocktake, nil
+}
+
+// ListItems returns a page of the snapshot of the stocktake id ordered by
+// id: after the keyset cursor (sort id) when given, else from the offset.
+// A stocktake the principal cannot see is ErrNotFound.
+func (r *PGRepository) ListItems(ctx context.Context, orgID, id string, page api.PaginationParams) ([]Item, int, error) {
+	items := []Item{}
+	var total int
+
+	if !api.IsUUID(id) {
+		return nil, 0, ErrNotFound
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", id).Scan(&exists); err != nil {
+			return fmt.Errorf("check stocktake: %w", err)
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM stocktake_item WHERE stocktake_id = $1", id).Scan(&total); err != nil {
+			return fmt.Errorf("count stocktake items: %w", err)
+		}
+		query := `SELECT id::text, stocktake_id::text, item_kind, COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''),
+		                 location_id::text, expected_quantity::float8, counted_quantity::float8, COALESCE(classification, ''), created_at
+		            FROM stocktake_item WHERE stocktake_id = $1`
+		args := []any{id}
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(itemSort, "asc") || !api.IsUUID(page.Cursor.ID) {
+				return fmt.Errorf("%w: not issued for the stocktake items", api.ErrInvalidCursor)
+			}
+			query += " AND id > $2::uuid ORDER BY id LIMIT $3"
+			args = append(args, page.Cursor.ID, page.Limit)
+		} else {
+			query += " ORDER BY id LIMIT $2 OFFSET $3"
+			args = append(args, page.Limit, page.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list stocktake items: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var item Item
+			if err = rows.Scan(&item.ID, &item.StocktakeID, &item.ItemKind, &item.AssetID, &item.ConsumableID,
+				&item.LocationID, &item.ExpectedQuantity, &item.CountedQuantity, &item.Classification, &item.CreatedAt); err != nil {
+				return fmt.Errorf("scan stocktake item: %w", err)
+			}
+			item.CreatedAt = item.CreatedAt.UTC()
+			items = append(items, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// ItemsNextCursor returns the keyset cursor after the last item of a full
+// page, or an empty string when the page was not full.
+func ItemsNextCursor(items []Item, limit int) string {
+	if len(items) == 0 || len(items) < limit {
+		return ""
+	}
+	last := items[len(items)-1].ID
+	return api.EncodeCursor(api.Cursor{Sort: itemSort, Dir: "asc", Value: last, ID: last})
 }
 
 // Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete
@@ -613,6 +819,9 @@ func scanStocktake(scanner stockScanner) (*Stocktake, error) {
 		&item.Description,
 		&item.Status,
 		&item.Scope,
+		&item.LocationID,
+		&item.ClientID,
+		&item.SiteID,
 		&item.StartedBy,
 		&startedAt,
 		&completedAt,

@@ -697,6 +697,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
 		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
+		locations.DependencyStocktake, locations.DependencyStocktakeItem, locations.DependencyStockScan,
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {
 		t.Errorf("DependencyProblem.dependencies enum %v, want the kinds %v", spec, kinds)
@@ -718,7 +719,8 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	}
 	// The delete rules of 000157, of 000189 for the enrollment codes bound
 	// to a site by 000187 (F-430), of 000247 for the target bin of an
-	// internal order (WP-847) and of 000252 for the stock per bin (WP-283).
+	// internal order (WP-847), of 000252 for the stock per bin (WP-283) and
+	// of 000260 for the stocktake (WP-848).
 	restrict := map[string]bool{
 		"location_site_id_fkey": true, "location_parent_id_fkey": true, "building_site_id_fkey": true,
 		"room_building_id_fkey": true, "room_site_id_fkey": true, "rack_room_id_fkey": true, "rack_site_id_fkey": true,
@@ -731,6 +733,10 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		// stock is not deleted, DeleteError reports quantity_item until
 		// WP-758 renames the kind.
 		"stock_level_location_fkey": true,
+		// The area of a stocktake, a location of its frozen expected stock
+		// and the place found of a scan (000260, WP-848): a node an
+		// inventory names is not deleted, DeleteError reports the table.
+		"stocktake_location_fkey": true, "stocktake_item_location_fkey": true, "stock_scan_location_fkey": true,
 	}
 	// Foreign keys that follow a delete: the specialist row goes with its
 	// location row; a desk loses its room and a review item its site; the
@@ -770,7 +776,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		}
 	}
 	if seen != len(restrict) {
-		t.Errorf("found %d of the %d foreign keys of 000157, 000189, 000247 and 000252", seen, len(restrict))
+		t.Errorf("found %d of the %d foreign keys of 000157, 000189, 000247, 000252 and 000260", seen, len(restrict))
 	}
 	if err = locations.DeleteError(&pgconn.PgError{Code: "23503", TableName: "unknown_table"}); errors.As(err, new(*locations.DependencyError)) {
 		t.Errorf("a violation of an unknown table is reported as %v", err)

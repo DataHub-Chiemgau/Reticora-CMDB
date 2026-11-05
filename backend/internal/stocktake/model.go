@@ -9,22 +9,29 @@ import (
 
 // Stocktake represents a planned or active inventory count.
 type Stocktake struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	Title          string    `json:"title"`
-	Description    string    `json:"description,omitempty"`
-	Status         string    `json:"status"`
-	Scope          string    `json:"scope"`
-	StartedBy      string    `json:"started_by,omitempty"`
-	StartedAt      string    `json:"started_at,omitempty"`
-	CompletedAt    string    `json:"completed_at,omitempty"`
-	DueDate        string    `json:"due_date,omitempty"`
-	TotalExpected  int       `json:"total_expected"`
-	TotalScanned   int       `json:"total_scanned"`
-	TotalMissing   int       `json:"total_missing"`
-	TotalSurplus   int       `json:"total_surplus"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	Title          string `json:"title"`
+	Description    string `json:"description,omitempty"`
+	Status         string `json:"status"`
+	Scope          string `json:"scope"`
+	// LocationID is the area of the stocktake, a node of the location tree
+	// whose subtree (bins included) is counted (WP-848). ClientID and
+	// SiteID are derived from it by the database; all three are empty for
+	// an org-wide stocktake of an earlier release.
+	LocationID    string    `json:"location_id,omitempty"`
+	ClientID      string    `json:"client_id,omitempty"`
+	SiteID        string    `json:"site_id,omitempty"`
+	StartedBy     string    `json:"started_by,omitempty"`
+	StartedAt     string    `json:"started_at,omitempty"`
+	CompletedAt   string    `json:"completed_at,omitempty"`
+	DueDate       string    `json:"due_date,omitempty"`
+	TotalExpected int       `json:"total_expected"`
+	TotalScanned  int       `json:"total_scanned"`
+	TotalMissing  int       `json:"total_missing"`
+	TotalSurplus  int       `json:"total_surplus"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // StockScan represents a single scan event during a stocktake.
@@ -42,22 +49,50 @@ type StockScan struct {
 	ScannedAt      time.Time `json:"scanned_at"`
 }
 
-// CreateRequest is the payload for creating a stocktake.
+// CreateRequest is the payload for creating a stocktake. Status and the
+// totals are not writable (WP-848): a stocktake starts planned, start and
+// cancel are its transitions, start sets total_expected from the snapshot.
 type CreateRequest struct {
-	Title         string `json:"title"`
-	Description   string `json:"description,omitempty"`
-	Scope         string `json:"scope,omitempty"`
-	DueDate       string `json:"due_date,omitempty"`
-	TotalExpected int    `json:"total_expected,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	// Scope is deprecated (WP-848); LocationID names the area.
+	Scope      string `json:"scope,omitempty"`
+	LocationID string `json:"location_id,omitempty"`
+	DueDate    string `json:"due_date,omitempty"`
 }
 
-// UpdateRequest is the payload for updating a stocktake.
+// UpdateRequest is the payload for updating a stocktake. LocationID may
+// change only while the stocktake is planned; an empty value removes the
+// area.
 type UpdateRequest struct {
-	Title         *string `json:"title,omitempty"`
-	Description   *string `json:"description,omitempty"`
-	Status        *string `json:"status,omitempty"`
-	DueDate       *string `json:"due_date,omitempty"`
-	TotalExpected *int    `json:"total_expected,omitempty"`
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	DueDate     *string `json:"due_date,omitempty"`
+	LocationID  *string `json:"location_id,omitempty"`
+}
+
+// Item kinds of the snapshot (stocktake_item.item_kind).
+const (
+	ItemKindAsset      = "asset"
+	ItemKindConsumable = "consumable"
+)
+
+// Item is one row of the expected stock that POST …/start freezes
+// (stocktake_item, WP-848): an asset in the area (expected quantity 1) or
+// the stock of a consumable in a bin of the area (expected quantity
+// on_hand at the start). CountedQuantity and Classification are set when
+// the stocktake is completed (WP-287).
+type Item struct {
+	ID               string    `json:"id"`
+	StocktakeID      string    `json:"stocktake_id"`
+	ItemKind         string    `json:"item_kind"`
+	AssetID          string    `json:"asset_id,omitempty"`
+	ConsumableID     string    `json:"consumable_id,omitempty"`
+	LocationID       string    `json:"location_id"`
+	ExpectedQuantity float64   `json:"expected_quantity"`
+	CountedQuantity  *float64  `json:"counted_quantity,omitempty"`
+	Classification   string    `json:"classification,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // ScanRequest is the payload for recording a scan.

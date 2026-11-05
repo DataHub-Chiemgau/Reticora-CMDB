@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000259_consumable_on_hand_total
+Stand: Migration 000260_stocktake_snapshot
 
 ## Prüfung
 
@@ -1605,6 +1605,35 @@ befüllt mit Σ `stock_level.on_hand` je Artikel über alle Bins. Fortgeschriebe
 wird die Spalte nur von `consumable.ApplyBooking` unter der Zeilensperre des
 Artikels; Tabelle, Indizes und RLS bleiben unverändert. Down entfernt Spalte
 und Constraint.
+Inventurbereich und Soll-Snapshot (INV-01, API-06, WP-848, Migration
+000260): `stocktake` erhält `stocktake_id_organization_key` (`id`,
+`organization_id`), den Bereich `location_id` mit
+`stocktake_location_fkey` (`location_id`, `organization_id`) → `location`
+ON DELETE RESTRICT sowie `client_id` und `site_id` ohne Fremdschlüssel,
+Indizes `idx_stocktake_location` und `idx_stocktake_client`.
+`stocktake_derive_location` (BEFORE INSERT OR UPDATE OF `location_id`,
+`client_id`, `site_id`) setzt Client und Standort des Knotens; ein nicht
+sichtbarer Knoten ergibt 23503 auf `stocktake_location_fkey`, ohne Bereich
+bleiben beide NULL (Altinventuren). `location_refresh_stocktake` (AFTER
+UPDATE ON `location` bei geändertem `site_id`/`client_id`, erweiterter
+Scope) leitet nach. `stocktake_item` (`id`, `organization_id`,
+`client_id`/`site_id` NOT NULL, `stocktake_id`, `item_kind`
+`asset|consumable`, `asset_id`, `consumable_id`, `location_id`,
+`expected_quantity`, `counted_quantity`, `classification`
+`found|missing|unexpected`, `created_at`) mit `stocktake_item_object_check`,
+den Teil-UNIQUE-Indizes `stocktake_item_asset_key` (`stocktake_id`,
+`asset_id`) und `stocktake_item_consumable_key` (`stocktake_id`,
+`consumable_id`, `location_id`), `stocktake_item_stocktake_fkey` → `stocktake`
+ON DELETE CASCADE und `stocktake_item_asset_fkey`,
+`stocktake_item_consumable_fkey`, `stocktake_item_location_fkey` (jeweils mit
+`organization_id`, ON DELETE RESTRICT); `stocktake_item_derive_scope`
+übernimmt Client und Standort der Inventur, `stocktake_refresh_items` folgt
+ihrer Änderung. `stock_scan.location_id` (Fundort) mit
+`stock_scan_location_fkey` (ON DELETE RESTRICT) und
+`idx_stock_scan_location`. RLS: `stocktake_isolation` (Org-, Client- und
+Site-Prädikat, NULL lesbar) mit den restriktiven `stocktake_scoped_update`
+und `stocktake_scoped_delete`; `stocktake_item` mit ENABLE/FORCE,
+TRUNCATE-Schutz `reticora_truncate_guard` und `stocktake_item_isolation`.
 
 ## Tabellen, RLS und Policies
 
@@ -1751,7 +1780,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
-| `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |
+| `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
+| `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
 | `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |

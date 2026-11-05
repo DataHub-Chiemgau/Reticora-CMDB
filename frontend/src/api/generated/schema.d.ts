@@ -2432,7 +2432,10 @@ export interface paths {
     /** List stocktakes */
     get: operations['listStocktakes'];
     put?: never;
-    /** Create a stocktake */
+    /**
+     * Create a stocktake
+     * @description Creates a planned stocktake. location_id names its area, a node of the location tree whose subtree (bins included) is counted (WP-848); client_id and site_id follow the node. status and the totals are not writable (400).
+     */
     post: operations['createStocktake'];
     delete?: never;
     options?: never;
@@ -2458,7 +2461,10 @@ export interface paths {
     delete: operations['deleteStocktake'];
     options?: never;
     head?: never;
-    /** Update a stocktake */
+    /**
+     * Update a stocktake
+     * @description Changes title, description, due_date and, while the stocktake is planned, its area location_id (WP-848). status and the totals are not writable (400); start and cancel are the transitions.
+     */
     patch: operations['updateStocktake'];
     trace?: never;
   };
@@ -8634,7 +8640,7 @@ export interface paths {
     put?: never;
     /**
      * Start a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description Moves a planned stocktake to in_progress and freezes the expected stock of its area in the same transaction (INV-01, WP-848): one item per asset whose location_id lies in the subtree of the area (expected quantity 1) and one per stock of a consumable in a bin of the subtree (expected quantity on_hand). Assets with a free-text location only are not part of it; the snapshot holds the objects the caller sees and does not follow later movements. started_at, started_by and total_expected (the number of items) are set. The operation has no request body.
      */
     post: operations['startStocktake'];
     delete?: never;
@@ -8655,7 +8661,7 @@ export interface paths {
     };
     /**
      * List the expected items of a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description The expected stock frozen by POST …/start (INV-01, WP-848), ordered by id; empty before the start.
      */
     get: operations['listStocktakeItems'];
     put?: never;
@@ -8703,7 +8709,7 @@ export interface paths {
     put?: never;
     /**
      * Cancel a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description Moves a planned or in-progress stocktake to cancelled (WP-848); the frozen expected stock stays. The operation has no request body.
      */
     post: operations['cancelStocktake'];
     delete?: never;
@@ -13015,8 +13021,28 @@ export interface components {
       organization_id: string;
       title: string;
       description?: string;
-      status: string;
+      /** @enum {string} */
+      status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+      /**
+       * @deprecated
+       * @description Free-text scope of earlier releases; location_id names the area (WP-848).
+       */
       scope: string;
+      /**
+       * Format: uuid
+       * @description The area, a node of the location tree whose subtree (bins included) is counted; absent for an organization-wide stocktake of an earlier release.
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the area, derived from location_id.
+       */
+      client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the area, derived from location_id.
+       */
+      site_id?: string;
       started_by?: string;
       /** Format: date-time */
       started_at?: string;
@@ -13036,18 +13062,63 @@ export interface components {
     CreateStocktakeRequest: {
       title: string;
       description?: string;
+      /**
+       * @deprecated
+       * @description Free-text scope of earlier releases; location_id names the area (WP-848).
+       */
       scope?: string;
+      /**
+       * Format: uuid
+       * @description The area, a node of the location tree (WP-848).
+       */
+      location_id?: string;
       /** Format: date-time */
       due_date?: string;
-      total_expected?: number;
     };
     UpdateStocktakeRequest: {
       title?: string;
       description?: string;
-      status?: string;
+      /** @description The area, a node of the location tree; only while the stocktake is planned (409 otherwise), an empty value removes it (WP-848). */
+      location_id?: string;
       /** Format: date-time */
       due_date?: string;
-      total_expected?: number;
+    };
+    StocktakeItem: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      stocktake_id: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable';
+      /**
+       * Format: uuid
+       * @description Set for item_kind asset.
+       */
+      asset_id?: string;
+      /**
+       * Format: uuid
+       * @description Set for item_kind consumable.
+       */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The location of the asset or the bin of the stock at the start.
+       */
+      location_id: string;
+      /** @description 1 for an asset, on_hand of the bin at the start for a consumable. */
+      expected_quantity: number;
+      /** @description Set when the stocktake is completed (WP-287). */
+      counted_quantity?: number;
+      /**
+       * @description Set when the stocktake is completed (WP-287).
+       * @enum {string}
+       */
+      classification?: 'found' | 'missing' | 'unexpected';
+      /** Format: date-time */
+      created_at: string;
+    };
+    StocktakeItemListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['StocktakeItem'][];
     };
     StocktakeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Stocktake'][];
@@ -14776,7 +14847,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -14794,6 +14865,9 @@ export interface components {
         | 'agent_enrollment_token'
         | 'collector_enrollment_code'
         | 'ci_merge'
+        | 'stocktake'
+        | 'stocktake_item'
+        | 'stock_scan'
       )[];
     };
     /** @enum {string} */
@@ -22289,6 +22363,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description location_id is no UUID or names no node of the location tree visible to the caller (unknown, of another organization or outside the scope alike); `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22337,7 +22420,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -22376,7 +22459,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -22386,6 +22469,24 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description location_id changes while the stocktake is not planned. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description location_id is no UUID or names no node of the location tree visible to the caller; `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeScans: {
@@ -22526,7 +22627,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -39309,18 +39410,53 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-287. */
+      /** @description The started stocktake. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: only a principal with an organization-wide scope may start it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The stocktake is not planned. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The stocktake has no area; `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Profile --no-db: the in-memory repository reaches neither the location tree nor the stock of the bins. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeItems: {
@@ -39346,17 +39482,27 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the expected items of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287. */
+      /** @description A page of the expected items (cursor contract, API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StocktakeItemListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description Profile --no-db: the in-memory repository freezes no expected stock. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeDifferences: {
@@ -39407,18 +39553,35 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-287. */
+      /** @description The cancelled stocktake. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: only a principal with an organization-wide scope may cancel it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The stocktake is completed or cancelled already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getDocumentUsage: {
