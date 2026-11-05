@@ -118,11 +118,6 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Reason:   "TimescaleDB hypertable without row level security (ViewProtectedTables)",
 		TestFile: "internal/monitoring/audit_t1_metric_scope_integration_test.go", TestName: "TestMetricViewsHonourScope",
 	},
-	"stock_scan": {
-		Path:     "asset_id -> asset, ci_id -> ci (stocktake.scanVisible)",
-		Reason:   "a scan is visible only when the scanned asset and CI are",
-		TestFile: "internal/stocktake/stocktake_scope_integration_test.go", TestName: "TestStocktakeRepositoryClientScope",
-	},
 }
 
 // ViewProtectedTables maps tables that cannot carry row level security to

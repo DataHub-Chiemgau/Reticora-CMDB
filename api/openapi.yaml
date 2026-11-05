@@ -5369,17 +5369,25 @@ paths:
       operationId: listStocktakeScans
       tags: [Stocktake]
       summary: List recorded scans for a stocktake
+      description: >-
+        The scans the caller sees, newest first (keyset cursor over
+        scanned_at and id, WP-287). A scan carries the client and site of
+        its stocktake (of the scanned object for a stocktake of an earlier
+        release without area); a principal restricted in the client or site
+        scope sees only the scans of its scope.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Paginated list of stocktake scans
+          description: A page of the scans (cursor contract, API-02).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StockScanListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -5388,6 +5396,14 @@ paths:
       operationId: createStocktakeScan
       tags: [Stocktake]
       summary: Record a stocktake scan
+      description: >-
+        Records an asset or the counted quantity of a consumable at the
+        place found (INV-01, WP-287). The server classifies the scan:
+        found when the object is in the frozen expected stock (a consumable
+        with an item of that bin), else unexpected. A code read by the
+        scanner is stored, not resolved; the client resolves it through GET
+        /api/v1/labels/lookup. Scans need an in-progress stocktake with
+        snapshot. scan_result, ci_id and location_found are no input (400).
       requestBody:
         required: true
         content:
@@ -5406,7 +5422,30 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: The stocktake, the asset or the consumable is unknown or outside the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: >-
+            The stocktake is not in progress or has no frozen expected stock
+            (a stocktake of an earlier release without area included).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            Not exactly one of asset_id and consumable_id, a quantity for an
+            asset or none greater than 0 for a consumable, an unknown
+            scan_method, or a place found (`field` location_id) that is
+            unknown, outside the scope or outside the area, or no bin for a
+            consumable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/difference:
     x-phase: P2
@@ -5416,23 +5455,39 @@ paths:
     get:
       operationId: getStocktakeDifference
       tags: [Stocktake]
-      summary: Difference list of a stocktake
-      description: Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/stocktakes/{id}/differences'
+      summary: Difference list of a stocktake (deprecated, use …/differences)
+      description: >-
+        Deprecated alias of GET /api/v1/stocktakes/{id}/differences (E-25,
+        E-38, WP-287): the same operation with the same rows and pages. The
+        path answers until x-sunset with the Deprecation, Sunset and
+        successor-version Link headers.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Paginated difference list
+          description: A page of the difference list (cursor contract, API-02).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StocktakeDifferenceListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Profile --no-db, as for …/differences.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/complete:
     x-phase: P2
@@ -5442,14 +5497,17 @@ paths:
     post:
       operationId: completeStocktake
       tags: [Stocktake]
-      summary: Complete a stocktake with inventory correction
-      description: >
-        Completes the stocktake and applies the recorded differences to the
-        inventory: assets scanned as missing are marked lost, surplus assets
-        are put back in stock, wrong_location moves the asset to the found
-        location and damaged assets are sent to maintenance. Completion is
-        atomic and only possible once; the request is rejected with 409 when
-        the stocktake is already completed or cancelled.
+      summary: Complete a stocktake
+      description: >-
+        Moves an in-progress stocktake with frozen expected stock to
+        completed and fixes its result in the same transaction (INV-01,
+        WP-287): counted_quantity and classification of every item, an item
+        with expected_quantity 0 per unexpected object, and total_scanned,
+        total_missing and total_surplus. It books no inventory correction
+        and changes no asset (the correction over stock movements follows
+        in WP-761); apply_corrections is ignored, corrections stays empty. A
+        stocktake without snapshot (an earlier release without area
+        included) can only be cancelled.
       requestBody:
         required: false
         content:
@@ -5478,7 +5536,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Stocktake is already completed or cancelled
+          description: >-
+            The stocktake is not in progress (planned, completed or
+            cancelled) or has no frozen expected stock.
           content:
             application/problem+json:
               schema:
@@ -20086,20 +20146,34 @@ paths:
   /api/v1/stocktakes/{id}/differences:
     x-phase: P2
     x-feature: stocktake_standard
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listStocktakeDifferences
       tags: [Stocktake]
       summary: List the differences of a stocktake
-      description: Planned (E-38); WP-287 implements the operation.
+      description: >-
+        The difference list computed from the frozen expected stock and the
+        scans the caller sees (INV-01, E-38, WP-287), one entry per object,
+        ordered by object: missing (in the snapshot, not scanned; counted
+        quantity 0), unexpected (not in the snapshot; for a consumable a bin
+        without item) and found with a deviation (an asset whose last scan
+        shows another location than the snapshot, a consumable whose
+        scanned quantities do not add up to the expected quantity). The
+        embedded asset carries only the fields the caller may read (field
+        permissions of the object kind asset, RBA-07); the embedded
+        consumable carries its identity. After the completion the scans no
+        longer change, so the list stays as fixed.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the differences of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287.
+          description: A page of the difference list (cursor contract, API-02).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeDifferenceListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -20108,6 +20182,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: >-
+            Profile --no-db: the in-memory repository freezes no expected
+            stock.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/cancel:
     x-phase: P2
@@ -28239,12 +28321,18 @@ components:
           format: date-time
         total_expected:
           type: integer
+          description: Number of items frozen by the start.
         total_scanned:
           type: integer
+          description: >-
+            Number of counted objects (WP-287); computed when read while the
+            stocktake with snapshot is in progress, fixed by the completion.
         total_missing:
           type: integer
+          description: Number of missing objects, computed and fixed like total_scanned.
         total_surplus:
           type: integer
+          description: Number of unexpected objects, computed and fixed like total_scanned.
         created_at:
           type: string
           format: date-time
@@ -28363,16 +28451,49 @@ components:
           type: string
         asset_id:
           type: string
+        consumable_id:
+          type: string
+        quantity:
+          type: number
+          description: The counted quantity of the consumable.
+        location_id:
+          type: string
+          format: uuid
+          description: The place found, a location of the area; absent in scans of earlier releases.
+        client_id:
+          type: string
+          format: uuid
+          description: Client of the stocktake (of the scanned object for a stocktake without area).
+        site_id:
+          type: string
+          format: uuid
+          description: Site of the stocktake (of the scanned object for a stocktake without area).
         ci_id:
           type: string
+          deprecated: true
+          description: Read field of scans of earlier releases.
         scanned_by:
           type: string
         scan_method:
           type: string
+          enum: [manual, barcode, rfid, qrcode]
         scan_result:
           type: string
+          enum: [found, missing, unexpected]
+          description: >-
+            Set by the server: found when the object is in the frozen
+            expected stock, else unexpected; missing occurs in scans of
+            earlier releases only.
+        legacy_scan_result:
+          type: string
+          description: The result of a scan of an earlier release before WP-287 (surplus, wrong_location, damaged, found, missing).
+        code:
+          type: string
+          description: The code read by the scanner, stored and not resolved.
         location_found:
           type: string
+          deprecated: true
+          description: Free-text place found of scans of earlier releases.
         notes:
           type: string
         scanned_at:
@@ -28381,18 +28502,31 @@ components:
 
     CreateStockScanRequest:
       type: object
-      required: [scan_result]
+      additionalProperties: false
+      required: [location_id]
+      description: Exactly one of asset_id and consumable_id; quantity with a consumable only.
       properties:
         asset_id:
           type: string
-        ci_id:
+          format: uuid
+        consumable_id:
           type: string
+          format: uuid
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          description: The counted quantity of the consumable, required with consumable_id.
+        location_id:
+          type: string
+          format: uuid
+          description: The place found, a location in the subtree of the area; a bin for a consumable.
         scan_method:
           type: string
-        scan_result:
+          enum: [manual, barcode, rfid, qrcode]
+          default: manual
+        code:
           type: string
-        location_found:
-          type: string
+          description: The code read by the scanner, stored and not resolved (GET /api/v1/labels/lookup resolves it).
         notes:
           type: string
 
@@ -28407,14 +28541,72 @@ components:
               items:
                 $ref: '#/components/schemas/StockScan'
 
-    StocktakeDifferenceEntry:
+    StocktakeDifference:
       type: object
-      required: [scan]
+      required: [item_kind, classification, expected_quantity, counted_quantity]
       properties:
-        scan:
-          $ref: '#/components/schemas/StockScan'
+        item_kind:
+          type: string
+          enum: [asset, consumable]
+        asset_id:
+          type: string
+          format: uuid
+          description: Set for item_kind asset.
+        consumable_id:
+          type: string
+          format: uuid
+          description: Set for item_kind consumable.
+        classification:
+          type: string
+          enum: [found, missing, unexpected]
+          description: found entries deviate in location (asset) or quantity (consumable).
+        expected_location_id:
+          type: string
+          format: uuid
+          description: The location of the item of the snapshot; absent for unexpected.
+        found_location_id:
+          type: string
+          format: uuid
+          description: The place found of the last scan (asset) or the scanned bin (consumable); absent for missing.
+        expected_quantity:
+          type: number
+          description: 1 for an asset of the snapshot, the frozen on_hand for a consumable, 0 for unexpected.
+        counted_quantity:
+          type: number
+          description: 1 for a scanned asset, the sum of the scanned quantities for a consumable, 0 for missing.
         asset:
-          $ref: '#/components/schemas/Asset'
+          type: object
+          description: >-
+            The asset when the caller sees it, without the fields it may not
+            read (field permissions of the object kind asset).
+          properties:
+            id:
+              type: string
+            client_id:
+              type: string
+            name:
+              type: string
+            inventory_no:
+              type: string
+            serial_number:
+              type: string
+            lifecycle_state:
+              type: string
+            location_id:
+              type: string
+        consumable:
+          type: object
+          description: The consumable when the caller sees it.
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            sku:
+              type: string
+            unit:
+              type: string
 
     StocktakeDifferenceListResponse:
       allOf:
@@ -28425,38 +28617,28 @@ components:
             data:
               type: array
               items:
-                $ref: '#/components/schemas/StocktakeDifferenceEntry'
+                $ref: '#/components/schemas/StocktakeDifference'
 
     CompleteStocktakeRequest:
       type: object
       properties:
         apply_corrections:
           type: boolean
-          description: Whether the recorded differences are applied to the inventory. Defaults to true.
-          default: true
+          deprecated: true
+          description: Ignored (WP-287); the completion books no correction until WP-761.
 
     StocktakeCorrection:
       type: object
+      deprecated: true
+      description: No longer produced (WP-287); corrections stays empty.
       required: [asset_id, scan_result, applied]
       properties:
         asset_id:
           type: string
-        asset_tag:
-          type: string
         scan_result:
-          type: string
-        previous_status:
-          type: string
-        new_status:
-          type: string
-        previous_location:
-          type: string
-        new_location:
           type: string
         applied:
           type: boolean
-        detail:
-          type: string
 
     StocktakeCompletion:
       type: object
@@ -28466,8 +28648,12 @@ components:
           $ref: '#/components/schemas/Stocktake'
         corrections_applied:
           type: integer
+          deprecated: true
+          description: Always 0 (WP-287).
         corrections:
           type: array
+          deprecated: true
+          description: Always empty (WP-287); the result is in the items and the difference list.
           items:
             $ref: '#/components/schemas/StocktakeCorrection'
 

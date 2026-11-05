@@ -1325,7 +1325,7 @@ export const stocktakeApi = {
     stocktakeId: string,
     params: ListParams = {},
   ): Promise<PaginatedResponse<StocktakeDifferenceEntry>> {
-    return fetchAPI(`/stocktakes/${stocktakeId}/difference${buildQuery(params)}`);
+    return fetchAPI(`/stocktakes/${stocktakeId}/differences${buildQuery(params)}`);
   },
   complete(stocktakeId: string, applyCorrections = true): Promise<StocktakeCompletion> {
     return fetchAPI(`/stocktakes/${stocktakeId}/complete`, {
@@ -1335,9 +1335,18 @@ export const stocktakeApi = {
   },
 };
 
+// One object of the difference list (WP-287, GET …/differences).
 export interface StocktakeDifferenceEntry {
-  scan: StockScan;
-  asset?: Asset;
+  item_kind: 'asset' | 'consumable';
+  asset_id?: string;
+  consumable_id?: string;
+  classification: 'found' | 'missing' | 'unexpected';
+  expected_location_id?: string;
+  found_location_id?: string;
+  expected_quantity: number;
+  counted_quantity: number;
+  asset?: Partial<Asset>;
+  consumable?: { id: string; name: string; sku?: string; unit?: string };
 }
 
 export interface StocktakeCorrection {

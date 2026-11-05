@@ -3,8 +3,6 @@ package stocktake
 
 import (
 	"time"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 )
 
 // Stocktake represents a planned or active inventory count.
@@ -34,19 +32,39 @@ type Stocktake struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// StockScan represents a single scan event during a stocktake.
+// Scan results (scan_result_check, 000265): the server sets found when the
+// object is in the snapshot of the stocktake, else unexpected; missing
+// occurs in rows of earlier releases only (WP-287).
+const (
+	ScanFound      = "found"
+	ScanMissing    = "missing"
+	ScanUnexpected = "unexpected"
+)
+
+// StockScan represents a single scan event during a stocktake: an asset or
+// the counted quantity of a consumable at the place found (WP-287).
+// ClientID and SiteID are those of the stocktake (stock_scan_derive_scope).
+// CIID, LocationFound and LegacyScanResult are read fields of the rows of
+// earlier releases.
 type StockScan struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	StocktakeID    string    `json:"stocktake_id"`
-	AssetID        string    `json:"asset_id,omitempty"`
-	CIID           string    `json:"ci_id,omitempty"`
-	ScannedBy      string    `json:"scanned_by"`
-	ScanMethod     string    `json:"scan_method"`
-	ScanResult     string    `json:"scan_result"`
-	LocationFound  string    `json:"location_found,omitempty"`
-	Notes          string    `json:"notes,omitempty"`
-	ScannedAt      time.Time `json:"scanned_at"`
+	ID               string    `json:"id"`
+	OrganizationID   string    `json:"organization_id"`
+	StocktakeID      string    `json:"stocktake_id"`
+	AssetID          string    `json:"asset_id,omitempty"`
+	ConsumableID     string    `json:"consumable_id,omitempty"`
+	Quantity         *float64  `json:"quantity,omitempty"`
+	LocationID       string    `json:"location_id,omitempty"`
+	ClientID         string    `json:"client_id,omitempty"`
+	SiteID           string    `json:"site_id,omitempty"`
+	CIID             string    `json:"ci_id,omitempty"`
+	ScannedBy        string    `json:"scanned_by"`
+	ScanMethod       string    `json:"scan_method"`
+	ScanResult       string    `json:"scan_result"`
+	LegacyScanResult string    `json:"legacy_scan_result,omitempty"`
+	Code             string    `json:"code,omitempty"`
+	LocationFound    string    `json:"location_found,omitempty"`
+	Notes            string    `json:"notes,omitempty"`
+	ScannedAt        time.Time `json:"scanned_at"`
 }
 
 // CreateRequest is the payload for creating a stocktake. Status and the
@@ -95,15 +113,22 @@ type Item struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
-// ScanRequest is the payload for recording a scan.
+// ScanRequest is the payload for recording a scan (WP-287): exactly one of
+// AssetID and ConsumableID (then with Quantity > 0) at the place found
+// LocationID. scan_result, ci_id and location_found are no input any more
+// (400, unknown fields); Code is stored, not resolved.
 type ScanRequest struct {
-	AssetID       string `json:"asset_id,omitempty"`
-	CIID          string `json:"ci_id,omitempty"`
-	ScanMethod    string `json:"scan_method,omitempty"`
-	ScanResult    string `json:"scan_result"`
-	LocationFound string `json:"location_found,omitempty"`
-	Notes         string `json:"notes,omitempty"`
+	AssetID      string   `json:"asset_id,omitempty"`
+	ConsumableID string   `json:"consumable_id,omitempty"`
+	Quantity     *float64 `json:"quantity,omitempty"`
+	LocationID   string   `json:"location_id,omitempty"`
+	ScanMethod   string   `json:"scan_method,omitempty"`
+	Code         string   `json:"code,omitempty"`
+	Notes        string   `json:"notes,omitempty"`
 }
+
+// Scan methods (scan_method_check, 000012).
+var scanMethods = []string{"manual", "barcode", "rfid", "qrcode"}
 
 // FilterParams holds filter parameters for listing stocktakes.
 type FilterParams struct {
@@ -114,35 +139,69 @@ type FilterParams struct {
 	SortDir string
 }
 
-// DifferenceEntry pairs a deviating scan (missing, surplus, damaged,
-// wrong_location) with the asset it refers to. Asset is nil when the scan
-// did not resolve to a known asset.
-type DifferenceEntry struct {
-	Scan  StockScan    `json:"scan"`
-	Asset *asset.Asset `json:"asset,omitempty"`
+// Difference is one object of the difference list of a stocktake
+// (WP-287): missing (in the snapshot, not scanned; counted quantity 0),
+// unexpected (not in the snapshot; a consumable in a bin without snapshot
+// row) or found with a deviation (an asset whose last scan shows another
+// location than the snapshot, a consumable whose scanned quantities do not
+// add up to the expected quantity). Asset and Consumable embed the object
+// when the caller sees it; the handler projects the asset through
+// permission.Project.
+type Difference struct {
+	ItemKind           string  `json:"item_kind"`
+	AssetID            string  `json:"asset_id,omitempty"`
+	ConsumableID       string  `json:"consumable_id,omitempty"`
+	Classification     string  `json:"classification"`
+	ExpectedLocationID string  `json:"expected_location_id,omitempty"`
+	FoundLocationID    string  `json:"found_location_id,omitempty"`
+	ExpectedQuantity   float64 `json:"expected_quantity"`
+	CountedQuantity    float64 `json:"counted_quantity"`
+	Asset              any     `json:"asset,omitempty"`
+	Consumable         *Supply `json:"consumable,omitempty"`
+	key                string
+}
+
+// DifferenceAsset is the embedded asset of a difference. SiteID and
+// AssetTypeID only address the field permissions of the projection.
+type DifferenceAsset struct {
+	ID             string `json:"id"`
+	ClientID       string `json:"client_id,omitempty"`
+	Name           string `json:"name"`
+	InventoryNo    string `json:"inventory_no,omitempty"`
+	SerialNumber   string `json:"serial_number,omitempty"`
+	LifecycleState string `json:"lifecycle_state,omitempty"`
+	LocationID     string `json:"location_id,omitempty"`
+	SiteID         string `json:"-"`
+	AssetTypeID    string `json:"-"`
+}
+
+// Supply is the embedded consumable of a difference. Field permissions do
+// not know the object kind consumable, so it carries the identity only.
+type Supply struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	SKU  string `json:"sku,omitempty"`
+	Unit string `json:"unit,omitempty"`
 }
 
 // CompleteRequest is the payload for completing a stocktake.
+// ApplyCorrections is ignored (WP-287): the completion fixes the result in
+// the snapshot and books no correction until WP-761.
 type CompleteRequest struct {
 	ApplyCorrections *bool `json:"apply_corrections,omitempty"`
 }
 
-// Correction describes the inventory change applied (or skipped) for one
-// deviating scan when a stocktake is completed.
+// Correction is a deprecated member of Completion: the completion applies
+// no correction any more (WP-287), the list stays empty.
 type Correction struct {
-	AssetID          string `json:"asset_id"`
-	AssetTag         string `json:"asset_tag,omitempty"`
-	ScanResult       string `json:"scan_result"`
-	PreviousStatus   string `json:"previous_status,omitempty"`
-	NewStatus        string `json:"new_status,omitempty"`
-	PreviousLocation string `json:"previous_location,omitempty"`
-	NewLocation      string `json:"new_location,omitempty"`
-	Applied          bool   `json:"applied"`
-	Detail           string `json:"detail,omitempty"`
+	AssetID    string `json:"asset_id"`
+	ScanResult string `json:"scan_result"`
+	Applied    bool   `json:"applied"`
 }
 
-// Completion is the result of completing a stocktake: the final stocktake
-// state plus every inventory correction that was applied.
+// Completion is the result of completing a stocktake: the completed
+// stocktake with its totals. CorrectionsApplied is 0 and Corrections empty
+// (WP-287); the result per object is in GET …/items and …/differences.
 type Completion struct {
 	Stocktake          Stocktake    `json:"stocktake"`
 	CorrectionsApplied int          `json:"corrections_applied"`

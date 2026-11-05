@@ -33,6 +33,17 @@ var (
 	// start and items: it reaches neither the location tree nor the stock
 	// of the bins (501, WP-848).
 	ErrSnapshotUnavailable = errors.New("the expected stock needs the location tree and the stock of the bins")
+	// ErrNoSnapshot is returned by AddScan and Complete for a stocktake
+	// without frozen expected stock, a stocktake of an earlier release
+	// without area included (409, WP-287): it can only be cancelled.
+	ErrNoSnapshot = errors.New("the stocktake has no frozen expected stock")
+	// ErrObjectNotFound is returned by AddScan for an asset or consumable
+	// that is unknown or outside the scope (404, WP-287).
+	ErrObjectNotFound = errors.New("scanned object not found")
+	// ErrPlaceFound is returned by AddScan for a place found that is
+	// unknown, outside the scope or outside the area, or no bin for a
+	// consumable (422 on location_id, WP-287).
+	ErrPlaceFound = errors.New("the place found is no location of the area")
 )
 
 // Status values of a stocktake (stocktake_status_check, 000012).
@@ -43,18 +54,6 @@ const (
 	StatusCancelled  = "cancelled"
 )
 
-// deviatingResults are the scan results that make up the difference list.
-var deviatingResults = []string{"missing", "surplus", "damaged", "wrong_location"}
-
-func isDeviating(result string) bool {
-	for _, r := range deviatingResults {
-		if r == result {
-			return true
-		}
-	}
-	return false
-}
-
 // Repository defines persistence operations for stocktakes.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Stocktake, int, error)
@@ -62,19 +61,26 @@ type Repository interface {
 	Create(ctx context.Context, s *Stocktake) error
 	Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Stocktake, error)
 	Delete(ctx context.Context, orgID, id string) error
+	// AddScan records a scan of an in-progress stocktake with snapshot
+	// and classifies it (found when the object is in the snapshot, else
+	// unexpected). It fails with ErrNotFound for an unknown stocktake,
+	// ErrInvalidTransition when it is not in progress, ErrNoSnapshot
+	// without snapshot, ErrObjectNotFound for an object outside the scope
+	// and ErrPlaceFound for a place found outside the area.
 	AddScan(ctx context.Context, scan *StockScan) error
+	// ListScans returns a page of the scans, newest first (keyset over
+	// scanned_at and id).
 	ListScans(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error)
-	// Difference returns the deviating scans of a stocktake (missing, surplus,
-	// damaged, wrong_location), each enriched with the referenced asset when
-	// the scan resolved to one.
-	Difference(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]DifferenceEntry, int, error)
-	// Complete finalizes a stocktake. When applyCorrections is true, the
-	// recorded differences are applied to the inventory: missing assets are
-	// marked lost, surplus assets return to stock, wrong_location moves the
-	// asset to the found location and damaged assets go to maintenance.
-	// Completing an already completed or cancelled stocktake fails with
-	// ErrAlreadyCompleted.
-	Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error)
+	// Differences returns a page of the difference list, computed from the
+	// snapshot and the scans (WP-287), ordered by object.
+	Differences(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]Difference, int, error)
+	// Complete finalizes an in-progress stocktake with snapshot: it writes
+	// counted_quantity and classification per item, an item per unexpected
+	// object and the totals, then the status, in one transaction (WP-287).
+	// It books no correction. A completed or cancelled stocktake fails with
+	// ErrAlreadyCompleted, a planned one with ErrInvalidTransition, one
+	// without snapshot with ErrNoSnapshot.
+	Complete(ctx context.Context, orgID, id string) (*Completion, error)
 	// Start moves a planned stocktake with an area to in_progress and
 	// freezes the expected stock of the area in one transaction (WP-848).
 	// It fails with ErrInvalidTransition for another status and with
@@ -91,21 +97,15 @@ type Repository interface {
 type MemoryRepository struct {
 	mu         sync.RWMutex
 	stocktakes map[string]*Stocktake
-	scans      map[string]*StockScan
-	assets     asset.Lookup
 	nextID     int
-	nextScan   int
 }
 
-// NewMemoryRepository creates a new in-memory stocktake repository. assets
-// provides the asset records used by the difference list and completion
-// corrections; it may be nil, in which case scans never resolve to assets.
-func NewMemoryRepository(assets asset.Lookup) *MemoryRepository {
-	return &MemoryRepository{
-		stocktakes: make(map[string]*Stocktake),
-		scans:      make(map[string]*StockScan),
-		assets:     assets,
-	}
+// NewMemoryRepository creates a new in-memory stocktake repository (profile
+// --no-db). It freezes no expected stock: start, items and the difference
+// list answer 501, scans and the completion 409 (WP-287). The asset lookup
+// of the wiring is no longer read.
+func NewMemoryRepository(_ asset.Lookup) *MemoryRepository {
+	return &MemoryRepository{stocktakes: make(map[string]*Stocktake)}
 }
 
 func (r *MemoryRepository) List(_ context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Stocktake, int, error) {
@@ -286,196 +286,82 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 		return ErrNotFound
 	}
 	delete(r.stocktakes, id)
-	// Remove associated scans
-	for sid, scan := range r.scans {
-		if scan.StocktakeID == id {
-			delete(r.scans, sid)
-		}
-	}
 	return nil
 }
 
+// AddScan follows the status rule of the PostgreSQL repository: a
+// stocktake that is not in progress is ErrInvalidTransition, an
+// in-progress one ErrNoSnapshot, since the in-memory repository freezes no
+// expected stock.
 func (r *MemoryRepository) AddScan(_ context.Context, scan *StockScan) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	// Verify stocktake exists
 	st, ok := r.stocktakes[scan.StocktakeID]
 	if !ok || st.OrganizationID != scan.OrganizationID {
 		return ErrNotFound
 	}
-
-	r.nextScan++
-	scan.ID = fmt.Sprintf("scan-%d", r.nextScan)
-	scan.ScannedAt = time.Now().UTC()
-	r.scans[scan.ID] = scan
-
-	// Update counters
-	st.TotalScanned++
-	switch scan.ScanResult {
-	case "missing":
-		st.TotalMissing++
-	case "surplus":
-		st.TotalSurplus++
+	if st.Status != StatusInProgress {
+		return ErrInvalidTransition
 	}
-	st.UpdatedAt = time.Now().UTC()
-
-	return nil
+	return ErrNoSnapshot
 }
 
-func (r *MemoryRepository) Difference(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]DifferenceEntry, int, error) {
-	r.mu.RLock()
-	st, ok := r.stocktakes[stocktakeID]
-	if !ok || st.OrganizationID != orgID {
-		r.mu.RUnlock()
-		return nil, 0, ErrNotFound
-	}
-	var scans []StockScan
-	for _, s := range r.scans {
-		if s.OrganizationID == orgID && s.StocktakeID == stocktakeID && isDeviating(s.ScanResult) {
-			scans = append(scans, *s)
-		}
-	}
-	r.mu.RUnlock()
-
-	sort.Slice(scans, func(i, j int) bool { return scans[i].ScannedAt.Before(scans[j].ScannedAt) })
-	total := len(scans)
-	start := page.Offset
-	if start > total {
-		start = total
-	}
-	end := start + page.Limit
-	if end > total {
-		end = total
-	}
-
-	entries := make([]DifferenceEntry, 0, end-start)
-	for i := range scans[start:end] {
-		s := &scans[start+i]
-		entry := DifferenceEntry{Scan: *s}
-		if s.AssetID != "" && r.assets != nil {
-			if a, err := r.assets.GetByID(ctx, orgID, s.AssetID); err == nil {
-				entry.Asset = a
-			}
-		}
-		entries = append(entries, entry)
-	}
-	return entries, total, nil
-}
-
-func (r *MemoryRepository) Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error) {
-	r.mu.Lock()
-	s, ok := r.stocktakes[id]
-	if !ok || s.OrganizationID != orgID {
-		r.mu.Unlock()
-		return nil, ErrNotFound
-	}
-	if s.Status == "completed" || s.Status == "cancelled" {
-		r.mu.Unlock()
-		return nil, ErrAlreadyCompleted
-	}
-	// Transition first so a failing correction never leaves the stocktake in
-	// a half-completed state visible to concurrent readers.
-	s.Status = "completed"
-	s.CompletedAt = time.Now().UTC().Format(time.RFC3339)
-	s.UpdatedAt = time.Now().UTC()
-	var scans []StockScan
-	for _, scan := range r.scans {
-		if scan.StocktakeID == id && isDeviating(scan.ScanResult) {
-			scans = append(scans, *scan)
-		}
-	}
-	r.mu.Unlock()
-	sort.Slice(scans, func(i, j int) bool { return scans[i].ScannedAt.Before(scans[j].ScannedAt) })
-
-	completion := &Completion{Stocktake: *s, Corrections: []Correction{}}
-	if !applyCorrections || r.assets == nil {
-		return completion, nil
-	}
-	for i := range scans {
-		scan := &scans[i]
-		if scan.AssetID == "" {
-			continue
-		}
-		c, err := r.applyCorrection(ctx, orgID, scan)
-		if err != nil {
-			continue
-		}
-		completion.Corrections = append(completion.Corrections, c)
-		if c.Applied {
-			completion.CorrectionsApplied++
-		}
-	}
-	return completion, nil
-}
-
-// applyCorrection applies the inventory change implied by a deviating scan
-// through the asset repository and records the outcome.
-func (r *MemoryRepository) applyCorrection(ctx context.Context, orgID string, scan *StockScan) (Correction, error) {
-	a, err := r.assets.GetByID(ctx, orgID, scan.AssetID)
-	if err != nil {
-		return Correction{}, err
-	}
-	req, c := correctionFor(a, scan)
-	if c.Detail != "" {
-		return c, nil
-	}
-	if _, err := r.assets.Update(ctx, orgID, a.ID, &req); err != nil {
-		return Correction{}, err
-	}
-	c.Applied = true
-	return c, nil
-}
-
-// correctionFor maps a deviating scan result to the asset update that
-// corrects the inventory: missing → lost, surplus → in_stock, damaged →
-// maintenance, wrong_location → move to the found location.
-func correctionFor(a *asset.Asset, scan *StockScan) (asset.UpdateRequest, Correction) {
-	c := Correction{AssetID: a.ID, AssetTag: a.AssetTag, ScanResult: scan.ScanResult, PreviousStatus: a.Status, PreviousLocation: a.Location}
-	var req asset.UpdateRequest
-	switch scan.ScanResult {
-	case "missing":
-		status := "lost"
-		req.Status = &status
-		c.NewStatus = status
-	case "surplus":
-		status := "in_stock"
-		req.Status = &status
-		c.NewStatus = status
-	case "damaged":
-		status := "maintenance"
-		req.Status = &status
-		c.NewStatus = status
-	case "wrong_location":
-		if scan.LocationFound == "" {
-			c.Detail = "scan did not record a found location"
-			return req, c
-		}
-		req.Location = &scan.LocationFound
-		c.NewLocation = scan.LocationFound
-	}
-	return req, c
-}
-
-func (r *MemoryRepository) ListScans(_ context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
+// Differences fails with ErrSnapshotUnavailable for a known stocktake.
+func (r *MemoryRepository) Differences(_ context.Context, orgID, stocktakeID string, _ api.PaginationParams) ([]Difference, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	var result []StockScan
-	for _, s := range r.scans {
-		if s.OrganizationID == orgID && s.StocktakeID == stocktakeID {
-			result = append(result, *s)
-		}
+	st, ok := r.stocktakes[stocktakeID]
+	if !ok || st.OrganizationID != orgID {
+		return nil, 0, ErrNotFound
 	}
+	return nil, 0, ErrSnapshotUnavailable
+}
 
-	total := len(result)
-	start := page.Offset
-	if start > total {
-		start = total
+// Complete follows the status rule of the PostgreSQL repository; an
+// in-progress stocktake has no snapshot here (ErrNoSnapshot), so nothing
+// changes.
+func (r *MemoryRepository) Complete(_ context.Context, orgID, id string) (*Completion, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	s, ok := r.stocktakes[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, ErrNotFound
 	}
-	end := start + page.Limit
-	if end > total {
-		end = total
+	return nil, completeRule(s)
+}
+
+// completeRule returns the error of the completion of s: ErrAlreadyCompleted
+// when it is completed or cancelled, ErrInvalidTransition when it is
+// planned, ErrNoSnapshot without frozen expected stock, else nil.
+func completeRule(s *Stocktake) error {
+	switch {
+	case s.Status == StatusCompleted || s.Status == StatusCancelled:
+		return ErrAlreadyCompleted
+	case s.Status != StatusInProgress:
+		return ErrInvalidTransition
+	case !s.hasSnapshot():
+		return ErrNoSnapshot
 	}
-	return result[start:end], total, nil
+	return nil
+}
+
+// hasSnapshot reports whether start froze the expected stock of s: only a
+// stocktake with area is started (WP-848).
+func (s *Stocktake) hasSnapshot() bool {
+	return s.LocationID != "" && s.StartedAt != ""
+}
+
+// ListScans returns no scans: the in-memory repository records none.
+func (r *MemoryRepository) ListScans(_ context.Context, orgID, stocktakeID string, _ api.PaginationParams) ([]StockScan, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	st, ok := r.stocktakes[stocktakeID]
+	if !ok || st.OrganizationID != orgID {
+		return nil, 0, ErrNotFound
+	}
+	return []StockScan{}, 0, nil
 }

@@ -1471,3 +1471,5 @@ STK-05;[P2];B;backend/internal/order/order_receive_integration_test.go;WP-760
 AST-02;[P2];B;backend/internal/assignment/signature_verify_integration_test.go;WP-748
 REL-09;[P2];B;backend/internal/relationship/history_system_integration_test.go;WP-771
 STK-03;[P2];B;backend/internal/reservation/consumable_reservation_integration_test.go;WP-284
+INV-01;[P2];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-287
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-287

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000264_reservation_consumable_bin
+Stand: Migration 000265_stock_scan_classification
 
 ## Prüfung
 
@@ -407,9 +407,8 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`assignment`, `form_submission` und
-`stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
-Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+`assignment` und `form_submission` (Sichtbarkeit über das referenzierte
+Asset, CI, Formular bzw. Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
 `metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
@@ -1722,6 +1721,24 @@ jüngsten an freigegeben und kopiert (`over_reservation`);
 000263 wieder her; Reservierungen von Artikeln ohne `quantity_item`-Zeile
 legt es in `migration_quarantine` (`reservation_without_quantity_item`), das
 nächste Up holt sie zurück.
+Klassifizierte Inventur-Scans (INV-01, TEN-06, WP-287, Migration 000265):
+`stock_scan` erhält `consumable_id` mit `stock_scan_consumable_fkey`
+(`consumable_id`, `organization_id`) → `consumable` ON DELETE RESTRICT,
+`quantity` NUMERIC(12,2) mit `stock_scan_quantity_check` (gesetzt und > 0
+genau dann, wenn `consumable_id` gesetzt ist), `code`, `legacy_scan_result`
+sowie `client_id` und `site_id` ohne Fremdschlüssel; Indizes
+`idx_stock_scan_consumable`, `idx_stock_scan_client` und
+`idx_stock_scan_stocktake_scanned` (`stocktake_id`, `scanned_at`, `id`).
+`scan_result_check` erlaubt `found`, `missing`, `unexpected`; Altwerte
+`surplus`/`wrong_location` wurden `unexpected`, `damaged` wurde `found`, der
+Originalwert steht in `legacy_scan_result`. `stock_scan_derive_scope`
+(BEFORE INSERT OR UPDATE OF `stocktake_id`, `asset_id`, `consumable_id`,
+`client_id`, `site_id`, erweiterter Scope) setzt Client und Standort der
+Inventur, ohne Bereich die des Assets, Consumables bzw. CIs;
+`stocktake_refresh_scans` (AFTER UPDATE OF `client_id`, `site_id`,
+`location_id` ON `stocktake`) leitet nach. RLS: `stock_scan_isolation`
+(Org-, Client- und Site-Prädikat, NULL lesbar) mit den restriktiven
+`stock_scan_scoped_update` und `stock_scan_scoped_delete`.
 
 ## Tabellen, RLS und Policies
 
@@ -1868,7 +1885,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
 | `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
-| `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
+| `stock_scan` | ja | ja | stock_scan_isolation (ALL), stock_scan_scoped_delete (DELETE), stock_scan_scoped_update (UPDATE) |
 | `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
 | `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |

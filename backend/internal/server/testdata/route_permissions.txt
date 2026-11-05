@@ -297,6 +297,7 @@ GET /api/v1/stock-movements/{id}/signature asset:read
 GET /api/v1/stocktakes stocktake:read
 GET /api/v1/stocktakes/{id} stocktake:read
 GET /api/v1/stocktakes/{id}/difference stocktake:read
+GET /api/v1/stocktakes/{id}/differences stocktake:read
 GET /api/v1/stocktakes/{id}/items stocktake:read
 GET /api/v1/stocktakes/{id}/scans stocktake:read
 GET /api/v1/subnets ipam:read
