@@ -52,25 +52,38 @@ var (
 // and its feed ("web01 PSU2" → web01, psu2; "db01-B" → db01, b).
 func ParseOutletName(name string) (device, feed string) {
 	n := strings.TrimSpace(name)
-	switch {
-	case feedSuffix.MatchString(n):
-		m := feedSuffix.FindStringSubmatch(n)
+	if m := feedSuffix.FindStringSubmatch(n); m != nil {
 		return strings.TrimSpace(n[:len(n)-len(m[0])]), strings.ToLower(m[1] + m[2])
-	case sideSuffix.MatchString(n):
-		m := sideSuffix.FindStringSubmatch(n)
+	}
+	if m := sideSuffix.FindStringSubmatch(n); m != nil {
 		return strings.TrimSpace(n[:len(n)-len(m[0])]), strings.ToLower(m[1])
-	case numSuffix.MatchString(n):
-		m := numSuffix.FindStringSubmatch(n)
+	}
+	if m := numSuffix.FindStringSubmatch(n); m != nil {
 		return strings.TrimSpace(n[:len(n)-len(m[0])]), m[1]
 	}
 	return n, ""
 }
 
-// outletsOf returns the outlets of a power device item.
+// outletsOf returns the outlets of a power device item; no outlets are
+// nil, as after a JSON round trip.
 func outletsOf(item *IngestItem) []DeviceOutlet {
 	raw, ok := item.RawData["power"]
 	if !ok || raw == nil {
 		return nil
+	}
+	// The record's own value (HTTP ingest, stored power devices) is read
+	// directly; a queued record holds the decoded map.
+	switch p := raw.(type) {
+	case *DevicePower:
+		if p == nil || len(p.Outlets) == 0 {
+			return nil
+		}
+		return p.Outlets
+	case DevicePower:
+		if len(p.Outlets) == 0 {
+			return nil
+		}
+		return p.Outlets
 	}
 	var p DevicePower
 	b, err := json.Marshal(raw)
@@ -326,6 +339,16 @@ func (h *Handler) writePowerFeeds(ctx context.Context, orgID string, items []Ing
 // ciNameIndex finds the CIs named by outlets: by hostname or FQDN through
 // the identity index, otherwise by CI name.
 func (h *Handler) ciNameIndex(ctx context.Context, orgID string, names []string) map[string]string {
+	// Every name is looked up once (the device of several outlets).
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			unique = append(unique, n)
+		}
+	}
+	names = unique
 	out := map[string]string{}
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if ok {

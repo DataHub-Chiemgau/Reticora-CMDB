@@ -1132,7 +1132,7 @@ func checkTeamScope(ctx context.Context, tx pgx.Tx, orgID string, a *UserRoleAss
 	if a.ScopeType != "team" {
 		return nil
 	}
-	if !isUUID(a.ScopeID) {
+	if !api.IsUUID(a.ScopeID) {
 		return errTeamNotFound
 	}
 	var exists bool
@@ -1155,7 +1155,7 @@ func checkTeamScope(ctx context.Context, tx pgx.Tx, orgID string, a *UserRoleAss
 // reads the assignments again. The IdP account keeps mfa_required when
 // org_admin is revoked (WP-358: MFA stays), so no org_admin loses MFA here.
 func (r *PGRepository) RevokeRoleAssignment(ctx context.Context, orgID string, caller *identity.Principal, id string) error {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return errAssignmentNotFound
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -1233,7 +1233,7 @@ func lockRoleAssignment(ctx context.Context, tx pgx.Tx, orgID, id string) (a *Us
 // user, the role and the scope of the assignment.
 func recordRevocationAudit(ctx context.Context, tx pgx.Tx, orgID string, caller *identity.Principal, a *UserRoleAssignment, table, roleName string) error {
 	actor, actorType := "", "user"
-	if isUUID(caller.Subject) {
+	if api.IsUUID(caller.Subject) {
 		actor = caller.Subject
 	}
 	if caller.Type == identity.PrincipalTypeAPIKey {

@@ -7,7 +7,6 @@ const (
 	TypeValidationError     = "urn:reticora:problem:validation-error"
 	TypeUnauthorized        = "urn:reticora:problem:unauthorized"
 	TypeForbidden           = "urn:reticora:problem:forbidden"
-	TypeEntitlementLimit    = "urn:reticora:problem:entitlement-limit"
 	TypeNotFound            = "urn:reticora:problem:not-found"
 	TypeConflict            = "urn:reticora:problem:conflict"
 	TypeIdempotencyMismatch = "urn:reticora:problem:idempotency-mismatch"
@@ -32,28 +31,6 @@ func Unauthorized(w http.ResponseWriter, r *http.Request, detail string) {
 		Type:     TypeUnauthorized,
 		Title:    "Unauthorized",
 		Status:   http.StatusUnauthorized,
-		Detail:   detail,
-		Instance: r.URL.Path,
-	})
-}
-
-// Forbidden returns a 403 problem.
-func Forbidden(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, &ProblemDetail{
-		Type:     TypeForbidden,
-		Title:    "Forbidden",
-		Status:   http.StatusForbidden,
-		Detail:   detail,
-		Instance: r.URL.Path,
-	})
-}
-
-// EntitlementLimit returns a 403 entitlement-limit problem.
-func EntitlementLimit(w http.ResponseWriter, r *http.Request, detail string) {
-	RespondProblem(w, &ProblemDetail{
-		Type:     TypeEntitlementLimit,
-		Title:    "Entitlement Limit Exceeded",
-		Status:   http.StatusForbidden,
 		Detail:   detail,
 		Instance: r.URL.Path,
 	})

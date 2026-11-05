@@ -88,6 +88,12 @@ type FieldReader interface {
 	Get(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error)
 }
 
+// decisionReader reads a field without its effective value, which the
+// decision does not use (PGRepository).
+type decisionReader interface {
+	getForDecision(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error)
+}
+
 var decisionFailures atomic.Int64
 
 // DecisionFailures returns how many decisions failed closed because the
@@ -122,7 +128,11 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 	var fv *FieldValue
 	if reader != nil {
 		var err error
-		fv, err = reader.Get(ctx, w.OrganizationID, w.CIID, w.Field)
+		if dr, ok := reader.(decisionReader); ok {
+			fv, err = dr.getForDecision(ctx, w.OrganizationID, w.CIID, w.Field)
+		} else {
+			fv, err = reader.Get(ctx, w.OrganizationID, w.CIID, w.Field)
+		}
 		switch {
 		case errors.Is(err, ErrNotFound):
 			fv = nil

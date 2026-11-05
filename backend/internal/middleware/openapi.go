@@ -425,9 +425,9 @@ func (v *OpenAPIValidator) writeDeprecation(w http.ResponseWriter, r *http.Reque
 	d, ok := v.deprecated[routeKey(r.Method, path)]
 	if !ok {
 		for key, candidate := range v.deprecated {
-			parts := strings.SplitN(key, " ", 2)
-			if parts[0] == r.Method && routePatternMatches(parts[1], path) {
-				d, template, ok = candidate, parts[1], true
+			method, candidateTemplate, _ := strings.Cut(key, " ")
+			if method == r.Method && routePatternMatches(candidateTemplate, path) {
+				d, template, ok = candidate, candidateTemplate, true
 				break
 			}
 		}
@@ -600,14 +600,14 @@ func (v *OpenAPIValidator) lookup(method, path string) (RouteSpec, bool) {
 	}
 	// Of several matching templates the one with the fewest placeholders
 	// wins (/cis/search before /cis/{id}), as in the router.
-	best, bestKey, found := RouteSpec{}, "", false
+	best, bestTemplate, found := RouteSpec{}, "", false
 	for key, spec := range v.routes {
-		parts := strings.SplitN(key, " ", 2)
-		if len(parts) != 2 || parts[0] != method || !routePatternMatches(parts[1], cleanPath) {
+		keyMethod, template, ok := strings.Cut(key, " ")
+		if !ok || keyMethod != method || !routePatternMatches(template, cleanPath) {
 			continue
 		}
-		if !found || moreSpecific(parts[1], strings.SplitN(bestKey, " ", 2)[1]) {
-			best, bestKey, found = spec, key, true
+		if !found || moreSpecific(template, bestTemplate) {
+			best, bestTemplate, found = spec, template, true
 		}
 	}
 	return best, found
@@ -616,14 +616,19 @@ func (v *OpenAPIValidator) lookup(method, path string) (RouteSpec, bool) {
 // moreSpecific reports whether template a is more specific than b: the
 // first segment where one is literal and the other a placeholder decides.
 func moreSpecific(a, b string) bool {
-	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
-	for i := range min(len(as), len(bs)) {
-		ap, bp := isPathPlaceholder(as[i]), isPathPlaceholder(bs[i])
+	as, bs := a, b
+	for {
+		aSegment, aRest, aMore := strings.Cut(as, "/")
+		bSegment, bRest, bMore := strings.Cut(bs, "/")
+		ap, bp := isPathPlaceholder(aSegment), isPathPlaceholder(bSegment)
 		if ap != bp {
 			return bp
 		}
+		if !aMore || !bMore {
+			return a < b
+		}
+		as, bs = aRest, bRest
 	}
-	return a < b
 }
 
 func configuredSpecPath() string {
@@ -698,26 +703,23 @@ func isJSONMediaType(header string) bool {
 	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
+// routePatternMatches walks the segments of both cleaned paths without
+// allocating: every segment must be a placeholder or equal, and both must
+// have the same number of segments.
 func routePatternMatches(pattern, path string) bool {
-	pattern = cleanRoutePath(pattern)
-	path = cleanRoutePath(path)
-	patternParts := strings.Split(strings.Trim(pattern, "/"), "/")
-	pathParts := strings.Split(strings.Trim(path, "/"), "/")
-	if pattern == "/" && path == "/" {
-		return true
-	}
-	if len(patternParts) != len(pathParts) {
-		return false
-	}
-	for i := range patternParts {
-		if isPathPlaceholder(patternParts[i]) {
-			continue
-		}
-		if patternParts[i] != pathParts[i] {
+	pattern = strings.Trim(cleanRoutePath(pattern), "/")
+	path = strings.Trim(cleanRoutePath(path), "/")
+	for {
+		patternSegment, patternRest, patternMore := strings.Cut(pattern, "/")
+		pathSegment, pathRest, pathMore := strings.Cut(path, "/")
+		if patternMore != pathMore || (!isPathPlaceholder(patternSegment) && patternSegment != pathSegment) {
 			return false
 		}
+		if !patternMore {
+			return true
+		}
+		pattern, path = patternRest, pathRest
 	}
-	return true
 }
 
 func isPathPlaceholder(segment string) bool {

@@ -365,7 +365,7 @@ func (h *Handler) RecordCollectorJobStatus(ctx context.Context, orgID, collector
 	if err != nil {
 		return nil, err
 	}
-	if !isUUIDText(rep.JobID) {
+	if !api.IsUUID(rep.JobID) {
 		return nil, errors.New("not found")
 	}
 	own := JobOfCollector(collectorID)

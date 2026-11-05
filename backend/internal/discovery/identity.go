@@ -711,7 +711,7 @@ func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string)
 	}
 	types := map[string]ResolvedType{}
 	for _, name := range names {
-		if isUUID(name) {
+		if api.IsUUID(name) {
 			types[name] = ResolvedType{ID: name, Active: true}
 			continue
 		}
@@ -760,40 +760,21 @@ func (h *Handler) identityCandidates(ctx context.Context, orgID string, item *In
 	if err != nil {
 		return nil, fmt.Errorf("identity candidates: %w", err)
 	}
+	if len(ids) == 0 {
+		return make([]ci.Item, 0), nil
+	}
 	// One read for all candidates (NFR-03), in the order of the index query.
-	if reader, ok := h.ciRepo.(ci.BatchReader); ok && len(ids) > 0 {
-		items, err := reader.GetByIDs(ctx, orgID, ids)
-		if err != nil {
-			return nil, fmt.Errorf("load candidates: %w", err)
-		}
-		byID := make(map[string]ci.Item, len(items))
-		for i := range items {
-			byID[items[i].ID] = items[i]
-		}
-		out := make([]ci.Item, 0, len(ids))
-		for _, id := range ids {
-			item, ok := byID[id]
-			if !ok {
-				return nil, fmt.Errorf("load candidate %s: not found", id)
-			}
-			out = append(out, item)
-		}
-		return out, nil
+	out, err := h.loadCandidates(ctx, orgID, [][]string{ids})
+	if err != nil {
+		return nil, err
 	}
-	out := make([]ci.Item, 0, len(ids))
-	for _, id := range ids {
-		item, err := h.ciRepo.GetByID(ctx, orgID, id)
-		if err != nil {
-			return nil, fmt.Errorf("load candidate %s: %w", id, err)
-		}
-		out = append(out, *item)
-	}
-	return out, nil
+	return out[0], nil
 }
 
 // neighborCandidates returns the CIs topology neighbors can resolve to. A
 // neighbor many records of the batch report (the switch of a rack) is
-// looked up once (WP-608, NFR-03).
+// looked up once (WP-608, NFR-03), and the CIs are read with one batch
+// read where the repository has one.
 func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []IngestItem) []ci.Item {
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if !ok {
@@ -802,7 +783,7 @@ func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []
 	}
 	seen := map[string]bool{}
 	queried := map[string]bool{}
-	var out []ci.Item
+	var ids []string
 	for i := range items {
 		for _, rel := range items[i].Relationships {
 			q := IdentityQuery{ManagementIP: rel.TargetIP}
@@ -816,20 +797,39 @@ func (h *Handler) neighborCandidates(ctx context.Context, orgID string, items []
 			if queried[key] {
 				continue
 			}
-			ids, err := finder.IdentityCandidates(ctx, orgID, &q)
+			found, err := finder.IdentityCandidates(ctx, orgID, &q)
 			if err != nil {
 				continue
 			}
 			queried[key] = true
-			for _, id := range ids {
-				if seen[id] {
-					continue
-				}
-				seen[id] = true
-				if c, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
-					out = append(out, *c)
+			for _, id := range found {
+				if !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
 				}
 			}
+		}
+	}
+	var out []ci.Item
+	if reader, ok := h.ciRepo.(ci.BatchReader); ok && len(ids) > 0 {
+		if read, err := reader.GetByIDs(ctx, orgID, ids); err == nil {
+			byID := make(map[string]ci.Item, len(read))
+			for i := range read {
+				byID[read[i].ID] = read[i]
+			}
+			for _, id := range ids {
+				if c, ok := byID[id]; ok {
+					out = append(out, c)
+				}
+			}
+			return out
+		}
+	}
+	// Without a batch read, or when it fails, CI by CI; a CI that cannot
+	// be read is skipped.
+	for _, id := range ids {
+		if c, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
+			out = append(out, *c)
 		}
 	}
 	return out

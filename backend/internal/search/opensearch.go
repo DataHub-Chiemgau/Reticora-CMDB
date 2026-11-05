@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -282,7 +283,7 @@ func buildOpenSearchQuery(q *Query, scope *database.TenantScope) (map[string]any
 		}
 		filters = append(filters, map[string]any{"bool": map[string]any{
 			"should": []any{
-				map[string]any{"terms": map[string]any{field: nonNil(set.IDs())}},
+				map[string]any{"terms": map[string]any{field: api.NonNilSlice(set.IDs())}},
 				map[string]any{"bool": map[string]any{"must_not": map[string]any{"exists": map[string]any{"field": field}}}},
 			},
 			"minimum_should_match": 1,
@@ -636,13 +637,6 @@ func visibleTo(scope *database.TenantScope, orgID string, doc *Document) bool {
 		}
 	}
 	return true
-}
-
-func nonNil(ids []string) []string {
-	if ids == nil {
-		return []string{}
-	}
-	return ids
 }
 
 func (b *OpenSearchBackend) auth(req *http.Request) {

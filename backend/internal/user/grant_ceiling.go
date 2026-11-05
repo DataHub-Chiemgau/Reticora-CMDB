@@ -98,7 +98,7 @@ type targetRole struct {
 // readStandardRole reads a standard role (table role) of the organization;
 // found is false when there is none.
 func readStandardRole(ctx context.Context, tx pgx.Tx, orgID, roleID string) (role *targetRole, found bool, err error) {
-	if !isUUID(roleID) {
+	if !api.IsUUID(roleID) {
 		return nil, false, nil
 	}
 	role = &targetRole{}
@@ -123,7 +123,7 @@ func readStandardRole(ctx context.Context, tx pgx.Tx, orgID, roleID string) (rol
 // readCustomRole reads a custom role of the organization; found is false when
 // there is none.
 func readCustomRole(ctx context.Context, tx pgx.Tx, orgID, roleID string) (role *targetRole, found bool, err error) {
-	if !isUUID(roleID) {
+	if !api.IsUUID(roleID) {
 		return nil, false, nil
 	}
 	role = &targetRole{Scope: "org"}
@@ -153,7 +153,7 @@ func toPermissions(keys []string) []identity.Permission {
 // siteClient returns the client of a site of the organization that the caller
 // can read (RLS); "" when there is none.
 func siteClient(ctx context.Context, tx pgx.Tx, orgID, siteID string) (string, error) {
-	if !isUUID(siteID) {
+	if !api.IsUUID(siteID) {
 		return "", nil
 	}
 	var client string
@@ -233,7 +233,7 @@ func checkScopeTarget(ctx context.Context, tx pgx.Tx, orgID, scopeType, scopeID 
 	var exists bool
 	switch scopeType {
 	case "client":
-		if isUUID(scopeID) {
+		if api.IsUUID(scopeID) {
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM client WHERE id = $1 AND organization_id = $2)`,
 				scopeID, orgID).Scan(&exists); err != nil {
 				return fmt.Errorf("check client of the scope: %w", err)
@@ -266,7 +266,7 @@ func validateAssignmentScope(a *UserRoleAssignment) error {
 			return &api.FieldError{Field: "scope_id", Message: "an organization-wide assignment has no scope_id", Status: 422}
 		}
 	case "client", "site":
-		if !isUUID(a.ScopeID) {
+		if !api.IsUUID(a.ScopeID) {
 			return &api.FieldError{Field: "scope_id", Message: "scope_id must name the " + a.ScopeType, Status: 422}
 		}
 	case "team":

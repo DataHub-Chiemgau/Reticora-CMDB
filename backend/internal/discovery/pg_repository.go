@@ -1215,7 +1215,7 @@ func (r *PGRepository) NeighborReporters(ctx context.Context, orgID string, keys
 				WHERE lower(n->>'remote_ip') = ANY($2::text[])
 				OR translate(lower(n->>'remote_mac'), ':-.', '') = ANY($3::text[])
 				OR lower(n->>'remote_hostname') = ANY($4::text[]))
-			ORDER BY c.created_at, c.id`, orgID, nonNil(keys.IPs), nonNil(keys.MACs), nonNil(keys.Hostnames))
+			ORDER BY c.created_at, c.id`, orgID, api.NonNilSlice(keys.IPs), api.NonNilSlice(keys.MACs), api.NonNilSlice(keys.Hostnames))
 		if err != nil {
 			return err
 		}
@@ -1233,13 +1233,6 @@ func (r *PGRepository) NeighborReporters(ctx context.Context, orgID string, keys
 }
 
 // nonNil is list, or an empty list for nil (an empty array, not NULL).
-func nonNil(list []string) []string {
-	if list == nil {
-		return []string{}
-	}
-	return list
-}
-
 // DiscoveryEdge finds the edge of a type between two CIs with an index
 // lookup instead of listing every edge of the source (WP-205): a core switch
 // with thousands of neighbours is re-confirmed without a scan or a cap.

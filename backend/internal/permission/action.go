@@ -159,7 +159,7 @@ type CreatorScope struct {
 // Standard roles of IdP groups do not count: the groups of the session are
 // not stored. Nothing of it is stored in the job parameters.
 func (r *FieldResolver) PolicyForCreator(ctx context.Context, users CreatorStatus, orgID, userID string, scope *CreatorScope) (*FieldPolicy, error) {
-	if users == nil || !isUUID(userID) {
+	if users == nil || !api.IsUUID(userID) {
 		return nil, ErrCreatorInactive
 	}
 	active, err := users.UserActive(ctx, orgID, userID)

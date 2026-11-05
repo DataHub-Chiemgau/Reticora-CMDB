@@ -60,7 +60,7 @@ func walkOutlets(g *gosnmp.GoSNMP) (outlets []plugins.DeviceOutlet, pdu bool) {
 		for i := range names {
 			idx = append(idx, i)
 		}
-		sortInts(idx)
+		slices.Sort(idx)
 		out := make([]plugins.DeviceOutlet, 0, len(idx))
 		for _, i := range idx {
 			name := strings.TrimSpace(names[i])
@@ -337,14 +337,6 @@ func isDefaultOutletName(name string) bool {
 		return true
 	}
 	return n == ""
-}
-
-func sortInts(a []int) {
-	for i := 1; i < len(a); i++ {
-		for j := i; j > 0 && a[j] < a[j-1]; j-- {
-			a[j], a[j-1] = a[j-1], a[j]
-		}
-	}
 }
 
 func (p *Plugin) port() int {

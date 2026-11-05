@@ -3,7 +3,6 @@ package wmi
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
@@ -83,15 +82,14 @@ func New(opts ...Option) *Plugin {
 }
 
 // newClient returns a client that verifies with cfg. It follows no
-// redirects: a redirect could send the Basic credentials to plain HTTP.
+// redirects (plugins.NewTLSClient): a redirect could send the Basic
+// credentials to plain HTTP.
 func (p *Plugin) newClient(cfg *tls.Config) *http.Client {
 	timeout := p.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	client := plugins.NewTLSClient(timeout, cfg)
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return client
+	return plugins.NewTLSClient(timeout, cfg)
 }
 
 // clientFor returns the HTTP client whose TLS verification applies to target.
@@ -125,14 +123,19 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	var results []plugins.Result
 	var wg sync.WaitGroup
 
+feed:
 	for _, target := range targets {
 		if ctx.Err() != nil {
 			break
 		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break feed
+		}
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			conn, err := net.DialTimeout("tcp", net.JoinHostPort(t, strconv.Itoa(winRMHTTPSPort)), timeout)
@@ -406,11 +409,7 @@ func buildWSManRequest(to, wmiClass, action, messageID, body string) string {
 
 // newMessageID returns a fresh wsa:MessageID (uuid: plus a random UUID).
 func newMessageID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	return fmt.Sprintf("uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+	return "uuid:" + plugins.NewRecordID()
 }
 
 // xmlText escapes s for XML character data.

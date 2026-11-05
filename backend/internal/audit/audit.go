@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1188,7 +1187,5 @@ func (f *ListFilter) where(where string, args []any) (clause string, values []an
 	return where, args
 }
 
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
 // IsUUID reports whether s is a UUID (resource and actor ids of entries).
-func IsUUID(s string) bool { return uuidPattern.MatchString(s) }
+func IsUUID(s string) bool { return api.IsUUID(s) }

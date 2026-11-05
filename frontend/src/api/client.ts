@@ -685,7 +685,7 @@ export async function fetchAllPages<T>(path: string, params: object = {}): Promi
   }
 }
 
-function buildQuery(params: object) {
+export function buildQuery(params: object) {
   const query = new URLSearchParams();
   Object.entries(params as Record<string, string | number | boolean | undefined>).forEach(
     ([key, value]) => {

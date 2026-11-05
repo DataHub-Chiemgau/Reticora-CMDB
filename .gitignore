@@ -7,6 +7,8 @@ frontend/dist/
 backend/bin/
 /backend/agent
 /backend/server
+/server
+frontend/tsconfig.tsbuildinfo
 
 # Test artifacts
 frontend/test-results/

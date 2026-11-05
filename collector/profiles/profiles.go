@@ -246,10 +246,13 @@ func (r *Registry) VendorByMAC(mac string) (string, bool) {
 	return "", false
 }
 
+// ouiSeparators removes the separators of a MAC address or OUI prefix.
+var ouiSeparators = strings.NewReplacer(":", "", "-", "", ".", "")
+
 // normalizeOUI reduces a MAC address or OUI prefix to 6 lowercase hex digits.
 func normalizeOUI(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	value = strings.NewReplacer(":", "", "-", "", ".", "").Replace(value)
+	value = ouiSeparators.Replace(value)
 	if len(value) < 6 {
 		return ""
 	}

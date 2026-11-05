@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // OIDCConfig stores the provider connection details.
@@ -419,7 +421,7 @@ func decodeOrganization(raw json.RawMessage) (string, error) {
 		value = values[0]
 	}
 	value = strings.TrimSpace(value)
-	if !isUUID(value) {
+	if !api.IsUUID(value) {
 		return "", errors.New("identity: organization attribute is not a UUID")
 	}
 	return value, nil

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -263,7 +262,7 @@ func checkObjectGrant(g *ObjectGrant) error {
 		return fieldError("object_kind", "unknown object kind")
 	case !g.Level.Valid():
 		return fieldError("level", "level must be none, read or write")
-	case !isUUID(g.ObjectID):
+	case !api.IsUUID(g.ObjectID):
 		return fieldError("object_id", "object_id must be a UUID")
 	}
 	return nil
@@ -289,26 +288,6 @@ func countSet(values ...*string) int {
 		}
 	}
 	return n
-}
-
-// isUUID accepts the canonical 8-4-4-4-12 hex form.
-func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, r := range s {
-		switch i {
-		case 8, 13, 18, 23:
-			if r != '-' {
-				return false
-			}
-		default:
-			if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // cursorTime is the sort value of the list cursors: created_at in UTC with

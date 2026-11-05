@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -744,10 +743,8 @@ func (b *DiskBuffer) listMessageFiles() ([]os.DirEntry, error) {
 		files = append(files, entry)
 	}
 
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].Name() < files[j].Name()
-	})
-
+	// os.ReadDir returns the entries sorted by filename; the filter keeps
+	// that order.
 	return files, nil
 }
 

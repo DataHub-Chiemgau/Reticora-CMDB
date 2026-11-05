@@ -193,7 +193,7 @@ func HashInvitationToken(token string) string {
 // InvitationOrg returns the organization a token names.
 func InvitationOrg(token string) (string, bool) {
 	orgID, secret, ok := strings.Cut(strings.TrimSpace(token), ".")
-	if !ok || secret == "" || !isUUID(orgID) {
+	if !ok || secret == "" || !api.IsUUID(orgID) {
 		return "", false
 	}
 	return strings.ToLower(orgID), true
@@ -205,7 +205,7 @@ func validateInvitation(inv *Invitation) error {
 	if addr, err := mail.ParseAddress(inv.Email); err != nil || addr.Address != inv.Email {
 		return &api.FieldError{Field: "email", Message: "email must be a plain e-mail address"}
 	}
-	if !isUUID(inv.RoleID) {
+	if !api.IsUUID(inv.RoleID) {
 		return &api.FieldError{Field: "role_id", Message: "role_id must be a role id"}
 	}
 	switch inv.ScopeType {
@@ -217,7 +217,7 @@ func validateInvitation(inv *Invitation) error {
 			return &api.FieldError{Field: "scope_id", Message: "an organization-wide invitation has no scope_id"}
 		}
 	case "client", "site":
-		if !isUUID(inv.ScopeID) {
+		if !api.IsUUID(inv.ScopeID) {
 			return &api.FieldError{Field: "scope_id", Message: "scope_id must name the " + inv.ScopeType}
 		}
 	default:
@@ -444,7 +444,7 @@ func (r *PGInvitations) ListInvitations(ctx context.Context, orgID string, page 
 // principal must hold user:manage and the role's permissions in a scope
 // covering the invitation's scope (grant ceiling).
 func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, caller *identity.Principal, tokenHash string, delivery InvitationDelivery, expiresAt time.Time) (*Invitation, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrInvitationNotFound
 	}
 	var inv *Invitation
@@ -497,7 +497,7 @@ func (r *PGInvitations) RenewInvitation(ctx context.Context, orgID, id string, c
 // RevokeInvitation implements InvitationRepository: a pending or expired
 // invitation is deleted; an accepted one stays as a record.
 func (r *PGInvitations) RevokeInvitation(ctx context.Context, orgID, id string) error {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return ErrInvitationNotFound
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

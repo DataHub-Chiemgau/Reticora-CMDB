@@ -111,7 +111,7 @@ func (r *PGRepository) Create(ctx context.Context, sub *Subscription) error {
 		}
 
 		if sub.ServiceAccountID != "" {
-			visible := uuidPattern.MatchString(sub.ServiceAccountID)
+			visible := api.IsUUID(sub.ServiceAccountID)
 			if visible {
 				if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM service_account WHERE id = $1::uuid)`,
 					sub.ServiceAccountID).Scan(&visible); err != nil {

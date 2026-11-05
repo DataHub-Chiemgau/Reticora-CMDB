@@ -1,7 +1,6 @@
 package discovery
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -184,16 +183,20 @@ func (h *Handler) ProcessMessages(ctx context.Context, msgs []IngestMessage) (Bu
 		ordered[i] = i
 	}
 	sort.SliceStable(ordered, func(a, b int) bool { return msgs[ordered[a]].ObservedAt.Before(msgs[ordered[b]].ObservedAt) })
+	serialLanes := make([]int, len(msgs))
+	for i := range msgs {
+		serialLanes[i] = h.serialLane(msgs[i].lane(h.ingestLanes))
+	}
 	var total BulkIngestResponse
 	var failed []RecordError
 	for len(ordered) > 0 {
 		head := msgs[ordered[0]]
-		lane := h.serialLane(head.lane(h.ingestLanes))
+		lane := serialLanes[ordered[0]]
 		var group []IngestItem
 		var members, rest []int
 		for _, i := range ordered {
 			if msgs[i].OrganizationID == head.OrganizationID && sameScope(msgs[i].Scope, head.Scope) &&
-				h.serialLane(msgs[i].lane(h.ingestLanes)) == lane {
+				serialLanes[i] == lane {
 				item := msgs[i].item()
 				item.seq = i + 1
 				group = append(group, item)
@@ -463,10 +466,23 @@ func (r *BulkIngestResponse) finish(received, future int, err error) error {
 	return nil
 }
 
+// sameScope reports whether two scopes are equal as JSON: a nil list and a
+// pointer to a nil list are both null, an empty list is [], the ids compare
+// in order.
 func sameScope(a, b *MessageScope) bool {
-	ja, _ := json.Marshal(a)
-	jb, _ := json.Marshal(b)
-	return bytes.Equal(ja, jb)
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.UserID == b.UserID && sameScopeIDs(a.Clients, b.Clients) &&
+		sameScopeIDs(a.Sites, b.Sites) && sameScopeIDs(a.Teams, b.Teams)
+}
+
+func sameScopeIDs(a, b *[]string) bool {
+	aNull, bNull := a == nil || *a == nil, b == nil || *b == nil
+	if aNull || bNull {
+		return aNull == bNull
+	}
+	return slices.Equal(*a, *b)
 }
 
 // processSerially processes the items of one lane of an organization while
@@ -1224,8 +1240,9 @@ func (q *NATSIngestQueue) ReadinessDetail(context.Context) (any, error) {
 func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) {
 	ctx = withQueued(ctx)
 	type entry struct {
-		msg IngestMessage
-		d   ingestDelivery
+		msg  IngestMessage
+		d    ingestDelivery
+		lane int
 	}
 	var entries []entry
 	for _, d := range deliveries {
@@ -1236,7 +1253,7 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 			_ = d.Term()
 			continue
 		}
-		entries = append(entries, entry{msg, d})
+		entries = append(entries, entry{msg, d, msg.lane(h.ingestLanes)})
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].msg.ObservedAt.Before(entries[j].msg.ObservedAt) })
 
@@ -1245,11 +1262,11 @@ func consumeBatch(ctx context.Context, h *Handler, deliveries []ingestDelivery) 
 	// consumer and drain lanes join the lanes of this instance.
 	for len(entries) > 0 {
 		head := entries[0].msg
-		lane := head.lane(h.ingestLanes)
+		lane := entries[0].lane
 		var group, rest []entry
 		for i := range entries {
 			e := &entries[i]
-			if e.msg.OrganizationID == head.OrganizationID && sameScope(e.msg.Scope, head.Scope) && e.msg.lane(h.ingestLanes) == lane {
+			if e.msg.OrganizationID == head.OrganizationID && sameScope(e.msg.Scope, head.Scope) && e.lane == lane {
 				group = append(group, *e)
 			} else {
 				rest = append(rest, *e)

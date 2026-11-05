@@ -627,7 +627,7 @@ func exportTypes(rows *exportV2Rows, k *exportKeys) ([]ExportTypeV2, error) {
 			body := &ExportTypeBody{Name: t.Name, DisplayName: t.DisplayName, Icon: t.Icon, Description: t.Description,
 				Category: t.Category, IsBuiltin: t.IsBuiltin, IsActive: t.IsActive, IsLogical: t.IsLogical,
 				IsObservable: t.IsObservable, TemplateKey: t.TemplateKey, AttributeSetKeys: []string{},
-				Capabilities: t.Capabilities, AllowedRelationshipTypes: nonNil(t.AllowedRelationshipTypes),
+				Capabilities: t.Capabilities, AllowedRelationshipTypes: api.NonNilSlice(t.AllowedRelationshipTypes),
 				UISchema: t.UISchema, ComplianceRules: nonNilAny(t.ComplianceRules), DiscoveryMappings: nonNilAny(t.DiscoveryMappings)}
 			var err error
 			if body.ParentTypeKey, err = exportKey(k.types, "parent ci type", t.ParentTypeID); err != nil {
@@ -671,7 +671,7 @@ func exportAttributes(defs []AttributeDefinition, k *exportKeys) ([]ExportAttrib
 				Searchable: d.Searchable, Unique: d.Unique, UniqueScope: d.UniqueScope, Inheritable: d.Inheritable,
 				Validation: d.Validation, Computed: d.Computed, Conditional: d.Conditional,
 				ReferenceTarget: d.ReferenceTarget, Group: d.Group, Order: d.Order, Unit: d.Unit, AppliesTo: d.AppliesTo,
-				AppliesToCategories: nonNil(d.AppliesToCategories), AppliesToTypeKeys: []string{}}
+				AppliesToCategories: api.NonNilSlice(d.AppliesToCategories), AppliesToTypeKeys: []string{}}
 			for _, typeID := range d.AppliesToTypeIDs {
 				typeKey, typeErr := exportKey(k.types, "ci type", typeID)
 				if typeErr != nil {
@@ -869,7 +869,7 @@ func exportLifecycleModels(list []ExportLifecycleModelV2) []ExportLifecycleModel
 			body.States = []ExportLifecycleStateV2{}
 		}
 		for j := range body.States {
-			body.States[j].RequiredFields = nonNil(body.States[j].RequiredFields)
+			body.States[j].RequiredFields = api.NonNilSlice(body.States[j].RequiredFields)
 		}
 		slices.SortStableFunc(body.States, func(a, b ExportLifecycleStateV2) int {
 			return cmp.Or(cmp.Compare(a.SortOrder, b.SortOrder), cmp.Compare(a.Key, b.Key))
@@ -879,7 +879,7 @@ func exportLifecycleModels(list []ExportLifecycleModelV2) []ExportLifecycleModel
 			body.Transitions = []ExportLifecycleTransitionV2{}
 		}
 		for j := range body.Transitions {
-			body.Transitions[j].RequiredFields = nonNil(body.Transitions[j].RequiredFields)
+			body.Transitions[j].RequiredFields = api.NonNilSlice(body.Transitions[j].RequiredFields)
 		}
 		slices.SortStableFunc(body.Transitions, func(a, b ExportLifecycleTransitionV2) int {
 			return cmp.Or(cmp.Compare(a.FromStateKey, b.FromStateKey), cmp.Compare(a.ToStateKey, b.ToStateKey),

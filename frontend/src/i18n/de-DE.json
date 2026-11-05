@@ -415,9 +415,6 @@
       "add": "Scope anlegen",
       "enabled": "Aktiv",
       "disabled": "Inaktiv",
-      "enable": "Aktivieren",
-      "disable": "Deaktivieren",
-      "delete": "Löschen",
       "health": {
         "ok": "Letzter Lauf ok",
         "partial": "Teilweise fehlgeschlagen",
@@ -435,7 +432,6 @@
         "upload_failed": "Upload fehlgeschlagen (gepuffert)",
         "unknown": "Unbekannter Fehler"
       },
-      "edit": "Bearbeiten",
       "editNamed": "Scope {{name}} bearbeiten",
       "enableNamed": "Scope {{name}} aktivieren",
       "disableNamed": "Scope {{name}} deaktivieren",
@@ -2329,7 +2325,6 @@
       "empty": "Keine Drafts.",
       "listLabel": "Metamodell-Drafts",
       "isActive": "aktiver Draft",
-      "meta": "Änderungen: {{count}} · angelegt {{created}}",
       "chooseActive": "Als aktiven Draft wählen",
       "chooseActiveAction": "Draft {{name}} als aktiven Draft wählen",
       "discard": "Verwerfen",
@@ -2339,7 +2334,6 @@
       "discardFailed": "Der Draft konnte nicht verworfen werden.",
       "notFound": "Diesen Draft gibt es nicht.",
       "back": "Zurück zur Draft-Liste",
-      "detailMeta": "Änderungen: {{count}} · Version {{version}} · angelegt {{created}}",
       "publishedAt": "Publiziert {{at}}",
       "readOnly": "Dieser Draft ist abgeschlossen und schreibgeschützt.",
       "needsPublish": "Testen und Publizieren erfordern das Recht metamodel:publish.",

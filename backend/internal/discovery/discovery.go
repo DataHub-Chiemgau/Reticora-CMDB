@@ -800,6 +800,14 @@ func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName s
 	if h.provenance == nil || ciID == "" || fieldName == ci.LegacyTagsKey {
 		return nil
 	}
+	// The store that records several fields at once records this one
+	// without reading back the effective value, which is not used here.
+	if many, ok := h.provenance.(manyProvenance); ok {
+		if err := many.RecordDiscoveredMany(ctx, orgID, ciID, map[string]any{fieldName: value}, source, observedAt); err != nil && database.TxFailed(ctx) {
+			return err
+		}
+		return nil
+	}
 	if _, err := h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt); err != nil && database.TxFailed(ctx) {
 		return err
 	}
@@ -864,26 +872,6 @@ func (h *Handler) QueueOverrideConflict(ctx context.Context, orgID string, devic
 		return false
 	}
 	return opened
-}
-
-// isUUID reports whether value looks like a canonical UUID.
-func isUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	for i, c := range value {
-		switch i {
-		case 8, 13, 18, 23:
-			if c != '-' {
-				return false
-			}
-		default:
-			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // resolveCITypeIDs maps each item's ci_type_name, a name, key or UUID, to
@@ -1430,7 +1418,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			}
 		}
 	}
-	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
+	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, func() []ci.Item {
+		return h.neighborCandidates(ctx, orgID, processed)
+	})
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
 	// The new CIs of the batch take their feeds from the outlets of power

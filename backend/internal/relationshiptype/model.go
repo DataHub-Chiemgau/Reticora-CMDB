@@ -118,28 +118,19 @@ func ciTypeLists(source, target []string) []ciTypeList {
 	return []ciTypeList{{"allowed_source_types", source}, {"allowed_target_types", target}}
 }
 
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
-}
-
 // Validate checks the REL-01 contract of a type: a known category,
 // impact direction and cardinality; an undirected type has the impact
 // direction undirected, a directed type any other; undirected belongs to
 // the category network (REL-06, IMP-03). The database holds the same rules
 // (CHECKs of migrations 000113 and 000202).
 func (t *Type) Validate() error {
-	if !contains(Categories, t.Category) {
+	if !slices.Contains(Categories, t.Category) {
 		return fmt.Errorf("category must be one of %v", Categories)
 	}
-	if !contains(ImpactDirections, t.ImpactDirection) {
+	if !slices.Contains(ImpactDirections, t.ImpactDirection) {
 		return fmt.Errorf("impact_direction must be one of %v", ImpactDirections)
 	}
-	if !contains(Cardinalities, t.Cardinality) {
+	if !slices.Contains(Cardinalities, t.Cardinality) {
 		return fmt.Errorf("cardinality must be one of %v", Cardinalities)
 	}
 	if t.Directed == (t.ImpactDirection == ImpactUndirected) {
@@ -148,10 +139,10 @@ func (t *Type) Validate() error {
 	if t.ImpactDirection == ImpactUndirected && t.Category != "network" {
 		return fmt.Errorf("an undirected type belongs to the category network")
 	}
-	if contains(StructuralKeys, t.Key) && !t.IsSystem {
+	if slices.Contains(StructuralKeys, t.Key) && !t.IsSystem {
 		return fmt.Errorf("%s is projected from the structure tables and cannot be defined", t.Key)
 	}
-	if contains(ProjectedKeys, t.Key) {
+	if slices.Contains(ProjectedKeys, t.Key) {
 		return fmt.Errorf("%s is projected from the IPAM tables and cannot be defined", t.Key)
 	}
 	if t.IsSystem && len(t.MetadataSchema) > 0 {
@@ -366,7 +357,7 @@ func (d *AttributeDefinition) validate() (string, error) {
 	if d.Key == "" || utf8.RuneCountInString(d.Key) > maxAttributeKeyLength {
 		return "key", fmt.Errorf("key is required (at most %d characters)", maxAttributeKeyLength)
 	}
-	if contains(ReservedAttributeKeys, d.Key) {
+	if slices.Contains(ReservedAttributeKeys, d.Key) {
 		return "key", fmt.Errorf("%q is reserved for the relationship itself", d.Key)
 	}
 	if err := d.DisplayName.Validate(); err != nil {

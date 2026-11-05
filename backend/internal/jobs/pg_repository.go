@@ -123,7 +123,7 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 		}
 		maxAttempts := max(job.MaxAttempts, 1)
 		createdBy, scope := job.CreatedBy, job.Scope
-		if query, ok := sourceRows[job.RefTable]; ok && scope == nil && isUUID(job.RefID) {
+		if query, ok := sourceRows[job.RefTable]; ok && scope == nil && api.IsUUID(job.RefID) {
 			var src Scope
 			var initiator string
 			var recorded bool
@@ -195,7 +195,7 @@ func (r *PGRepository) getOne(ctx context.Context, orgID, where string, args ...
 
 // Get implements Repository.
 func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*Job, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrNotFound
 	}
 	return r.getOne(ctx, orgID, "id = $2", id)
@@ -203,7 +203,7 @@ func (r *PGRepository) Get(ctx context.Context, orgID, id string) (*Job, error) 
 
 // GetByRef implements Repository.
 func (r *PGRepository) GetByRef(ctx context.Context, orgID, refTable, refID string) (*Job, error) {
-	if !isUUID(refID) {
+	if !api.IsUUID(refID) {
 		return nil, ErrNotFound
 	}
 	return r.getOne(ctx, orgID, "ref_table = $2 AND ref_id = $3", refTable, refID)
@@ -279,7 +279,7 @@ func (r *PGRepository) ClaimNext(ctx context.Context, orgID string, kinds []stri
 // ClaimID implements Repository: the status check and the change are one
 // statement, so of two workers holding the same job only one claims it.
 func (r *PGRepository) ClaimID(ctx context.Context, orgID, id string, now time.Time) (*Job, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrNotFound
 	}
 	var out *Job
@@ -337,7 +337,7 @@ func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) 
 // to the outbox in its transaction (WP-550): a failed append rolls the
 // change back, the job stays running.
 func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []Status, u *Update) (*Job, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrNotFound
 	}
 	var out *Job
@@ -388,7 +388,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 // MarkReverted implements Repository; the check and the change are one
 // statement, so of two concurrent reverts one records it.
 func (r *PGRepository) MarkReverted(ctx context.Context, orgID, id, by string, at time.Time) (*Job, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrNotFound
 	}
 	var out *Job
@@ -476,7 +476,7 @@ func (r *PGRepository) RunningOverdue(ctx context.Context, t time.Time, limit in
 
 // surrogate is created_by as stored: a UUID surrogate, otherwise none.
 func surrogate(createdBy string) any {
-	if !isUUID(createdBy) {
+	if !api.IsUUID(createdBy) {
 		return nil
 	}
 	return createdBy
@@ -487,23 +487,4 @@ func nullJSON(raw []byte) any {
 		return nil
 	}
 	return raw
-}
-
-func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, c := range s {
-		switch i {
-		case 8, 13, 18, 23:
-			if c != '-' {
-				return false
-			}
-		default:
-			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-				return false
-			}
-		}
-	}
-	return true
 }

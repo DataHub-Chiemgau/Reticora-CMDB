@@ -554,7 +554,7 @@ func ValidateValue(def *FieldDefinition, value any) error {
 		}
 		if len(items) > 1 {
 			key := fmt.Sprint(item)
-			if uuidPattern.MatchString(key) {
+			if api.IsUUID(key) {
 				// A UUID names the same id in either case.
 				key = strings.ToLower(key)
 			}
@@ -826,9 +826,6 @@ func StoredValidation(raw []byte) *rules.Rule {
 	return legacy.AST()
 }
 
-// uuidPattern is the textual form of a UUID (any version).
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
 // checkType checks a value against its MET-11 data type.
 func checkType(dataType string, value any) error {
 	switch CanonicalType(dataType) {
@@ -925,7 +922,7 @@ func checkType(dataType string, value any) error {
 		}
 	case TypeUUID:
 		str, ok := value.(string)
-		if !ok || !uuidPattern.MatchString(str) {
+		if !ok || !api.IsUUID(str) {
 			return fmt.Errorf("expected UUID")
 		}
 	case TypeJSON:
@@ -934,7 +931,7 @@ func checkType(dataType string, value any) error {
 		// Files and references store the id of the referenced entity: a
 		// UUID, as for uuid (MET-11).
 		str, ok := value.(string)
-		if !ok || !uuidPattern.MatchString(str) {
+		if !ok || !api.IsUUID(str) {
 			return fmt.Errorf("expected the UUID of the referenced object")
 		}
 	default:

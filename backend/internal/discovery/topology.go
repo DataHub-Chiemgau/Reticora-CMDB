@@ -283,12 +283,14 @@ func hasRelationships(items []IngestItem, resolvedCIID []string) bool {
 // deriveTopology resolves and upserts topology relationships for a bulk ingest
 // batch, returning the number of relationships created. When the
 // suppressions cannot be loaded no edge is written (fail-closed, REL-03).
-func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string, existing []ci.Item) int {
+// existing returns the CIs the neighbors resolve to; it is called only past
+// the guard, so a batch without relationships reads none.
+func (h *Handler) deriveTopology(ctx context.Context, orgID string, items []IngestItem, resolvedCIID []string, existing func() []ci.Item) int {
 	if h.relRepo == nil || !hasRelationships(items, resolvedCIID) {
 		return 0
 	}
 
-	index := BuildNeighborIndex(existing)
+	index := BuildNeighborIndex(existing())
 	suppressed, err := h.suppressionChecker(ctx, orgID)
 	if err != nil {
 		slog.Error("topology skipped: suppressions not loaded", "event", "discovery.topology.failed", "organization_id", orgID, "error", err)
@@ -744,7 +746,7 @@ func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewIt
 	}
 	d := DerivedRelationship{SourceCIID: payloadString(item.Payload, "source_ci_id"), TargetCIID: payloadString(item.Payload, "target_ci_id"),
 		RelType: "connected_to", Confidence: defaultConfidence}
-	if !isUUID(d.SourceCIID) || !isUUID(d.TargetCIID) {
+	if !api.IsUUID(d.SourceCIID) || !api.IsUUID(d.TargetCIID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CIs")
 	}
 	// A CI deleted meanwhile is gone also when the edge exists already, which

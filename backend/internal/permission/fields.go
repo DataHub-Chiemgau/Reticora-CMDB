@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -519,7 +520,7 @@ func (r *FieldResolver) Resolve(ctx context.Context, p identity.Principal) (*Fie
 				return nil, err
 			}
 		}
-	case isUUID(p.Subject):
+	case api.IsUUID(p.Subject):
 		if grants, err = r.access.AccessGrants(ctx, orgID, p.Subject); err != nil {
 			return nil, err
 		}
