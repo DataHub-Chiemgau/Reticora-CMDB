@@ -16440,8 +16440,12 @@ paths:
       operationId: listInventoryItems
       summary: Manage quantity-based inventory items
       description: >-
-        The planned successor is /api/v1/consumables (E-38); the deprecation
-        follows once the successor is implemented (WP-283, WP-757).
+        Alias of GET /api/v1/consumables (E-38, E-40, WP-757): the
+        consumables in the form of a quantity item, stock_level the sum of
+        on_hand over the bins the caller sees, location_id the bin when the
+        article lies in exactly one, attributes empty. The successor is GET
+        /api/v1/consumables; the deprecation follows with WP-846 once the
+        web client no longer calls this path.
       responses:
         '200':
           description: Manage quantity-based inventory items
@@ -16451,9 +16455,11 @@ paths:
       operationId: createInventoryItems
       summary: Manage quantity-based inventory items
       description: >-
-        The planned successor is POST /api/v1/consumables (E-38); the
-        deprecation follows once the successor is implemented (WP-283,
-        WP-757).
+        Alias of POST /api/v1/consumables (E-38, E-40, WP-757): creates a
+        consumable; a stock_level > 0 is booked as a receipt into the bin
+        location_id through the movement service in the same transaction.
+        The successor is POST /api/v1/consumables; the deprecation follows
+        with WP-846 once the web client no longer calls this path.
       responses:
         '201':
           description: Manage quantity-based inventory items
@@ -16468,19 +16474,29 @@ paths:
         '422':
           description: >-
             client_id or location_id is no UUID, client_id names no client of
-            the organization, or location_id a location that is unknown, of
-            another organization or outside the caller's scope (all alike).
+            the organization, attributes are not empty (consumable keeps
+            none), stock_level is negative, stock_level > 0 comes without
+            location_id or location_id without stock_level, or location_id
+            names no bin of the article's client visible to the caller
+            (unknown, of another organization or outside the scope alike);
+            `field` names it.
 
   /api/v1/inventory/items/{id}:
     x-phase: P2
     x-feature: stock
     get:
       operationId: getInventoryItemsId
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/consumables/{id}'
       summary: Read, update or delete a quantity inventory item
       description: >-
-        The planned successor is /api/v1/consumables/{id} (E-38); the
-        deprecation follows once the successor is implemented (WP-283,
-        WP-757).
+        Deprecated (E-38, E-40, WP-757): alias of GET
+        /api/v1/consumables/{id} in the form of a quantity item (stock_level
+        the sum of on_hand over the visible bins, location_id the only bin).
+        The path answers until x-sunset with the Deprecation, Sunset and
+        successor-version Link headers.
       responses:
         '200':
           description: Read, update or delete a quantity inventory item
@@ -16490,11 +16506,16 @@ paths:
           description: The item is unknown, of another organization or outside the caller's scope.
     patch:
       operationId: updateInventoryItemsId
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/consumables/{id}'
       summary: Read, update or delete a quantity inventory item
       description: >-
-        The planned successor is /api/v1/consumables/{id} (E-38); the
-        deprecation follows once the successor is implemented (WP-283,
-        WP-757).
+        Deprecated (E-38, E-40, WP-757): alias of PATCH
+        /api/v1/consumables/{id} for name, category, unit, min_level and
+        notes. The path answers until x-sunset with the Deprecation, Sunset
+        and successor-version Link headers.
       responses:
         '200':
           description: Read, update or delete a quantity inventory item
@@ -16504,15 +16525,20 @@ paths:
           description: The item is unknown, of another organization or outside the caller's scope.
         '422':
           description: >-
-            location_id is no UUID or names a location that is unknown, of
-            another organization or outside the caller's scope (all alike).
+            location_id or attributes are given: stock moves between bins by
+            a transfer through POST /api/v1/stock-movements, and consumable
+            keeps no attributes; `field` names it.
     delete:
       operationId: deleteInventoryItemsId
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/consumables/{id}'
       summary: Read, update or delete a quantity inventory item
       description: >-
-        The planned successor is /api/v1/consumables/{id} (E-38); the
-        deprecation follows once the successor is implemented (WP-283,
-        WP-757).
+        Deprecated (E-38, E-40, WP-757): alias of DELETE
+        /api/v1/consumables/{id}. The path answers until x-sunset with the
+        Deprecation, Sunset and successor-version Link headers.
       responses:
         '204':
           description: Read, update or delete a quantity inventory item
@@ -16521,7 +16547,9 @@ paths:
         '404':
           description: The item is unknown, of another organization or outside the caller's scope.
         '409':
-          description: The item has movements in the ledger, which are kept (dependencies stock_movement, WP-274).
+          description: >-
+            The item still has stock in a bin, or it has movements in the
+            ledger, which are kept (dependencies stock_movement, WP-274).
           content:
             application/problem+json:
               schema:
@@ -17249,17 +17277,18 @@ paths:
       operationId: listStockMovements
       summary: List the movements of the ledger (append-only)
       description: >-
-        The movements of assets, consumables and quantity items under the
-        caller's scope, newest first on (occurred_at, id) with a keyset
-        cursor (WP-274). location_id matches the source or the target;
-        occurred_from and occurred_to bound occurred_at inclusively.
+        The movements of assets and consumables under the caller's scope,
+        newest first on (occurred_at, id) with a keyset cursor (WP-274).
+        location_id matches the source or the target; occurred_from and
+        occurred_to bound occurred_at inclusively. quantity_item_id is the
+        deprecated alias of consumable_id (E-40, WP-757).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - { name: asset_id, in: query, schema: { type: string, format: uuid } }
         - { name: consumable_id, in: query, schema: { type: string, format: uuid } }
-        - { name: quantity_item_id, in: query, schema: { type: string, format: uuid } }
+        - { name: quantity_item_id, in: query, deprecated: true, description: Deprecated alias of consumable_id (WP-757)., schema: { type: string, format: uuid } }
         - { name: movement_type, in: query, schema: { $ref: '#/components/schemas/MovementType' } }
         - { name: location_id, in: query, schema: { type: string, format: uuid } }
         - { name: occurred_from, in: query, schema: { type: string, format: date-time } }
@@ -17291,8 +17320,9 @@ paths:
         (exactly one of them) or transfer (two different bins) with quantity
         > 0 on its stock per bin; the consumable and then its stock rows in
         location order are locked, so opposite transfers do not deadlock and
-        no bin drops below zero. A quantity item (until the merge into
-        consumable, E-40) books the same types on its stock level. An asset
+        no bin drops below zero. quantity_item_id is the deprecated alias of
+        consumable_id since the merge of quantity_item into consumable with
+        the same ids (E-40, WP-757). An asset
         moves only by transfer to to_location_id without quantity (E-142),
         which also needs asset:move. The references are checked and
         stock.movement is written to the outbox in the same transaction; any
@@ -17321,13 +17351,12 @@ paths:
             (feature-not-entitled).
         '404':
           description: >-
-            The asset, consumable or quantity item is unknown, of another
-            organization or outside the caller's scope (all alike, TEN-04);
-            nothing is recorded.
+            The asset or consumable (also named by quantity_item_id) is
+            unknown, of another organization or outside the caller's scope
+            (all alike, TEN-04); nothing is recorded.
         '409':
           description: >-
-            The withdrawal exceeds the available stock of the bin or the stock
-            level of the quantity item (type
+            The withdrawal exceeds the available stock of the bin (type
             https://reticora.io/problems/insufficient-stock); nothing is
             recorded.
         '422':
@@ -17338,7 +17367,7 @@ paths:
             `field` names the refused field: a legacy or unknown
             movement_type, a type not booked for the object (an asset only
             transfer), none or several objects, quantity on an asset or
-            missing for a consumable or quantity item, the locations a type
+            missing for a consumable, the locations a type
             does not take, an id that is no UUID, a location that is not
             visible, no bin (consumable) or of another client, or a ticket,
             order, workflow run or document that is not visible.
@@ -17350,15 +17379,53 @@ paths:
     post:
       operationId: convertInventoryItemToAsset
       summary: Convert one unit of a quantity item into a serialized asset
+      description: >-
+        Retrieves one unit of the article (a consumable, E-40, WP-757) from
+        the bin location_id and creates the serialized asset in that bin,
+        both in one transaction through the movement service (WP-274);
+        location_id may be left out when the article lies in exactly one
+        bin. Any error rolls back asset and movement. The operation has no
+        successor and goes away with the sunset of inventory/items (E-38);
+        until then it is not deprecated on its own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset_tag]
+              properties:
+                asset_tag: { type: string }
+                serial_number: { type: string }
+                location_id: { type: string, format: uuid, description: The bin to take the unit from. }
       responses:
         '201':
           description: Serialized asset created from one unit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [asset_id, quantity_item_id, movement_id]
+                properties:
+                  asset_id: { type: string, format: uuid }
+                  quantity_item_id: { type: string, format: uuid }
+                  movement_id: { type: string, format: uuid }
+        '400':
+          description: The body is no valid JSON or asset_tag is missing.
         '401':
           description: Unauthorized
         '404':
           description: The item is unknown, of another organization or outside the caller's scope.
         '409':
-          description: No stock available to convert
+          description: >-
+            The bin holds no available unit (type
+            https://reticora.io/problems/insufficient-stock), or the asset tag
+            is taken; nothing is created.
+        '422':
+          description: >-
+            location_id is no UUID, is missing while the article lies in none
+            or several bins, or names no bin of the article's client visible
+            to the caller; `field` names it.
 
   /api/v1/search/query:
     post:
@@ -28291,10 +28358,10 @@ components:
         organization_id: { type: string, format: uuid }
         client_id: { type: string, format: uuid }
         site_id: { type: string, format: uuid }
-        item_kind: { type: string, enum: [asset, consumable, quantity_item] }
+        item_kind: { type: string, enum: [asset, consumable] }
         asset_id: { type: string, format: uuid }
         consumable_id: { type: string, format: uuid }
-        quantity_item_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid, deprecated: true, description: Never set since the merge into consumable (WP-757). }
         movement_type: { $ref: '#/components/schemas/MovementType' }
         from_location_id: { type: string, format: uuid }
         to_location_id: { type: string, format: uuid }
@@ -28319,16 +28386,14 @@ components:
         a consumable (consumable_id) receipt (only to_location_id),
         retrieval (only from_location_id), correction (exactly one of them)
         and transfer (two different bins) with quantity > 0 on its stock per
-        bin; for a quantity item (quantity_item_id, until the merge into
-        consumable, E-40) the same types with quantity > 0 on its stock
-        level. For an asset (asset_id) only transfer to to_location_id
-        without quantity.
+        bin; quantity_item_id is its deprecated alias (E-40, WP-757). For an
+        asset (asset_id) only transfer to to_location_id without quantity.
       required: [movement_type]
       properties:
-        item_kind: { type: string, enum: [asset, consumable, quantity_item] }
+        item_kind: { type: string, enum: [asset, consumable, quantity_item], description: quantity_item is the deprecated alias of consumable (WP-757). }
         asset_id: { type: string, format: uuid }
         consumable_id: { type: string, format: uuid }
-        quantity_item_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid, deprecated: true, description: Deprecated alias of consumable_id (WP-757). }
         movement_type: { $ref: '#/components/schemas/MovementType' }
         from_location_id: { type: string, format: uuid }
         to_location_id: { type: string, format: uuid }

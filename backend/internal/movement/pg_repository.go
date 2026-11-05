@@ -9,9 +9,11 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -29,8 +31,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 const movementSelectColumns = `
 	id::text, organization_id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
-	item_kind, COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''),
-	COALESCE(quantity_item_id::text, ''), movement_type,
+	item_kind, COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''), movement_type,
 	COALESCE(from_location_id::text, ''), COALESCE(to_location_id::text, ''),
 	quantity::float8, COALESCE(actor_id::text, ''), COALESCE(assignee_user_id::text, ''),
 	COALESCE(assignee_team_id::text, ''), due_at, COALESCE(reason, ''),
@@ -50,60 +51,59 @@ func canonicalMovementType(name string) (string, bool) {
 
 // normalizeMovement checks the type and the object of m and keeps only
 // its object, like migration 000242: without item_kind a movement with an
-// asset is one of the asset, one with a consumable of the consumable,
-// otherwise of the quantity item. An asset movement carries no quantity
-// (callers before WP-274 sent 1), a consumable or quantity item movement a
-// positive one. A legacy type name becomes the canonical
-// one, which m carries afterwards.
+// asset is one of the asset, otherwise of the consumable. quantity_item_id
+// (item_kind quantity_item) is the deprecated alias of consumable_id since
+// the merge of quantity_item into consumable with the same ids (E-40,
+// WP-757). An asset movement carries no quantity (callers before WP-274
+// sent 1), a consumable movement a positive one. A legacy type name
+// becomes the canonical one, which m carries afterwards.
 func normalizeMovement(m *Movement) error {
 	movementType, ok := canonicalMovementType(m.MovementType)
 	if !ok {
-		return &api.FieldError{Field: "movement_type", Message: "unknown movement_type", Status: http.StatusUnprocessableEntity}
+		return fieldError("movement_type", "unknown movement_type")
 	}
 	m.MovementType = movementType
 	if m.ItemKind == "" {
 		switch {
 		case m.AssetID != "":
 			m.ItemKind = "asset"
-		case m.ConsumableID != "":
-			m.ItemKind = "consumable"
-		default:
+		case m.ConsumableID == "" && m.QuantityItemID != "":
 			m.ItemKind = "quantity_item"
+		default:
+			m.ItemKind = "consumable"
 		}
+	}
+	if m.ItemKind == "quantity_item" {
+		if m.QuantityItemID == "" {
+			return fieldError("quantity_item_id", "quantity_item_id is required for a quantity item movement")
+		}
+		m.ItemKind, m.ConsumableID, m.itemAlias = "consumable", m.QuantityItemID, true
 	}
 	switch m.ItemKind {
 	case "asset":
 		if m.AssetID == "" {
-			return &api.FieldError{Field: "asset_id", Message: "asset_id is required for an asset movement", Status: http.StatusUnprocessableEntity}
+			return fieldError("asset_id", "asset_id is required for an asset movement")
 		}
 		m.QuantityItemID = ""
 		m.ConsumableID = ""
 		m.Quantity = nil
 	case "consumable":
 		if m.ConsumableID == "" {
-			return &api.FieldError{Field: "consumable_id", Message: "consumable_id is required for a consumable movement", Status: http.StatusUnprocessableEntity}
+			return fieldError("consumable_id", "consumable_id is required for a consumable movement")
 		}
 		m.AssetID, m.QuantityItemID = "", ""
 		if m.Quantity == nil || *m.Quantity <= 0 {
-			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
-		}
-	case "quantity_item":
-		if m.QuantityItemID == "" {
-			return &api.FieldError{Field: "quantity_item_id", Message: "quantity_item_id is required for a quantity item movement", Status: http.StatusUnprocessableEntity}
-		}
-		m.AssetID, m.ConsumableID = "", ""
-		if m.Quantity == nil || *m.Quantity <= 0 {
-			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
+			return fieldError("quantity", "quantity must be greater than 0")
 		}
 	default:
-		return &api.FieldError{Field: "item_kind", Message: "item_kind must be asset, consumable or quantity_item", Status: http.StatusUnprocessableEntity}
+		return fieldError("item_kind", "item_kind must be asset or consumable (quantity_item is the alias of consumable)")
 	}
 	return nil
 }
 
 // requireRow fails with missing when id (if set) names no row of table that
 // is visible under the caller's scope. The foreign keys of stock_movement
-// and quantity_item are checked without row level security: an object of
+// are checked without row level security: an object of
 // another organization or outside the scope passed them, an unknown one
 // failed with the constraint text, so the two could be told apart (TEN-04,
 // API-03, F-047). The check runs before the write, in its transaction.
@@ -143,35 +143,24 @@ func referenceNotFound(field string) error {
 	return &api.FieldError{Field: field, Message: "referenced object not found", Status: http.StatusUnprocessableEntity}
 }
 
-// lockObject locks the moved asset or quantity item (SELECT … FOR UPDATE,
-// which applies the select and update policies) and returns its client and,
-// for a quantity item, its stock level. An object that is unknown, of
-// another organization or outside the caller's scope is ErrAssetNotFound
-// or ErrItemNotFound.
-func lockObject(ctx context.Context, tx pgx.Tx, m *Movement) (client string, level float64, err error) {
-	if m.ItemKind == "asset" {
-		if !api.IsUUID(m.AssetID) {
-			return "", 0, ErrAssetNotFound
-		}
-		err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM asset
-			WHERE id = $1 AND organization_id = $2 FOR UPDATE`, m.AssetID, m.OrganizationID).Scan(&client)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", 0, ErrAssetNotFound
-		}
-	} else {
-		if !api.IsUUID(m.QuantityItemID) {
-			return "", 0, ErrItemNotFound
-		}
-		err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), stock_level::float8 FROM quantity_item
-			WHERE id = $1 AND organization_id = $2 FOR UPDATE`, m.QuantityItemID, m.OrganizationID).Scan(&client, &level)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", 0, ErrItemNotFound
-		}
+// lockAsset locks the moved asset (SELECT … FOR UPDATE, which applies the
+// select and update policies) and returns its client. An asset that is
+// unknown, of another organization or outside the caller's scope is
+// ErrAssetNotFound.
+func lockAsset(ctx context.Context, tx pgx.Tx, m *Movement) (string, error) {
+	if !api.IsUUID(m.AssetID) {
+		return "", ErrAssetNotFound
+	}
+	var client string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM asset
+		WHERE id = $1 AND organization_id = $2 FOR UPDATE`, m.AssetID, m.OrganizationID).Scan(&client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrAssetNotFound
 	}
 	if err != nil {
-		return "", 0, fmt.Errorf("lock moved object: %w", err)
+		return "", fmt.Errorf("lock moved object: %w", err)
 	}
-	return client, level, nil
+	return client, nil
 }
 
 // checkLocation fails with a 422 field error when id (if set) names no
@@ -220,57 +209,51 @@ func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
 	if err := normalizeMovement(m); err != nil {
 		return err
 	}
-	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	return aliasError(m, database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		return recordTx(ctx, tx, r.outbox, m)
-	})
+	}))
 }
 
 // RecordTx books a movement in tx, the transaction of the calling
-// operation (STK-04, AST-07, WP-274): the moved asset or quantity item is
-// locked (FOR UPDATE); type, object (not visible: ErrAssetNotFound or
-// ErrItemNotFound), locations (visible and of the object's client, else a
-// 422 field error) and the references ticket_id, order_id,
-// workflow_run_id and document_id (visible, else 422) are checked; the row
-// is inserted into stock_movement, whose triggers derive client and site
-// and refuse any later change; an asset with to_location_id gets it as
-// location_id (mirrored to its CIs), a quantity item its stock level
-// (receipt and correction add, transfer keeps, the others take away; a
-// shortfall is ErrInsufficientStock); a consumable is locked, checked and
-// booked on its stock per bin by consumable.ApplyBooking before the row
-// is inserted (bookConsumable, WP-756); last, stock.movement is appended
-// to the outbox (K20). Any error must abort the calling operation, which
-// rolls back movement and event together.
+// operation (STK-04, AST-07, WP-274): a moved asset is locked (FOR
+// UPDATE) and its locations are checked (visible and of the asset's
+// client, else a 422 field error); a consumable is locked, checked and
+// booked on its stock per bin by consumable.ApplyBooking before the row is
+// inserted (bookConsumable, WP-756); quantity_item_id names the consumable
+// of the same id (WP-757, ErrItemNotFound when not visible). The
+// references ticket_id, order_id, workflow_run_id and document_id are
+// checked (visible, else 422); the row is inserted into stock_movement,
+// whose triggers derive client and site and refuse any later change; an
+// asset with to_location_id gets it as location_id (mirrored to its CIs);
+// last, stock.movement is appended to the outbox (K20). Any error must
+// abort the calling operation, which rolls back movement and event
+// together.
 func RecordTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	if err := normalizeMovement(m); err != nil {
 		return err
 	}
-	return recordTx(ctx, tx, events.NewOutbox(), m)
+	return aliasError(m, recordTx(ctx, tx, events.NewOutbox(), m))
 }
 
-// lockAndCheck locks the moved asset or quantity item and checks the
-// locations (lockObject, checkLocation) and returns the stock level of a
-// quantity item; a consumable is locked, checked and booked by
+// lockAndCheck locks the moved asset and checks its locations (lockAsset,
+// checkLocation); a consumable is locked, checked and booked by
 // bookConsumable.
-func lockAndCheck(ctx context.Context, tx pgx.Tx, m *Movement) (float64, error) {
+func lockAndCheck(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	if m.ItemKind == "consumable" {
-		return 0, bookConsumable(ctx, tx, m)
+		return bookConsumable(ctx, tx, m)
 	}
-	client, level, err := lockObject(ctx, tx, m)
+	client, err := lockAsset(ctx, tx, m)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	if fromErr := checkLocation(ctx, tx, m, "from_location_id", m.FromLocationID, client); fromErr != nil {
-		return 0, fromErr
+		return fromErr
 	}
-	if toErr := checkLocation(ctx, tx, m, "to_location_id", m.ToLocationID, client); toErr != nil {
-		return 0, toErr
-	}
-	return level, nil
+	return checkLocation(ctx, tx, m, "to_location_id", m.ToLocationID, client)
 }
 
 func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement) error {
-	level, err := lockAndCheck(ctx, tx, m)
-	if err != nil {
+	if err := lockAndCheck(ctx, tx, m); err != nil {
 		return err
 	}
 	for _, ref := range []struct{ table, field, id string }{
@@ -283,27 +266,20 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 			return refErr
 		}
 	}
-	var delta float64
-	if m.ItemKind == "quantity_item" {
-		delta = stockDelta(m.MovementType, *m.Quantity)
-		if level+delta < 0 {
-			return ErrInsufficientStock
-		}
-	}
 	var clientID, siteID *string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO stock_movement (
-			organization_id, item_kind, asset_id, quantity_item_id,
+			organization_id, item_kind, asset_id, consumable_id,
 			movement_type, from_location_id, to_location_id, quantity,
 			actor_id, assignee_user_id, assignee_team_id, due_at, reason, ticket_id,
-			order_id, workflow_run_id, document_id, notes, consumable_id
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			order_id, workflow_run_id, document_id, notes
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 		RETURNING id::text, client_id::text, site_id::text, occurred_at, created_at`,
-		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.QuantityItemID),
+		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.ConsumableID),
 		m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
 		m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.AssigneeUserID), nilIfEmpty(m.AssigneeTeamID),
 		m.DueAt, nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
-		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes), nilIfEmpty(m.ConsumableID),
+		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes),
 	).Scan(&m.ID, &clientID, &siteID, &m.OccurredAt, &m.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("record movement: %w", err)
@@ -311,19 +287,9 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 	m.ClientID, m.SiteID = deref(clientID), deref(siteID)
 	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
 	entity := m.AssetID
-	switch {
-	case m.ItemKind == "consumable":
+	if m.ItemKind == "consumable" {
 		entity = m.ConsumableID
-	case m.ItemKind == "quantity_item":
-		entity = m.QuantityItemID
-		if delta != 0 {
-			if _, err = tx.Exec(ctx,
-				"UPDATE quantity_item SET stock_level = stock_level + $2 WHERE id = $1 AND organization_id = $3",
-				m.QuantityItemID, delta, m.OrganizationID); err != nil {
-				return fmt.Errorf("adjust stock level: %w", err)
-			}
-		}
-	case m.ToLocationID != "":
+	} else if m.ToLocationID != "" {
 		// The mirror trigger sets the location of every CI of the asset
 		// (asset_propagate_location); a CI outside the scope fails it with
 		// asset_location_ci_scope, which the wrapped error keeps.
@@ -338,7 +304,7 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 		}
 	}
 	if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: m.OrganizationID, Type: events.StockMovement, EntityID: entity,
-		Data: events.StockMovementData{ID: m.ID, ItemKind: m.ItemKind, AssetID: m.AssetID, QuantityItemID: m.QuantityItemID,
+		Data: events.StockMovementData{ID: m.ID, ItemKind: m.ItemKind, AssetID: m.AssetID,
 			MovementType: m.MovementType, Quantity: m.Quantity, ClientID: m.ClientID, SiteID: m.SiteID}}); err != nil {
 		return fmt.Errorf("record movement event: %w", err)
 	}
@@ -382,7 +348,8 @@ func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter *
 			add("consumable_id = ?", filter.ConsumableID)
 		}
 		if filter.QuantityItemID != "" {
-			add("quantity_item_id = ?", filter.QuantityItemID)
+			// The deprecated alias of consumable_id (WP-757).
+			add("consumable_id = ?", filter.QuantityItemID)
 		}
 		if filter.MovementType != "" {
 			movementType, _ := canonicalMovementType(filter.MovementType)
@@ -466,27 +433,33 @@ func MovementPage(rows []Movement, total int, page api.PaginationParams) api.Lis
 	return list
 }
 
-const itemSelectColumns = `
-	id::text, organization_id::text, COALESCE(client_id::text, ''),
-	COALESCE(sku, ''), name, category, unit, stock_level, min_level,
-	COALESCE(location_id::text, ''), COALESCE(notes, ''), attributes,
-	created_at, updated_at
-`
+// itemSelect reads the articles of the alias inventory/items from
+// consumable (E-40, WP-757): stock_level is the sum of on_hand over the
+// bins the caller sees (stock_level_isolation), location_id the bin when
+// there is exactly one such row.
+const itemSelect = `SELECT c.id::text, c.organization_id::text, COALESCE(c.client_id::text, ''),
+	COALESCE(c.sku, ''), c.name, c.category, c.unit,
+	COALESCE(s.on_hand, 0)::float8, c.min_level::float8, COALESCE(s.bin, ''), COALESCE(c.notes, ''),
+	c.created_at, c.updated_at
+	FROM consumable c
+	LEFT JOIN LATERAL (SELECT sum(l.on_hand) AS on_hand,
+	                          CASE WHEN count(*) = 1 THEN min(l.location_id::text) END AS bin
+	                     FROM stock_level l
+	                    WHERE l.consumable_id = c.id AND l.organization_id = c.organization_id) s ON true`
 
-// ListItems returns quantity items.
+// ListItems returns the articles of the alias, ordered by name.
 func (r *PGRepository) ListItems(ctx context.Context, orgID string, page api.PaginationParams) ([]QuantityItem, int, error) {
 	var out []QuantityItem
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
-			"SELECT COUNT(*) FROM quantity_item WHERE organization_id = $1", orgID).Scan(&total); err != nil {
-			return fmt.Errorf("count quantity items: %w", err)
+			"SELECT COUNT(*) FROM consumable WHERE organization_id = $1", orgID).Scan(&total); err != nil {
+			return fmt.Errorf("count inventory items: %w", err)
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM quantity_item WHERE organization_id = $1 ORDER BY name ASC LIMIT $2 OFFSET $3",
-			itemSelectColumns), orgID, page.Limit, page.Offset)
+		rows, err := tx.Query(ctx, itemSelect+" WHERE c.organization_id = $1 ORDER BY c.name ASC, c.id LIMIT $2 OFFSET $3",
+			orgID, page.Limit, page.Offset)
 		if err != nil {
-			return fmt.Errorf("list quantity items: %w", err)
+			return fmt.Errorf("list inventory items: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
@@ -501,153 +474,168 @@ func (r *PGRepository) ListItems(ctx context.Context, orgID string, page api.Pag
 	return out, total, err
 }
 
-// GetItem returns one quantity item.
+// getItem reads the article id in tx; an invisible one is ErrItemNotFound.
+func getItem(ctx context.Context, tx pgx.Tx, orgID, id string) (*QuantityItem, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrItemNotFound
+	}
+	item, err := scanItem(tx.QueryRow(ctx, itemSelect+" WHERE c.id = $1 AND c.organization_id = $2", id, orgID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrItemNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get inventory item: %w", err)
+	}
+	return item, nil
+}
+
+// GetItem returns one article of the alias.
 func (r *PGRepository) GetItem(ctx context.Context, orgID, id string) (*QuantityItem, error) {
 	var out *QuantityItem
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		item, err := scanItem(tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT %s FROM quantity_item WHERE id = $1 AND organization_id = $2",
-			itemSelectColumns), id, orgID))
-		if err != nil {
-			if err == pgx.ErrNoRows {
-				return ErrItemNotFound
-			}
-			return fmt.Errorf("get quantity item: %w", err)
-		}
-		out = item
-		return nil
+		var err error
+		out, err = getItem(ctx, tx, orgID, id)
+		return err
 	})
 	return out, err
 }
 
-// CreateItem inserts a quantity item. A location that is unknown, of another
-// organization or outside the caller's scope is a 422 field error; a client
-// outside the scope is refused by the policy of quantity_item, an unknown
-// one or one of another organization by its composite foreign key.
+// CreateItem inserts the article into consumable and books a stock_level
+// > 0 as a receipt into the bin location_id through the movement service
+// in the same transaction (checkNewItem, WP-757); a location that is no
+// visible bin of the article's client is 422 on location_id. A client
+// outside the scope is refused by the policy of consumable, an unknown one
+// or one of another organization by its composite foreign key.
 func (r *PGRepository) CreateItem(ctx context.Context, item *QuantityItem) error {
+	if err := checkNewItem(item); err != nil {
+		return err
+	}
 	if nilIfEmpty(item.ClientID) != nil {
 		if err := api.RequireUUID("client_id", item.ClientID); err != nil {
 			return err
 		}
 	}
 	return database.WithRequestTenant(ctx, r.pool, item.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if item.Attributes == nil {
-			item.Attributes = map[string]any{}
+		if item.Category == "" {
+			item.Category = "general"
 		}
-		if err := requireRow(ctx, tx, "location", item.OrganizationID, item.LocationID, locationNotFound("location_id")); err != nil {
-			return err
+		if item.Unit == "" {
+			item.Unit = "pcs"
 		}
-		category := item.Category
-		if category == "" {
-			category = "general"
-		}
-		unit := item.Unit
-		if unit == "" {
-			unit = "pcs"
-		}
-		return tx.QueryRow(ctx, `
-			INSERT INTO quantity_item (
-				organization_id, client_id, sku, name, category, unit,
-				stock_level, min_level, location_id, notes, attributes
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		item.Attributes = map[string]any{}
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO consumable (organization_id, client_id, sku, name, category, unit, min_level, notes)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			RETURNING id::text, created_at, updated_at`,
-			item.OrganizationID, nilIfEmpty(item.ClientID), nilIfEmpty(item.SKU),
-			item.Name, category, unit, item.StockLevel, item.MinLevel,
-			nilIfEmpty(item.LocationID), nilIfEmpty(item.Notes), item.Attributes,
-		).Scan(&item.ID, &item.CreatedAt, &item.UpdatedAt)
+			item.OrganizationID, nilIfEmpty(item.ClientID), nilIfEmpty(item.SKU), item.Name, item.Category, item.Unit,
+			item.MinLevel, nilIfEmpty(item.Notes),
+		).Scan(&item.ID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return fmt.Errorf("create inventory item: %w", err)
+		}
+		item.CreatedAt, item.UpdatedAt = item.CreatedAt.UTC(), item.UpdatedAt.UTC()
+		if item.StockLevel == 0 {
+			return nil
+		}
+		return asLocationField(recordTx(ctx, tx, r.outbox, receiptOf(item)))
 	})
 }
 
-// UpdateItem modifies a quantity item (metadata only; stock levels change via
-// movements so the level stays auditable).
+// UpdateItem modifies the metadata of an article (checkItemUpdate): stock
+// changes only through movements, so it stays auditable.
 func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req UpdateItemRequest) (*QuantityItem, error) {
+	if err := checkItemUpdate(&req); err != nil {
+		return nil, err
+	}
 	var out *QuantityItem
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if req.LocationID != nil {
-			if err := requireRow(ctx, tx, "location", orgID, *req.LocationID, locationNotFound("location_id")); err != nil {
-				return err
-			}
+		if !api.IsUUID(id) {
+			return ErrItemNotFound
 		}
 		sets := []string{}
 		args := []any{id, orgID}
-		pos := 3
+		set := func(column string, value any) {
+			args = append(args, value)
+			sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+		}
 		if req.Name != nil {
-			sets = append(sets, fmt.Sprintf("name = $%d", pos))
-			args = append(args, *req.Name)
-			pos++
+			set("name", *req.Name)
 		}
 		if req.Category != nil {
-			sets = append(sets, fmt.Sprintf("category = $%d", pos))
-			args = append(args, *req.Category)
-			pos++
+			set("category", *req.Category)
 		}
 		if req.Unit != nil {
-			sets = append(sets, fmt.Sprintf("unit = $%d", pos))
-			args = append(args, *req.Unit)
-			pos++
+			set("unit", *req.Unit)
 		}
 		if req.MinLevel != nil {
-			sets = append(sets, fmt.Sprintf("min_level = $%d", pos))
-			args = append(args, *req.MinLevel)
-			pos++
-		}
-		if req.LocationID != nil {
-			sets = append(sets, fmt.Sprintf("location_id = $%d", pos))
-			args = append(args, nilIfEmpty(*req.LocationID))
-			pos++
+			set("min_level", *req.MinLevel)
 		}
 		if req.Notes != nil {
-			sets = append(sets, fmt.Sprintf("notes = $%d", pos))
-			args = append(args, nilIfEmpty(*req.Notes))
-			pos++
+			set("notes", nilIfEmpty(*req.Notes))
 		}
-		if req.Attributes != nil {
-			sets = append(sets, fmt.Sprintf("attributes = $%d", pos))
-			args = append(args, req.Attributes)
-		}
-		if len(sets) == 0 {
-			item, err := scanItem(tx.QueryRow(ctx, fmt.Sprintf(
-				"SELECT %s FROM quantity_item WHERE id = $1 AND organization_id = $2",
-				itemSelectColumns), id, orgID))
+		if len(sets) > 0 {
+			tag, err := tx.Exec(ctx, "UPDATE consumable SET "+strings.Join(sets, ", ")+", updated_at = now() WHERE id = $1 AND organization_id = $2",
+				args...)
 			if err != nil {
-				if err == pgx.ErrNoRows {
-					return ErrItemNotFound
-				}
-				return err
+				return fmt.Errorf("update inventory item: %w", err)
 			}
-			out = item
-			return nil
-		}
-		item, err := scanItem(tx.QueryRow(ctx, fmt.Sprintf(
-			"UPDATE quantity_item SET %s WHERE id = $1 AND organization_id = $2 RETURNING %s",
-			strings.Join(sets, ", "), itemSelectColumns), args...))
-		if err != nil {
-			if err == pgx.ErrNoRows {
+			if tag.RowsAffected() == 0 {
 				return ErrItemNotFound
 			}
-			return fmt.Errorf("update quantity item: %w", err)
 		}
-		out = item
-		return nil
+		var err error
+		out, err = getItem(ctx, tx, orgID, id)
+		return err
 	})
 	return out, err
 }
 
-// DeleteItem removes a quantity item. One kept by movements of the ledger
-// (RESTRICT, WP-744) is ErrHasMovements.
+// DeleteItem removes the article like DELETE /api/v1/consumables/{id}
+// (consumable.PGRepository.Delete): stock in a bin keeps it
+// (consumable.ErrHasStock), movements of the ledger as well (RESTRICT,
+// ErrHasMovements).
 func (r *PGRepository) DeleteItem(ctx context.Context, orgID, id string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		cmd, err := tx.Exec(ctx,
-			"DELETE FROM quantity_item WHERE id = $1 AND organization_id = $2", id, orgID)
-		if IsLedgerReference(err) {
-			return ErrHasMovements
-		}
+	err := consumable.NewPGRepository(r.pool).Delete(ctx, orgID, id)
+	var pgErr *pgconn.PgError
+	switch {
+	case IsLedgerReference(err):
+		return ErrHasMovements
+	case errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.TableName == "stock_level":
+		// A row in a bin the caller cannot see (RESTRICT of stock_level).
+		return consumable.ErrHasStock
+	}
+	return asItemError(err)
+}
+
+// ConvertItem converts one unit of the article into a serialized asset in
+// one transaction (WP-757, E-38): the bin is conv.LocationID or the only
+// bin of the article (consumable.OnlyBin, else 422 on location_id); the
+// asset is created in that bin through assets, which joins the transaction
+// (database.ContextWithTx), and the retrieval of one unit is booked
+// through the movement service. Any error, a shortfall
+// (ErrInsufficientStock) included, rolls back asset and movement.
+func (r *PGRepository) ConvertItem(ctx context.Context, conv *Conversion, assets AssetCreator) error {
+	return database.WithRequestTenant(ctx, r.pool, conv.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		item, err := getItem(ctx, tx, conv.OrganizationID, conv.ItemID)
 		if err != nil {
-			return fmt.Errorf("delete quantity item: %w", err)
+			return err
 		}
-		if cmd.RowsAffected() == 0 {
-			return ErrItemNotFound
+		bin := conv.LocationID
+		if bin == "" {
+			if bin, err = consumable.OnlyBin(ctx, tx, conv.OrganizationID, conv.ItemID); err != nil {
+				return asItemError(err)
+			}
 		}
+		assetID, err := assets.Create(database.ContextWithTx(ctx, tx), &AssetRef{OrganizationID: conv.OrganizationID,
+			ClientID: item.ClientID, AssetTag: conv.AssetTag, Name: item.Name, Category: "hardware", LocationID: bin,
+			SerialNumber: conv.SerialNumber})
+		if err != nil {
+			return err
+		}
+		m := retrievalOf(conv, bin, assetID)
+		if err = recordTx(ctx, tx, r.outbox, m); err != nil {
+			return asItemError(asLocationField(err))
+		}
+		conv.AssetID, conv.Movement = assetID, m
 		return nil
 	})
 }
@@ -660,7 +648,7 @@ func scanMovement(scanner movementScanner) (*Movement, error) {
 	m := &Movement{}
 	if err := scanner.Scan(
 		&m.ID, &m.OrganizationID, &m.ClientID, &m.SiteID, &m.ItemKind, &m.AssetID,
-		&m.ConsumableID, &m.QuantityItemID, &m.MovementType, &m.FromLocationID,
+		&m.ConsumableID, &m.MovementType, &m.FromLocationID,
 		&m.ToLocationID, &m.Quantity, &m.ActorID, &m.AssigneeUserID, &m.AssigneeTeamID,
 		&m.DueAt, &m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID, &m.DocumentID,
 		&m.Notes, &m.SignatureHash, &m.OccurredAt, &m.CreatedAt,
@@ -676,20 +664,16 @@ func scanMovement(scanner movementScanner) (*Movement, error) {
 }
 
 func scanItem(scanner movementScanner) (*QuantityItem, error) {
-	item := &QuantityItem{}
-	var createdAt, updatedAt time.Time
+	item := &QuantityItem{Attributes: map[string]any{}}
 	if err := scanner.Scan(
 		&item.ID, &item.OrganizationID, &item.ClientID, &item.SKU, &item.Name,
 		&item.Category, &item.Unit, &item.StockLevel, &item.MinLevel,
-		&item.LocationID, &item.Notes, &item.Attributes, &createdAt, &updatedAt,
+		&item.LocationID, &item.Notes, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
-	if item.Attributes == nil {
-		item.Attributes = map[string]any{}
-	}
-	item.CreatedAt = createdAt.UTC()
-	item.UpdatedAt = updatedAt.UTC()
+	item.CreatedAt = item.CreatedAt.UTC()
+	item.UpdatedAt = item.UpdatedAt.UTC()
 	return item, nil
 }
 

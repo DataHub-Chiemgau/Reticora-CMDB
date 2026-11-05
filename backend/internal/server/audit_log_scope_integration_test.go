@@ -106,7 +106,8 @@ func TestAuditLogHidesForeignClientRouteEntries(t *testing.T) {
 	form2 := scalar(`INSERT INTO form_def (organization_id, client_id, name, schema) VALUES ($1, $2, 'als-c2-form', '{"type":"object"}')
 		RETURNING id::text`, f.OrgA, f.Client2)
 	consumable2 := scalar(`INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, 'als-c2-cons') RETURNING id::text`, f.OrgA, f.Client2)
-	item2 := scalar(`INSERT INTO quantity_item (organization_id, client_id, name) VALUES ($1, $2, 'als-c2-qty') RETURNING id::text`, f.OrgA, f.Client2)
+	// The article of the alias inventory/items is a consumable (WP-757).
+	item2 := scalar(`INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, 'als-c2-qty') RETURNING id::text`, f.OrgA, f.Client2)
 	modules := map[string]string{ticket2: "ticket of client 2", document2: "document linked to a client-2 CI",
 		window2: "maintenance window of a client-2 CI", sla2: "SLA of client 2", desk2: "desk in a room of client 2",
 		key2: "key of client 2", order2: "order of client 2", form2: "form of client 2", consumable2: "consumable of client 2",

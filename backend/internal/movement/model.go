@@ -1,5 +1,6 @@
 // Package movement implements the unified, append-only inventory movement
-// ledger (spec §9) plus quantity-based inventory items (spec §6). Every
+// ledger (spec §9) plus the deprecated alias inventory/items of quantity
+// items on consumable (spec §6, E-40, WP-757). Every
 // inventory movement is an auditable transaction; history is never
 // overwritten (enforced by a database trigger and by the absence of update
 // operations in this package).
@@ -49,46 +50,31 @@ var AssetMovementTypes = map[string]bool{"transfer": true}
 // its stock per bin (consumable.ApplyBooking, E-38, WP-756).
 var ConsumableMovementTypes = consumable.BookingTypes
 
-// QuantityMovementTypes are the quantity bookings POST
-// /api/v1/stock-movements takes for a quantity item, with quantity > 0
-// (until the merge into consumable, E-40): those of a consumable.
-var QuantityMovementTypes = consumable.BookingTypes
-
 // Problem types of the movement service (RFC 7807).
 const (
 	// ProblemMovementTypeReserved: the movement type arises only in its
 	// domain path (422).
 	ProblemMovementTypeReserved = "https://reticora.io/problems/movement-type-reserved"
 	// ProblemInsufficientStock: the movement would drive the stock of a
-	// quantity item below zero (409).
+	// bin below zero (409).
 	ProblemInsufficientStock = consumable.ProblemInsufficientStock
 )
-
-// stockDelta is the change of the stock level of a quantity item by a
-// movement of the given type and quantity: receipt and correction add,
-// transfer keeps the level, every other type takes away (WP-274).
-func stockDelta(movementType string, quantity float64) float64 {
-	switch movementType {
-	case "receipt", "correction":
-		return quantity
-	case "transfer":
-		return 0
-	default:
-		return -quantity
-	}
-}
 
 // Movement is one auditable inventory transaction, a row of the ledger
 // stock_movement (WP-744). client_id and site_id are derived by the
 // database from the moved object and the locations at booking time.
 type Movement struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	SiteID         string    `json:"site_id,omitempty"`
-	ItemKind       string    `json:"item_kind"` // asset | consumable | quantity_item
-	AssetID        string    `json:"asset_id,omitempty"`
-	ConsumableID   string    `json:"consumable_id,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	SiteID         string `json:"site_id,omitempty"`
+	ItemKind       string `json:"item_kind"` // asset | consumable
+	AssetID        string `json:"asset_id,omitempty"`
+	ConsumableID   string `json:"consumable_id,omitempty"`
+	// QuantityItemID is the deprecated alias of ConsumableID (E-40,
+	// WP-757): quantity items were merged into consumable with the same
+	// ids. normalizeMovement moves it to ConsumableID, so a recorded or
+	// listed movement never carries it.
 	QuantityItemID string    `json:"quantity_item_id,omitempty"`
 	MovementType   string    `json:"movement_type"`
 	FromLocationID string    `json:"from_location_id,omitempty"`
@@ -115,6 +101,9 @@ type Movement struct {
 	// into or from the only bin of the consumable (POST
 	// /api/v1/consumables/{id}/movements, WP-756).
 	onlyBin bool
+	// itemAlias marks a movement named by quantity_item_id: an invisible
+	// article is ErrItemNotFound instead of consumable.ErrNotFound.
+	itemAlias bool
 }
 
 // ConsumableMovement is a consumable movement in the form of the
@@ -139,7 +128,8 @@ func LegacyConsumableMovement(m *Movement) ConsumableMovement {
 }
 
 // CreateMovementRequest is the payload for recording a movement of
-// exactly one asset, consumable or quantity item.
+// exactly one asset or consumable; quantity_item_id is the deprecated alias
+// of consumable_id (WP-757).
 type CreateMovementRequest struct {
 	ItemKind       string   `json:"item_kind,omitempty"`
 	AssetID        string   `json:"asset_id,omitempty"`
@@ -159,7 +149,8 @@ type CreateMovementRequest struct {
 
 // MovementFilter holds query filters for listing movements. LocationID
 // matches the source or the target; OccurredFrom and OccurredTo bound
-// occurred_at inclusively.
+// occurred_at inclusively. QuantityItemID is the deprecated alias of
+// ConsumableID (WP-757).
 type MovementFilter struct {
 	AssetID        string
 	ConsumableID   string
@@ -170,8 +161,11 @@ type MovementFilter struct {
 	OccurredTo     *time.Time
 }
 
-// QuantityItem is a quantity-tracked inventory item (cables, adapters,
-// consumables) without serialized CI identity (spec §6).
+// QuantityItem is the answer form of the deprecated alias inventory/items
+// on consumable (E-40, E-38, WP-757): StockLevel is the sum of on_hand over
+// the bins the caller sees, LocationID the bin when the article lies in
+// exactly one, else empty; Attributes is always empty (consumable keeps
+// none).
 type QuantityItem struct {
 	ID             string         `json:"id"`
 	OrganizationID string         `json:"organization_id"`
@@ -187,9 +181,14 @@ type QuantityItem struct {
 	Attributes     map[string]any `json:"attributes"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
+
+	// actorID is the user of a receipt booked by CreateItem.
+	actorID string
 }
 
-// CreateItemRequest is the payload for creating a quantity item.
+// CreateItemRequest is the payload for creating an article through the
+// alias: a stock_level > 0 is booked as a receipt into the bin
+// location_id; attributes have no target and must be empty.
 type CreateItemRequest struct {
 	ClientID   string         `json:"client_id,omitempty"`
 	SKU        string         `json:"sku,omitempty"`
@@ -203,7 +202,10 @@ type CreateItemRequest struct {
 	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
-// UpdateItemRequest is the payload for updating a quantity item.
+// UpdateItemRequest is the payload for updating an article through the
+// alias. LocationID and Attributes are refused (422): stock moves by a
+// transfer through POST /api/v1/stock-movements, consumable keeps no
+// attributes.
 type UpdateItemRequest struct {
 	Name       *string        `json:"name,omitempty"`
 	Category   *string        `json:"category,omitempty"`
@@ -212,4 +214,21 @@ type UpdateItemRequest struct {
 	LocationID *string        `json:"location_id,omitempty"`
 	Notes      *string        `json:"notes,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
+}
+
+// Conversion converts one unit of an article into a serialized asset (POST
+// /api/v1/inventory/items/{id}/convert, WP-757): the retrieval of one unit
+// from the bin LocationID (the only bin of the article when empty) and the
+// asset in that bin arise in one transaction. AssetID and Movement are set
+// on success.
+type Conversion struct {
+	OrganizationID string
+	ItemID         string
+	LocationID     string
+	AssetTag       string
+	SerialNumber   string
+	ActorID        string
+
+	AssetID  string
+	Movement *Movement
 }

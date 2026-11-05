@@ -34,8 +34,10 @@ func TestAuditT1ModuleChannelsClientScope(t *testing.T) {
 	consumable := func(client, name string) string {
 		return w.scalar(`INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`, f.OrgA, client, name)
 	}
+	// The articles of the alias inventory/items live in consumable since
+	// WP-757 (E-40).
 	item := func(client, name string) string {
-		return w.scalar(`INSERT INTO quantity_item (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`, f.OrgA, client, name)
+		return w.scalar(`INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`, f.OrgA, client, name)
 	}
 	// An asset moves through the route only by transfer, to a location of
 	// its client (E-142, WP-756).
@@ -68,7 +70,7 @@ func TestAuditT1ModuleChannelsClientScope(t *testing.T) {
 		{"consumables", "/api/v1/consumables", "/api/v1/consumables/", consumable(f.Client1, "t1-mod-cons1"), consumable(f.Client2, "t1-mod-cons2"),
 			map[string]any{"name": "t1-mod-hijack"}, true, `SELECT name FROM consumable WHERE id = $1`},
 		{"inventory items", "/api/v1/inventory/items", "/api/v1/inventory/items/", item(f.Client1, "t1-mod-item1"), item(f.Client2, "t1-mod-item2"),
-			map[string]any{"name": "t1-mod-hijack"}, true, `SELECT name FROM quantity_item WHERE id = $1`},
+			map[string]any{"name": "t1-mod-hijack"}, true, `SELECT name FROM consumable WHERE id = $1`},
 		{"stock movements", "/api/v1/stock-movements", "", movement(a1, room1), movement(a2, room2), nil, false,
 			`SELECT movement_type FROM stock_movement WHERE id = $1`},
 	}

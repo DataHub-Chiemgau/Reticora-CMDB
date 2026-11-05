@@ -30,8 +30,8 @@ import (
 // booking writes exactly one stock.movement whose entity is the asset and
 // whose data carries the derived client_id and site_id; a location of
 // another client is 422 on its field; a withdrawal beyond the stock of a
-// quantity item is ErrInsufficientStock and keeps the level, a transfer
-// keeps it as well.
+// bin, booked through the alias quantity_item_id (WP-757), is
+// ErrInsufficientStock and keeps the stock, a transfer keeps the sum.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestMovementServiceRecordTx(t *testing.T) {
@@ -182,39 +182,47 @@ func TestMovementServiceRecordTx(t *testing.T) {
 
 	t.Run("stock", func(t *testing.T) {
 		item := f.ID()
-		if _, err := f.Admin.Exec(bg, `INSERT INTO quantity_item (id, organization_id, client_id, name, stock_level, location_id)
-			VALUES ($1, $2, $3, 'svc-cable', 5, $4)`, item, f.OrgA, f.Client1, room1); err != nil {
+		bin, bin2 := stockBin(t, f, f.Client1, "svc-bin1"), stockBin(t, f, f.Client1, "svc-bin2")
+		if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'svc-cable')`,
+			item, f.OrgA, f.Client1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 5)`,
+			f.OrgA, item, bin); err != nil {
 			t.Fatal(err)
 		}
 		level := func() string {
-			return scalar(`SELECT stock_level::float8::text FROM quantity_item WHERE id = $1`, item)
+			return scalar(`SELECT COALESCE(sum(on_hand), 0)::float8::text FROM stock_level WHERE consumable_id = $1`, item)
 		}
-		book := func(kind string, qty float64) error {
-			return svc.Record(ctx, &movement.Movement{OrganizationID: f.OrgA, QuantityItemID: item, MovementType: kind, Quantity: &qty})
+		book := func(kind, from, to string, qty float64) error {
+			return svc.Record(ctx, &movement.Movement{OrganizationID: f.OrgA, QuantityItemID: item, MovementType: kind,
+				FromLocationID: from, ToLocationID: to, Quantity: &qty})
 		}
-		if err := book("retrieval", 6); !errors.Is(err, movement.ErrInsufficientStock) {
+		if err := book("retrieval", bin, "", 6); !errors.Is(err, movement.ErrInsufficientStock) {
 			t.Errorf("withdrawal beyond the stock: %v, want ErrInsufficientStock", err)
 		}
 		if got := level(); got != "5" {
 			t.Errorf("level after the refused withdrawal: %s, want 5", got)
 		}
-		if err := book("transfer", 3); err != nil {
+		if err := book("transfer", bin, bin2, 3); err != nil {
 			t.Fatal(err)
 		}
 		if got := level(); got != "5" {
 			t.Errorf("level after a transfer: %s, want 5", got)
 		}
-		if err := book("retrieval", 5); err != nil {
-			t.Fatal(err)
-		}
-		if err := book("receipt", 2); err != nil {
-			t.Fatal(err)
+		for _, b := range []struct {
+			kind, from, to string
+			qty            float64
+		}{{"retrieval", bin, "", 2}, {"retrieval", bin2, "", 3}, {"receipt", "", bin, 2}} {
+			if err := book(b.kind, b.from, b.to, b.qty); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if got := level(); got != "2" {
 			t.Errorf("level after withdrawing 5 and receiving 2: %s, want 2", got)
 		}
-		if got := scalar(`SELECT count(*)::text FROM event_outbox WHERE type = 'stock.movement' AND entity_id = $1`, item); got != "3" {
-			t.Errorf("stock.movement events of the quantity item: %s, want 3", got)
+		if got := scalar(`SELECT count(*)::text FROM event_outbox WHERE type = 'stock.movement' AND entity_id = $1`, item); got != "4" {
+			t.Errorf("stock.movement events of the article: %s, want 4", got)
 		}
 	})
 }
@@ -279,11 +287,12 @@ func ids(body map[string]any) []string {
 // names, a consumable receipt without bin, quantity on an asset, an asset
 // type other than transfer (E-142, WP-756) and a missing quantity with 422
 // on the field; it books
-// an asset transfer and a quantity receipt. GET filters by consumable_id,
+// an asset transfer and a receipt through the alias quantity_item_id
+// (WP-757). GET filters by consumable_id,
 // occurred_from/occurred_to (RFC 3339, else 422) and movement_type
 // (unknown 422) and pages with the keyset cursor newest first. DELETE of a
-// consumable and of a quantity item with movements is 409 with
-// dependencies ["stock_movement"].
+// consumable and of an article of the alias inventory/items with stock is
+// 409, with movements only 409 with dependencies ["stock_movement"].
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestStockMovementAPI(t *testing.T) {
@@ -293,8 +302,13 @@ func TestStockMovementAPI(t *testing.T) {
 	room := f.Room(t, f.Client1, "api-r1")
 	asset := f.Asset(t, f.OrgA, f.Client1, "api-a1")
 	item, cons := f.ID(), f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO quantity_item (id, organization_id, client_id, name, stock_level) VALUES ($1, $2, $3, 'api-cable', 3)`,
+	itemBin := stockBin(t, f, f.Client1, "api-item-bin")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'api-cable')`,
 		item, f.OrgA, f.Client1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 3)`,
+		f.OrgA, item, itemBin); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'api-toner')`,
@@ -330,7 +344,7 @@ func TestStockMovementAPI(t *testing.T) {
 			"two objects":           {map[string]any{"movement_type": "receipt", "asset_id": asset, "quantity_item_id": item}, "asset_id"},
 			"foreign item kind":     {map[string]any{"movement_type": "receipt", "asset_id": asset, "item_kind": "quantity_item"}, "item_kind"},
 			"unknown ticket":        {map[string]any{"movement_type": "transfer", "asset_id": asset, "to_location_id": room, "ticket_id": f.ID()}, "ticket_id"},
-			"withdrawal over stock": {map[string]any{"movement_type": "retrieval", "quantity_item_id": item, "quantity": 9.0}, ""},
+			"withdrawal over stock": {map[string]any{"movement_type": "retrieval", "quantity_item_id": item, "quantity": 9.0, "from_location_id": itemBin}, ""},
 		} {
 			code, body := a.do(http.MethodPost, "/api/v1/stock-movements", tc.body)
 			if tc.field == "" {
@@ -344,7 +358,7 @@ func TestStockMovementAPI(t *testing.T) {
 			}
 		}
 		var n int
-		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM stock_movement WHERE asset_id = $1 OR quantity_item_id = $2`, asset, item).Scan(&n); err != nil || n != 0 {
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM stock_movement WHERE asset_id = $1 OR consumable_id = $2`, asset, item).Scan(&n); err != nil || n != 0 {
 			t.Errorf("movements after the refused bookings: %d (%v), want none", n, err)
 		}
 	})
@@ -356,9 +370,11 @@ func TestStockMovementAPI(t *testing.T) {
 			t.Fatalf("asset transfer: %d %v", code, body)
 		}
 		transferID, _ = body["id"].(string)
-		code, body = a.do(http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "receipt", "quantity_item_id": item, "quantity": 2})
-		if code != http.StatusCreated || body["quantity"] != 2.0 {
-			t.Fatalf("quantity receipt: %d %v", code, body)
+		code, body = a.do(http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "receipt", "quantity_item_id": item,
+			"quantity": 2, "to_location_id": itemBin})
+		if code != http.StatusCreated || body["quantity"] != 2.0 || body["item_kind"] != "consumable" || body["consumable_id"] != item ||
+			body["quantity_item_id"] != nil {
+			t.Fatalf("receipt through quantity_item_id: %d %v", code, body)
 		}
 	})
 
@@ -427,6 +443,14 @@ func TestStockMovementAPI(t *testing.T) {
 	})
 
 	t.Run("delete with movements", func(t *testing.T) {
+		// The article holds 5 in its bin: stock keeps it first.
+		if code, body := a.do(http.MethodDelete, "/api/v1/inventory/items/"+item, nil); code != http.StatusConflict || body["dependencies"] != nil {
+			t.Errorf("DELETE of an article with stock: %d %v, want 409 without dependencies", code, body)
+		}
+		if code, body := a.do(http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "retrieval", "quantity_item_id": item,
+			"quantity": 5, "from_location_id": itemBin}); code != http.StatusCreated {
+			t.Fatalf("retrieval of the rest: %d %v", code, body)
+		}
 		for _, path := range []string{"/api/v1/consumables/" + cons, "/api/v1/inventory/items/" + item} {
 			code, body := a.do(http.MethodDelete, path, nil)
 			deps, _ := body["dependencies"].([]any)
@@ -435,9 +459,8 @@ func TestStockMovementAPI(t *testing.T) {
 			}
 		}
 		var n int
-		if err := f.Admin.QueryRow(bg, `SELECT (SELECT count(*) FROM consumable WHERE id = $1) + (SELECT count(*) FROM quantity_item WHERE id = $2)`,
-			cons, item).Scan(&n); err != nil || n != 2 {
-			t.Errorf("consumable and quantity item after the refused deletes: %d (%v), want both", n, err)
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM consumable WHERE id IN ($1, $2)`, cons, item).Scan(&n); err != nil || n != 2 {
+			t.Errorf("consumable and article after the refused deletes: %d (%v), want both", n, err)
 		}
 	})
 }
