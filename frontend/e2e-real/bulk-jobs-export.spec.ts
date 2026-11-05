@@ -1012,14 +1012,16 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     const presetSpec = rows(presets).find((p) => p.name === preset)?.filter_spec;
     expect(presetSpec, `preset ${preset}`).toBeTruthy();
 
-    // CIs the preset distinguishes: type physical_server, without vs with a
-    // backed_up_by relationship (the preset has no attribute, WP-309).
+    // CIs the preset distinguishes: a subtype of the system type server
+    // (ci_type_subtree, VIE-02) without vs a server with a backed_up_by
+    // relationship (the preset has no attribute, WP-309).
     const phys = await ok<{ id: string }>(a, 'POST', '/ci-types', {
       key: 'physical_server',
       name: `Physical Server ${tag}`,
+      parent_type_id: a.serverType,
     });
     const prod = await newCI(a, { ci_type_id: phys.id, name: `${tag}-prod` });
-    const staging = await newCI(a, { ci_type_id: phys.id, name: `${tag}-staging` });
+    const staging = await newCI(a, { name: `${tag}-staging` });
     const backup = await newCI(a, { name: `${tag}-backup` });
     await ok(a, 'POST', '/relationships', {
       source_ci_id: staging.id,

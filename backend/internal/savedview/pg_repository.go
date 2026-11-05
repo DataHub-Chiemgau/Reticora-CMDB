@@ -20,11 +20,34 @@ const selectColumns = `
 `
 
 // visibleTo is the predicate of the views a user may read (VIE-01): own,
-// shared org-wide, or shared with a role of the user; %d is the parameter
-// of the user id.
-const visibleTo = `(shared OR owner_id = $%[1]d OR shared_with_roles && ARRAY(
+// shared org-wide, or shared with a role of the user: a stored role or
+// custom role assignment, or a builtin org role whose name the user holds
+// through an IdP group (E-110, as permission.PGRepository.RoleGrants
+// resolves them). user and roles are the parameters of the user id and of
+// the standard role names (text[], AccessFrom).
+func visibleTo(user, roles int) string {
+	return fmt.Sprintf(`(shared OR owner_id = $%[1]d OR shared_with_roles && ARRAY(
 	SELECT ra.role_id FROM role_assignment ra WHERE ra.user_id = $%[1]d
-	UNION SELECT ucr.custom_role_id FROM user_custom_role ucr WHERE ucr.user_id = $%[1]d))`
+	UNION SELECT ucr.custom_role_id FROM user_custom_role ucr WHERE ucr.user_id = $%[1]d
+	UNION SELECT ro.id FROM role ro WHERE ro.organization_id = saved_view.organization_id
+		AND ro.is_builtin AND ro.scope = 'org' AND ro.name = ANY($%[2]d::text[])))`, user, roles)
+}
+
+// writableBy is the predicate of the views a user may change or delete:
+// own, or with saved_view:manage (parameter manage) every view the user
+// may read (VIE-02); user and roles as in visibleTo.
+func writableBy(user, manage, roles int) string {
+	return fmt.Sprintf(`(owner_id = $%d OR ($%d::boolean AND %s))`, user, manage, visibleTo(user, roles))
+}
+
+// idpRoles returns the standard role names of the caller's IdP groups for
+// visibleTo, never NULL.
+func idpRoles(ctx context.Context) []string {
+	if roles := AccessFrom(ctx).IdPRoles; roles != nil {
+		return roles
+	}
+	return []string{}
+}
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -41,14 +64,14 @@ func (r *PGRepository) List(ctx context.Context, orgID, ownerID string, page api
 	var out []View
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1 AND " + fmt.Sprintf(visibleTo, 2)
+		where := "organization_id = $1 AND " + visibleTo(2, 3)
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM saved_view WHERE "+where,
-			orgID, nilIfEmpty(ownerID)).Scan(&total); err != nil {
+			orgID, nilIfEmpty(ownerID), idpRoles(ctx)).Scan(&total); err != nil {
 			return fmt.Errorf("count saved views: %w", err)
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM saved_view WHERE %s ORDER BY name ASC LIMIT $3 OFFSET $4",
-			selectColumns, where), orgID, nilIfEmpty(ownerID), page.Limit, page.Offset)
+			"SELECT %s FROM saved_view WHERE %s ORDER BY name ASC LIMIT $4 OFFSET $5",
+			selectColumns, where), orgID, nilIfEmpty(ownerID), idpRoles(ctx), page.Limit, page.Offset)
 		if err != nil {
 			return fmt.Errorf("list saved views: %w", err)
 		}
@@ -71,8 +94,8 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id, userID string) (*
 	var out *View
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		v, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT %s FROM saved_view WHERE id = $1 AND organization_id = $2 AND "+fmt.Sprintf(visibleTo, 3),
-			selectColumns), id, orgID, nilIfEmpty(userID)))
+			"SELECT %s FROM saved_view WHERE id = $1 AND organization_id = $2 AND %s",
+			selectColumns, visibleTo(3, 4)), id, orgID, nilIfEmpty(userID), idpRoles(ctx)))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
@@ -113,9 +136,10 @@ func (r *PGRepository) Create(ctx context.Context, view *View) error {
 	})
 }
 
-// Update modifies a view the caller owns; a view shared with the caller,
-// org-wide or by role, is read-only and not found (E-86, option 1). Only
-// the fields the request sends change (F-166).
+// Update modifies a view the caller owns or, with saved_view:manage
+// (AccessFrom), one the caller may read (VIE-02); for everybody else a view
+// shared with the caller, org-wide or by role, is read-only and not found
+// (E-86, option 1). Only the fields the request sends change (F-166).
 func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error) {
 	var out *View
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -169,8 +193,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 			sets = append(sets, "name = name")
 		}
 		v, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"UPDATE saved_view SET %s WHERE id = $1 AND organization_id = $2 AND owner_id = $%d RETURNING %s",
-			strings.Join(sets, ", "), pos, selectColumns), append(args, nilIfEmpty(ownerID))...))
+			"UPDATE saved_view SET %s WHERE id = $1 AND organization_id = $2 AND %s RETURNING %s",
+			strings.Join(sets, ", "), writableBy(pos, pos+1, pos+2), selectColumns),
+			append(args, nilIfEmpty(ownerID), AccessFrom(ctx).Manage, idpRoles(ctx))...))
 		if err != nil {
 			if err == pgx.ErrNoRows {
 				return ErrNotFound
@@ -183,13 +208,14 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id, ownerID string, re
 	return out, err
 }
 
-// Delete removes a view the caller owns; any other view, shared or not, is
-// not found (E-86, option 1).
+// Delete removes a view the caller owns or, with saved_view:manage, one the
+// caller may read (VIE-02); any other view, shared or not, is not found
+// (E-86, option 1).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id, ownerID string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
-			"DELETE FROM saved_view WHERE id = $1 AND organization_id = $2 AND owner_id = $3",
-			id, orgID, nilIfEmpty(ownerID))
+			"DELETE FROM saved_view WHERE id = $1 AND organization_id = $2 AND "+writableBy(3, 4, 5),
+			id, orgID, nilIfEmpty(ownerID), AccessFrom(ctx).Manage, idpRoles(ctx))
 		if err != nil {
 			return fmt.Errorf("delete saved view: %w", err)
 		}

@@ -75,6 +75,21 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 				table, p, p, table, p, p), f.CIType)
 		}
 	}
+	if f.CITypeSubtree != "" {
+		// The type of the key or name and every subtype (ci_type_subtree,
+		// WP-248); for an asset through its type or the linked CI.
+		p := next()
+		subtree := fmt.Sprintf(`SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = %s OR t.name = %s`, p, p)
+		if table == "ci" {
+			add(fmt.Sprintf(`ci.ci_type_id IN (%s)`, subtree), f.CITypeSubtree)
+		} else {
+			add(fmt.Sprintf(`(asset.asset_type_id IN (%s)
+				OR asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id IN (%s)))`, subtree, subtree), f.CITypeSubtree)
+		}
+	}
+	if f.OwnedByMe {
+		add(ownedByMeSQL(table))
+	}
 	if f.AssetCategory != "" && table == "asset" {
 		p := next()
 		add(fmt.Sprintf("%s.category = %s", table, p), f.AssetCategory)
@@ -146,6 +161,21 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 	if f.LacksRelationship != "" && table == "ci" {
 		p := next()
 		add("NOT "+relationshipExists(f.LacksRelationship, p), f.LacksRelationship)
+	}
+	if f.LacksOutgoingRelationship != "" && table == "ci" {
+		p := next()
+		add("NOT "+directedRelationshipExists(f.LacksOutgoingRelationship, p, "source_ci_id"), f.LacksOutgoingRelationship)
+	}
+	if f.LacksIncomingRelationship != "" && table == "ci" {
+		p := next()
+		add("NOT "+directedRelationshipExists(f.LacksIncomingRelationship, p, "target_ci_id"), f.LacksIncomingRelationship)
+	}
+	if f.NoMetricWithinHours > 0 && table == "ci" {
+		// The samples the caller may read (metric_sample_v, scoped like
+		// the CI; idx_metric_sample_ci on ci_id, time).
+		p := next()
+		add(fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id
+			AND ms.time >= now() - make_interval(hours => %s::int))`, p), f.NoMetricWithinHours)
 	}
 	if f.UpstreamOf != "" && table == "ci" {
 		// CIs upstream of X: sources of edges pointing (transitively) into X,
@@ -246,6 +276,18 @@ func (f *FilterSpec) validate(entityKind string, cat *catalog) error {
 			return &api.FieldError{Field: id.field, Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
 		}
 	}
+	if f.NoMetricWithinHours < 0 || f.NoMetricWithinHours > MaxMetricWindowHours {
+		return &api.FieldError{Field: "no_metric_within_hours", Message: fmt.Sprintf("must be between 1 and %d", MaxMetricWindowHours), Status: http.StatusUnprocessableEntity}
+	}
+	for _, key := range []struct{ field, value string }{
+		{"ci_type_subtree", f.CITypeSubtree},
+		{"lacks_outgoing_relationship", f.LacksOutgoingRelationship},
+		{"lacks_incoming_relationship", f.LacksIncomingRelationship},
+	} {
+		if strings.ContainsRune(key.value, 0) {
+			return &api.FieldError{Field: key.field, Message: "must not contain NUL characters", Status: http.StatusUnprocessableEntity}
+		}
+	}
 	for i, tag := range f.Tags {
 		if tag == "" || strings.ContainsRune(tag, 0) {
 			return &api.FieldError{Field: fmt.Sprintf("tags[%d]", i), Message: "must be a tag key", Status: http.StatusUnprocessableEntity}
@@ -278,6 +320,47 @@ func (f *FilterSpec) validate(entityKind string, cat *catalog) error {
 
 // MaxRelationshipDepth bounds upstream_of and downstream_of (SRC-04).
 const MaxRelationshipDepth = 5
+
+// MaxMetricWindowHours bounds no_metric_within_hours (one year).
+const MaxMetricWindowHours = 8760
+
+// currentUser is the calling user of the request transaction: app.user_id,
+// set from the principal by database.WithRequestTenant; NULL without one.
+const currentUser = `NULLIF(current_setting('app.user_id', true), '')::uuid`
+
+// ownedByMeSQL is the predicate of owned_by_me on table (VIE-02): the
+// calling user is the owner user, or one of the user's teams
+// (team_member) the owner team; for an asset also the current holder of
+// the holder cache (asset.assigned_user_id, assigned_team_id; WP-745,
+// WP-747). The contact role owner (ci_contact) does not count.
+func ownedByMeSQL(table string) string {
+	teams := `(SELECT tm.team_id FROM team_member tm WHERE tm.user_id = ` + currentUser + `)`
+	clause := fmt.Sprintf(`%[1]s.owner_user_id = %[2]s OR %[1]s.owner_team_id IN %[3]s`, table, currentUser, teams)
+	if table == "asset" {
+		clause += fmt.Sprintf(` OR asset.assigned_user_id = %s OR asset.assigned_team_id IN %s`, currentUser, teams)
+	}
+	return "(" + clause + ")"
+}
+
+// directedRelationshipExists is the predicate of lacks_outgoing_relationship
+// (end source_ci_id) and lacks_incoming_relationship (end target_ci_id),
+// negated: the CI is that end of a relationship of type p, stored or, for a
+// type of projectedRelTypes, projected (as relationshipExists reads them,
+// with the visible CI or location at the other end).
+func directedRelationshipExists(relType, p, end string) string {
+	stored := fmt.Sprintf(`EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = %s AND r.%s = ci.id)`, p, end)
+	if !projectedRelTypes[relType] {
+		return stored
+	}
+	if end == "source_ci_id" {
+		return fmt.Sprintf(`(%s
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.source_ci_id = ci.id
+			AND (e.target_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci t WHERE t.id = e.target_ci_id))))`, stored, p)
+	}
+	return fmt.Sprintf(`(%s
+		OR EXISTS (SELECT 1 FROM ci_structure_edge e WHERE e.rel_type = %s AND e.target_ci_id = ci.id
+			AND EXISTS (SELECT 1 FROM ci s WHERE s.id = e.source_ci_id)))`, stored, p)
+}
 
 // projectedRelTypes are the structural relationship types of the view
 // ci_structure_edge (DB-05, CH27): contains from ci.parent_ci_id,
@@ -477,6 +560,9 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 		{f.Search != "", "name", "search"},
 		{f.ClientID != "", "client_id", "client_id"},
 		{f.CIType != "", "ci_type_id", "ci_type"},
+		{f.CITypeSubtree != "", "ci_type_id", "ci_type_subtree"},
+		{f.OwnedByMe, "owner_user_id", "owned_by_me"},
+		{f.OwnedByMe, "owner_team_id", "owned_by_me"},
 		{f.AssetCategory != "" && isAsset, "category", "asset_category"},
 		{f.Lifecycle != "", "lifecycle_state", "lifecycle"},
 		{f.Status != "", "status", "status"},

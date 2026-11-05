@@ -17323,7 +17323,12 @@ paths:
     get:
       operationId: listSavedViews
       summary: Saved views the caller may read (VIE-01)
-      description: Own views, views shared org-wide and views shared with a role of the caller.
+      description: >-
+        Own views, views shared org-wide and views shared with a role of the
+        caller. A role counts when the caller holds it through a stored role
+        or custom role assignment or, for a standard role (org_admin,
+        engineer, viewer), only through an IdP group or role of the session
+        (E-110, VIE-02).
       responses:
         '200':
           description: Saved views
@@ -17345,6 +17350,13 @@ paths:
     post:
       operationId: createSavedViews
       summary: Create a saved view (VIE-01)
+      description: >-
+        A missing shared is false. With from_preset the view is a clone of a
+        system view (GET /api/v1/saved-views/presets, VIE-02): the server
+        takes entity_kind, filter_spec, sort and columns of the preset, name
+        stays required and the sharing comes from the request. An unknown
+        key and from_preset together with filter_spec are 422 on
+        from_preset.
       requestBody:
         required: true
         content:
@@ -17379,7 +17391,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or an unknown from_preset or from_preset with filter_spec (field from_preset).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17387,10 +17399,28 @@ paths:
   /api/v1/saved-views/presets:
     get:
       operationId: listSavedViewsPresets
-      summary: List the standard saved view presets
+      summary: List the system views (VIE-02)
+      description: >-
+        The system views are code presets with a stable key, a display name
+        per language (de, en) and system true; name is the English name.
+        They have no row in saved_view and cannot be changed; POST
+        /api/v1/saved-views with from_preset clones one. The list is always
+        complete, next_cursor is never set.
       responses:
         '200':
-          description: List the standard saved view presets
+          description: The system views
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); never set, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SavedViewPreset' }
         '401':
           description: Unauthorized
 
@@ -17398,7 +17428,11 @@ paths:
     get:
       operationId: getSavedViewsId
       summary: Read a saved view
-      description: A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+      description: >-
+        A private view of somebody else, or a view shared with roles the
+        caller does not hold, is 404 (VIE-01). A standard role (org_admin,
+        engineer, viewer) also counts when the caller holds it only through
+        an IdP group or role of the session (E-110, VIE-02).
       responses:
         '200':
           description: The view
@@ -17413,12 +17447,17 @@ paths:
       operationId: updateSavedViewsId
       summary: Update a saved view
       description: >-
-        Only the owner changes the view (E-86, option 1). For everybody else a
-        view shared org-wide or with a role is read-only, and its PATCH answers
-        404 like a view the caller cannot see; the view stays unchanged. Only
-        the fields sent change: a request without shared keeps the sharing.
-        Every id in shared_with_roles must be a role or custom role of the
-        organization.
+        Only the owner or a holder of saved_view:manage (effective
+        permissions, also through an IdP group) changes the view (E-86,
+        option 1, VIE-02); saved_view:manage applies only to views the caller
+        may read, a private view of somebody else stays 404. For everybody
+        else a view shared org-wide or with a role is read-only, and its
+        PATCH answers 404 like a view the caller cannot see; the view stays
+        unchanged. Only the fields sent change: a request without shared
+        keeps the sharing and shared_with_roles. Every id in
+        shared_with_roles must be a role or custom role of the organization.
+        from_preset is 422 (field from_preset): a clone is created with
+        POST.
       requestBody:
         required: true
         content:
@@ -17455,7 +17494,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or from_preset (field from_preset).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17463,8 +17502,12 @@ paths:
       operationId: deleteSavedViewsId
       summary: Delete a saved view
       description: >-
-        Only the owner deletes the view (E-86, option 1). A view shared with
-        the caller, org-wide or with a role, answers 404 and stays.
+        Only the owner or a holder of saved_view:manage (effective
+        permissions, also through an IdP group) deletes the view (E-86,
+        option 1, VIE-02); saved_view:manage applies only to views the caller
+        may read. For everybody else a view shared with the caller, org-wide
+        or with a role, answers 404 and stays; a private view of somebody
+        else is 404 as well.
       responses:
         '204':
           description: Deleted
@@ -17674,11 +17717,23 @@ paths:
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
         where.and[1].value, where.value[0] or
-        where.and[1].related.max_depth, or the flat field). Requires
+        where.and[1].related.max_depth, or the flat field). The flat
+        fields of the system views (VIE-02): owned_by_me selects what the
+        calling user owns, the owner user or a team of the user as owner
+        team and, for assets, also the current holder (user or team); the
+        user is the one of the request, never a value of the body.
+        ci_type_subtree is a type key or name with all its subtypes (for
+        assets through the asset type or the linked CI). For CIs only:
+        lacks_outgoing_relationship requires that the CI is the source of
+        no relationship of the type, lacks_incoming_relationship that it is
+        the target of none (lacks_relationship stays undirected), and
+        no_metric_within_hours (1 to 8760, else 422) that no metric sample
+        of the CI lies in the last n hours. Requires
         search:read and the read permission of the entity kind (ci:read for
         ci, asset:read for asset); asset.<field> and asset.attributes.<key>
         of a CI query (also in the where of related) need asset:read as
         well, related and the flat has_relationship, lacks_relationship,
+        lacks_outgoing_relationship, lacks_incoming_relationship,
         upstream_of and downstream_of relationship:read. An asset query and the asset
         fields of a CI query need the module inventory and the entitlement
         assets_basic (403 feature-not-entitled); the route itself is not
@@ -17704,6 +17759,23 @@ paths:
               properties:
                 entity_kind: { type: string, enum: [ci, asset] }
                 where: { $ref: '#/components/schemas/FilterExpr' }
+                owned_by_me:
+                  type: boolean
+                  description: What the calling user owns (owner user, owner team of the user; for assets also the holder).
+                ci_type_subtree:
+                  type: string
+                  description: A CI type key or name including all its subtypes.
+                lacks_outgoing_relationship:
+                  type: string
+                  description: CIs only; the CI is the source of no relationship of this type.
+                lacks_incoming_relationship:
+                  type: string
+                  description: CIs only; the CI is the target of no relationship of this type.
+                no_metric_within_hours:
+                  type: integer
+                  minimum: 1
+                  maximum: 8760
+                  description: CIs only; no metric sample of the CI within the last n hours.
                 sort:
                   type: array
                   maxItems: 50
@@ -23914,6 +23986,44 @@ components:
           type: array
           description: Role or custom role ids of the organization whose holders may read the view.
           items: { type: string }
+        from_preset:
+          type: string
+          description: >-
+            POST only: the key of a system view to clone (VIE-02); its
+            entity_kind, filter_spec, sort and columns are taken over. Not
+            together with filter_spec; 422 on from_preset for an unknown
+            key and in a PATCH.
+    SavedViewPreset:
+      type: object
+      description: A system view (VIE-02), a code preset without a row in saved_view.
+      required: [key, name, display_name, entity_kind, filter_spec, sort, columns, system]
+      properties:
+        key:
+          type: string
+          description: Stable key, e.g. my_devices_ci, warranty_expiring, servers_without_monitoring.
+        name:
+          type: string
+          description: English name.
+        display_name:
+          type: object
+          required: [de, en]
+          properties:
+            de: { type: string }
+            en: { type: string }
+        entity_kind: { type: string, enum: [ci, asset] }
+        filter_spec:
+          type: object
+          additionalProperties: true
+          description: The filter spec of the view (as for POST /api/v1/search/query).
+        sort:
+          type: array
+          items: { $ref: '#/components/schemas/SavedViewSortKey' }
+        columns:
+          type: array
+          items: { type: string }
+        system:
+          type: boolean
+          description: Always true.
     ImpactAnalysis:
       type: object
       required: [failed_cis, impacted, count, summary]

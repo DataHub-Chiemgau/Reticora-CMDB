@@ -522,3 +522,119 @@ func TestSavedViewRelationshipFilterSeesProjection(t *testing.T) {
 		}
 	}
 }
+
+// TestSavedViewManageAndIdPRolesAgainstPostgres covers the write protection
+// of VIE-02 (WP-307) against PostgreSQL: the owner changes and deletes an
+// org-wide shared view, so does a holder of saved_view:manage (effective
+// permissions of the request, identity.WithPermissions); another user with
+// saved_view:write gets 404 for PATCH and DELETE and the view stays;
+// saved_view:manage on a private view of somebody else is 404. A PATCH with
+// only the name keeps shared and shared_with_roles. A view shared with the
+// standard role engineer is read by a user who holds engineer only through
+// an IdP group (Principal.Groups, E-110); without the group it is 404.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSavedViewManageAndIdPRolesAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "bd")
+	bg := context.Background()
+	owner := f.AppUser(t, f.OrgA, "manage-owner")
+	admin := f.AppUser(t, f.OrgA, "manage-admin")
+	writer := f.AppUser(t, f.OrgA, "manage-writer")
+	var engineer string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM role WHERE organization_id = $1 AND name = 'engineer'`, f.OrgA).Scan(&engineer); err != nil {
+		if err = f.Admin.QueryRow(bg, `INSERT INTO role (organization_id, name, is_builtin, scope) VALUES ($1, 'engineer', true, 'org') RETURNING id::text`,
+			f.OrgA).Scan(&engineer); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mux := chi.NewRouter()
+	savedview.NewHandler(savedview.NewPGRepository(f.App)).RegisterRoutes(mux)
+	type caller struct {
+		user   string
+		perms  []identity.Permission
+		groups []string
+	}
+	call := func(c caller, method, path, body string) (int, map[string]any) {
+		t.Helper()
+		ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: c.user})
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: c.user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser, Groups: c.groups})
+		ctx = identity.WithPermissions(ctx, c.perms)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)).WithContext(ctx))
+		var out map[string]any
+		_ = json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	write := []identity.Permission{identity.PermSavedViewRead, identity.PermSavedViewWrite}
+	manage := append(slices.Clone(write), identity.PermSavedViewManage)
+	asOwner, asAdmin, asWriter := caller{owner, write, nil}, caller{admin, manage, nil}, caller{writer, write, nil}
+	create := func(body string) string {
+		t.Helper()
+		code, view := call(asOwner, http.MethodPost, "/api/v1/saved-views", body)
+		id, _ := view["id"].(string)
+		if code != http.StatusCreated || id == "" {
+			t.Fatalf("create %s: %d %v", body, code, view)
+		}
+		return id
+	}
+	name := func(id string) string {
+		t.Helper()
+		var n string
+		if err := f.Admin.QueryRow(bg, `SELECT name FROM saved_view WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	shared := create(`{"name": "Org-weit", "entity_kind": "ci", "shared": true, "shared_with_roles": ["` + engineer + `"]}`)
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		if code, out := call(asWriter, method, "/api/v1/saved-views/"+shared, `{"name": "gekapert"}`); code != http.StatusNotFound {
+			t.Errorf("%s by a user with saved_view:write: %d %v, want 404", method, code, out)
+		}
+	}
+	if n := name(shared); n != "Org-weit" {
+		t.Errorf("view after the refused writes: %q", n)
+	}
+	code, got := call(asAdmin, http.MethodPatch, "/api/v1/saved-views/"+shared, `{"name": "Übernommen"}`)
+	roles, _ := got["shared_with_roles"].([]any)
+	if code != http.StatusOK || got["name"] != "Übernommen" || got["shared"] != true || len(roles) != 1 || got["owner_id"] != owner {
+		t.Errorf("PATCH by saved_view:manage: %d %v, want 200 with shared and roles kept", code, got)
+	}
+	if code, got = call(asOwner, http.MethodPatch, "/api/v1/saved-views/"+shared, `{"name": "Zurück"}`); code != http.StatusOK || got["shared"] != true {
+		t.Errorf("PATCH by the owner: %d %v", code, got)
+	}
+	if code, _ = call(asAdmin, http.MethodDelete, "/api/v1/saved-views/"+shared, ""); code != http.StatusNoContent {
+		t.Errorf("DELETE by saved_view:manage: %d, want 204", code)
+	}
+	own := create(`{"name": "Eigene geteilte", "entity_kind": "ci", "shared": true}`)
+	if code, _ = call(asOwner, http.MethodDelete, "/api/v1/saved-views/"+own, ""); code != http.StatusNoContent {
+		t.Errorf("DELETE by the owner: %d, want 204", code)
+	}
+
+	private := create(`{"name": "Privat", "entity_kind": "ci"}`)
+	for _, method := range []string{http.MethodGet, http.MethodPatch, http.MethodDelete} {
+		if status, out := call(asAdmin, method, "/api/v1/saved-views/"+private, `{"name": "gekapert"}`); status != http.StatusNotFound {
+			t.Errorf("%s of a private view by saved_view:manage: %d %v, want 404", method, status, out)
+		}
+	}
+	if n := name(private); n != "Privat" {
+		t.Errorf("private view after saved_view:manage: %q", n)
+	}
+
+	byRole := create(`{"name": "Für Engineers", "entity_kind": "ci", "shared_with_roles": ["` + engineer + `"]}`)
+	idp := caller{writer, write, []string{"/reticora-engineer"}}
+	if code, _ = call(idp, http.MethodGet, "/api/v1/saved-views/"+byRole, ""); code != http.StatusOK {
+		t.Errorf("GET by engineer through an IdP group: %d, want 200", code)
+	}
+	if _, list := call(idp, http.MethodGet, "/api/v1/saved-views", ""); list["total"] != float64(1) {
+		t.Errorf("list of engineer through an IdP group: %v", list)
+	}
+	if code, _ = call(idp, http.MethodPatch, "/api/v1/saved-views/"+byRole, `{"name": "gekapert"}`); code != http.StatusNotFound {
+		t.Errorf("PATCH by engineer through an IdP group: %d, want 404", code)
+	}
+	for _, c := range []caller{asWriter, {writer, write, []string{"reticora-viewer", "unmapped"}}} {
+		if code, _ = call(c, http.MethodGet, "/api/v1/saved-views/"+byRole, ""); code != http.StatusNotFound {
+			t.Errorf("GET without the engineer group %v: %d, want 404", c.groups, code)
+		}
+	}
+}

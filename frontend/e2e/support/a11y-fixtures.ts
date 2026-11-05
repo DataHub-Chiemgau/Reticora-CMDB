@@ -1297,12 +1297,14 @@ export const A11Y_HANDLERS: Handler[] = [
     reply: fixed({
       data: [
         {
-          id: 'preset-active',
+          key: 'a11y_preset_active',
           name: 'a11y-preset-active',
+          display_name: { de: 'a11y-preset-active', en: 'a11y-preset-active' },
           entity_kind: 'ci',
           filter_spec: { status: 'active' },
-          shared: true,
-          created_at: AT,
+          sort: [],
+          columns: [],
+          system: true,
         },
       ],
     }),

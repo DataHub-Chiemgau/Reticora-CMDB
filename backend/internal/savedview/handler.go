@@ -92,6 +92,23 @@ func ownerID(r *http.Request) string {
 	return ""
 }
 
+// callerAccess returns the context of the repository calls with the access
+// of the caller (WithAccess, VIE-02): the standard roles of the IdP groups
+// of the principal (E-110, Groups from WP-725) and saved_view:manage from
+// the effective permissions of the request, so that an org_admin mapped
+// through an IdP group manages as well. Without a principal or groups only
+// stored role assignments count.
+func callerAccess(r *http.Request) (context.Context, Access) {
+	var access Access
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok && len(p.Groups) > 0 {
+		access.IdPRoles = identity.StandardRolesForGroups(p.Groups)
+	}
+	if perms, ok := identity.PermissionsFromContext(r.Context()); ok {
+		access.Manage = identity.HasPermission(perms, identity.PermSavedViewManage)
+	}
+	return WithAccess(r.Context(), access), access
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -99,7 +116,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.List(r.Context(), t.OrganizationID, ownerID(r), page)
+	ctx, _ := callerAccess(r)
+	items, total, err := h.repo.List(ctx, t.OrganizationID, ownerID(r), page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -110,7 +128,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PresetList handles GET /api/v1/saved-views/presets
+// PresetList handles GET /api/v1/saved-views/presets: the system views
+// (Presets, VIE-02) as one complete list without a cursor.
 func (h *Handler) PresetList(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -130,12 +149,35 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id, ownerID(r))
+	ctx, _ := callerAccess(r)
+	item, err := h.repo.GetByID(ctx, t.OrganizationID, id, ownerID(r))
 	if err != nil {
 		writeViewError(w, r, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// applyPreset clones the system view of req.FromPreset into the request
+// (VIE-02): entity_kind, filter_spec, sort and columns come from the
+// preset; name and sharing stay those of the request. An unknown key and
+// from_preset together with filter_spec are 422 on from_preset.
+func applyPreset(req *UpsertRequest) error {
+	if req.FromPreset == "" {
+		return nil
+	}
+	if req.FilterSpec != nil {
+		return &api.FieldError{Field: "from_preset", Message: "from_preset and filter_spec exclude each other", Status: http.StatusUnprocessableEntity}
+	}
+	preset, ok := PresetByKey(req.FromPreset)
+	if !ok {
+		return &api.FieldError{Field: "from_preset", Message: fmt.Sprintf("unknown preset %q", req.FromPreset), Status: http.StatusUnprocessableEntity}
+	}
+	req.EntityKind = preset.EntityKind
+	req.FilterSpec = preset.FilterSpec
+	req.Sort = preset.Sort
+	req.Columns = preset.Columns
+	return nil
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +193,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name == "" {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name is required")
+		return
+	}
+	if err := applyPreset(&req); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	if err := ValidateView(req.EntityKind, &req); err != nil {
@@ -193,16 +239,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, id, ownerID(r))
+	ctx, access := callerAccess(r)
+	current, err := h.repo.GetByID(ctx, t.OrganizationID, id, ownerID(r))
 	if err != nil {
 		writeViewError(w, r, err)
 		return
 	}
-	// Only the owner changes a view (E-86, option 1): a view shared with the
+	// Only the owner or a holder of saved_view:manage changes a view
+	// (E-86, option 1, VIE-02): for everybody else a view shared with the
 	// caller is read-only and answers 404 like a view the caller cannot
 	// see, before any validation tells them more about it.
-	if user := ownerID(r); user == "" || current.OwnerID != user {
+	if user := ownerID(r); user == "" || (current.OwnerID != user && !access.Manage) {
 		writeViewError(w, r, ErrNotFound)
+		return
+	}
+	// A clone is created, never patched in (VIE-02).
+	if req.FromPreset != "" {
+		api.WriteFieldError(w, &api.FieldError{Field: "from_preset", Message: "from_preset applies to POST only", Status: http.StatusUnprocessableEntity})
 		return
 	}
 	kind := req.EntityKind
@@ -216,7 +269,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !h.checkViewFilter(w, r, t, kind, req.FilterSpec) {
 		return
 	}
-	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, ownerID(r), &req)
+	item, err := h.repo.Update(ctx, t.OrganizationID, id, ownerID(r), &req)
 	if err != nil {
 		// A name the owner uses for another view is 409, not 404 (F-047).
 		writeViewError(w, r, err)
@@ -235,7 +288,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.repo.Delete(r.Context(), t.OrganizationID, id, ownerID(r)); err != nil {
+	ctx, _ := callerAccess(r)
+	if err := h.repo.Delete(ctx, t.OrganizationID, id, ownerID(r)); err != nil {
 		writeViewError(w, r, err)
 		return
 	}
@@ -393,9 +447,12 @@ func (h *Handler) assetAccess(w http.ResponseWriter, r *http.Request, t tenant.T
 
 // usesRelationships reports whether the spec filters by relationships: a
 // related node of the AST or one of the flat fields has_relationship,
-// lacks_relationship, upstream_of and downstream_of (WP-789).
+// lacks_relationship, lacks_outgoing_relationship,
+// lacks_incoming_relationship, upstream_of and downstream_of (WP-789,
+// VIE-02).
 func usesRelationships(spec *FilterSpec) bool {
-	found := spec.HasRelationship != "" || spec.LacksRelationship != "" || spec.UpstreamOf != "" || spec.DownstreamOf != ""
+	found := spec.HasRelationship != "" || spec.LacksRelationship != "" || spec.UpstreamOf != "" || spec.DownstreamOf != "" ||
+		spec.LacksOutgoingRelationship != "" || spec.LacksIncomingRelationship != ""
 	if spec.Where != nil {
 		spec.Where.walk(func(e *Expr) {
 			found = found || e.Related != nil

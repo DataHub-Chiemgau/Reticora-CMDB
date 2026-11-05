@@ -7605,11 +7605,14 @@ export interface paths {
     };
     /**
      * Saved views the caller may read (VIE-01)
-     * @description Own views, views shared org-wide and views shared with a role of the caller.
+     * @description Own views, views shared org-wide and views shared with a role of the caller. A role counts when the caller holds it through a stored role or custom role assignment or, for a standard role (org_admin, engineer, viewer), only through an IdP group or role of the session (E-110, VIE-02).
      */
     get: operations['listSavedViews'];
     put?: never;
-    /** Create a saved view (VIE-01) */
+    /**
+     * Create a saved view (VIE-01)
+     * @description A missing shared is false. With from_preset the view is a clone of a system view (GET /api/v1/saved-views/presets, VIE-02): the server takes entity_kind, filter_spec, sort and columns of the preset, name stays required and the sharing comes from the request. An unknown key and from_preset together with filter_spec are 422 on from_preset.
+     */
     post: operations['createSavedViews'];
     delete?: never;
     options?: never;
@@ -7624,7 +7627,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the standard saved view presets */
+    /**
+     * List the system views (VIE-02)
+     * @description The system views are code presets with a stable key, a display name per language (de, en) and system true; name is the English name. They have no row in saved_view and cannot be changed; POST /api/v1/saved-views with from_preset clones one. The list is always complete, next_cursor is never set.
+     */
     get: operations['listSavedViewsPresets'];
     put?: never;
     post?: never;
@@ -7643,21 +7649,21 @@ export interface paths {
     };
     /**
      * Read a saved view
-     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01). A standard role (org_admin, engineer, viewer) also counts when the caller holds it only through an IdP group or role of the session (E-110, VIE-02).
      */
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
     /**
      * Delete a saved view
-     * @description Only the owner deletes the view (E-86, option 1). A view shared with the caller, org-wide or with a role, answers 404 and stays.
+     * @description Only the owner or a holder of saved_view:manage (effective permissions, also through an IdP group) deletes the view (E-86, option 1, VIE-02); saved_view:manage applies only to views the caller may read. For everybody else a view shared with the caller, org-wide or with a role, answers 404 and stays; a private view of somebody else is 404 as well.
      */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
     /**
      * Update a saved view
-     * @description Only the owner changes the view (E-86, option 1). For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing. Every id in shared_with_roles must be a role or custom role of the organization.
+     * @description Only the owner or a holder of saved_view:manage (effective permissions, also through an IdP group) changes the view (E-86, option 1, VIE-02); saved_view:manage applies only to views the caller may read, a private view of somebody else stays 404. For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing and shared_with_roles. Every id in shared_with_roles must be a role or custom role of the organization. from_preset is 422 (field from_preset): a clone is created with POST.
      */
     patch: operations['updateSavedViewsId'];
     trace?: never;
@@ -7717,7 +7723,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. The node related (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs that reach, over at most max_depth (1 to 5, default 1) relationships of rel_types (keys of relationship_type; unknown 422, none: every type) in direction out (the CI is the source, e.g. a VM runs_on a host), in (the target) or both, a CI that matches its where; the walk passes only through visible CIs that are not deleted. At most 10 levels and 100 nodes, the nodes of the where of related included. The filter AST is $defs/filter of api/rules.schema.json. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value, where.value[0] or where.and[1].related.max_depth, or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query (also in the where of related) need asset:read as well, related and the flat has_relationship, lacks_relationship, upstream_of and downstream_of relationship:read. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. The node related (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs that reach, over at most max_depth (1 to 5, default 1) relationships of rel_types (keys of relationship_type; unknown 422, none: every type) in direction out (the CI is the source, e.g. a VM runs_on a host), in (the target) or both, a CI that matches its where; the walk passes only through visible CIs that are not deleted. At most 10 levels and 100 nodes, the nodes of the where of related included. The filter AST is $defs/filter of api/rules.schema.json. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value, where.value[0] or where.and[1].related.max_depth, or the flat field). The flat fields of the system views (VIE-02): owned_by_me selects what the calling user owns, the owner user or a team of the user as owner team and, for assets, also the current holder (user or team); the user is the one of the request, never a value of the body. ci_type_subtree is a type key or name with all its subtypes (for assets through the asset type or the linked CI). For CIs only: lacks_outgoing_relationship requires that the CI is the source of no relationship of the type, lacks_incoming_relationship that it is the target of none (lacks_relationship stays undirected), and no_metric_within_hours (1 to 8760, else 422) that no metric sample of the CI lies in the last n hours. Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query (also in the where of related) need asset:read as well, related and the flat has_relationship, lacks_relationship, lacks_outgoing_relationship, lacks_incoming_relationship, upstream_of and downstream_of relationship:read. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -10722,6 +10728,29 @@ export interface components {
       shared?: boolean;
       /** @description Role or custom role ids of the organization whose holders may read the view. */
       shared_with_roles?: string[];
+      /** @description POST only: the key of a system view to clone (VIE-02); its entity_kind, filter_spec, sort and columns are taken over. Not together with filter_spec; 422 on from_preset for an unknown key and in a PATCH. */
+      from_preset?: string;
+    };
+    /** @description A system view (VIE-02), a code preset without a row in saved_view. */
+    SavedViewPreset: {
+      /** @description Stable key, e.g. my_devices_ci, warranty_expiring, servers_without_monitoring. */
+      key: string;
+      /** @description English name. */
+      name: string;
+      display_name: {
+        de: string;
+        en: string;
+      };
+      /** @enum {string} */
+      entity_kind: 'ci' | 'asset';
+      /** @description The filter spec of the view (as for POST /api/v1/search/query). */
+      filter_spec: {
+        [key: string]: unknown;
+      };
+      sort: components['schemas']['SavedViewSortKey'][];
+      columns: string[];
+      /** @description Always true. */
+      system: boolean;
     };
     ImpactAnalysis: {
       /** @description The failed CI (single-CI short form only). */
@@ -37272,7 +37301,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or an unknown from_preset or from_preset with filter_spec (field from_preset). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37292,12 +37321,18 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the standard saved view presets */
+      /** @description The system views */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); never set, the list is complete. */
+            next_cursor?: string;
+            data: components['schemas']['SavedViewPreset'][];
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -37412,7 +37447,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or from_preset (field from_preset). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37644,6 +37679,16 @@ export interface operations {
           /** @enum {string} */
           entity_kind?: 'ci' | 'asset';
           where?: components['schemas']['FilterExpr'];
+          /** @description What the calling user owns (owner user, owner team of the user; for assets also the holder). */
+          owned_by_me?: boolean;
+          /** @description A CI type key or name including all its subtypes. */
+          ci_type_subtree?: string;
+          /** @description CIs only; the CI is the source of no relationship of this type. */
+          lacks_outgoing_relationship?: string;
+          /** @description CIs only; the CI is the target of no relationship of this type. */
+          lacks_incoming_relationship?: string;
+          /** @description CIs only; no metric sample of the CI within the last n hours. */
+          no_metric_within_hours?: number;
           sort?: components['schemas']['SavedViewSortKey'][];
           columns?: string[];
         } & {
