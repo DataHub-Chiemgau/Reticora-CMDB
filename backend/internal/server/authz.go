@@ -319,6 +319,9 @@ var routeRules = []routeRule{
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
+	// The goods receipt books stock (WP-760, E-106); without a rule it would
+	// derive order:write.
+	{http.MethodPost, "orders/*/receive", identity.PermStockWrite},
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
 	// Collectors report with the ingest credential; managing them is

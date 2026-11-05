@@ -79,6 +79,9 @@ var (
 	// ErrFourEyes: the approver is the requester, or the requester is
 	// unknown (403).
 	ErrFourEyes = errors.New("four-eyes rule: an order must be approved by a user other than its requester (requested_by)")
+	// ErrNotReceivable: the goods receipt needs status ordered or
+	// partially_received (409, WP-760).
+	ErrNotReceivable = errors.New("goods can only be received for an order in status ordered or partially_received")
 )
 
 // msgTargetBin is the 422 message for a target_location_id that names no bin the
@@ -190,6 +193,65 @@ type CreateItemRequest struct {
 	UnitPrice    float64 `json:"unit_price,omitempty"`
 	ConsumableID string  `json:"consumable_id,omitempty"`
 	AssetID      string  `json:"asset_id,omitempty"`
+}
+
+// ReceiveItemRequest is one position of a goods receipt (WP-760): the
+// position item_id of the order receives quantity (> 0) into the bin
+// location_id, by default the target bin of the order. An asset position
+// names the received assets in asset_ids, as many as quantity.
+type ReceiveItemRequest struct {
+	ItemID     string   `json:"item_id"`
+	Quantity   float64  `json:"quantity"`
+	LocationID string   `json:"location_id,omitempty"`
+	AssetIDs   []string `json:"asset_ids,omitempty"`
+}
+
+// ReceiveOrderRequest is the payload of POST /api/v1/orders/{id}/receive.
+type ReceiveOrderRequest struct {
+	Items []ReceiveItemRequest `json:"items"`
+}
+
+// itemField is the field name of position i of a goods receipt.
+func itemField(i int, field string) string {
+	return fmt.Sprintf("items[%d].%s", i, field)
+}
+
+// validate checks the form of a goods receipt: at least one position, each
+// with item_id and a positive quantity, and no asset named twice. The
+// references are checked by the repository.
+func (req *ReceiveOrderRequest) validate() error {
+	if len(req.Items) == 0 {
+		return fieldError("items", "at least one position is required")
+	}
+	assets := map[string]bool{}
+	for i := range req.Items {
+		line := &req.Items[i]
+		line.ItemID = strings.TrimSpace(line.ItemID)
+		line.LocationID = strings.TrimSpace(line.LocationID)
+		if line.ItemID == "" {
+			return fieldError(itemField(i, "item_id"), "item_id is required")
+		}
+		if line.Quantity <= 0 {
+			return fieldError(itemField(i, "quantity"), "quantity must be greater than 0")
+		}
+		for j, id := range line.AssetIDs {
+			id = strings.ToLower(strings.TrimSpace(id))
+			if assets[id] {
+				return fieldError(itemField(i, "asset_ids"), "an asset is named more than once in the goods receipt")
+			}
+			assets[id] = true
+			line.AssetIDs[j] = id
+		}
+	}
+	return nil
+}
+
+// Receipt is a goods receipt of the order OrderID by ActorID (WP-760).
+type Receipt struct {
+	OrganizationID string
+	OrderID        string
+	ActorID        string
+	Items          []ReceiveItemRequest
 }
 
 // FilterParams scopes order list queries.

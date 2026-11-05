@@ -7,6 +7,10 @@
 package movement
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
@@ -92,6 +96,16 @@ type Movement struct {
 	SignatureHash  string    `json:"signature_hash,omitempty"`
 	OccurredAt     time.Time `json:"occurred_at"`
 	CreatedAt      time.Time `json:"created_at"`
+
+	// SignerUserID and SignerSurrogate name the signer of a signed
+	// movement (WP-276): a user id as pseudonymous key (WP-241) or the
+	// pii_subject surrogate of a contact or an external person, never a
+	// name. The answer carries them in Signature.
+	SignerUserID    string `json:"-"`
+	SignerSurrogate string `json:"-"`
+	// Signature is the reference to the signature of a signed movement
+	// (document, hash, signer, signed_at = occurred_at), nil without one.
+	Signature *SignatureRef `json:"signature,omitempty"`
 
 	// DueAt is the due date of an assignment (CHECK
 	// stock_movement_due_at_assignment, WP-745); nil for every other type.
@@ -231,4 +245,83 @@ type Conversion struct {
 
 	AssetID  string
 	Movement *Movement
+}
+
+// SignatureRef is the reference to the signature of a movement (AST-02,
+// WP-276, E-51): the document of the category signature holding the PNG,
+// the signature_hash binding image and movement, the signer as user id or
+// surrogate and signed_at, the occurred_at of the movement. It never holds
+// the image or a name.
+type SignatureRef struct {
+	DocumentID      string    `json:"document_id"`
+	SignatureHash   string    `json:"signature_hash"`
+	SignerUserID    string    `json:"signer_user_id,omitempty"`
+	SignerSurrogate string    `json:"signer_surrogate,omitempty"`
+	SignedAt        time.Time `json:"signed_at"`
+}
+
+// fillSignature sets m.Signature from the signature columns of a signed
+// movement (signature_hash set), else clears it.
+func (m *Movement) fillSignature() {
+	if m.SignatureHash == "" {
+		m.Signature = nil
+		return
+	}
+	m.Signature = &SignatureRef{DocumentID: m.DocumentID, SignatureHash: m.SignatureHash,
+		SignerUserID: m.SignerUserID, SignerSurrogate: m.SignerSurrogate, SignedAt: m.OccurredAt}
+}
+
+// SignatureTimeLayout is the form of occurred_at in the signature hash: UTC
+// with microseconds, like audit.ComputeHash.
+const SignatureTimeLayout = "2006-01-02T15:04:05.000000Z"
+
+// SignatureTime returns t as the database stores it and the signature hash
+// covers it: UTC, truncated to microseconds.
+func SignatureTime(t time.Time) time.Time {
+	return t.UTC().Truncate(time.Microsecond)
+}
+
+// signatureKeys is the fixed key order of the canonical JSON of the
+// signature hash.
+var signatureKeys = []string{"id", "organization_id", "asset_id", "movement_type", "assignee_user_id",
+	"assignee_team_id", "signer_user_id", "signer_surrogate", "actor_id", "occurred_at", "document_id"}
+
+// SignatureHash returns the signature_hash of the signed movement m with
+// the image png (AST-02, WP-276): hex(SHA-256(png || 0x00 || canonical
+// JSON)), the canonical JSON an object with the keys id, organization_id,
+// asset_id, movement_type, assignee_user_id, assignee_team_id,
+// signer_user_id, signer_surrogate, actor_id, occurred_at and document_id
+// in this order, missing values as empty strings, occurred_at in UTC
+// truncated to microseconds (SignatureTimeLayout). The hash covers only
+// ids, so it stays verifiable after crypto shredding. The write path, the
+// verification (WP-748) and the legacy run (WP-749) share it.
+func SignatureHash(png []byte, m *Movement) string {
+	occurred := ""
+	if !m.OccurredAt.IsZero() {
+		occurred = SignatureTime(m.OccurredAt).Format(SignatureTimeLayout)
+	}
+	values := map[string]string{
+		"id": m.ID, "organization_id": m.OrganizationID, "asset_id": m.AssetID, "movement_type": m.MovementType,
+		"assignee_user_id": m.AssigneeUserID, "assignee_team_id": m.AssigneeTeamID,
+		"signer_user_id": m.SignerUserID, "signer_surrogate": m.SignerSurrogate, "actor_id": m.ActorID,
+		"occurred_at": occurred, "document_id": m.DocumentID,
+	}
+	var canonical bytes.Buffer
+	canonical.WriteByte('{')
+	for i, key := range signatureKeys {
+		if i > 0 {
+			canonical.WriteByte(',')
+		}
+		k, _ := json.Marshal(key)
+		v, _ := json.Marshal(values[key])
+		canonical.Write(k)
+		canonical.WriteByte(':')
+		canonical.Write(v)
+	}
+	canonical.WriteByte('}')
+	h := sha256.New()
+	h.Write(png)
+	h.Write([]byte{0})
+	h.Write(canonical.Bytes())
+	return hex.EncodeToString(h.Sum(nil))
 }

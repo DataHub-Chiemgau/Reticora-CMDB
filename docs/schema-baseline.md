@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000261_relationship_change
+Stand: Migration 000263_lifecycle_guards_lcy03
 
 ## Prüfung
 
@@ -288,7 +288,7 @@ bleiben unverändert.
 `ticket`, `location`, `disposal_record`, `stocktake`, `contract` und
 `stock_movement` (`doc_link_entity_type_check`, Migrationen 000217, 000238
 und 000242); die Registry in `backend/internal/document/links.go` hält
-dieselben Werte außer `stock_movement` (folgt mit WP-276). Für
+dieselben Werte (`stock_movement` seit WP-276). Für
 `stock_movement` übernimmt `derive_document_link_scope` Client und Standort
 der Bewegung (eingefroren, keine Propagation).
 `derive_document_link_scope` leitet `client_id`/`site_id` auch aus
@@ -1682,6 +1682,16 @@ RLS mit ENABLE/FORCE, TRUNCATE-Schutz `reticora_truncate_guard`,
 `relationship_change_isolation` (USING wie `ci_relationship_isolation`,
 WITH CHECK mit dem Schreibprädikat aus 000142) und die restriktiven
 `relationship_change_scoped_update` und `relationship_change_scoped_delete`.
+Digitale Unterschrift an Bewegungen (AST-02, E-51, E-124, WP-276, Migration
+000262): `document_category_check` erlaubt neben den acht Werten aus 000011
+die Kategorie `signature`. `stock_movement` erhält `signer_user_id` und
+`signer_surrogate` (beide `uuid`, ohne Fremdschlüssel wie `actor_id`, damit
+Crypto-Shredding möglich bleibt) mit `stock_movement_signer_check`
+(`num_nonnulls(signer_user_id, signer_surrogate) <= 1`) und
+`stock_movement_signature_check` (`signature_hash` nur mit `document_id` und
+genau einem Unterzeichner). Append-only-Trigger, Policies und RLS bleiben
+unverändert. Down bricht ab, solange Dokumente der Kategorie `signature` oder
+Bewegungen mit `signature_hash` existieren.
 
 ## Tabellen, RLS und Policies
 

@@ -530,3 +530,56 @@ func TestRetentionPurgesSoftDeletedDocuments(t *testing.T) {
 		t.Errorf("chain after the purges: %+v %v", result, verr)
 	}
 }
+
+// TestRetentionDeletesOldRelationshipChanges covers WP-771 (REL-09,
+// NFR-06): retention.history deletes the relationship_change rows created
+// before the history period (RETICORA_RETENTION_HISTORY_DAYS, 1095 days),
+// as it does for ci_change, per organization; younger rows stay, and
+// organization B, which has no expired row, keeps its rows.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldRelationshipChanges(t *testing.T) {
+	f := scopetest.Seed(t, "a7")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 1095, 90, 365))
+	endpoints := map[string][2]string{
+		f.OrgA: {f.CI(t, f.OrgA, "", "wp771-ret-a1"), f.CI(t, f.OrgA, "", "wp771-ret-a2")},
+		f.OrgB: {f.CI(t, f.OrgB, "", "wp771-ret-b1"), f.CI(t, f.OrgB, "", "wp771-ret-b2")},
+	}
+	// insert writes a history row of org created age ago and returns its id.
+	insert := func(org string, age time.Duration) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO relationship_change (organization_id, relationship_id, source_ci_id, target_ci_id,
+				rel_type, change_kind, actor_type, source, observed_at, created_at)
+			VALUES ($1, gen_random_uuid(), $2, $3, 'connected_to', 'created', 'system', 'collector', $4, $4) RETURNING id::text`,
+			org, endpoints[org][0], endpoints[org][1], now.Add(-age)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	expired := insert(f.OrgA, 1100*day)
+	youngA := insert(f.OrgA, 1000*day)
+	youngB := insert(f.OrgB, 10*day)
+
+	if err := r.RunHistory(bg); err != nil {
+		t.Fatal(err)
+	}
+	left := func(org string) []string {
+		t.Helper()
+		var ids []string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(array_agg(id::text ORDER BY created_at), '{}') FROM relationship_change
+			WHERE organization_id = $1`, org).Scan(&ids); err != nil {
+			t.Fatal(err)
+		}
+		return ids
+	}
+	if got := left(f.OrgA); !slices.Equal(got, []string{youngA}) {
+		t.Errorf("relationship_change of A after the run: %v, want only %s (deleted: %s)", got, youngA, expired)
+	}
+	if got := left(f.OrgB); !slices.Equal(got, []string{youngB}) {
+		t.Errorf("relationship_change of B after the run: %v, want %s", got, youngB)
+	}
+}

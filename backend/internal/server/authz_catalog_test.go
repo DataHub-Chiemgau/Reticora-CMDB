@@ -237,7 +237,7 @@ func TestP2KeysGateTheirActions(t *testing.T) {
 		{"POST", "/api/v1/templates", "citype:manage"},
 		{"POST", "/api/v1/subnets/x/reservations", "ipam:write"},
 		{"GET", "/api/v1/subnets/x/reservations", "ipam:read"},
-		{"POST", "/api/v1/orders/x/receive", "order:write"},
+		{"POST", "/api/v1/orders/x/receive", "stock:write"}, // WP-760
 		{"GET", "/api/v1/stock-movements", "asset:read"},
 	} {
 		if got, access := PermissionForRoute(tc.method, tc.path); string(got) != tc.want || access != routeProtected {

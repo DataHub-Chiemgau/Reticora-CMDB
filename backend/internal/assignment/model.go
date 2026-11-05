@@ -1,10 +1,16 @@
 // Package assignment provides the Assignment domain for asset/CI allocation and transfer.
 package assignment
 
-import "time"
+import (
+	"time"
 
-// Signature is a captured digital signature for handover/return. The image is
-// either inline base64 or an S3 object key; metadata records signer and time.
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+)
+
+// Signature is the legacy signature of the table assignment (migration
+// 000047): inline base64 or an object key, signer surrogate, client time
+// and method. It is only read until the table is dropped (WP-843); new
+// signatures are SignatureInput and movement.SignatureRef (WP-276).
 type Signature struct {
 	ImageBase64 string `json:"image_base64,omitempty"`
 	ObjectKey   string `json:"object_key,omitempty"`
@@ -18,8 +24,9 @@ type Signature struct {
 // movement; assigned_to names a user holder, assigned_team_id a team
 // holder, due_at the due date (due_date its day in organization.timezone).
 // Since WP-747 the reads come from the projection of the ledger: ci_id and
-// the signatures stay empty (the signatures of the table assignment are
-// secured by WP-843, the new ones are documents with WP-276).
+// the legacy signatures stay empty (the signatures of the table assignment
+// are secured by WP-843). Signature references the signature of the
+// assignment movement (WP-276) in the answers of assign and transfer.
 type Assignment struct {
 	ID                string     `json:"id"`
 	OrganizationID    string     `json:"organization_id"`
@@ -40,6 +47,27 @@ type Assignment struct {
 	ReturnSignature   *Signature `json:"return_signature,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
+
+	Signature *movement.SignatureRef `json:"signature,omitempty"`
+}
+
+// SignatureInput is a signature captured with an assignment, return or
+// transfer (AST-02, E-51, WP-276): the PNG of the canvas in base64 and
+// optionally the signer. The image becomes a document of the category
+// signature bound to the movement by signature_hash.
+type SignatureInput struct {
+	ImagePNGBase64 string       `json:"image_png_base64"`
+	Signer         *SignerInput `json:"signer,omitempty"`
+}
+
+// SignerInput names the signer by exactly one of a user of the
+// organization, a contact in the caller's scope or the name of an external
+// person (stored only as a vault surrogate). Without it the holder of the
+// movement signs.
+type SignerInput struct {
+	UserID    string `json:"user_id,omitempty"`
+	ContactID string `json:"contact_id,omitempty"`
+	Name      string `json:"name,omitempty"`
 }
 
 // FilterParams holds filter parameters for listing assignments.
@@ -54,27 +82,34 @@ type FilterParams struct {
 }
 
 // AssignAssetRequest is the payload of POST /api/v1/assets/{id}/assign:
-// exactly one holder, optionally the due date and notes.
+// exactly one holder, optionally the due date, notes and the signature
+// (WP-276).
 type AssignAssetRequest struct {
-	AssignedUserID string     `json:"assigned_user_id,omitempty"`
-	AssignedTeamID string     `json:"assigned_team_id,omitempty"`
-	DueAt          *time.Time `json:"due_at,omitempty"`
-	Notes          string     `json:"notes,omitempty"`
+	AssignedUserID string          `json:"assigned_user_id,omitempty"`
+	AssignedTeamID string          `json:"assigned_team_id,omitempty"`
+	DueAt          *time.Time      `json:"due_at,omitempty"`
+	Notes          string          `json:"notes,omitempty"`
+	Signature      *SignatureInput `json:"signature,omitempty"`
 }
 
 // ReturnAssetRequest is the payload of POST /api/v1/assets/{id}/return.
 type ReturnAssetRequest struct {
-	ExpectedHolder  string `json:"expected_holder"`
-	ReturnCondition string `json:"return_condition,omitempty"`
-	Notes           string `json:"notes,omitempty"`
+	ExpectedHolder  string          `json:"expected_holder"`
+	ReturnCondition string          `json:"return_condition,omitempty"`
+	Notes           string          `json:"notes,omitempty"`
+	Signature       *SignatureInput `json:"signature,omitempty"`
 }
 
 // TransferAssetRequest is the payload of POST
-// /api/v1/assets/{id}/transfer: the current and the new holder.
+// /api/v1/assets/{id}/transfer: the current and the new holder; signature
+// is that of the new holder (bound to the assignment), return_signature
+// that of the previous one (bound to the return).
 type TransferAssetRequest struct {
-	ExpectedHolder string     `json:"expected_holder"`
-	AssignedUserID string     `json:"assigned_user_id,omitempty"`
-	AssignedTeamID string     `json:"assigned_team_id,omitempty"`
-	DueAt          *time.Time `json:"due_at,omitempty"`
-	Notes          string     `json:"notes,omitempty"`
+	ExpectedHolder  string          `json:"expected_holder"`
+	AssignedUserID  string          `json:"assigned_user_id,omitempty"`
+	AssignedTeamID  string          `json:"assigned_team_id,omitempty"`
+	DueAt           *time.Time      `json:"due_at,omitempty"`
+	Notes           string          `json:"notes,omitempty"`
+	Signature       *SignatureInput `json:"signature,omitempty"`
+	ReturnSignature *SignatureInput `json:"return_signature,omitempty"`
 }

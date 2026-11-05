@@ -23,7 +23,7 @@ type Service struct {
 	repo    Repository
 	states  StateStore
 	changes ChangeRecorder
-	checks  []SystemCheck
+	guards  GuardChecker
 }
 
 // StateStore combines StateReader and StateWriter for the two entity kinds
@@ -52,12 +52,7 @@ type TransitionRecord struct {
 	Reason     string
 }
 
-// SystemCheck is a check of the system that runs in the transaction of a
-// transition after the guard of the model (WP-279: location, holder,
-// disposal_record, reservation); an error refuses the transition.
-type SystemCheck func(ctx context.Context, check *TransitionCheck) error
-
-// TransitionCheck is what a SystemCheck sees: the entity, its model, the
+// TransitionCheck is what a GuardChecker sees: the entity, its model, the
 // locked current state, the target and the request context.
 type TransitionCheck struct {
 	OrgID      string
@@ -92,13 +87,23 @@ type GuardViolation struct {
 }
 
 // GuardError refuses a transition whose required fields or guard rules the
-// context fails (422 lifecycle-guard with the violations).
+// context fails (422 lifecycle-guard with the violations), or an asset
+// that fails a system guard of LCY-03 (WP-279): then Guard is its
+// guard_key and Missing names the missing references (location_id,
+// assignee, disposal_record, reservation).
 type GuardError struct {
 	Violations []GuardViolation
+	Guard      string
+	Missing    []string
+	detail     string
 }
 
-// validation: a fixed text.
+// validation: a fixed text, or the text of the failed system guard with
+// its key and the target state.
 func (e *GuardError) Error() string {
+	if e.detail != "" {
+		return e.detail
+	}
 	return "the transition context fails the guard of the lifecycle transition"
 }
 
@@ -130,10 +135,12 @@ func NewService(repo Repository, states StateStore, changes ChangeRecorder) *Ser
 	return &Service{repo: repo, states: states, changes: changes}
 }
 
-// WithGuards adds system checks that run in the transaction of every
-// transition after the guard of the model (WP-279).
-func (s *Service) WithGuards(checks ...SystemCheck) *Service {
-	s.checks = append(s.checks, checks...)
+// WithGuards sets the checker of the system guards of LCY-03 (WP-279). They
+// run in the transaction of every transition of an asset into a guarded
+// state (SystemGuardFor), after the guard of the model. Without a checker
+// such a transition fails closed (422 lifecycle-guard, cannot be checked).
+func (s *Service) WithGuards(checker GuardChecker) *Service {
+	s.guards = checker
 	return s
 }
 
@@ -144,7 +151,7 @@ func (s *Service) WithGuards(checks ...SystemCheck) *Service {
 // any state, or the target is the initial state of an entity without a
 // state (InvalidTransitionError); the required fields of target and edge
 // and the guard rules are evaluated against the context (GuardError);
-// then the system checks run, the state is set and history, audit and
+// then the system guard of an asset's target state runs (WP-279), the state is set and history, audit and
 // event are recorded. A model that cannot be loaded is ErrNoLifecycleModel.
 func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, modelID string, req TransitionRequest) (*TransitionResult, error) {
 	if req.ToState == "" {
@@ -173,12 +180,9 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, m
 		if violations := guardViolations(target, edge, req.Context); len(violations) > 0 {
 			return &GuardError{Violations: violations}
 		}
-		check := &TransitionCheck{OrgID: orgID, EntityType: entityType, EntityID: entityID, Model: def,
-			From: current, To: req.ToState, Context: req.Context}
-		for _, systemCheck := range s.checks {
-			if checkErr := systemCheck(ctx, check); checkErr != nil {
-				return checkErr
-			}
+		if guardErr := s.checkSystemGuard(ctx, &TransitionCheck{OrgID: orgID, EntityType: entityType,
+			EntityID: entityID, Model: def, From: current, To: req.ToState, Context: req.Context}); guardErr != nil {
+			return guardErr
 		}
 		if setErr := s.states.SetState(ctx, orgID, entityType, entityID, req.ToState); setErr != nil {
 			return setErr
@@ -204,6 +208,23 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, m
 		return nil, err
 	}
 	return result, nil
+}
+
+// checkSystemGuard evaluates the system guard of the target state of an
+// asset (LCY-03, WP-279) whatever its model; CIs have none. Without a
+// checker a guarded transition is refused (fail-closed).
+func (s *Service) checkSystemGuard(ctx context.Context, check *TransitionCheck) error {
+	if check.EntityType != "asset" {
+		return nil
+	}
+	guard, ok := SystemGuardFor(check.To)
+	if !ok {
+		return nil
+	}
+	if s.guards == nil {
+		return uncheckableGuardError(guard, check.To)
+	}
+	return s.guards.CheckGuard(ctx, guard, check)
 }
 
 // allowedTransition returns the target state and the edge of a transition

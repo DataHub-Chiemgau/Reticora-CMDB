@@ -41,6 +41,16 @@ type Repository interface {
 	// AddItem adds a position to an order in draft; it books nothing.
 	AddItem(ctx context.Context, item *Item) (*Order, error)
 	ListItems(ctx context.Context, orgID, orderID string) ([]Item, error)
+	// RunInTx runs fn in one transaction of the context's tenant scope;
+	// the repository calls fn makes with its context join it (WP-332,
+	// database.WithRequestTenantTx). The in-memory repository calls fn
+	// without a transaction.
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+	// Receive books the goods receipt rc through book (WP-760, see
+	// PGRepository.Receive): ErrNotReceivable outside ordered and
+	// partially_received, *api.FieldError (422) for a position, quantity,
+	// bin or asset that does not fit.
+	Receive(ctx context.Context, rc *Receipt, book Booker) (*Order, error)
 }
 
 // checkFourEyes refuses an approval by the requester or of an order
@@ -261,6 +271,42 @@ func (r *MemoryRepository) AddItem(_ context.Context, item *Item) (*Order, error
 	stored := *item
 	r.items[item.OrderID] = append(r.items[item.OrderID], &stored)
 	return r.copyOf(o), nil
+}
+
+// RunInTx calls fn without a transaction (--no-db).
+func (r *MemoryRepository) RunInTx(ctx context.Context, _ string, fn func(ctx context.Context) error) error {
+	return fn(ctx)
+}
+
+// Receive checks the state and the positions like the PostgreSQL
+// repository; it knows no locations, so every bin is unknown (422) and
+// nothing is booked.
+func (r *MemoryRepository) Receive(_ context.Context, rc *Receipt, _ Booker) (*Order, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, err := r.get(rc.OrganizationID, rc.OrderID)
+	if err != nil {
+		return nil, err
+	}
+	if o.Status != StatusOrdered && o.Status != StatusPartiallyReceived {
+		return nil, ErrNotReceivable
+	}
+	if len(rc.Items) == 0 {
+		return nil, fieldError("items", "at least one position is required")
+	}
+	for i := range rc.Items {
+		found := false
+		for _, it := range r.items[o.ID] {
+			found = found || it.ID == rc.Items[i].ItemID
+		}
+		if !found {
+			return nil, fieldError(itemField(i, "item_id"), msgReceiveItem)
+		}
+	}
+	if rc.Items[0].LocationID == "" && o.TargetLocationID == "" {
+		return nil, fieldError(itemField(0, "location_id"), msgReceiveNoBin)
+	}
+	return nil, fieldError(itemField(0, "location_id"), msgReceiveBin)
 }
 
 func (r *MemoryRepository) ListItems(_ context.Context, orgID, orderID string) ([]Item, error) {

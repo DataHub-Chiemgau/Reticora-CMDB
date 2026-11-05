@@ -455,23 +455,9 @@ func (r *PGRepository) CreateVersion(ctx context.Context, v *Version, limit *int
 		if lockErr != nil {
 			return fmt.Errorf("lock document: %w", lockErr)
 		}
-		if err := addStorageUsage(ctx, tx, v.OrganizationID, v.Size, limit); err != nil {
+		if err := AddVersionTx(ctx, tx, v, limit); err != nil {
 			return err
 		}
-		if v.ScanStatus == "" {
-			v.ScanStatus = ScanPending
-		}
-		if err := tx.QueryRow(ctx, `
-			INSERT INTO document_version (id, organization_id, document_id, version, storage_key, size, mime,
-			                              checksum_sha256, scan_status, uploaded_by_surrogate)
-			SELECT $1, $2, $3, COALESCE(max(version), 0) + 1, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid
-			  FROM document_version WHERE document_id = $3
-			RETURNING version, created_at`,
-			v.ID, v.OrganizationID, v.DocumentID, v.StorageKey, v.Size, v.MimeType, v.ChecksumSHA256, v.ScanStatus,
-			uuidOrEmpty(v.UploadedBy)).Scan(&v.Version, &v.CreatedAt); err != nil {
-			return fmt.Errorf("insert document version: %w", err)
-		}
-		v.CreatedAt = v.CreatedAt.UTC()
 		var err error
 		if doc, err = scanDocument(tx.QueryRow(ctx, `
 			UPDATE document

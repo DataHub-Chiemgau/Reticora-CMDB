@@ -2831,8 +2831,10 @@ export const deskApi = {
   },
 };
 
+// The SVG label of an asset (INV-03, WP-849): Code128 and QR of the
+// inventory number or the asset URN.
 export function assetLabelURL(assetId: string): string {
-  return `${API_BASE}/assets/${assetId}/label.svg`;
+  return `${API_BASE}/assets/${assetId}/label?format=svg`;
 }
 
 // ─── Endpoint agents + security findings (Block E) ──────────────────────────

@@ -226,6 +226,7 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		{http.MethodPost, "/api/v1/orders/{id}/approve", identity.PermOrderApprove},
 		{http.MethodPost, "/api/v1/orders/{id}/reject", identity.PermOrderApprove},
 		{http.MethodPost, "/api/v1/orders/{id}/submit", identity.PermOrderWrite},
+		{http.MethodPost, "/api/v1/orders/{id}/receive", identity.PermStockWrite},
 		{http.MethodPut, "/api/v1/cis/{id}/field-definitions", identity.PermCIInstanceAttributeManage},
 		{http.MethodDelete, "/api/v1/cis/{id}/field-definitions/{name}", identity.PermCIInstanceAttributeManage},
 		{http.MethodGet, "/api/v1/cis/{id}/field-definitions", identity.PermCIRead},

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -448,5 +450,45 @@ func TestUnmergeRefusesWhileSurvivorIsMergedVictim(t *testing.T) {
 	}
 	if after := state(rel, a3, b3, c3); after != before {
 		t.Errorf("the refused scoped unmerge changed\n%s\nbefore\n%s", after, before)
+	}
+}
+
+// TestUnmergeRecordsEdgeHistory covers WP-771 (REL-09) against PostgreSQL:
+// the unmerge writes in its transaction a row rewired per edge it hangs
+// back on the victim (from the survivor's endpoint to the victim's) and a
+// row restored per edge it inserts again, all with reason unmerge and
+// source system without a request context; it writes no edge event
+// (ci.restored and ci.changed cover them).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestUnmergeRecordsEdgeHistory(t *testing.T) {
+	f := scopetest.Seed(t, "b4")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()))
+	e := seedMergeEdges(t, f, "wp771-unmerge")
+	if _, err := svc.Merge(ctx, f.OrgA, e.survivor, e.victim); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Unmerge(ctx, f.OrgA, e.victim, false); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		id   string
+		want edgeChange
+	}{
+		"moved back at the source": {e.moved, edgeChange{kind: "rewired", fields: []string{"source_ci_id"},
+			beforeSource: e.survivor, beforeTarget: e.other, afterSource: e.victim, afterTarget: e.other, hasBefore: true, hasAfter: true}},
+		"moved back at the target": {e.target, edgeChange{kind: "rewired", fields: []string{"target_ci_id"},
+			beforeSource: e.other, beforeTarget: e.survivor, afterSource: e.other, afterTarget: e.victim, hasBefore: true, hasAfter: true}},
+		"duplicate inserted again": {e.dup, edgeChange{kind: "restored", fields: []string{},
+			afterSource: e.victim, afterTarget: e.other, hasAfter: true}},
+	} {
+		tc.want.reason, tc.want.source, tc.want.actorType = "unmerge", audit.SourceSystem, "system"
+		if got := edgeChanges(t, f, tc.id, "unmerge"); len(got) != 1 || !reflect.DeepEqual(got[0], tc.want) {
+			t.Errorf("%s: history %+v, want %+v", name, got, tc.want)
+		}
+	}
+	if n := edgeEventCount(t, f, e.moved, e.target, e.dup); n != 0 {
+		t.Errorf("merge and unmerge wrote %d edge events", n)
 	}
 }

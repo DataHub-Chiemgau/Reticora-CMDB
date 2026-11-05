@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -220,7 +221,10 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 		if err != nil {
 			return fmt.Errorf("discovery edges: %w", err)
 		}
-		outbox := events.NewOutbox()
+		// Each removed edge gets its history row removed right after its
+		// DELETE (WP-771); the events relationship.removed follow at the end,
+		// so the outbox comes last (K20).
+		var removed []*events.Event
 		for i := range edges {
 			e := &edges[i]
 			reason := ""
@@ -245,25 +249,27 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 				deadline = &d
 			}
 			var confirmed time.Time
-			err = tx.QueryRow(ctx, `DELETE FROM ci_relationship
+			edge, derr := scanRelationship(withExtra(tx.QueryRow(ctx, `DELETE FROM ci_relationship
 				WHERE id = $1 AND organization_id = $2 AND source = 'discovery' AND verification_state <> 'verified'
 				  AND ($3::timestamptz IS NULL OR COALESCE(last_confirmed_at, last_seen_at, created_at) < $3)
-				RETURNING COALESCE(last_confirmed_at, last_seen_at, created_at)`, e.id, orgID, deadline).Scan(&confirmed)
-			if errors.Is(err, pgx.ErrNoRows) {
+				RETURNING `+relationshipSelectColumns+`, COALESCE(last_confirmed_at, last_seen_at, created_at)`, e.id, orgID, deadline), &confirmed))
+			if errors.Is(derr, pgx.ErrNoRows) {
 				slog.Info("discovery edge kept: verified or confirmed during the cleanup", "job", CleanupKind,
 					"organization_id", orgID, "relationship_id", e.id)
 				continue
 			}
-			if err != nil {
-				return fmt.Errorf("remove edge %s: %w", e.id, err)
+			if derr != nil {
+				return fmt.Errorf("remove edge %s: %w", e.id, derr)
+			}
+			if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeRemoved, Before: edge, Reason: reason,
+				DefaultSource: audit.SourceSystem}); recErr != nil {
+				return recErr
 			}
 			e.confirmed = confirmed
-			if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.RelationshipRemoved, EntityID: e.id,
+			removed = append(removed, &events.Event{OrgID: orgID, Type: events.RelationshipRemoved, EntityID: e.id,
 				Data: map[string]any{"id": e.id, "source_ci_id": e.source, "target_ci_id": e.target, "rel_type": e.relType,
 					"source": "discovery", "reason": reason, "last_confirmed_at": e.confirmed.UTC().Format(time.RFC3339),
-					"stale_after": age.String()}}); err != nil {
-				return err
-			}
+					"stale_after": age.String()}})
 			if reason == "suppressed" {
 				res.Suppressed++
 			} else {
@@ -271,7 +277,11 @@ func (c *Cleanup) RunOrg(ctx context.Context, orgID string) (CleanupResult, erro
 			}
 			slog.Info("discovery edge removed", "event", events.RelationshipRemoved, "organization_id", orgID, "relationship_id", e.id, "reason", reason)
 		}
-		return nil
+		if len(removed) == 0 {
+			return nil
+		}
+		_, err = events.NewOutbox().AppendMany(ctx, tx, removed)
+		return err
 	})
 	return res, err
 }

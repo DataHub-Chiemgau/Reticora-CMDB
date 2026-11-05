@@ -32,6 +32,15 @@ const (
 	KindBin       Kind = "bin"
 )
 
+// StorageKinds are the kinds of the storage branch (warehouse → bin) and
+// OperationsKinds those of the operations branch (site → rack). The
+// lifecycle guards of LCY-03 (WP-279) check in_stock and deployed against
+// them; the filter branch=storage|operations (WP-282) uses the same sets.
+var (
+	StorageKinds    = []Kind{KindWarehouse, KindZone, KindShelf, KindBin}
+	OperationsKinds = []Kind{KindSite, KindBuilding, KindRoom, KindRack}
+)
+
 // parentKinds is the parent matrix of LOC-10. The site is the root and has
 // no entry. It must match location_parent_kind in migration 000062.
 var parentKinds = map[Kind]Kind{

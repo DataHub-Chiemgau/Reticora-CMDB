@@ -3576,7 +3576,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A link with an entity type outside the registry, or `category`
+            `signature`, which only a signed assignment, return or transfer
+            sets (WP-276, WP-748).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3624,6 +3631,23 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            `category` is `signature`; only a signed assignment, return or
+            transfer sets it (WP-276, WP-748).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
     delete:
       operationId: deleteDocument
       tags: [Documents]
@@ -3643,6 +3667,15 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/orders:
     x-phase: P2
@@ -4574,29 +4607,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
-
-  /api/v1/assets/{id}/label.svg:
-    x-phase: P2
-    x-feature: barcode
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      - name: base_url
-        in: query
-        schema: { type: string }
-        description: CMDB base URL for the deep link on the label.
-    get:
-      operationId: getAssetLabel
-      tags: [Assets]
-      summary: Render the printable direct-access label (SVG) for an asset
-      responses:
-        '200':
-          description: SVG label
-          content:
-            image/svg+xml: {}
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
 
   /api/v1/asset-locations:
     x-phase: P4
@@ -10129,6 +10139,15 @@ paths:
           $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '413':
           description: Payload too large
           content:
@@ -10257,7 +10276,8 @@ paths:
       summary: Link a document to another entity
       description: >-
         entity_type is one of ci, asset, assignment, ticket, location,
-        disposal_record, stocktake and contract (WP-737); any other value
+        disposal_record, stocktake, contract (WP-737) and stock_movement
+        (WP-276); any other value
         answers 422. A target
         that does not exist or lies outside the caller's scope answers 404.
         The link takes client, site and team of its target (MGT-01). A
@@ -10298,7 +10318,8 @@ paths:
             https://reticora.io/problems/document-quarantined); a document
             whose scan is pending (type
             https://reticora.io/problems/document-pending-scan) is linked
-            normally.
+            normally. A signature document (category `signature`) takes no
+            further link (type https://reticora.io/problems/409, WP-748).
           content:
             application/problem+json:
               schema:
@@ -19135,13 +19156,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/return:
     x-phase: P2
@@ -19178,13 +19221,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/transfer:
     x-phase: P2
@@ -19221,13 +19286,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/reserve:
     x-phase: P2
@@ -19432,23 +19519,65 @@ paths:
   /api/v1/assets/{id}/label:
     x-phase: P2
     x-feature: barcode
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAssetLabel
       tags: [Assets]
-      summary: Render the label of an asset
-      description: Planned (E-38); WP-763 implements the operation.
+      summary: Render the label of an asset (INV-03)
+      description: >-
+        Renders the printable label of the asset (E-52). The barcode
+        content is the inventory number, without one (or without the
+        right to read it) the URN `urn:reticora:asset:<uuid>`; both
+        resolve through `GET /api/v1/labels/lookup`. The label carries the
+        content as Code128 (where it is printable ASCII and fits the label)
+        and as QR code, the name and manufacturer/model as text (as the
+        caller's field permissions allow), and no host or deep link.
+        `svg` is the 50×25 mm asset label, `png` the two symbols without
+        text, `pdf` the label in a template. The path needs the features
+        barcode and assets_basic (403 feature-not-entitled) and the
+        permission asset:read. Replaces `label.svg` (E-38, without alias).
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: Output format; an unknown value is 422.
+          schema:
+            type: string
+            enum: [svg, png, pdf]
+            default: svg
+        - name: template
+          in: query
+          required: false
+          description: >-
+            PDF template (format pdf only): `asset_50x25` (50×25 mm),
+            `bin_100x50` (100×50 mm), each one label per page, or `a4_24`
+            (A4 sheet with 24 labels). An unknown value is 422 for every
+            format.
+          schema:
+            type: string
+            enum: [asset_50x25, bin_100x50, a4_24]
+            default: asset_50x25
       responses:
         '200':
-          description: Render the label of an asset. The response schema comes with WP-763.
+          description: The label
+          content:
+            image/svg+xml:
+              schema: { type: string }
+            image/png:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/as-of:
     x-phase: P2
@@ -19598,23 +19727,59 @@ paths:
   /api/v1/stock-movements/{id}/signature:
     x-phase: P2
     x-feature: signature
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: verifyStockMovementSignature
       tags: [Assets]
       summary: Verify the signature of a movement
-      description: Planned (E-38); WP-748 implements the operation.
+      description: >-
+        Verifies the signature of a signed movement (AST-02, E-51, WP-748):
+        it loads version 1 of the signature document (category
+        `signature`, locked against changes), compares the SHA-256 of the
+        stored image with `checksum_sha256` of the version and recomputes
+        the `signature_hash` of the movement. `valid` is true only when both
+        match. A version whose scan is pending is verified and answers
+        `scan_status` `pending_scan`. Every verification writes the audit
+        entry `stock_movement.signature_verified` (document_id, valid,
+        scan_status; never the image). Requires `asset:read` and the
+        feature `signature`.
       responses:
         '200':
-          description: Verify the signature of a movement. The response schema comes with WP-748.
+          description: The verification of the signature.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignatureVerification'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The movement is unknown or outside the caller's client and site
+            scope, or it carries no signature.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: >-
+            The signature image is quarantined (type
+            https://reticora.io/problems/document-quarantined) or its scan
+            failed (type https://reticora.io/problems/document-pending-scan).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '501':
+          description: The profile without database offers no verification.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/consumables/{id}/stock:
     x-phase: P2
@@ -19749,17 +19914,43 @@ paths:
   /api/v1/orders/{id}/receive:
     x-phase: P2
     x-feature: internal_orders
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: receiveOrder
-      tags: [Stocktake]
+      tags: [Orders]
       summary: Book the goods receipt of an order
-      description: Planned (E-38); WP-760 implements the operation.
+      description: >-
+        Goods receipt of an order in status ordered or partially_received
+        (409 otherwise; STK-05, WP-760), with the right stock:write. Each
+        position names an item_id of the order and a quantity (> 0) up to its
+        open quantity (quantity - received_quantity, overdelivery 422). The
+        bin is location_id, by default the target_location_id of the order
+        (422 when both are missing); it must be a location of kind bin within
+        the scope and, for an order with a client, of that client (422). A
+        consumable position books one movement receipt into the bin in
+        stock_movement (item_kind consumable, order_id) and carries the
+        stock_level of the bin forward; an asset position names as many
+        asset_ids as it receives (422 otherwise), each visible and org-wide or
+        of the order's client (422), and books one movement receipt per
+        asset (item_kind asset) that moves it into the bin. Every booking
+        emits stock.movement. The order then moves to received when every
+        position is fully received, else to partially_received. Everything
+        runs in one transaction: the first error books nothing. A repetition
+        with the same Idempotency-Key returns the stored answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiveOrderRequest'
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-760.
+          description: The order with the received quantity of each position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19768,6 +19959,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
@@ -20103,6 +20296,15 @@ paths:
           $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '413':
           description: Payload too large
           content:
@@ -20171,6 +20373,15 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/tickets/{id}/links:
     x-phase: P2
@@ -24607,7 +24818,10 @@ components:
       description: >-
         A refused lifecycle transition (422). Type
         urn:reticora:problem:lifecycle-guard: the transition context fails
-        required fields or guard rules, each failed rule is a violation.
+        required fields or guard rules, each failed rule is a violation; an
+        asset that fails a system guard of LCY-03 (WP-279) names the guard
+        and the missing references. Without a guard checker the transition
+        fails closed with the same type.
         Type urn:reticora:problem:invalid-transition: the model has no edge
         from the current state to to_state, or no such state (field
         to_state, from_state, to_state). Type
@@ -24623,6 +24837,23 @@ components:
             to_state:
               type: string
               description: Requested state of an invalid transition.
+            guard:
+              type: string
+              enum: [storage_location, operations_location_or_holder, disposal_record, active_reservation]
+              description: >-
+                guard_key of the failed system guard of an asset (WP-279):
+                storage_location (in_stock: location of kind warehouse,
+                zone, shelf or bin), operations_location_or_holder
+                (deployed: location of kind site, building, room or rack,
+                or a holder), disposal_record (disposed) or
+                active_reservation (reserved). Objects outside the
+                caller's scope count as missing.
+            missing:
+              type: array
+              items:
+                type: string
+                enum: [location_id, assignee, disposal_record, reservation]
+              description: References the failed system guard misses.
             violations:
               type: array
               items:
@@ -24634,7 +24865,7 @@ components:
                     description: Field of the transition context.
                   code:
                     type: string
-                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
+                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json), guard.<guard> for a system guard.
                   message: { type: string }
     DisposalTransitionProblem:
       description: >-
@@ -27661,6 +27892,8 @@ components:
         updated_at:
           type: string
           format: date-time
+        signature:
+          $ref: '#/components/schemas/SignatureRef'
 
     AssignAssetRequest:
       type: object
@@ -27679,6 +27912,8 @@ components:
           format: date-time
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
 
     ReturnAssetRequest:
       type: object
@@ -27693,6 +27928,8 @@ components:
           description: Booked as `reason` of the return movement.
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
 
     TransferAssetRequest:
       type: object
@@ -27714,16 +27951,97 @@ components:
           format: date-time
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
+        return_signature:
+          $ref: '#/components/schemas/SignatureInput'
 
-    Signature:
+    SignatureInput:
       type: object
-      description: Digital signature captured at handover/return.
+      additionalProperties: false
+      description: >-
+        A digital signature captured with an assignment, return or transfer
+        (AST-02, E-51, WP-276): the PNG of the signature canvas in base64,
+        decoded at most 512 KiB (413 above, 422
+        `https://reticora.io/problems/mime-mismatch` for content that is no
+        PNG). It needs the feature `signature` (403
+        `https://reticora.io/problems/feature-not-entitled`) and counts
+        against `max_storage_mb` (403
+        `https://reticora.io/problems/entitlement-limit`). The image becomes
+        a document of the category `signature` linked to the movement,
+        bound to it by `signature_hash`; signed_at is the `occurred_at` of
+        the movement (server time). The former fields `image_base64`,
+        `object_key`, `signer_name`, `signed_at` and `method` answer 422.
+      required: [image_png_base64]
       properties:
-        image_base64: { type: string, description: Inline base64 image. }
-        object_key: { type: string, description: S3 object key of the stored signature image. }
-        signer_name: { type: string }
+        image_png_base64:
+          type: string
+          format: byte
+          maxLength: 716800
+        signer:
+          type: object
+          additionalProperties: false
+          description: >-
+            Exactly one of a user of the organization (422 otherwise), a
+            contact in the caller's scope (404 when not visible, 422 without
+            pseudonymized personal data) or the name of an external person,
+            stored only as a vault surrogate. Without it the holder of the
+            movement signs (on a return the previous holder); a team holder
+            requires it (422).
+          properties:
+            user_id: { type: string, format: uuid }
+            contact_id: { type: string, format: uuid }
+            name: { type: string }
+
+    SignatureRef:
+      type: object
+      description: >-
+        The signature of a movement (WP-276): the document of the category
+        `signature` holding the image, the hash binding image and movement
+        (hex SHA-256 of the PNG, a zero byte and the canonical JSON of the
+        movement ids), the signer as user id or surrogate (never a name) and
+        `signed_at`, the `occurred_at` of the movement.
+      required: [document_id, signature_hash, signed_at]
+      properties:
+        document_id: { type: string, format: uuid }
+        signature_hash: { type: string }
+        signer_user_id: { type: string, format: uuid }
+        signer_surrogate: { type: string, format: uuid }
         signed_at: { type: string, format: date-time }
-        method: { type: string, enum: [touchscreen, drawn, typed] }
+
+    SignatureVerification:
+      type: object
+      description: >-
+        The verification of the signature of a movement (WP-748): the
+        signature reference, version 1 of the signature document with its
+        scan status and the result. Never the image or a name.
+      required: [movement_id, document_id, version, signature_hash, signed_at, scan_status, valid, legacy]
+      properties:
+        movement_id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        version:
+          type: integer
+          description: The verified version of the document, always 1.
+        signature_hash: { type: string }
+        signer_user_id: { type: string, format: uuid }
+        signer_surrogate:
+          type: string
+          format: uuid
+          description: The signer as vault surrogate (SEC-05), never a name.
+        signed_at: { type: string, format: date-time }
+        scan_status:
+          type: string
+          enum: [pending_scan, clean]
+        valid:
+          type: [boolean, 'null']
+          description: >-
+            True when the stored image matches checksum_sha256 and
+            signature_hash, false when not (an exchanged or missing image);
+            null is reserved for legacy signatures without a verifiable
+            image (WP-749).
+        legacy:
+          type: boolean
+          description: A signature taken over from the former assignment table (WP-749); false until then.
 
     AssignmentListResponse:
       allOf:
@@ -28696,9 +29014,11 @@ components:
         order_id: { type: string, format: uuid }
         workflow_run_id: { type: string, format: uuid }
         document_id: { type: string, format: uuid }
-        signature_hash: { type: string, description: Hash of the signature (WP-276); absent until then. }
+        signature_hash: { type: string, description: Hash of the signature (WP-276); absent for an unsigned movement. }
         occurred_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
+        signature:
+          $ref: '#/components/schemas/SignatureRef'
     CreateStockMovementRequest:
       type: object
       description: >-
@@ -28943,6 +29263,25 @@ components:
         unit_price: { type: number }
         consumable_id: { type: string }
         asset_id: { type: string }
+    ReceiveOrderRequest:
+      type: object
+      description: Goods receipt of an order (STK-05, WP-760).
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [item_id, quantity]
+            properties:
+              item_id: { type: string, format: uuid, description: Position of the order. }
+              quantity: { type: number, exclusiveMinimum: 0, description: Received quantity, at most the open quantity of the position. }
+              location_id: { type: string, format: uuid, description: Bin of the receipt; default target_location_id of the order. }
+              asset_ids:
+                type: array
+                description: The received assets of an asset position, as many as quantity; not allowed for a consumable position.
+                items: { type: string, format: uuid }
     OrderListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

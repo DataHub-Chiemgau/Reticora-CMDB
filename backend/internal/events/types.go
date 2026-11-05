@@ -1,6 +1,9 @@
 package events
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Event types of EVT-02, and those NTF-05 notifies of besides.
 const (
@@ -179,11 +182,23 @@ type AssetChangedData struct {
 }
 
 // AssetAssignmentData is the data of asset.assigned and asset.returned
-// (WP-275).
+// (WP-275, WP-748): the asset, its client and site, the booked movement,
+// the holder (on asset.returned the previous one) and the due date of an
+// assignment; on a signed movement the signature document, the
+// signature_hash and the signer as user id or vault surrogate. It never
+// holds image data or a name.
 type AssetAssignmentData struct {
-	ID       string `json:"id"`
-	ClientID string `json:"client_id,omitempty"`
-	SiteID   string `json:"site_id,omitempty"`
+	ID                  string     `json:"id"`
+	ClientID            string     `json:"client_id,omitempty"`
+	SiteID              string     `json:"site_id,omitempty"`
+	MovementID          string     `json:"movement_id"`
+	AssignedUserID      string     `json:"assigned_user_id,omitempty"`
+	AssignedTeamID      string     `json:"assigned_team_id,omitempty"`
+	DueAt               *time.Time `json:"due_at,omitempty"`
+	SignatureDocumentID string     `json:"signature_document_id,omitempty"`
+	SignatureHash       string     `json:"signature_hash,omitempty"`
+	SignerUserID        string     `json:"signer_user_id,omitempty"`
+	SignerSurrogate     string     `json:"signer_surrogate,omitempty"`
 }
 
 // AssetWarrantyData is the data of asset.warranty_expiring, one reached

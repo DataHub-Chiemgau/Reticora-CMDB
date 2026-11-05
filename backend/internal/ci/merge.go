@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
@@ -22,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -456,6 +459,9 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			}
 			result.Moved[ref.key] += n
 		}
+		if eerr := recordMergeEdges(ctx, tx, orgID, &snap); eerr != nil {
+			return eerr
+		}
 		conflicts, opened, err := mergeFieldValues(ctx, tx, orgID, survivorID, victimID, survivorInstance, &snap)
 		if err != nil {
 			return err
@@ -611,6 +617,146 @@ func moveReference(ctx context.Context, tx pgx.Tx, ref *mergeReference, survivor
 		return 0, fmt.Errorf("move %s: %w", ref.table, err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// The history of the edges a merge or unmerge moves (REL-09, WP-771): no
+// edge events, ci.merged, ci.restored and ci.changed cover them.
+
+// snapshotEdges returns the rows of ci_relationship among the snapshot
+// rows.
+func snapshotEdges(rows []snapshotRow) []json.RawMessage {
+	var out []json.RawMessage
+	for i := range rows {
+		if rows[i].Table == "ci_relationship" {
+			out = append(out, rows[i].Row)
+		}
+	}
+	return out
+}
+
+// snapshotEdgeIDs returns the ids of the stored edges.
+func snapshotEdgeIDs(rows []json.RawMessage) ([]string, error) {
+	ids := make([]string, len(rows))
+	for i, raw := range rows {
+		var row struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &row); err != nil {
+			return nil, fmt.Errorf("decode merge snapshot: %w", err)
+		}
+		ids[i] = row.ID
+	}
+	return ids, nil
+}
+
+// rewiredFields names the endpoints that differ between before and after.
+func rewiredFields(before, after *relationship.Relationship) []string {
+	var fields []string
+	if before.SourceCIID != after.SourceCIID {
+		fields = append(fields, "source_ci_id")
+	}
+	if before.TargetCIID != after.TargetCIID {
+		fields = append(fields, "target_ci_id")
+	}
+	return fields
+}
+
+// recordMergeEdges writes the history of the edges the merge moved, after
+// the moves: rewired with the old and the new endpoint for each edge it
+// hung on the survivor (snap.Changed), removed for each it deleted as a
+// duplicate (snap.Removed), both with reason merge.
+func recordMergeEdges(ctx context.Context, tx pgx.Tx, orgID string, snap *mergeSnapshot) error {
+	changed, removed := snapshotEdges(snap.Changed), snapshotEdges(snap.Removed)
+	if len(changed)+len(removed) == 0 {
+		return nil
+	}
+	befores, err := relationship.EdgesFromRowsTx(ctx, tx, append(slices.Clone(changed), removed...))
+	if err != nil {
+		return err
+	}
+	if len(befores) != len(changed)+len(removed) {
+		return fmt.Errorf("decode merge snapshot: %d of %d edges", len(befores), len(changed)+len(removed))
+	}
+	ids := make([]string, len(changed))
+	for i := range changed {
+		ids[i] = befores[i].ID
+	}
+	afters, err := relationship.EdgesTx(ctx, tx, orgID, ids)
+	if err != nil {
+		return err
+	}
+	var recs []*relationship.ChangeRecord
+	for i, before := range befores {
+		if i >= len(changed) {
+			recs = append(recs, &relationship.ChangeRecord{Kind: relationship.ChangeRemoved, Before: before, Reason: "merge",
+				DefaultSource: audit.SourceSystem})
+			continue
+		}
+		after := afters[before.ID]
+		if after == nil {
+			continue
+		}
+		if fields := rewiredFields(before, after); len(fields) > 0 {
+			recs = append(recs, &relationship.ChangeRecord{Kind: relationship.ChangeRewired, Before: before, After: after,
+				ChangedFields: fields, Reason: "merge", DefaultSource: audit.SourceSystem})
+		}
+	}
+	return relationship.RecordChangesTx(ctx, tx, recs)
+}
+
+// unmergeEdges are the edges of a merge snapshot an unmerge writes back:
+// the ids of the moved and of the removed ones and the moved ones as they
+// are before the unmerge.
+type unmergeEdges struct {
+	changed, removed []string
+	current          map[string]*relationship.Relationship
+}
+
+// readUnmergeEdges reads the moved edges before the unmerge restores them.
+func readUnmergeEdges(ctx context.Context, tx pgx.Tx, orgID string, snap *mergeSnapshot) (*unmergeEdges, error) {
+	out := &unmergeEdges{}
+	var err error
+	if out.changed, err = snapshotEdgeIDs(snapshotEdges(snap.Changed)); err != nil {
+		return nil, err
+	}
+	if out.removed, err = snapshotEdgeIDs(snapshotEdges(snap.Removed)); err != nil {
+		return nil, err
+	}
+	if out.current, err = relationship.EdgesTx(ctx, tx, orgID, out.changed); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// record writes the history of the edges the unmerge wrote back: rewired
+// for each moved edge back on the victim, restored for each one inserted
+// again, both with reason unmerge.
+func (u *unmergeEdges) record(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if len(u.changed)+len(u.removed) == 0 {
+		return nil
+	}
+	restored, err := relationship.EdgesTx(ctx, tx, orgID, append(slices.Clone(u.changed), u.removed...))
+	if err != nil {
+		return err
+	}
+	var recs []*relationship.ChangeRecord
+	for _, id := range u.changed {
+		before, after := u.current[id], restored[id]
+		if before == nil || after == nil {
+			continue
+		}
+		if fields := rewiredFields(before, after); len(fields) > 0 {
+			recs = append(recs, &relationship.ChangeRecord{Kind: relationship.ChangeRewired, Before: before, After: after,
+				ChangedFields: fields, Reason: "unmerge", DefaultSource: audit.SourceSystem})
+		}
+	}
+	for _, id := range u.removed {
+		if after := restored[id]; after != nil {
+			recs = append(recs, &relationship.ChangeRecord{Kind: relationship.ChangeRestored, After: after, Reason: "unmerge",
+				DefaultSource: audit.SourceSystem})
+		}
+	}
+	return relationship.RecordChangesTx(ctx, tx, recs)
 }
 
 // fieldValue is one row of ci_field_value as the merge compares it.
@@ -1037,6 +1183,10 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 		if overwritten == nil {
 			overwritten = []string{}
 		}
+		edges, err := readUnmergeEdges(ctx, tx, orgID, &snap)
+		if err != nil {
+			return err
+		}
 		cols := map[string][]string{}
 		// The survivor first gives up the unique values of the victim.
 		for _, row := range []snapshotRow{{Table: "ci", Row: snap.Survivor}, {Table: "ci", Row: snap.Victim}} {
@@ -1053,6 +1203,9 @@ func (r *PGRepository) Unmerge(ctx context.Context, orgID, victimID string, forc
 			if rerr := restoreRow(ctx, tx, cols, &snap.Removed[i], true); rerr != nil {
 				return rerr
 			}
+		}
+		if eerr := edges.record(ctx, tx, orgID); eerr != nil {
+			return eerr
 		}
 		// Both CIs get a new version: the snapshot state is a new write.
 		if _, err = tx.Exec(ctx, `UPDATE ci SET version = version + 2, updated_at = NOW() WHERE id = ANY($1::uuid[])`,

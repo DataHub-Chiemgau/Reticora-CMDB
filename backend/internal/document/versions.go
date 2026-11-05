@@ -206,6 +206,9 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return nil, nil, false
 	}
+	if refuseSignatureChange(w, doc, nil) {
+		return nil, nil, false
+	}
 
 	// (1) Body, verified type (SEC-09, sniff.go), size and checksum.
 	mimeType, payload, ok := h.readUpload(w, r)
@@ -344,6 +347,113 @@ func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
 		out.LimitMB = &mb
 	}
 	api.WriteJSON(w, http.StatusOK, out)
+}
+
+// CategorySignature is the category of a signature image (AST-02, WP-276):
+// only the signature path of the assignment service sets it.
+const CategorySignature = "signature"
+
+// ErrMimeMismatch is the refusal of content that does not match its
+// declared type (VerifyContent; 422 mime-mismatch).
+var ErrMimeMismatch = errors.New("content does not match its type")
+
+// VerifyContent checks content held in memory against the declared,
+// whitelisted type like an upload (SEC-09, WP-268, sniff.go): executables,
+// scripts and HTML are refused, the signature of the type must match
+// (image/png: \x89PNG\r\n\x1a\n, http.DetectContentType image/png). A
+// mismatch wraps ErrMimeMismatch, a type off the whitelist is
+// errUnsupportedType.
+func VerifyContent(declared string, body []byte) error {
+	if _, err := declaredType(declared); err != nil {
+		return err
+	}
+	head := body
+	if len(head) > sniffLen {
+		head = head[:sniffLen]
+	}
+	err := checkHead(declared, head)
+	if err == nil {
+		err = checkBody(declared, body)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrMimeMismatch, err.Error())
+	}
+	return nil
+}
+
+// AddVersionTx stores v as the next version of its document in tx, the
+// transaction of the caller (WP-731): it adds v.Size to the usage of the
+// organization only within limit (nil: unlimited; else
+// *entitlement.LimitExceededError), numbers v after the highest version and
+// inserts it pending its scan. The upload route (CreateVersion) and the
+// signature path (CreateWithFirstVersionTx) share it; the caller has locked
+// or just inserted the document and stored the blob under v.StorageKey.
+func AddVersionTx(ctx context.Context, tx pgx.Tx, v *Version, limit *int64) error {
+	if err := addStorageUsage(ctx, tx, v.OrganizationID, v.Size, limit); err != nil {
+		return err
+	}
+	if v.ScanStatus == "" {
+		v.ScanStatus = ScanPending
+	}
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO document_version (id, organization_id, document_id, version, storage_key, size, mime,
+		                              checksum_sha256, scan_status, uploaded_by_surrogate)
+		SELECT $1, $2, $3, COALESCE(max(version), 0) + 1, $4, $5, $6, $7, $8, NULLIF($9, '')::uuid
+		  FROM document_version WHERE document_id = $3
+		RETURNING version, created_at`,
+		v.ID, v.OrganizationID, v.DocumentID, v.StorageKey, v.Size, v.MimeType, v.ChecksumSHA256, v.ScanStatus,
+		uuidOrEmpty(v.UploadedBy)).Scan(&v.Version, &v.CreatedAt); err != nil {
+		return fmt.Errorf("insert document version: %w", err)
+	}
+	v.CreatedAt = v.CreatedAt.UTC()
+	return nil
+}
+
+// CreateWithFirstVersionTx inserts the document d with the id the caller
+// chose and its content v as version 1 in tx, the transaction of the
+// caller (WP-276): the blob is stored under v.StorageKey
+// (blob.OrgKey(org, "documents", d.ID, v.ID)) before the transaction, the
+// usage counts against limit like an upload (AddVersionTx). d mirrors the
+// version (storage key, size, MIME type). The caller links the document in
+// the same transaction (LinkTx); a scoped principal's document without a
+// link fails at the commit (document_scoped_insert_linked).
+func CreateWithFirstVersionTx(ctx context.Context, tx pgx.Tx, d *Document, v *Version, limit *int64) error {
+	if !api.IsUUID(d.ID) || !api.IsUUID(v.ID) {
+		return errors.New("document and version need an id")
+	}
+	v.OrganizationID, v.DocumentID = d.OrganizationID, d.ID
+	if err := blob.CheckOrgKey(v.OrganizationID, v.StorageKey); err != nil {
+		return err
+	}
+	if d.Tags == nil {
+		d.Tags = []string{}
+	}
+	d.StorageKey, d.FileSize, d.MimeType, d.Version = v.StorageKey, v.Size, v.MimeType, 1
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO document (id, organization_id, title, description, file_name, file_size, mime_type,
+		                      storage_key, version, category, tags, uploaded_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $10, $11)
+		RETURNING created_at, updated_at`,
+		d.ID, d.OrganizationID, d.Title, nilIfEmpty(d.Description), d.FileName, d.FileSize, d.MimeType,
+		d.StorageKey, d.Category, d.Tags, d.UploadedBy).Scan(&d.CreatedAt, &d.UpdatedAt); err != nil {
+		return fmt.Errorf("create document: %w", err)
+	}
+	d.CreatedAt, d.UpdatedAt = d.CreatedAt.UTC(), d.UpdatedAt.UTC()
+	if err := AddVersionTx(ctx, tx, v, limit); err != nil {
+		return err
+	}
+	if v.Version != 1 {
+		return fmt.Errorf("create document: first version is %d", v.Version)
+	}
+	d.ScanStatus = v.ScanStatus
+	return nil
+}
+
+// EnqueueScan submits the malware scan of version v to submitter once the
+// transaction of ctx has committed (WP-734, database.AfterCommit); nil
+// submits nothing and the version stays pending_scan for the sweep.
+func EnqueueScan(ctx context.Context, submitter ScanSubmitter, v *Version) {
+	(&Handler{}).WithScans(submitter).enqueueScan(ctx, v)
 }
 
 // requestedVersion parses the query parameter version of GET …/content:

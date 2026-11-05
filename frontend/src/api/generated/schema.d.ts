@@ -2094,29 +2094,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/assets/{id}/label.svg': {
-    parameters: {
-      query?: {
-        /** @description CMDB base URL for the deep link on the label. */
-        base_url?: string;
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /** Render the printable direct-access label (SVG) for an asset */
-    get: operations['getAssetLabel'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/asset-locations': {
     parameters: {
       query?: never;
@@ -4430,7 +4407,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake and contract (WP-737); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -8400,8 +8377,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Render the label of an asset
-     * @description Planned (E-38); WP-763 implements the operation.
+     * Render the label of an asset (INV-03)
+     * @description Renders the printable label of the asset (E-52). The barcode content is the inventory number, without one (or without the right to read it) the URN `urn:reticora:asset:<uuid>`; both resolve through `GET /api/v1/labels/lookup`. The label carries the content as Code128 (where it is printable ASCII and fits the label) and as QR code, the name and manufacturer/model as text (as the caller's field permissions allow), and no host or deep link. `svg` is the 50×25 mm asset label, `png` the two symbols without text, `pdf` the label in a template. The path needs the features barcode and assets_basic (403 feature-not-entitled) and the permission asset:read. Replaces `label.svg` (E-38, without alias).
      */
     get: operations['getAssetLabel'];
     put?: never;
@@ -8493,7 +8470,7 @@ export interface paths {
     };
     /**
      * Verify the signature of a movement
-     * @description Planned (E-38); WP-748 implements the operation.
+     * @description Verifies the signature of a signed movement (AST-02, E-51, WP-748): it loads version 1 of the signature document (category `signature`, locked against changes), compares the SHA-256 of the stored image with `checksum_sha256` of the version and recomputes the `signature_hash` of the movement. `valid` is true only when both match. A version whose scan is pending is verified and answers `scan_status` `pending_scan`. Every verification writes the audit entry `stock_movement.signature_verified` (document_id, valid, scan_status; never the image). Requires `asset:read` and the feature `signature`.
      */
     get: operations['verifyStockMovementSignature'];
     put?: never;
@@ -8633,7 +8610,7 @@ export interface paths {
     put?: never;
     /**
      * Book the goods receipt of an order
-     * @description Planned (E-38); WP-760 implements the operation.
+     * @description Goods receipt of an order in status ordered or partially_received (409 otherwise; STK-05, WP-760), with the right stock:write. Each position names an item_id of the order and a quantity (> 0) up to its open quantity (quantity - received_quantity, overdelivery 422). The bin is location_id, by default the target_location_id of the order (422 when both are missing); it must be a location of kind bin within the scope and, for an order with a client, of that client (422). A consumable position books one movement receipt into the bin in stock_movement (item_kind consumable, order_id) and carries the stock_level of the bin forward; an asset position names as many asset_ids as it receives (422 otherwise), each visible and org-wide or of the order's client (422), and books one movement receipt per asset (item_kind asset) that moves it into the bin. Every booking emits stock.movement. The order then moves to received when every position is fully received, else to partially_received. Everything runs in one transaction: the first error books nothing. A repetition with the same Idempotency-Key returns the stored answer.
      */
     post: operations['receiveOrder'];
     delete?: never;
@@ -11313,16 +11290,27 @@ export interface components {
       from_state?: string;
       to_state: string;
     };
-    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
+    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation; an asset that fails a system guard of LCY-03 (WP-279) names the guard and the missing references. Without a guard checker the transition fails closed with the same type. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
     LifecycleGuardProblem: components['schemas']['ProblemDetail'] & {
       /** @description Current state of an invalid transition. */
       from_state?: string;
       /** @description Requested state of an invalid transition. */
       to_state?: string;
+      /**
+       * @description guard_key of the failed system guard of an asset (WP-279): storage_location (in_stock: location of kind warehouse, zone, shelf or bin), operations_location_or_holder (deployed: location of kind site, building, room or rack, or a holder), disposal_record (disposed) or active_reservation (reserved). Objects outside the caller's scope count as missing.
+       * @enum {string}
+       */
+      guard?:
+        | 'storage_location'
+        | 'operations_location_or_holder'
+        | 'disposal_record'
+        | 'active_reservation';
+      /** @description References the failed system guard misses. */
+      missing?: ('location_id' | 'assignee' | 'disposal_record' | 'reservation')[];
       violations?: {
         /** @description Field of the transition context. */
         field: string;
-        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json). */
+        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json), guard.<guard> for a system guard. */
         code: string;
         message: string;
       }[];
@@ -13000,6 +12988,7 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      signature?: components['schemas']['SignatureRef'];
     };
     /** @description Exactly one of `assigned_user_id` and `assigned_team_id` (WP-275). */
     AssignAssetRequest: {
@@ -13016,6 +13005,7 @@ export interface components {
       /** Format: date-time */
       due_at?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
     };
     ReturnAssetRequest: {
       /**
@@ -13026,6 +13016,7 @@ export interface components {
       /** @description Booked as `reason` of the return movement. */
       return_condition?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
     };
     /** @description The current holder and exactly one new holder, a user or a team (WP-275). */
     TransferAssetRequest: {
@@ -13041,18 +13032,58 @@ export interface components {
       /** Format: date-time */
       due_at?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
+      return_signature?: components['schemas']['SignatureInput'];
     };
-    /** @description Digital signature captured at handover/return. */
-    Signature: {
-      /** @description Inline base64 image. */
-      image_base64?: string;
-      /** @description S3 object key of the stored signature image. */
-      object_key?: string;
-      signer_name?: string;
+    /** @description A digital signature captured with an assignment, return or transfer (AST-02, E-51, WP-276): the PNG of the signature canvas in base64, decoded at most 512 KiB (413 above, 422 `https://reticora.io/problems/mime-mismatch` for content that is no PNG). It needs the feature `signature` (403 `https://reticora.io/problems/feature-not-entitled`) and counts against `max_storage_mb` (403 `https://reticora.io/problems/entitlement-limit`). The image becomes a document of the category `signature` linked to the movement, bound to it by `signature_hash`; signed_at is the `occurred_at` of the movement (server time). The former fields `image_base64`, `object_key`, `signer_name`, `signed_at` and `method` answer 422. */
+    SignatureInput: {
+      /** Format: byte */
+      image_png_base64: string;
+      /** @description Exactly one of a user of the organization (422 otherwise), a contact in the caller's scope (404 when not visible, 422 without pseudonymized personal data) or the name of an external person, stored only as a vault surrogate. Without it the holder of the movement signs (on a return the previous holder); a team holder requires it (422). */
+      signer?: {
+        /** Format: uuid */
+        user_id?: string;
+        /** Format: uuid */
+        contact_id?: string;
+        name?: string;
+      };
+    };
+    /** @description The signature of a movement (WP-276): the document of the category `signature` holding the image, the hash binding image and movement (hex SHA-256 of the PNG, a zero byte and the canonical JSON of the movement ids), the signer as user id or surrogate (never a name) and `signed_at`, the `occurred_at` of the movement. */
+    SignatureRef: {
+      /** Format: uuid */
+      document_id: string;
+      signature_hash: string;
+      /** Format: uuid */
+      signer_user_id?: string;
+      /** Format: uuid */
+      signer_surrogate?: string;
       /** Format: date-time */
-      signed_at?: string;
+      signed_at: string;
+    };
+    /** @description The verification of the signature of a movement (WP-748): the signature reference, version 1 of the signature document with its scan status and the result. Never the image or a name. */
+    SignatureVerification: {
+      /** Format: uuid */
+      movement_id: string;
+      /** Format: uuid */
+      document_id: string;
+      /** @description The verified version of the document, always 1. */
+      version: number;
+      signature_hash: string;
+      /** Format: uuid */
+      signer_user_id?: string;
+      /**
+       * Format: uuid
+       * @description The signer as vault surrogate (SEC-05), never a name.
+       */
+      signer_surrogate?: string;
+      /** Format: date-time */
+      signed_at: string;
       /** @enum {string} */
-      method?: 'touchscreen' | 'drawn' | 'typed';
+      scan_status: 'pending_scan' | 'clean';
+      /** @description True when the stored image matches checksum_sha256 and signature_hash, false when not (an exchanged or missing image); null is reserved for legacy signatures without a verifiable image (WP-749). */
+      valid: boolean | null;
+      /** @description A signature taken over from the former assignment table (WP-749); false until then. */
+      legacy: boolean;
     };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
@@ -13609,12 +13640,13 @@ export interface components {
       workflow_run_id?: string;
       /** Format: uuid */
       document_id?: string;
-      /** @description Hash of the signature (WP-276); absent until then. */
+      /** @description Hash of the signature (WP-276); absent for an unsigned movement. */
       signature_hash?: string;
       /** Format: date-time */
       occurred_at: string;
       /** Format: date-time */
       created_at: string;
+      signature?: components['schemas']['SignatureRef'];
     };
     /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; quantity_item_id is its deprecated alias (E-40, WP-757). For an asset (asset_id) only transfer to to_location_id without quantity. */
     CreateStockMovementRequest: {
@@ -13865,6 +13897,25 @@ export interface components {
       unit_price?: number;
       consumable_id?: string;
       asset_id?: string;
+    };
+    /** @description Goods receipt of an order (STK-05, WP-760). */
+    ReceiveOrderRequest: {
+      items: {
+        /**
+         * Format: uuid
+         * @description Position of the order.
+         */
+        item_id: string;
+        /** @description Received quantity */
+        quantity: number;
+        /**
+         * Format: uuid
+         * @description Bin of the receipt; default target_location_id of the order.
+         */
+        location_id?: string;
+        /** @description The received assets of an asset position, as many as quantity; not allowed for a consumable position. */
+        asset_ids?: string[];
+      }[];
     };
     OrderListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Order'][];
@@ -20387,7 +20438,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description A link with an entity type outside the registry, or `category` `signature`, which only a signed assignment, return or transfer sets (WP-276, WP-748). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20437,6 +20496,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateDocument: {
@@ -20467,6 +20535,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description `category` is `signature`; only a signed assignment, return or transfer sets it (WP-276, WP-748). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listOrders: {
@@ -21710,34 +21796,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-    };
-  };
-  getAssetLabel: {
-    parameters: {
-      query?: {
-        /** @description CMDB base URL for the deep link on the label. */
-        base_url?: string;
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description SVG label */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'image/svg+xml': unknown;
-        };
-      };
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
     };
   };
   recordAssetLocation: {
@@ -27872,6 +27930,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Payload too large */
       413: {
         headers: {
@@ -27983,7 +28050,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. */
+      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. A signature document (category `signature`) takes no further link (type https://reticora.io/problems/409, WP-748). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -38896,10 +38963,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   returnAsset: {
@@ -38929,10 +39021,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   transferAsset: {
@@ -38962,10 +39079,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   reserveAsset: {
@@ -39165,7 +39307,12 @@ export interface operations {
   };
   getAssetLabel: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Output format; an unknown value is 422. */
+        format?: 'svg' | 'png' | 'pdf';
+        /** @description PDF template (format pdf only): `asset_50x25` (50×25 mm), `bin_100x50` (100×50 mm), each one label per page, or `a4_24` (A4 sheet with 24 labels). An unknown value is 422 for every format. */
+        template?: 'asset_50x25' | 'bin_100x50' | 'a4_24';
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -39175,16 +39322,22 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Render the label of an asset. The response schema comes with WP-763. */
+      /** @description The label */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'image/svg+xml': string;
+          'image/png': string;
+          'application/pdf': string;
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getAssetAsOf: {
@@ -39337,16 +39490,45 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Verify the signature of a movement. The response schema comes with WP-748. */
+      /** @description The verification of the signature. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SignatureVerification'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
+      /** @description The movement is unknown or outside the caller's client and site scope, or it carries no signature. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The signature image is quarantined (type https://reticora.io/problems/document-quarantined) or its scan failed (type https://reticora.io/problems/document-pending-scan). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The profile without database offers no verification. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listConsumableStock: {
@@ -39502,19 +39684,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReceiveOrderRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-760. */
+      /** @description The order with the received quantity of each position */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -39809,6 +39998,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Payload too large */
       413: {
         headers: {
@@ -39873,6 +40071,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTicketLinks: {

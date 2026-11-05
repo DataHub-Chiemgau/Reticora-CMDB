@@ -111,8 +111,8 @@ func (r *Retention) RunAuditLog(ctx context.Context) error {
 	})
 }
 
-// RunHistory removes CI, entity and location history older than the
-// history period.
+// RunHistory removes CI, entity, location and relationship history
+// (relationship_change, WP-771) older than the history period.
 func (r *Retention) RunHistory(ctx context.Context) error {
 	cutoff := r.now().Add(-r.policy.History)
 	return r.eachOrganization(ctx, RetentionHistory, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
@@ -121,6 +121,7 @@ func (r *Retention) RunHistory(ctx context.Context) error {
 			`DELETE FROM ci_change WHERE organization_id = $1 AND created_at < $2`,
 			`DELETE FROM entity_change WHERE organization_id = $1 AND created_at < $2`,
 			`DELETE FROM location_change WHERE organization_id = $1 AND changed_at < $2`,
+			`DELETE FROM relationship_change WHERE organization_id = $1 AND created_at < $2`,
 		} {
 			tag, err := tx.Exec(ctx, q, orgID, cutoff)
 			if err != nil {

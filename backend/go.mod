@@ -9,8 +9,11 @@ replace github.com/DataHub-Chiemgau/Reticora-CMDB/collector => ../collector
 require (
 	github.com/99designs/gqlgen v0.17.93
 	github.com/DataHub-Chiemgau/Reticora-CMDB/collector v0.0.0-00010101000000-000000000000
+	github.com/boombuler/barcode v1.1.0
 	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/nats-io/jwt/v2 v2.7.4
 	github.com/nats-io/nats.go v1.54.0
 	github.com/nats-io/nkeys v0.4.16
@@ -72,6 +75,7 @@ require (
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
 	google.golang.org/grpc v1.84.0 // indirect

@@ -13,6 +13,8 @@ import (
 // Handler provides HTTP handlers for the internal ordering module.
 type Handler struct {
 	repo Repository
+	// booker books the goods receipt (WP-760); nil answers 503.
+	booker Booker
 }
 
 // NewHandler creates a new order handler.
@@ -34,6 +36,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/orders/{id}/cancel", h.Cancel)
 	r.Post("/api/v1/orders/{id}/close", h.Close)
 	r.Post("/api/v1/orders/{id}/items", h.AddItem)
+	r.Post("/api/v1/orders/{id}/receive", h.Receive)
 }
 
 // writeError maps the repository errors: a refused transition or a change
@@ -44,6 +47,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrInvalidTransition):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrInvalidTransition.Error())
+	case errors.Is(err, ErrNotReceivable):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotReceivable.Error())
 	case errors.Is(err, ErrNotDraft):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrNotDraft.Error())
 	case errors.Is(err, ErrFourEyes):

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -31,13 +32,16 @@ func (h *Handler) WithService(service *Service) *Handler {
 
 // RegisterRoutes registers assignment routes on the given mux. Below
 // /api/v1/assignments only the reads remain (E-38, WP-746); every write
-// goes through /api/v1/assets/{id}/assign|return|transfer.
+// goes through /api/v1/assets/{id}/assign|return|transfer. The
+// verification of a signature (WP-748) stands here, not in package
+// movement, which assignment imports.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assignments", h.List)
 	r.Get("/api/v1/assignments/{id}", h.Get)
 	r.Post("/api/v1/assets/{id}/assign", h.AssignAsset)
 	r.Post("/api/v1/assets/{id}/return", h.ReturnAsset)
 	r.Post("/api/v1/assets/{id}/transfer", h.TransferAsset)
+	r.Get("/api/v1/stock-movements/{id}/signature", h.VerifySignature)
 }
 
 // writable answers 401 without tenant and 501 without service, and
@@ -56,7 +60,8 @@ func (h *Handler) writable(w http.ResponseWriter, t tenant.TenantInfo) bool {
 
 // writeServiceError answers a failed write of the assignment service: an
 // asset that is not visible or not lockable is 404, a holder conflict 409
-// with its problem type, a field error 422 on its field; database errors
+// with its problem type, a field error 422 on its field, a refused
+// signature as writeSignatureError answers it; database errors
 // (a holder of another organization: 422) go through api.WriteRepoError.
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
@@ -72,6 +77,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		api.WriteProblem(w, http.StatusConflict, ProblemAssetNotAssigned, "Conflict", "the asset is not assigned")
 	case errors.Is(err, ErrAssetReserved):
 		api.WriteProblem(w, http.StatusConflict, ProblemAssetReserved, "Conflict", ErrAssetReserved.Error())
+	case writeSignatureError(w, err):
 	default:
 		api.WriteRepoError(w, err)
 	}
@@ -85,12 +91,12 @@ func (h *Handler) AssignAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req AssignAssetRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	if !readRequest(w, r, &req) {
 		return
 	}
 	a, err := h.service.Assign(r.Context(), t.OrganizationID, &AssignInput{AssetID: chi.URLParam(r, "id"),
-		Holder: Holder{UserID: req.AssignedUserID, TeamID: req.AssignedTeamID}, DueAt: req.DueAt, Notes: req.Notes})
+		Holder: Holder{UserID: req.AssignedUserID, TeamID: req.AssignedTeamID}, DueAt: req.DueAt, Notes: req.Notes,
+		Signature: req.Signature})
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -106,12 +112,12 @@ func (h *Handler) ReturnAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req ReturnAssetRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	if !readRequest(w, r, &req) {
 		return
 	}
 	m, err := h.service.Return(r.Context(), t.OrganizationID, &ReturnInput{AssetID: chi.URLParam(r, "id"),
-		ExpectedHolder: req.ExpectedHolder, ReturnCondition: req.ReturnCondition, Notes: req.Notes})
+		ExpectedHolder: req.ExpectedHolder, ReturnCondition: req.ReturnCondition, Notes: req.Notes,
+		Signature: req.Signature})
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -127,18 +133,58 @@ func (h *Handler) TransferAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req TransferAssetRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	if !readRequest(w, r, &req) {
 		return
 	}
 	a, err := h.service.Transfer(r.Context(), t.OrganizationID, &TransferInput{AssetID: chi.URLParam(r, "id"),
 		ExpectedHolder: req.ExpectedHolder, Holder: Holder{UserID: req.AssignedUserID, TeamID: req.AssignedTeamID},
-		DueAt: req.DueAt, Notes: req.Notes})
+		DueAt: req.DueAt, Notes: req.Notes, Signature: req.Signature, ReturnSignature: req.ReturnSignature})
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, a)
+}
+
+// readRequest reads the body of a write into v (readSignedBody): a body
+// above 1 MiB answers 413, a legacy signature field 422 on the field, any
+// other malformed body 400. It reports whether the write may go on.
+func readRequest(w http.ResponseWriter, r *http.Request, v any) bool {
+	err := readSignedBody(w, r, v)
+	var maxErr *http.MaxBytesError
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &maxErr):
+		api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large", "the request body exceeds 1 MiB")
+	case api.WriteFieldError(w, err):
+	default:
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	}
+	return false
+}
+
+// writeSignatureError answers a refused signature (WP-276) and reports
+// whether err was one: an image above 512 KiB 413, content that is no PNG
+// 422 mime-mismatch, a feature outside the plan or an exhausted storage 403
+// (feature-not-entitled, entitlement-limit), an invisible signer contact
+// 404 and missing blob storage 503.
+func writeSignatureError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, ErrSignatureTooLarge):
+		api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large", ErrSignatureTooLarge.Error())
+	case errors.Is(err, document.ErrMimeMismatch):
+		api.WriteProblem(w, http.StatusUnprocessableEntity, document.ProblemMimeMismatch, "Content Type Mismatch",
+			"signature.image_png_base64 is no PNG image")
+	case api.WriteEntitlementError(w, err):
+	case errors.Is(err, ErrContactNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrContactNotFound.Error())
+	case errors.Is(err, ErrSignatureUnavailable):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrSignatureUnavailable.Error())
+	default:
+		return false
+	}
+	return true
 }
 
 // List handles GET /api/v1/assignments

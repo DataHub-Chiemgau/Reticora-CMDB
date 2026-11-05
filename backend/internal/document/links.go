@@ -37,10 +37,13 @@ const (
 //   - disposal_record directly (its own client and site since 000145);
 //   - contract directly (its own client; org-wide with client_id NULL,
 //     WP-737);
-//   - stocktake on existence only (org-wide).
-//
-// stock_movement (WP-744, WP-276) follows.
+//   - stocktake on existence only (org-wide);
+//   - stock_movement directly (its own client and site, WP-744; the
+//     signature images of WP-276).
 var linkTargets = map[string]func(id string) string{
+	"stock_movement": func(id string) string {
+		return "EXISTS (SELECT 1 FROM stock_movement WHERE stock_movement.id = " + id + ")"
+	},
 	"ci": func(id string) string {
 		return "EXISTS (SELECT 1 FROM ci WHERE ci.id = " + id + ")"
 	},
@@ -137,6 +140,49 @@ func targetVisible(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 		return api.ErrNotFound
 	}
 	return nil
+}
+
+// LinkTx links a document to its target in tx, the transaction of the
+// caller (WP-276): the entity type must stand in the registry, the target
+// must be visible under the tenant scope (api.ErrNotFound otherwise), the
+// trigger derive_document_link_scope sets client, site and team, and the
+// WITH CHECK of document_link refuses a link outside a scoped principal's
+// scope. It sets the id and creation time of link.
+func LinkTx(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
+	if err := checkEntityType(link.EntityType); err != nil {
+		return err
+	}
+	if !api.IsUUID(link.EntityID) {
+		return errInvalidEntityID
+	}
+	if err := targetVisible(ctx, tx, link); err != nil {
+		return err
+	}
+	if err := insertLink(ctx, tx, link); err != nil {
+		return err
+	}
+	return requireVisible(ctx, tx, "document_link", linkVisible, link.ID)
+}
+
+// refuseSignatureChange answers a change that would break the evidence of
+// a signature (AST-02, E-51, WP-748) and reports whether it answered: a
+// document of the category signature (d) takes no PATCH, content, new
+// version, soft delete, new link and no removal of a link (409); no
+// creation or PATCH sets the category signature (category, 422), only the
+// signature path of WP-276 does (CreateWithFirstVersionTx). The signature
+// hash reveals an exchanged image, this lock prevents it. d or category
+// may be nil.
+func refuseSignatureChange(w http.ResponseWriter, d *Document, category *string) bool {
+	switch {
+	case d != nil && d.Category == CategorySignature:
+		api.WriteError(w, http.StatusConflict, "Conflict", "a signature document is locked and cannot be changed")
+	case category != nil && *category == CategorySignature:
+		api.WriteFieldError(w, &api.FieldError{Field: "category", Status: http.StatusUnprocessableEntity,
+			Message: "the category signature is set only by a signed assignment, return or transfer"})
+	default:
+		return false
+	}
+	return true
 }
 
 // recordLinkAudit writes document.linked or document.unlinked as the last

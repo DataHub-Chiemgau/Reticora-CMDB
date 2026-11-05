@@ -90,7 +90,7 @@ GET /api/v1/api-keys apikey:manage
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/children asset:read
-GET /api/v1/assets/{id}/label.svg asset:read
+GET /api/v1/assets/{id}/label asset:read
 GET /api/v1/assets/{id}/lifecycle-transitions asset:read
 GET /api/v1/assets/{id}/locations asset:read
 GET /api/v1/assets/{id}/movements asset:read
@@ -293,6 +293,7 @@ GET /api/v1/slas sla:read
 GET /api/v1/slas/breaches sla:read
 GET /api/v1/slas/{id} sla:read
 GET /api/v1/stock-movements asset:read
+GET /api/v1/stock-movements/{id}/signature asset:read
 GET /api/v1/stocktakes stocktake:read
 GET /api/v1/stocktakes/{id} stocktake:read
 GET /api/v1/stocktakes/{id}/difference stocktake:read
@@ -539,6 +540,7 @@ POST /api/v1/orders/{id}/cancel order:write
 POST /api/v1/orders/{id}/close order:write
 POST /api/v1/orders/{id}/items order:write
 POST /api/v1/orders/{id}/place order:write
+POST /api/v1/orders/{id}/receive stock:write
 POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
 POST /api/v1/privacy/erasure user:manage

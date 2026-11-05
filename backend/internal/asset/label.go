@@ -1,50 +1,30 @@
 package asset
 
 import (
-	"fmt"
-	"html"
 	"strings"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 )
 
-// RenderLabelSVG renders a direct-access asset label (spec §13: Direct-Access-
-// Etiketten): asset tag, name, optional barcode/RFID value as a scannable
-// pseudo-barcode strip, and the deep link into the CMDB.
-//
-// The barcode strip is a deterministic bar pattern derived from the value's
-// bytes — a visual label marker, not a scanner-grade symbology.
-func RenderLabelSVG(a *Asset, baseURL string) string {
-	tag := a.AssetTag
-	if tag == "" {
-		tag = a.ID
+// LabelSubject maps an asset onto the neutral label subject (INV-03,
+// WP-849, E-52): the code is the inventory number, without one the URN
+// urn:reticora:asset:<uuid>; both resolve through GET
+// /api/v1/labels/lookup (WP-762). The title is the name, the subtitle
+// manufacturer and model. The label carries no deep link and no host.
+func LabelSubject(a *Asset) labels.Subject {
+	code := a.AssetTag
+	if strings.TrimSpace(code) == "" {
+		code = labels.URN(labels.KindAsset, a.ID)
 	}
-	code := a.Barcode
-	if code == "" {
-		code = a.RFIDTag
+	title := a.Name
+	if title == "" {
+		title = code
 	}
-	if code == "" {
-		code = tag
+	return labels.Subject{
+		Kind:     labels.KindAsset,
+		ID:       a.ID,
+		Code:     code,
+		Title:    title,
+		Subtitle: strings.TrimSpace(a.Manufacturer + " " + a.Model),
 	}
-	link := strings.TrimRight(baseURL, "/") + "/assets/" + a.ID
-
-	var bars strings.Builder
-	x := 20
-	for _, b := range []byte(code) {
-		w := 1 + int(b%3)
-		if b%2 == 0 {
-			fmt.Fprintf(&bars, `<rect x="%d" y="78" width="%d" height="30" fill="#111"/>`, x, w)
-		}
-		x += w + 1
-		if x > 268 {
-			break
-		}
-	}
-
-	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="140" viewBox="0 0 300 140" font-family="monospace">
-  <rect width="300" height="140" fill="#fff" stroke="#111" stroke-width="2" rx="8"/>
-  <text x="16" y="30" font-size="18" font-weight="bold">%s</text>
-  <text x="16" y="52" font-size="11" fill="#333">%s</text>
-  <text x="16" y="68" font-size="9" fill="#666">%s</text>
-  %s
-  <text x="16" y="126" font-size="8" fill="#888">%s</text>
-</svg>`, html.EscapeString(tag), html.EscapeString(a.Name), html.EscapeString(code), bars.String(), html.EscapeString(link))
 }
