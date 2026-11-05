@@ -303,6 +303,11 @@ func (h *Handler) Query(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
+	// Relationship filters need relationship:read (WP-789); like saving a
+	// view, the static check of the spec answers first.
+	if !h.relationshipAccess(w, r, t, &spec) {
+		return
+	}
 	// Field permissions (RBA-07, WP-729): every field the spec reads must be
 	// readable for the queried types before any SQL runs, otherwise 403
 	// with the fields and without a total; the rows are projected.
@@ -386,8 +391,37 @@ func (h *Handler) assetAccess(w http.ResponseWriter, r *http.Request, t tenant.T
 	return true
 }
 
+// usesRelationships reports whether the spec filters by relationships: a
+// related node of the AST or one of the flat fields has_relationship,
+// lacks_relationship, upstream_of and downstream_of (WP-789).
+func usesRelationships(spec *FilterSpec) bool {
+	found := spec.HasRelationship != "" || spec.LacksRelationship != "" || spec.UpstreamOf != "" || spec.DownstreamOf != ""
+	if spec.Where != nil {
+		spec.Where.walk(func(e *Expr) {
+			found = found || e.Related != nil
+		})
+	}
+	return found
+}
+
+// relationshipAccess answers whether the spec may filter by relationships
+// and otherwise writes the refusal: a relationship filter (usesRelationships)
+// needs relationship:read, the permission of the relationship routes (403
+// missing permission relationship:read, WP-789).
+func (h *Handler) relationshipAccess(w http.ResponseWriter, r *http.Request, t tenant.TenantInfo, spec *FilterSpec) bool {
+	if !usesRelationships(spec) {
+		return true
+	}
+	if key := string(identity.PermRelationshipRead); !h.mayRead(r.Context(), t, key) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing permission "+key)
+		return false
+	}
+	return true
+}
+
 // checkViewFilter checks the filter of a saved view on POST and PATCH by
-// the rules of the query (WP-309): asset references (assetAccess), field
+// the rules of the query (WP-309): asset references (assetAccess),
+// relationship filters (relationshipAccess, WP-789), field
 // permissions (checkFields) and, through the query engine, the attribute
 // definitions (searchable) and the tag catalog. A field error names
 // filter_spec.<field>. Without an engine that checks specs (memory
@@ -412,7 +446,7 @@ func (h *Handler) checkViewFilter(w http.ResponseWriter, r *http.Request, t tena
 		entityKind = "ci"
 	}
 	spec.EntityKind = entityKind
-	if !h.assetAccess(w, r, t, &spec) {
+	if !h.assetAccess(w, r, t, &spec) || !h.relationshipAccess(w, r, t, &spec) {
 		return false
 	}
 	policy, err := permission.PolicyFrom(r.Context())
@@ -453,7 +487,8 @@ type TypeResolver interface {
 // pass. The queried types are the types of ci_type for a CI query (without
 // it, or when the engine cannot resolve it, every type), for asset.<field>
 // and for an asset query every asset type (ci_type of an asset query also
-// matches assets through their CI). The error is an *api.FieldForbiddenError
+// matches assets through their CI), for the fields of related CIs every CI
+// type (WP-789). The error is an *api.FieldForbiddenError
 // naming the fields as the request names them.
 func (h *Handler) checkFields(ctx context.Context, orgID string, policy *permission.FieldPolicy, spec *FilterSpec) error {
 	entityKind := spec.entityKind()
@@ -469,7 +504,13 @@ func (h *Handler) checkFields(ctx context.Context, orgID string, policy *permiss
 		}
 		ciTypes = ids
 	}
-	names := map[string][]string{} // by entity kind and field key
+	// The names by group and field key; the fields of related CIs (WP-789)
+	// are checked for every type.
+	type group struct {
+		entity  string
+		related bool
+	}
+	names := map[group]map[string][]string{}
 	var refused []string
 	for _, ref := range refs {
 		key, checked, known := fieldKey(ref.EntityKind, ref.Path)
@@ -479,23 +520,25 @@ func (h *Handler) checkFields(ctx context.Context, orgID string, policy *permiss
 				refused = append(refused, ref.Name)
 			}
 		case checked:
-			id := ref.EntityKind + "\x00" + key
-			names[id] = append(names[id], ref.Name)
+			g := group{ref.EntityKind, ref.Related}
+			if names[g] == nil {
+				names[g] = map[string][]string{}
+			}
+			names[g][key] = append(names[g][key], ref.Name)
 		}
 	}
-	for _, entity := range []string{"ci", "asset"} {
-		var keys []string
-		for id := range names {
-			if kind, key, _ := strings.Cut(id, "\x00"); kind == entity {
-				keys = append(keys, key)
-			}
+	for g, byKey := range names {
+		keys := make([]string, 0, len(byKey))
+		for key := range byKey {
+			keys = append(keys, key)
 		}
+		sort.Strings(keys)
 		var types []string
-		if entity == "ci" {
+		if g.entity == "ci" && !g.related {
 			types = ciTypes
 		}
-		for _, key := range permission.UnreadableKeys(policy, objectKinds[entity], types, keys) {
-			refused = append(refused, names[entity+"\x00"+key]...)
+		for _, key := range permission.UnreadableKeys(policy, objectKinds[g.entity], types, keys) {
+			refused = append(refused, byKey[key]...)
 		}
 	}
 	if len(refused) == 0 {

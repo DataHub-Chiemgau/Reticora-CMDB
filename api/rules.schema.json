@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reticora.io/schemas/rules.schema.json",
   "title": "Reticora rule AST",
-  "description": "The JSON rule language of the metamodel (MET-45, CH18). The schema root is a value rule: required, pattern, range and enum, combined with all; it checks one value. $defs/condition is a condition (WP-715): comparisons of a field (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty) combined with the logic nodes all (AND), any (OR) and not (exactly one rule); it is true or false for a record. Comparisons occur only in conditions, the value operators required, pattern, range and enum only in value rules. This condition grammar is the common form of metamodel conditions, guards and filters (CH18, MET-45): the fieldmeta conditional rules (visible_when, required_when, read_only_when, allowed_values_when) map onto it without loss; savedview.Expr stays the SQL filter compiler, WP-309 maps it onto this form and adds only the filter operators (e.g. like, exists). backend/internal/rules evaluates rules and conditions bindingly, frontend/src/rules evaluates the same AST for previews; api/rules.conformance.json holds the cases both must pass. Semantics of conditions (those of fieldmeta.Predicate): field is the key of an attribute definition or of a typed CI column; an absent field is null. empty holds for an empty value (see below; also an empty object). Two empty values are equal; otherwise numbers compare by value, also when one is sent as decimal text, and strings and booleans by their text; a non-empty array or object equals nothing. in holds when the value equals one of the values. gt, gte, lt and lte compare numbers (also decimal text) and are false for anything else. contains holds for a string containing the text of value or for an array with an element equal to value. all of no rules holds, any of no rules does not. Semantics of value rules: a value is empty when it is absent, null, a string of only whitespace or an empty array. required fails for an empty value; every other rule passes an empty value. pattern, range and enum apply to each element of an array value. String lengths count Unicode code points. Patterns use the common subset of RE2 and ECMAScript (no lookaround, no backreferences) and match anywhere unless anchored with ^ and $. Violation codes: required, pattern, pattern.type, range.min, range.max, range.type, enum. $defs/expr is an expression (WP-258, MET-10 computed): it yields a value instead of checking one, e.g. the value of a computed attribute. Its operators are separate from those of value rules and conditions: field (the value of an attribute of the record, or asset.<field> of the asset linked through ci.asset_id, one of warranty_until, purchase_date, purchase_price, inventory_no, serial_number, status, and the deprecated names warranty_end, purchase_cost and asset_tag of the same values (AST-01, WP-738)), literal (a string, number or boolean), add, sub, mul and div (numbers, also decimal text), today (the current date in the time zone of the evaluation, YYYY-MM-DD), days_between (the days from the first to the second date; a date is text YYYY-MM-DD, a timestamp counts with its date in the time zone), concat, lower and upper (text; numbers and booleans by their text) and coalesce (the first non-empty operand). Semantics of expressions: an empty input (absent, null or blank text), a value of the wrong kind, a date that cannot be read or a division by 0 make the whole expression empty, except within coalesce. The result type is number (arithmetic, days_between), string (concat, lower, upper), date (today), that of the literal or asset field, the common type of the operands of coalesce, or any for an attribute of the record. Only backend/internal/rules evaluates expressions for now (EvalExpr).",
+  "description": "The JSON rule language of the metamodel (MET-45, CH18). The schema root is a value rule: required, pattern, range and enum, combined with all; it checks one value. $defs/condition is a condition (WP-715): comparisons of a field (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty) combined with the logic nodes all (AND), any (OR) and not (exactly one rule); it is true or false for a record. Comparisons occur only in conditions, the value operators required, pattern, range and enum only in value rules. This condition grammar is the common form of metamodel conditions, guards and filters (CH18, MET-45): the fieldmeta conditional rules (visible_when, required_when, read_only_when, allowed_values_when) map onto it without loss; savedview.Expr stays the SQL filter compiler; $defs/filter is the filter AST (WP-789, savedview.Expr): its comparisons eq, ne, in, lt, lte, gt and gte carry the names and value forms of those of conditions, it adds only the filter operators like, exists, between, has_any and has_all and the relationship node related, and its node form (and, or, not) stays that of the API (FilterExpr). backend/internal/rules evaluates rules and conditions bindingly, frontend/src/rules evaluates the same AST for previews; api/rules.conformance.json holds the cases both must pass. Semantics of conditions (those of fieldmeta.Predicate): field is the key of an attribute definition or of a typed CI column; an absent field is null. empty holds for an empty value (see below; also an empty object). Two empty values are equal; otherwise numbers compare by value, also when one is sent as decimal text, and strings and booleans by their text; a non-empty array or object equals nothing. in holds when the value equals one of the values. gt, gte, lt and lte compare numbers (also decimal text) and are false for anything else. contains holds for a string containing the text of value or for an array with an element equal to value. all of no rules holds, any of no rules does not. Semantics of value rules: a value is empty when it is absent, null, a string of only whitespace or an empty array. required fails for an empty value; every other rule passes an empty value. pattern, range and enum apply to each element of an array value. String lengths count Unicode code points. Patterns use the common subset of RE2 and ECMAScript (no lookaround, no backreferences) and match anywhere unless anchored with ^ and $. Violation codes: required, pattern, pattern.type, range.min, range.max, range.type, enum. $defs/expr is an expression (WP-258, MET-10 computed): it yields a value instead of checking one, e.g. the value of a computed attribute. Its operators are separate from those of value rules and conditions: field (the value of an attribute of the record, or asset.<field> of the asset linked through ci.asset_id, one of warranty_until, purchase_date, purchase_price, inventory_no, serial_number, status, and the deprecated names warranty_end, purchase_cost and asset_tag of the same values (AST-01, WP-738)), literal (a string, number or boolean), add, sub, mul and div (numbers, also decimal text), today (the current date in the time zone of the evaluation, YYYY-MM-DD), days_between (the days from the first to the second date; a date is text YYYY-MM-DD, a timestamp counts with its date in the time zone), concat, lower and upper (text; numbers and booleans by their text) and coalesce (the first non-empty operand). Semantics of expressions: an empty input (absent, null or blank text), a value of the wrong kind, a date that cannot be read or a division by 0 make the whole expression empty, except within coalesce. The result type is number (arithmetic, days_between), string (concat, lower, upper), date (today), that of the literal or asset field, the common type of the operands of coalesce, or any for an attribute of the record. Only backend/internal/rules evaluates expressions for now (EvalExpr).",
   "$ref": "#/$defs/rule",
   "$defs": {
     "rule": {
@@ -304,6 +304,168 @@
             "properties": {
               "value": { "type": ["string", "number", "boolean"] }
             }
+          }
+        }
+      ]
+    },
+    "filter": {
+      "description": "A node of the filter AST (WP-789; savedview.Expr, FilterExpr of api/openapi.yaml, the where of POST /api/v1/search/query and of saved_view.filter_spec): exactly one of and, or, not, related or a comparison. At most 10 levels (MaxExprDepth) and 100 nodes (MaxExprNodes); the nodes of the filter of related count towards both, its root one level below the related node. The filter is compiled to SQL and evaluated by PostgreSQL under the row level security of the caller. field is a whitelisted column of the entity kind, attributes.<key> (a searchable attribute definition; custom_fields for assets), tags or, for CIs, asset.<field> and asset.attributes.<key> of the asset linked through ci.asset_id. The kind of the field (text, number, time, uuid or bool; for an attribute fieldmeta.FilterKind of the data type of its definition) decides the cast of field and value and the operators it takes: like only for text, lt, lte, gt and gte not for uuid and bool, between only for number and time. eq, ne, in, lt, lte, gt and gte carry the names and value forms of the comparisons of $defs/compare; in SQL a missing value (NULL, an absent key or an attribute stored with another JSON type) matches neither eq, in, between nor an order comparison and, as IS DISTINCT FROM, matches ne. Time values are RFC 3339 times or dates and compare as timestamptz; numbers compare numerically, an attribute number also given as numeric text. Specific to filters are like (case-insensitive; * is the wildcard, without one the value matches as a substring), exists (the field has a value; false: it has none), between (inclusive), has_any and has_all (the tags of the tag catalog by key) and related. api/rules.conformance.json holds the cases (filter_cases, invalid_filters) that backend/internal/savedview (Expr.Validate) and frontend/src/rules/filter.ts (parseFilter) both pass; the field whitelist, attribute definitions, tag keys and relationship types are checked by the backend only.",
+      "oneOf": [
+        { "$ref": "#/$defs/filter_and" },
+        { "$ref": "#/$defs/filter_or" },
+        { "$ref": "#/$defs/filter_not" },
+        { "$ref": "#/$defs/filter_related" },
+        { "$ref": "#/$defs/filter_compare" }
+      ]
+    },
+    "filter_and": {
+      "description": "AND: every node holds.",
+      "type": "object",
+      "required": ["and"],
+      "additionalProperties": false,
+      "properties": {
+        "and": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/filter" }
+        }
+      }
+    },
+    "filter_or": {
+      "description": "OR: at least one node holds.",
+      "type": "object",
+      "required": ["or"],
+      "additionalProperties": false,
+      "properties": {
+        "or": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/filter" }
+        }
+      }
+    },
+    "filter_not": {
+      "description": "NOT: the node does not hold (a node that is NULL in SQL counts as false).",
+      "type": "object",
+      "required": ["not"],
+      "additionalProperties": false,
+      "properties": { "not": { "$ref": "#/$defs/filter" } }
+    },
+    "filter_related": {
+      "description": "Relationship node (SRC-04), for entity_kind ci only: the CI reaches, over at most max_depth relationships (default 1, at most 5) of the types rel_types (keys of relationship_type, system and organization types; all types when absent), a CI that is not deleted and matches where. With out the CI is the source of each relationship (a VM runs_on a host), with in its target, with both either. The walk passes only through CIs that are visible to the caller and not deleted; the structural type contains (ci.parent_ci_id) counts like a stored relationship. Example (VMs on hosts in rack R12 whose warranty ends within 30 days): {\"and\": [{\"field\": \"ci_type\", \"op\": \"eq\", \"value\": \"vm\"}, {\"related\": {\"direction\": \"out\", \"rel_types\": [\"runs_on\", \"hosted_on\"], \"where\": {\"and\": [{\"field\": \"location_id\", \"op\": \"eq\", \"value\": \"<rack id>\"}, {\"field\": \"attributes.warranty_days_left\", \"op\": \"lt\", \"value\": 30}]}}}]}.",
+      "type": "object",
+      "required": ["related"],
+      "additionalProperties": false,
+      "properties": {
+        "related": {
+          "type": "object",
+          "required": ["direction", "where"],
+          "additionalProperties": false,
+          "properties": {
+            "direction": { "enum": ["out", "in", "both"] },
+            "rel_types": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "max_depth": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5,
+              "default": 1
+            },
+            "where": { "$ref": "#/$defs/filter" }
+          }
+        }
+      }
+    },
+    "filter_compare": {
+      "description": "A comparison of field with value. exists takes true, false or no value; in a non-empty array of values; between an array of exactly two (number or time); has_any and has_all a non-empty array of tag keys and only the field tags, which takes no other operator; every other operator one string, number or boolean.",
+      "type": "object",
+      "required": ["field", "op"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string", "minLength": 1 },
+        "op": {
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "lte",
+            "gt",
+            "gte",
+            "like",
+            "in",
+            "exists",
+            "between",
+            "has_any",
+            "has_all"
+          ]
+        },
+        "value": {}
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "op": { "const": "exists" } } },
+          "then": { "properties": { "value": { "type": ["boolean", "null"] } } }
+        },
+        {
+          "if": { "properties": { "op": { "const": "in" } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": ["string", "number", "boolean"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "op": { "const": "between" } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 2,
+                "items": { "type": ["string", "number"] }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["has_any", "has_all"] } } },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "field": { "const": "tags" },
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": { "enum": ["eq", "ne", "lt", "lte", "gt", "gte", "like"] }
+            }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": { "type": ["string", "number", "boolean"] }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "field": { "const": "tags" } } },
+          "then": {
+            "properties": { "op": { "enum": ["has_any", "has_all"] } }
           }
         }
       ]

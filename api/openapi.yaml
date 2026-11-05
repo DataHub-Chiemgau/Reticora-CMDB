@@ -17294,8 +17294,16 @@ paths:
         every type): an unknown attribute is 422, one that is not
         searchable 400 with a hint, one searchable with different data
         types 400 with the hint to give ci_type; it compares by the data
-        type of its definition. An unknown tag key is 422. At most 10 levels
-        and 100 nodes. Every value
+        type of its definition. An unknown tag key is 422. The node related
+        (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs
+        that reach, over at most max_depth (1 to 5, default 1)
+        relationships of rel_types (keys of relationship_type; unknown 422,
+        none: every type) in direction out (the CI is the source, e.g. a VM
+        runs_on a host), in (the target) or both, a CI that matches its
+        where; the walk passes only through visible CIs that are not
+        deleted. At most 10 levels and 100 nodes, the nodes of the where of
+        related included. The filter AST is $defs/filter of
+        api/rules.schema.json. Every value
         is checked against its field before any query runs: UUID fields
         take UUIDs, time and date fields an RFC 3339 time or a date
         (YYYY-MM-DD), number fields numbers, boolean fields true or false,
@@ -17307,10 +17315,13 @@ paths:
         comparison and, like a missing key, matches ne. The ids in
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
-        where.and[1].value or where.value[0], or the flat field). Requires
+        where.and[1].value, where.value[0] or
+        where.and[1].related.max_depth, or the flat field). Requires
         search:read and the read permission of the entity kind (ci:read for
         ci, asset:read for asset); asset.<field> and asset.attributes.<key>
-        of a CI query need asset:read as well. An asset query and the asset
+        of a CI query (also in the where of related) need asset:read as
+        well, related and the flat has_relationship, lacks_relationship,
+        upstream_of and downstream_of relationship:read. An asset query and the asset
         fields of a CI query need the module inventory and the entitlement
         assets_basic (403 feature-not-entitled); the route itself is not
         gated. Saving a view (POST and PATCH /api/v1/saved-views) checks
@@ -17362,9 +17373,11 @@ paths:
         '403':
           description: >-
             The caller lacks search:read or the read permission of the
-            queried entity kind (ci:read or asset:read), or asset:read for
+            queried entity kind (ci:read or asset:read), asset:read for
             asset fields of a CI query (ProblemDetail, "missing permission
-            asset:read"); the organization lacks assets_basic or the module
+            asset:read") or relationship:read for related and the flat
+            relationship fields (ProblemDetail, "missing permission
+            relationship:read"); the organization lacks assets_basic or the module
             inventory is off for an asset query or asset fields (type
             https://reticora.io/problems/feature-not-entitled); or the spec
             reads a field the caller may not read (field
@@ -17375,7 +17388,8 @@ paths:
             the other flat filters of an asset), a key of attributes, tags
             (flat or compared with has_any or has_all, as attributes.tags),
             a sort key, a column or, for CIs, asset.<field> and
-            asset.attributes.<key>, when the caller cannot read it in every client and
+            asset.attributes.<key>, also a field of the where of related
+            (checked for every type), when the caller cannot read it in every client and
             site scope of its role assignments for one of the queried types
             (ci_type, without it every type; asset.<field> and asset queries
             every asset type), or any such field under an object grant none.
@@ -23103,8 +23117,11 @@ components:
     FilterExpr:
       type: object
       description: >-
-        One node of the filter AST (SRC-03): exactly one of and, or, not or
-        a comparison (field, op, value).
+        One node of the filter AST (SRC-03): exactly one of and, or, not,
+        related or a comparison (field, op, value). It matches $defs/filter
+        of api/rules.schema.json, which also describes the evaluation in SQL;
+        api/rules.conformance.json holds its cases (filter_cases,
+        invalid_filters).
       properties:
         and:
           type: array
@@ -23113,6 +23130,7 @@ components:
           type: array
           items: { $ref: '#/components/schemas/FilterExpr' }
         not: { $ref: '#/components/schemas/FilterExpr' }
+        related: { $ref: '#/components/schemas/FilterRelated' }
         field:
           type: string
           description: >-
@@ -23135,6 +23153,39 @@ components:
             of them for in; a list of exactly two for between; a non-empty
             list of tag keys for has_any and has_all; true, false or nothing
             for exists.
+    FilterRelated:
+      type: object
+      required: [direction, where]
+      additionalProperties: false
+      description: >-
+        Relationship node of the filter AST (SRC-04, WP-789), for
+        entity_kind ci only: the CI reaches, over at most max_depth
+        relationships of rel_types, a CI that is not deleted and matches
+        where. With out the CI is the source of each relationship (a VM
+        runs_on a host), with in its target, with both either. The walk
+        passes only through CIs visible to the caller that are not deleted;
+        the structural type contains (parent CI) counts like a stored
+        relationship. Example, VMs on hosts in rack R12 whose warranty ends
+        within 30 days: {"and": [{"field": "ci_type", "op": "eq", "value":
+        "vm"}, {"related": {"direction": "out", "rel_types": ["runs_on",
+        "hosted_on"], "where": {"and": [{"field": "location_id", "op": "eq",
+        "value": "<rack id>"}, {"field": "attributes.warranty_days_left",
+        "op": "lt", "value": 30}]}}}]}.
+      properties:
+        direction: { type: string, enum: [out, in, both] }
+        rel_types:
+          type: array
+          description: >-
+            Keys of relationship_type (system and organization types); an
+            unknown key is 422. Absent or empty: every type.
+          items: { type: string, minLength: 1 }
+        max_depth:
+          type: integer
+          minimum: 1
+          maximum: 5
+          default: 1
+          description: Relationships at most between the CI and the matching CI.
+        where: { $ref: '#/components/schemas/FilterExpr' }
     SavedViewSortKey:
       type: object
       required: [field]
