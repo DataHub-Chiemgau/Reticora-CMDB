@@ -479,6 +479,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/orders/{id}/close":                   "internal_order",
 		"POST /api/v1/orders/{id}/items":                   "internal_order",
 		"POST /api/v1/orders/{id}/place":                   "internal_order",
+		"POST /api/v1/orders/{id}/receive":                 "internal_order",
 		"POST /api/v1/orders/{id}/reject":                  "internal_order",
 		"POST /api/v1/orders/{id}/submit":                  "internal_order",
 		"POST /api/v1/reservations/{id}/release":           "reservation",

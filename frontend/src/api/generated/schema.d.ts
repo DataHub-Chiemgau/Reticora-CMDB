@@ -8633,7 +8633,7 @@ export interface paths {
     put?: never;
     /**
      * Book the goods receipt of an order
-     * @description Planned (E-38); WP-760 implements the operation.
+     * @description Goods receipt of an order in status ordered or partially_received (409 otherwise; STK-05, WP-760), with the right stock:write. Each position names an item_id of the order and a quantity (> 0) up to its open quantity (quantity - received_quantity, overdelivery 422). The bin is location_id, by default the target_location_id of the order (422 when both are missing); it must be a location of kind bin within the scope and, for an order with a client, of that client (422). A consumable position books one movement receipt into the bin in stock_movement (item_kind consumable, order_id) and carries the stock_level of the bin forward; an asset position names as many asset_ids as it receives (422 otherwise), each visible and org-wide or of the order's client (422), and books one movement receipt per asset (item_kind asset) that moves it into the bin. Every booking emits stock.movement. The order then moves to received when every position is fully received, else to partially_received. Everything runs in one transaction: the first error books nothing. A repetition with the same Idempotency-Key returns the stored answer.
      */
     post: operations['receiveOrder'];
     delete?: never;
@@ -13895,6 +13895,25 @@ export interface components {
       unit_price?: number;
       consumable_id?: string;
       asset_id?: string;
+    };
+    /** @description Goods receipt of an order (STK-05, WP-760). */
+    ReceiveOrderRequest: {
+      items: {
+        /**
+         * Format: uuid
+         * @description Position of the order.
+         */
+        item_id: string;
+        /** @description Received quantity */
+        quantity: number;
+        /**
+         * Format: uuid
+         * @description Bin of the receipt; default target_location_id of the order.
+         */
+        location_id?: string;
+        /** @description The received assets of an asset position, as many as quantity; not allowed for a consumable position. */
+        asset_ids?: string[];
+      }[];
     };
     OrderListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Order'][];
@@ -39607,19 +39626,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReceiveOrderRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-760. */
+      /** @description The order with the received quantity of each position */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Order'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

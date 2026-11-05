@@ -121,22 +121,29 @@ func checkSupplier(ctx context.Context, tx pgx.Tx, orgID, clientID, supplierID, 
 // get the same answer (msgTargetBin); only a usable location that is no bin
 // is reported as such.
 func checkTargetBin(ctx context.Context, tx pgx.Tx, orgID, orderClient, binID string) error {
+	return checkBin(ctx, tx, orgID, orderClient, binID, "target_location_id", msgTargetBin)
+}
+
+// checkBin is checkTargetBin on field: an unusable location is a 422 on
+// field with the message unusable; the goods receipt checks its bins with
+// it as well (WP-760).
+func checkBin(ctx context.Context, tx pgx.Tx, orgID, orderClient, binID, field, unusable string) error {
 	if !api.IsUUID(binID) {
-		return fieldError("target_location_id", msgTargetBin)
+		return fieldError(field, unusable)
 	}
 	var kind, client string
 	err := tx.QueryRow(ctx, `SELECT kind::text, client_id::text FROM location WHERE organization_id = $1 AND id = $2`, orgID, binID).Scan(&kind, &client)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fieldError("target_location_id", msgTargetBin)
+		return fieldError(field, unusable)
 	}
 	if err != nil {
 		return fmt.Errorf("read target location: %w", err)
 	}
 	if orderClient != "" && !strings.EqualFold(client, orderClient) {
-		return fieldError("target_location_id", msgTargetBin)
+		return fieldError(field, unusable)
 	}
 	if kind != "bin" {
-		return fieldError("target_location_id", "the target location must be a location of kind bin")
+		return fieldError(field, "the target location must be a location of kind bin")
 	}
 	return nil
 }

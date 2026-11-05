@@ -19816,17 +19816,43 @@ paths:
   /api/v1/orders/{id}/receive:
     x-phase: P2
     x-feature: internal_orders
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: receiveOrder
-      tags: [Stocktake]
+      tags: [Orders]
       summary: Book the goods receipt of an order
-      description: Planned (E-38); WP-760 implements the operation.
+      description: >-
+        Goods receipt of an order in status ordered or partially_received
+        (409 otherwise; STK-05, WP-760), with the right stock:write. Each
+        position names an item_id of the order and a quantity (> 0) up to its
+        open quantity (quantity - received_quantity, overdelivery 422). The
+        bin is location_id, by default the target_location_id of the order
+        (422 when both are missing); it must be a location of kind bin within
+        the scope and, for an order with a client, of that client (422). A
+        consumable position books one movement receipt into the bin in
+        stock_movement (item_kind consumable, order_id) and carries the
+        stock_level of the bin forward; an asset position names as many
+        asset_ids as it receives (422 otherwise), each visible and org-wide or
+        of the order's client (422), and books one movement receipt per
+        asset (item_kind asset) that moves it into the bin. Every booking
+        emits stock.movement. The order then moves to received when every
+        position is fully received, else to partially_received. Everything
+        runs in one transaction: the first error books nothing. A repetition
+        with the same Idempotency-Key returns the stored answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiveOrderRequest'
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-760.
+          description: The order with the received quantity of each position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19835,6 +19861,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
@@ -29085,6 +29113,25 @@ components:
         unit_price: { type: number }
         consumable_id: { type: string }
         asset_id: { type: string }
+    ReceiveOrderRequest:
+      type: object
+      description: Goods receipt of an order (STK-05, WP-760).
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [item_id, quantity]
+            properties:
+              item_id: { type: string, format: uuid, description: Position of the order. }
+              quantity: { type: number, exclusiveMinimum: 0, description: Received quantity, at most the open quantity of the position. }
+              location_id: { type: string, format: uuid, description: Bin of the receipt; default target_location_id of the order. }
+              asset_ids:
+                type: array
+                description: The received assets of an asset position, as many as quantity; not allowed for a consumable position.
+                items: { type: string, format: uuid }
     OrderListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

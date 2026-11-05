@@ -539,6 +539,7 @@ POST /api/v1/orders/{id}/cancel order:write
 POST /api/v1/orders/{id}/close order:write
 POST /api/v1/orders/{id}/items order:write
 POST /api/v1/orders/{id}/place order:write
+POST /api/v1/orders/{id}/receive stock:write
 POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
 POST /api/v1/privacy/erasure user:manage

@@ -770,7 +770,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
-		order.NewHandler(repos.Order),
+		// The goods receipt books through the movement service (WP-760).
+		order.NewHandler(repos.Order).WithBookings(movements),
 		maintenance.NewHandler(repos.Maintenance),
 		disposal.NewHandler(repos.Disposal).WithLifecycle(movements, lifecycleService, repos.LifecycleResolver, repos.Lifecycle),
 		keymgmt.NewHandler(repos.Key),
