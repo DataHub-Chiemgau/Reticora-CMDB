@@ -126,3 +126,76 @@ func TestHandlerTreeAndFieldProblems(t *testing.T) {
 		t.Errorf("get deleted building: %d", w.Code)
 	}
 }
+
+// TestHandlerBarcodeConflictNamesField covers WP-289 (INV-03) in the memory
+// profile: PATCH /api/v1/locations/{id} assigns and removes the barcode, and
+// a code another location of the organization holds is a 409 problem with
+// field barcode that does not name that location; another organization may
+// use the same code.
+func TestHandlerBarcodeConflictNamesField(t *testing.T) {
+	mux := chi.NewRouter()
+	NewHandler(NewMemoryRepository()).RegisterRoutes(mux)
+	call := func(org, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: org}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	create := func(org, body string) Location {
+		t.Helper()
+		w := call(org, http.MethodPost, "/api/v1/locations", body)
+		var loc Location
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &loc) != nil {
+			t.Fatalf("create %s: status %d %s", body, w.Code, w.Body.String())
+		}
+		return loc
+	}
+	barcodeOf := func(w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var loc Location
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &loc) != nil {
+			t.Fatalf("status %d %s, want 200", w.Code, w.Body.String())
+		}
+		return loc.Barcode
+	}
+	site := create("org-1", `{"kind":"site","client_id":"client-1","name":"HQ"}`)
+	wh := create("org-1", `{"kind":"warehouse","parent_id":"`+site.ID+`","name":"W1"}`)
+	other := create("org-2", `{"kind":"site","client_id":"client-2","name":"HQ"}`)
+
+	if got := barcodeOf(call("org-1", http.MethodPatch, "/api/v1/locations/"+site.ID, `{"barcode":"LOC-1"}`)); got != "LOC-1" {
+		t.Errorf("assign: barcode %q, want LOC-1", got)
+	}
+	if got := barcodeOf(call("org-1", http.MethodPatch, "/api/v1/locations/"+site.ID, `{"barcode":"LOC-1"}`)); got != "LOC-1" {
+		t.Errorf("assign the own code again: barcode %q, want LOC-1", got)
+	}
+	w := call("org-1", http.MethodPatch, "/api/v1/locations/"+wh.ID, `{"barcode":"LOC-1"}`)
+	var p struct {
+		Status int    `json:"status"`
+		Field  string `json:"field"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil || w.Code != http.StatusConflict ||
+		w.Header().Get("Content-Type") != "application/problem+json" || p.Status != http.StatusConflict || p.Field != "barcode" {
+		t.Fatalf("duplicate: %d %q %s (%v), want a 409 problem with field barcode", w.Code, w.Header().Get("Content-Type"), w.Body.String(), err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range body {
+		if value == site.ID || value == site.Name {
+			t.Errorf("duplicate names the location holding the code in %q: %s", key, w.Body.String())
+		}
+	}
+	if got := barcodeOf(call("org-2", http.MethodPatch, "/api/v1/locations/"+other.ID, `{"barcode":"LOC-1"}`)); got != "LOC-1" {
+		t.Errorf("other organization: barcode %q, want LOC-1", got)
+	}
+	if got := barcodeOf(call("org-1", http.MethodPatch, "/api/v1/locations/"+site.ID, `{"barcode":""}`)); got != "" {
+		t.Errorf("remove: barcode %q, want none", got)
+	}
+	if got := barcodeOf(call("org-1", http.MethodPatch, "/api/v1/locations/"+wh.ID, `{"barcode":"LOC-1"}`)); got != "LOC-1" {
+		t.Errorf("assign the released code: barcode %q, want LOC-1", got)
+	}
+}

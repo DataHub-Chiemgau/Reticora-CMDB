@@ -48,6 +48,8 @@ func TestFilterASTAgainstPostgres(t *testing.T) {
 			t.Fatalf("%s: %v", q.sql, err)
 		}
 	}
+	// ram_gb is a searchable integer attribute (API-02, WP-309).
+	defineAttribute(t, f, "ram_gb", "integer", true)
 	engine := savedview.NewPGQueryEngine(f.App)
 	run := func(raw string) map[string]bool {
 		t.Helper()
@@ -113,6 +115,17 @@ func searchQuery(v *auditT7Views, body string) (code int, names []string, total 
 	return code, names, total, field, raw
 }
 
+// defineAttribute creates an organization-global attribute definition of
+// organization A (MET-13): the structured query compares attributes by
+// their definition and refuses undefined ones (API-02, WP-309).
+func defineAttribute(t *testing.T, f *scopetest.Fixture, key, dataType string, searchable bool) {
+	t.Helper()
+	if _, err := f.Admin.Exec(context.Background(), `INSERT INTO attribute_definition (organization_id, ci_type_id, scope, key, data_type, searchable)
+		VALUES ($1, NULL, 'global', $2, $3, $4)`, f.OrgA, key, dataType, searchable); err != nil {
+		t.Fatalf("define attribute %s: %v", key, err)
+	}
+}
+
 // setAttributes stores the JSON attrs as the dynamic attributes of a new
 // client-1 CI named name and returns its id.
 func setAttributes(t *testing.T, f *scopetest.Fixture, name, attrs string) string {
@@ -135,6 +148,11 @@ func setAttributes(t *testing.T, f *scopetest.Fixture, name, attrs string) strin
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestFilterASTMixedTypesAgainstPostgres(t *testing.T) {
 	v := newAuditT7Views(t, "bc")
+	// The definitions give the kinds the values were compared by before
+	// WP-309 (from the JSON value).
+	defineAttribute(t, v.f, "ram_gb", "integer", true)
+	defineAttribute(t, v.f, "monitored", "boolean", true)
+	defineAttribute(t, v.f, "installed", "date", true)
 	setAttributes(t, v.f, "mixed-64", `{"ram_gb": 64, "monitored": true, "installed": "2024-06-01"}`)
 	setAttributes(t, v.f, "mixed-8", `{"ram_gb": 8, "monitored": "true", "installed": "2023-01-01T10:00:00+02:00"}`)
 	setAttributes(t, v.f, "mixed-16gb", `{"ram_gb": "16GB", "monitored": "yes", "installed": "today"}`)
@@ -153,7 +171,6 @@ func TestFilterASTMixedTypesAgainstPostgres(t *testing.T) {
 		{"exists false", `{"field": "attributes.ram_gb", "op": "exists", "value": false}`, []string{"mixed-none"}},
 		{"exists", `{"field": "attributes.ram_gb", "op": "exists"}`, []string{"mixed-16gb", "mixed-64", "mixed-8"}},
 		{"not gte 16", `{"not": {"field": "attributes.ram_gb", "op": "gte", "value": 16}}`, []string{"mixed-16gb", "mixed-8", "mixed-none"}},
-		{"text eq", `{"field": "attributes.ram_gb", "op": "eq", "value": "16GB"}`, []string{"mixed-16gb"}},
 		// The order of the predicates does not matter.
 		{"and, comparison first", `{"and": [{"field": "attributes.ram_gb", "op": "gte", "value": 16}, ` + all + `]}`, []string{"mixed-64"}},
 		{"and, comparison last", `{"and": [` + all + `, {"field": "attributes.ram_gb", "op": "gte", "value": 16}]}`, []string{"mixed-64"}},
@@ -170,6 +187,14 @@ func TestFilterASTMixedTypesAgainstPostgres(t *testing.T) {
 		if code != http.StatusOK || strings.Join(names, ",") != strings.Join(c.want, ",") || total != len(c.want) {
 			t.Errorf("%s: %d %v (total %d), want 200 %v: %s", c.name, code, names, total, c.want, raw)
 		}
+	}
+	// ram_gb is an integer by its definition (WP-309): a text value is no
+	// value of it (422), a number given as a string compares numerically.
+	if code, _, _, field, raw := searchQuery(v, `{"where": {"field": "attributes.ram_gb", "op": "eq", "value": "16GB"}}`); code != http.StatusUnprocessableEntity || field != "where.value" {
+		t.Errorf("text eq on an integer: %d %q, want 422 on where.value: %s", code, field, raw)
+	}
+	if code, names, _, _, raw := searchQuery(v, `{"where": {"field": "attributes.ram_gb", "op": "gte", "value": "16"}}`); code != http.StatusOK || strings.Join(names, ",") != "mixed-64" {
+		t.Errorf("gte as a string: %d %v, want 200 [mixed-64]: %s", code, names, raw)
 	}
 }
 
@@ -248,6 +273,7 @@ func TestSearchQueryRejectsInvalidValues(t *testing.T) {
 	}
 
 	// Saving a view checks its filter_spec the same way (VIE-01).
+	defineAttribute(t, f, "ram_gb", "integer", true)
 	view := v.create(f.User, `{"name": "wp405-view", "entity_kind": "ci", "filter_spec": {"where": {"field": "attributes.ram_gb", "op": "gte", "value": 16}}}`)
 	for _, c := range []struct{ name, method, path, body, field string }{
 		{"create with a where value", http.MethodPost, "/api/v1/saved-views",

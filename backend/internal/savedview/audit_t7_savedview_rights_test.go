@@ -48,6 +48,7 @@ func newAuditT7Views(t *testing.T, tag string) *auditT7Views {
 	savedview.NewHandler(savedview.NewPGRepository(f.App)).
 		WithQueryEngine(savedview.NewPGQueryEngine(f.App)).
 		WithPermissions(grants{"ci:read": true, "asset:read": true}).
+		WithEntitlements(features{"assets_basic": true}).WithInventory(true).
 		RegisterRoutes(mux)
 	return &auditT7Views{t: t, f: f, mux: mux}
 }

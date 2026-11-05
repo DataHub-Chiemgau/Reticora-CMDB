@@ -344,7 +344,13 @@ func TestAssetAST01Migration(t *testing.T) {
 			t.Fatal(readErr)
 		}
 		if name == "down" {
-			return string(owner) + "\n" + string(search) + "\n" + string(names) + "\n" + string(b)
+			// The register trigger of 000255 (WP-289) reads
+			// asset.inventory_no of 000231: it goes first and stays down.
+			registry, registryErr := os.ReadFile("../../migrations/000255_barcode_registry.down.sql")
+			if registryErr != nil {
+				t.Fatal(registryErr)
+			}
+			return string(registry) + "\n" + string(owner) + "\n" + string(search) + "\n" + string(names) + "\n" + string(b)
 		}
 		return string(b) + "\n" + string(names) + "\n" + string(search) + "\n" + string(owner)
 	}

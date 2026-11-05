@@ -233,7 +233,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"import-profiles":       identity.PermImportManage, // only org_admin manages profiles, engineer runs imports (WP-774, E-106)
 	"tags":                  identity.PermTagManage,    // the tag catalog and its merge (CI-08, WP-753, E-106)
 	"locations":             identity.PermLocationWrite,
-	"stock-movements":       identity.PermAssetMove,
+	"stock-movements":       identity.PermStockWrite, // quantity bookings (E-38); an asset transfer also needs asset:move in the handler (E-142, WP-756)
 	"inventory":             identity.PermStockWrite, // former inventory:manage, translated by 000192
 	"movements":             identity.PermAssetMove,
 	"reservations":          identity.PermReservationWrite,

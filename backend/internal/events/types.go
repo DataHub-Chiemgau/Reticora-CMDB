@@ -218,7 +218,8 @@ type ContractExpiringData struct {
 
 // StockMovementData is the data of stock.movement, the movement with the
 // field names of movement.Movement (WP-274). id is the movement; the
-// entity of the envelope is the moved asset or quantity item.
+// entity of the envelope is the moved asset or quantity item; client_id
+// and site_id are the scope the ledger derived for the movement.
 type StockMovementData struct {
 	ID             string   `json:"id"`
 	ItemKind       string   `json:"item_kind"`
@@ -226,6 +227,8 @@ type StockMovementData struct {
 	QuantityItemID string   `json:"quantity_item_id,omitempty"`
 	MovementType   string   `json:"movement_type"`
 	Quantity       *float64 `json:"quantity,omitempty"`
+	ClientID       string   `json:"client_id,omitempty"`
+	SiteID         string   `json:"site_id,omitempty"`
 }
 
 // StockBelowMinimumData is the data of stock.below_minimum, about a

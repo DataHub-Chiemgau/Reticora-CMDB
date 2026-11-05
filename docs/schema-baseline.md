@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000247_internal_order_target_bin
+Stand: Migration 000255_barcode_registry
 
 ## Prüfung
 
@@ -386,7 +386,7 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`assignment`, `composition`, `form_submission` und
+`assignment`, `form_submission` und
 `stock_scan` (Sichtbarkeit über das referenzierte Asset, CI, Formular bzw.
 Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
@@ -583,7 +583,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `ai_conversation.user_id` | `ai_conversation_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `ai_message.conversation_id` | `ai_message_conversation_id_fkey` | `ai_conversation` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `asset.parent_asset_id` | `asset_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
 | `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `assignment.asset_id` | `assignment_asset_id_fkey` | `asset` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `assignment.assigned_by` | `assignment_assigned_by_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
@@ -611,9 +610,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `collector_enrollment_code.used_by_collector_id` | `collector_enrollment_code_used_by_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `compliance_result.ci_id` | `compliance_result_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `compliance_result.rule_id` | `compliance_result_rule_id_fkey` | `compliance_rule` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `composition.child_asset_id` | `composition_child_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
-| `composition.child_ci_id` | `composition_child_ci_id_fkey` | `ci` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
-| `composition.parent_asset_id` | `composition_parent_asset_id_fkey` | `asset` | composition and asset.parent_asset_id are dropped by WP-743 (K19) |
 | `contact.pii_subject_id` | `contact_pii_subject_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `discovery_job.collector_id` | `discovery_job_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `discovery_result.job_id` | `discovery_result_job_id_fkey` | `discovery_job` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
@@ -1404,6 +1400,157 @@ Teilindex `idx_internal_order_target_location` (`target_location_id`,
 `organization_id`) WHERE NOT NULL. Art `bin` und Client der Bestellung
 prüft das Order-Repository; RLS und Policies bleiben unverändert.
 
+Asset-Tags (API-06, WP-755, E-38, Migration 000249): `asset_tag_link`
+ordnet Assets Tags des Katalogs zu (`id` PRIMARY KEY, `organization_id`
+→ `organization` ON DELETE CASCADE, `asset_id`, `tag_id`, `client_id`,
+`site_id`, `created_by` ohne Fremdschlüssel, `created_at`):
+`asset_tag_link_asset_fkey` (`asset_id`, `organization_id`) → `asset`
+(`id`, `organization_id`) ON DELETE CASCADE (K19),
+`asset_tag_link_tag_fkey` (`tag_id`, `organization_id`) → `tag` (`id`,
+`organization_id`) ohne ON-DELETE-Aktion (zugeordnete Tags lassen sich
+nicht löschen), `asset_tag_link_asset_id_tag_id_key` (`asset_id`,
+`tag_id`), Index `idx_asset_tag_link_org_tag` (`organization_id`,
+`tag_id`). `client_id` und `site_id` setzt `derive_asset_tag_link_scope`
+(`asset_tag_link_scope`, BEFORE INSERT OR UPDATE) aus dem Asset;
+`propagate_asset_module_scope()` (Fassung aus 000217 plus
+`asset_tag_link`, erweiterter Scope) zieht sie bei Client- oder
+Standortwechsel des Assets nach. RLS mit ENABLE/FORCE und den Policies
+wie `ci_tag` (`asset_tag_link_isolation`, `asset_tag_link_scoped_update`,
+`asset_tag_link_scoped_delete`), TRUNCATE-Schutz
+`reticora_truncate_guard`. `asset_version_bump()` (Fassung aus 000241)
+erhöht die Version zusätzlich, wenn die Transaktion
+`app.asset_version_touch` auf `on` setzt (Tag-Änderung ohne geänderte
+Spalte). Die Datenmigration übernimmt die String-Elemente von
+`asset.custom_fields.tags` (nur Arrays, Schlüssel nach
+`tag_normalize_key`, leere entfallen, fehlende Tags legt sie mit
+`display_name` de/en = erstem Originalwert an), entfernt `tags` aus
+`custom_fields` ohne Änderung von `updated_at` und `version` und
+normalisiert `saved_view.filter_spec.tags` der Sichten mit `entity_kind =
+'asset'`.
+Asset-Wertehistorie mit Client-Scope (AUD-08, SEC-05, TEN-02, TEN-05,
+WP-794, Migration 000250): `entity_change` erhält `client_id` und `site_id`
+(UUID, nullable, ohne Fremdschlüssel, denormalisiert wie bei `ci_change`)
+und den Index `idx_entity_change_org_entity` (`organization_id`,
+`entity_type`, `entity_id`, `created_at`; bei großem Bestand vorab mit
+`CREATE INDEX CONCURRENTLY IF NOT EXISTS` baubar, wenn die Spalten vorab per
+`ADD COLUMN IF NOT EXISTS` angelegt werden). Der Trigger `asset_history`
+(AFTER INSERT OR UPDATE OR DELETE ON `asset`, FOR EACH ROW, Funktion
+`asset_history()` mit `asset_history_form(asset)`) schreibt die Spur der
+typisierten Spalten für jeden Schreiber in der Form des Asset-DTO
+(`ci_id` als `primary_ci_id`, `purchase_price` als Dezimal-String): eine
+create-Zeile mit der ganzen Zeile, eine delete-Zeile mit der ganzen
+Vorgängerzeile (nicht beim Löschen der Organisation), bei UPDATE je
+geänderter Spalte eine Zeile, jeweils mit `actor_id` aus `app.user_id`,
+`entity_version` aus `version` und `client_id`/`site_id` aus NEW bzw. OLD.
+Ausgenommen sind `custom_fields` (versiegelt vom Asset-Repository),
+`created_at`, `updated_at`, `version`, die Spiegelspalten `asset_tag`,
+`purchase_cost`, `warranty_end`, `supplier` und `serial_number_norm`;
+`lifecycle_state` nur in UPDATE-Zeilen (Zeile `lifecycle_transition` aus
+WP-724). `entity_change_derive_scope` (BEFORE INSERT ON `entity_change`)
+setzt bei Zeilen von Assets und CIs Client und Standort der Entität (mit
+erweitertem Scope gelesen); die Zeile eines gelöschten Assets behält den
+geschriebenen Scope. `asset_history_scope_propagation` und
+`ci_history_scope_propagation` (AFTER UPDATE bei geändertem `client_id`
+oder `site_id`, Funktion `propagate_entity_change_scope()`) ziehen die
+Zeilen mit erweitertem Scope nach. Backfill aus Asset bzw. CI, für
+gelöschte Assets aus ihrer letzten delete-Zeile. `entity_change_isolation`
+trägt das Client- und Site-Prädikat von `asset_tenant_isolation` (000151)
+in USING und WITH CHECK, dazu die restriktiven Policies
+`entity_change_scoped_update` und `entity_change_scoped_delete`; Zeilen
+anderer Typen ohne Scope schreiben nur org-weite Prinzipale (E-09).
+Halter-Cache und Fälligkeit (AST-02, E-124, WP-745, Migration 000251):
+`asset` erhält `assigned_user_id`, `assigned_team_id` (UUID) und
+`assignment_due_at` (TIMESTAMPTZ) mit `asset_assigned_user_id_fkey`
+(`assigned_user_id`, `organization_id`) → `app_user` (Schlüssel
+`app_user_id_organization_key`, 000177) und `asset_assigned_team_id_fkey`
+(`assigned_team_id`, `organization_id`) → `team` (Schlüssel
+`team_id_organization_key`, 000150), beide ohne ON-DELETE-Aktion (ein
+haltendes Team lässt sich nicht löschen, 409), CHECK `asset_single_holder`
+(`num_nonnulls(assigned_user_id, assigned_team_id) <= 1`), CHECK
+`asset_holder_due` (`assignment_due_at` nur mit Halter) und Teilindizes
+`idx_asset_assigned_user` (`organization_id`, `assigned_user_id`) und
+`idx_asset_assigned_team` (`organization_id`, `assigned_team_id`), je WHERE
+NOT NULL. `assigned_team_id` ist kein Scope-Merkmal; Policies unverändert.
+`asset_history` schreibt die drei Spalten wie `location_id` in die Spur
+(kein Spiegel einer anderen Spalte). `stock_movement` erhält `due_at`
+(TIMESTAMPTZ) mit CHECK `stock_movement_due_at_assignment` (`due_at IS
+NULL OR movement_type = 'assignment'`). Keine Daten (Backfill WP-275).
+Backfill des Halter-Caches (AST-02, WP-275, Migration 000254, nur Daten):
+je Asset bestimmt die jüngste offene `assignment`-Zeile (`active`/`overdue`)
+`assigned_user_id` und `assignment_due_at` (Tagesende von `due_date` in
+`organization.timezone`), Zeilen nur mit `ci_id` über `ci.asset_id`, nur
+Nutzer derselben Organisation; Down leert die drei Spalten.
+
+Bestand von Mengenartikeln je Bin (STK-01, STK-02, STK-03, API-06, WP-283,
+E-40, E-41, Migration 000252): `consumable` erhält `barcode` (TEXT, partieller
+UNIQUE-Index `consumable_organization_id_barcode_key` (`organization_id`,
+`barcode`) WHERE NOT NULL) und `supplier_id` (UUID) mit
+`consumable_supplier_id_fkey` (`supplier_id`, `organization_id`) →
+`supplier` (ohne ON-DELETE-Aktion) und Teilindex `idx_consumable_supplier`;
+die Spalten `stock_level` und `location` entfallen. `stock_level` (`id`,
+`organization_id` → `organization` ON DELETE CASCADE, `client_id` und
+`site_id` NOT NULL ohne Fremdschlüssel, `consumable_id`, `location_id`,
+`on_hand` und `reserved` `numeric(12,2)` NOT NULL DEFAULT 0 mit
+`stock_level_on_hand_check` (`on_hand >= 0`) und
+`stock_level_reserved_check` (`reserved >= 0 AND reserved <= on_hand`),
+`updated_at`) mit `stock_level_consumable_id_location_id_key`,
+`stock_level_consumable_fkey` (`consumable_id`, `organization_id`) →
+`consumable` und `stock_level_location_fkey` (`location_id`,
+`organization_id`) → `location`, beide ON DELETE RESTRICT (K19), sowie
+den Indizes `idx_stock_level_location` (`location_id`) und
+`idx_stock_level_org_consumable` (`organization_id`, `consumable_id`).
+`stock_level_derive_location` (BEFORE INSERT OR UPDATE OF `location_id`,
+`consumable_id`, `client_id`, `site_id`, Funktion
+`stock_level_derive_location()` mit erweitertem Scope) setzt Client und
+Standort des Bins und lehnt Nicht-Bins (`stock_level_location_bin`) und
+Artikel eines anderen Clients (`stock_level_location_client`) mit 23514
+ab; `location_refresh_stock_level` (AFTER UPDATE ON `location` bei
+geändertem `path`, `site_id` oder `client_id`, Funktion
+`location_refresh_stock_level()`) leitet nach; `consumable_client_stock`
+(BEFORE UPDATE OF `client_id` ON `consumable`, Funktion
+`consumable_client_stock()`) lehnt einen Client ab, der nicht zu den Bins
+passt (`consumable_stock_level_client`, 23514). RLS mit ENABLE/FORCE,
+TRUNCATE-Schutz `reticora_truncate_guard` und `stock_level_isolation` mit
+Org-, Client- und Site-Prädikat (USING = WITH CHECK). Der Altbestand
+(`stock_level <> 0`, Gründe `stock_without_bin`/`negative_stock`) und
+Freitext-Standorte ohne Bestand (`location_without_bin`) stehen in
+`migration_quarantine` (Migration `000252`).
+
+Barcode-Register (INV-03, WP-289, E-26, Migration 000255): `location` erhält
+`barcode` (TEXT). `barcode_registry` (`id`, `organization_id` →
+`organization` ON DELETE CASCADE, `client_id` und `site_id` (UUID, NULL bei
+Assets/Mengenartikeln ohne Client bzw. bei Mengenartikeln ohne Standort),
+`code` TEXT NOT NULL, `source` mit `barcode_registry_source_check`
+(`barcode`, `inventory_no`), `asset_id`, `consumable_id`, `location_id`) mit
+`barcode_registry_organization_id_code_key` UNIQUE (`organization_id`,
+`code`), CHECK `barcode_registry_one_object`
+(`num_nonnulls(asset_id, consumable_id, location_id) = 1`), CHECK
+`barcode_registry_inventory_no_asset` (`source = 'barcode' OR asset_id IS NOT
+NULL`), den Fremdschlüsseln `barcode_registry_client_fkey` → `client`,
+`barcode_registry_asset_fkey` → `asset`, `barcode_registry_consumable_fkey`
+→ `consumable` und `barcode_registry_location_fkey` → `location`, je
+(`…_id`, `organization_id`) und ON DELETE CASCADE (K19), sowie den
+Teilindizes `idx_barcode_registry_asset`, `idx_barcode_registry_consumable`,
+`idx_barcode_registry_location` und `idx_barcode_registry_client` (je WHERE
+NOT NULL). Die Zeilentrigger `barcode_registry_sync` (AFTER INSERT OR UPDATE
+ON `asset`, `consumable` und `location`, Funktionen
+`barcode_registry_sync_asset()`, `barcode_registry_sync_consumable()`,
+`barcode_registry_sync_location()` mit erweitertem Scope) bauen die
+Registerzeilen eines Objekts neu auf, wenn sich `barcode`, bei Assets auch
+`inventory_no`, `client_id` oder `site_id` ändert; gleiche Werte von
+`barcode` und `inventory_no` ergeben eine Zeile (`inventory_no`). Eine
+Dublette über alle Objektarten ist 23505 auf dem UNIQUE-Constraint. RLS mit
+ENABLE/FORCE, TRUNCATE-Schutz `reticora_truncate_guard`,
+`barcode_registry_isolation` (Org-, Client- und Site-Prädikat, NULL lesbar
+wie `asset_tag_link`) sowie die restriktiven
+`barcode_registry_scoped_update` und `barcode_registry_scoped_delete`.
+Übernommen werden `asset.inventory_no`, `asset.barcode`,
+`consumable.barcode` und der Code eines direkt abgebildeten Knotens aus
+`location_node_retired` (`node_type` = `location.kind`, genau ein Knoten mit
+Code); belegte Codes stehen mit Grund `barcode_conflict` (Asset und
+Mengenartikel mit `barcode` NULL; Knoten) bzw. `barcode_ambiguous` (mehrere
+Knoten) in `migration_quarantine` (Migration `000255`).
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1422,11 +1569,13 @@ SECURITY`), Policies mit ihrem Kommando.
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
+| `asset_tag_link` | ja | ja | asset_tag_link_isolation (ALL), asset_tag_link_scoped_delete (DELETE), asset_tag_link_scoped_update (UPDATE) |
 | `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
+| `barcode_registry` | ja | ja | barcode_registry_isolation (ALL), barcode_registry_scoped_delete (DELETE), barcode_registry_scoped_update (UPDATE) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `bulk_change_set` | ja | ja | bulk_change_set_isolation (ALL), bulk_change_set_scoped_delete (DELETE), bulk_change_set_scoped_update (UPDATE) |
 | `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |
@@ -1451,7 +1600,6 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
-| `composition` | ja | ja | composition_isolation (ALL) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
@@ -1468,7 +1616,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `document_version` | ja | ja | document_version_isolation (ALL) |
 | `endpoint_agent` | ja | ja | endpoint_agent_isolation (ALL), endpoint_agent_scoped_delete (DELETE), endpoint_agent_scoped_update (UPDATE) |
 | `entitlement` | ja | ja | entitlement_isolation (ALL) |
-| `entity_change` | ja | ja | entity_change_isolation (ALL) |
+| `entity_change` | ja | ja | entity_change_isolation (ALL), entity_change_scoped_delete (DELETE), entity_change_scoped_update (UPDATE) |
 | `event_outbox` | ja | ja | event_outbox_isolation (ALL), event_outbox_system_select (SELECT) |
 | `event_outbox_counter` | ja | ja | event_outbox_counter_isolation (ALL), event_outbox_counter_system_select (SELECT) |
 | `export_job` | ja | ja | export_job_isolation (ALL), export_job_system_select (SELECT) |
@@ -1545,6 +1693,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
+| `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
 | `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |

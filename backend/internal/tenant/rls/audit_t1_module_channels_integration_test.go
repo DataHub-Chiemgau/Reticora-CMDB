@@ -37,8 +37,11 @@ func TestAuditT1ModuleChannelsClientScope(t *testing.T) {
 	item := func(client, name string) string {
 		return w.scalar(`INSERT INTO quantity_item (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`, f.OrgA, client, name)
 	}
-	movement := func(asset string) string {
-		return w.create(w.orgA, "/api/v1/stock-movements", map[string]any{"movement_type": "correction", "asset_id": asset, "reason": "t1"})
+	// An asset moves through the route only by transfer, to a location of
+	// its client (E-142, WP-756).
+	room1, room2 := f.Room(t, f.Client1, "t1-mod-r1"), f.Room(t, f.Client2, "t1-mod-r2")
+	movement := func(asset, room string) string {
+		return w.create(w.orgA, "/api/v1/stock-movements", map[string]any{"movement_type": "transfer", "asset_id": asset, "to_location_id": room, "reason": "t1"})
 	}
 	t1, t2 := ticket(ci1, "t1-mod-ticket1"), ticket(ci2, "t1-mod-ticket2")
 	if got := w.scalar(`SELECT COALESCE(client_id::text, '') FROM ticket WHERE id = $1`, t2); got != f.Client2 {
@@ -66,7 +69,7 @@ func TestAuditT1ModuleChannelsClientScope(t *testing.T) {
 			map[string]any{"name": "t1-mod-hijack"}, true, `SELECT name FROM consumable WHERE id = $1`},
 		{"inventory items", "/api/v1/inventory/items", "/api/v1/inventory/items/", item(f.Client1, "t1-mod-item1"), item(f.Client2, "t1-mod-item2"),
 			map[string]any{"name": "t1-mod-hijack"}, true, `SELECT name FROM quantity_item WHERE id = $1`},
-		{"stock movements", "/api/v1/stock-movements", "", movement(a1), movement(a2), nil, false,
+		{"stock movements", "/api/v1/stock-movements", "", movement(a1, room1), movement(a2, room2), nil, false,
 			`SELECT movement_type FROM stock_movement WHERE id = $1`},
 	}
 	for _, k := range kinds {

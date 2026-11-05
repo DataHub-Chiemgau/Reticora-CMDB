@@ -43,7 +43,7 @@ func TestMovementRepositoryClientScope(t *testing.T) {
 
 	ctx := f.ClientCtx(f.Client1)
 	page := api.PaginationParams{Limit: 100}
-	list, total, err := repo.ListMovements(ctx, f.OrgA, movement.MovementFilter{}, page)
+	list, total, err := repo.ListMovements(ctx, f.OrgA, &movement.MovementFilter{}, page)
 	if err != nil || total != 1 || len(list) != 1 || list[0].AssetID != own {
 		t.Fatalf("client-1 movements: total=%d %+v err=%v, want only the own one", total, list, err)
 	}
@@ -58,7 +58,7 @@ func TestMovementRepositoryClientScope(t *testing.T) {
 	if err = f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM stock_movement WHERE asset_id = $1`, foreign).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("client-2 movements: count=%d err=%v, want 1", count, err)
 	}
-	if _, _, err = repo.ListMovements(context.Background(), f.OrgA, movement.MovementFilter{}, page); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.ListMovements(context.Background(), f.OrgA, &movement.MovementFilter{}, page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // MemoryRepository is an in-memory location tree for --no-db mode and
@@ -92,7 +94,10 @@ func (m *MemoryRepository) Get(_ context.Context, orgID, id string) (*Location, 
 	return &out, nil
 }
 
-// Update renames and/or moves a node; a move re-derives the subtree.
+// Update renames and/or moves a node and assigns its barcode; a move
+// re-derives the subtree. A barcode is unique among the locations of the
+// organization (the database checks it over assets and consumables too,
+// WP-289); a taken code is the *api.ConflictError of the database path.
 func (m *MemoryRepository) Update(_ context.Context, orgID, id string, req UpdateRequest) (*Location, error) {
 	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return nil, fieldError("name", ErrInvalidInput, "name must not be empty")
@@ -116,8 +121,18 @@ func (m *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 			return nil, fieldError("parent_id", ErrCycle, "a node cannot be moved below itself")
 		}
 	}
+	if req.Barcode != nil && *req.Barcode != "" {
+		for _, other := range m.nodes {
+			if other.ID != n.ID && other.OrganizationID == orgID && other.Barcode == *req.Barcode {
+				return nil, &api.ConflictError{Field: "barcode", Message: "the value is already taken"}
+			}
+		}
+	}
 	if req.Name != nil {
 		n.Name = *req.Name
+	}
+	if req.Barcode != nil {
+		n.Barcode = *req.Barcode
 	}
 	if parent != nil {
 		n.ParentID = parent.ID

@@ -130,7 +130,8 @@ func TestAuditLogHidesForeignClientRouteEntries(t *testing.T) {
 			t.Fatalf("%s %s = %d %s", w.method, w.path, r.Code, t6Short(r.Body))
 		}
 	}
-	movement2 := created("/api/v1/stock-movements", fmt.Sprintf(`{"movement_type":"correction","asset_id":%q,"reason":"als-c2-move-secret"}`, asset2))
+	// An asset moves through the route only by transfer (E-142, WP-756).
+	movement2 := created("/api/v1/stock-movements", fmt.Sprintf(`{"movement_type":"transfer","asset_id":%q,"to_location_id":%q,"reason":"als-c2-move-secret"}`, asset2, room2))
 	modules[movement2] = "stock movement of a client-2 asset"
 
 	// An entry of a resource type no auditor writes yet: hidden from

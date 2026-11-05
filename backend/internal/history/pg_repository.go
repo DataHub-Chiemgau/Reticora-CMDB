@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -32,8 +33,9 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 // visibleEntity hides the changes of a CI or an asset that is not visible
 // under the transaction's tenant scope: the ci and asset policies filter the
-// subqueries by client and site scope, while entity_change carries no
-// client column yet (WP-025). An asset is deleted for good, so the changes
+// subqueries by client and site scope; the asset rows of entity_change
+// carry the scope of their asset since WP-794, the rows of the other types
+// none (WP-025). An asset is deleted for good, so the changes
 // of a deleted asset are hidden too (WP-516). Other entity types follow
 // with their packages' WithTenant migration.
 const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))
@@ -310,6 +312,30 @@ func (r *PGRepository) Visible(ctx context.Context, orgID, entityType, entityID 
 		return tx.QueryRow(ctx, query, entityID).Scan(&visible)
 	})
 	return visible, err
+}
+
+// AssetFacts reads the type and scope of an asset the caller sees under
+// its tenant scope (AssetLookup, WP-794); nil for an unknown, deleted or
+// invisible one.
+func (r *PGRepository) AssetFacts(ctx context.Context, orgID, assetID string) (*AssetFacts, error) {
+	if !api.IsUUID(assetID) {
+		return nil, nil
+	}
+	var facts *AssetFacts
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		f := AssetFacts{}
+		err := tx.QueryRow(ctx, `SELECT COALESCE(asset_type_id::text, ''), COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
+			FROM asset WHERE id = $1`, assetID).Scan(&f.TypeID, &f.ClientID, &f.SiteID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read asset facts: %w", err)
+		}
+		facts = &f
+		return nil
+	})
+	return facts, err
 }
 
 // ciTrail is the change trail of a CI for its replay at $3 (JOB-04, WP-516,

@@ -355,7 +355,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	all := []string{"POST", "PATCH", "DELETE"}
 	for collection, table := range map[string]string{
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
-		"compliance/rules": "compliance_rule", "compositions": "composition", "consumables": "consumable",
+		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "quantity_item",
 		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
@@ -454,6 +454,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/agents/{id}/enable":                  "endpoint_agent",
 		"PATCH /api/v1/agents/{id}/policy":                 "endpoint_agent",
 		"POST /api/v1/agents/{id}/site":                    "endpoint_agent",
+		"POST /api/v1/assets/{id}/assign":                  "asset", // holder cache (WP-275)
+		"POST /api/v1/assets/{id}/return":                  "asset",
+		"POST /api/v1/assets/{id}/transfer":                "asset",
 		"POST /api/v1/assignments/{id}/return":             "assignment",
 		"POST /api/v1/assignments/{id}/transfer":           "assignment",
 		"DELETE /api/v1/assignments/{id}":                  "assignment",
@@ -518,6 +521,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	m["POST /api/v1/metamodel/drafts/{id}/test"] = RouteSnapshot{Table: "metamodel_draft", Keys: []SnapshotKey{{"id", "id"}},
 		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
+	// The tags of an asset are its rows of asset_tag_link (WP-755).
+	m["PUT /api/v1/assets/{id}/tags"] = RouteSnapshot{Table: "asset", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'tags',
+			(SELECT COALESCE(jsonb_agg(g.key ORDER BY g.key), '[]'::jsonb) FROM asset_tag_link l
+			  JOIN tag g ON g.id = l.tag_id WHERE l.asset_id = t.id))`}
 	// Relationship types are addressed by key; the organization's own type,
 	// not the built-in one of the same key.
 	for _, method := range []string{"PATCH", "DELETE"} {

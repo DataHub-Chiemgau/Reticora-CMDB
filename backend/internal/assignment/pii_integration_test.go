@@ -13,7 +13,9 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -22,12 +24,14 @@ import (
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // TestAssignmentSignatureKeepsSurrogate covers F-385 (WP-656, SEC-05,
-// AUD-04, WP-241 AK1) against PostgreSQL: the signer names of the handover
-// and return signatures live in the PII vault and the assignment table
-// keeps only their surrogates; the REST resource returns the names
-// unchanged; a transfer keeps the stored signatures; existing plaintext
-// signer names are moved by the pii.backfill run; deleting the vault entry
-// shreds the name, deleting the assignment deletes its entries.
+// AUD-04, WP-241 AK1) against PostgreSQL with the assignment service
+// (WP-275): the signer names of the handover and return signatures live in
+// the PII vault and the transition rows of assignment keep only their
+// surrogates; the REST resource returns the names unchanged; a transfer
+// keeps the stored signatures without a new vault entry; existing
+// plaintext signer names are moved by the pii.backfill run; deleting the
+// vault entry shreds the name; DELETE of an assignment is 409 (append-only
+// history) and keeps the vault entries.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
@@ -49,7 +53,9 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 	holder := f.AppUser(t, f.OrgA, "wp656holder")
 	successor := f.AppUser(t, f.OrgA, "wp656next")
 	mux := chi.NewRouter()
-	assignment.NewHandler(assignment.NewPGRepository(f.App)).RegisterRoutes(mux)
+	assignment.NewHandler(assignment.NewPGRepository(f.App)).
+		WithService(assignment.NewService(f.App, movement.NewService(movement.NewPGRepository(f.App)), events.NewOutbox())).
+		RegisterRoutes(mux)
 	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: holder})
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -101,7 +107,7 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 		return n
 	}
 
-	// Handover and return through the REST resource.
+	// Handover, transfer and return through the REST resource.
 	w := call(http.MethodPost, "/api/v1/assignments", `{"asset_id": "`+asset+`", "assigned_to": "`+holder+`",
 		"signature": {"signer_name": "Max Verifier", "method": "typed", "signed_at": "2026-10-28T10:00:00Z"}}`)
 	if w.Code != http.StatusCreated {
@@ -111,19 +117,34 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 	if created.CheckoutSignature == nil || created.CheckoutSignature.SignerName != "Max Verifier" {
 		t.Fatalf("create response = %s", w.Body.String())
 	}
-	w = call(http.MethodPost, "/api/v1/assignments/"+created.ID+"/return", `{"return_condition": "good",
+	checkout, _ := stored(created.ID)
+
+	// A transfer carries no signature: no new vault entry, the stored
+	// handover signature stays.
+	before := subjects()
+	if w = call(http.MethodPost, "/api/v1/assignments/"+created.ID+"/transfer", `{"new_assignee": "`+successor+`"}`); w.Code != http.StatusCreated {
+		t.Fatalf("transfer: %d %s", w.Code, w.Body.String())
+	}
+	next := decode(w)
+	if after := subjects(); after != before {
+		t.Fatalf("transfer changed the vault entries: %d -> %d", before, after)
+	}
+	if c2, r2 := stored(created.ID); c2 != checkout || r2 != "" {
+		t.Fatalf("transfer rewrote the signatures: %s / %s", c2, r2)
+	}
+
+	w = call(http.MethodPost, "/api/v1/assignments/"+next.ID+"/return", `{"return_condition": "good",
 		"signature": {"signer_name": "Rita Rueckgabe", "method": "typed", "signed_at": "2026-10-28T11:00:00Z"}}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("return: %d %s", w.Code, w.Body.String())
 	}
 	returned := decode(w)
-	if returned.CheckoutSignature == nil || returned.CheckoutSignature.SignerName != "Max Verifier" ||
-		returned.ReturnSignature == nil || returned.ReturnSignature.SignerName != "Rita Rueckgabe" {
+	if returned.Status != "returned" || returned.ReturnSignature == nil || returned.ReturnSignature.SignerName != "Rita Rueckgabe" {
 		t.Fatalf("return response = %s", w.Body.String())
 	}
+	_, ret := stored(next.ID)
 
 	// The table keeps only surrogates; the vault holds the names encrypted.
-	checkout, ret := stored(created.ID)
 	if strings.Contains(checkout, "Max Verifier") {
 		t.Errorf("assignment.checkout_signature holds the signer name in plaintext: %s", checkout)
 	}
@@ -147,26 +168,14 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 
 	// Detail and list resolve the names (REST contract unchanged).
 	got := decode(call(http.MethodGet, "/api/v1/assignments/"+created.ID, ""))
+	gotNext := decode(call(http.MethodGet, "/api/v1/assignments/"+next.ID, ""))
 	if got.CheckoutSignature == nil || got.CheckoutSignature.SignerName != "Max Verifier" || got.CheckoutSignature.Method != "typed" ||
-		got.ReturnSignature == nil || got.ReturnSignature.SignerName != "Rita Rueckgabe" {
-		t.Fatalf("get = %+v / %+v", got.CheckoutSignature, got.ReturnSignature)
+		gotNext.ReturnSignature == nil || gotNext.ReturnSignature.SignerName != "Rita Rueckgabe" {
+		t.Fatalf("get = %+v / %+v", got.CheckoutSignature, gotNext.ReturnSignature)
 	}
 	if list := call(http.MethodGet, "/api/v1/assignments", "").Body.String(); !strings.Contains(list, `"signer_name":"Max Verifier"`) ||
 		!strings.Contains(list, `"signer_name":"Rita Rueckgabe"`) {
 		t.Fatalf("list does not resolve the signers: %s", list)
-	}
-
-	// A transfer carries the read signatures along without a new vault
-	// entry and keeps the stored surrogates.
-	before := subjects()
-	if w = call(http.MethodPost, "/api/v1/assignments/"+created.ID+"/transfer", `{"new_assignee": "`+successor+`"}`); w.Code != http.StatusCreated {
-		t.Fatalf("transfer: %d %s", w.Code, w.Body.String())
-	}
-	if after := subjects(); after != before {
-		t.Fatalf("transfer changed the vault entries: %d -> %d", before, after)
-	}
-	if c2, r2 := stored(created.ID); c2 != checkout || r2 != ret {
-		t.Fatalf("transfer rewrote the signatures: %s / %s", c2, r2)
 	}
 
 	// An existing assignment with plaintext signer names is moved by the
@@ -208,18 +217,23 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 	w = call(http.MethodGet, "/api/v1/assignments/"+created.ID, "")
 	shredded := decode(w)
 	if w.Code != http.StatusOK || shredded.CheckoutSignature == nil || shredded.CheckoutSignature.SignerName != "" ||
-		shredded.CheckoutSignature.Method != "typed" || strings.Contains(w.Body.String(), "Max Verifier") ||
-		shredded.ReturnSignature == nil || shredded.ReturnSignature.SignerName != "Rita Rueckgabe" {
+		shredded.CheckoutSignature.Method != "typed" || strings.Contains(w.Body.String(), "Max Verifier") {
 		t.Fatalf("after shredding: %d %s", w.Code, w.Body.String())
 	}
+	if kept := decode(call(http.MethodGet, "/api/v1/assignments/"+next.ID, "")); kept.ReturnSignature == nil ||
+		kept.ReturnSignature.SignerName != "Rita Rueckgabe" {
+		t.Fatalf("the return signature after shredding the handover signer = %+v", kept.ReturnSignature)
+	}
 
-	// Deleting the assignment deletes the vault entries of its signers.
+	// The history is append-only: DELETE is 409, the row and the vault
+	// entries of its signers stay.
 	_, legacyRet := stored(legacy)
 	legacySubject := signer("return_signature", legacyRet)
-	if w = call(http.MethodDelete, "/api/v1/assignments/"+legacy, ""); w.Code != http.StatusNoContent {
-		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
+	if w = call(http.MethodDelete, "/api/v1/assignments/"+legacy, ""); w.Code != http.StatusConflict {
+		t.Fatalf("delete: %d %s, want 409", w.Code, w.Body.String())
 	}
-	if plaintext(`SELECT 1 FROM pii_subject WHERE surrogate_id = $1`, legacySubject) {
-		t.Fatal("the vault entry of a deleted assignment's signer is left")
+	if !plaintext(`SELECT 1 FROM pii_subject WHERE surrogate_id = $1`, legacySubject) ||
+		!plaintext(`SELECT 1 FROM assignment WHERE id = $1`, legacy) {
+		t.Fatal("DELETE removed the assignment or the vault entry of its signer")
 	}
 }

@@ -53,14 +53,26 @@ type Asset struct {
 	// read-only in the API; internal callers (the inventory conversion) set
 	// it on create.
 	LocationID string `json:"location_id,omitempty"`
+	// AssignedUserID or AssignedTeamID is the current holder and
+	// AssignmentDueAt the due date of its assignment (holder cache, AST-02,
+	// WP-745); at most one holder, a due date only with one. Read-only:
+	// they change through POST /api/v1/assets/{id}/assign|return|transfer
+	// (WP-275). The holder is not the owner (OwnerUserID, OwnerTeamID).
+	AssignedUserID  string     `json:"assigned_user_id,omitempty"`
+	AssignedTeamID  string     `json:"assigned_team_id,omitempty"`
+	AssignmentDueAt *time.Time `json:"assignment_due_at,omitempty"`
 	// LifecycleState is the state of the effective asset lifecycle model
 	// (E-120); it changes only through POST
 	// /api/v1/assets/{id}/lifecycle-transitions.
 	LifecycleState string         `json:"lifecycle_state,omitempty"`
 	Notes          string         `json:"notes,omitempty"`
 	CustomFields   map[string]any `json:"custom_fields"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	// Tags are the keys of the catalog tags of the asset (asset_tag_link,
+	// WP-755), sorted, [] without tags; written by PUT
+	// /api/v1/assets/{id}/tags only.
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// AssetTypeID and SiteID are the type and scope of the asset for its
 	// field permissions (RBA-07). Not part of the API.
 	AssetTypeID string `json:"-"`
@@ -149,10 +161,14 @@ type UpdateRequest struct {
 	Notes         *string        `json:"notes,omitempty"`
 	CustomFields  map[string]any `json:"custom_fields,omitempty"`
 	CIID          *string        `json:"primary_ci_id,omitempty"`
-	// LocationID and LifecycleState are read-only (E-120): a PATCH that
-	// sends them is 422 naming the canonical write path.
-	LocationID     ReadOnly `json:"location_id"`
-	LifecycleState ReadOnly `json:"lifecycle_state"`
+	// LocationID, LifecycleState (E-120) and the holder cache (WP-745) are
+	// read-only: a PATCH that sends them is 422 naming the canonical write
+	// path.
+	LocationID      ReadOnly `json:"location_id"`
+	LifecycleState  ReadOnly `json:"lifecycle_state"`
+	AssignedUserID  ReadOnly `json:"assigned_user_id"`
+	AssignedTeamID  ReadOnly `json:"assigned_team_id"`
+	AssignmentDueAt ReadOnly `json:"assignment_due_at"`
 	// Check runs on the locked current asset before the write (the field
 	// permissions of the handler); nil passes.
 	Check func(current *Asset) error `json:"-"`

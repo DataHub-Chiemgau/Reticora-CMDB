@@ -63,6 +63,31 @@ func scanRecord(s pgx.Row) (*Record, error) {
 const disposalVisible = `(disposal_record.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = disposal_record.asset_id))
 	AND (disposal_record.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = disposal_record.ci_id))`
 
+// RunInTx implements TxRunner: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins
+// (WP-332): the record, the movement and the lifecycle transition of a
+// disposal commit or roll back together (WP-278).
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// lockSubjects locks the rows of the disposed asset and CI (SELECT … FOR
+// UPDATE) until the end of the transaction, so parallel disposals of the
+// same object are serialized: the second one sees the state the first one
+// committed (WP-278). A row outside the tenant scope is not locked; the
+// visibility check after it refuses it.
+func lockSubjects(ctx context.Context, tx pgx.Tx, rec *Record) error {
+	for _, s := range []struct{ table, id string }{{"asset", rec.AssetID}, {"ci", rec.CIID}} {
+		if s.id == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx, "SELECT 1 FROM "+s.table+" WHERE id = $1::uuid FOR UPDATE", s.id); err != nil {
+			return fmt.Errorf("lock disposed %s: %w", s.table, err)
+		}
+	}
+	return nil
+}
+
 // referencesVisible checks before the insert that the asset or CI, the
 // supplier and the evidence document of rec are visible under the
 // transaction's tenant scope (their policies filter the subqueries; a
@@ -234,8 +259,9 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Record, 
 	return rec, err
 }
 
-// Create records a disposal in one transaction: the visibility of the
-// referenced objects, the vault subjects of the persons, the row (the
+// Create records a disposal in one transaction (or in the transaction of
+// the context, RunInTx): the lock of the disposed asset or CI, the
+// visibility of the referenced objects, the vault subjects of the persons, the row (the
 // database sets record_hash and the scope) and, last before the commit,
 // the audit entry disposal_record.created (database.BeforeCommit, WP-334).
 // Any error rolls everything back, the audit entry included.
@@ -243,6 +269,9 @@ func (r *PGRepository) Create(ctx context.Context, rec *Record) error {
 	return database.WithRequestTenant(ctx, r.pool, rec.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if rec.PerformedAt.IsZero() {
 			rec.PerformedAt = time.Now().UTC()
+		}
+		if err := lockSubjects(ctx, tx, rec); err != nil {
+			return err
 		}
 		if err := referencesVisible(ctx, tx, rec); err != nil {
 			return err

@@ -59,3 +59,61 @@ models:
     fields:
       status:
         resolver: true
+  # The asset detail aggregate (GQL-03, WP-311). The fields under field
+  # permissions (RBA-07) resolve in resolvers_assets.go with the asset
+  # policy of the request.
+  Asset:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset.Asset
+    fields:
+      inventoryNo:
+        resolver: true
+      category:
+        resolver: true
+      status:
+        resolver: true
+      manufacturer:
+        resolver: true
+      model:
+        resolver: true
+      serialNumber:
+        resolver: true
+      purchaseDate:
+        resolver: true
+      purchasePrice:
+        resolver: true
+      currency:
+        resolver: true
+      warrantyUntil:
+        resolver: true
+      costCenter:
+        resolver: true
+      supplierId:
+        resolver: true
+      contractId:
+        resolver: true
+      ownerUserId:
+        resolver: true
+      ownerTeamId:
+        resolver: true
+      invoiceNumber:
+        resolver: true
+      rfidTag:
+        resolver: true
+      barcode:
+        resolver: true
+      locationId:
+        resolver: true
+      lifecycleState:
+        resolver: true
+      primaryCiId:
+        resolver: true
+      notes:
+        resolver: true
+      customFields:
+        resolver: true
+      tags:
+        resolver: true
+  Movement:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement.Movement
+  Document:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document.Document

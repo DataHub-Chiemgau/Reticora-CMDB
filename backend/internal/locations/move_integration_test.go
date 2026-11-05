@@ -717,8 +717,8 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The delete rules of 000157, of 000189 for the enrollment codes bound
-	// to a site by 000187 (F-430) and of 000247 for the target bin of an
-	// internal order (WP-847).
+	// to a site by 000187 (F-430), of 000247 for the target bin of an
+	// internal order (WP-847) and of 000252 for the stock per bin (WP-283).
 	restrict := map[string]bool{
 		"location_site_id_fkey": true, "location_parent_id_fkey": true, "building_site_id_fkey": true,
 		"room_building_id_fkey": true, "room_site_id_fkey": true, "rack_room_id_fkey": true, "rack_site_id_fkey": true,
@@ -727,16 +727,22 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		"collector_enrollment_code_site_fkey": true,
 		// The target bin of an internal order (000247, WP-847).
 		"internal_order_target_location_fkey": true,
+		// The stock of a consumable in a bin (000252, WP-283): a bin with
+		// stock is not deleted, DeleteError reports quantity_item until
+		// WP-758 renames the kind.
+		"stock_level_location_fkey": true,
 	}
 	// Foreign keys that follow a delete: the specialist row goes with its
 	// location row; a desk loses its room and a review item its site; the
 	// object link of a ticket goes with its location (WP-764); a bulk
 	// change set row keeps its revert data and loses only the site of its
-	// scope snapshot (WP-305).
+	// scope snapshot (WP-305); the register row of a location barcode goes
+	// with its location, it only mirrors the code of the deleted node
+	// (WP-289).
 	follow := map[string]string{
 		"site_location_fkey": "c", "building_location_fkey": "c", "room_location_fkey": "c", "rack_location_fkey": "c",
 		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n", "ticket_link_location_fkey": "c",
-		"bulk_change_set_site_fkey": "n",
+		"bulk_change_set_site_fkey": "n", "barcode_registry_location_fkey": "c",
 	}
 	tree := []string{"location", "building", "room", "rack"}
 	seen := 0
@@ -764,7 +770,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		}
 	}
 	if seen != len(restrict) {
-		t.Errorf("found %d of the %d foreign keys of 000157, 000189 and 000247", seen, len(restrict))
+		t.Errorf("found %d of the %d foreign keys of 000157, 000189, 000247 and 000252", seen, len(restrict))
 	}
 	if err = locations.DeleteError(&pgconn.PgError{Code: "23503", TableName: "unknown_table"}); errors.As(err, new(*locations.DependencyError)) {
 		t.Errorf("a violation of an unknown table is reported as %v", err)

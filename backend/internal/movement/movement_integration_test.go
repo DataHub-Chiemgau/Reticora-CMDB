@@ -48,6 +48,26 @@ func siteCtx(f *scopetest.Fixture, siteID string) context.Context {
 	return database.ContextWithTenantScope(context.Background(), &scope)
 }
 
+// stockBin creates a site of clientID in organization A with warehouse,
+// zone, shelf and bin through the maintenance pool and returns the bin, the
+// place of the stock of a consumable (stock_level, WP-283).
+func stockBin(t *testing.T, f *scopetest.Fixture, clientID, name string) string {
+	t.Helper()
+	ctx := context.Background()
+	var parent string
+	if err := f.Admin.QueryRow(ctx, `INSERT INTO site (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
+		f.OrgA, clientID, name).Scan(&parent); err != nil {
+		t.Fatalf("seed site %s: %v", name, err)
+	}
+	for _, kind := range []string{"warehouse", "zone", "shelf", "bin"} {
+		if err := f.Admin.QueryRow(ctx, `INSERT INTO location (organization_id, kind, parent_id, name) VALUES ($1, $2, $3, $4) RETURNING id::text`,
+			f.OrgA, kind, parent, name+"-"+kind).Scan(&parent); err != nil {
+			t.Fatalf("seed %s %s: %v", kind, name, err)
+		}
+	}
+	return parent
+}
+
 // siteOf returns the site of the location id.
 func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 	t.Helper()
@@ -482,7 +502,10 @@ func TestStockMovementLedgerRules(t *testing.T) {
 	admin(`UPDATE asset SET location_id = $2 WHERE id = $1`, located, room2)
 	item, cons, team := f.ID(), f.ID(), f.ID()
 	admin(`INSERT INTO quantity_item (id, organization_id, client_id, name, location_id) VALUES ($1, $2, $3, 'ledger', $4)`, item, f.OrgA, f.Client1, room1)
-	admin(`INSERT INTO consumable (id, organization_id, client_id, name, stock_level) VALUES ($1, $2, $3, 'ledger', 10)`, cons, f.OrgA, f.Client1)
+	admin(`INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'ledger')`, cons, f.OrgA, f.Client1)
+	// The stock of the consumable lies in a bin since WP-283.
+	consBin := stockBin(t, f, f.Client1, "ledger-bin")
+	admin(`INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 10)`, f.OrgA, cons, consBin)
 	admin(`INSERT INTO team (id, organization_id, name) VALUES ($1, $2, 'ledger')`, team, f.OrgA)
 
 	t.Run("schema", func(t *testing.T) {
@@ -638,7 +661,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		page := api.PaginationParams{Limit: 200}
 		listed := func(ctx context.Context, filter movement.MovementFilter) []string {
 			t.Helper()
-			list, _, err := repo.ListMovements(ctx, f.OrgA, filter, page)
+			list, _, err := repo.ListMovements(ctx, f.OrgA, &filter, page)
 			if err != nil {
 				t.Fatalf("list movements: %v", err)
 			}
@@ -662,7 +685,8 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		}
 
 		// Site 1 does not see the movement at site 2 and writes no consumable
-		// movement (no site, E-09); the org-wide principal does.
+		// movement (the bin of the consumable lies at another site, so it
+		// sees none, WP-283); the org-wide principal does.
 		site1Ctx := siteCtx(f, site1)
 		if got := listed(site1Ctx, movement.MovementFilter{}); !slices.Contains(got, own.ID) || slices.Contains(got, otherSite.ID) {
 			t.Errorf("site-1 movements %v: want %s and not %s", got, own.ID, otherSite.ID)
@@ -682,7 +706,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			t.Errorf("consumable movements: %+v, %v; want one out with reference ledger", list, err)
 		}
 		var level float64
-		if err = f.Admin.QueryRow(ctx, `SELECT stock_level FROM consumable WHERE id = $1`, cons).Scan(&level); err != nil || level != 9 {
+		if err = f.Admin.QueryRow(ctx, `SELECT on_hand::float8 FROM stock_level WHERE consumable_id = $1 AND location_id = $2`, cons, consBin).Scan(&level); err != nil || level != 9 {
 			t.Errorf("consumable stock after the refused and the booked movement: %v, %v; want 9", level, err)
 		}
 	})

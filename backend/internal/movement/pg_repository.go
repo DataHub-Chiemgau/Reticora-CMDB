@@ -2,6 +2,7 @@ package movement
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -9,66 +10,64 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	outbox *events.Outbox
 }
 
-// NewPGRepository creates a PostgreSQL-backed movement repository.
+// NewPGRepository creates a PostgreSQL-backed movement repository; its
+// bookings write stock.movement to the outbox (WP-274).
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
-	return &PGRepository{pool: pool}
+	return &PGRepository{pool: pool, outbox: events.NewOutbox()}
 }
 
 const movementSelectColumns = `
-	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
+	id::text, organization_id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
+	item_kind, COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''),
 	COALESCE(quantity_item_id::text, ''), movement_type,
 	COALESCE(from_location_id::text, ''), COALESCE(to_location_id::text, ''),
-	quantity, COALESCE(actor_id::text, ''), COALESCE(reason, ''),
+	quantity::float8, COALESCE(actor_id::text, ''), COALESCE(assignee_user_id::text, ''),
+	COALESCE(assignee_team_id::text, ''), due_at, COALESCE(reason, ''),
 	COALESCE(ticket_id::text, ''), COALESCE(order_id::text, ''),
 	COALESCE(workflow_run_id::text, ''), COALESCE(document_id::text, ''),
-	COALESCE(notes, ''), created_at
+	COALESCE(notes, ''), COALESCE(signature_hash, ''), occurred_at, created_at
 `
-
-// legacyMovementTypes maps the type names of asset_movement that STK-04
-// does not know to the canonical types of stock_movement, like migration
-// 000242 does for the existing rows (WP-744).
-var legacyMovementTypes = map[string]string{
-	"warehouse_transfer":  "transfer",
-	"bin_transfer":        "transfer",
-	"reservation_release": "release",
-	"repair_transfer":     "repair",
-}
-
-// canonicalMovementTypes are the movement types of stock_movement
-// (stock_movement_movement_type_check, STK-04).
-var canonicalMovementTypes = map[string]bool{
-	"receipt": true, "transfer": true, "assignment": true, "return": true,
-	"deployment": true, "retrieval": true, "reservation": true, "release": true,
-	"repair": true, "disposal": true, "correction": true,
-}
 
 // canonicalMovementType returns the canonical type of a legacy or canonical
 // type name and whether it is one.
 func canonicalMovementType(name string) (string, bool) {
-	if mapped, ok := legacyMovementTypes[name]; ok {
+	if mapped, ok := LegacyMovementTypes[name]; ok {
 		return mapped, true
 	}
-	return name, canonicalMovementTypes[name]
+	return name, MovementTypes[name]
 }
 
-// normalizeObject fixes the item kind of m and keeps only its object, like
-// migration 000242: without item_kind a movement with an asset is one of the
-// asset, otherwise of the quantity item. An asset movement carries no
-// quantity (the booking dialog sends 1), a quantity item movement a positive
-// one.
-func normalizeObject(m *Movement) error {
+// normalizeMovement checks the type and the object of m and keeps only
+// its object, like migration 000242: without item_kind a movement with an
+// asset is one of the asset, one with a consumable of the consumable,
+// otherwise of the quantity item. An asset movement carries no quantity
+// (callers before WP-274 sent 1), a consumable or quantity item movement a
+// positive one. A legacy type name becomes the canonical
+// one, which m carries afterwards.
+func normalizeMovement(m *Movement) error {
+	movementType, ok := canonicalMovementType(m.MovementType)
+	if !ok {
+		return &api.FieldError{Field: "movement_type", Message: "unknown movement_type", Status: http.StatusUnprocessableEntity}
+	}
+	m.MovementType = movementType
 	if m.ItemKind == "" {
-		m.ItemKind = "asset"
-		if m.AssetID == "" {
+		switch {
+		case m.AssetID != "":
+			m.ItemKind = "asset"
+		case m.ConsumableID != "":
+			m.ItemKind = "consumable"
+		default:
 			m.ItemKind = "quantity_item"
 		}
 	}
@@ -78,17 +77,26 @@ func normalizeObject(m *Movement) error {
 			return &api.FieldError{Field: "asset_id", Message: "asset_id is required for an asset movement", Status: http.StatusUnprocessableEntity}
 		}
 		m.QuantityItemID = ""
+		m.ConsumableID = ""
 		m.Quantity = nil
+	case "consumable":
+		if m.ConsumableID == "" {
+			return &api.FieldError{Field: "consumable_id", Message: "consumable_id is required for a consumable movement", Status: http.StatusUnprocessableEntity}
+		}
+		m.AssetID, m.QuantityItemID = "", ""
+		if m.Quantity == nil || *m.Quantity <= 0 {
+			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
+		}
 	case "quantity_item":
 		if m.QuantityItemID == "" {
 			return &api.FieldError{Field: "quantity_item_id", Message: "quantity_item_id is required for a quantity item movement", Status: http.StatusUnprocessableEntity}
 		}
-		m.AssetID = ""
+		m.AssetID, m.ConsumableID = "", ""
 		if m.Quantity == nil || *m.Quantity <= 0 {
 			return &api.FieldError{Field: "quantity", Message: "quantity must be greater than 0", Status: http.StatusUnprocessableEntity}
 		}
 	default:
-		return &api.FieldError{Field: "item_kind", Message: "item_kind must be asset or quantity_item", Status: http.StatusUnprocessableEntity}
+		return &api.FieldError{Field: "item_kind", Message: "item_kind must be asset, consumable or quantity_item", Status: http.StatusUnprocessableEntity}
 	}
 	return nil
 }
@@ -122,139 +130,340 @@ func locationNotFound(field string) error {
 	return &api.FieldError{Field: field, Message: "location not found", Status: http.StatusUnprocessableEntity}
 }
 
-// Record appends a movement to the ledger stock_movement (WP-744). The
-// append-only trigger rejects any later mutation, the trigger
-// stock_movement_derive_scope sets client and site, and the policy refuses
-// a row outside the caller's scope (E-09). Legacy type names are mapped to
-// the canonical ones, which m carries afterwards. Quantity items get their
-// stock level adjusted inside the same transaction. An asset or quantity
-// item that is unknown, of another organization or outside the caller's
-// scope fails with ErrAssetNotFound or ErrItemNotFound, a location likewise
-// with a 422 field error, before anything is written.
+// locationOfOtherClient is the 422 field error of a location of another
+// client than the moved object or one of the CIs of a moved asset: the
+// mirror of asset.location_id would fail on ci_location_client.
+func locationOfOtherClient(field string) error {
+	return &api.FieldError{Field: field, Message: "location belongs to another client", Status: http.StatusUnprocessableEntity}
+}
+
+// referenceNotFound is the 422 field error of a ticket, order, workflow
+// run or document that is not visible under the caller's scope.
+func referenceNotFound(field string) error {
+	return &api.FieldError{Field: field, Message: "referenced object not found", Status: http.StatusUnprocessableEntity}
+}
+
+// lockObject locks the moved asset or quantity item (SELECT … FOR UPDATE,
+// which applies the select and update policies) and returns its client and,
+// for a quantity item, its stock level. An object that is unknown, of
+// another organization or outside the caller's scope is ErrAssetNotFound
+// or ErrItemNotFound.
+func lockObject(ctx context.Context, tx pgx.Tx, m *Movement) (client string, level float64, err error) {
+	if m.ItemKind == "asset" {
+		if !api.IsUUID(m.AssetID) {
+			return "", 0, ErrAssetNotFound
+		}
+		err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM asset
+			WHERE id = $1 AND organization_id = $2 FOR UPDATE`, m.AssetID, m.OrganizationID).Scan(&client)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", 0, ErrAssetNotFound
+		}
+	} else {
+		if !api.IsUUID(m.QuantityItemID) {
+			return "", 0, ErrItemNotFound
+		}
+		err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), stock_level::float8 FROM quantity_item
+			WHERE id = $1 AND organization_id = $2 FOR UPDATE`, m.QuantityItemID, m.OrganizationID).Scan(&client, &level)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", 0, ErrItemNotFound
+		}
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("lock moved object: %w", err)
+	}
+	return client, level, nil
+}
+
+// checkLocation fails with a 422 field error when id (if set) names no
+// location visible under the caller's scope, or one of another client
+// than the moved object or, for an asset, one of its CIs.
+func checkLocation(ctx context.Context, tx pgx.Tx, m *Movement, field, id, client string) error {
+	if id == "" {
+		return nil
+	}
+	if !api.IsUUID(id) {
+		return locationNotFound(field)
+	}
+	var locationClient string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM location WHERE id = $1 AND organization_id = $2`,
+		id, m.OrganizationID).Scan(&locationClient)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return locationNotFound(field)
+	}
+	if err != nil {
+		return fmt.Errorf("check location: %w", err)
+	}
+	if locationClient == "" {
+		return nil
+	}
+	if client != "" && client != locationClient {
+		return locationOfOtherClient(field)
+	}
+	if m.ItemKind == "asset" {
+		var foreign bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND asset_id = $2
+				AND client_id IS NOT NULL AND client_id <> $3::uuid)`,
+			m.OrganizationID, m.AssetID, locationClient).Scan(&foreign); err != nil {
+			return fmt.Errorf("check location client: %w", err)
+		}
+		if foreign {
+			return locationOfOtherClient(field)
+		}
+	}
+	return nil
+}
+
+// Record books a movement in a transaction of its own (WithRequestTenant),
+// or in the transaction the context carries (database.ContextWithTx,
+// WP-332), like RecordTx.
 func (r *PGRepository) Record(ctx context.Context, m *Movement) error {
-	movementType, ok := canonicalMovementType(m.MovementType)
-	if !ok {
-		return fmt.Errorf("invalid movement_type %q", m.MovementType)
-	}
-	if m.AssetID == "" && m.QuantityItemID == "" {
-		return fmt.Errorf("asset_id or quantity_item_id is required")
-	}
-	if err := normalizeObject(m); err != nil {
+	if err := normalizeMovement(m); err != nil {
 		return err
 	}
-	m.MovementType = movementType
 	return database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		for _, ref := range []struct {
-			table, id string
-			missing   error
-		}{
-			{"asset", m.AssetID, ErrAssetNotFound},
-			{"quantity_item", m.QuantityItemID, ErrItemNotFound},
-			{"location", m.FromLocationID, locationNotFound("from_location_id")},
-			{"location", m.ToLocationID, locationNotFound("to_location_id")},
-		} {
-			if err := requireRow(ctx, tx, ref.table, m.OrganizationID, ref.id, ref.missing); err != nil {
-				return err
-			}
+		return recordTx(ctx, tx, r.outbox, m)
+	})
+}
+
+// RecordTx books a movement in tx, the transaction of the calling
+// operation (STK-04, AST-07, WP-274): the moved asset or quantity item is
+// locked (FOR UPDATE); type, object (not visible: ErrAssetNotFound or
+// ErrItemNotFound), locations (visible and of the object's client, else a
+// 422 field error) and the references ticket_id, order_id,
+// workflow_run_id and document_id (visible, else 422) are checked; the row
+// is inserted into stock_movement, whose triggers derive client and site
+// and refuse any later change; an asset with to_location_id gets it as
+// location_id (mirrored to its CIs), a quantity item its stock level
+// (receipt and correction add, transfer keeps, the others take away; a
+// shortfall is ErrInsufficientStock); a consumable is locked, checked and
+// booked on its stock per bin by consumable.ApplyBooking before the row
+// is inserted (bookConsumable, WP-756); last, stock.movement is appended
+// to the outbox (K20). Any error must abort the calling operation, which
+// rolls back movement and event together.
+func RecordTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
+	if err := normalizeMovement(m); err != nil {
+		return err
+	}
+	return recordTx(ctx, tx, events.NewOutbox(), m)
+}
+
+// lockAndCheck locks the moved asset or quantity item and checks the
+// locations (lockObject, checkLocation) and returns the stock level of a
+// quantity item; a consumable is locked, checked and booked by
+// bookConsumable.
+func lockAndCheck(ctx context.Context, tx pgx.Tx, m *Movement) (float64, error) {
+	if m.ItemKind == "consumable" {
+		return 0, bookConsumable(ctx, tx, m)
+	}
+	client, level, err := lockObject(ctx, tx, m)
+	if err != nil {
+		return 0, err
+	}
+	if fromErr := checkLocation(ctx, tx, m, "from_location_id", m.FromLocationID, client); fromErr != nil {
+		return 0, fromErr
+	}
+	if toErr := checkLocation(ctx, tx, m, "to_location_id", m.ToLocationID, client); toErr != nil {
+		return 0, toErr
+	}
+	return level, nil
+}
+
+func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement) error {
+	level, err := lockAndCheck(ctx, tx, m)
+	if err != nil {
+		return err
+	}
+	for _, ref := range []struct{ table, field, id string }{
+		{"ticket", "ticket_id", m.TicketID},
+		{"internal_order", "order_id", m.OrderID},
+		{"workflow_run", "workflow_run_id", m.WorkflowRunID},
+		{"document", "document_id", m.DocumentID},
+	} {
+		if refErr := requireRow(ctx, tx, ref.table, m.OrganizationID, ref.id, referenceNotFound(ref.field)); refErr != nil {
+			return refErr
 		}
-		err := tx.QueryRow(ctx, `
-			INSERT INTO stock_movement (
-				organization_id, item_kind, asset_id, quantity_item_id,
-				movement_type, from_location_id, to_location_id, quantity,
-				actor_id, reason, ticket_id, order_id, workflow_run_id,
-				document_id, notes
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-			RETURNING id::text, created_at`,
-			m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.QuantityItemID),
-			m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
-			m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID),
-			nilIfEmpty(m.OrderID), nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID),
-			nilIfEmpty(m.Notes),
-		).Scan(&m.ID, &m.CreatedAt)
-		if err != nil {
-			return fmt.Errorf("record movement: %w", err)
+	}
+	var delta float64
+	if m.ItemKind == "quantity_item" {
+		delta = stockDelta(m.MovementType, *m.Quantity)
+		if level+delta < 0 {
+			return ErrInsufficientStock
 		}
-		// Adjust the quantity item stock level atomically.
-		if m.ItemKind == "quantity_item" {
-			delta := *m.Quantity
-			switch m.MovementType {
-			case "receipt", "return", "correction":
-				// positive delta
-			default:
-				delta = -delta
-			}
-			if _, err := tx.Exec(ctx,
+	}
+	var clientID, siteID *string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO stock_movement (
+			organization_id, item_kind, asset_id, quantity_item_id,
+			movement_type, from_location_id, to_location_id, quantity,
+			actor_id, assignee_user_id, assignee_team_id, due_at, reason, ticket_id,
+			order_id, workflow_run_id, document_id, notes, consumable_id
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+		RETURNING id::text, client_id::text, site_id::text, occurred_at, created_at`,
+		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.QuantityItemID),
+		m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
+		m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.AssigneeUserID), nilIfEmpty(m.AssigneeTeamID),
+		m.DueAt, nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
+		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes), nilIfEmpty(m.ConsumableID),
+	).Scan(&m.ID, &clientID, &siteID, &m.OccurredAt, &m.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("record movement: %w", err)
+	}
+	m.ClientID, m.SiteID = deref(clientID), deref(siteID)
+	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
+	entity := m.AssetID
+	switch {
+	case m.ItemKind == "consumable":
+		entity = m.ConsumableID
+	case m.ItemKind == "quantity_item":
+		entity = m.QuantityItemID
+		if delta != 0 {
+			if _, err = tx.Exec(ctx,
 				"UPDATE quantity_item SET stock_level = stock_level + $2 WHERE id = $1 AND organization_id = $3",
 				m.QuantityItemID, delta, m.OrganizationID); err != nil {
 				return fmt.Errorf("adjust stock level: %w", err)
 			}
 		}
-		// Track the current location of a moved asset.
-		if m.ItemKind == "asset" && m.ToLocationID != "" {
-			if _, err := tx.Exec(ctx,
-				"UPDATE asset SET location_id = $2 WHERE id = $1 AND organization_id = $3",
-				m.AssetID, m.ToLocationID, m.OrganizationID); err != nil {
-				return fmt.Errorf("update asset location: %w", err)
-			}
+	case m.ToLocationID != "":
+		// The mirror trigger sets the location of every CI of the asset
+		// (asset_propagate_location); a CI outside the scope fails it with
+		// asset_location_ci_scope, which the wrapped error keeps.
+		tag, updErr := tx.Exec(ctx,
+			"UPDATE asset SET location_id = $2, updated_at = now() WHERE id = $1 AND organization_id = $3",
+			m.AssetID, m.ToLocationID, m.OrganizationID)
+		if updErr != nil {
+			return fmt.Errorf("update asset location: %w", updErr)
 		}
-		return nil
-	})
+		if tag.RowsAffected() == 0 {
+			return ErrAssetNotFound
+		}
+	}
+	if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: m.OrganizationID, Type: events.StockMovement, EntityID: entity,
+		Data: events.StockMovementData{ID: m.ID, ItemKind: m.ItemKind, AssetID: m.AssetID, QuantityItemID: m.QuantityItemID,
+			MovementType: m.MovementType, Quantity: m.Quantity, ClientID: m.ClientID, SiteID: m.SiteID}}); err != nil {
+		return fmt.Errorf("record movement event: %w", err)
+	}
+	return nil
 }
 
-// ListMovements returns the asset and quantity item movements of the ledger
-// filtered by the given parameters (consumable movements follow with
-// WP-274); a legacy type name filters by its canonical type. The policy of
-// stock_movement applies the caller's client and site scope.
-func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
+// The movement lists sort newest first on (occurred_at, id); the keyset
+// cursor pins this order.
+const (
+	movementSort = "occurred_at"
+	movementDir  = "desc"
+)
+
+// ListMovements returns the movements of the ledger of every object kind
+// filtered by the given parameters, newest first on (occurred_at, id),
+// with at most one row more than page.Limit so the caller knows whether
+// more follow (MovementPage), and the number of matching rows. A legacy
+// type name filters by its canonical type. The policy of stock_movement
+// applies the caller's client and site scope.
+func (r *PGRepository) ListMovements(ctx context.Context, orgID string, filter *MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
+	// An id filter that is no UUID names no row (the deprecated consumable
+	// path passes its path id unchecked, WP-756).
+	for _, id := range []string{filter.AssetID, filter.ConsumableID, filter.QuantityItemID, filter.LocationID} {
+		if id != "" && !api.IsUUID(id) {
+			return nil, 0, nil
+		}
+	}
 	var out []Movement
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := []string{"organization_id = $1", "item_kind IN ('asset', 'quantity_item')"}
+		where := []string{"organization_id = $1"}
 		args := []any{orgID}
-		pos := 2
+		add := func(clause string, value any) {
+			args = append(args, value)
+			where = append(where, strings.ReplaceAll(clause, "?", fmt.Sprintf("$%d", len(args))))
+		}
 		if filter.AssetID != "" {
-			where = append(where, fmt.Sprintf("asset_id = $%d", pos))
-			args = append(args, filter.AssetID)
-			pos++
+			add("asset_id = ?", filter.AssetID)
+		}
+		if filter.ConsumableID != "" {
+			add("consumable_id = ?", filter.ConsumableID)
 		}
 		if filter.QuantityItemID != "" {
-			where = append(where, fmt.Sprintf("quantity_item_id = $%d", pos))
-			args = append(args, filter.QuantityItemID)
-			pos++
+			add("quantity_item_id = ?", filter.QuantityItemID)
 		}
 		if filter.MovementType != "" {
-			where = append(where, fmt.Sprintf("movement_type = $%d", pos))
 			movementType, _ := canonicalMovementType(filter.MovementType)
-			args = append(args, movementType)
-			pos++
+			add("movement_type = ?", movementType)
 		}
 		if filter.LocationID != "" {
-			where = append(where, fmt.Sprintf("(from_location_id = $%d OR to_location_id = $%d)", pos, pos))
-			args = append(args, filter.LocationID)
-			pos++
+			add("(from_location_id = ? OR to_location_id = ?)", filter.LocationID)
+		}
+		if filter.OccurredFrom != nil {
+			add("occurred_at >= ?", *filter.OccurredFrom)
+		}
+		if filter.OccurredTo != nil {
+			add("occurred_at <= ?", *filter.OccurredTo)
 		}
 		clause := strings.Join(where, " AND ")
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+clause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count movements: %w", err)
 		}
-		args = append(args, page.Limit, page.Offset)
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM stock_movement WHERE %s ORDER BY occurred_at DESC, created_at DESC LIMIT $%d OFFSET $%d",
-			movementSelectColumns, clause, pos, pos+1), args...)
+		if page.Cursor != nil {
+			at, id, posErr := movementPosition(*page.Cursor)
+			if posErr != nil {
+				return posErr
+			}
+			clause += " AND " + api.KeysetClause(movementSort, "timestamptz", movementDir, len(args)+1)
+			args = append(args, at, id)
+		}
+		tail := fmt.Sprintf(" ORDER BY occurred_at DESC, id DESC LIMIT $%d", len(args)+1)
+		args = append(args, page.Limit+1)
+		if page.Cursor == nil && page.Offset > 0 {
+			tail += fmt.Sprintf(" OFFSET $%d", len(args)+1)
+			args = append(args, page.Offset)
+		}
+		rows, err := tx.Query(ctx, "SELECT "+movementSelectColumns+" FROM stock_movement WHERE "+clause+tail, args...)
 		if err != nil {
 			return fmt.Errorf("list movements: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
-			m, err := scanMovement(rows)
-			if err != nil {
-				return err
+			m, scanErr := scanMovement(rows)
+			if scanErr != nil {
+				return scanErr
 			}
 			out = append(out, *m)
 		}
 		return rows.Err()
 	})
 	return out, total, err
+}
+
+// movementPosition returns the (occurred_at, id) position of a keyset
+// cursor of the movement lists; a cursor of another order or with a
+// malformed position is api.ErrInvalidCursor.
+// validation: fixed texts wrapping api.ErrInvalidCursor (API-03).
+func movementPosition(c api.Cursor) (time.Time, string, error) {
+	if !c.Matches(movementSort, movementDir) {
+		return time.Time{}, "", fmt.Errorf("%w: sort order changed", api.ErrInvalidCursor)
+	}
+	at, err := time.Parse(time.RFC3339Nano, c.Value)
+	if err != nil || !api.IsUUID(c.ID) {
+		return time.Time{}, "", fmt.Errorf("%w: malformed position", api.ErrInvalidCursor)
+	}
+	return at, c.ID, nil
+}
+
+// MovementPage is the list response of the rows ListMovements read (at
+// most one more than the limit): when more follow, the page ends at the
+// limit, has_more is set and next_cursor is the keyset cursor after its
+// last row.
+func MovementPage(rows []Movement, total int, page api.PaginationParams) api.ListResponse[Movement] {
+	list := api.ListResponse[Movement]{Data: api.NonNilSlice(rows), Total: total, Limit: page.Limit, Offset: page.Offset}
+	if page.Cursor != nil {
+		list.Offset = 0
+	}
+	if page.Limit > 0 && len(rows) > page.Limit {
+		list.Data = rows[:page.Limit]
+		last := &list.Data[page.Limit-1]
+		list.HasMore = true
+		list.NextCursor = api.EncodeCursor(api.Cursor{Sort: movementSort, Dir: movementDir,
+			Value: last.OccurredAt.UTC().Format(time.RFC3339Nano), ID: last.ID})
+	}
+	return list
 }
 
 const itemSelectColumns = `
@@ -424,11 +633,15 @@ func (r *PGRepository) UpdateItem(ctx context.Context, orgID, id string, req Upd
 	return out, err
 }
 
-// DeleteItem removes a quantity item.
+// DeleteItem removes a quantity item. One kept by movements of the ledger
+// (RESTRICT, WP-744) is ErrHasMovements.
 func (r *PGRepository) DeleteItem(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmd, err := tx.Exec(ctx,
 			"DELETE FROM quantity_item WHERE id = $1 AND organization_id = $2", id, orgID)
+		if IsLedgerReference(err) {
+			return ErrHasMovements
+		}
 		if err != nil {
 			return fmt.Errorf("delete quantity item: %w", err)
 		}
@@ -445,16 +658,20 @@ type movementScanner interface {
 
 func scanMovement(scanner movementScanner) (*Movement, error) {
 	m := &Movement{}
-	var createdAt time.Time
 	if err := scanner.Scan(
-		&m.ID, &m.OrganizationID, &m.ItemKind, &m.AssetID, &m.QuantityItemID,
-		&m.MovementType, &m.FromLocationID, &m.ToLocationID, &m.Quantity,
-		&m.ActorID, &m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID,
-		&m.DocumentID, &m.Notes, &createdAt,
+		&m.ID, &m.OrganizationID, &m.ClientID, &m.SiteID, &m.ItemKind, &m.AssetID,
+		&m.ConsumableID, &m.QuantityItemID, &m.MovementType, &m.FromLocationID,
+		&m.ToLocationID, &m.Quantity, &m.ActorID, &m.AssigneeUserID, &m.AssigneeTeamID,
+		&m.DueAt, &m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID, &m.DocumentID,
+		&m.Notes, &m.SignatureHash, &m.OccurredAt, &m.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
-	m.CreatedAt = createdAt.UTC()
+	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
+	if m.DueAt != nil {
+		due := m.DueAt.UTC()
+		m.DueAt = &due
+	}
 	return m, nil
 }
 
@@ -474,6 +691,13 @@ func scanItem(scanner movementScanner) (*QuantityItem, error) {
 	item.CreatedAt = createdAt.UTC()
 	item.UpdatedAt = updatedAt.UTC()
 	return item, nil
+}
+
+func deref(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func nilIfEmpty(value string) any {

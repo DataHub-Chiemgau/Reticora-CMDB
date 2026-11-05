@@ -9,7 +9,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
@@ -79,17 +78,6 @@ func (c assetCreator) Create(ctx context.Context, ref *movement.AssetRef) (strin
 		return "", err
 	}
 	return a.ID, nil
-}
-
-// compositionParentLookup adapts composition.Repository to the
-// asset.ParentLookup port (spec §5: child assets inherit shared inventory
-// fields from the parent read-only).
-type compositionParentLookup struct {
-	repo composition.Repository
-}
-
-func (l compositionParentLookup) ParentOfAsset(ctx context.Context, orgID, assetID string) (bool, error) {
-	return composition.ParentOfAsset(ctx, l.repo, orgID, assetID)
 }
 
 // overrideProvenance adapts override.Repository to the
@@ -206,17 +194,18 @@ func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, 
 	}, nil
 }
 
-// parentAssetLookup adapts asset.Repository to the composition.AssetLookup
-// port (spec §5: a child CI displays the parent asset's shared inventory
-// identity read-only instead of duplicating it). It is the mirror image of
-// ciLookup, which projects the opposite direction. ParentAssetRef keeps the
-// old names and the float purchase cost until WP-273; the decimal string of
-// the asset is converted here (an empty one is 0).
-type parentAssetLookup struct {
+// ciParentAssetLookup adapts asset.Repository to the ci.ParentAssetLookup
+// port of GET /cis/{id}/parent (spec §5, WP-742: a child CI displays the
+// parent asset's shared inventory identity read-only instead of duplicating
+// it). It is the mirror image of ciLookup, which projects the opposite
+// direction. ParentAssetRef keeps the old names and the float purchase cost
+// of the deprecated path (API-01); the decimal string of the asset is
+// converted here (an empty one is 0).
+type ciParentAssetLookup struct {
 	repo asset.Repository
 }
 
-func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*composition.ParentAssetRef, error) {
+func (l ciParentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*ci.ParentAssetRef, error) {
 	a, err := l.repo.GetByID(ctx, orgID, id)
 	if err != nil {
 		return nil, err
@@ -227,7 +216,7 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 			return nil, err
 		}
 	}
-	return &composition.ParentAssetRef{
+	return &ci.ParentAssetRef{
 		ID:            a.ID,
 		Name:          a.Name,
 		AssetTag:      a.AssetTag,
@@ -246,10 +235,12 @@ func (l parentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*comp
 }
 
 // bffSources hands the read models of topology, rack layout, search, the
-// review inbox and jobs to the GraphQL BFF (GQL-02). Without the job model
-// (no database) the jobs query is unavailable.
+// review inbox and jobs (GQL-02) and those of the asset detail (asset,
+// movement ledger, documents; GQL-03) to the GraphQL BFF. Without the job
+// model (no database) the jobs query is unavailable.
 func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbff.JobSource) *graphqlbff.Sources {
-	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource}
+	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource,
+		Assets: repos.Asset, Movements: repos.Movement, Documents: repos.Document}
 	if reviewSource, ok := repos.Discovery.(graphqlbff.ReviewSource); ok {
 		sources.Reviews = reviewSource
 	}

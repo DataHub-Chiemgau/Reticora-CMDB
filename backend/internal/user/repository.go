@@ -24,6 +24,11 @@ var ErrUserOwnsOpenObjects = errors.New("user owns open objects; hand them over 
 // reference; deactivate or anonymize the user instead (TLC-04).
 var ErrUserReferenced = errors.New("user is referenced by existing records; deactivate or anonymize instead")
 
+// ErrTeamReferenced rejects deleting a team that existing records still
+// reference, such as an asset it holds (asset.assigned_team_id, WP-745) or
+// a ticket; PostgreSQL reports the foreign key violation (23503). 409.
+var ErrTeamReferenced = errors.New("team is referenced by existing records; hand them over first")
+
 // ErrNotFound: the team, team member or role is not one of the organization
 // or lies outside the caller's scope; both answer the same 404 (API-03,
 // TEN-04). The repositories wrap it with the object (errTeamNotFound,

@@ -121,14 +121,12 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params := SnapshotRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: &at}
-	// A CI snapshot is projected with the policy of the caller (WP-727),
-	// resolved before the job runs detached from the request.
-	var policy *permission.FieldPolicy
-	if req.EntityType == "ci" {
-		if policy, err = permission.PolicyFrom(r.Context()); err != nil {
-			api.WriteRepoError(w, err)
-			return
-		}
+	// The snapshot is projected with the policy of the caller (WP-727,
+	// WP-794), resolved before the job runs detached from the request.
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
 	run := func(ctx context.Context) (any, error) { return h.projectedSnapshot(ctx, orgID, &params, policy) }
 	if h.jobs == nil && h.queue == nil {
@@ -179,12 +177,22 @@ func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotReque
 	return &snapshot, nil
 }
 
-// projectedSnapshot is the snapshot of req, for a CI projected with policy
-// (nil: the structural fields only, WP-727).
+// projectedSnapshot is the snapshot of req projected with policy (nil:
+// the structural fields only; a CI since WP-727, an asset since WP-794).
 func (h *Handler) projectedSnapshot(ctx context.Context, orgID string, req *SnapshotRequest, policy *permission.FieldPolicy) (*StateSnapshot, error) {
 	snapshot, err := h.snapshot(ctx, orgID, req)
-	if err != nil || req.EntityType != "ci" {
+	if err != nil {
 		return snapshot, err
+	}
+	if req.EntityType == "asset" {
+		a, aerr := h.assetProjection(ctx, orgID, req.EntityID, policy)
+		if aerr != nil {
+			return nil, aerr
+		}
+		if a != nil {
+			a.state(snapshot)
+		}
+		return snapshot, nil
 	}
 	p, err := h.projection(ctx, orgID, req.EntityID, policy)
 	if err != nil {
@@ -209,9 +217,9 @@ func writeSnapshotError(w http.ResponseWriter, err error) {
 
 // RunSnapshotJob runs a snapshot job of the job queue (handler of
 // history.snapshot) with the tenant and scope of its creator
-// (jobs.CreatorContext) and projects a CI snapshot with the field policy
-// of the creator (WithCreatorPolicy, WP-727); it only reads, so a repeated
-// attempt is harmless.
+// (jobs.CreatorContext) and projects the snapshot with the field policy
+// of the creator (WithCreatorPolicy, WP-727, WP-794); it only reads, so a
+// repeated attempt is harmless.
 func (h *Handler) RunSnapshotJob(ctx context.Context, job *jobs.Job) (any, error) {
 	var req SnapshotRequest
 	if err := json.Unmarshal(job.Params, &req); err != nil {
@@ -221,12 +229,9 @@ func (h *Handler) RunSnapshotJob(ctx context.Context, job *jobs.Job) (any, error
 		return nil, fmt.Errorf("invalid snapshot job parameters: %s/%s", req.EntityType, req.EntityID)
 	}
 	ctx = jobs.CreatorContext(ctx, job)
-	var policy *permission.FieldPolicy
-	if req.EntityType == "ci" {
-		var err error
-		if policy, err = h.creatorPolicyOf(ctx, job); err != nil {
-			return nil, err
-		}
+	policy, err := h.creatorPolicyOf(ctx, job, snapshotKinds[req.EntityType])
+	if err != nil {
+		return nil, err
 	}
 	return h.projectedSnapshot(ctx, job.OrganizationID, &req, policy)
 }
@@ -290,12 +295,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The values of the fields the principal may not read are left out
-	// (WP-727); total stays the number of entries.
-	if entityType == "ci" {
-		if items, err = h.projectList(r.Context(), t.OrganizationID, id, items); err != nil {
-			api.WriteRepoError(w, err)
-			return
-		}
+	// (WP-727, WP-794); total stays the number of entries.
+	switch entityType {
+	case "ci":
+		items, err = h.projectList(r.Context(), t.OrganizationID, id, items)
+	case "asset":
+		items, err = h.projectAssetList(r.Context(), t.OrganizationID, id, items)
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
 	// An entity without changes answers "data": [], not null (F-401).
 	resp := ListResponse{
@@ -337,15 +346,12 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 		}
 		at = parsed
 	}
-	// The state of a CI carries only the fields the principal may read
-	// (WP-727).
-	var policy *permission.FieldPolicy
-	if entityType == "ci" {
-		var err error
-		if policy, err = permission.PolicyFrom(r.Context()); err != nil {
-			api.WriteRepoError(w, err)
-			return
-		}
+	// The state carries only the fields the principal may read (WP-727,
+	// WP-794).
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
 	}
 	snapshot, err := h.projectedSnapshot(r.Context(), t.OrganizationID,
 		&SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: &at}, policy)
@@ -408,16 +414,20 @@ func (h *Handler) WithCIs(l CILookup) *Handler {
 type CreatorPolicy func(ctx context.Context, orgID, userID string) (*permission.FieldPolicy, error)
 
 // WithCreatorPolicy sets the resolver of the creator's policy. Without it
-// a queued CI snapshot keeps only its structural fields (fail-closed).
+// a queued snapshot keeps only its structural fields (fail-closed).
 func (h *Handler) WithCreatorPolicy(p CreatorPolicy) *Handler {
 	h.creatorPolicy = p
 	return h
 }
 
+// snapshotKinds are the object kinds of the entity types with a state
+// snapshot.
+var snapshotKinds = map[string]permission.ObjectKind{"ci": permission.KindCI, "asset": permission.KindAsset}
+
 // creatorPolicyOf returns the field policy of the creator of job: nil
 // (structural fields only) without resolver or when the creator may not
-// read CIs at all.
-func (h *Handler) creatorPolicyOf(ctx context.Context, job *jobs.Job) (*permission.FieldPolicy, error) {
+// read objects of the kind at all.
+func (h *Handler) creatorPolicyOf(ctx context.Context, job *jobs.Job, kind permission.ObjectKind) (*permission.FieldPolicy, error) {
 	if h.creatorPolicy == nil {
 		return nil, nil
 	}
@@ -425,7 +435,7 @@ func (h *Handler) creatorPolicyOf(ctx context.Context, job *jobs.Job) (*permissi
 	if err != nil {
 		return nil, fmt.Errorf("resolve the field permissions of the job creator: %w", err)
 	}
-	if !policy.Level(permission.KindCI, "", "", permission.ObjectRef{}).Readable() {
+	if !policy.Level(kind, "", "", permission.ObjectRef{}).Readable() {
 		return nil, nil
 	}
 	return policy, nil

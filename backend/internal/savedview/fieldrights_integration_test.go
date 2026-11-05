@@ -83,7 +83,7 @@ func newFREnv(t *testing.T) *frEnv {
 
 	e.mux = chi.NewMux()
 	savedview.NewHandler(savedview.NewMemoryRepository()).WithQueryEngine(savedview.NewPGQueryEngine(f.App)).
-		WithPermissions(grants{"ci:read": true, "asset:read": true}).RegisterRoutes(e.mux)
+		WithPermissions(grants{"ci:read": true, "asset:read": true}).WithEntitlements(features{"assets_basic": true}).WithInventory(true).RegisterRoutes(e.mux)
 	return e
 }
 
@@ -188,7 +188,7 @@ func TestStructuredQueryFieldRightsAgainstPostgres(t *testing.T) {
 	// Without the read permission of the entity kind the 403 has no fields.
 	noRead := chi.NewMux()
 	savedview.NewHandler(savedview.NewMemoryRepository()).WithQueryEngine(savedview.NewPGQueryEngine(e.f.App)).
-		WithPermissions(grants{"asset:read": true}).RegisterRoutes(noRead)
+		WithPermissions(grants{"asset:read": true}).WithEntitlements(features{"assets_basic": true}).WithInventory(true).RegisterRoutes(noRead)
 	saved := e.mux
 	e.mux = noRead
 	if code, out, raw := e.query(policy, `{"where": {"field": "serial_number", "op": "eq", "value": "x"}}`); code != http.StatusForbidden ||

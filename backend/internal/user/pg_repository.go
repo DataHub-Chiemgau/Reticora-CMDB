@@ -651,6 +651,10 @@ func (r *PGRepository) UpdateTeam(ctx context.Context, orgID, id string, req Upd
 func (r *PGRepository) DeleteTeam(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM team WHERE id = $1 AND organization_id = $2", id, orgID)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return ErrTeamReferenced
+		}
 		if err != nil {
 			return fmt.Errorf("delete team: %w", err)
 		}

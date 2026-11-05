@@ -173,7 +173,9 @@ func TestStructuredSearchScopeDepthAndPermission(t *testing.T) {
 	status := func(granted grants, held []identity.Permission, body string) int {
 		t.Helper()
 		mux := chi.NewRouter()
-		savedview.NewHandler(savedview.NewMemoryRepository()).WithQueryEngine(engine).WithPermissions(granted).RegisterRoutes(mux)
+		savedview.NewHandler(savedview.NewMemoryRepository()).WithQueryEngine(engine).WithPermissions(granted).
+			// The module inventory and assets_basic (WP-309).
+			WithEntitlements(features{"assets_basic": true}).WithInventory(true).RegisterRoutes(mux)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/search/query", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})

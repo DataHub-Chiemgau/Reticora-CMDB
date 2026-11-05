@@ -4,11 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
@@ -20,14 +24,32 @@ var (
 	ErrAssetNotFound = errors.New("asset not found")
 	// ErrConflict: the organization has an item with this SKU already (409).
 	ErrConflict = errors.New("an item with this SKU already exists")
+	// ErrInsufficientStock: the movement would drive the stock level of
+	// the quantity item or the stock of a bin of the consumable below zero
+	// (409, ProblemInsufficientStock); it is consumable.ErrInsufficientStock.
+	ErrInsufficientStock = consumable.ErrInsufficientStock
+	// ErrHasMovements: the object is kept by movements of the ledger,
+	// which are never deleted (409 with dependencies stock_movement).
+	ErrHasMovements = errors.New("the object has stock movements; it cannot be deleted")
 )
+
+// IsLedgerReference reports whether err is the violation of a RESTRICT
+// foreign key of stock_movement: a delete of an object the ledger keeps
+// (WP-744).
+func IsLedgerReference(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.TableName == "stock_movement"
+}
 
 // Repository defines persistence for movements and quantity items.
 type Repository interface {
 	// Record appends a movement. There is intentionally no update or delete:
 	// the ledger is append-only (spec §9).
 	Record(ctx context.Context, m *Movement) error
-	ListMovements(ctx context.Context, orgID string, filter MovementFilter, page api.PaginationParams) ([]Movement, int, error)
+	// ListMovements returns the matching movements newest first on
+	// (occurred_at, id), at most page.Limit+1 of them (MovementPage), and
+	// their number.
+	ListMovements(ctx context.Context, orgID string, filter *MovementFilter, page api.PaginationParams) ([]Movement, int, error)
 
 	ListItems(ctx context.Context, orgID string, page api.PaginationParams) ([]QuantityItem, int, error)
 	GetItem(ctx context.Context, orgID, id string) (*QuantityItem, error)
@@ -36,12 +58,31 @@ type Repository interface {
 	DeleteItem(ctx context.Context, orgID, id string) error
 }
 
-// MemoryRepository is an in-memory implementation (tests, --no-db).
+// ConsumableStock is the stock per bin of the consumables in the No-DB
+// profile (consumable.MemoryRepository): Book applies a booking with the
+// rules of consumable.ApplyBooking, OnlyBin names the only bin.
+type ConsumableStock interface {
+	Book(ctx context.Context, b *consumable.Booking) error
+	OnlyBin(ctx context.Context, orgID, consumableID string) (string, error)
+}
+
+// MemoryRepository is an in-memory implementation (tests, --no-db). It
+// applies the types, rules and filters of the service, without lock and
+// event; consumable movements book on the stock per bin of consumables.
 type MemoryRepository struct {
-	mu        sync.RWMutex
-	movements []Movement
-	items     map[string]*QuantityItem
-	seq       int
+	mu          sync.RWMutex
+	movements   []Movement
+	items       map[string]*QuantityItem
+	consumables ConsumableStock
+	seq         int
+}
+
+// WithConsumables books the consumable movements on stock, the stock per
+// bin of the consumable store of the same profile (WP-756); without it a
+// consumable movement is consumable.ErrNotFound.
+func (r *MemoryRepository) WithConsumables(stock ConsumableStock) *MemoryRepository {
+	r.consumables = stock
+	return r
 }
 
 // NewMemoryRepository creates an empty in-memory movement repository.
@@ -54,71 +95,102 @@ func (r *MemoryRepository) nextID() string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", r.seq)
 }
 
-// Record appends a movement and adjusts quantity item stock levels.
-func (r *MemoryRepository) Record(_ context.Context, m *Movement) error {
+// Record appends a movement and adjusts quantity item stock levels and the
+// stock per bin of a consumable like RecordTx: an unknown quantity item is
+// ErrItemNotFound, an unknown consumable consumable.ErrNotFound, a
+// shortfall ErrInsufficientStock; a refused booking appends nothing.
+func (r *MemoryRepository) Record(ctx context.Context, m *Movement) error {
+	if err := normalizeMovement(m); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !MovementTypes[m.MovementType] {
-		return fmt.Errorf("invalid movement_type %q", m.MovementType)
+	var item *QuantityItem
+	if m.ItemKind == "consumable" {
+		if r.consumables == nil {
+			return consumable.ErrNotFound
+		}
+		if m.onlyBin {
+			bin, err := r.consumables.OnlyBin(ctx, m.OrganizationID, m.ConsumableID)
+			if err != nil {
+				return err
+			}
+			placeOnlyBin(m, bin)
+		}
+		if err := r.consumables.Book(ctx, bookingOf(m)); err != nil {
+			return err
+		}
 	}
-	if m.ItemKind == "" {
-		m.ItemKind = "asset"
-	}
-	if m.AssetID == "" && m.QuantityItemID == "" {
-		return fmt.Errorf("asset_id or quantity_item_id is required")
+	if m.ItemKind == "quantity_item" {
+		var ok bool
+		if item, ok = r.items[m.QuantityItemID]; !ok || item.OrganizationID != m.OrganizationID {
+			return ErrItemNotFound
+		}
+		if item.StockLevel+stockDelta(m.MovementType, *m.Quantity) < 0 {
+			return ErrInsufficientStock
+		}
+		m.ClientID = item.ClientID
 	}
 	m.ID = r.nextID()
-	m.CreatedAt = time.Now().UTC()
+	now := time.Now().UTC()
+	m.CreatedAt = now
+	m.OccurredAt = now
 	r.movements = append(r.movements, *m)
-	// Quantity stock-level bookkeeping for quantity items.
-	if m.QuantityItemID != "" && m.Quantity != nil {
-		item, ok := r.items[m.QuantityItemID]
-		if ok {
-			switch m.MovementType {
-			case "receipt", "return", "correction":
-				item.StockLevel += *m.Quantity
-			default:
-				item.StockLevel -= *m.Quantity
-			}
-			item.UpdatedAt = time.Now().UTC()
-		}
+	if item != nil {
+		item.StockLevel += stockDelta(m.MovementType, *m.Quantity)
+		item.UpdatedAt = now
 	}
 	return nil
 }
 
-func (r *MemoryRepository) ListMovements(_ context.Context, orgID string, filter MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
+// matches reports whether m passes filter.
+func (filter *MovementFilter) matches(m *Movement) bool {
+	movementType, _ := canonicalMovementType(filter.MovementType)
+	switch {
+	case filter.AssetID != "" && m.AssetID != filter.AssetID,
+		filter.ConsumableID != "" && m.ConsumableID != filter.ConsumableID,
+		filter.QuantityItemID != "" && m.QuantityItemID != filter.QuantityItemID,
+		filter.MovementType != "" && m.MovementType != movementType,
+		filter.LocationID != "" && m.FromLocationID != filter.LocationID && m.ToLocationID != filter.LocationID,
+		filter.OccurredFrom != nil && m.OccurredAt.Before(*filter.OccurredFrom),
+		filter.OccurredTo != nil && m.OccurredAt.After(*filter.OccurredTo):
+		return false
+	}
+	return true
+}
+
+func (r *MemoryRepository) ListMovements(_ context.Context, orgID string, filter *MovementFilter, page api.PaginationParams) ([]Movement, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Movement
 	for i := range r.movements {
 		m := &r.movements[i]
-		if m.OrganizationID != orgID {
-			continue
+		if m.OrganizationID == orgID && filter.matches(m) {
+			out = append(out, *m)
 		}
-		if filter.AssetID != "" && m.AssetID != filter.AssetID {
-			continue
-		}
-		if filter.QuantityItemID != "" && m.QuantityItemID != filter.QuantityItemID {
-			continue
-		}
-		if filter.MovementType != "" && m.MovementType != filter.MovementType {
-			continue
-		}
-		if filter.LocationID != "" && m.FromLocationID != filter.LocationID && m.ToLocationID != filter.LocationID {
-			continue
-		}
-		out = append(out, *m)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	slices.SortStableFunc(out, func(a, b Movement) int {
+		if c := b.OccurredAt.Compare(a.OccurredAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
 	total := len(out)
-	start := page.Offset
-	if start > total {
+	start := min(page.Offset, total)
+	if page.Cursor != nil {
+		at, id, err := movementPosition(*page.Cursor)
+		if err != nil {
+			return nil, 0, err
+		}
 		start = total
+		for i := range out {
+			if out[i].OccurredAt.Before(at) || (out[i].OccurredAt.Equal(at) && out[i].ID < id) {
+				start = i
+				break
+			}
+		}
 	}
-	end := start + page.Limit
-	if end > total {
-		end = total
-	}
+	end := min(start+max(page.Limit, 0)+1, total)
 	return out[start:end], total, nil
 }
 
@@ -214,6 +286,11 @@ func (r *MemoryRepository) DeleteItem(_ context.Context, orgID, id string) error
 	item, ok := r.items[id]
 	if !ok || item.OrganizationID != orgID {
 		return ErrItemNotFound
+	}
+	for i := range r.movements {
+		if r.movements[i].QuantityItemID == id {
+			return ErrHasMovements
+		}
 	}
 	delete(r.items, id)
 	return nil

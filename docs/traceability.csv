@@ -80,7 +80,6 @@ TEN-06;[B];B;backend/internal/monitoring/monitoring_scope_integration_test.go;WP
 TEN-06;[B];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/assignment/assignment_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;WP-017
-TEN-06;[B];B;backend/internal/composition/composition_scope_integration_test.go;WP-017
 AST-01;[P2];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 MGT-11;[P5];B;backend/internal/asset/asset_scope_integration_test.go;WP-017
 TEN-06;[B];B;backend/internal/movement/movement_scope_integration_test.go;WP-018
@@ -1419,3 +1418,27 @@ STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
 AST-05;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273
 AST-04;[P2];B;backend/internal/ci/composition_integration_test.go;WP-273
+AST-05;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-742
+AST-04;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-742
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/asset/tags_integration_test.go;WP-755
+STK-04;[P2];B;backend/internal/movement/service_integration_test.go;WP-274
+AST-07;[P2];B;backend/internal/movement/service_integration_test.go;WP-274
+EVT-03;[P2–P3];B;backend/internal/movement/service_integration_test.go;WP-274
+AUD-08;[P2];C;backend/internal/asset/history_integration_test.go;WP-794
+AST-05;[P2];B;backend/internal/ci/composition_legacy_integration_test.go;WP-841
+MGT-02;[P2];B;backend/internal/disposal/disposal_tx_integration_test.go;WP-278
+AST-02;[P2];B;backend/internal/asset/holder_integration_test.go;WP-745
+STK-02;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+STK-03;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+STK-01;[P2];B;backend/internal/consumable/stock_integration_test.go;WP-283
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/stock_integration_test.go;WP-283
+GQL-03;[P2];C;backend/internal/graphqlbff/assets_test.go;WP-311
+SRC-03;[P2], Textsyntax [O];C;backend/internal/savedview/ast_assets_integration_test.go;WP-309
+AST-05;[P2];B;backend/internal/composition/quarantine_integration_test.go;WP-743
+STK-03;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
+STK-01;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/booking_integration_test.go;WP-756
+AST-07;[P2];B;backend/internal/consumable/booking_integration_test.go;WP-756
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/locations/barcode_integration_test.go;WP-289
+AST-02;[P2];B;backend/internal/assignment/transfer_integration_test.go;WP-275
+AST-07;[P2];B;backend/internal/assignment/transfer_integration_test.go;WP-275

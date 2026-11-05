@@ -1431,7 +1431,10 @@ export interface paths {
     /** List assignments */
     get: operations['listAssignments'];
     put?: never;
-    /** Create an assignment */
+    /**
+     * Create an assignment
+     * @description Assigns the asset of `asset_id`, or the asset of the CI of `ci_id` (`ci.asset_id`), to the user `assigned_to` through the assignment service (WP-275, until WP-746); `id` is the id of the assignment movement. A CI without asset is 422; an assigned asset 409.
+     */
     post: operations['createAssignment'];
     delete?: never;
     options?: never;
@@ -1453,7 +1456,10 @@ export interface paths {
     get: operations['getAssignment'];
     put?: never;
     post?: never;
-    /** Delete an assignment */
+    /**
+     * Delete an assignment
+     * @description Refused with 409 (`https://reticora.io/problems/assignment-append-only`): the history of assignments is append-only (WP-275); return or transfer the asset instead.
+     */
     delete: operations['deleteAssignment'];
     options?: never;
     head?: never;
@@ -1756,6 +1762,14 @@ export interface paths {
      *     audit entry disposal_record.created is written in the same transaction.
      *     An asset, CI, supplier or evidence document the caller cannot see
      *     answers 404 without a record.
+     *
+     *     The disposal runs in one transaction (MGT-02, WP-278): the asset or
+     *     CI is locked, the record is written, an asset books the stock
+     *     movement disposal (event stock.movement), and the asset or CI enters
+     *     the lifecycle state disposed with the context disposal_record and
+     *     disposal_date (event lifecycle.changed). A CI whose type has no
+     *     lifecycle model gets the record only. Any error rolls back record,
+     *     movement, state change, audit entries and events.
      */
     post: operations['createDisposalRecord'];
     delete?: never;
@@ -2378,7 +2392,10 @@ export interface paths {
     delete: operations['deleteConsumable'];
     options?: never;
     head?: never;
-    /** Update a consumable */
+    /**
+     * Update a consumable
+     * @description A barcode that an asset (barcode or inventory number), another consumable or a location of the organization holds is a 409 that does not name the holder (INV-03).
+     */
     patch: operations['updateConsumable'];
     trace?: never;
   };
@@ -2392,12 +2409,16 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List stock movements of a consumable */
+    /**
+     * List stock movements of a consumable
+     * @deprecated
+     * @description Deprecated (E-38, WP-756): the successor is GET /api/v1/stock-movements with the filter consumable_id, which returns the same rows and pages. Each row keeps direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
+     */
     get: operations['listConsumableMovements'];
     put?: never;
     /**
      * Record a stock in/out movement and adjust the level atomically
-     * @description The planned successor is POST /api/v1/stock-movements with the quantity bookings receipt and retrieval (E-38); the deprecation follows once the successor is implemented (WP-283, WP-756).
+     * @description The successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval (E-38, WP-756); this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The deprecation follows with WP-846.
      */
     post: operations['addConsumableMovement'];
     delete?: never;
@@ -4042,7 +4063,7 @@ export interface paths {
     put?: never;
     /**
      * Return an assigned asset or CI
-     * @description Marks the assignment as returned, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty.
+     * @description Returns the asset of the assignment (its `asset_id`, or the asset of its CI) from the holder of the assignment through the assignment service (WP-275, until WP-746): the movement `return` is booked and the open assignments of the asset are closed, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty. 409 when the assignment is closed or the asset has another holder.
      */
     post: operations['returnAssignment'];
     delete?: never;
@@ -4065,7 +4086,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer an assignment to a new assignee
-     * @description Marks the existing assignment as transferred and creates a new active assignment of the same asset/CI for the new assignee.
+     * @description Transfers the asset of the assignment from its holder to the user `new_assignee` through the assignment service (WP-275, until WP-746): the open assignments are closed as transferred and a new active assignment is created. 409 when the assignment is closed or the asset has another holder.
      */
     post: operations['transferAssignment'];
     delete?: never;
@@ -5914,10 +5935,16 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
-    /** List child composition entries of a parent asset */
+    /**
+     * List the child CIs of the CIs of an asset
+     * @description The CIs whose parent_ci_id is a CI linked to the asset (ci.asset_id), each with its child_mode (configuration or standalone; AST-05, WP-742). The legacy composition rows are no longer read. An asset without CIs, or one outside the caller's scope, has no children.
+     */
     get: operations['listAssetsIdChildren'];
     put?: never;
     post?: never;
@@ -7151,10 +7178,17 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
-    /** Get the parent asset owning this CI and the inventory fields it contributes */
+    /**
+     * Get the parent asset owning this CI and the inventory fields it contributes
+     * @deprecated
+     * @description Deprecated (E-25, API-01; WP-742): GET /api/v1/cis/{id} carries parent_ci_id, child_mode, asset and asset_source_ci_id. The answer keeps the former format and reads ci.parent_ci_id: composition is the child CI (id = child_ci_id) with the flags derived from child_mode (configuration: configuration_only; standalone: the independently_* flags), parent_asset_id the asset of the parent CI, its own or the one it derives as a configuration child (WP-273). inherited_fields lists the inherited fields of a configuration child and is empty for a standalone child. A CI without parent_ci_id, or whose parent has no asset, is 404.
+     */
     get: operations['getCisIdParent'];
     put?: never;
     post?: never;
@@ -7182,43 +7216,6 @@ export interface paths {
     options?: never;
     head?: never;
     patch?: never;
-    trace?: never;
-  };
-  '/api/v1/compositions': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Manage parent-asset/child composition links */
-    get: operations['listCompositions'];
-    put?: never;
-    /** Manage parent-asset/child composition links */
-    post: operations['createCompositions'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/compositions/{id}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Read, update or delete a composition link */
-    get: operations['getCompositionsId'];
-    put?: never;
-    post?: never;
-    /** Read, update or delete a composition link */
-    delete: operations['deleteCompositionsId'];
-    options?: never;
-    head?: never;
-    /** Read, update or delete a composition link */
-    patch: operations['updateCompositionsId'];
     trace?: never;
   };
   '/api/v1/history/snapshots': {
@@ -7450,8 +7447,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Rename and/or move a node
-     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
+     * Rename and/or move a node, assign its barcode
+     * @description Moving re-derives path, site and client of the node and its subtree. Sites cannot be moved. barcode assigns a code to the node or removes it with an empty string (audit location.barcode_changed, INV-03); it needs no entitlement of its own. Renaming or moving a rack node needs the rack_view feature like PATCH /racks/{id} (403 feature-not-entitled otherwise, the rack stays unchanged, F-400).
      */
     patch: operations['updateLocation'];
     trace?: never;
@@ -7673,10 +7670,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List and record inventory movements (append-only ledger) */
+    /**
+     * List the movements of the ledger (append-only)
+     * @description The movements of assets, consumables and quantity items under the caller's scope, newest first on (occurred_at, id) with a keyset cursor (WP-274). location_id matches the source or the target; occurred_from and occurred_to bound occurred_at inclusively.
+     */
     get: operations['listStockMovements'];
     put?: never;
-    /** List and record inventory movements (append-only ledger) */
+    /**
+     * Book a physical movement
+     * @description Books through the movement service (WP-274, WP-756) in one transaction. A consumable (consumable_id) books receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) or transfer (two different bins) with quantity > 0 on its stock per bin; the consumable and then its stock rows in location order are locked, so opposite transfers do not deadlock and no bin drops below zero. A quantity item (until the merge into consumable, E-40) books the same types on its stock level. An asset moves only by transfer to to_location_id without quantity (E-142), which also needs asset:move. The references are checked and stock.movement is written to the outbox in the same transaction; any error rolls back the whole booking.
+     */
     post: operations['createStockMovements'];
     delete?: never;
     options?: never;
@@ -7712,7 +7715,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists. Fields are the whitelisted columns of the entity kind, its dynamic attributes (attributes.<key>) and, for CIs, the fields of the linked asset (asset.<field>). At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the type of the value (for in of the first element, all elements sharing it): a number only with numeric values, a boolean only with booleans, a time string with lt, lte, gt or gte only with values holding a time, other strings as text. An attribute value of another JSON type counts as missing: it matches neither eq, in nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); the results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query need asset:read as well. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -8244,7 +8247,7 @@ export interface paths {
     put?: never;
     /**
      * Assign an asset
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
      */
     post: operations['assignAsset'];
     delete?: never;
@@ -8267,7 +8270,7 @@ export interface paths {
     put?: never;
     /**
      * Return an assigned asset
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Takes the asset back from its holder `expected_holder` in one transaction (WP-275): the movement `return` with the previous holder and `reason` = `return_condition` is booked, the holder cache is emptied, the open assignments of the asset are closed and `asset.returned` is written to the outbox. 409 when the asset has no holder (`https://reticora.io/problems/asset-not-assigned`) or another one (`https://reticora.io/problems/holder-mismatch`).
      */
     post: operations['returnAsset'];
     delete?: never;
@@ -8290,7 +8293,7 @@ export interface paths {
     put?: never;
     /**
      * Transfer an assigned asset to another assignee
-     * @description Planned (E-38); WP-275 implements the operation.
+     * @description Changes the holder from `expected_holder` to exactly one new holder, a user or a team, in one transaction (WP-275): the pair `return` (old holder) and `assignment` (new holder) with the same `occurred_at` is booked, the holder cache is set, the open assignments are closed as transferred and `asset.returned` and then `asset.assigned` are written to the outbox. 409 when the asset has no holder or another one than `expected_holder`.
      */
     post: operations['transferAsset'];
     delete?: never;
@@ -8432,8 +8435,8 @@ export interface paths {
     };
     get?: never;
     /**
-     * Replace the tags of an asset
-     * @description Planned (E-38); WP-755 implements the operation.
+     * Replace the tags of an asset (API-06)
+     * @description Replaces the tags of the asset with the catalog tags `tags` (keys) in one transaction; an empty list removes every tag. Unknown keys are 422 with the entries (tags[i]); tags are not created implicitly (POST /api/v1/tags). A changed list raises the version by 1, writes the history row of the field tags and the event asset.changed with changed_fields ["tags"]; an unchanged list changes nothing. If-Match as with PATCH /api/v1/assets/{id} (API-07, WP-740): 412 when it is required but missing or names no version of the asset, 409 with the fields when the tags changed since. An asset outside the caller's scope is 404. custom_fields.tags of POST and PATCH /api/v1/assets is refused with 400. Requires asset:write.
      */
     put: operations['replaceAssetTags'];
     post?: never;
@@ -8501,7 +8504,7 @@ export interface paths {
     };
     /**
      * List the stock levels of a consumable per bin
-     * @description Planned (E-38); WP-283 implements the operation.
+     * @description The stock rows of the consumable in the bins visible under the caller's client and site scope, ordered by bin (STK-02, WP-283).
      */
     get: operations['listConsumableStock'];
     put?: never;
@@ -10639,11 +10642,26 @@ export interface components {
       and?: components['schemas']['FilterExpr'][];
       or?: components['schemas']['FilterExpr'][];
       not?: components['schemas']['FilterExpr'];
-      /** @description A column of the entity kind, attributes.<key> or (CIs) asset.<field>. */
+      /** @description A column of the entity kind, attributes.<key> (a searchable attribute definition, custom fields for assets), tags (with has_any or has_all only) or, for CIs, asset.<field> and asset.attributes.<key> of the linked asset. */
       field?: string;
-      /** @enum {string} */
-      op?: 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'like' | 'in' | 'exists';
-      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string); a non-empty list of them for in; true, false or nothing for exists. */
+      /**
+       * @description between compares number and time fields inclusively; has_any and has_all compare the field tags with tag keys (one of them, all of them).
+       * @enum {string}
+       */
+      op?:
+        | 'eq'
+        | 'ne'
+        | 'lt'
+        | 'lte'
+        | 'gt'
+        | 'gte'
+        | 'like'
+        | 'in'
+        | 'exists'
+        | 'between'
+        | 'has_any'
+        | 'has_all';
+      /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string; an attribute takes the kind of its definition, a number also as a numeric string); a non-empty list of them for in; a list of exactly two for between; a non-empty list of tag keys for has_any and has_all; true, false or nothing for exists. */
       value?: unknown;
     };
     SavedViewSortKey: {
@@ -11283,6 +11301,11 @@ export interface components {
         message: string;
       }[];
     };
+    /** @description A refused disposal (422, WP-278): the lifecycle transition of the asset or CI to disposed is not allowed from its current state (invalid-transition) or fails its guard (lifecycle-guard). */
+    DisposalTransitionProblem: components['schemas']['LifecycleGuardProblem'] & {
+      /** @description States of the lifecycle model with a transition to disposed (invalid-transition only). */
+      allowed_from_states?: string[];
+    };
     /** @description from_state is not the current state (409, type urn:reticora:problem:conflict). */
     LifecycleTransitionConflictProblem: components['schemas']['ProblemDetail'] & {
       /** @description The current lifecycle state; empty without one. */
@@ -11778,6 +11801,43 @@ export interface components {
       discovery_source?: components['schemas']['CIDiscoverySource'];
       /** Format: date-time */
       last_seen_at?: string;
+    };
+    /** @description Answer of the deprecated GET /api/v1/cis/{id}/parent in the format of the former composition handler (API-01, WP-742). */
+    CIParentLegacy: {
+      composition: {
+        /** @description ID of the child CI. */
+        id: string;
+        organization_id: string;
+        parent_asset_id: string;
+        child_ci_id: string;
+        configuration_only: boolean;
+        independently_serialized: boolean;
+        independently_assignable: boolean;
+        independently_locatable: boolean;
+        independently_lifecycle_managed: boolean;
+        /** Format: date-time */
+        created_at: string;
+        /** Format: date-time */
+        updated_at: string;
+      };
+      /** @description Read-only inventory identity of the parent asset; missing when it cannot be read. */
+      parent_asset?: {
+        id: string;
+        name: string;
+        asset_tag?: string;
+        status?: string;
+        serial_number?: string;
+        barcode?: string;
+        rfid_tag?: string;
+        purchase_date?: string;
+        purchase_cost?: number;
+        currency?: string;
+        supplier?: string;
+        invoice_number?: string;
+        warranty_end?: string;
+        location?: string;
+      };
+      inherited_fields: string[];
     };
     CIListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['CI'][];
@@ -12642,12 +12702,29 @@ export interface components {
       location?: string;
       /** @description Node of the canonical location tree; changed through stock movements and rack placement only. */
       readonly location_id?: string;
+      /**
+       * Format: uuid
+       * @description Current holder, a user of the organization (holder cache, AST-02, WP-745); at most one of assigned_user_id and assigned_team_id. Not the owner (owner_user_id). Changed through POST /api/v1/assets/{id}/assign, /return and /transfer only.
+       */
+      readonly assigned_user_id?: string;
+      /**
+       * Format: uuid
+       * @description Current holder, a team of the organization (holder cache, AST-02, WP-745). Not the owner (owner_team_id) and no scope of the asset. Changed through POST /api/v1/assets/{id}/assign, /return and /transfer only.
+       */
+      readonly assigned_team_id?: string;
+      /**
+       * Format: date-time
+       * @description Due date of the current assignment; only with a holder (WP-745).
+       */
+      readonly assignment_due_at?: string;
       /** @description State of the effective asset lifecycle model (E-120); changed through POST /api/v1/assets/{id}/lifecycle-transitions only. */
       readonly lifecycle_state?: string;
       notes?: string;
       custom_fields: {
         [key: string]: unknown;
       };
+      /** @description Keys of the catalog tags of the asset (WP-755), sorted; [] without tags. Written by PUT /api/v1/assets/{id}/tags only. */
+      readonly tags?: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -12722,11 +12799,12 @@ export interface components {
       /** @deprecated */
       location?: string;
       notes?: string;
+      /** @description Custom fields; the key tags is refused with 400 (tags are catalog tags, PUT /api/v1/assets/{id}/tags, WP-755). */
       custom_fields?: {
         [key: string]: unknown;
       };
     };
-    /** @description location_id and lifecycle_state are read-only: sending either is 422 naming the canonical write path. An empty currency is the currency of the organization, an empty purchase_price removes the price. Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
+    /** @description location_id, lifecycle_state and the holder cache assigned_user_id, assigned_team_id and assignment_due_at (WP-745) are read-only: sending one is 422 naming the field and the canonical write path. An empty currency is the currency of the organization, an empty purchase_price removes the price. Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end, supplier and ci_id are unknown members (400). */
     UpdateAssetRequest: {
       name?: string;
       /** @description Inventory number, unique per organization (409 on inventory_no otherwise; empty is 400). */
@@ -12761,6 +12839,7 @@ export interface components {
       notes?: string;
       /** @description Primary CI; linked in the same transaction as a manual change of the CI (version, history, ci.changed; requires ci:write); the previous primary CI stays linked. An empty string clears the primary CI, the CI stays linked (DELETE /api/v1/assets/{id}/cis/{ci_id} unlinks it). An unknown CI or one outside the caller's scope, or a CI of another client than the asset, is 422 on primary_ci_id. */
       primary_ci_id?: string;
+      /** @description Custom fields; the key tags is refused with 400 (tags are catalog tags, PUT /api/v1/assets/{id}/tags, WP-755). */
       custom_fields?: {
         [key: string]: unknown;
       };
@@ -12783,12 +12862,19 @@ export interface components {
     AssetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Asset'][];
     };
+    /** @description An assignment of an asset to a user (`assigned_to`) or a team (`assigned_team_id`). Written by the assignment service (WP-275), its `id` is the id of the assignment movement in the ledger. */
     Assignment: {
       id: string;
       organization_id: string;
       asset_id?: string;
       ci_id?: string;
-      assigned_to: string;
+      /** @description The user holder; absent for a team holder. */
+      assigned_to?: string;
+      /**
+       * Format: uuid
+       * @description The team holder (WP-275); absent for a user holder.
+       */
+      assigned_team_id?: string;
       assigned_by: string;
       assignment_type: string;
       status: string;
@@ -12796,6 +12882,11 @@ export interface components {
       assigned_at: string;
       /** Format: date-time */
       due_date?: string;
+      /**
+       * Format: date-time
+       * @description The due date of the assignment (WP-275); `due_date` is its day in the time zone of the organization.
+       */
+      due_at?: string;
       /** Format: date-time */
       returned_at?: string;
       return_condition?: string;
@@ -12804,6 +12895,47 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description Exactly one of `assigned_user_id` and `assigned_team_id` (WP-275). */
+    AssignAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The user (`app_user.id`) the asset is assigned to.
+       */
+      assigned_user_id?: string;
+      /**
+       * Format: uuid
+       * @description The team the asset is assigned to.
+       */
+      assigned_team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
+    };
+    ReturnAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The current holder (user or team); another one is 409.
+       */
+      expected_holder: string;
+      /** @description Booked as `reason` of the return movement. */
+      return_condition?: string;
+      notes?: string;
+    };
+    /** @description The current holder and exactly one new holder, a user or a team (WP-275). */
+    TransferAssetRequest: {
+      /**
+       * Format: uuid
+       * @description The current holder (user or team); another one is 409.
+       */
+      expected_holder: string;
+      /** Format: uuid */
+      assigned_user_id?: string;
+      /** Format: uuid */
+      assigned_team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
     };
     /** @description Digital signature captured at handover/return. */
     Signature: {
@@ -13161,60 +13293,192 @@ export interface components {
       client_id?: string;
       name: string;
       sku?: string;
+      /** @description Unique per organization where set (WP-283). */
+      barcode?: string;
+      /**
+       * Format: uuid
+       * @description Supplier of the consumable (E-41, WP-283).
+       */
+      supplier_id?: string;
       category: string;
       unit: string;
-      stock_level: number;
+      /**
+       * @deprecated
+       * @description Sum of on_hand over the bins of the consumable the caller sees (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept as a computed field until WP-320 (WP-283).
+       */
+      readonly stock_level: number;
       min_level: number;
-      location?: string;
       notes?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description The stock is booked per bin (POST /api/v1/consumables/{id}/movements with location_id), not set on create (WP-283). */
     CreateConsumableRequest: {
       client_id?: string;
       name: string;
       sku?: string;
+      barcode?: string;
+      /** Format: uuid */
+      supplier_id?: string;
       category?: string;
       unit?: string;
-      stock_level?: number;
       min_level?: number;
-      location?: string;
       notes?: string;
     };
     UpdateConsumableRequest: {
+      /** @description A client that does not match the bins holding stock of the consumable is 422 (WP-283). */
       client_id?: string;
       name?: string;
       sku?: string;
+      barcode?: string;
+      supplier_id?: string;
       category?: string;
       unit?: string;
       min_level?: number;
-      location?: string;
       notes?: string;
     };
-    StockMovement: {
-      id: string;
-      organization_id: string;
+    /** @description The stock of a consumable in one bin (stock_level, STK-02, WP-283). */
+    ConsumableStock: {
+      /** Format: uuid */
       consumable_id: string;
-      /** @enum {string} */
-      direction: 'in' | 'out';
-      quantity: number;
-      reason?: string;
-      reference?: string;
-      actor_id?: string;
+      /**
+       * Format: uuid
+       * @description The bin.
+       */
+      location_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      on_hand: number;
+      /** @description Never above on_hand. */
+      reserved: number;
       /** Format: date-time */
-      created_at: string;
+      updated_at: string;
     };
-    CreateStockMovementRequest: {
+    ConsumableStockListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableStock'][];
+    };
+    /** @description A row of the ledger stock_movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (WP-756): the fields of StockMovement plus direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). */
+    ConsumableMovement: components['schemas']['StockMovement'] & {
       /** @enum {string} */
       direction: 'in' | 'out';
+      /** @description The bin, target of in and source of out (WP-283). */
+      location_id?: string;
+      reference?: string;
+    };
+    CreateConsumableMovementRequest: {
+      /** @enum {string} */
+      direction: 'in' | 'out';
+      /**
+       * Format: uuid
+       * @description The bin: in is a receipt into it, out a retrieval from it. Without it the consumable must have exactly one bin, else 422 (WP-283).
+       */
+      location_id?: string;
       quantity: number;
       reason?: string;
       reference?: string;
     };
     ConsumableListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Consumable'][];
+    };
+    ConsumableMovementListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableMovement'][];
+    };
+    /**
+     * @description Movement type of the ledger stock_movement (STK-04). assignment, return, reservation, release and disposal arise only in their domain paths (WP-274).
+     * @enum {string}
+     */
+    MovementType:
+      | 'receipt'
+      | 'transfer'
+      | 'assignment'
+      | 'return'
+      | 'deployment'
+      | 'retrieval'
+      | 'reservation'
+      | 'release'
+      | 'repair'
+      | 'disposal'
+      | 'correction';
+    /** @description One row of the append-only ledger stock_movement (STK-04, AST-07, WP-744, WP-274). client_id and site_id are derived from the moved object and the locations at booking time. User and team ids are surrogates (SEC-05). */
+    StockMovement: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      movement_type: components['schemas']['MovementType'];
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      /** @description Moved quantity; absent for an asset. */
+      quantity?: number;
+      actor_id?: string;
+      assignee_user_id?: string;
+      assignee_team_id?: string;
+      /**
+       * Format: date-time
+       * @description Due date of an assignment (WP-745); absent for every other movement type.
+       */
+      due_at?: string;
+      reason?: string;
+      notes?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      workflow_run_id?: string;
+      /** Format: uuid */
+      document_id?: string;
+      /** @description Hash of the signature (WP-276); absent until then. */
+      signature_hash?: string;
+      /** Format: date-time */
+      occurred_at: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; for a quantity item (quantity_item_id, until the merge into consumable, E-40) the same types with quantity > 0 on its stock level. For an asset (asset_id) only transfer to to_location_id without quantity. */
+    CreateStockMovementRequest: {
+      /** @enum {string} */
+      item_kind?: 'asset' | 'consumable' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      movement_type: components['schemas']['MovementType'];
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      quantity?: number;
+      reason?: string;
+      notes?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      workflow_run_id?: string;
+      /** Format: uuid */
+      document_id?: string;
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -14175,6 +14439,10 @@ export interface components {
       /** @description Number of live CIs whose assignment moved to the tag. */
       moved: number;
     };
+    ReplaceAssetTagsRequest: {
+      /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
+      tags: string[];
+    };
     ReplaceCITagsRequest: {
       /** @description Keys of catalog tags; duplicates count once, [] removes every tag. */
       tags: string[];
@@ -14426,6 +14694,8 @@ export interface components {
       name: string;
       /** @description ltree path of the node ids from the site */
       path: string;
+      /** @description Code assigned to the node (INV-03); absent without one. Unique per organization over the barcodes and inventory numbers of assets, the barcodes of consumables and of locations. */
+      barcode?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -14445,6 +14715,8 @@ export interface components {
     LocationUpdateRequest: {
       name?: string;
       parent_id?: string;
+      /** @description Assigns the code to the node, also to a site, building, room or rack; an empty string removes it. A code held by any asset, consumable or location of the organization is a 409 with field barcode. */
+      barcode?: string;
     };
     LocationListResponse: {
       /** @description Opaque signed cursor for the next page (API-02); absent on the last page. */
@@ -16554,7 +16826,7 @@ export interface components {
         'application/problem+json': components['schemas']['DependencyProblem'];
       };
     };
-    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. */
+    /** @description The name is taken below the same parent: a site per client, a building per site, a room per building, a rack per room (LOC-03..06). `field` is `name`; nothing was stored. On PATCH also a barcode that an asset (barcode or inventory number), a consumable or a location of the organization holds (INV-03): `field` is `barcode`, the holder is not named. */
     LocationNameTaken: {
       headers: {
         [name: string]: unknown;
@@ -19703,6 +19975,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -19743,15 +20018,9 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Assignment deleted */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listDocuments: {
@@ -20434,6 +20703,15 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The current lifecycle state of the asset or CI has no transition to disposed, or it has no state (invalid-transition, field asset_id or ci_id, with from_state and the allowed source states of its model, e.g. retired and repair), or the transition fails its guard (lifecycle-guard with violations). Nothing is recorded. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DisposalTransitionProblem'];
+        };
+      };
     };
   };
   getDisposalRecord: {
@@ -21748,6 +22026,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The consumable has movements in the ledger, which are kept (dependencies stock_movement, WP-274), or stock on hand or reserved in a bin (WP-283). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DependencyProblem'];
+        };
+      };
     };
   };
   updateConsumable: {
@@ -21778,6 +22065,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listConsumableMovements: {
@@ -21808,14 +22097,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Paginated movements */
+      /** @description The movements of the consumable, newest first. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['StockMovementListResponse'];
+          'application/json': components['schemas']['ConsumableMovementListResponse'];
         };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       401: components['responses']['Unauthorized'];
     };
@@ -21832,11 +22128,11 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreateStockMovementRequest'];
+        'application/json': components['schemas']['CreateConsumableMovementRequest'];
       };
     };
     responses: {
-      /** @description Movement recorded; returns movement and updated consumable */
+      /** @description Movement recorded; the body is {"movement": ConsumableMovement} (WP-756). */
       201: {
         headers: {
           [name: string]: unknown;
@@ -21846,7 +22142,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description The bin does not hold the quantity (type insufficient-stock). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description location_id names no visible bin, a bin of another client, or is missing while the consumable has none or several bins. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakes: {
@@ -26522,6 +26835,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -26553,6 +26868,8 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -27940,8 +28257,8 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description Records such as tickets still reference the team. */
-      422: {
+      /** @description Records such as tickets or an asset the team holds (assigned_team_id, WP-745) still reference the team. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -32094,27 +32411,39 @@ export interface operations {
   };
   listAssetsIdChildren: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List child composition entries of a parent asset */
+      /** @description One page of the child CIs (API-02) */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['CIListResponse'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   getAssetsIdLifecycleTransitionOptions: {
@@ -32192,15 +32521,40 @@ export interface operations {
   };
   listAssetsIdMovements: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List the movement ledger of an asset */
+      /** @description The movements of the asset, newest first. */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockMovementListResponse'];
+        };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -35246,7 +35600,10 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
@@ -35256,22 +35613,12 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['CIParentLegacy'];
         };
-        content?: never;
       };
-      /** @description CI has no parent asset */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listCisIdState: {
@@ -35298,131 +35645,6 @@ export interface operations {
         content?: never;
       };
       404: components['responses']['NotFound'];
-    };
-  };
-  listCompositions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Manage parent-asset/child composition links */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  createCompositions: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Manage parent-asset/child composition links */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  getCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  deleteCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-    };
-  };
-  updateCompositionsId: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Read, update or delete a composition link */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
     };
   };
   createStateSnapshot: {
@@ -35732,6 +35954,15 @@ export interface operations {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The item has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['DependencyProblem'];
+        };
       };
     };
   };
@@ -36504,6 +36735,16 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description The filter of the view reads assets without asset:read, the module inventory or the entitlement assets_basic (feature-not-entitled), or reads a field the caller may not read (FieldForbiddenProblem), as POST /api/v1/search/query checks it (WP-309). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       /** @description The caller has a view of this name already. */
       409: {
         headers: {
@@ -36513,7 +36754,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36625,12 +36866,23 @@ export interface operations {
           'application/json': components['schemas']['SavedView'];
         };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
+      };
+      /** @description The filter of the view reads assets without asset:read, the module inventory or the entitlement assets_basic (feature-not-entitled), or reads a field the caller may not read (FieldForbiddenProblem), as POST /api/v1/search/query checks it (WP-309). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
       };
       404: components['responses']['NotFound'];
       /** @description The owner has another view of this name; the view stays unchanged. */
@@ -36642,7 +36894,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36655,15 +36907,47 @@ export interface operations {
   };
   listStockMovements: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        asset_id?: string;
+        consumable_id?: string;
+        quantity_item_id?: string;
+        movement_type?: components['schemas']['MovementType'];
+        location_id?: string;
+        occurred_from?: string;
+        occurred_to?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description List and record inventory movements (append-only ledger) */
+      /** @description The movements of one page. */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['StockMovementListResponse'];
+        };
+      };
+      /** @description The cursor is malformed or was issued for another order. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -36671,6 +36955,13 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description An id filter is no UUID, movement_type is unknown, or occurred_from/occurred_to is no RFC 3339 date-time; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -36685,16 +36976,22 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateStockMovementRequest'];
+      };
+    };
     responses: {
-      /** @description List and record inventory movements (append-only ledger) */
+      /** @description The booked movement. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StockMovement'];
+        };
       };
-      /** @description movement_type is invalid or the item or quantity is missing. */
+      /** @description The body is no valid JSON. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -36708,14 +37005,28 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      /** @description The caller lacks stock:write, or asset:move for the transfer of an asset (E-142), or the organization is not entitled to stock (feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The asset, consumable or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description An id field is no UUID, or from_location_id/to_location_id names a location that is unknown, of another organization or outside the caller's scope; `field` names it. */
+      /** @description The withdrawal exceeds the available stock of the bin or the stock level of the quantity item (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable or quantity item, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, or a ticket, order, workflow run or document that is not visible. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36791,7 +37102,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
+      /** @description Invalid filter spec (malformed JSON, unknown member or entity_kind), an attribute that is not searchable or searchable with different data types (field names it, the detail gives the hint), or a value the database refuses after the checks (e.g. NUL in a flat text field); the detail is generic and never carries database text. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -36805,7 +37116,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read) (ProblemDetail), or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (as attributes.tags), a sort key, a column or, for CIs, asset.<field>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read), or asset:read for asset fields of a CI query (ProblemDetail, "missing permission asset:read"); the organization lacks assets_basic or the module inventory is off for an asset query or asset fields (type https://reticora.io/problems/feature-not-entitled); or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (flat or compared with has_any or has_all, as attributes.tags), a sort key, a column or, for CIs, asset.<field> and asset.attributes.<key>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -36815,7 +37126,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
-      /** @description Invalid filter AST, filter value, sort key or column; field names it (where.<path>, the flat field, sort[<i>].field, sort[<i>].dir or columns[<i>]). */
+      /** @description Invalid filter AST, filter value, sort key or column, an unknown attribute or an unknown tag key; field names it (where.<path>, the flat field, tags[<i>], sort[<i>].field, sort[<i>].dir or columns[<i>]). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37931,7 +38242,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The tag is assigned to CIs or tickets, or is a system tag. */
+      /** @description The tag is assigned to CIs, tickets or assets, or is a system tag. */
       409: {
         headers: {
           [name: string]: unknown;
@@ -38261,19 +38572,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
-      200: {
+      /** @description Assigned; `id` is the id of the assignment movement. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38287,19 +38605,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReturnAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
+      /** @description Returned; the booked return movement. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StockMovement'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38313,19 +38638,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TransferAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-275. */
-      200: {
+      /** @description Transferred; the new assignment, `id` is the id of its assignment movement. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Assignment'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38560,27 +38892,66 @@ export interface operations {
   replaceAssetTags: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceAssetTagsRequest'];
+      };
+    };
     responses: {
-      /** @description Replaced. The request and response schemas come with WP-755. */
+      /** @description Tags replaced; the asset */
       200: {
         headers: {
+          /** @description The new asset version. */
+          ETag?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Asset'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The tags changed since the If-Match version */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            | components['schemas']['VersionConflictProblem']
+            | components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description If-Match missing although required, or not a version of the asset */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description tags is missing or names unknown tags; `violations` names the entries. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
     };
   };
   convertReservation: {
@@ -38656,12 +39027,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283. */
+      /** @description List the stock levels of a consumable per bin. The page follows the cursor contract (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConsumableStockListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

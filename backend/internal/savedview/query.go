@@ -3,10 +3,13 @@ package savedview
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,10 +30,33 @@ func NewPGQueryEngine(pool *pgxpool.Pool) *PGQueryEngine {
 	return &PGQueryEngine{pool: pool}
 }
 
+// SpecChecker checks a filter spec against the catalog of the organization
+// (attribute definitions, tag catalog) without running it (*PGQueryEngine):
+// saving a view checks its filter by the rules of the query (WP-309).
+type SpecChecker interface {
+	CheckSpec(ctx context.Context, orgID string, spec *FilterSpec) error
+}
+
+// CheckSpec validates the spec and resolves its attributes and tags in
+// WithRequestTenant as Query does, without running it. The errors are those
+// of Query: a 422 or 400 *api.FieldError naming the field.
+func (e *PGQueryEngine) CheckSpec(ctx context.Context, orgID string, spec *FilterSpec) error {
+	return database.WithRequestTenant(ctx, e.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		cat, err := resolveCatalog(ctx, tx, spec)
+		if err != nil {
+			return err
+		}
+		_, _, err = spec.compile(spec.entityKind(), cat, nil, 1)
+		return err
+	})
+}
+
 // Query executes the filter spec in WithRequestTenant, i.e. under RLS with
 // the principal's full scope (client, site, team). entity_kind selects the
 // table: "ci" or "asset". Unknown kinds are rejected; deleted CIs are never
-// returned.
+// returned. The attributes and tags of the spec are resolved in the
+// transaction first (resolveCatalog, API-02, WP-309): an unknown attribute
+// or tag is a 422, an attribute that is not searchable a 400.
 func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpec, page api.PaginationParams) ([]QueryResult, int, error) {
 	table := "ci"
 	switch spec.entityKind() {
@@ -45,7 +71,11 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpe
 	var out []QueryResult
 	var total int
 	err := database.WithRequestTenant(ctx, e.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where, args, err := spec.CompileSQL(spec.entityKind(), []any{orgID}, 2)
+		cat, err := resolveCatalog(ctx, tx, spec)
+		if err != nil {
+			return err
+		}
+		where, args, err := spec.compile(spec.entityKind(), cat, []any{orgID}, 2)
 		if err != nil {
 			return err
 		}
@@ -105,6 +135,173 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpe
 		return nil, 0, err
 	}
 	return out, total, nil
+}
+
+// attributeUse is a dynamic attribute of a spec and the field that names it
+// in an error.
+type attributeUse struct {
+	ref   attrRef
+	field string
+}
+
+// tagUse is a tag key of a spec and the field that names it in an error.
+type tagUse struct{ key, field string }
+
+// specUses returns the dynamic attributes the spec compares (the flat
+// attributes, attributes.<key> and asset.attributes.<key> of the AST) and
+// the tag keys it names (the flat tags, the values of has_any and has_all),
+// in the order of the spec.
+func specUses(spec *FilterSpec) (attrs []attributeUse, tags []tagUse) {
+	entityKind := spec.entityKind()
+	for _, k := range sortedKeys(spec.Attributes) {
+		attrs = append(attrs, attributeUse{attrRef{entityKind, k}, "attributes." + k})
+	}
+	for i, tag := range spec.Tags {
+		tags = append(tags, tagUse{tag, fmt.Sprintf("tags[%d]", i)})
+	}
+	if spec.Where != nil {
+		spec.Where.walkPaths("", func(n *Expr, path string) {
+			if ref, ok := attributeRef(entityKind, n.Field); ok {
+				attrs = append(attrs, attributeUse{ref, "where" + path})
+			}
+			if values, ok := n.Value.([]any); ok && n.Field == TagsField {
+				for i, v := range values {
+					tags = append(tags, tagUse{fmt.Sprint(v), fmt.Sprintf("where%s.value[%d]", path, i)})
+				}
+			}
+		})
+	}
+	return attrs, tags
+}
+
+// resolveCatalog validates the spec and resolves, under the caller's row
+// level security, the definitions of the dynamic attributes it compares
+// (attributeDefinition) and the tag keys it names: an unknown tag is a 422
+// naming the value.
+func resolveCatalog(ctx context.Context, tx pgx.Tx, spec *FilterSpec) (*catalog, error) {
+	entityKind := spec.entityKind()
+	if err := spec.Validate(entityKind); err != nil {
+		return nil, err
+	}
+	attrs, tags := specUses(spec)
+	cat := &catalog{attrs: map[attrRef]resolvedAttribute{}}
+	if len(attrs) > 0 {
+		// The types of a CI query that names ci_type (key or name, as the
+		// filter compares it); an asset query and the linked asset count
+		// every type.
+		var ciTypes []string
+		named := entityKind == "ci" && spec.CIType != ""
+		if named {
+			rows, err := tx.Query(ctx, `SELECT id::text FROM ci_type WHERE key = $1 OR name = $1`, spec.CIType)
+			if err != nil {
+				return nil, fmt.Errorf("types of the filter: %w", err)
+			}
+			if ciTypes, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+				return nil, fmt.Errorf("types of the filter: %w", err)
+			}
+		}
+		for _, u := range attrs {
+			if _, done := cat.attrs[u.ref]; done {
+				continue
+			}
+			a, err := attributeDefinition(ctx, tx, u.ref.key, u.field, ciTypes, named && u.ref.entity == "ci")
+			if err != nil {
+				return nil, err
+			}
+			cat.attrs[u.ref] = a
+		}
+	}
+	if len(tags) > 0 {
+		keys := make([]string, len(tags))
+		for i, t := range tags {
+			keys[i] = t.key
+		}
+		rows, err := tx.Query(ctx, `SELECT key FROM tag WHERE key = ANY($1::text[])`, keys)
+		if err != nil {
+			return nil, fmt.Errorf("tags of the filter: %w", err)
+		}
+		known, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return nil, fmt.Errorf("tags of the filter: %w", err)
+		}
+		for _, t := range tags {
+			if !slices.Contains(known, t.key) {
+				return nil, &api.FieldError{Field: t.field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown tag %q", t.key)}
+			}
+		}
+	}
+	return cat, nil
+}
+
+// attributeDefinition resolves an attribute the filter compares (API-02)
+// by the contract of attributeFilterOf of the CI list (ci/pg_repository.go,
+// WP-566, WP-708): the definitions of the named types (types, when named)
+// with the inheritable ones of their ancestors and the global ones apply,
+// else every definition of the key counts. Not defined for any of them is
+// a 422, searchable for none a 400 with the hint, searchable with different
+// filter kinds a 400 with the hint to name the type. The kind is
+// fieldmeta.FilterKind of the data type; the hits are restricted to the
+// types the attribute is searchable for unless a searchable global
+// definition covers every type. A computed attribute (WP-258) is resolved
+// like any other. field names the attribute in the error.
+func attributeDefinition(ctx context.Context, tx pgx.Tx, key, field string, types []string, named bool) (resolvedAttribute, error) {
+	const covers = `CASE WHEN d.ci_type_id IS NULL OR NOT d.searchable THEN '{}'::text[]
+			WHEN d.inheritable THEN ARRAY(SELECT s.id::text FROM ci_type_subtree(d.ci_type_id) s)
+			ELSE ARRAY[d.ci_type_id::text] END`
+	query, args := `SELECT d.ci_type_id IS NULL, d.data_type, d.searchable, `+covers+`
+		FROM attribute_definition d WHERE d.key = $1`, []any{key}
+	if named {
+		query += ` AND (d.ci_type_id IS NULL OR d.ci_type_id = ANY($2::uuid[])
+			OR (d.inheritable AND d.ci_type_id IN (SELECT a.id FROM unnest($2::uuid[]) AS n(id), LATERAL ci_type_ancestors(n.id) a)))`
+		args = append(args, types)
+	}
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return resolvedAttribute{}, fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	var (
+		untyped, searchable bool
+		dataType            string
+		subtree             []string
+		defined, global     bool
+		kinds, covered      []string
+	)
+	if _, err = pgx.ForEachRow(rows, []any{&untyped, &dataType, &searchable, &subtree}, func() error {
+		defined = true
+		if !searchable {
+			return nil
+		}
+		if k := fieldmeta.FilterKind(dataType); !slices.Contains(kinds, k) {
+			kinds = append(kinds, k)
+		}
+		global = global || untyped
+		for _, t := range subtree {
+			if !slices.Contains(covered, t) {
+				covered = append(covered, t)
+			}
+		}
+		return nil
+	}); err != nil {
+		return resolvedAttribute{}, fmt.Errorf("attribute definition %s: %w", key, err)
+	}
+	switch {
+	case !defined && named:
+		return resolvedAttribute{}, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("unknown attribute %q for the given ci_type", key)}
+	case !defined:
+		return resolvedAttribute{}, &api.FieldError{Field: field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown attribute %q", key)}
+	case len(kinds) == 0:
+		return resolvedAttribute{}, &api.FieldError{Field: field, Status: http.StatusBadRequest,
+			Message: fmt.Sprintf("attribute %q is not searchable; mark it searchable in its attribute definition to filter on it", key)}
+	case len(kinds) > 1:
+		return resolvedAttribute{}, &api.FieldError{Field: field, Status: http.StatusBadRequest,
+			Message: fmt.Sprintf("attribute %q has different data types in the types that make it searchable; give ci_type to filter on it", key)}
+	}
+	if global {
+		return resolvedAttribute{kind: kinds[0]}, nil
+	}
+	slices.Sort(covered)
+	return resolvedAttribute{kind: kinds[0], types: covered}, nil
 }
 
 // summaryColumns are the columns the summary of a row joins, per entity

@@ -399,8 +399,16 @@ FROM migration_quarantine
 ORDER BY organization_id, source_table;
 ```
 
-Repair a row by re-creating the relationship or composition with valid
-references through the API, then delete the quarantine entry. `migrate down`
+Repair a relationship row by re-creating it with valid references through
+the API, then delete the quarantine entry. A composition row is repaired on
+the child contract (AST-05): the composition API is gone (WP-742) and
+migration 000253 (WP-743) dropped the table `composition` together with
+`asset.parent_asset_id`, saving their rows in `migration_quarantine`
+(`migration = '000253'`). Hang the child CI (`child_ci_id`, or the CIs of
+`child_asset_id`) below the primary CI of the parent asset with
+`PATCH /api/v1/cis/{id}` and `parent_ci_id`, choose `child_mode`
+(`configuration` or `standalone`), then delete the quarantine entry.
+`migrate down`
 past 000056 moves the rows that 000056 quarantined back into their tables and
 then drops `migration_quarantine`. The down migrations of later migrations run
 before it; entries they keep (for example those of 000166 and 000179, or the

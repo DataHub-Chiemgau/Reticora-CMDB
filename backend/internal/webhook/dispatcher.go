@@ -379,8 +379,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, orgID, event string, payload 
 // existing subscriptions still use: they receive the event under its new
 // name, once per subscription even when it names several of them.
 // lifecycle.transitioned and asset.movement had no producer;
-// inventory.movement is dispatched directly until WP-274 writes
-// stock.movement to the outbox.
+// inventory.movement was dispatched directly until the movement service
+// wrote stock.movement to the outbox (WP-274).
 var legacyNames = map[string][]string{
 	events.CIChanged:           {"ci.updated"},
 	events.RelationshipRemoved: {"relationship.deleted"},

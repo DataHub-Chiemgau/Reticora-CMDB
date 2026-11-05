@@ -24,7 +24,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
@@ -103,6 +102,9 @@ type Repositories struct {
 	Discovery         discovery.Repository
 	Asset             asset.Repository
 	Assignment        assignment.Repository
+	// AssignmentService writes assignments over the ledger (WP-275); nil
+	// (profile without database): the writing assignment routes answer 501.
+	AssignmentService *assignment.Service
 	Document          document.Repository
 	Stocktake         stocktake.Repository
 	Consumable        consumable.Repository
@@ -155,7 +157,6 @@ type Repositories struct {
 	LocationTree      locations.Repository
 	Movement          movement.Repository
 	Reservation       reservation.Repository
-	Composition       composition.Repository
 	Override          override.Repository
 	History           history.Repository
 	SavedView         savedview.Repository
@@ -728,6 +729,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// access request starts (WFL-04).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// The one writer of the ledger stock_movement (WP-274): the route and
+	// the disposal in its transaction (WP-278) lock, check and write
+	// stock.movement to the outbox; assignments book through
+	// repos.AssignmentService (WP-275).
+	movements := movement.NewService(repos.Movement)
+	// One lifecycle service for the transition routes and the disposal
+	// (WP-278).
+	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History))
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -746,17 +755,16 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
-			WithComposition(compositionParentLookup{repo: repos.Composition}).
 			WithCIs(ciLookup{repo: repos.CI}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
-		assignment.NewHandler(repos.Assignment).WithMovements(repos.Movement),
+		assignment.NewHandler(repos.Assignment).WithService(repos.AssignmentService),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
 		order.NewHandler(repos.Order),
 		maintenance.NewHandler(repos.Maintenance),
-		disposal.NewHandler(repos.Disposal).WithMovements(repos.Movement),
+		disposal.NewHandler(repos.Disposal).WithLifecycle(movements, lifecycleService, repos.LifecycleResolver, repos.Lifecycle),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
@@ -784,8 +792,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
 		monitoringHandler,
+		// The BFF gates the fields of late modules itself (WP-311): its
+		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
-			WithSources(bffSources(&repos, topologyHandler, bffJobs)),
+			WithSources(bffSources(&repos, topologyHandler, bffJobs)).WithModules(opts.Modules),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
@@ -799,18 +809,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		metamodelImportHandler(&repos),
 		importer.NewHandler(repos.Import),
 		importHandler,
-		lifecycle.NewHandler(repos.Lifecycle,
-			lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)),
-			repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
+		lifecycle.NewHandler(repos.Lifecycle, lifecycleService, repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
-		movement.NewHandler(repos.Movement, opts.Dispatcher).WithAssets(assetCreator{repo: repos.Asset}),
+		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
-		composition.NewHandler(repos.Composition, opts.Dispatcher).
-			WithAssets(parentAssetLookup{repo: repos.Asset}),
 		// The overrides follow the field permissions of the CI (WP-265).
 		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
-		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission),
+		// Asset references of the structured query need the module
+		// inventory and assets_basic (WP-309); the route stays ungated.
+		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission).
+			WithEntitlements(aiEntitlements).WithInventory(opts.Modules.Enabled(ModuleInventory)),
 		credential.NewHandler(opts.Credentials),
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
@@ -1045,8 +1054,6 @@ func validate(repos *Repositories, opts *Options) error {
 		return fmt.Errorf("server: movement repository is required")
 	case repos.Reservation == nil:
 		return fmt.Errorf("server: reservation repository is required")
-	case repos.Composition == nil:
-		return fmt.Errorf("server: composition repository is required")
 	case repos.Override == nil:
 		return fmt.Errorf("server: override repository is required")
 	case repos.History == nil:
@@ -1199,6 +1206,8 @@ func ciHandler(repos *Repositories, opts *Options) *ci.Handler {
 	if repos.Override != nil {
 		h.WithProvenance(repos.Override)
 	}
+	// GET /cis/{id}/parent projects the parent asset (WP-742).
+	h.WithParentAssets(ciParentAssetLookup{repo: repos.Asset})
 	return h.WithIncludes(map[string]ci.IncludeFunc{
 		"relationships": func(ctx context.Context, orgID, ciID string) (any, bool, error) {
 			rels, total, err := repos.Relationship.List(ctx, orgID, ciID, page)

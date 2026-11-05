@@ -19,10 +19,13 @@ import (
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff/generated"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -51,14 +54,52 @@ type EntitlementChecker interface {
 	IsEnabled(ctx context.Context, orgID, featureKey string) bool
 }
 
+// ModuleChecker reports whether a late module (RETICORA_MODULES, WP-214)
+// is switched on; *server.ModuleSet satisfies it, a nil set enables every
+// module.
+type ModuleChecker interface {
+	Enabled(key string) bool
+}
+
+// The late modules the BFF gates its fields with (E-03, GQL-04): the keys
+// of server.LateModules, which graphqlbff cannot import.
+const (
+	ModuleInventory = "inventory"
+	ModuleDocuments = "documents"
+)
+
+// ModuleKeys are the module keys the BFF uses (modules_test.go checks them
+// against server.LateModules).
+var ModuleKeys = []string{ModuleInventory, ModuleDocuments}
+
 // Sources are the read models of the queries beyond CIs and relationships
-// (GQL-02); a missing source answers its query with an error.
+// (GQL-02, GQL-03); a missing source answers its query with an error.
 type Sources struct {
-	Topology TopologySource
-	Racks    RackSource
-	Search   SearchSource
-	Reviews  ReviewSource
-	Jobs     JobSource
+	Topology  TopologySource
+	Racks     RackSource
+	Search    SearchSource
+	Reviews   ReviewSource
+	Jobs      JobSource
+	Assets    AssetSource
+	Movements MovementSource
+	Documents DocumentSource
+}
+
+// AssetSource reads one asset in the caller's scope (asset.Repository).
+type AssetSource interface {
+	GetByID(ctx context.Context, orgID, id string) (*asset.Asset, error)
+}
+
+// MovementSource reads the ledger stock_movement (movement.Repository,
+// WP-274).
+type MovementSource interface {
+	ListMovements(ctx context.Context, orgID string, filter *movement.MovementFilter, page api.PaginationParams) ([]movement.Movement, int, error)
+}
+
+// DocumentSource reads the documents linked to an entity
+// (document.Repository).
+type DocumentSource interface {
+	GetLinksForEntity(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams) ([]document.Document, int, error)
 }
 
 // TopologySource builds topology graphs (topology.Handler).
@@ -122,6 +163,14 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	cfg.Complexity.Query.Jobs = func(child int, _ *string, _ *string, first *int) int {
 		return child * pageSize(first, defaultPage, maxPage)
 	}
+	// The asset detail (GQL-03): the asset costs its selection, each list
+	// its selection per entry of the page.
+	cfg.Complexity.Query.Asset = func(child int, _ string) int { return child }
+	listCost := func(child int, first *int) int { return saturatingMul(child, pageSize(first, defaultPage, maxPage)) }
+	cfg.Complexity.Asset.Cis = listCost
+	cfg.Complexity.Asset.Children = listCost
+	cfg.Complexity.Asset.Documents = listCost
+	cfg.Complexity.Asset.Movements = func(child int, first *int, _ *string) int { return listCost(child, first) }
 	srv := handler.New(generated.NewExecutableSchema(cfg))
 	// POST only: no GET queries (no CSRF-able reads), no subscriptions.
 	srv.AddTransport(transport.POST{})
@@ -185,6 +234,14 @@ func (h *Handler) WithSources(sources *Sources) *Handler {
 // Without a checker, gated fields are refused.
 func (h *Handler) WithEntitlements(entitlements EntitlementChecker) *Handler {
 	h.resolver.entitlements = entitlements
+	return h
+}
+
+// WithModules attaches the module gate (WP-214, E-03): fields of a module
+// that is switched off answer UNAVAILABLE. Without a checker the
+// module-bound fields are refused (fail-closed, like WithEntitlements).
+func (h *Handler) WithModules(modules ModuleChecker) *Handler {
+	h.resolver.modules = modules
 	return h
 }
 

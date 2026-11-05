@@ -824,14 +824,6 @@ export function useReleaseReservation() {
 }
 
 // Composition
-export function useCompositionChildren(assetId: string | undefined) {
-  return useQuery({
-    queryKey: ['composition', assetId],
-    queryFn: () => compositionApi.children(assetId!),
-    enabled: !!assetId,
-  });
-}
-
 /**
  * Resolves the parent asset a CI belongs to. A standalone CI legitimately has
  * no parent, so a 404 is an expected answer rather than an error worth

@@ -770,6 +770,7 @@ export interface StockMovement {
   id: string;
   item_kind: string;
   asset_id?: string;
+  consumable_id?: string;
   quantity_item_id?: string;
   movement_type: string;
   from_location_id?: string;
@@ -777,6 +778,8 @@ export interface StockMovement {
   quantity?: number;
   actor_id?: string;
   reason?: string;
+  /** When the movement happened; the list sorts newest first on it (WP-274). */
+  occurred_at: string;
   created_at: string;
 }
 
@@ -795,8 +798,12 @@ export const inventoryApi = {
   listMovements(
     params: {
       asset_id?: string;
+      consumable_id?: string;
       movement_type?: string;
       location_id?: string;
+      /** RFC 3339 bounds of occurred_at, inclusive. */
+      occurred_from?: string;
+      occurred_to?: string;
       limit?: number;
       offset?: number;
     } = {},
@@ -891,18 +898,25 @@ export const reservationApi = {
 
 // ─── Composition (§5, §14) ───────────────────────────────────────────────────
 
+/**
+ * The parent link of a child CI in the format of the former composition
+ * handler, as the deprecated `GET /cis/{id}/parent` still answers it from
+ * `ci.parent_ci_id` (CIParentLegacy, WP-742): `id` and `child_ci_id` are the
+ * child CI. `role` is no longer sent; it stays optional for the detail card.
+ */
 export interface Composition {
   id: string;
+  organization_id: string;
   parent_asset_id: string;
-  child_ci_id?: string;
-  child_asset_id?: string;
+  child_ci_id: string;
   role?: string;
-  position?: string;
   configuration_only: boolean;
   independently_serialized: boolean;
   independently_assignable: boolean;
   independently_locatable: boolean;
   independently_lifecycle_managed: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ParentAssetRef {
@@ -930,32 +944,13 @@ export interface ParentAssetRef {
 export interface CIParent {
   composition: Composition;
   parent_asset?: ParentAssetRef;
-  inherited_fields?: string[];
+  inherited_fields: string[];
 }
 
 export const compositionApi = {
-  children(assetId: string) {
-    return fetchAPI<PaginatedResponse<Composition>>(`/assets/${assetId}/children`);
-  },
   /** Resolves the parent asset of a CI. Rejects with a 404 ApiError when the CI is standalone. */
   parentOfCI(ciId: string) {
     return fetchAPI<CIParent>(`/cis/${ciId}/parent`);
-  },
-  create(data: {
-    parent_asset_id: string;
-    child_ci_id?: string;
-    child_asset_id?: string;
-    role?: string;
-    configuration_only?: boolean;
-    independently_serialized?: boolean;
-  }) {
-    return fetchAPI('/compositions', { method: 'POST', body: JSON.stringify(data) });
-  },
-  update(id: string, data: Partial<Composition>) {
-    return fetchAPI(`/compositions/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-  },
-  delete(id: string): Promise<void> {
-    return fetchAPI(`/compositions/${id}`, { method: 'DELETE' });
   },
 };
 

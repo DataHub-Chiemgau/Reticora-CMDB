@@ -74,8 +74,8 @@ func TestCompileSQLAssetKindUsesCustomFields(t *testing.T) {
 	}
 }
 
-// Tags of CIs are assignments of the tag catalog (ci_tag, WP-281); assets
-// keep the array in custom_fields until WP-755. Every tag is required.
+// Tags of CIs and assets are assignments of the tag catalog (ci_tag,
+// WP-281; asset_tag_link, WP-755). Every tag is required.
 func TestCompileSQLTags(t *testing.T) {
 	spec := FilterSpec{EntityKind: "ci", Tags: []string{"prod", "dmz"}}
 	where, args, err := spec.CompileSQL("ci", []any{"org"}, 2)
@@ -94,13 +94,18 @@ func TestCompileSQLTags(t *testing.T) {
 		t.Fatalf("ci tags must not read attributes: %s", where)
 	}
 
-	spec = FilterSpec{EntityKind: "asset", Tags: []string{"prod"}}
+	spec = FilterSpec{EntityKind: "asset", Tags: []string{"prod", "dmz"}}
 	where, args, err = spec.CompileSQL("asset", []any{"org"}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if where != "asset.custom_fields->'tags' ? $2" || len(args) != 2 || args[1] != "prod" {
+	want = "EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = $2) AND " +
+		"EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = $3)"
+	if where != want || len(args) != 3 || args[1] != "prod" || args[2] != "dmz" {
 		t.Fatalf("asset tags: %s %v", where, args)
+	}
+	if strings.Contains(where, "custom_fields") {
+		t.Fatalf("asset tags must not read custom_fields: %s", where)
 	}
 }
 
@@ -313,7 +318,7 @@ func TestFilterASTValidation(t *testing.T) {
 		"unknown field":         {"ci", `{"field": "password", "op": "eq", "value": "x"}`},
 		"asset field on assets": {"asset", `{"field": "asset.status", "op": "eq", "value": "x"}`},
 		"bad attribute key":     {"ci", `{"field": "attributes.a'b", "op": "eq", "value": "x"}`},
-		"unknown operator":      {"ci", `{"field": "name", "op": "between", "value": "x"}`},
+		"unknown operator":      {"ci", `{"field": "name", "op": "regex", "value": "x"}`},
 		"like on a time":        {"ci", `{"field": "created_at", "op": "like", "value": "2026"}`},
 		"order on a uuid":       {"ci", `{"field": "client_id", "op": "lt", "value": "x"}`},
 		"empty in":              {"ci", `{"field": "status", "op": "in", "value": []}`},
@@ -380,8 +385,8 @@ func TestFilterASTLegacyAssetNames(t *testing.T) {
 // TestFilterASTOwnerFields covers CI-07 (WP-752): owner_user_id and
 // owner_team_id of a CI compile with eq, ne and in as uuid parameters, are
 // valid sort keys and columns of a view, map onto their field keys and
-// take only UUIDs and no ordering; on assets and for unknown fields the
-// AST still refuses them.
+// take only UUIDs and no ordering; unknown fields the AST still refuses
+// (the owner of an asset is a field of the asset since WP-309).
 func TestFilterASTOwnerFields(t *testing.T) {
 	const user, team, other = "0b1e5c1a-0000-4000-8000-00000000a001", "0b1e5c1a-0000-4000-8000-00000000b002", "0b1e5c1a-0000-4000-8000-00000000c003"
 	ast := mustAST(t, `{"or": [{"field": "owner_user_id", "op": "eq", "value": "`+user+`"},
@@ -419,11 +424,10 @@ func TestFilterASTOwnerFields(t *testing.T) {
 		}
 	}
 	for name, c := range map[string]struct{ kind, raw string }{
-		"no uuid":           {"ci", `{"field": "owner_user_id", "op": "eq", "value": "alice"}`},
-		"order on a uuid":   {"ci", `{"field": "owner_team_id", "op": "gt", "value": "` + team + `"}`},
-		"like on a uuid":    {"ci", `{"field": "owner_user_id", "op": "like", "value": "0b1e*"}`},
-		"owner of an asset": {"asset", `{"field": "owner_user_id", "op": "eq", "value": "` + user + `"}`},
-		"unknown field":     {"ci", `{"field": "owner_name", "op": "eq", "value": "x"}`},
+		"no uuid":         {"ci", `{"field": "owner_user_id", "op": "eq", "value": "alice"}`},
+		"order on a uuid": {"ci", `{"field": "owner_team_id", "op": "gt", "value": "` + team + `"}`},
+		"like on a uuid":  {"ci", `{"field": "owner_user_id", "op": "like", "value": "0b1e*"}`},
+		"unknown field":   {"ci", `{"field": "owner_name", "op": "eq", "value": "x"}`},
 	} {
 		var astErr *ASTError
 		if err := mustAST(t, c.raw).Validate(c.kind); !errors.As(err, &astErr) {
@@ -597,5 +601,242 @@ func TestFilterASTSpecValidationNamesTheField(t *testing.T) {
 		Where: mustAST(t, `{"field": "attributes.ram_gb", "op": "gte", "value": 16}`)}
 	if err := valid.Validate("ci"); err != nil {
 		t.Errorf("valid spec: %v", err)
+	}
+}
+
+// TestFilterASTBetween covers SRC-03 (WP-309): between compares numbers and
+// times inclusively with exactly two parameters cast to the field kind;
+// one value, three values, text and uuid fields are refused.
+func TestFilterASTBetween(t *testing.T) {
+	for _, c := range []struct{ kind, raw, want string }{
+		{"asset", `{"field": "purchase_price", "op": "between", "value": [100, 500.5]}`,
+			`(asset.purchase_price)::numeric BETWEEN $2::numeric AND $3::numeric`},
+		{"ci", `{"field": "created_at", "op": "between", "value": ["2026-01-01", "2026-12-31T23:59:59Z"]}`,
+			`(ci.created_at)::timestamptz BETWEEN $2::timestamptz AND $3::timestamptz`},
+		{"ci", `{"field": "asset.warranty_until", "op": "between", "value": ["2026-01-01", "2027-01-01"]}`,
+			`EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND (sa.warranty_until)::timestamptz BETWEEN $2::timestamptz AND $3::timestamptz)`},
+		{"ci", `{"field": "attributes.ram_gb", "op": "between", "value": [8, 64]}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->$2) = 'number' THEN (ci.attributes->>$2)::numeric END BETWEEN $3::numeric AND $4::numeric`},
+	} {
+		ast := mustAST(t, c.raw)
+		if err := ast.Validate(c.kind); err != nil {
+			t.Fatalf("%s: %v", c.raw, err)
+		}
+		sql, args, _, err := ast.CompileSQL(c.kind, c.kind, []any{"org"}, 2)
+		if err != nil || sql != c.want {
+			t.Errorf("%s:\n got %s (%v)\nwant %s", c.raw, sql, err, c.want)
+		}
+		if strings.Contains(sql, "2026") || len(args) < 3 {
+			t.Errorf("%s: values not parameterized: %s %v", c.raw, sql, args)
+		}
+	}
+	for _, c := range []struct{ kind, raw, path string }{
+		{"asset", `{"field": "purchase_price", "op": "between", "value": [100]}`, ".value"},
+		{"asset", `{"field": "purchase_price", "op": "between", "value": 100}`, ".value"},
+		{"asset", `{"field": "purchase_price", "op": "between", "value": [1, 2, 3]}`, ".value"},
+		{"asset", `{"field": "purchase_price", "op": "between", "value": [1, "x"]}`, ".value[1]"},
+		{"ci", `{"field": "created_at", "op": "between", "value": ["2026-01-01", "garbage"]}`, ".value[1]"},
+		{"ci", `{"field": "name", "op": "between", "value": ["a", "b"]}`, ""},
+		{"ci", `{"field": "client_id", "op": "between", "value": ["` + uuidA + `", "` + uuidA + `"]}`, ""},
+		{"ci", `{"field": "is_manual", "op": "between", "value": [false, true]}`, ""},
+	} {
+		var astErr *ASTError
+		if err := mustAST(t, c.raw).Validate(c.kind); !errors.As(err, &astErr) || astErr.Path != c.path {
+			t.Errorf("%s: %v, want an ASTError at where%s", c.raw, err, c.path)
+		}
+	}
+}
+
+const uuidA = "00000000-0000-4000-8000-0000000000aa"
+
+// TestFilterASTTags covers SRC-03 (WP-309): has_any is one EXISTS over the
+// tag keys, has_all one EXISTS per key, over ci_tag for CIs and
+// asset_tag_link for assets with tag.key, the building block of the flat
+// tags; has_any and has_all apply to tags only, tags take nothing else.
+func TestFilterASTTags(t *testing.T) {
+	for _, c := range []struct {
+		kind, raw, want string
+		args            []any
+	}{
+		{"ci", `{"field": "tags", "op": "has_any", "value": ["prod", "dmz"]}`,
+			`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = ANY($2::text[]))`,
+			[]any{"org", []string{"prod", "dmz"}}},
+		{"ci", `{"field": "tags", "op": "has_all", "value": ["prod", "dmz"]}`,
+			`(EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = $2) AND ` +
+				`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND t.key = $3))`,
+			[]any{"org", "prod", "dmz"}},
+		{"asset", `{"field": "tags", "op": "has_any", "value": ["prod"]}`,
+			`EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = ANY($2::text[]))`,
+			[]any{"org", []string{"prod"}}},
+		{"asset", `{"field": "tags", "op": "has_all", "value": ["prod"]}`,
+			`(EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND t.key = $2))`,
+			[]any{"org", "prod"}},
+	} {
+		ast := mustAST(t, c.raw)
+		if err := ast.Validate(c.kind); err != nil {
+			t.Fatalf("%s: %v", c.raw, err)
+		}
+		sql, args, _, err := ast.CompileSQL(c.kind, c.kind, []any{"org"}, 2)
+		if err != nil || sql != c.want || fmt.Sprint(args) != fmt.Sprint(c.args) {
+			t.Errorf("%s (%s):\n got %s %v (%v)\nwant %s %v", c.raw, c.kind, sql, args, err, c.want, c.args)
+		}
+	}
+	// The flat tags are has_all with the same building block.
+	flat, _, err := (&FilterSpec{Tags: []string{"prod", "dmz"}}).CompileSQL("ci", []any{"org"}, 2)
+	all, _, _, aerr := mustAST(t, `{"field": "tags", "op": "has_all", "value": ["prod", "dmz"]}`).CompileSQL("ci", "ci", []any{"org"}, 2)
+	if err != nil || aerr != nil || "("+flat+")" != all {
+		t.Errorf("flat tags %q and has_all %q differ (%v, %v)", flat, all, err, aerr)
+	}
+	for _, c := range []struct{ raw, path string }{
+		{`{"field": "tags", "op": "eq", "value": "prod"}`, ""},
+		{`{"field": "tags", "op": "in", "value": ["prod"]}`, ""},
+		{`{"field": "tags", "op": "exists"}`, ""},
+		{`{"field": "name", "op": "has_any", "value": ["prod"]}`, ""},
+		{`{"field": "attributes.tags", "op": "has_all", "value": ["prod"]}`, ""},
+		{`{"field": "tags", "op": "has_any", "value": []}`, ".value"},
+		{`{"field": "tags", "op": "has_all", "value": "prod"}`, ".value"},
+		{`{"field": "tags", "op": "has_any", "value": ["prod", 5]}`, ".value[1]"},
+		{`{"field": "tags", "op": "has_any", "value": [""]}`, ".value[0]"},
+	} {
+		var astErr *ASTError
+		if err := mustAST(t, c.raw).Validate("ci"); !errors.As(err, &astErr) || astErr.Path != c.path {
+			t.Errorf("%s: %v, want an ASTError at where%s", c.raw, err, c.path)
+		}
+	}
+}
+
+// TestFilterASTAssetFieldsAST01 covers WP-309: the AST-01 columns of WP-271
+// and currency are asset fields, on assets and as asset.<field> of a CI in
+// the EXISTS over ci.asset_id; asset.attributes.<key> reads the custom
+// fields of the linked asset; it is no field of an asset query.
+func TestFilterASTAssetFieldsAST01(t *testing.T) {
+	for field, kind := range map[string]string{"manufacturer": kindText, "model": kindText, "cost_center": kindText, "currency": kindText,
+		"supplier_id": kindUUID, "contract_id": kindUUID, "owner_user_id": kindUUID, "owner_team_id": kindUUID} {
+		value := `"x"`
+		if kind == kindUUID {
+			value = `"` + uuidA + `"`
+		}
+		ast := mustAST(t, fmt.Sprintf(`{"field": "asset.%s", "op": "eq", "value": %s}`, field, value))
+		if err := ast.Validate("ci"); err != nil {
+			t.Fatalf("asset.%s: %v", field, err)
+		}
+		sql, _, _, err := ast.CompileSQL("ci", "ci", []any{"org"}, 2)
+		col := "sa." + field
+		if kind == kindUUID {
+			col = "(sa." + field + ")::uuid"
+		}
+		if want := "EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND " + col + " = $2"; err != nil || !strings.HasPrefix(sql, want) {
+			t.Errorf("asset.%s: %s (%v), want prefix %s", field, sql, err, want)
+		}
+		if err = mustAST(t, fmt.Sprintf(`{"field": %q, "op": "eq", "value": %s}`, field, value)).Validate("asset"); err != nil {
+			t.Errorf("%s on assets: %v", field, err)
+		}
+	}
+	ast := mustAST(t, `{"field": "asset.attributes.room", "op": "eq", "value": "R1"}`)
+	if err := ast.Validate("ci"); err != nil {
+		t.Fatal(err)
+	}
+	sql, args, _, err := ast.CompileSQL("ci", "ci", []any{"org"}, 2)
+	if want := "EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND sa.custom_fields->>$2 = $3)"; err != nil || sql != want || args[1] != "room" {
+		t.Errorf("asset.attributes.room: %s %v (%v), want %s", sql, args, err, want)
+	}
+	for _, c := range []struct{ kind, raw string }{
+		{"asset", `{"field": "asset.attributes.room", "op": "eq", "value": "R1"}`},
+		{"ci", `{"field": "asset.attributes.Bad-Key", "op": "eq", "value": "R1"}`},
+	} {
+		var astErr *ASTError
+		if err := mustAST(t, c.raw).Validate(c.kind); !errors.As(err, &astErr) {
+			t.Errorf("%s on %s: %v, want an ASTError", c.raw, c.kind, err)
+		}
+	}
+}
+
+// TestFilterASTTypedAttributes covers API-02 (WP-309): with the catalog the
+// kind of an attribute comes from its definition, not from the JSON value.
+// A CI attribute is read with citype.KeyExpression (the expression of the
+// attribute indexes, E-73), restricted to the types of its definitions;
+// a number given as a string compares numerically; a value that does not
+// fit the definition is refused; the flat attributes compare the same way.
+func TestFilterASTTypedAttributes(t *testing.T) {
+	cat := &catalog{attrs: map[attrRef]resolvedAttribute{
+		{"ci", "ram_gb"}:      {kind: kindNumber},
+		{"ci", "env"}:         {kind: kindText, types: []string{uuidA}},
+		{"asset", "room"}:     {kind: kindText},
+		{"asset", "acquired"}: {kind: kindTime, types: []string{uuidA}},
+	}}
+	for _, c := range []struct{ kind, raw, want string }{
+		// The string "16" is a number by the definition.
+		{"ci", `{"field": "attributes.ram_gb", "op": "gte", "value": "16"}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END >= $2::numeric`},
+		{"ci", `{"field": "attributes.ram_gb", "op": "between", "value": ["8", 64]}`,
+			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END BETWEEN $2::numeric AND $3::numeric`},
+		// Equality on text is the index expression with the key as a literal.
+		{"ci", `{"field": "attributes.env", "op": "eq", "value": "prod"}`,
+			`(ci.ci_type_id = ANY($2::uuid[]) AND reticora_attr_text(attributes, 'env') = $3)`},
+		{"ci", `{"field": "asset.attributes.room", "op": "eq", "value": "R1"}`,
+			`EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND sa.custom_fields->>$2 = $3)`},
+		{"ci", `{"field": "asset.attributes.acquired", "op": "between", "value": ["2024-01-01", "2024-12-31"]}`,
+			`EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND (sa.asset_type_id = ANY($2::uuid[]) AND CASE WHEN ` +
+				`jsonb_typeof(sa.custom_fields->$3) = 'string' AND sa.custom_fields->>$3 ~ '^\d{4}-\d{2}-\d{2}' AND ` +
+				`pg_input_is_valid(sa.custom_fields->>$3, 'timestamptz') THEN (sa.custom_fields->>$3)::timestamptz END ` +
+				`BETWEEN $4::timestamptz AND $5::timestamptz))`},
+		{"asset", `{"field": "attributes.room", "op": "in", "value": ["R1", "R2"]}`, `asset.custom_fields->>$2 = ANY($3::text[])`},
+	} {
+		sql, _, _, err := mustAST(t, c.raw).compile(c.kind, c.kind, cat, []any{"org"}, 2)
+		if err != nil || sql != c.want {
+			t.Errorf("%s (%s):\n got %s (%v)\nwant %s", c.raw, c.kind, sql, err, c.want)
+		}
+	}
+	for _, c := range []struct{ kind, raw, path string }{
+		{"ci", `{"field": "attributes.ram_gb", "op": "eq", "value": "16GB"}`, ".value"},
+		{"ci", `{"field": "attributes.ram_gb", "op": "like", "value": "16"}`, ""},
+		{"ci", `{"field": "attributes.env", "op": "eq", "value": 5}`, ".value"},
+		{"ci", `{"field": "attributes.env", "op": "between", "value": ["a", "b"]}`, ""},
+		{"ci", `{"field": "asset.attributes.acquired", "op": "lt", "value": "yesterday"}`, ".value"},
+	} {
+		nodes := 0
+		var astErr *ASTError
+		if err := mustAST(t, c.raw).validate(c.kind, "", 1, &nodes, cat); !errors.As(err, &astErr) || astErr.Path != c.path {
+			t.Errorf("%s: %v, want an ASTError at where%s", c.raw, err, c.path)
+		}
+	}
+	// The flat attributes are eq comparisons of the AST under the catalog.
+	spec := FilterSpec{Attributes: map[string]any{"ram_gb": "16"}}
+	where, args, err := spec.compile("ci", cat, []any{"org"}, 2)
+	if want := `CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END = $2::numeric`; err != nil ||
+		where != want || len(args) != 2 {
+		t.Errorf("flat attribute: %s %v (%v), want %s", where, args, err, want)
+	}
+	var fe *api.FieldError
+	if _, _, err = (&FilterSpec{Attributes: map[string]any{"ram_gb": "16GB"}}).compile("ci", cat, []any{"org"}, 2); !errors.As(err, &fe) ||
+		fe.Field != "attributes.ram_gb" || fe.Status != http.StatusUnprocessableEntity {
+		t.Errorf("flat attribute 16GB: %v, want a 422 on attributes.ram_gb", err)
+	}
+}
+
+// TestReferencedFieldsWP309 covers the field permission check of WP-309:
+// asset.attributes.<key> is a custom field of the asset policy, the tag
+// comparisons read attributes.tags like the flat tags, between and a
+// computed attribute are their field.
+func TestReferencedFieldsWP309(t *testing.T) {
+	spec := FilterSpec{Where: mustAST(t, `{"and": [
+		{"field": "asset.attributes.room", "op": "eq", "value": "R1"},
+		{"field": "tags", "op": "has_any", "value": ["prod"]},
+		{"field": "asset.cost_center", "op": "eq", "value": "CC"},
+		{"field": "created_at", "op": "between", "value": ["2024-01-01", "2025-01-01"]},
+		{"field": "attributes.warranty_days_left", "op": "lt", "value": 30}]}`)}
+	got := fmt.Sprint(spec.ReferencedFields("ci"))
+	want := fmt.Sprint([]FieldRef{
+		{"asset", "attributes.room", "asset.attributes.room"},
+		{"ci", "attributes.tags", "tags"},
+		{"asset", "cost_center", "asset.cost_center"},
+		{"ci", "created_at", "created_at"},
+		{"ci", "attributes.warranty_days_left", "attributes.warranty_days_left"},
+	})
+	if got != want {
+		t.Errorf("ReferencedFields:\n got %s\nwant %s", got, want)
+	}
+	if key, checked, known := fieldKey("asset", "attributes.room"); key != "attributes.room" || !checked || !known {
+		t.Errorf("fieldKey(asset, attributes.room) = %q, %v, %v", key, checked, known)
 	}
 }

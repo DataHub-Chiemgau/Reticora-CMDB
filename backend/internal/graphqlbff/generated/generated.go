@@ -14,8 +14,11 @@ import (
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -35,6 +38,7 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Asset() AssetResolver
 	CI() CIResolver
 	Job() JobResolver
 	Query() QueryResolver
@@ -48,9 +52,48 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	Asset struct {
+		Barcode        func(childComplexity int) int
+		Category       func(childComplexity int) int
+		Children       func(childComplexity int, first *int) int
+		Cis            func(childComplexity int, first *int) int
+		ClientID       func(childComplexity int) int
+		ContractID     func(childComplexity int) int
+		CostCenter     func(childComplexity int) int
+		CreatedAt      func(childComplexity int) int
+		Currency       func(childComplexity int) int
+		CustomFields   func(childComplexity int) int
+		Documents      func(childComplexity int, first *int) int
+		ID             func(childComplexity int) int
+		InventoryNo    func(childComplexity int) int
+		InvoiceNumber  func(childComplexity int) int
+		LifecycleState func(childComplexity int) int
+		LocationID     func(childComplexity int) int
+		Manufacturer   func(childComplexity int) int
+		Model          func(childComplexity int) int
+		Movements      func(childComplexity int, first *int, after *string) int
+		Name           func(childComplexity int) int
+		Notes          func(childComplexity int) int
+		OwnerTeamID    func(childComplexity int) int
+		OwnerUserID    func(childComplexity int) int
+		PrimaryCiID    func(childComplexity int) int
+		PurchaseDate   func(childComplexity int) int
+		PurchasePrice  func(childComplexity int) int
+		RfidTag        func(childComplexity int) int
+		SerialNumber   func(childComplexity int) int
+		Status         func(childComplexity int) int
+		SupplierID     func(childComplexity int) int
+		Tags           func(childComplexity int) int
+		UpdatedAt      func(childComplexity int) int
+		Version        func(childComplexity int) int
+		WarrantyUntil  func(childComplexity int) int
+	}
+
 	CI struct {
+		AssetID        func(childComplexity int) int
 		Attributes     func(childComplexity int) int
 		CITypeID       func(childComplexity int) int
+		ChildMode      func(childComplexity int) int
 		ClientID       func(childComplexity int) int
 		CreatedAt      func(childComplexity int) int
 		Fqdn           func(childComplexity int) int
@@ -63,6 +106,7 @@ type ComplexityRoot struct {
 		Manufacturer   func(childComplexity int) int
 		Model          func(childComplexity int) int
 		Name           func(childComplexity int) int
+		ParentCIID     func(childComplexity int) int
 		SerialNumber   func(childComplexity int) int
 		SiteID         func(childComplexity int) int
 		Status         func(childComplexity int) int
@@ -83,6 +127,22 @@ type ComplexityRoot struct {
 		Node   func(childComplexity int) int
 	}
 
+	Document struct {
+		Category    func(childComplexity int) int
+		CreatedAt   func(childComplexity int) int
+		Description func(childComplexity int) int
+		FileName    func(childComplexity int) int
+		FileSize    func(childComplexity int) int
+		ID          func(childComplexity int) int
+		MimeType    func(childComplexity int) int
+		ScanStatus  func(childComplexity int) int
+		Tags        func(childComplexity int) int
+		Title       func(childComplexity int) int
+		UpdatedAt   func(childComplexity int) int
+		UploadedBy  func(childComplexity int) int
+		Version     func(childComplexity int) int
+	}
+
 	Job struct {
 		CreatedAt  func(childComplexity int) int
 		Error      func(childComplexity int) int
@@ -93,12 +153,39 @@ type ComplexityRoot struct {
 		Status     func(childComplexity int) int
 	}
 
+	Movement struct {
+		ActorID        func(childComplexity int) int
+		AssetID        func(childComplexity int) int
+		AssigneeTeamID func(childComplexity int) int
+		AssigneeUserID func(childComplexity int) int
+		CreatedAt      func(childComplexity int) int
+		DocumentID     func(childComplexity int) int
+		FromLocationID func(childComplexity int) int
+		ID             func(childComplexity int) int
+		ItemKind       func(childComplexity int) int
+		MovementType   func(childComplexity int) int
+		Notes          func(childComplexity int) int
+		OccurredAt     func(childComplexity int) int
+		OrderID        func(childComplexity int) int
+		Quantity       func(childComplexity int) int
+		Reason         func(childComplexity int) int
+		TicketID       func(childComplexity int) int
+		ToLocationID   func(childComplexity int) int
+	}
+
+	MovementConnection struct {
+		Nodes      func(childComplexity int) int
+		PageInfo   func(childComplexity int) int
+		TotalCount func(childComplexity int) int
+	}
+
 	PageInfo struct {
 		EndCursor   func(childComplexity int) int
 		HasNextPage func(childComplexity int) int
 	}
 
 	Query struct {
+		Asset            func(childComplexity int, id string) int
 		Ci               func(childComplexity int, id string) int
 		Cis              func(childComplexity int, first *int, after *string, filter *CIFilter) int
 		CurrentUser      func(childComplexity int) int
@@ -202,6 +289,36 @@ type ComplexityRoot struct {
 
 // region    ************************** generated!.gotpl **************************
 
+type AssetResolver interface {
+	InventoryNo(ctx context.Context, obj *asset.Asset) (*string, error)
+	Category(ctx context.Context, obj *asset.Asset) (*string, error)
+	Status(ctx context.Context, obj *asset.Asset) (*string, error)
+	Manufacturer(ctx context.Context, obj *asset.Asset) (*string, error)
+	Model(ctx context.Context, obj *asset.Asset) (*string, error)
+	SerialNumber(ctx context.Context, obj *asset.Asset) (*string, error)
+	PurchaseDate(ctx context.Context, obj *asset.Asset) (*string, error)
+	PurchasePrice(ctx context.Context, obj *asset.Asset) (*string, error)
+	Currency(ctx context.Context, obj *asset.Asset) (*string, error)
+	WarrantyUntil(ctx context.Context, obj *asset.Asset) (*string, error)
+	CostCenter(ctx context.Context, obj *asset.Asset) (*string, error)
+	SupplierID(ctx context.Context, obj *asset.Asset) (*string, error)
+	ContractID(ctx context.Context, obj *asset.Asset) (*string, error)
+	OwnerUserID(ctx context.Context, obj *asset.Asset) (*string, error)
+	OwnerTeamID(ctx context.Context, obj *asset.Asset) (*string, error)
+	InvoiceNumber(ctx context.Context, obj *asset.Asset) (*string, error)
+	RfidTag(ctx context.Context, obj *asset.Asset) (*string, error)
+	Barcode(ctx context.Context, obj *asset.Asset) (*string, error)
+	LocationID(ctx context.Context, obj *asset.Asset) (*string, error)
+	LifecycleState(ctx context.Context, obj *asset.Asset) (*string, error)
+	PrimaryCiID(ctx context.Context, obj *asset.Asset) (*string, error)
+	Notes(ctx context.Context, obj *asset.Asset) (*string, error)
+	CustomFields(ctx context.Context, obj *asset.Asset) (map[string]any, error)
+	Tags(ctx context.Context, obj *asset.Asset) ([]string, error)
+	Cis(ctx context.Context, obj *asset.Asset, first *int) ([]*ci.Item, error)
+	Children(ctx context.Context, obj *asset.Asset, first *int) ([]*ci.Item, error)
+	Movements(ctx context.Context, obj *asset.Asset, first *int, after *string) (*MovementConnection, error)
+	Documents(ctx context.Context, obj *asset.Asset, first *int) ([]*document.Document, error)
+}
 type CIResolver interface {
 	Hostname(ctx context.Context, obj *ci.Item) (*string, error)
 	Fqdn(ctx context.Context, obj *ci.Item) (*string, error)
@@ -225,6 +342,7 @@ type QueryResolver interface {
 	SearchEverything(ctx context.Context, q string, types []string, first *int) (*SearchResult, error)
 	ReviewInbox(ctx context.Context, status *string, kind *string, first *int) ([]*reviews.Item, error)
 	Jobs(ctx context.Context, kind *string, status *string, first *int) ([]*jobs.Job, error)
+	Asset(ctx context.Context, id string) (*asset.Asset, error)
 }
 type RackMountResolver interface {
 	Ci(ctx context.Context, obj *rack.RackMount) (*ci.Item, error)
@@ -258,6 +376,237 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	_ = ec
 	switch typeName + "." + field {
 
+	case "Asset.barcode":
+		if e.ComplexityRoot.Asset.Barcode == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Barcode(childComplexity), true
+	case "Asset.category":
+		if e.ComplexityRoot.Asset.Category == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Category(childComplexity), true
+	case "Asset.children":
+		if e.ComplexityRoot.Asset.Children == nil {
+			break
+		}
+
+		args, err := ec.field_Asset_children_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Asset.Children(childComplexity, args["first"].(*int)), true
+	case "Asset.cis":
+		if e.ComplexityRoot.Asset.Cis == nil {
+			break
+		}
+
+		args, err := ec.field_Asset_cis_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Asset.Cis(childComplexity, args["first"].(*int)), true
+	case "Asset.clientId":
+		if e.ComplexityRoot.Asset.ClientID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.ClientID(childComplexity), true
+	case "Asset.contractId":
+		if e.ComplexityRoot.Asset.ContractID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.ContractID(childComplexity), true
+	case "Asset.costCenter":
+		if e.ComplexityRoot.Asset.CostCenter == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.CostCenter(childComplexity), true
+	case "Asset.createdAt":
+		if e.ComplexityRoot.Asset.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.CreatedAt(childComplexity), true
+	case "Asset.currency":
+		if e.ComplexityRoot.Asset.Currency == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Currency(childComplexity), true
+	case "Asset.customFields":
+		if e.ComplexityRoot.Asset.CustomFields == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.CustomFields(childComplexity), true
+	case "Asset.documents":
+		if e.ComplexityRoot.Asset.Documents == nil {
+			break
+		}
+
+		args, err := ec.field_Asset_documents_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Asset.Documents(childComplexity, args["first"].(*int)), true
+	case "Asset.id":
+		if e.ComplexityRoot.Asset.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.ID(childComplexity), true
+	case "Asset.inventoryNo":
+		if e.ComplexityRoot.Asset.InventoryNo == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.InventoryNo(childComplexity), true
+	case "Asset.invoiceNumber":
+		if e.ComplexityRoot.Asset.InvoiceNumber == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.InvoiceNumber(childComplexity), true
+	case "Asset.lifecycleState":
+		if e.ComplexityRoot.Asset.LifecycleState == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.LifecycleState(childComplexity), true
+	case "Asset.locationId":
+		if e.ComplexityRoot.Asset.LocationID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.LocationID(childComplexity), true
+	case "Asset.manufacturer":
+		if e.ComplexityRoot.Asset.Manufacturer == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Manufacturer(childComplexity), true
+	case "Asset.model":
+		if e.ComplexityRoot.Asset.Model == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Model(childComplexity), true
+	case "Asset.movements":
+		if e.ComplexityRoot.Asset.Movements == nil {
+			break
+		}
+
+		args, err := ec.field_Asset_movements_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Asset.Movements(childComplexity, args["first"].(*int), args["after"].(*string)), true
+	case "Asset.name":
+		if e.ComplexityRoot.Asset.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Name(childComplexity), true
+	case "Asset.notes":
+		if e.ComplexityRoot.Asset.Notes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Notes(childComplexity), true
+	case "Asset.ownerTeamId":
+		if e.ComplexityRoot.Asset.OwnerTeamID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.OwnerTeamID(childComplexity), true
+	case "Asset.ownerUserId":
+		if e.ComplexityRoot.Asset.OwnerUserID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.OwnerUserID(childComplexity), true
+	case "Asset.primaryCiId":
+		if e.ComplexityRoot.Asset.PrimaryCiID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.PrimaryCiID(childComplexity), true
+	case "Asset.purchaseDate":
+		if e.ComplexityRoot.Asset.PurchaseDate == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.PurchaseDate(childComplexity), true
+	case "Asset.purchasePrice":
+		if e.ComplexityRoot.Asset.PurchasePrice == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.PurchasePrice(childComplexity), true
+	case "Asset.rfidTag":
+		if e.ComplexityRoot.Asset.RfidTag == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.RfidTag(childComplexity), true
+	case "Asset.serialNumber":
+		if e.ComplexityRoot.Asset.SerialNumber == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.SerialNumber(childComplexity), true
+	case "Asset.status":
+		if e.ComplexityRoot.Asset.Status == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Status(childComplexity), true
+	case "Asset.supplierId":
+		if e.ComplexityRoot.Asset.SupplierID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.SupplierID(childComplexity), true
+	case "Asset.tags":
+		if e.ComplexityRoot.Asset.Tags == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Tags(childComplexity), true
+	case "Asset.updatedAt":
+		if e.ComplexityRoot.Asset.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.UpdatedAt(childComplexity), true
+	case "Asset.version":
+		if e.ComplexityRoot.Asset.Version == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.Version(childComplexity), true
+	case "Asset.warrantyUntil":
+		if e.ComplexityRoot.Asset.WarrantyUntil == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Asset.WarrantyUntil(childComplexity), true
+
+	case "CI.assetId":
+		if e.ComplexityRoot.CI.AssetID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CI.AssetID(childComplexity), true
 	case "CI.attributes":
 		if e.ComplexityRoot.CI.Attributes == nil {
 			break
@@ -270,6 +619,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.CI.CITypeID(childComplexity), true
+	case "CI.childMode":
+		if e.ComplexityRoot.CI.ChildMode == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CI.ChildMode(childComplexity), true
 	case "CI.clientId":
 		if e.ComplexityRoot.CI.ClientID == nil {
 			break
@@ -342,6 +697,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.CI.Name(childComplexity), true
+	case "CI.parentCiId":
+		if e.ComplexityRoot.CI.ParentCIID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CI.ParentCIID(childComplexity), true
 	case "CI.serialNumber":
 		if e.ComplexityRoot.CI.SerialNumber == nil {
 			break
@@ -417,6 +778,85 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.CIEdge.Node(childComplexity), true
 
+	case "Document.category":
+		if e.ComplexityRoot.Document.Category == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.Category(childComplexity), true
+	case "Document.createdAt":
+		if e.ComplexityRoot.Document.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.CreatedAt(childComplexity), true
+	case "Document.description":
+		if e.ComplexityRoot.Document.Description == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.Description(childComplexity), true
+	case "Document.fileName":
+		if e.ComplexityRoot.Document.FileName == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.FileName(childComplexity), true
+	case "Document.fileSize":
+		if e.ComplexityRoot.Document.FileSize == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.FileSize(childComplexity), true
+	case "Document.id":
+		if e.ComplexityRoot.Document.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.ID(childComplexity), true
+	case "Document.mimeType":
+		if e.ComplexityRoot.Document.MimeType == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.MimeType(childComplexity), true
+	case "Document.scanStatus":
+		if e.ComplexityRoot.Document.ScanStatus == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.ScanStatus(childComplexity), true
+	case "Document.tags":
+		if e.ComplexityRoot.Document.Tags == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.Tags(childComplexity), true
+	case "Document.title":
+		if e.ComplexityRoot.Document.Title == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.Title(childComplexity), true
+	case "Document.updatedAt":
+		if e.ComplexityRoot.Document.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.UpdatedAt(childComplexity), true
+	case "Document.uploadedBy":
+		if e.ComplexityRoot.Document.UploadedBy == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.UploadedBy(childComplexity), true
+	case "Document.version":
+		if e.ComplexityRoot.Document.Version == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Document.Version(childComplexity), true
+
 	case "Job.createdAt":
 		if e.ComplexityRoot.Job.CreatedAt == nil {
 			break
@@ -460,6 +900,128 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Job.Status(childComplexity), true
 
+	case "Movement.actorId":
+		if e.ComplexityRoot.Movement.ActorID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.ActorID(childComplexity), true
+	case "Movement.assetId":
+		if e.ComplexityRoot.Movement.AssetID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.AssetID(childComplexity), true
+	case "Movement.assigneeTeamId":
+		if e.ComplexityRoot.Movement.AssigneeTeamID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.AssigneeTeamID(childComplexity), true
+	case "Movement.assigneeUserId":
+		if e.ComplexityRoot.Movement.AssigneeUserID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.AssigneeUserID(childComplexity), true
+	case "Movement.createdAt":
+		if e.ComplexityRoot.Movement.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.CreatedAt(childComplexity), true
+	case "Movement.documentId":
+		if e.ComplexityRoot.Movement.DocumentID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.DocumentID(childComplexity), true
+	case "Movement.fromLocationId":
+		if e.ComplexityRoot.Movement.FromLocationID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.FromLocationID(childComplexity), true
+	case "Movement.id":
+		if e.ComplexityRoot.Movement.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.ID(childComplexity), true
+	case "Movement.itemKind":
+		if e.ComplexityRoot.Movement.ItemKind == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.ItemKind(childComplexity), true
+	case "Movement.movementType":
+		if e.ComplexityRoot.Movement.MovementType == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.MovementType(childComplexity), true
+	case "Movement.notes":
+		if e.ComplexityRoot.Movement.Notes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.Notes(childComplexity), true
+	case "Movement.occurredAt":
+		if e.ComplexityRoot.Movement.OccurredAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.OccurredAt(childComplexity), true
+	case "Movement.orderId":
+		if e.ComplexityRoot.Movement.OrderID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.OrderID(childComplexity), true
+	case "Movement.quantity":
+		if e.ComplexityRoot.Movement.Quantity == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.Quantity(childComplexity), true
+	case "Movement.reason":
+		if e.ComplexityRoot.Movement.Reason == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.Reason(childComplexity), true
+	case "Movement.ticketId":
+		if e.ComplexityRoot.Movement.TicketID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.TicketID(childComplexity), true
+	case "Movement.toLocationId":
+		if e.ComplexityRoot.Movement.ToLocationID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Movement.ToLocationID(childComplexity), true
+
+	case "MovementConnection.nodes":
+		if e.ComplexityRoot.MovementConnection.Nodes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MovementConnection.Nodes(childComplexity), true
+	case "MovementConnection.pageInfo":
+		if e.ComplexityRoot.MovementConnection.PageInfo == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MovementConnection.PageInfo(childComplexity), true
+	case "MovementConnection.totalCount":
+		if e.ComplexityRoot.MovementConnection.TotalCount == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MovementConnection.TotalCount(childComplexity), true
+
 	case "PageInfo.endCursor":
 		if e.ComplexityRoot.PageInfo.EndCursor == nil {
 			break
@@ -473,6 +1035,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.PageInfo.HasNextPage(childComplexity), true
 
+	case "Query.asset":
+		if e.ComplexityRoot.Query.Asset == nil {
+			break
+		}
+
+		args, err := ec.field_Query_asset_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.Asset(childComplexity, args["id"].(string)), true
 	case "Query.ci":
 		if e.ComplexityRoot.Query.Ci == nil {
 			break
@@ -1001,6 +1574,8 @@ type Query {
   reviewInbox(status: String, kind: String, first: Int): [ReviewItem!]!
   "Jobs of the organization."
   jobs(kind: String, status: String, first: Int): [Job!]!
+  "One asset with its CIs, child CIs, movements and documents (GQL-03); null when it is not visible."
+  asset(id: ID!): Asset
 }
 
 input CIFilter {
@@ -1050,6 +1625,12 @@ type CI {
   attributes: Map
   "The keys of the catalog tags of the CI, sorted (CI-07, WP-754)."
   tags: [String!]!
+  "The asset the CI is linked to (AST-04)."
+  assetId: ID
+  "The CI this one is physically part of (AST-05)."
+  parentCiId: ID
+  "The child contract under the parent: configuration or standalone (AST-05)."
+  childMode: String
 }
 
 type Relationship {
@@ -1153,6 +1734,97 @@ type User {
   organizationId: ID!
   clientId: ID
 }
+
+"""
+An asset with the AST-01 names (WP-739). The fields under field permissions
+(RBA-07) are null when the caller may not read them; custom fields without
+read access are left out. The lists are null with an error when their
+permission, feature or module is missing, the asset stays.
+"""
+type Asset {
+  id: ID!
+  name: String!
+  clientId: ID
+  version: Int!
+  createdAt: Time!
+  updatedAt: Time!
+  inventoryNo: String
+  category: String
+  status: String
+  manufacturer: String
+  model: String
+  serialNumber: String
+  purchaseDate: String
+  purchasePrice: String
+  currency: String
+  warrantyUntil: String
+  costCenter: String
+  supplierId: ID
+  contractId: ID
+  ownerUserId: ID
+  ownerTeamId: ID
+  invoiceNumber: String
+  rfidTag: String
+  barcode: String
+  locationId: ID
+  lifecycleState: String
+  "The primary CI (column asset.ci_id, E-122)."
+  primaryCiId: ID
+  notes: String
+  customFields: Map
+  "The keys of the catalog tags of the asset, sorted (WP-755)."
+  tags: [String!]
+  "The CIs linked to the asset (ci.asset_id); at most 100."
+  cis(first: Int): [CI!]
+  "The child CIs of the linked CIs (ci.parent_ci_id with childMode, AST-05); at most 100."
+  children(first: Int): [CI!]
+  "The movements of the asset in the ledger stock_movement, newest first; at most 100 per page."
+  movements(first: Int, after: String): MovementConnection
+  "The documents linked to the asset; at most 100."
+  documents(first: Int): [Document!]
+}
+
+type MovementConnection {
+  nodes: [Movement!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+type Movement {
+  id: ID!
+  itemKind: String!
+  movementType: String!
+  assetId: ID
+  fromLocationId: ID
+  toLocationId: ID
+  quantity: Float
+  actorId: ID
+  assigneeUserId: ID
+  assigneeTeamId: ID
+  reason: String
+  ticketId: ID
+  orderId: ID
+  documentId: ID
+  notes: String
+  occurredAt: Time!
+  createdAt: Time!
+}
+
+type Document {
+  id: ID!
+  title: String!
+  description: String
+  fileName: String!
+  fileSize: Int!
+  mimeType: String!
+  version: Int!
+  category: String!
+  tags: [String!]!
+  uploadedBy: ID
+  scanStatus: String
+  createdAt: Time!
+  updatedAt: Time!
+}
 `, BuiltIn: false},
 }
 var parsedSchema = gqlparser.MustLoadSchema(sources...)
@@ -1160,6 +1832,80 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // childFields_* functions provide shared child field context lookups.
 // Each function is generated once per unique object type, deduplicating the
 // switch statements that were previously inlined in every fieldContext_* function.
+
+func (ec *executionContext) childFields_Asset(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_Asset_id(ctx, field)
+	case "name":
+		return ec.fieldContext_Asset_name(ctx, field)
+	case "clientId":
+		return ec.fieldContext_Asset_clientId(ctx, field)
+	case "version":
+		return ec.fieldContext_Asset_version(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_Asset_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_Asset_updatedAt(ctx, field)
+	case "inventoryNo":
+		return ec.fieldContext_Asset_inventoryNo(ctx, field)
+	case "category":
+		return ec.fieldContext_Asset_category(ctx, field)
+	case "status":
+		return ec.fieldContext_Asset_status(ctx, field)
+	case "manufacturer":
+		return ec.fieldContext_Asset_manufacturer(ctx, field)
+	case "model":
+		return ec.fieldContext_Asset_model(ctx, field)
+	case "serialNumber":
+		return ec.fieldContext_Asset_serialNumber(ctx, field)
+	case "purchaseDate":
+		return ec.fieldContext_Asset_purchaseDate(ctx, field)
+	case "purchasePrice":
+		return ec.fieldContext_Asset_purchasePrice(ctx, field)
+	case "currency":
+		return ec.fieldContext_Asset_currency(ctx, field)
+	case "warrantyUntil":
+		return ec.fieldContext_Asset_warrantyUntil(ctx, field)
+	case "costCenter":
+		return ec.fieldContext_Asset_costCenter(ctx, field)
+	case "supplierId":
+		return ec.fieldContext_Asset_supplierId(ctx, field)
+	case "contractId":
+		return ec.fieldContext_Asset_contractId(ctx, field)
+	case "ownerUserId":
+		return ec.fieldContext_Asset_ownerUserId(ctx, field)
+	case "ownerTeamId":
+		return ec.fieldContext_Asset_ownerTeamId(ctx, field)
+	case "invoiceNumber":
+		return ec.fieldContext_Asset_invoiceNumber(ctx, field)
+	case "rfidTag":
+		return ec.fieldContext_Asset_rfidTag(ctx, field)
+	case "barcode":
+		return ec.fieldContext_Asset_barcode(ctx, field)
+	case "locationId":
+		return ec.fieldContext_Asset_locationId(ctx, field)
+	case "lifecycleState":
+		return ec.fieldContext_Asset_lifecycleState(ctx, field)
+	case "primaryCiId":
+		return ec.fieldContext_Asset_primaryCiId(ctx, field)
+	case "notes":
+		return ec.fieldContext_Asset_notes(ctx, field)
+	case "customFields":
+		return ec.fieldContext_Asset_customFields(ctx, field)
+	case "tags":
+		return ec.fieldContext_Asset_tags(ctx, field)
+	case "cis":
+		return ec.fieldContext_Asset_cis(ctx, field)
+	case "children":
+		return ec.fieldContext_Asset_children(ctx, field)
+	case "movements":
+		return ec.fieldContext_Asset_movements(ctx, field)
+	case "documents":
+		return ec.fieldContext_Asset_documents(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Asset", field.Name)
+}
 
 func (ec *executionContext) childFields_CI(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
@@ -1203,6 +1949,12 @@ func (ec *executionContext) childFields_CI(ctx context.Context, field graphql.Co
 		return ec.fieldContext_CI_attributes(ctx, field)
 	case "tags":
 		return ec.fieldContext_CI_tags(ctx, field)
+	case "assetId":
+		return ec.fieldContext_CI_assetId(ctx, field)
+	case "parentCiId":
+		return ec.fieldContext_CI_parentCiId(ctx, field)
+	case "childMode":
+		return ec.fieldContext_CI_childMode(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type CI", field.Name)
 }
@@ -1231,6 +1983,38 @@ func (ec *executionContext) childFields_CIEdge(ctx context.Context, field graphq
 	return nil, fmt.Errorf("no field named %q was found under type CIEdge", field.Name)
 }
 
+func (ec *executionContext) childFields_Document(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_Document_id(ctx, field)
+	case "title":
+		return ec.fieldContext_Document_title(ctx, field)
+	case "description":
+		return ec.fieldContext_Document_description(ctx, field)
+	case "fileName":
+		return ec.fieldContext_Document_fileName(ctx, field)
+	case "fileSize":
+		return ec.fieldContext_Document_fileSize(ctx, field)
+	case "mimeType":
+		return ec.fieldContext_Document_mimeType(ctx, field)
+	case "version":
+		return ec.fieldContext_Document_version(ctx, field)
+	case "category":
+		return ec.fieldContext_Document_category(ctx, field)
+	case "tags":
+		return ec.fieldContext_Document_tags(ctx, field)
+	case "uploadedBy":
+		return ec.fieldContext_Document_uploadedBy(ctx, field)
+	case "scanStatus":
+		return ec.fieldContext_Document_scanStatus(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_Document_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_Document_updatedAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Document", field.Name)
+}
+
 func (ec *executionContext) childFields_Job(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "id":
@@ -1249,6 +2033,58 @@ func (ec *executionContext) childFields_Job(ctx context.Context, field graphql.C
 		return ec.fieldContext_Job_finishedAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Job", field.Name)
+}
+
+func (ec *executionContext) childFields_Movement(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_Movement_id(ctx, field)
+	case "itemKind":
+		return ec.fieldContext_Movement_itemKind(ctx, field)
+	case "movementType":
+		return ec.fieldContext_Movement_movementType(ctx, field)
+	case "assetId":
+		return ec.fieldContext_Movement_assetId(ctx, field)
+	case "fromLocationId":
+		return ec.fieldContext_Movement_fromLocationId(ctx, field)
+	case "toLocationId":
+		return ec.fieldContext_Movement_toLocationId(ctx, field)
+	case "quantity":
+		return ec.fieldContext_Movement_quantity(ctx, field)
+	case "actorId":
+		return ec.fieldContext_Movement_actorId(ctx, field)
+	case "assigneeUserId":
+		return ec.fieldContext_Movement_assigneeUserId(ctx, field)
+	case "assigneeTeamId":
+		return ec.fieldContext_Movement_assigneeTeamId(ctx, field)
+	case "reason":
+		return ec.fieldContext_Movement_reason(ctx, field)
+	case "ticketId":
+		return ec.fieldContext_Movement_ticketId(ctx, field)
+	case "orderId":
+		return ec.fieldContext_Movement_orderId(ctx, field)
+	case "documentId":
+		return ec.fieldContext_Movement_documentId(ctx, field)
+	case "notes":
+		return ec.fieldContext_Movement_notes(ctx, field)
+	case "occurredAt":
+		return ec.fieldContext_Movement_occurredAt(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_Movement_createdAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Movement", field.Name)
+}
+
+func (ec *executionContext) childFields_MovementConnection(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "nodes":
+		return ec.fieldContext_MovementConnection_nodes(ctx, field)
+	case "pageInfo":
+		return ec.fieldContext_MovementConnection_pageInfo(ctx, field)
+	case "totalCount":
+		return ec.fieldContext_MovementConnection_totalCount(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type MovementConnection", field.Name)
 }
 
 func (ec *executionContext) childFields_PageInfo(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -1551,6 +2387,70 @@ func (ec *executionContext) childFields___Type(ctx context.Context, field graphq
 
 // region    ***************************** args.gotpl *****************************
 
+func (ec *executionContext) field_Asset_children_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Asset_cis_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Asset_documents_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Asset_movements_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "after",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["after"] = arg1
+	return args, nil
+}
+
 func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
 	var err error
 	args := map[string]any{}
@@ -1562,6 +2462,20 @@ func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs
 		return nil, err
 	}
 	args["name"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_asset_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
 	return args, nil
 }
 
@@ -1832,6 +2746,872 @@ func (ec *executionContext) field___Type_fields_args(ctx context.Context, rawArg
 // endregion ***************************** args.gotpl *****************************
 
 // region    **************************** field.gotpl *****************************
+
+func (ec *executionContext) _Asset_id(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_name(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_name(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_clientId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_clientId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ClientID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_clientId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_version(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_version(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Version, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int64) graphql.Marshaler {
+			return ec.marshalNInt2int64(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_version(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_createdAt(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_updatedAt(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_updatedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_inventoryNo(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_inventoryNo(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().InventoryNo(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_inventoryNo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_category(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_category(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Category(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_category(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_status(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_status(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Status(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_status(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_manufacturer(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_manufacturer(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Manufacturer(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_manufacturer(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_model(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_model(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Model(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_model(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_serialNumber(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_serialNumber(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().SerialNumber(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_serialNumber(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_purchaseDate(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_purchaseDate(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().PurchaseDate(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_purchaseDate(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_purchasePrice(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_purchasePrice(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().PurchasePrice(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_purchasePrice(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_currency(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_currency(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Currency(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_currency(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_warrantyUntil(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_warrantyUntil(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().WarrantyUntil(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_warrantyUntil(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_costCenter(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_costCenter(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().CostCenter(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_costCenter(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_supplierId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_supplierId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().SupplierID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_supplierId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_contractId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_contractId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().ContractID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_contractId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_ownerUserId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_ownerUserId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().OwnerUserID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_ownerUserId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_ownerTeamId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_ownerTeamId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().OwnerTeamID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_ownerTeamId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_invoiceNumber(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_invoiceNumber(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().InvoiceNumber(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_invoiceNumber(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_rfidTag(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_rfidTag(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().RfidTag(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_rfidTag(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_barcode(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_barcode(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Barcode(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_barcode(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_locationId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_locationId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().LocationID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_locationId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_lifecycleState(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_lifecycleState(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().LifecycleState(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_lifecycleState(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_primaryCiId(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_primaryCiId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().PrimaryCiID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_primaryCiId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_notes(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_notes(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Notes(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_notes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_customFields(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_customFields(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().CustomFields(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalOMap2map(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_customFields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_tags(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_tags(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.Asset().Tags(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalOString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_tags(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Asset", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Asset_cis(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_cis(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Asset().Cis(ctx, obj, fc.Args["first"].(*int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*ci.Item) graphql.Marshaler {
+			return ec.marshalOCI2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋciᚐItemᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_cis(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Asset",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_CI(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Asset_cis_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Asset_children(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_children(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Asset().Children(ctx, obj, fc.Args["first"].(*int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*ci.Item) graphql.Marshaler {
+			return ec.marshalOCI2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋciᚐItemᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_children(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Asset",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_CI(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Asset_children_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Asset_movements(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_movements(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Asset().Movements(ctx, obj, fc.Args["first"].(*int), fc.Args["after"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *MovementConnection) graphql.Marshaler {
+			return ec.marshalOMovementConnection2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐMovementConnection(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_movements(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Asset",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_MovementConnection(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Asset_movements_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Asset_documents(ctx context.Context, field graphql.CollectedField, obj *asset.Asset) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Asset_documents(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Asset().Documents(ctx, obj, fc.Args["first"].(*int))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*document.Document) graphql.Marshaler {
+			return ec.marshalODocument2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocumentᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Asset_documents(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Asset",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Document(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Asset_documents_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
 
 func (ec *executionContext) _CI_id(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
@@ -2293,6 +4073,75 @@ func (ec *executionContext) fieldContext_CI_tags(_ context.Context, field graphq
 	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
 }
 
+func (ec *executionContext) _CI_assetId(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CI_assetId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AssetID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CI_assetId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CI_parentCiId(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CI_parentCiId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ParentCIID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CI_parentCiId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CI_childMode(ctx context.Context, field graphql.CollectedField, obj *ci.Item) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CI_childMode(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ChildMode, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOString2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CI_childMode(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CI", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
 func (ec *executionContext) _CIConnection_edges(ctx context.Context, field graphql.CollectedField, obj *CIConnection) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2467,6 +4316,305 @@ func (ec *executionContext) fieldContext_CIEdge_node(_ context.Context, field gr
 	return fc, nil
 }
 
+func (ec *executionContext) _Document_id(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Document_title(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_title(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Title, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_description(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_description(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Description, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOString2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Document_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_fileName(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_fileName(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.FileName, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_fileName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_fileSize(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_fileSize(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.FileSize, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int64) graphql.Marshaler {
+			return ec.marshalNInt2int64(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_fileSize(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _Document_mimeType(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_mimeType(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.MimeType, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_mimeType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_version(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_version(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Version, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_version(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _Document_category(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_category(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Category, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_category(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_tags(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_tags(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Tags, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalNString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_tags(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_uploadedBy(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_uploadedBy(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UploadedBy, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Document_uploadedBy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Document_scanStatus(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_scanStatus(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ScanStatus, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOString2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Document_scanStatus(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Document_createdAt(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _Document_updatedAt(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Document_updatedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.UpdatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Document_updatedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
 func (ec *executionContext) _Job_id(ctx context.Context, field graphql.CollectedField, obj *jobs.Job) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -2626,6 +4774,484 @@ func (ec *executionContext) _Job_finishedAt(ctx context.Context, field graphql.C
 }
 func (ec *executionContext) fieldContext_Job_finishedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Job", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_id(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_itemKind(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_itemKind(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ItemKind, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_itemKind(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_movementType(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_movementType(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.MovementType, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_movementType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_assetId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_assetId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AssetID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_assetId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_fromLocationId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_fromLocationId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.FromLocationID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_fromLocationId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_toLocationId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_toLocationId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ToLocationID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_toLocationId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_quantity(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_quantity(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Quantity, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *float64) graphql.Marshaler {
+			return ec.marshalOFloat2ᚖfloat64(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_quantity(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type Float does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_actorId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_actorId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ActorID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_actorId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_assigneeUserId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_assigneeUserId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AssigneeUserID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_assigneeUserId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_assigneeTeamId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_assigneeTeamId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AssigneeTeamID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_assigneeTeamId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_reason(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_reason(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Reason, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOString2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_reason(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_ticketId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_ticketId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TicketID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_ticketId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_orderId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_orderId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OrderID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_orderId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_documentId(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_documentId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.DocumentID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOID2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_documentId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_notes(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_notes(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Notes, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalOString2string(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_notes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_occurredAt(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_occurredAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OccurredAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_occurredAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _Movement_createdAt(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Movement_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Movement_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("Movement", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _MovementConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *MovementConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MovementConnection_nodes(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Nodes, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*movement.Movement) graphql.Marshaler {
+			return ec.marshalNMovement2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmovementᚐMovementᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MovementConnection_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MovementConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Movement(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MovementConnection_pageInfo(ctx context.Context, field graphql.CollectedField, obj *MovementConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MovementConnection_pageInfo(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.PageInfo, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *PageInfo) graphql.Marshaler {
+			return ec.marshalNPageInfo2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐPageInfo(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MovementConnection_pageInfo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "MovementConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_PageInfo(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _MovementConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *MovementConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MovementConnection_totalCount(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TotalCount, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MovementConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MovementConnection", field, false, false, errors.New("field of type Int does not have child fields"))
 }
 
 func (ec *executionContext) _PageInfo_hasNextPage(ctx context.Context, field graphql.CollectedField, obj *PageInfo) (ret graphql.Marshaler) {
@@ -3052,6 +5678,50 @@ func (ec *executionContext) fieldContext_Query_jobs(ctx context.Context, field g
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_jobs_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_asset(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_asset(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().Asset(ctx, fc.Args["id"].(string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *asset.Asset) graphql.Marshaler {
+			return ec.marshalOAsset2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋassetᚐAsset(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Query_asset(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_Asset(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_asset_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -5591,6 +8261,1133 @@ func (ec *executionContext) unmarshalInputCIFilter(ctx context.Context, obj any)
 
 // region    **************************** object.gotpl ****************************
 
+var assetImplementors = []string{"Asset"}
+
+func (ec *executionContext) _Asset(ctx context.Context, sel ast.SelectionSet, obj *asset.Asset) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, assetImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Asset")
+		case "id":
+			out.Values[i] = ec._Asset_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "name":
+			out.Values[i] = ec._Asset_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "clientId":
+			out.Values[i] = ec._Asset_clientId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "version":
+			out.Values[i] = ec._Asset_version(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "createdAt":
+			out.Values[i] = ec._Asset_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Asset_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "inventoryNo":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_inventoryNo(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "category":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_category(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "status":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_status(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "manufacturer":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_manufacturer(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "model":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_model(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "serialNumber":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_serialNumber(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "purchaseDate":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_purchaseDate(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "purchasePrice":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_purchasePrice(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "currency":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_currency(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "warrantyUntil":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_warrantyUntil(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "costCenter":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_costCenter(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "supplierId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_supplierId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "contractId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_contractId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "ownerUserId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_ownerUserId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "ownerTeamId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_ownerTeamId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "invoiceNumber":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_invoiceNumber(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "rfidTag":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_rfidTag(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "barcode":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_barcode(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "locationId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_locationId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "lifecycleState":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_lifecycleState(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "primaryCiId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_primaryCiId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "notes":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_notes(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "customFields":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_customFields(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "tags":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_tags(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "cis":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_cis(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "children":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_children(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "movements":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_movements(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "documents":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Asset_documents(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
 var cIImplementors = []string{"CI"}
 
 func (ec *executionContext) _CI(ctx context.Context, sel ast.SelectionSet, obj *ci.Item) graphql.Marshaler {
@@ -5934,6 +9731,21 @@ func (ec *executionContext) _CI(ctx context.Context, sel ast.SelectionSet, obj *
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "assetId":
+			out.Values[i] = ec._CI_assetId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "parentCiId":
+			out.Values[i] = ec._CI_parentCiId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "childMode":
+			out.Values[i] = ec._CI_childMode(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -6051,6 +9863,104 @@ func (ec *executionContext) _CIEdge(ctx context.Context, sel ast.SelectionSet, o
 	return out
 }
 
+var documentImplementors = []string{"Document"}
+
+func (ec *executionContext) _Document(ctx context.Context, sel ast.SelectionSet, obj *document.Document) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, documentImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Document")
+		case "id":
+			out.Values[i] = ec._Document_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "title":
+			out.Values[i] = ec._Document_title(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "description":
+			out.Values[i] = ec._Document_description(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "fileName":
+			out.Values[i] = ec._Document_fileName(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "fileSize":
+			out.Values[i] = ec._Document_fileSize(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "mimeType":
+			out.Values[i] = ec._Document_mimeType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "version":
+			out.Values[i] = ec._Document_version(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "category":
+			out.Values[i] = ec._Document_category(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "tags":
+			out.Values[i] = ec._Document_tags(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "uploadedBy":
+			out.Values[i] = ec._Document_uploadedBy(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "scanStatus":
+			out.Values[i] = ec._Document_scanStatus(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._Document_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "updatedAt":
+			out.Values[i] = ec._Document_updatedAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
 var jobImplementors = []string{"Job"}
 
 func (ec *executionContext) _Job(ctx context.Context, sel ast.SelectionSet, obj *jobs.Job) graphql.Marshaler {
@@ -6130,6 +10040,172 @@ func (ec *executionContext) _Job(ctx context.Context, sel ast.SelectionSet, obj 
 			out.Values[i] = ec._Job_finishedAt(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
 				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var movementImplementors = []string{"Movement"}
+
+func (ec *executionContext) _Movement(ctx context.Context, sel ast.SelectionSet, obj *movement.Movement) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, movementImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("Movement")
+		case "id":
+			out.Values[i] = ec._Movement_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "itemKind":
+			out.Values[i] = ec._Movement_itemKind(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "movementType":
+			out.Values[i] = ec._Movement_movementType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "assetId":
+			out.Values[i] = ec._Movement_assetId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "fromLocationId":
+			out.Values[i] = ec._Movement_fromLocationId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "toLocationId":
+			out.Values[i] = ec._Movement_toLocationId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "quantity":
+			out.Values[i] = ec._Movement_quantity(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "actorId":
+			out.Values[i] = ec._Movement_actorId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "assigneeUserId":
+			out.Values[i] = ec._Movement_assigneeUserId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "assigneeTeamId":
+			out.Values[i] = ec._Movement_assigneeTeamId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "reason":
+			out.Values[i] = ec._Movement_reason(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "ticketId":
+			out.Values[i] = ec._Movement_ticketId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "orderId":
+			out.Values[i] = ec._Movement_orderId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "documentId":
+			out.Values[i] = ec._Movement_documentId(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "notes":
+			out.Values[i] = ec._Movement_notes(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "occurredAt":
+			out.Values[i] = ec._Movement_occurredAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "createdAt":
+			out.Values[i] = ec._Movement_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var movementConnectionImplementors = []string{"MovementConnection"}
+
+func (ec *executionContext) _MovementConnection(ctx context.Context, sel ast.SelectionSet, obj *MovementConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, movementConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("MovementConnection")
+		case "nodes":
+			out.Values[i] = ec._MovementConnection_nodes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pageInfo":
+			out.Values[i] = ec._MovementConnection_pageInfo(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._MovementConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -6402,6 +10478,28 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 				}()
 				res = ec._Query_jobs(ctx, field)
 				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "asset":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_asset(ctx, field)
+				if res == graphql.RequiredNull {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
 				return res
@@ -7720,6 +11818,16 @@ func (ec *executionContext) marshalNCIEdge2ᚖgithubᚗcomᚋDataHubᚑChiemgau�
 	return ec._CIEdge(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNDocument2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocument(ctx context.Context, sel ast.SelectionSet, v *document.Document) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Document(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalNFloat2float64(ctx context.Context, v any) (float64, error) {
 	res, err := graphql.UnmarshalFloatContext(ctx, v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -7838,6 +11946,32 @@ func (ec *executionContext) marshalNJob2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋR
 		return graphql.Null
 	}
 	return ec._Job(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNMovement2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmovementᚐMovementᚄ(ctx context.Context, sel ast.SelectionSet, v []*movement.Movement) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNMovement2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmovementᚐMovement(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNMovement2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmovementᚐMovement(ctx context.Context, sel ast.SelectionSet, v *movement.Movement) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._Movement(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalNPageInfo2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐPageInfo(ctx context.Context, sel ast.SelectionSet, v *PageInfo) graphql.Marshaler {
@@ -8249,6 +12383,13 @@ func (ec *executionContext) marshalN__TypeKind2string(ctx context.Context, sel a
 	return res
 }
 
+func (ec *executionContext) marshalOAsset2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋassetᚐAsset(ctx context.Context, sel ast.SelectionSet, v *asset.Asset) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._Asset(ctx, sel, v)
+}
+
 func (ec *executionContext) unmarshalOBoolean2bool(ctx context.Context, v any) (bool, error) {
 	res, err := graphql.UnmarshalBoolean(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -8279,6 +12420,25 @@ func (ec *executionContext) marshalOBoolean2ᚖbool(ctx context.Context, sel ast
 	return res
 }
 
+func (ec *executionContext) marshalOCI2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋciᚐItemᚄ(ctx context.Context, sel ast.SelectionSet, v []*ci.Item) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNCI2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋciᚐItem(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
 func (ec *executionContext) marshalOCI2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋciᚐItem(ctx context.Context, sel ast.SelectionSet, v *ci.Item) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -8292,6 +12452,42 @@ func (ec *executionContext) unmarshalOCIFilter2ᚖgithubᚗcomᚋDataHubᚑChiem
 	}
 	res, err := ec.unmarshalInputCIFilter(ctx, v)
 	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalODocument2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocumentᚄ(ctx context.Context, sel ast.SelectionSet, v []*document.Document) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNDocument2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocument(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) unmarshalOFloat2ᚖfloat64(ctx context.Context, v any) (*float64, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalFloatContext(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOFloat2ᚖfloat64(ctx context.Context, sel ast.SelectionSet, v *float64) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	res := graphql.MarshalFloatContext(*v)
+	return graphql.WrapContextMarshaler(ctx, res)
 }
 
 func (ec *executionContext) unmarshalOID2string(ctx context.Context, v any) (string, error) {
@@ -8358,6 +12554,13 @@ func (ec *executionContext) marshalOMap2map(ctx context.Context, sel ast.Selecti
 	_ = ctx
 	res := graphql.MarshalMap(v)
 	return res
+}
+
+func (ec *executionContext) marshalOMovementConnection2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐMovementConnection(ctx context.Context, sel ast.SelectionSet, v *MovementConnection) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._MovementConnection(ctx, sel, v)
 }
 
 func (ec *executionContext) marshalORackLayout2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐRackLayout(ctx context.Context, sel ast.SelectionSet, v *RackLayout) graphql.Marshaler {

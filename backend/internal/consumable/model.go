@@ -1,40 +1,47 @@
 // Package consumable implements the Lagerverwaltung for Verbrauchsmaterial
-// (spec §6.9): stock levels with min-level alerting and auditable movements.
+// (spec §6.9): stock per bin with min-level alerting and auditable movements
+// (STK-01 to STK-03, WP-283).
 package consumable
 
 import "time"
 
-// Consumable is a stock item (cable, SFP, toner, ...).
+// Consumable is a stock item (cable, SFP, toner, ...). Its stock lies in
+// bins (Stock, table stock_level); StockLevel is the sum of on_hand over
+// the bins the caller sees, kept read-only and deprecated until WP-320.
 type Consumable struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
 	ClientID       string    `json:"client_id,omitempty"`
 	Name           string    `json:"name"`
 	SKU            string    `json:"sku,omitempty"`
+	Barcode        string    `json:"barcode,omitempty"`
+	SupplierID     string    `json:"supplier_id,omitempty"`
 	Category       string    `json:"category"`
 	Unit           string    `json:"unit"`
 	StockLevel     float64   `json:"stock_level"`
 	MinLevel       float64   `json:"min_level"`
-	Location       string    `json:"location,omitempty"`
 	Notes          string    `json:"notes,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// LowStock reports whether the stock level is at or below the minimum.
+// LowStock reports whether the stock (sum over the bins) is at or below the
+// minimum.
 func (c *Consumable) LowStock() bool { return c.StockLevel <= c.MinLevel }
 
 // Movement is one stock in/out event.
 type Movement struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ConsumableID   string    `json:"consumable_id"`
-	Direction      string    `json:"direction"` // in | out
-	Quantity       float64   `json:"quantity"`
-	Reason         string    `json:"reason,omitempty"`
-	Reference      string    `json:"reference,omitempty"`
-	ActorID        string    `json:"actor_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ConsumableID   string `json:"consumable_id"`
+	Direction      string `json:"direction"` // in | out
+	// LocationID is the bin: the target of in, the source of out.
+	LocationID string    `json:"location_id,omitempty"`
+	Quantity   float64   `json:"quantity"`
+	Reason     string    `json:"reason,omitempty"`
+	Reference  string    `json:"reference,omitempty"`
+	ActorID    string    `json:"actor_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // CreateConsumableRequest is the payload for creating a consumable.
@@ -42,32 +49,64 @@ type CreateConsumableRequest struct {
 	ClientID   string  `json:"client_id,omitempty"`
 	Name       string  `json:"name"`
 	SKU        string  `json:"sku,omitempty"`
+	Barcode    string  `json:"barcode,omitempty"`
+	SupplierID string  `json:"supplier_id,omitempty"`
 	Category   string  `json:"category,omitempty"`
 	Unit       string  `json:"unit,omitempty"`
-	StockLevel float64 `json:"stock_level,omitempty"`
 	MinLevel   float64 `json:"min_level,omitempty"`
-	Location   string  `json:"location,omitempty"`
 	Notes      string  `json:"notes,omitempty"`
 }
 
 // UpdateConsumableRequest is the payload for updating a consumable.
 type UpdateConsumableRequest struct {
-	ClientID *string  `json:"client_id,omitempty"`
-	Name     *string  `json:"name,omitempty"`
-	SKU      *string  `json:"sku,omitempty"`
-	Category *string  `json:"category,omitempty"`
-	Unit     *string  `json:"unit,omitempty"`
-	MinLevel *float64 `json:"min_level,omitempty"`
-	Location *string  `json:"location,omitempty"`
-	Notes    *string  `json:"notes,omitempty"`
+	ClientID   *string  `json:"client_id,omitempty"`
+	Name       *string  `json:"name,omitempty"`
+	SKU        *string  `json:"sku,omitempty"`
+	Barcode    *string  `json:"barcode,omitempty"`
+	SupplierID *string  `json:"supplier_id,omitempty"`
+	Category   *string  `json:"category,omitempty"`
+	Unit       *string  `json:"unit,omitempty"`
+	MinLevel   *float64 `json:"min_level,omitempty"`
+	Notes      *string  `json:"notes,omitempty"`
 }
 
-// CreateMovementRequest records a stock in/out.
+// CreateMovementRequest records a stock in/out (transitional path until
+// WP-756): in is a receipt into the bin location_id, out a retrieval from
+// it; without location_id the only bin of the consumable is used.
 type CreateMovementRequest struct {
-	Direction string  `json:"direction"`
-	Quantity  float64 `json:"quantity"`
-	Reason    string  `json:"reason,omitempty"`
-	Reference string  `json:"reference,omitempty"`
+	Direction  string  `json:"direction"`
+	LocationID string  `json:"location_id,omitempty"`
+	Quantity   float64 `json:"quantity"`
+	Reason     string  `json:"reason,omitempty"`
+	Reference  string  `json:"reference,omitempty"`
+}
+
+// Stock is the stock of a consumable in one bin (a row of stock_level):
+// on_hand never drops below zero, reserved never exceeds on_hand. client_id
+// and site_id are those of the bin.
+type Stock struct {
+	ID             string    `json:"-"`
+	OrganizationID string    `json:"-"`
+	ConsumableID   string    `json:"consumable_id"`
+	LocationID     string    `json:"location_id"`
+	ClientID       string    `json:"client_id,omitempty"`
+	SiteID         string    `json:"site_id,omitempty"`
+	OnHand         float64   `json:"on_hand"`
+	Reserved       float64   `json:"reserved"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Booking is one quantity booking on the stock of a consumable per bin
+// (ApplyBooking): receipt into ToLocationID, retrieval from FromLocationID,
+// correction with exactly one of them (to raises, from lowers) and
+// transfer between two different bins, always with Quantity > 0.
+type Booking struct {
+	OrganizationID string
+	ConsumableID   string
+	MovementType   string
+	FromLocationID string
+	ToLocationID   string
+	Quantity       float64
 }
 
 // FilterParams scopes consumable list queries.

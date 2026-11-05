@@ -66,6 +66,8 @@ var Channels = []Channel{
 	{Name: "graphql-search", Read: "POST /bff/graphql { searchEverything(q) }", GraphQL: "searchEverything"},
 	{Name: "graphql-review-inbox", Read: "POST /bff/graphql { reviewInbox }", GraphQL: "reviewInbox"},
 	{Name: "graphql-jobs", Read: "POST /bff/graphql { jobs }", GraphQL: "jobs"},
+	// The asset aggregate (WP-311, module inventory).
+	{Name: "graphql-asset", Read: "POST /bff/graphql { asset(id) }", GraphQL: "asset"},
 }
 
 // ScopeKinds are the principal scopes of the matrix (TEN-04): the whole

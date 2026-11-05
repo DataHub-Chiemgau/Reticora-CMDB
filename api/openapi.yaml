@@ -3412,6 +3412,11 @@ paths:
       operationId: createAssignment
       tags: [Assignments]
       summary: Create an assignment
+      description: >-
+        Assigns the asset of `asset_id`, or the asset of the CI of `ci_id`
+        (`ci.asset_id`), to the user `assigned_to` through the assignment
+        service (WP-275, until WP-746); `id` is the id of the assignment
+        movement. A CI without asset is 422; an assigned asset 409.
       requestBody:
         required: true
         content:
@@ -3429,6 +3434,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3456,13 +3467,17 @@ paths:
       operationId: deleteAssignment
       tags: [Assignments]
       summary: Delete an assignment
+      description: >-
+        Refused with 409 (`https://reticora.io/problems/assignment-append-only`):
+        the history of assignments is append-only (WP-275); return or transfer
+        the asset instead.
       responses:
-        '204':
-          description: Assignment deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/documents:
     x-phase: P2
@@ -4041,6 +4056,14 @@ paths:
         audit entry disposal_record.created is written in the same transaction.
         An asset, CI, supplier or evidence document the caller cannot see
         answers 404 without a record.
+
+        The disposal runs in one transaction (MGT-02, WP-278): the asset or
+        CI is locked, the record is written, an asset books the stock
+        movement disposal (event stock.movement), and the asset or CI enters
+        the lifecycle state disposed with the context disposal_record and
+        disposal_date (event lifecycle.changed). A CI whose type has no
+        lifecycle model gets the record only. Any error rolls back record,
+        movement, state change, audit entries and events.
       requestBody:
         required: true
         content:
@@ -4060,6 +4083,16 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            The current lifecycle state of the asset or CI has no transition
+            to disposed, or it has no state (invalid-transition, field
+            asset_id or ci_id, with from_state and the allowed source states
+            of its model, e.g. retired and repair), or the transition fails
+            its guard (lifecycle-guard with violations). Nothing is recorded.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/DisposalTransitionProblem' }
 
   /api/v1/disposal-records/{id}:
     x-phase: P2
@@ -5013,6 +5046,10 @@ paths:
       operationId: updateConsumable
       tags: [Consumables]
       summary: Update a consumable
+      description: >-
+        A barcode that an asset (barcode or inventory number), another
+        consumable or a location of the organization holds is a 409 that does
+        not name the holder (INV-03).
       requestBody:
         required: true
         content:
@@ -5032,6 +5069,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteConsumable
       tags: [Consumables]
@@ -5043,6 +5084,15 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The consumable has movements in the ledger, which are kept
+            (dependencies stock_movement, WP-274), or stock on hand or
+            reserved in a bin (WP-283).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DependencyProblem'
 
   /api/v1/consumables/{id}/movements:
     x-phase: P2
@@ -5052,18 +5102,32 @@ paths:
     get:
       operationId: listConsumableMovements
       tags: [Consumables]
+      deprecated: true
+      x-deprecated-at: '2026-11-04'
+      x-sunset: '2027-11-05'
+      x-successor: '/api/v1/stock-movements'
       summary: List stock movements of a consumable
+      description: >-
+        Deprecated (E-38, WP-756): the successor is GET
+        /api/v1/stock-movements with the filter consumable_id, which returns
+        the same rows and pages. Each row keeps direction (in when it books
+        only into to_location_id, else out), location_id (the bin of that
+        direction) and reference (the notes). The path answers until
+        x-sunset with the Deprecation, Sunset and successor-version Link
+        headers.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Paginated movements
+          description: The movements of the consumable, newest first.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StockMovementListResponse'
+                $ref: '#/components/schemas/ConsumableMovementListResponse'
+        '400':
+          description: The cursor is malformed or was issued for another order.
         '401':
           $ref: '#/components/responses/Unauthorized'
     post:
@@ -5071,18 +5135,22 @@ paths:
       tags: [Consumables]
       summary: Record a stock in/out movement and adjust the level atomically
       description: >-
-        The planned successor is POST /api/v1/stock-movements with the
-        quantity bookings receipt and retrieval (E-38); the deprecation
-        follows once the successor is implemented (WP-283, WP-756).
+        The successor is POST /api/v1/stock-movements with consumable_id and
+        the quantity bookings receipt and retrieval (E-38, WP-756); this
+        path books through the same movement service: in is a receipt into
+        the bin location_id, out a retrieval from it. The deprecation follows
+        with WP-846.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateStockMovementRequest'
+              $ref: '#/components/schemas/CreateConsumableMovementRequest'
       responses:
         '201':
-          description: Movement recorded; returns movement and updated consumable
+          description: >-
+            Movement recorded; the body is {"movement": ConsumableMovement}
+            (WP-756).
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5090,7 +5158,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The bin does not hold the quantity (type insufficient-stock).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            location_id names no visible bin, a bin of another client, or is
+            missing while the consumable has none or several bins.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes:
     x-phase: P2
@@ -9224,9 +9304,13 @@ paths:
       tags: [Assignments]
       summary: Return an assigned asset or CI
       description: >-
-        Marks the assignment as returned, recording the return condition and
-        timestamp. The optional `notes` field overwrites the assignment notes
-        when non-empty.
+        Returns the asset of the assignment (its `asset_id`, or the asset of
+        its CI) from the holder of the assignment through the assignment
+        service (WP-275, until WP-746): the movement `return` is booked and
+        the open assignments of the asset are closed, recording the return
+        condition and timestamp. The optional `notes` field overwrites the
+        assignment notes when non-empty. 409 when the assignment is closed or
+        the asset has another holder.
       requestBody:
         required: false
         content:
@@ -9246,6 +9330,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -9259,8 +9347,11 @@ paths:
       tags: [Assignments]
       summary: Transfer an assignment to a new assignee
       description: >-
-        Marks the existing assignment as transferred and creates a new active
-        assignment of the same asset/CI for the new assignee.
+        Transfers the asset of the assignment from its holder to the user
+        `new_assignee` through the assignment service (WP-275, until WP-746):
+        the open assignments are closed as transferred and a new active
+        assignment is created. 409 when the assignment is closed or the asset
+        has another holder.
       requestBody:
         required: true
         content:
@@ -9280,6 +9371,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -10764,8 +10859,10 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
-        '422':
-          description: Records such as tickets still reference the team.
+        '409':
+          description: >-
+            Records such as tickets or an asset the team holds
+            (assigned_team_id, WP-745) still reference the team.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -12998,14 +13095,32 @@ paths:
   /api/v1/assets/{id}/children:
     x-phase: P2
     x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listAssetsIdChildren
-      summary: List child composition entries of a parent asset
+      tags: [Assets]
+      summary: List the child CIs of the CIs of an asset
+      description: >-
+        The CIs whose parent_ci_id is a CI linked to the asset (ci.asset_id),
+        each with its child_mode (configuration or standalone; AST-05,
+        WP-742). The legacy composition rows are no longer read. An asset
+        without CIs, or one outside the caller's scope, has no children.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List child composition entries of a parent asset
+          description: One page of the child CIs (API-02)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIListResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/assets/{id}/lifecycle-transitions:
     x-phase: P2
@@ -13089,9 +13204,19 @@ paths:
         /api/v1/stock-movements with the filter asset_id, which reads the
         same ledger. The path answers until x-sunset with the Deprecation,
         Sunset and successor-version Link headers.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the movement ledger of an asset
+          description: The movements of the asset, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementListResponse'
+        '400':
+          description: The cursor is malformed or was issued for another order.
         '401':
           description: Unauthorized
         '404':
@@ -16219,16 +16344,37 @@ paths:
               schema: { $ref: '#/components/schemas/LifecycleGuardProblem' }
 
   /api/v1/cis/{id}/parent:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCisIdParent
+      deprecated: true
+      x-deprecated-at: '2026-11-04'
+      x-sunset: '2027-11-05'
+      x-successor: '/api/v1/cis/{id}'
+      tags: [CIs]
       summary: Get the parent asset owning this CI and the inventory fields it contributes
+      description: >-
+        Deprecated (E-25, API-01; WP-742): GET /api/v1/cis/{id} carries
+        parent_ci_id, child_mode, asset and asset_source_ci_id. The answer
+        keeps the former format and reads ci.parent_ci_id: composition is
+        the child CI (id = child_ci_id) with the flags derived from
+        child_mode (configuration: configuration_only; standalone: the
+        independently_* flags), parent_asset_id the asset of the parent CI,
+        its own or the one it derives as a configuration child (WP-273).
+        inherited_fields lists the inherited fields of a configuration child
+        and is empty for a standalone child. A CI without parent_ci_id, or
+        whose parent has no asset, is 404.
       responses:
         '200':
           description: Parent composition link and the parent asset's read-only inventory identity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CIParentLegacy' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
         '404':
-          description: CI has no parent asset
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/state:
     get:
@@ -16247,54 +16393,6 @@ paths:
           description: Unauthorized
         '404':
           $ref: '#/components/responses/NotFound'
-
-  /api/v1/compositions:
-    x-phase: P2
-    x-feature: assets_basic
-    get:
-      operationId: listCompositions
-      summary: Manage parent-asset/child composition links
-      responses:
-        '200':
-          description: Manage parent-asset/child composition links
-        '401':
-          description: Unauthorized
-    post:
-      operationId: createCompositions
-      summary: Manage parent-asset/child composition links
-      responses:
-        '201':
-          description: Manage parent-asset/child composition links
-        '401':
-          description: Unauthorized
-
-  /api/v1/compositions/{id}:
-    x-phase: P2
-    x-feature: assets_basic
-    get:
-      operationId: getCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '200':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
-    patch:
-      operationId: updateCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '200':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
-    delete:
-      operationId: deleteCompositionsId
-      summary: Read, update or delete a composition link
-      responses:
-        '204':
-          description: Read, update or delete a composition link
-        '401':
-          description: Unauthorized
 
   /api/v1/history/snapshots:
     post:
@@ -16549,6 +16647,12 @@ paths:
           description: Unauthorized
         '404':
           description: The item is unknown, of another organization or outside the caller's scope.
+        '409':
+          description: The item has movements in the ledger, which are kept (dependencies stock_movement, WP-274).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/DependencyProblem'
 
   /api/v1/lifecycle-definitions:
     get:
@@ -16748,10 +16852,12 @@ paths:
     patch:
       operationId: updateLocation
       tags: [Locations]
-      summary: Rename and/or move a node
+      summary: Rename and/or move a node, assign its barcode
       description: >-
         Moving re-derives path, site and client of the node and its subtree.
-        Sites cannot be moved. Renaming or moving a rack node needs the
+        Sites cannot be moved. barcode assigns a code to the node or removes
+        it with an empty string (audit location.barcode_changed, INV-03); it
+        needs no entitlement of its own. Renaming or moving a rack node needs the
         rack_view feature like PATCH /racks/{id} (403 feature-not-entitled
         otherwise, the rack stays unchanged, F-400).
       requestBody:
@@ -17062,13 +17168,26 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The filter of the view reads assets without asset:read, the
+            module inventory or the entitlement assets_basic
+            (feature-not-entitled), or reads a field the caller may not read
+            (FieldForbiddenProblem), as POST /api/v1/search/query checks it
+            (WP-309).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '409':
           description: The caller has a view of this name already.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17119,8 +17238,23 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SavedView' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The filter of the view reads assets without asset:read, the
+            module inventory or the entitlement assets_basic
+            (feature-not-entitled), or reads a field the caller may not read
+            (FieldForbiddenProblem), as POST /api/v1/search/query checks it
+            (WP-309).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -17129,7 +17263,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17152,32 +17286,101 @@ paths:
     x-feature: assets_basic
     get:
       operationId: listStockMovements
-      summary: List and record inventory movements (append-only ledger)
+      summary: List the movements of the ledger (append-only)
+      description: >-
+        The movements of assets, consumables and quantity items under the
+        caller's scope, newest first on (occurred_at, id) with a keyset
+        cursor (WP-274). location_id matches the source or the target;
+        occurred_from and occurred_to bound occurred_at inclusively.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - { name: asset_id, in: query, schema: { type: string, format: uuid } }
+        - { name: consumable_id, in: query, schema: { type: string, format: uuid } }
+        - { name: quantity_item_id, in: query, schema: { type: string, format: uuid } }
+        - { name: movement_type, in: query, schema: { $ref: '#/components/schemas/MovementType' } }
+        - { name: location_id, in: query, schema: { type: string, format: uuid } }
+        - { name: occurred_from, in: query, schema: { type: string, format: date-time } }
+        - { name: occurred_to, in: query, schema: { type: string, format: date-time } }
       responses:
         '200':
-          description: List and record inventory movements (append-only ledger)
+          description: The movements of one page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovementListResponse'
+        '400':
+          description: The cursor is malformed or was issued for another order.
         '401':
           description: Unauthorized
+        '422':
+          description: >-
+            An id filter is no UUID, movement_type is unknown, or
+            occurred_from/occurred_to is no RFC 3339 date-time; `field` names
+            it.
     post:
       x-feature: stock
       operationId: createStockMovements
-      summary: List and record inventory movements (append-only ledger)
+      summary: Book a physical movement
+      description: >-
+        Books through the movement service (WP-274, WP-756) in one
+        transaction. A consumable (consumable_id) books receipt (only
+        to_location_id), retrieval (only from_location_id), correction
+        (exactly one of them) or transfer (two different bins) with quantity
+        > 0 on its stock per bin; the consumable and then its stock rows in
+        location order are locked, so opposite transfers do not deadlock and
+        no bin drops below zero. A quantity item (until the merge into
+        consumable, E-40) books the same types on its stock level. An asset
+        moves only by transfer to to_location_id without quantity (E-142),
+        which also needs asset:move. The references are checked and
+        stock.movement is written to the outbox in the same transaction; any
+        error rolls back the whole booking.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStockMovementRequest'
       responses:
         '201':
-          description: List and record inventory movements (append-only ledger)
+          description: The booked movement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovement'
         '400':
-          description: movement_type is invalid or the item or quantity is missing.
+          description: The body is no valid JSON.
         '401':
           description: Unauthorized
+        '403':
+          description: >-
+            The caller lacks stock:write, or asset:move for the transfer of an
+            asset (E-142), or the organization is not entitled to stock
+            (feature-not-entitled).
         '404':
           description: >-
-            The asset or quantity item is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04); nothing is recorded.
+            The asset, consumable or quantity item is unknown, of another
+            organization or outside the caller's scope (all alike, TEN-04);
+            nothing is recorded.
+        '409':
+          description: >-
+            The withdrawal exceeds the available stock of the bin or the stock
+            level of the quantity item (type
+            https://reticora.io/problems/insufficient-stock); nothing is
+            recorded.
         '422':
           description: >-
-            An id field is no UUID, or from_location_id/to_location_id names a
-            location that is unknown, of another organization or outside the
-            caller's scope; `field` names it.
+            assignment, return, reservation, release and disposal arise only
+            in their domain paths (type
+            https://reticora.io/problems/movement-type-reserved). Otherwise
+            `field` names the refused field: a legacy or unknown
+            movement_type, a type not booked for the object (an asset only
+            transfer), none or several objects, quantity on an asset or
+            missing for a consumable or quantity item, the locations a type
+            does not take, an id that is no UUID, a location that is not
+            visible, no bin (consumable) or of another client, or a ticket,
+            order, workflow run or document that is not visible.
 
 
   /api/v1/inventory/items/{id}/convert:
@@ -17203,27 +17406,43 @@ paths:
       description: >-
         The flat fields of the filter spec are AND-ed with the filter AST in
         where (SRC-03): groups and, or and not nest comparisons of a field
-        with eq, ne, lt, lte, gt, gte, like (* as wildcard), in or exists.
-        Fields are the whitelisted columns of the entity kind, its dynamic
-        attributes (attributes.<key>) and, for CIs, the fields of the linked
-        asset (asset.<field>). At most 10 levels and 100 nodes. Every value
+        with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or,
+        for number and time fields, between (a list of two values,
+        inclusive). Fields are the whitelisted columns of the entity kind
+        (for assets also the AST-01 columns manufacturer, model,
+        cost_center, currency, supplier_id, contract_id, owner_user_id and
+        owner_team_id), its dynamic attributes (attributes.<key>), its tags
+        (tags with has_any or has_all and a list of tag keys of the tag
+        catalog; the flat tags mean has_all) and, for CIs, the fields of
+        the linked asset (asset.<field>) and its custom fields
+        (asset.attributes.<key>). An attribute (also of the flat
+        attributes, also a computed one) must have a definition of the
+        organization or the system for the queried types (ci_type, else
+        every type): an unknown attribute is 422, one that is not
+        searchable 400 with a hint, one searchable with different data
+        types 400 with the hint to give ci_type; it compares by the data
+        type of its definition. An unknown tag key is 422. At most 10 levels
+        and 100 nodes. Every value
         is checked against its field before any query runs: UUID fields
         take UUIDs, time and date fields an RFC 3339 time or a date
         (YYYY-MM-DD), number fields numbers, boolean fields true or false,
         text fields strings without NUL; each element of in likewise, and
         exists takes true, false or no value. A dynamic attribute compares
-        by the type of the value (for in of the first element, all elements
-        sharing it): a number only with numeric values, a boolean only with
-        booleans, a time string with lt, lte, gt or gte only with values
-        holding a time, other strings as text. An attribute value of another
-        JSON type counts as missing: it matches neither eq, in nor an order
+        by the data type of its definition (a number value may be given as
+        a numeric string). A stored attribute value of another JSON type
+        counts as missing: it matches neither eq, in, between nor an order
         comparison and, like a missing key, matches ne. The ids in
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
         where.and[1].value or where.value[0], or the flat field). Requires
         search:read and the read permission of the entity kind (ci:read for
-        ci, asset:read for asset); the results follow the caller's client,
-        site and team scope. Rebuilding the index (/api/v1/search/reindex)
+        ci, asset:read for asset); asset.<field> and asset.attributes.<key>
+        of a CI query need asset:read as well. An asset query and the asset
+        fields of a CI query need the module inventory and the entitlement
+        assets_basic (403 feature-not-entitled); the route itself is not
+        gated. Saving a view (POST and PATCH /api/v1/saved-views) checks
+        its filter_spec by the same rules (field filter_spec.<field>). The
+        results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex)
         requires search:write. sort and columns present the result of a
         saved view (VIE-01) and select no rows: sort orders the rows by its
         keys (NULLs last, then by id; without sort by name), columns adds
@@ -17260,23 +17479,30 @@ paths:
         '400':
           description: >-
             Invalid filter spec (malformed JSON, unknown member or
-            entity_kind), or a value the database refuses after the checks
-            (e.g. NUL in a flat text field); the detail is generic and never
+            entity_kind), an attribute that is not searchable or searchable
+            with different data types (field names it, the detail gives the
+            hint), or a value the database refuses after the checks (e.g.
+            NUL in a flat text field); the detail is generic and never
             carries database text.
         '401':
           description: Unauthorized
         '403':
           description: >-
             The caller lacks search:read or the read permission of the
-            queried entity kind (ci:read or asset:read) (ProblemDetail), or
-            the spec reads a field the caller may not read (field
+            queried entity kind (ci:read or asset:read), or asset:read for
+            asset fields of a CI query (ProblemDetail, "missing permission
+            asset:read"); the organization lacks assets_basic or the module
+            inventory is off for an asset query or asset fields (type
+            https://reticora.io/problems/feature-not-entitled); or the spec
+            reads a field the caller may not read (field
             permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden,
             FieldForbiddenProblem: `fields` names the fields as the request
             names them): a typed field or attributes.<key> of the AST, a
             flat field on a column (asset_category, warranty_within_days and
             the other flat filters of an asset), a key of attributes, tags
-            (as attributes.tags), a sort key, a column or, for CIs,
-            asset.<field>, when the caller cannot read it in every client and
+            (flat or compared with has_any or has_all, as attributes.tags),
+            a sort key, a column or, for CIs, asset.<field> and
+            asset.attributes.<key>, when the caller cannot read it in every client and
             site scope of its role assignments for one of the queried types
             (ci_type, without it every type; asset.<field> and asset queries
             every asset type), or any such field under an object grant none.
@@ -17294,9 +17520,10 @@ paths:
                   - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '422':
           description: >-
-            Invalid filter AST, filter value, sort key or column; field
-            names it (where.<path>, the flat field, sort[<i>].field,
-            sort[<i>].dir or columns[<i>]).
+            Invalid filter AST, filter value, sort key or column, an unknown
+            attribute or an unknown tag key; field names it (where.<path>,
+            the flat field, tags[<i>], sort[<i>].field, sort[<i>].dir or
+            columns[<i>]).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -18445,7 +18672,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The tag is assigned to CIs or tickets, or is a system tag.
+          description: The tag is assigned to CIs, tickets or assets, or is a system tag.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -18708,17 +18935,34 @@ paths:
   /api/v1/assets/{id}/assign:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: assignAsset
       tags: [Assignments]
       summary: Assign an asset
-      description: Planned (E-38); WP-275 implements the operation.
+      description: >-
+        Assigns the free asset to exactly one holder, a user or a team, in one
+        transaction (AST-02, AST-07, WP-275): the asset is locked, the
+        movement `assignment` is booked in the ledger, the holder cache of the
+        asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is
+        set and `asset.assigned` is written to the outbox. 409 when the asset
+        has a holder already (`https://reticora.io/problems/asset-assigned`);
+        422 for no or two holders and for a user or team of another
+        organization; 404 for an asset outside the caller's scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignAssetRequest'
       responses:
-        '200':
-          description: Done. The request and response schemas come with WP-275.
+        '201':
+          description: Assigned; `id` is the id of the assignment movement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -18727,23 +18971,41 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/return:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: returnAsset
       tags: [Assignments]
       summary: Return an assigned asset
-      description: Planned (E-38); WP-275 implements the operation.
+      description: >-
+        Takes the asset back from its holder `expected_holder` in one
+        transaction (WP-275): the movement `return` with the previous holder
+        and `reason` = `return_condition` is booked, the holder cache is
+        emptied, the open assignments of the asset are closed and
+        `asset.returned` is written to the outbox. 409 when the asset has no
+        holder (`https://reticora.io/problems/asset-not-assigned`) or another
+        one (`https://reticora.io/problems/holder-mismatch`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReturnAssetRequest'
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-275.
+          description: Returned; the booked return movement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockMovement'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -18752,23 +19014,41 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/transfer:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: transferAsset
       tags: [Assignments]
       summary: Transfer an assigned asset to another assignee
-      description: Planned (E-38); WP-275 implements the operation.
+      description: >-
+        Changes the holder from `expected_holder` to exactly one new holder,
+        a user or a team, in one transaction (WP-275): the pair `return` (old
+        holder) and `assignment` (new holder) with the same `occurred_at` is
+        booked, the holder cache is set, the open assignments are closed as
+        transferred and `asset.returned` and then `asset.assigned` are written
+        to the outbox. 409 when the asset has no holder or another one than
+        `expected_holder`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferAssetRequest'
       responses:
-        '200':
-          description: Done. The request and response schemas come with WP-275.
+        '201':
+          description: Transferred; the new assignment, `id` is the id of its assignment movement.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Assignment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -18777,6 +19057,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
@@ -18999,17 +19281,47 @@ paths:
   /api/v1/assets/{id}/tags:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     put:
       operationId: replaceAssetTags
       tags: [Tags]
-      summary: Replace the tags of an asset
-      description: Planned (E-38); WP-755 implements the operation.
+      summary: Replace the tags of an asset (API-06)
+      description: >-
+        Replaces the tags of the asset with the catalog tags `tags` (keys) in
+        one transaction; an empty list removes every tag. Unknown keys are
+        422 with the entries (tags[i]); tags are not created implicitly
+        (POST /api/v1/tags). A changed list raises the version by 1, writes
+        the history row of the field tags and the event asset.changed with
+        changed_fields ["tags"]; an unchanged list changes nothing. If-Match
+        as with PATCH /api/v1/assets/{id} (API-07, WP-740): 412 when it is
+        required but missing or names no version of the asset, 409 with the
+        fields when the tags changed since. An asset outside the caller's
+        scope is 404. custom_fields.tags of POST and PATCH /api/v1/assets is
+        refused with 400. Requires asset:write.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the version the change is based on, or "*".
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceAssetTagsRequest'
       responses:
         '200':
-          description: Replaced. The request and response schemas come with WP-755.
+          description: Tags replaced; the asset
+          headers:
+            ETag:
+              description: The new asset version.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19018,8 +19330,24 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The tags changed since the If-Match version
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/VersionConflictProblem' }
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+        '412':
+          description: If-Match missing although required, or not a version of the asset
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: tags is missing or names unknown tags; `violations` names the entries.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ViolationProblem' }
 
   /api/v1/reservations/{id}/convert:
     x-phase: P2
@@ -19070,20 +19398,25 @@ paths:
   /api/v1/consumables/{id}/stock:
     x-phase: P2
     x-feature: stock
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listConsumableStock
       tags: [Consumables]
       summary: List the stock levels of a consumable per bin
-      description: Planned (E-38); WP-283 implements the operation.
+      description: >-
+        The stock rows of the consumable in the bins visible under the
+        caller's client and site scope, ordered by bin (STK-02, WP-283).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the stock levels of a consumable per bin. The page follows the cursor contract (API-02); the item schema comes with WP-283.
+          description: List the stock levels of a consumable per bin. The page follows the cursor contract (API-02).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumableStockListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -20438,7 +20771,10 @@ components:
       description: >-
         The name is taken below the same parent: a site per client, a building
         per site, a room per building, a rack per room (LOC-03..06). `field`
-        is `name`; nothing was stored.
+        is `name`; nothing was stored. On PATCH also a barcode that an
+        asset (barcode or inventory number), a consumable or a location of
+        the organization holds (INV-03): `field` is `barcode`, the holder
+        is not named.
       content:
         application/problem+json:
           schema:
@@ -22859,15 +23195,26 @@ components:
         not: { $ref: '#/components/schemas/FilterExpr' }
         field:
           type: string
-          description: A column of the entity kind, attributes.<key> or (CIs) asset.<field>.
+          description: >-
+            A column of the entity kind, attributes.<key> (a searchable
+            attribute definition, custom fields for assets), tags (with
+            has_any or has_all only) or, for CIs, asset.<field> and
+            asset.attributes.<key> of the linked asset.
         op:
           type: string
-          enum: [eq, ne, lt, lte, gt, gte, like, in, exists]
+          enum: [eq, ne, lt, lte, gt, gte, like, in, exists, between, has_any, has_all]
+          description: >-
+            between compares number and time fields inclusively; has_any
+            and has_all compare the field tags with tag keys (one of them,
+            all of them).
         value:
           description: >-
             A value of the field's kind (UUID, RFC 3339 time or date, number,
-            boolean or string); a non-empty list of them for in; true, false
-            or nothing for exists.
+            boolean or string; an attribute takes the kind of its
+            definition, a number also as a numeric string); a non-empty list
+            of them for in; a list of exactly two for between; a non-empty
+            list of tag keys for has_any and has_all; true, false or nothing
+            for exists.
     SavedViewSortKey:
       type: object
       required: [field]
@@ -23968,6 +24315,21 @@ components:
                     type: string
                     description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
                   message: { type: string }
+    DisposalTransitionProblem:
+      description: >-
+        A refused disposal (422, WP-278): the lifecycle transition of the
+        asset or CI to disposed is not allowed from its current state
+        (invalid-transition) or fails its guard (lifecycle-guard).
+      allOf:
+        - $ref: '#/components/schemas/LifecycleGuardProblem'
+        - type: object
+          properties:
+            allowed_from_states:
+              type: array
+              items: { type: string }
+              description: >-
+                States of the lifecycle model with a transition to disposed
+                (invalid-transition only).
     LifecycleTransitionConflictProblem:
       description: >-
         from_state is not the current state (409, type
@@ -24899,6 +25261,58 @@ components:
         last_seen_at:
           type: string
           format: date-time
+
+    CIParentLegacy:
+      type: object
+      description: >-
+        Answer of the deprecated GET /api/v1/cis/{id}/parent in the format of
+        the former composition handler (API-01, WP-742).
+      required: [composition, inherited_fields]
+      properties:
+        composition:
+          type: object
+          required: [id, organization_id, parent_asset_id, child_ci_id, configuration_only, independently_serialized,
+            independently_assignable, independently_locatable, independently_lifecycle_managed, created_at, updated_at]
+          properties:
+            id:
+              type: string
+              description: ID of the child CI.
+            organization_id: { type: string }
+            parent_asset_id: { type: string }
+            child_ci_id: { type: string }
+            configuration_only: { type: boolean }
+            independently_serialized: { type: boolean }
+            independently_assignable: { type: boolean }
+            independently_locatable: { type: boolean }
+            independently_lifecycle_managed: { type: boolean }
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+        parent_asset:
+          type: object
+          description: Read-only inventory identity of the parent asset; missing when it cannot be read.
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            asset_tag: { type: string }
+            status: { type: string }
+            serial_number: { type: string }
+            barcode: { type: string }
+            rfid_tag: { type: string }
+            purchase_date: { type: string }
+            purchase_cost: { type: number }
+            currency: { type: string }
+            supplier: { type: string }
+            invoice_number: { type: string }
+            warranty_end: { type: string }
+            location: { type: string }
+        inherited_fields:
+          type: array
+          items: { type: string }
 
     CIListResponse:
       allOf:
@@ -26464,6 +26878,30 @@ components:
           description: >-
             Node of the canonical location tree; changed through stock
             movements and rack placement only.
+        assigned_user_id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: >-
+            Current holder, a user of the organization (holder cache, AST-02,
+            WP-745); at most one of assigned_user_id and assigned_team_id.
+            Not the owner (owner_user_id). Changed through POST
+            /api/v1/assets/{id}/assign, /return and /transfer only.
+        assigned_team_id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: >-
+            Current holder, a team of the organization (holder cache, AST-02,
+            WP-745). Not the owner (owner_team_id) and no scope of the asset.
+            Changed through POST /api/v1/assets/{id}/assign, /return and
+            /transfer only.
+        assignment_due_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: >-
+            Due date of the current assignment; only with a holder (WP-745).
         lifecycle_state:
           type: string
           readOnly: true
@@ -26475,6 +26913,14 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+        tags:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: >-
+            Keys of the catalog tags of the asset (WP-755), sorted; [] without
+            tags. Written by PUT /api/v1/assets/{id}/tags only.
         created_at:
           type: string
           format: date-time
@@ -26611,12 +27057,17 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+          description: >-
+            Custom fields; the key tags is refused with 400 (tags are catalog
+            tags, PUT /api/v1/assets/{id}/tags, WP-755).
 
     UpdateAssetRequest:
       type: object
       description: >-
-        location_id and lifecycle_state are read-only: sending either is 422
-        naming the canonical write path. An empty currency is the currency
+        location_id, lifecycle_state and the holder cache assigned_user_id,
+        assigned_team_id and assignment_due_at (WP-745) are read-only:
+        sending one is 422 naming the field and the canonical write path. An
+        empty currency is the currency
         of the organization, an empty purchase_price removes the price.
         Names of AST-01 (WP-739); asset_tag, purchase_cost, warranty_end,
         supplier and ci_id are unknown members (400).
@@ -26690,6 +27141,9 @@ components:
         custom_fields:
           type: object
           additionalProperties: true
+          description: >-
+            Custom fields; the key tags is refused with 400 (tags are catalog
+            tags, PUT /api/v1/assets/{id}/tags, WP-755).
 
     LinkAssetCIRequest:
       type: object
@@ -26734,7 +27188,11 @@ components:
 
     Assignment:
       type: object
-      required: [id, organization_id, assigned_to, assigned_by, assignment_type, status, assigned_at, created_at, updated_at]
+      description: >-
+        An assignment of an asset to a user (`assigned_to`) or a team
+        (`assigned_team_id`). Written by the assignment service (WP-275), its
+        `id` is the id of the assignment movement in the ledger.
+      required: [id, organization_id, assigned_by, assignment_type, status, assigned_at, created_at, updated_at]
       properties:
         id:
           type: string
@@ -26746,6 +27204,11 @@ components:
           type: string
         assigned_to:
           type: string
+          description: The user holder; absent for a team holder.
+        assigned_team_id:
+          type: string
+          format: uuid
+          description: The team holder (WP-275); absent for a user holder.
         assigned_by:
           type: string
         assignment_type:
@@ -26758,6 +27221,10 @@ components:
         due_date:
           type: string
           format: date-time
+        due_at:
+          type: string
+          format: date-time
+          description: The due date of the assignment (WP-275); `due_date` is its day in the time zone of the organization.
         returned_at:
           type: string
           format: date-time
@@ -26771,6 +27238,59 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    AssignAssetRequest:
+      type: object
+      description: Exactly one of `assigned_user_id` and `assigned_team_id` (WP-275).
+      properties:
+        assigned_user_id:
+          type: string
+          format: uuid
+          description: The user (`app_user.id`) the asset is assigned to.
+        assigned_team_id:
+          type: string
+          format: uuid
+          description: The team the asset is assigned to.
+        due_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
+
+    ReturnAssetRequest:
+      type: object
+      required: [expected_holder]
+      properties:
+        expected_holder:
+          type: string
+          format: uuid
+          description: The current holder (user or team); another one is 409.
+        return_condition:
+          type: string
+          description: Booked as `reason` of the return movement.
+        notes:
+          type: string
+
+    TransferAssetRequest:
+      type: object
+      description: The current holder and exactly one new holder, a user or a team (WP-275).
+      required: [expected_holder]
+      properties:
+        expected_holder:
+          type: string
+          format: uuid
+          description: The current holder (user or team); another one is 409.
+        assigned_user_id:
+          type: string
+          format: uuid
+        assigned_team_id:
+          type: string
+          format: uuid
+        due_at:
+          type: string
+          format: date-time
+        notes:
+          type: string
 
     Signature:
       type: object
@@ -27526,56 +28046,116 @@ components:
         client_id: { type: string }
         name: { type: string }
         sku: { type: string }
+        barcode:
+          type: string
+          description: Unique per organization where set (WP-283).
+        supplier_id:
+          type: string
+          format: uuid
+          description: Supplier of the consumable (E-41, WP-283).
         category: { type: string }
         unit: { type: string }
-        stock_level: { type: number }
+        stock_level:
+          type: number
+          readOnly: true
+          deprecated: true
+          description: >-
+            Sum of on_hand over the bins of the consumable the caller sees
+            (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept
+            as a computed field until WP-320 (WP-283).
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CreateConsumableRequest:
       type: object
       required: [name]
+      description: >-
+        The stock is booked per bin (POST /api/v1/consumables/{id}/movements
+        with location_id), not set on create (WP-283).
       properties:
         client_id: { type: string }
         name: { type: string }
         sku: { type: string }
+        barcode: { type: string }
+        supplier_id: { type: string, format: uuid }
         category: { type: string }
         unit: { type: string }
-        stock_level: { type: number }
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
     UpdateConsumableRequest:
       type: object
       properties:
-        client_id: { type: string }
+        client_id:
+          type: string
+          description: >-
+            A client that does not match the bins holding stock of the
+            consumable is 422 (WP-283).
         name: { type: string }
         sku: { type: string }
+        barcode: { type: string }
+        supplier_id: { type: string }
         category: { type: string }
         unit: { type: string }
         min_level: { type: number }
-        location: { type: string }
         notes: { type: string }
-    StockMovement:
+    ConsumableStock:
       type: object
-      required: [id, organization_id, consumable_id, direction, quantity, created_at]
+      description: The stock of a consumable in one bin (stock_level, STK-02, WP-283).
+      required: [consumable_id, location_id, on_hand, reserved, updated_at]
       properties:
-        id: { type: string }
-        organization_id: { type: string }
-        consumable_id: { type: string }
-        direction: { type: string, enum: [in, out] }
-        quantity: { type: number }
-        reason: { type: string }
-        reference: { type: string }
-        actor_id: { type: string }
-        created_at: { type: string, format: date-time }
-    CreateStockMovementRequest:
+        consumable_id: { type: string, format: uuid }
+        location_id:
+          type: string
+          format: uuid
+          description: The bin.
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        on_hand:
+          type: number
+          minimum: 0
+        reserved:
+          type: number
+          minimum: 0
+          description: Never above on_hand.
+        updated_at: { type: string, format: date-time }
+    ConsumableStockListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ConsumableStock' }
+    ConsumableMovement:
+      description: >-
+        A row of the ledger stock_movement of a consumable in the legacy form
+        of /api/v1/consumables/{id}/movements (WP-756): the fields of
+        StockMovement plus direction (in when it books only into
+        to_location_id, else out), location_id (the bin of that direction)
+        and reference (the notes).
+      allOf:
+        - $ref: '#/components/schemas/StockMovement'
+        - type: object
+          required: [direction]
+          properties:
+            direction: { type: string, enum: [in, out] }
+            location_id:
+              type: string
+              description: The bin, target of in and source of out (WP-283).
+            reference: { type: string }
+    CreateConsumableMovementRequest:
       type: object
       required: [direction, quantity]
       properties:
         direction: { type: string, enum: [in, out] }
+        location_id:
+          type: string
+          format: uuid
+          description: >-
+            The bin: in is a receipt into it, out a retrieval from it. Without
+            it the consumable must have exactly one bin, else 422 (WP-283).
         quantity: { type: number }
         reason: { type: string }
         reference: { type: string }
@@ -27588,6 +28168,83 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/Consumable' }
+    ConsumableMovementListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ConsumableMovement' }
+    MovementType:
+      type: string
+      description: >-
+        Movement type of the ledger stock_movement (STK-04). assignment,
+        return, reservation, release and disposal arise only in their domain
+        paths (WP-274).
+      enum: [receipt, transfer, assignment, return, deployment, retrieval, reservation, release, repair, disposal, correction]
+    StockMovement:
+      type: object
+      description: >-
+        One row of the append-only ledger stock_movement (STK-04, AST-07,
+        WP-744, WP-274). client_id and site_id are derived from the moved
+        object and the locations at booking time. User and team ids are
+        surrogates (SEC-05).
+      required: [id, organization_id, item_kind, movement_type, occurred_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        item_kind: { type: string, enum: [asset, consumable, quantity_item] }
+        asset_id: { type: string, format: uuid }
+        consumable_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid }
+        movement_type: { $ref: '#/components/schemas/MovementType' }
+        from_location_id: { type: string, format: uuid }
+        to_location_id: { type: string, format: uuid }
+        quantity: { type: number, description: Moved quantity; absent for an asset. }
+        actor_id: { type: string }
+        assignee_user_id: { type: string }
+        assignee_team_id: { type: string }
+        due_at: { type: string, format: date-time, description: Due date of an assignment (WP-745); absent for every other movement type. }
+        reason: { type: string }
+        notes: { type: string }
+        ticket_id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        workflow_run_id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        signature_hash: { type: string, description: Hash of the signature (WP-276); absent until then. }
+        occurred_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    CreateStockMovementRequest:
+      type: object
+      description: >-
+        A physical movement of exactly one object (E-38, E-142, WP-756). For
+        a consumable (consumable_id) receipt (only to_location_id),
+        retrieval (only from_location_id), correction (exactly one of them)
+        and transfer (two different bins) with quantity > 0 on its stock per
+        bin; for a quantity item (quantity_item_id, until the merge into
+        consumable, E-40) the same types with quantity > 0 on its stock
+        level. For an asset (asset_id) only transfer to to_location_id
+        without quantity.
+      required: [movement_type]
+      properties:
+        item_kind: { type: string, enum: [asset, consumable, quantity_item] }
+        asset_id: { type: string, format: uuid }
+        consumable_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid }
+        movement_type: { $ref: '#/components/schemas/MovementType' }
+        from_location_id: { type: string, format: uuid }
+        to_location_id: { type: string, format: uuid }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        reason: { type: string }
+        notes: { type: string }
+        ticket_id: { type: string, format: uuid }
+        order_id: { type: string, format: uuid }
+        workflow_run_id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
     StockMovementListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
@@ -28959,6 +29616,17 @@ components:
           type: integer
           description: Number of live CIs whose assignment moved to the tag.
 
+    ReplaceAssetTagsRequest:
+      type: object
+      required: [tags]
+      additionalProperties: false
+      properties:
+        tags:
+          type: array
+          items:
+            type: string
+          description: Keys of catalog tags; duplicates count once, [] removes every tag.
+
     ReplaceCITagsRequest:
       type: object
       required: [tags]
@@ -29335,6 +30003,12 @@ components:
         kind: { $ref: '#/components/schemas/LocationKind' }
         name: { type: string }
         path: { type: string, description: ltree path of the node ids from the site }
+        barcode:
+          type: string
+          description: >-
+            Code assigned to the node (INV-03); absent without one. Unique per
+            organization over the barcodes and inventory numbers of assets,
+            the barcodes of consumables and of locations.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     LocationTreeNode:
@@ -29361,6 +30035,13 @@ components:
       properties:
         name: { type: string, minLength: 1 }
         parent_id: { type: string }
+        barcode:
+          type: string
+          description: >-
+            Assigns the code to the node, also to a site, building, room or
+            rack; an empty string removes it. A code held by any asset,
+            consumable or location of the organization is a 409 with field
+            barcode.
     LocationListResponse:
       type: object
       required: [data, total]

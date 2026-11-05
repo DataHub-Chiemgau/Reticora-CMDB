@@ -44,12 +44,16 @@ type Resolver struct {
 	ciRepo       ci.Repository
 	relRepo      relationship.Repository
 	entitlements EntitlementChecker
+	modules      ModuleChecker
 	sources      Sources
 }
 
 // CI implements generated.ResolverRoot: the fields under field
 // permissions (RBA-07, WP-727).
 func (r *Resolver) CI() generated.CIResolver { return &ciResolver{r} }
+
+// Asset implements generated.ResolverRoot (GQL-03).
+func (r *Resolver) Asset() generated.AssetResolver { return &assetResolver{r} }
 
 // Query implements generated.ResolverRoot.
 func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
@@ -70,6 +74,7 @@ func (r *Resolver) ReviewItem() generated.ReviewItemResolver { return &reviewIte
 func (r *Resolver) TopologyNode() generated.TopologyNodeResolver { return &topologyNodeResolver{r} }
 
 type (
+	assetResolver        struct{ *Resolver }
 	ciResolver           struct{ *Resolver }
 	queryResolver        struct{ *Resolver }
 	jobResolver          struct{ *Resolver }

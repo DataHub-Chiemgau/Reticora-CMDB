@@ -5,10 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"reflect"
 	"regexp"
 	"strings"
 
@@ -19,14 +17,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/go-chi/chi/v5"
 )
-
-// ParentLookup reports whether an asset is a composition child (spec §5:
-// children must not duplicate the parent's shared inventory properties).
-type ParentLookup interface {
-	// ParentOfAsset returns true when the asset participates as a child in a
-	// composition.
-	ParentOfAsset(ctx context.Context, orgID, assetID string) (bool, error)
-}
 
 // CILookup resolves the technical identity of a linked CI (spec §4: the CI
 // owns the technical/configuration view; the asset reads it through the
@@ -53,9 +43,8 @@ type CIRef struct {
 
 // Handler provides HTTP handlers for asset endpoints.
 type Handler struct {
-	repo        Repository
-	composition ParentLookup
-	cis         CILookup
+	repo Repository
+	cis  CILookup
 	// links writes the asset↔CI links through the CI domain (WP-272).
 	links CILinker
 }
@@ -65,34 +54,11 @@ func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
 }
 
-// WithComposition attaches the composition lookup used to reject
-// parent-owned shared fields on child assets.
-func (h *Handler) WithComposition(lookup ParentLookup) *Handler {
-	h.composition = lookup
-	return h
-}
-
 // WithCIs attaches the CI lookup used to enrich an asset with the linked
 // CI's read-only technical identity (spec §4).
 func (h *Handler) WithCIs(lookup CILookup) *Handler {
 	h.cis = lookup
 	return h
-}
-
-// parentOwnedColumns are the shared inventory properties owned by the parent
-// asset in a composition (spec §5). Children inherit them read-only. The key
-// is the API name of the field (AST-01, WP-739), the value the member of
-// UpdateRequest.
-var parentOwnedColumns = map[string]string{
-	"serial_number":  "SerialNumber",
-	"barcode":        "Barcode",
-	"rfid_tag":       "RFIDTag",
-	"purchase_date":  "PurchaseDate",
-	"purchase_price": "PurchaseCost",
-	"supplier_id":    "SupplierID",
-	"invoice_number": "InvoiceNumber",
-	"warranty_until": "WarrantyEnd",
-	"location":       "Location",
 }
 
 // RegisterRoutes registers asset routes on the given mux.
@@ -109,6 +75,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// GET /api/v1/cis?filter[asset_id]=.
 	r.Post("/api/v1/assets/{id}/cis", h.LinkCI)
 	r.Delete("/api/v1/assets/{id}/cis/{ci_id}", h.UnlinkCI)
+	// Tags from the tag catalog (API-06, WP-755).
+	r.Put("/api/v1/assets/{id}/tags", h.ReplaceTags)
 }
 
 // requestContext returns the organization and the field policy of the
@@ -341,6 +309,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name and inventory_no are required")
 		return
 	}
+	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	if err := validCurrency(req.Currency); err != nil {
 		api.WriteFieldError(w, err)
 		return
@@ -387,6 +359,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Location:       req.Location,
 		Notes:          req.Notes,
 		CustomFields:   req.CustomFields,
+		Tags:           []string{},
 	}
 	if a.CustomFields == nil {
 		a.CustomFields = make(map[string]any)
@@ -455,18 +428,8 @@ func purchasePrice(value string) (string, error) {
 	return whole + "." + frac + strings.Repeat("0", 2-len(frac)), nil
 }
 
-// ParentOwnedFieldError refuses a write to a shared inventory property of a
-// composition child (spec §5, 409): the parent asset owns Field.
-type ParentOwnedFieldError struct{ Field string }
-
-// validation: a fixed rule text with the field name of the request.
-func (e *ParentOwnedFieldError) Error() string {
-	return fmt.Sprintf("field %q is owned by the parent asset and is read-only on composition children", e.Field)
-}
-
 // writeAssetError answers a failed asset request: an asset that is unknown,
 // of another organization or outside the caller's scope is 404 (TEN-04), a
-// parent-owned field of a composition child 409 with its domain message, a
 // linked CI that is no UUID or not visible 422 on primary_ci_id (on the link
 // routes 404), an asset the caller may not change 403, a reference that is
 // not usable 422 on its field, a taken inventory number, barcode or RFID tag
@@ -475,7 +438,6 @@ func (e *ParentOwnedFieldError) Error() string {
 // policy or SQLSTATE text reaches the client (API-03, F-047), the log keeps
 // it.
 func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
-	var owned *ParentOwnedFieldError
 	switch {
 	case writeConcurrencyError(w, err):
 	case errors.Is(err, ErrDeleteBlocked):
@@ -486,8 +448,6 @@ func writeAssetError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrCINotFound.Error())
 	case errors.Is(err, ErrNotWritable):
 		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrNotWritable.Error())
-	case errors.As(err, &owned):
-		api.WriteError(w, http.StatusConflict, "Conflict", owned.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "asset request failed", "error", err)
@@ -535,7 +495,15 @@ var readOnlyPaths = []struct {
 		func(req *UpdateRequest) bool { return req.LocationID.Set }},
 	{"lifecycle_state", "is read-only; the state changes through POST /api/v1/assets/{id}/lifecycle-transitions",
 		func(req *UpdateRequest) bool { return req.LifecycleState.Set }},
+	// The holder cache (WP-745) changes with the assignment service (WP-275).
+	{"assigned_user_id", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignedUserID.Set }},
+	{"assigned_team_id", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignedTeamID.Set }},
+	{"assignment_due_at", holderReadOnly, func(req *UpdateRequest) bool { return req.AssignmentDueAt.Set }},
 }
+
+// holderReadOnly is the message of a PATCH that sends a member of the
+// holder cache (WP-745).
+const holderReadOnly = "is read-only; the holder changes through POST /api/v1/assets/{id}/assign, /return or /transfer"
 
 // rejectReadOnly returns the 422 field error of the first read-only member
 // the request sends.
@@ -577,6 +545,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
+	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	if req.Currency != nil {
 		if err := validCurrency(*req.Currency); err != nil {
 			api.WriteFieldError(w, err)
@@ -594,14 +566,6 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.PurchaseCost = &price
-	}
-
-	// Children must not duplicate the parent asset's shared inventory
-	// properties (spec §5). Reject writes to parent-owned fields when the
-	// asset participates as a composition child.
-	if err := h.rejectParentOwnedFields(r.Context(), orgID, id, &req); err != nil {
-		writeAssetError(w, r, err)
-		return
 	}
 
 	// A primary CI is linked through the CI domain (WP-272), which needs
@@ -686,32 +650,6 @@ func normalizedValue(raw json.RawMessage) []byte {
 	default:
 		return []byte(s)
 	}
-}
-
-// rejectParentOwnedFields returns a *ParentOwnedFieldError when the request
-// writes a parent-owned shared inventory property on a composition child,
-// the error of the composition lookup when it fails.
-func (h *Handler) rejectParentOwnedFields(ctx context.Context, orgID, id string, req *UpdateRequest) error {
-	if h.composition == nil {
-		return nil
-	}
-	isChild, err := h.composition.ParentOfAsset(ctx, orgID, id)
-	if err != nil || !isChild {
-		return err
-	}
-	v := reflect.ValueOf(req).Elem()
-	for column, field := range parentOwnedColumns {
-		f := v.FieldByName(field)
-		if !f.IsValid() || f.IsNil() {
-			continue
-		}
-		// A nil-to-nil clear is allowed; only setting a value conflicts.
-		empty := reflect.Zero(f.Type().Elem())
-		if !reflect.DeepEqual(f.Elem().Interface(), empty.Interface()) {
-			return &ParentOwnedFieldError{Field: column}
-		}
-	}
-	return nil
 }
 
 // Label handles GET /api/v1/assets/{id}/label.svg — renders the printable

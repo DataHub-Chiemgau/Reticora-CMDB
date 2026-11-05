@@ -38,6 +38,8 @@ type Handler struct {
 	dispatcher EventDispatcher
 	includes   map[string]IncludeFunc
 	provenance ProvenanceSource
+	// parentAssets projects the asset of GET /cis/{id}/parent (WP-742).
+	parentAssets ParentAssetLookup
 }
 
 // IncludeFunc loads one related collection of a CI for ?include= (API-05);
@@ -91,6 +93,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Put("/api/v1/cis/{id}/templates", h.SetTemplates)
 	// Tag catalog and tags of a CI (CI-08, WP-753).
 	h.registerTagRoutes(r)
+	// The legacy composition paths on parent_ci_id (WP-742).
+	r.Get("/api/v1/cis/{id}/parent", h.Parent)
+	r.Get("/api/v1/assets/{id}/children", h.AssetChildren)
 }
 
 // List handles GET /api/v1/cis
@@ -1297,4 +1302,180 @@ func projectChangeAttributes(policy *permission.FieldPolicy, item *Item, value a
 		return nil
 	}
 	return permission.ProjectAttributes(policy, item.CITypeID, ciRef(item), attrs, permission.WithInstanceKeys(item.InstanceKeys))
+}
+
+// ParentAssetRef is the read-only projection of the asset whose shared
+// inventory identity a child CI shows (GET /cis/{id}/parent, spec §5). The
+// fields and names are those of the former composition handler (API-01).
+type ParentAssetRef struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	AssetTag      string  `json:"asset_tag,omitempty"`
+	Status        string  `json:"status,omitempty"`
+	SerialNumber  string  `json:"serial_number,omitempty"`
+	Barcode       string  `json:"barcode,omitempty"`
+	RFIDTag       string  `json:"rfid_tag,omitempty"`
+	PurchaseDate  string  `json:"purchase_date,omitempty"`
+	PurchaseCost  float64 `json:"purchase_cost,omitempty"`
+	Currency      string  `json:"currency,omitempty"`
+	Supplier      string  `json:"supplier,omitempty"`
+	InvoiceNumber string  `json:"invoice_number,omitempty"`
+	WarrantyEnd   string  `json:"warranty_end,omitempty"`
+	Location      string  `json:"location,omitempty"`
+}
+
+// ParentAssetLookup reads the asset GET /cis/{id}/parent projects; the
+// server adapts the asset repository.
+type ParentAssetLookup interface {
+	GetByID(ctx context.Context, orgID, id string) (*ParentAssetRef, error)
+}
+
+// WithParentAssets attaches the asset lookup of GET /cis/{id}/parent.
+func (h *Handler) WithParentAssets(lookup ParentAssetLookup) *Handler {
+	h.parentAssets = lookup
+	return h
+}
+
+// legacyInheritedFields are the fields a configuration child inherits from
+// its parent asset, as the composition handler named them (API-01).
+var legacyInheritedFields = []string{
+	"asset_tag", "serial_number", "barcode", "rfid_tag",
+	"purchase_date", "purchase_cost", "supplier", "invoice_number",
+	"warranty_end", "location", "lifecycle_state",
+}
+
+// legacyComposition is the composition member of GET /cis/{id}/parent in
+// the former format (API-01): the link is the child CI, its flags follow
+// from child_mode.
+type legacyComposition struct {
+	ID                            string `json:"id"`
+	OrganizationID                string `json:"organization_id"`
+	ParentAssetID                 string `json:"parent_asset_id"`
+	ChildCIID                     string `json:"child_ci_id"`
+	ConfigurationOnly             bool   `json:"configuration_only"`
+	IndependentlySerialized       bool   `json:"independently_serialized"`
+	IndependentlyAssignable       bool   `json:"independently_assignable"`
+	IndependentlyLocatable        bool   `json:"independently_locatable"`
+	IndependentlyLifecycleManaged bool   `json:"independently_lifecycle_managed"`
+	CreatedAt                     string `json:"created_at"`
+	UpdatedAt                     string `json:"updated_at"`
+}
+
+const noParentAsset = "CI has no parent asset"
+
+// Parent handles GET /api/v1/cis/{id}/parent, deprecated in favour of GET
+// /cis/{id} (E-25, API-01; WP-742): the asset of the parent CI, its own or
+// the one it derives as a configuration child (WP-273), in the format of
+// the former composition handler. A CI without a parent, or whose parent
+// has no asset, is 404 as before.
+func (h *Handler) Parent(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	child, err := h.svc.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil || child.ParentCIID == "" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", noParentAsset)
+		return
+	}
+	parent, err := h.svc.GetByID(r.Context(), t.OrganizationID, child.ParentCIID)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", noParentAsset)
+		return
+	}
+	assetID := parent.AssetID
+	if assetID == "" && parent.Asset != nil {
+		assetID = parent.Asset.ID
+	}
+	if assetID == "" {
+		api.WriteError(w, http.StatusNotFound, "Not Found", noParentAsset)
+		return
+	}
+	configuration := child.ChildMode == ChildModeConfiguration
+	link := legacyComposition{
+		ID: child.ID, OrganizationID: child.OrganizationID, ParentAssetID: assetID, ChildCIID: child.ID,
+		ConfigurationOnly: configuration, IndependentlySerialized: !configuration, IndependentlyAssignable: !configuration,
+		IndependentlyLocatable: !configuration, IndependentlyLifecycleManaged: !configuration,
+		CreatedAt: child.CreatedAt, UpdatedAt: child.UpdatedAt,
+	}
+	inherited := []string{}
+	if configuration {
+		inherited = legacyInheritedFields
+	}
+	resp := map[string]any{"composition": link, "inherited_fields": inherited}
+	// The asset projection is best-effort as before: the link stays useful
+	// when the asset cannot be read.
+	if h.parentAssets != nil {
+		if asset, aerr := h.parentAssets.GetByID(r.Context(), t.OrganizationID, assetID); aerr == nil && asset != nil {
+			resp["parent_asset"] = asset
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+// AssetChildren handles GET /api/v1/assets/{id}/children (WP-742): the
+// child CIs (parent_ci_id) of the CIs linked to the asset (ci.asset_id),
+// with child_mode, cursor-paginated (API-02). An asset without CIs or one
+// the principal cannot see has no children.
+func (h *Handler) AssetChildren(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
+		return
+	}
+	policy, ok := requestPolicy(w, r)
+	if !ok {
+		return
+	}
+	empty := api.ListResponse[any]{Data: []any{}, Limit: page.Limit, Offset: page.Offset}
+	assetID := chi.URLParam(r, "id")
+	if !api.IsUUID(assetID) {
+		api.WriteJSON(w, http.StatusOK, empty)
+		return
+	}
+	linked, _, err := h.svc.List(r.Context(), t.OrganizationID, &FilterParams{Filters: []api.Filter{
+		{Field: "asset_id", Op: api.OpExact, Kind: api.KindUUID, Values: []string{assetID}}}},
+		api.PaginationParams{Limit: api.MaxPageLimit})
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if len(linked) == 0 {
+		api.WriteJSON(w, http.StatusOK, empty)
+		return
+	}
+	parents := make([]string, len(linked))
+	for i := range linked {
+		parents[i] = linked[i].ID
+	}
+	filter := FilterParams{Filters: []api.Filter{{Field: "parent_ci_id", Op: api.OpIn, Kind: api.KindUUID, Values: parents}}}
+	items, counted, err := h.svc.List(r.Context(), t.OrganizationID, &filter, page)
+	if err != nil {
+		if errors.Is(err, api.ErrInvalidCursor) {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", api.ErrInvalidCursor.Error())
+			return
+		}
+		api.WriteRepoError(w, err)
+		return
+	}
+	hasMore := page.Offset+page.Limit < counted
+	if page.Cursor != nil {
+		hasMore = len(items) == page.Limit
+	}
+	data := make([]any, len(items))
+	for i := range items {
+		if data[i], err = projectCI(policy, &items[i]); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	total, capped := api.CapTotal(counted)
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[any]{Data: data, Total: total, TotalCapped: capped,
+		Limit: page.Limit, Offset: page.Offset, HasMore: hasMore, NextCursor: NextCursor(items, &filter, page.Limit)})
 }

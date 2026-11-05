@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +51,9 @@ const assetSelectColumns = `
 	COALESCE(barcode, ''),
 	COALESCE(location, ''),
 	COALESCE(location_id::text, ''),
+	COALESCE(assigned_user_id::text, ''),
+	COALESCE(assigned_team_id::text, ''),
+	assignment_due_at,
 	COALESCE(lifecycle_state, ''),
 	COALESCE(notes, ''),
 	custom_fields,
@@ -57,7 +61,9 @@ const assetSelectColumns = `
 	updated_at,
 	COALESCE(asset_type_id::text, ''),
 	COALESCE(site_id::text, ''),
-	version
+	version,
+	COALESCE((SELECT array_agg(t.key ORDER BY t.key) FROM asset_tag_link l JOIN tag t ON t.id = l.tag_id
+		WHERE l.asset_id = asset.id), '{}')
 `
 
 // physicalAssetModelID is the system lifecycle model physical_asset
@@ -442,12 +448,13 @@ func (r *PGRepository) Create(ctx context.Context, a *Asset) error {
 			return err
 		}
 		*a = *created
-		after, err := changeForm(created)
-		if err != nil {
-			return err
-		}
-		if recErr := recordChange(ctx, tx, a.OrganizationID, a.ID, "create", "", nil, after, created.Version); recErr != nil {
-			return recErr
+		// The trigger asset_history wrote the typed columns (WP-794); the
+		// custom fields go sealed into the creation (SEC-05).
+		if len(created.CustomFields) > 0 {
+			if recErr := recordChange(ctx, tx, a.OrganizationID, a.ID, "create", customFieldsMember, nil,
+				map[string]any{customFieldsMember: created.CustomFields}, created.Version); recErr != nil {
+				return recErr
+			}
 		}
 		return r.emit(ctx, tx, events.AssetCreated, created, nil)
 	})
@@ -564,7 +571,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 }
 
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
-// The history keeps the deletion with the asset as it was (WP-516). An
+// The history keeps the deletion with the asset as it was, without its
+// custom fields (trigger asset_history, WP-794). An
 // asset with stock movements or a disposal record (both append-only) is
 // ErrDeleteBlocked (409, E-121): its end is a lifecycle state.
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
@@ -581,10 +589,6 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if blocked {
 			return ErrDeleteBlocked
 		}
-		before, err := changeForm(current)
-		if err != nil {
-			return err
-		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM asset WHERE id = $1 AND organization_id = $2", id, orgID)
 		if err != nil {
 			if appendOnly(err) {
@@ -595,9 +599,6 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return ErrNotFound
-		}
-		if recErr := recordChange(ctx, tx, orgID, id, "delete", "", before, nil, current.Version); recErr != nil {
-			return recErr
 		}
 		return r.emit(ctx, tx, events.AssetDeleted, current, nil)
 	})
@@ -620,11 +621,17 @@ func appendOnly(err error) bool {
 // requires one (412); a version the asset never had fails (412); an older
 // version fails with 409 only when a field of the request changed since:
 // a trail row of a later version names it, or a later version has no
-// trail row at all (a writer outside the asset package, counted by the
-// trigger asset_version_bump), which counts as a change of every field of
-// the request.
+// trail row at all (a lifecycle transition, whose lifecycle_transition row
+// carries no version; the trigger asset_history traces every other writer
+// since WP-794), which counts as a change of every field of the request.
 func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *Asset, req *UpdateRequest) error {
-	if req.IfMatch == nil {
+	return checkIfMatch(ctx, tx, orgID, current, req.IfMatch, req.requestedFields())
+}
+
+// checkIfMatch is checkPrecondition for the If-Match version ifMatch (nil
+// without the header) of a write of the fields requested.
+func checkIfMatch(ctx context.Context, tx pgx.Tx, orgID string, current *Asset, ifMatch *int64, requested []string) error {
+	if ifMatch == nil {
 		var required bool
 		if err := tx.QueryRow(ctx, `SELECT COALESCE((settings->>'require_if_match')::boolean, false) FROM organization WHERE id = $1`,
 			orgID).Scan(&required); err != nil {
@@ -636,12 +643,11 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *As
 		return nil
 	}
 	switch {
-	case *req.IfMatch == current.Version, *req.IfMatch == api.IfMatchAny:
+	case *ifMatch == current.Version, *ifMatch == api.IfMatchAny:
 		return nil
-	case *req.IfMatch > current.Version || *req.IfMatch < 1:
+	case *ifMatch > current.Version || *ifMatch < 1:
 		return ErrPreconditionFailed
 	}
-	requested := req.requestedFields()
 	if len(requested) == 0 {
 		return nil
 	}
@@ -651,10 +657,10 @@ func checkPrecondition(ctx context.Context, tx pgx.Tx, orgID string, current *As
 			COALESCE(array_agg(DISTINCT field_name ORDER BY field_name) FILTER (WHERE field_name = ANY($4)), '{}')
 		FROM entity_change
 		WHERE entity_type = 'asset' AND entity_id = $1 AND entity_version > $2 AND entity_version <= $3`,
-		current.ID, *req.IfMatch, current.Version, requested).Scan(&traced, &fields); err != nil {
+		current.ID, *ifMatch, current.Version, requested).Scan(&traced, &fields); err != nil {
 		return fmt.Errorf("read changes since if-match: %w", err)
 	}
-	if traced < current.Version-*req.IfMatch {
+	if traced < current.Version-*ifMatch {
 		fields = requested
 	}
 	if len(fields) > 0 {
@@ -694,10 +700,10 @@ func changeForm(item *Asset) (map[string]any, error) {
 // untracked are the fields of an asset that are no change of their own.
 var untracked = map[string]bool{"updated_at": true, "version": true}
 
-// recordUpdate writes the trail of an update from before to after (one
-// row per changed field with the version after it) and, when a field
-// changed, asset.changed with the changed fields, last in the
-// transaction (K20).
+// recordUpdate writes the trail of the custom fields and tags of an update from
+// before to after (the trigger asset_history writes the typed columns,
+// WP-794) and, when a field changed, asset.changed with the changed
+// fields, last in the transaction (K20).
 func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID string, before, after *Asset) error {
 	beforeForm, err := changeForm(before)
 	if err != nil {
@@ -707,9 +713,20 @@ func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID string
 	if err != nil {
 		return err
 	}
-	changed, err := recordFieldChanges(ctx, tx, orgID, after.ID, beforeForm, afterForm, after.Version)
-	if err != nil || len(changed) == 0 {
-		return err
+	changed := changedFields(beforeForm, afterForm)
+	if len(changed) == 0 {
+		return nil
+	}
+	// The members that are no column of asset (custom fields, the tags of
+	// asset_tag_link, WP-755) have no trigger row: the trail is written here.
+	for _, member := range []string{customFieldsMember, fieldTags} {
+		if !slices.Contains(changed, member) {
+			continue
+		}
+		if recErr := recordChange(ctx, tx, orgID, after.ID, "update", member,
+			beforeForm[member], afterForm[member], after.Version); recErr != nil {
+			return recErr
+		}
 	}
 	return r.emit(ctx, tx, events.AssetChanged, after, changed)
 }
@@ -750,10 +767,9 @@ func eventData(a *Asset, changed []string) (map[string]any, error) {
 	return data, nil
 }
 
-// recordFieldChanges writes one update row per field that differs between
-// before and after (JSON forms of the asset), in the order of the field
-// names, with the version the write left; it returns the changed fields.
-func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before, after map[string]any, version int64) ([]string, error) {
+// changedFields returns the fields that differ between before and after
+// (JSON forms of the asset), in the order of the field names.
+func changedFields(before, after map[string]any) []string {
 	names := make([]string, 0, len(after))
 	seen := map[string]bool{}
 	for _, m := range []map[string]any{before, after} {
@@ -767,21 +783,19 @@ func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID, id string, before
 	sort.Strings(names)
 	var changed []string
 	for _, name := range names {
-		if reflect.DeepEqual(before[name], after[name]) {
-			continue
+		if !reflect.DeepEqual(before[name], after[name]) {
+			changed = append(changed, name)
 		}
-		if err := recordChange(ctx, tx, orgID, id, "update", name, before[name], after[name], version); err != nil {
-			return nil, err
-		}
-		changed = append(changed, name)
 	}
-	return changed, nil
+	return changed
 }
 
-// recordChange appends a change of the asset to the entity_change trail in
-// the transaction of the write (WP-516), with the acting user; personal
-// values are stored as vault surrogates (SEC-05), as in the CI history.
-// version is the asset version the write left (entity_version, WP-740).
+// recordChange appends a change of the custom fields of the asset to the
+// entity_change trail in the transaction of the write (WP-516, WP-794),
+// with the acting user; personal values are stored as vault surrogates
+// (SEC-05), as in the CI history. version is the asset version the write
+// left (entity_version, WP-740); client and site come from the asset
+// (entity_change_derive_asset_scope).
 func recordChange(ctx context.Context, tx pgx.Tx, orgID, id, changeType, field string, oldValue, newValue any, version int64) error {
 	values := make([]any, 2)
 	for i, v := range []any{oldValue, newValue} {
@@ -846,6 +860,9 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.Barcode,
 		&item.Location,
 		&item.LocationID,
+		&item.AssignedUserID,
+		&item.AssignedTeamID,
+		&item.AssignmentDueAt,
 		&item.LifecycleState,
 		&item.Notes,
 		&item.CustomFields,
@@ -854,17 +871,25 @@ func scanAsset(scanner assetScanner) (*Asset, error) {
 		&item.AssetTypeID,
 		&item.SiteID,
 		&item.Version,
+		&item.Tags,
 	); err != nil {
 		return nil, err
 	}
 	if item.CustomFields == nil {
 		item.CustomFields = make(map[string]any)
 	}
+	if item.Tags == nil {
+		item.Tags = []string{}
+	}
 	if purchaseDate.Valid {
 		item.PurchaseDate = purchaseDate.Time.UTC().Format("2006-01-02")
 	}
 	if warrantyEnd.Valid {
 		item.WarrantyEnd = warrantyEnd.Time.UTC().Format("2006-01-02")
+	}
+	if item.AssignmentDueAt != nil {
+		due := item.AssignmentDueAt.UTC()
+		item.AssignmentDueAt = &due
 	}
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()

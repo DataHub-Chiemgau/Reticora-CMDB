@@ -456,7 +456,6 @@ var auditRouteCreates = []struct{ route, body string }{
 	{"POST /api/v1/security/findings", `{"kind":"vulnerability","title":"a5-finding","ci_id":"<id:/api/v1/cis>"}`},
 	{"POST /api/v1/invitations", `{"email":"a5-invite@example.com","role_id":"<id:/api/v1/roles>"}`},
 	{"POST /api/v1/assignments", `{"assigned_to":"<user>","asset_id":"<asset2>"}`},
-	{"POST /api/v1/compositions", `{"parent_asset_id":"<id:/api/v1/assets>","child_asset_id":"<asset2>"}`},
 	{"POST /api/v1/inventory/items", `{"name":"a5-item"}`},
 	{"POST /api/v1/credentials/", `{"name":"a5-credential","kind":"snmp_v2c","secret":{"community":"public"}}`},
 	{"POST /api/v1/asset-locations", `{"asset_id":"<id:/api/v1/assets>","lat":47.8,"lon":12.6}`},
@@ -581,6 +580,9 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	// returned.
 	"POST /api/v1/tickets/{id}/links":             {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
 	"DELETE /api/v1/tickets/{id}/links/{link_id}": {"/api/v1/tickets/<id:/api/v1/tickets>/links/<id:/api/v1/ticket-links>", ""},
+
+	// Asset tags (WP-755): the system tag archived for the asset.
+	"PUT /api/v1/assets/{id}/tags": {"", `{"tags":["archived"]}`},
 }
 
 // auditRouteSubCreates create rows under another resource; they run first
@@ -681,6 +683,11 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	// A CI for the asset links (WP-272).
 	fixed["<ci7>"] = f.CI(t, f.OrgA, f.Client1, "a5-ci7")
 	if _, err = f.Admin.Exec(bg, `UPDATE ci SET ci_type_id = $2 WHERE id = $1`, fixed["<ci6>"], citype2); err != nil {
+		t.Fatal(err)
+	}
+	// A disposal needs a lifecycle state with a transition to disposed
+	// (WP-278).
+	if _, err = f.Admin.Exec(bg, `UPDATE asset SET lifecycle_state = 'retired' WHERE id = $1`, fixed["<asset2>"]); err != nil {
 		t.Fatal(err)
 	}
 	// A soft-deleted CI for POST /cis/{id}/restore.

@@ -96,8 +96,16 @@ describe('frontend API paths (catalogue contract)', () => {
     expect(old.test("return fetchAPI('/older/1');")).toBe(false);
   });
 
+  // Deprecated paths the frontend may still use until their sunset, with the
+  // work package that moves it off them.
+  const usedUntilSunset: Record<string, string> = {
+    // WP-742: the CI detail card (CIParentAssetCard) reads the deprecated
+    // parent path until the surfaces move to GET /cis/{id} (M2.9).
+    '/cis/{id}/parent': 'M2.9',
+  };
+
   it('uses no path whose every operation is deprecated', () => {
-    const deprecated = deprecatedPaths(spec);
+    const deprecated = deprecatedPaths(spec).filter((path) => !(path in usedUntilSunset));
 
     const uses: string[] = [];
     for (const [file, text] of Object.entries(sources)) {

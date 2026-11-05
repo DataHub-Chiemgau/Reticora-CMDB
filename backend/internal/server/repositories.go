@@ -11,7 +11,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/composition"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contact"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/contract"
@@ -79,6 +78,9 @@ func MemoryRepositories() Repositories {
 	cis := ci.NewMemoryRepository()
 	users := user.NewMemoryRepository()
 	serviceAccounts := user.NewMemoryServiceAccounts()
+	// Consumable movements book on the stock per bin of the same store
+	// (WP-756).
+	consumables := consumable.NewMemoryRepository()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -94,9 +96,8 @@ func MemoryRepositories() Repositories {
 		RelationshipType:  relationshiptype.NewMemoryRepository(),
 		Lifecycle:         lifecycle.NewMemoryRepository(),
 		LocationTree:      locations.NewMemoryRepository(),
-		Movement:          movement.NewMemoryRepository(),
+		Movement:          movement.NewMemoryRepository().WithConsumables(consumables),
 		Reservation:       reservation.NewMemoryRepository(),
-		Composition:       composition.NewMemoryRepository(),
 		// The provenance names override authors as PostgreSQL does from
 		// app_user and service_account (UI-15, WP-850).
 		Override: override.NewMemoryRepository().WithAuthorNames(func(ctx context.Context, orgID, id string) (string, bool) {
@@ -117,7 +118,7 @@ func MemoryRepositories() Repositories {
 		Assignment:        assignment.NewMemoryRepository(),
 		Document:          document.NewMemoryRepository(),
 		Stocktake:         stocktake.NewMemoryRepository(assets),
-		Consumable:        consumable.NewMemoryRepository(),
+		Consumable:        consumables,
 		Order:             order.NewMemoryRepository(),
 		Maintenance:       maintenance.NewMemoryRepository(),
 		Disposal:          disposal.NewMemoryRepository(),
@@ -172,6 +173,8 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Discovery:         discovery.NewPGRepository(pool),
 		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
+		// The assignment service books over the movement service (WP-275).
+		AssignmentService: assignment.NewService(pool, movement.NewService(movement.NewPGRepository(pool)), events.NewOutbox()),
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
 		Consumable:        consumable.NewPGRepository(pool),
@@ -218,7 +221,6 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LocationTree:      locations.NewPGRepository(pool),
 		Movement:          movement.NewPGRepository(pool),
 		Reservation:       reservation.NewPGRepository(pool),
-		Composition:       composition.NewPGRepository(pool),
 		Override:          override.NewPGRepository(pool).WithRecompute(cis),
 		History:           history.NewPGRepository(pool),
 		SavedView:         savedview.NewPGRepository(pool),

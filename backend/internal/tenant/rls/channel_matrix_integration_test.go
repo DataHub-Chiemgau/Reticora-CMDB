@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -359,6 +360,10 @@ type channelMatrix struct {
 	// (ci_ref, location, user), ciRefB a CI of it (WP-254).
 	refTypeB, ciRefB, siteB string
 	seq                     int
+
+	// assets are the assets of the GraphQL aggregate (WP-311): one of
+	// client 1, one of client 2, one of organization B; tag = name.
+	assets map[string]string
 }
 
 func newChannelMatrix(t *testing.T) *channelMatrix {
@@ -447,6 +452,12 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 	m.ciB = object{newCI(m.orgB, "chmci-b-a", "", "", ""), m.onlyB}
 	m.ciB2 = object{newCI(m.orgB, "chmci-b-b", "", "", ""), m.onlyB}
 	m.ciT2 = object{newCI(m.org, "chmci-t2-a", f.Client1, m.site1, m.team2), m.one.without("team")}
+	m.assets = map[string]string{}
+	for _, a := range []struct{ org, client, tag string }{
+		{f.OrgA, f.Client1, "chmas-c1"}, {f.OrgA, f.Client2, "chmas-c2"}, {f.OrgB, m.clientB, "chmas-b"},
+	} {
+		m.assets[f.Asset(t, a.org, a.client, a.tag)] = a.tag
+	}
 	edge := func(p *channelPrincipal, src, dst object) object {
 		return object{m.create(t, p, "/api/v1/relationships", map[string]any{"source_ci_id": src.id, "target_ci_id": dst.id, "rel_type": "depends_on"}),
 			src.seen.and(dst.seen)}
@@ -1521,6 +1532,26 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 	rows["graphql-jobs"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
 		show, hide := listed(p, jobsAll...)
 		return []matrixProbe{gql("jobs", `{ jobs(first: 100) { id kind status } }`, show, append(hide, `"errors"`))}
+	}}
+	rows["graphql-asset"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
+		// The aggregate sees exactly the assets REST shows the principal
+		// (GET /assets/{id} as the oracle); every other asset is null and
+		// leaks neither id nor name.
+		var out []matrixProbe
+		ids := append(slices.Sorted(maps.Keys(m.assets)), unknownID)
+		for _, id := range ids {
+			q := fmt.Sprintf(`{ asset(id: %q) { id name } }`, id)
+			if code, _ := m.env.call(p, http.MethodGet, "/api/v1/assets/"+id, nil); code == http.StatusOK {
+				out = append(out, gql("asset", q, []string{id, m.assets[id]}, []string{`"errors"`}))
+				continue
+			}
+			var hide []string
+			if name, ok := m.assets[id]; ok {
+				hide = []string{id, name}
+			}
+			out = append(out, gql("asset", q, []string{`"asset":null`}, hide))
+		}
+		return out
 	}}
 	return rows
 }

@@ -19,32 +19,44 @@ import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 
-const MOVEMENT_TYPES = [
+/** The eleven movement types of the ledger (STK-04, WP-274). */
+export const MOVEMENT_TYPES = [
   'receipt',
-  'warehouse_transfer',
-  'bin_transfer',
+  'transfer',
   'assignment',
   'return',
   'deployment',
   'retrieval',
   'reservation',
-  'reservation_release',
-  'repair_transfer',
+  'release',
+  'repair',
   'disposal',
   'correction',
-];
+] as const;
+
+/**
+ * The types POST /stock-movements books per object kind (E-38, WP-274):
+ * physical movements of an asset without quantity, quantity bookings of a
+ * quantity item with quantity. Assignment, return, reservation, release
+ * and disposal arise only in their domain paths.
+ */
+export const BOOKABLE_TYPES = {
+  asset: ['receipt', 'transfer', 'deployment', 'retrieval', 'repair', 'correction'],
+  quantity_item: ['receipt', 'retrieval', 'correction', 'transfer'],
+} as const;
+
+type ObjectKind = keyof typeof BOOKABLE_TYPES;
 
 const MOVEMENT_ICONS: Record<string, string> = {
   receipt: '📥',
-  warehouse_transfer: '🔄',
-  bin_transfer: '↔️',
+  transfer: '🔄',
   assignment: '👤',
   return: '↩️',
   deployment: '🚀',
   retrieval: '📤',
   reservation: '🔒',
-  reservation_release: '🔓',
-  repair_transfer: '🔧',
+  release: '🔓',
+  repair: '🔧',
   disposal: '🗑️',
   correction: '✏️',
 };
@@ -56,14 +68,22 @@ export function InventoryPage() {
   );
   const [typeFilter, setTypeFilter] = useState('');
   const [showMove, setShowMove] = useState(false);
-  const [moveDraft, setMoveDraft] = useState({
-    asset_id: '',
-    quantity_item_id: '',
+  const [moveDraft, setMoveDraft] = useState<{
+    kind: ObjectKind;
+    object_id: string;
+    movement_type: string;
+    to_location_id: string;
+    quantity: number;
+    reason: string;
+  }>({
+    kind: 'asset',
+    object_id: '',
     movement_type: 'receipt',
     to_location_id: '',
     quantity: 1,
     reason: '',
   });
+  const bookable: readonly string[] = BOOKABLE_TYPES[moveDraft.kind];
 
   const queryClient = useQueryClient();
   const movements = useMovements({ movement_type: typeFilter });
@@ -74,11 +94,11 @@ export function InventoryPage() {
   const record = useMutation({
     mutationFn: () =>
       inventoryApi.record({
-        asset_id: moveDraft.asset_id || undefined,
-        quantity_item_id: moveDraft.quantity_item_id || undefined,
+        ...(moveDraft.kind === 'asset'
+          ? { asset_id: moveDraft.object_id }
+          : { quantity_item_id: moveDraft.object_id, quantity: moveDraft.quantity }),
         movement_type: moveDraft.movement_type,
         to_location_id: moveDraft.to_location_id || undefined,
-        quantity: moveDraft.quantity || undefined,
         reason: moveDraft.reason || undefined,
       }),
     onSuccess: () => {
@@ -157,8 +177,27 @@ export function InventoryPage() {
           }}
         >
           <Select
+            label={t('inventory.objectKind', 'Objektart')}
+            options={[
+              { value: 'asset', label: t('inventory.kindAsset', 'Asset (serialisiert)') },
+              { value: 'quantity_item', label: t('inventory.items', 'Mengenartikel') },
+            ]}
+            value={moveDraft.kind}
+            onChange={(e) => {
+              const kind = e.target.value as ObjectKind;
+              const allowed: readonly string[] = BOOKABLE_TYPES[kind];
+              setMoveDraft({
+                ...moveDraft,
+                kind,
+                movement_type: allowed.includes(moveDraft.movement_type)
+                  ? moveDraft.movement_type
+                  : (allowed[0] ?? 'receipt'),
+              });
+            }}
+          />
+          <Select
             label={t('inventory.movementType', 'Bewegungsart')}
-            options={MOVEMENT_TYPES.map((mt) => ({
+            options={bookable.map((mt) => ({
               value: mt,
               label: `${MOVEMENT_ICONS[mt] ?? ''} ${mt}`,
             }))}
@@ -166,16 +205,15 @@ export function InventoryPage() {
             onChange={(e) => setMoveDraft({ ...moveDraft, movement_type: e.target.value })}
           />
           <Input
-            label={t('inventory.assetId', 'Asset-ID (serialisiert)')}
-            value={moveDraft.asset_id}
-            onChange={(e) => setMoveDraft({ ...moveDraft, asset_id: e.target.value })}
+            label={
+              moveDraft.kind === 'asset'
+                ? t('inventory.assetId', 'Asset-ID (serialisiert)')
+                : t('inventory.itemId', 'Mengenartikel-ID')
+            }
+            value={moveDraft.object_id}
+            onChange={(e) => setMoveDraft({ ...moveDraft, object_id: e.target.value })}
           />
-          <Input
-            label={t('inventory.itemId', 'Mengenartikel-ID')}
-            value={moveDraft.quantity_item_id}
-            onChange={(e) => setMoveDraft({ ...moveDraft, quantity_item_id: e.target.value })}
-          />
-          {moveDraft.quantity_item_id ? (
+          {moveDraft.kind === 'quantity_item' ? (
             <Input
               label={t('inventory.quantity', 'Menge')}
               type="number"
@@ -245,11 +283,14 @@ function MovementsTab({
           <li key={m.id} className="flex items-center gap-3 py-2 text-sm">
             <span aria-hidden>{MOVEMENT_ICONS[m.movement_type] ?? '•'}</span>
             <span className="font-medium">{m.movement_type}</span>
-            <span className="text-muted">{m.asset_id ?? m.quantity_item_id}</span>
+            <span className="text-muted">
+              {m.asset_id ?? m.quantity_item_id ?? m.consumable_id}
+            </span>
+            {m.consumable_id ? <Badge variant="neutral">{m.item_kind}</Badge> : null}
             {m.quantity ? <Badge variant="neutral">×{m.quantity}</Badge> : null}
             {m.reason ? <span className="text-muted">{m.reason}</span> : null}
             <span className="ml-auto text-xs text-muted">
-              {new Date(m.created_at).toLocaleString()}
+              <time dateTime={m.occurred_at}>{new Date(m.occurred_at).toLocaleString()}</time>
             </span>
           </li>
         ))}
