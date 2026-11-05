@@ -415,9 +415,6 @@
       "add": "Add scope",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "enable": "Enable",
-      "disable": "Disable",
-      "delete": "Delete",
       "health": {
         "ok": "Last run ok",
         "partial": "Partially failed",
@@ -435,7 +432,6 @@
         "upload_failed": "Upload failed (buffered)",
         "unknown": "Unknown error"
       },
-      "edit": "Edit",
       "editNamed": "Edit scope {{name}}",
       "enableNamed": "Enable scope {{name}}",
       "disableNamed": "Disable scope {{name}}",
@@ -2329,7 +2325,6 @@
       "empty": "No drafts.",
       "listLabel": "Metamodel drafts",
       "isActive": "active draft",
-      "meta": "Changes: {{count}} · created {{created}}",
       "chooseActive": "Choose as active draft",
       "chooseActiveAction": "Choose draft {{name}} as active draft",
       "discard": "Discard",
@@ -2339,7 +2334,6 @@
       "discardFailed": "The draft could not be discarded.",
       "notFound": "This draft does not exist.",
       "back": "Back to the draft list",
-      "detailMeta": "Changes: {{count}} · version {{version}} · created {{created}}",
       "publishedAt": "Published {{at}}",
       "readOnly": "This draft is closed and read-only.",
       "needsPublish": "Testing and publishing need the permission metamodel:publish.",

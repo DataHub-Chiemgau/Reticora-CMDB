@@ -220,13 +220,6 @@ html {
   }
 }
 
-/* A white label on the lighter dark-mode primary falls below 4.5:1; filled
-   primary surfaces (primary button, active navigation) get a dark label. */
-.dark .bg-primary.text-white,
-.dark .focus\:bg-primary:focus.focus\:text-white {
-  color: theme('colors.gray.950');
-}
-
 /* Shared text colours that keep WCAG AA (4.5:1) in both themes (WP-630,
    F-355/F-361): secondary text (hints, counters, table heads, inactive tabs)
    and text in the danger colour without a filled background (delete actions,
