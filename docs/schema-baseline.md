@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000256_quantity_item_merge
+Stand: Migration 000257_assignment_projection
 
 ## Prüfung
 
@@ -1568,6 +1568,36 @@ bei ausgesetztem `stock_movement_append_only` auf `consumable_id` und
 mit Fremdschlüssel und Index ist entfernt, `derive_stock_movement_scope()`
 kennt nur noch `asset` und `consumable`. `quantity_item` selbst bleibt
 unverändert bis WP-758.
+
+Zuweisungen als Projektion des Ledgers (AST-02, AST-07, WP-747, E-26,
+Migration 000257): Index `idx_stock_movement_holder` auf `stock_movement`
+(`organization_id`, `asset_id`, `movement_type`, `occurred_at`). Jede Zeile
+von `assignment` ohne Bewegung gleicher ID ist ID-gleich als
+`assignment`-Bewegung übernommen (`occurred_at` = `assigned_at`,
+`assignee_user_id` = `assigned_to`, `actor_id` = `assigned_by`, `notes`,
+`due_at` = Tagesende von `due_date` in `organization.timezone`), geschlossene
+Zeilen mit einer `return`-Bewegung mit Halter (`returned`: `returned_at`,
+`reason` = `return_condition`; `transferred`: Zeitpunkt der Folgezuweisung,
+sonst `updated_at`; `cancelled`: `updated_at`, `reason` `cancelled`).
+Best-effort-Bewegungen ohne Halter (unter 60 s) und die Kopien aus 000242
+(`notes` `assignment:<id>`) sind bei ausgesetztem
+`stock_movement_append_only` durch die vollständige Bewegung ersetzt,
+`document_link`-Zeilen (`stock_movement`) umgehängt; mehrere offene
+Zuweisungen eines Assets sind bis auf die jüngste (die des Halter-Caches
+zuerst) mit `return` (`reason` `migration: superseded`) geschlossen. Zeilen
+ohne Asset der Organisation (`assignment_without_asset`) oder mit Nutzer
+einer anderen Organisation (`assignment_foreign_user`) stehen ohne Signaturen
+in `migration_quarantine` (Migration `000257`) und bleiben in `assignment`.
+View `assignment_projection` (`security_invoker = true`, RLS von
+`stock_movement` gilt für den Aufrufer): je `assignment`-Bewegung eines
+Assets `id`, `organization_id`, `asset_id`, `assigned_to`,
+`assigned_team_id`, `assigned_by` (`actor_id`), `assignment_type`
+(`transfer` bei gleichzeitiger Rückgabe, sonst `assignment`), `status`
+(`transferred`, `returned`, `overdue`, `active`), `assigned_at`, `due_at`,
+`due_date`, `returned_at`, `return_condition` (erste `return`-Bewegung
+desselben Assets und Halters danach), `notes`, `created_at`, `updated_at`.
+Die Tabelle `assignment` bleibt unverändert bis WP-843; Down entfernt View,
+Index und Quarantäne-Einträge, die Bewegungen bleiben.
 
 ## Tabellen, RLS und Policies
 

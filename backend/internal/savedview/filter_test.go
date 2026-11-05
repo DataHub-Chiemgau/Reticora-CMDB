@@ -187,11 +187,21 @@ func TestCompileSQLAssetLifecycleAndOwner(t *testing.T) {
 	if !strings.Contains(where, "asset.lifecycle_state =") {
 		t.Fatalf("expected asset lifecycle predicate, got %s", where)
 	}
-	if !strings.Contains(where, "NOT EXISTS (SELECT 1 FROM assignment") {
-		t.Fatalf("expected has_owner=false predicate, got %s", where)
+	if !strings.Contains(where, "asset.assigned_user_id IS NULL AND asset.assigned_team_id IS NULL") || strings.Contains(where, "FROM assignment") {
+		t.Fatalf("expected has_owner=false over the holder cache, got %s", where)
 	}
 	if !strings.Contains(where, "asset.warranty_until <= CURRENT_DATE") {
 		t.Fatalf("expected warranty predicate, got %s", where)
+	}
+	// has_owner=true: a user or a team holds the asset (holder cache,
+	// WP-747).
+	trueVal := true
+	held := FilterSpec{EntityKind: "asset", HasOwner: &trueVal}
+	if where, _, err = held.CompileSQL("asset", []any{"org"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if where != "(asset.assigned_user_id IS NOT NULL OR asset.assigned_team_id IS NOT NULL)" {
+		t.Fatalf("has_owner=true = %s, want the holder cache", where)
 	}
 }
 

@@ -107,23 +107,23 @@ func (a *assignFixture) ledger(assetID string) []ledgerRow {
 	return out
 }
 
-// transitionRow is a row of assignment.
-type transitionRow struct {
-	id, status, user, asset, ci, due string
-	returned                         bool
+// projectedRow is a row of the projection assignment_projection (WP-747).
+type projectedRow struct {
+	id, status, kind, user, team, asset, due string
+	returned                                 bool
 }
 
-func (a *assignFixture) rows(where string, args ...any) []transitionRow {
+func (a *assignFixture) rows(where string, args ...any) []projectedRow {
 	a.t.Helper()
-	rows, err := a.f.Admin.Query(context.Background(), `SELECT id::text, status, assigned_to::text, COALESCE(asset_id::text, ''),
-			COALESCE(ci_id::text, ''), COALESCE(to_char(due_date, 'YYYY-MM-DD'), ''), returned_at IS NOT NULL
-		FROM assignment WHERE `+where+` ORDER BY assigned_at, id`, args...)
+	rows, err := a.f.Admin.Query(context.Background(), `SELECT id::text, status, assignment_type, COALESCE(assigned_to::text, ''),
+			COALESCE(assigned_team_id::text, ''), asset_id::text, COALESCE(to_char(due_date, 'YYYY-MM-DD'), ''), returned_at IS NOT NULL
+		FROM assignment_projection WHERE `+where+` ORDER BY assigned_at, id`, args...)
 	if err != nil {
 		a.t.Fatal(err)
 	}
-	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (transitionRow, error) {
-		var r transitionRow
-		return r, row.Scan(&r.id, &r.status, &r.user, &r.asset, &r.ci, &r.due, &r.returned)
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (projectedRow, error) {
+		var r projectedRow
+		return r, row.Scan(&r.id, &r.status, &r.kind, &r.user, &r.team, &r.asset, &r.due, &r.returned)
 	})
 	if err != nil {
 		a.t.Fatal(err)
@@ -179,9 +179,9 @@ func decodeAssignment(t *testing.T, w *httptest.ResponseRecorder) assignment.Ass
 // TestAssignmentServiceAssignReturnTransfer covers AST-02 and AST-07
 // (WP-275) against PostgreSQL: assignment to a user and to a team with a
 // due date, return and transfer book the movements assignment and return
-// in the ledger, keep the holder cache and the transition rows of
-// assignment in one transaction and write asset.returned before
-// asset.assigned; holder conflicts answer 409, a missing or double holder
+// in the ledger and keep the holder cache in one transaction, the
+// projection assignment_projection shows them (WP-747), and they write
+// asset.returned before asset.assigned; holder conflicts answer 409, a missing or double holder
 // 422, a holder of another organization 422.
 func TestAssignmentServiceAssignReturnTransfer(t *testing.T) {
 	f := scopetest.Seed(t, "a6")
@@ -217,7 +217,7 @@ func TestAssignmentServiceAssignReturnTransfer(t *testing.T) {
 	}
 	if rows := a.rows(`asset_id = $1`, asset); len(rows) != 1 || rows[0].id != first.ID || rows[0].status != "active" ||
 		rows[0].user != alice || rows[0].due != "2026-12-01" {
-		t.Fatalf("transition rows after assign = %+v", rows)
+		t.Fatalf("projection after assign = %+v", rows)
 	}
 
 	// An assigned asset is not assigned again.
@@ -245,9 +245,12 @@ func TestAssignmentServiceAssignReturnTransfer(t *testing.T) {
 		ledger[2].kind != "assignment" || ledger[2].team != crew || ledger[2].id != moved.ID || !ledger[1].at.Equal(ledger[2].at) {
 		t.Fatalf("ledger after transfer = %+v", ledger)
 	}
-	// The user row is closed; a team holder has no transition row.
-	if rows := a.rows(`asset_id = $1`, asset); len(rows) != 1 || rows[0].status != "transferred" || !rows[0].returned {
-		t.Fatalf("transition rows after transfer = %+v", rows)
+	// The assignment of the user is transferred, the one of the team is
+	// the transfer.
+	if rows := a.rows(`asset_id = $1`, asset); len(rows) != 2 || rows[0].id != first.ID || rows[0].status != "transferred" || !rows[0].returned ||
+		rows[0].kind != "assignment" || rows[1].id != moved.ID || rows[1].status != "active" || rows[1].kind != "transfer" ||
+		rows[1].team != crew || rows[1].user != "" || rows[1].due != "2027-01-15" {
+		t.Fatalf("projection after transfer = %+v", rows)
 	}
 
 	// A stale expected_holder is a conflict.
@@ -355,7 +358,7 @@ func TestAssignmentServiceConcurrency(t *testing.T) {
 		t.Fatalf("ledger after parallel transfers: %d movements, want 3", n)
 	}
 	if open := a.rows(`asset_id = $1 AND status = 'active'`, held); len(open) != 1 {
-		t.Fatalf("open transition rows = %+v, want one", open)
+		t.Fatalf("open assignments = %+v, want one", open)
 	}
 
 	free := f.Asset(t, f.OrgA, f.Client1, "wp275-free")
@@ -392,7 +395,7 @@ func (b *failingBooker) RecordTx(ctx context.Context, tx pgx.Tx, m *movement.Mov
 
 // TestAssignmentServiceRollbackAndScope covers the transaction and the
 // scope of the service (WP-275): a failing movement service rolls back the
-// first movement, the holder cache, the transition rows and the events; a
+// first movement, the holder cache, the projection and the events; a
 // client-scoped principal gets 404 for an org-wide and a foreign-client
 // asset; POST /api/v1/stock-movements refuses assignment and leaves the
 // cache alone; without the service (profile without database) the router
@@ -423,7 +426,7 @@ func TestAssignmentServiceRollbackAndScope(t *testing.T) {
 		t.Errorf("failed transfer left %d movements", n-movements)
 	}
 	if got := a.rows(`asset_id = $1`, asset); !slices.Equal(got, rows) {
-		t.Errorf("transition rows after the failed transfer = %+v, want %+v", got, rows)
+		t.Errorf("projection after the failed transfer = %+v, want %+v", got, rows)
 	}
 	if got := a.events(asset); !slices.Equal(got, evts) {
 		t.Errorf("events after the failed transfer = %v, want %v", got, evts)
@@ -504,9 +507,11 @@ func memoryRouter(t *testing.T) http.Handler {
 }
 
 // TestAssignmentCIOnlyRowAndBackfill covers the rows of assignment from
-// before WP-275 and the backfill 000254 (WP-275, WP-746): POST
-// /api/v1/assets/{id}/return closes an open row with only a ci_id whose CI
-// belongs to the asset; the backfill takes the newest open row per asset, a
+// before WP-275 and the backfill 000254 (WP-275, WP-746, WP-747): POST
+// /api/v1/assets/{id}/return leaves an open row with only a ci_id whose CI
+// belongs to the asset unchanged (the service writes no transition rows
+// since WP-747, migration 000257 took the history over); the backfill
+// takes the newest open row per asset, a
 // row with only a ci_id through ci.asset_id, the due date as the end of the
 // day in the time zone of the organization, and no user of another
 // organization.
@@ -525,8 +530,8 @@ func TestAssignmentCIOnlyRowAndBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// An open row with only a ci_id (before WP-275) is closed by the
-	// return of the asset.
+	// An open row with only a ci_id (before WP-275) stays as it is when the
+	// asset is returned.
 	ciOnly := f.ID()
 	if _, err := f.Admin.Exec(bg, `INSERT INTO assignment (id, organization_id, ci_id, assigned_to, assigned_by, status)
 		VALUES ($1, $2, $3, $4, $4, 'active')`, ciOnly, f.OrgA, server1, bob); err != nil {
@@ -538,8 +543,11 @@ func TestAssignmentCIOnlyRowAndBackfill(t *testing.T) {
 	if w := a.call(ctx, http.MethodPost, "/api/v1/assets/"+asset+"/return", `{"expected_holder":"`+bob+`"}`); w.Code != http.StatusOK {
 		t.Fatalf("return: %d %s", w.Code, w.Body.String())
 	}
-	if rows := a.rows(`id = $1`, ciOnly); len(rows) != 1 || rows[0].status != "returned" || !rows[0].returned {
-		t.Fatalf("ci-only row after the return = %+v", rows)
+	var status string
+	var returned bool
+	if err := f.Admin.QueryRow(bg, `SELECT status, returned_at IS NOT NULL FROM assignment WHERE id = $1`, ciOnly).Scan(&status, &returned); err != nil ||
+		status != "active" || returned {
+		t.Fatalf("ci-only row after the return: %s returned=%v err=%v, want active", status, returned, err)
 	}
 
 	// Backfill 000254 in a transaction that is rolled back.

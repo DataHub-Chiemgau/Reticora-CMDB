@@ -3,15 +3,11 @@ package assignment_test
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
@@ -27,9 +23,11 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 // keep only their surrogates. Since WP-746 no path below
 // /api/v1/assignments writes, so the assignments with signatures are
 // inserted per SQL with plaintext signer names; the pii.backfill run seals
-// them, the REST resource (GET /api/v1/assignments) returns the names
-// unchanged, another organization does not resolve them and deleting the
-// vault entry shreds the name.
+// them. Since WP-747 GET /api/v1/assignments reads the ledger and returns
+// no signatures, so the test checks the table and the vault directly: the
+// vault resolves the surrogates to the names, another organization does
+// not resolve them and deleting the vault entry shreds the name while the
+// signature stays (until WP-843).
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
@@ -50,22 +48,7 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 	asset := f.Asset(t, f.OrgA, f.Client1, "wp656-asset")
 	holder := f.AppUser(t, f.OrgA, "wp656holder")
 	successor := f.AppUser(t, f.OrgA, "wp656next")
-	mux := chi.NewRouter()
-	assignment.NewHandler(assignment.NewPGRepository(f.App)).RegisterRoutes(mux)
 	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: holder})
-	get := func(path string) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, http.NoBody).WithContext(ctx))
-		return w
-	}
-	decode := func(w *httptest.ResponseRecorder) assignment.Assignment {
-		t.Helper()
-		var a assignment.Assignment
-		if derr := json.Unmarshal(w.Body.Bytes(), &a); derr != nil {
-			t.Fatalf("decode %s: %v", w.Body.String(), derr)
-		}
-		return a
-	}
 	stored := func(id string) (checkout, ret string) {
 		t.Helper()
 		if qerr := f.Admin.QueryRow(bg, `SELECT COALESCE(checkout_signature::text, ''), COALESCE(return_signature::text, '')
@@ -139,37 +122,47 @@ func TestAssignmentSignatureKeepsSurrogate(t *testing.T) {
 		t.Fatalf("second backfill = %+v, %v", again, aerr)
 	}
 
-	// Detail and list resolve the names (REST contract unchanged).
-	got := decode(get("/api/v1/assignments/" + handover))
-	gotReturned := decode(get("/api/v1/assignments/" + returned))
-	if got.CheckoutSignature == nil || got.CheckoutSignature.SignerName != "Max Verifier" || got.CheckoutSignature.Method != "typed" ||
-		gotReturned.ReturnSignature == nil || gotReturned.ReturnSignature.SignerName != "Rita Rueckgabe" ||
-		gotReturned.CheckoutSignature == nil || gotReturned.CheckoutSignature.SignerName != "Lena Legacy" ||
-		gotReturned.CheckoutSignature.ImageBase64 != "aGVsbG8=" {
-		t.Fatalf("get = %+v / %+v / %+v", got.CheckoutSignature, gotReturned.CheckoutSignature, gotReturned.ReturnSignature)
+	// The vault resolves the surrogates to the names in organization A.
+	// GET /api/v1/assignments reads the ledger since WP-747 and returns no
+	// signatures; the table keeps them until WP-843.
+	name := func(orgID, id string) (string, error) {
+		subject, rerr := vault.Resolve(f.OrgCtx(orgID), orgID, id)
+		if rerr != nil {
+			return "", rerr
+		}
+		return subject.Data["v"], nil
 	}
-	if list := get("/api/v1/assignments").Body.String(); !strings.Contains(list, `"signer_name":"Max Verifier"`) ||
-		!strings.Contains(list, `"signer_name":"Rita Rueckgabe"`) {
-		t.Fatalf("list does not resolve the signers: %s", list)
+	legacyCheckout, _ := stored(returned)
+	legacySubject := signer("checkout_signature", legacyCheckout)
+	for subject, want := range map[string]string{checkoutSubject: "Max Verifier", returnSubject: "Rita Rueckgabe", legacySubject: "Lena Legacy"} {
+		if got, rerr := name(f.OrgA, subject); rerr != nil || got != want {
+			t.Fatalf("signer %s = %q, %v, want %q", subject, got, rerr, want)
+		}
+	}
+	if !strings.Contains(legacyCheckout, `"image_base64": "aGVsbG8="`) {
+		t.Fatalf("the image of the signature was lost: %s", legacyCheckout)
 	}
 
 	// Another organization does not resolve the signer.
-	if _, rerr := vault.Resolve(f.OrgCtx(f.OrgB), f.OrgB, checkoutSubject); rerr == nil {
-		t.Fatal("signer resolvable in another organization")
+	if got, rerr := name(f.OrgB, checkoutSubject); rerr == nil {
+		t.Fatalf("signer resolvable in another organization: %q", got)
 	}
 
-	// Deleting the vault entry shreds the name; the signature stays.
+	// Deleting the vault entry shreds the name; the signature with its
+	// surrogate stays in the table, the other signers stay resolvable.
 	if err = vault.Delete(ctx, f.OrgA, checkoutSubject); err != nil {
 		t.Fatal(err)
 	}
-	w := get("/api/v1/assignments/" + handover)
-	shredded := decode(w)
-	if w.Code != http.StatusOK || shredded.CheckoutSignature == nil || shredded.CheckoutSignature.SignerName != "" ||
-		shredded.CheckoutSignature.Method != "typed" || strings.Contains(w.Body.String(), "Max Verifier") {
-		t.Fatalf("after shredding: %d %s", w.Code, w.Body.String())
+	if got, rerr := name(f.OrgA, checkoutSubject); !errors.Is(rerr, pii.ErrNotFound) {
+		t.Fatalf("shredded signer = %q, %v, want pii.ErrNotFound", got, rerr)
 	}
-	if kept := decode(get("/api/v1/assignments/" + returned)); kept.ReturnSignature == nil ||
-		kept.ReturnSignature.SignerName != "Rita Rueckgabe" {
-		t.Fatalf("the return signature after shredding the handover signer = %+v", kept.ReturnSignature)
+	if exists(`SELECT 1 FROM pii_subject WHERE organization_id = $1 AND surrogate_id = $2`, f.OrgA, checkoutSubject) {
+		t.Fatal("the vault entry of the shredded signer is left")
+	}
+	if after, _ := stored(handover); after != checkout {
+		t.Fatalf("the signature changed by shredding: %s, want %s", after, checkout)
+	}
+	if got, rerr := name(f.OrgA, returnSubject); rerr != nil || got != "Rita Rueckgabe" {
+		t.Fatalf("the return signer after shredding the handover signer = %q, %v", got, rerr)
 	}
 }

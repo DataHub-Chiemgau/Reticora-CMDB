@@ -11,16 +11,16 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
-// Repository defines persistence operations for assignments.
+// Repository reads the assignments (GET /api/v1/assignments, the DSAR
+// export). Since WP-747 they are a projection of the ledger; only the
+// assignment service (Service) writes, over stock_movement.
 type Repository interface {
 	List(ctx context.Context, orgID string, filter *FilterParams, page api.PaginationParams) ([]Assignment, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Assignment, error)
-	Create(ctx context.Context, a *Assignment) error
-	Update(ctx context.Context, orgID, id string, a *Assignment) error
-	Delete(ctx context.Context, orgID, id string) error
 }
 
-// MemoryRepository is an in-memory implementation of Repository.
+// MemoryRepository is an in-memory implementation of Repository; Create
+// fills it in tests.
 type MemoryRepository struct {
 	mu          sync.RWMutex
 	assignments map[string]*Assignment
@@ -115,6 +115,8 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Assign
 	return a, nil
 }
 
+// Create adds an assignment (test data; the PostgreSQL repository has no
+// writes).
 func (r *MemoryRepository) Create(_ context.Context, a *Assignment) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -126,33 +128,5 @@ func (r *MemoryRepository) Create(_ context.Context, a *Assignment) error {
 	a.UpdatedAt = now
 	a.AssignedAt = now
 	r.assignments[a.ID] = a
-	return nil
-}
-
-func (r *MemoryRepository) Update(_ context.Context, orgID, id string, updated *Assignment) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	existing, ok := r.assignments[id]
-	if !ok || existing.OrganizationID != orgID {
-		return fmt.Errorf("assignment not found")
-	}
-	updated.ID = id
-	updated.OrganizationID = orgID
-	updated.CreatedAt = existing.CreatedAt
-	updated.UpdatedAt = time.Now().UTC()
-	r.assignments[id] = updated
-	return nil
-}
-
-func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	a, ok := r.assignments[id]
-	if !ok || a.OrganizationID != orgID {
-		return fmt.Errorf("assignment not found")
-	}
-	delete(r.assignments, id)
 	return nil
 }

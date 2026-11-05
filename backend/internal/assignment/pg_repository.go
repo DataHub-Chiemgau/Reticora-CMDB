@@ -3,6 +3,7 @@ package assignment
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,27 +14,34 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// assignmentSelectColumns are the columns of the projection
+// assignment_projection (000257) in the order of scanAssignment.
 const assignmentSelectColumns = `
 	id::text,
 	organization_id::text,
-	COALESCE(asset_id::text, ''),
-	COALESCE(ci_id::text, ''),
-	assigned_to::text,
-	assigned_by::text,
+	asset_id::text,
+	COALESCE(assigned_to::text, ''),
+	COALESCE(assigned_team_id::text, ''),
+	COALESCE(assigned_by::text, ''),
 	assignment_type,
 	status,
 	assigned_at,
+	due_at,
 	due_date,
 	returned_at,
 	COALESCE(return_condition, ''),
 	COALESCE(notes, ''),
-	checkout_signature,
-	return_signature,
 	created_at,
 	updated_at
 `
 
-// PGRepository implements Repository backed by PostgreSQL with RLS.
+// PGRepository reads the assignments from the projection
+// assignment_projection over the ledger stock_movement (AST-02, AST-07,
+// WP-747): one row per assignment movement, its return the first return
+// movement of the same asset and holder after it. The view runs with
+// security_invoker, so the row level security of stock_movement (client
+// and site scope of the booking) applies to the caller. The assignments
+// are written by the assignment service (Service) only.
 type PGRepository struct {
 	pool *pgxpool.Pool
 }
@@ -41,27 +49,6 @@ type PGRepository struct {
 // NewPGRepository creates a new PostgreSQL-backed assignment repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
-}
-
-// assignmentVisible restricts assignments to those whose asset and CI are
-// visible under the transaction's tenant scope: the asset and ci policies
-// filter the subqueries, while assignment carries no client column yet
-// (WP-025).
-const assignmentVisible = `(assignment.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = assignment.asset_id))
-	AND (assignment.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = assignment.ci_id))`
-
-// requireVisible fails with "not found" when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
-func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
-	var ok bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
-		return fmt.Errorf("check %s visibility: %w", table, err)
-	}
-	if !ok {
-		return fmt.Errorf("not found")
-	}
-	return nil
 }
 
 // List returns paginated assignments filtered by the given parameters.
@@ -80,19 +67,34 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			argPos++
 		}
 		if filter.AssignedTo != "" {
-			whereParts = append(whereParts, fmt.Sprintf("assigned_to = $%d", argPos))
-			args = append(args, filter.AssignedTo)
-			argPos++
+			// A value that is no UUID matches no row (uuid column).
+			if !api.IsUUID(filter.AssignedTo) {
+				whereParts = append(whereParts, "false")
+			} else {
+				whereParts = append(whereParts, fmt.Sprintf("assigned_to = $%d", argPos))
+				args = append(args, filter.AssignedTo)
+				argPos++
+			}
 		}
 		if filter.AssignedBy != "" {
-			whereParts = append(whereParts, fmt.Sprintf("assigned_by = $%d", argPos))
-			args = append(args, filter.AssignedBy)
-			argPos++
+			// A value that is no UUID matches no row (uuid column).
+			if !api.IsUUID(filter.AssignedBy) {
+				whereParts = append(whereParts, "false")
+			} else {
+				whereParts = append(whereParts, fmt.Sprintf("assigned_by = $%d", argPos))
+				args = append(args, filter.AssignedBy)
+				argPos++
+			}
 		}
 		if filter.AssetID != "" {
-			whereParts = append(whereParts, fmt.Sprintf("asset_id = $%d", argPos))
-			args = append(args, filter.AssetID)
-			argPos++
+			// A value that is no UUID matches no row (uuid column).
+			if !api.IsUUID(filter.AssetID) {
+				whereParts = append(whereParts, "false")
+			} else {
+				whereParts = append(whereParts, fmt.Sprintf("asset_id = $%d", argPos))
+				args = append(args, filter.AssetID)
+				argPos++
+			}
 		}
 		if filter.Search != "" {
 			whereParts = append(whereParts, fmt.Sprintf("notes ILIKE $%d", argPos))
@@ -101,7 +103,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM assignment WHERE "+assignmentVisible+" AND "+whereClause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM assignment_projection WHERE "+whereClause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count assignments: %w", err)
 		}
 
@@ -124,14 +126,14 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
-				"SELECT %s FROM assignment WHERE "+assignmentVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM assignment_projection WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
 				assignmentSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
-				"SELECT %s FROM assignment WHERE "+assignmentVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM assignment_projection WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
 				assignmentSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
@@ -152,11 +154,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate assignments: %w", err)
 		}
-		items := make([]*Assignment, len(assignments))
-		for i := range assignments {
-			items[i] = &assignments[i]
-		}
-		return reveal(ctx, tx, orgID, items...)
+		return nil
 	})
 
 	return assignments, total, err
@@ -167,171 +165,24 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Assignme
 	var assignment *Assignment
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		query := fmt.Sprintf("SELECT %s FROM assignment WHERE "+assignmentVisible+" AND id = $1", assignmentSelectColumns)
+		if !api.IsUUID(id) {
+			return fmt.Errorf("not found")
+		}
+		query := fmt.Sprintf("SELECT %s FROM assignment_projection WHERE id = $1", assignmentSelectColumns)
 		var err error
 		assignment, err = scanAssignment(tx.QueryRow(ctx, query, id))
 		if err != nil {
-			if err == pgx.ErrNoRows {
+			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("not found")
 			}
 			return fmt.Errorf("get assignment by id: %w", err)
 		}
-		return reveal(ctx, tx, orgID, assignment)
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return assignment, nil
-}
-
-// Create inserts a new assignment.
-func (r *PGRepository) Create(ctx context.Context, a *Assignment) error {
-	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		// The signer name goes into the vault; the table keeps its
-		// surrogate (SEC-05).
-		checkoutSig, err := sealSignature(ctx, tx, a.OrganizationID, a.CheckoutSignature)
-		if err != nil {
-			return err
-		}
-		query := `
-			INSERT INTO assignment (
-				organization_id, asset_id, ci_id, assigned_to, assigned_by, assignment_type,
-				status, assigned_at, due_date, returned_at, return_condition, notes, checkout_signature
-			) VALUES (
-				$1, $2, $3, $4, $5, $6,
-				$7, COALESCE($8::timestamptz, NOW()), $9, $10, $11, $12, $13::jsonb
-			)
-			RETURNING id::text, assigned_at, created_at, updated_at
-		`
-		if err = tx.QueryRow(ctx, query,
-			a.OrganizationID,
-			nilIfEmpty(a.AssetID),
-			nilIfEmpty(a.CIID),
-			a.AssignedTo,
-			a.AssignedBy,
-			a.AssignmentType,
-			a.Status,
-			nilIfZeroTime(a.AssignedAt),
-			nilIfEmpty(a.DueDate),
-			nilIfEmpty(a.ReturnedAt),
-			nilIfEmpty(a.ReturnCondition),
-			nilIfEmpty(a.Notes),
-			checkoutSig,
-		).Scan(&a.ID, &a.AssignedAt, &a.CreatedAt, &a.UpdatedAt); err != nil {
-			return fmt.Errorf("create assignment: %w", err)
-		}
-		a.AssignedAt = a.AssignedAt.UTC()
-		a.CreatedAt = a.CreatedAt.UTC()
-		a.UpdatedAt = a.UpdatedAt.UTC()
-		return requireVisible(ctx, tx, "assignment", assignmentVisible, a.ID)
-	})
-}
-
-// Update replaces mutable fields on an existing assignment.
-func (r *PGRepository) Update(ctx context.Context, orgID, id string, a *Assignment) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		returnSig, replaced, err := sealReturnSignature(ctx, tx, orgID, id, a.ReturnSignature)
-		if err != nil {
-			return err
-		}
-		query := `
-			UPDATE assignment SET
-				asset_id = $2,
-				ci_id = $3,
-				assigned_to = $4,
-				assigned_by = $5,
-				assignment_type = $6,
-				status = $7,
-				assigned_at = $8,
-				due_date = $9,
-				returned_at = $10,
-				return_condition = $11,
-				notes = $12,
-				return_signature = COALESCE($13::jsonb, return_signature),
-				updated_at = NOW()
-			WHERE id = $1
-			RETURNING ` + assignmentSelectColumns
-		updated, err := scanAssignment(tx.QueryRow(ctx, query,
-			id,
-			nilIfEmpty(a.AssetID),
-			nilIfEmpty(a.CIID),
-			a.AssignedTo,
-			a.AssignedBy,
-			a.AssignmentType,
-			a.Status,
-			a.AssignedAt,
-			nilIfEmpty(a.DueDate),
-			nilIfEmpty(a.ReturnedAt),
-			nilIfEmpty(a.ReturnCondition),
-			nilIfEmpty(a.Notes),
-			returnSig,
-		))
-		if err != nil {
-			if err == pgx.ErrNoRows {
-				return fmt.Errorf("not found")
-			}
-			return fmt.Errorf("update assignment: %w", err)
-		}
-		if serr := shred(ctx, tx, orgID, replaced); serr != nil {
-			return serr
-		}
-		if rerr := reveal(ctx, tx, orgID, updated); rerr != nil {
-			return rerr
-		}
-		*a = *updated
-		return requireVisible(ctx, tx, "assignment", assignmentVisible, id)
-	})
-}
-
-// sealReturnSignature returns the stored form of the return signature an
-// update writes: nil keeps the stored one, which is the case when sig is
-// none or equals it (a transfer or a repeated return carries the read
-// signature along). A new signature replaces the stored one, whose signer
-// subject (replaced) the caller deletes.
-func sealReturnSignature(ctx context.Context, tx pgx.Tx, orgID, id string, sig *Signature) (stored any, replaced string, err error) {
-	if sig == nil {
-		return nil, "", nil
-	}
-	var raw []byte
-	err = tx.QueryRow(ctx, "SELECT return_signature FROM assignment WHERE "+assignmentVisible+" AND id = $1 FOR UPDATE", id).Scan(&raw)
-	if err == pgx.ErrNoRows {
-		return nil, "", fmt.Errorf("not found")
-	}
-	if err != nil {
-		return nil, "", fmt.Errorf("read return signature: %w", err)
-	}
-	current := &Assignment{}
-	current.ReturnSignature, current.returnSigner = decodeSignature(raw)
-	if rerr := reveal(ctx, tx, orgID, current); rerr != nil {
-		return nil, "", rerr
-	}
-	if current.ReturnSignature != nil && *current.ReturnSignature == *sig {
-		return nil, "", nil
-	}
-	if stored, err = sealSignature(ctx, tx, orgID, sig); err != nil {
-		return nil, "", err
-	}
-	return stored, current.returnSigner, nil
-}
-
-// Delete deletes an assignment. The assignment table has no deleted_at column, so this is a hard delete.
-func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// The signer names of the deleted assignment are deleted with it
-		// (crypto-shredding).
-		var checkoutSig, returnSig []byte
-		err := tx.QueryRow(ctx, "DELETE FROM assignment WHERE "+assignmentVisible+" AND id = $1 RETURNING checkout_signature, return_signature", id).
-			Scan(&checkoutSig, &returnSig)
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("not found")
-		}
-		if err != nil {
-			return fmt.Errorf("delete assignment: %w", err)
-		}
-		_, checkoutSigner := decodeSignature(checkoutSig)
-		_, returnSigner := decodeSignature(returnSig)
-		return shred(ctx, tx, orgID, checkoutSigner, returnSigner)
-	})
 }
 
 type assignmentScanner interface {
@@ -340,38 +191,37 @@ type assignmentScanner interface {
 
 func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 	item := &Assignment{}
-	var dueDate sql.NullTime
-	var returnedAt sql.NullTime
-	var checkoutSig, returnSig []byte
+	var dueDate, returnedAt sql.NullTime
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
 		&item.AssetID,
-		&item.CIID,
 		&item.AssignedTo,
+		&item.AssignedTeamID,
 		&item.AssignedBy,
 		&item.AssignmentType,
 		&item.Status,
 		&item.AssignedAt,
+		&item.DueAt,
 		&dueDate,
 		&returnedAt,
 		&item.ReturnCondition,
 		&item.Notes,
-		&checkoutSig,
-		&returnSig,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
 	if dueDate.Valid {
-		item.DueDate = dueDate.Time.UTC().Format("2006-01-02")
+		item.DueDate = dueDate.Time.Format(time.DateOnly)
 	}
 	if returnedAt.Valid {
 		item.ReturnedAt = returnedAt.Time.UTC().Format(time.RFC3339)
 	}
-	item.CheckoutSignature, item.checkoutSigner = decodeSignature(checkoutSig)
-	item.ReturnSignature, item.returnSigner = decodeSignature(returnSig)
+	if item.DueAt != nil {
+		due := item.DueAt.UTC()
+		item.DueAt = &due
+	}
 	item.AssignedAt = item.AssignedAt.UTC()
 	item.CreatedAt = item.CreatedAt.UTC()
 	item.UpdatedAt = item.UpdatedAt.UTC()
@@ -380,13 +230,6 @@ func scanAssignment(scanner assignmentScanner) (*Assignment, error) {
 
 func nilIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
-}
-
-func nilIfZeroTime(value time.Time) any {
-	if value.IsZero() {
 		return nil
 	}
 	return value
