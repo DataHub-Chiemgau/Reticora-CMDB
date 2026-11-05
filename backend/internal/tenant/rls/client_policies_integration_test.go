@@ -22,10 +22,11 @@ const (
 	cpUser    = "c11e0230-0000-4000-8000-0000000000f1"
 )
 
-// clientPolicyTable describes how to insert a minimal row into one of the nine
+// clientPolicyTable describes how to insert a minimal row into one of the
 // tables that received a client predicate in migration 000058. location_node
 // was retired by migration 000074; its archive location_node_retired carries
-// the same predicate.
+// the same predicate. quantity_item is merged into consumable (000256,
+// WP-757, E-40); stock_level is covered by WP-283.
 type clientPolicyTable struct {
 	name    string
 	columns string // besides organization_id and client_id
@@ -42,7 +43,6 @@ var clientPolicyTables = []clientPolicyTable{
 	// One notification per window, client and channel (migration 000173):
 	// every row gets a channel of its own.
 	{"maintenance_notification", "maintenance_window_id, channel", "'" + cpWindow + "', 'wp023-' || gen_random_uuid()"},
-	{"quantity_item", "name", "'Item ' || gen_random_uuid()"},
 	{"sla", "name, priority, response_target_minutes, resolution_target_minutes", "'SLA ' || gen_random_uuid(), 'low', 10, 20"},
 }
 
@@ -109,7 +109,7 @@ func seedClientPolicies(t *testing.T, ctx context.Context, dsn string) (*pgxpool
 	return pool, rows
 }
 
-// TestClientPoliciesEnforceClientScope covers TEN-05/CH11 for the nine tables
+// TestClientPoliciesEnforceClientScope covers TEN-05/CH11 for the tables
 // of migration 000058 and E-09 (no NULL client writes without org-wide scope).
 func TestClientPoliciesEnforceClientScope(t *testing.T) {
 	ctx := context.Background()

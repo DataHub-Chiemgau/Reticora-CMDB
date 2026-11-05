@@ -7,6 +7,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/jackc/pgx/v5"
@@ -24,8 +25,8 @@ import (
 //     org-wide contact are visible.
 //   - Grants on sites of both clients see both clients.
 //
-// The site dimension within the client (assets and quantity items at another
-// site of client 1, WP-392) is TestSiteGrantConfinedToClientAndSite.
+// The site dimension within the client (assets and the stock of bins at
+// another site of client 1, WP-392, WP-844) is TestSiteGrantConfinedToClientAndSite.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSiteGrantConfinedToClient(t *testing.T) {
@@ -106,15 +107,16 @@ func TestSiteGrantConfinedToClient(t *testing.T) {
 }
 
 // TestSiteGrantConfinedToClientAndSite covers WP-392 (TEN-01, TEN-02,
-// F-014, F-141): a principal holding a role at site 1 of client 1 sees the
-// assets and quantity items of site 1 only, not those placed at another site
-// of the same client (site 1b). Asset and quantity item carry the site of
-// their location (site_id, migration 000151) and their policies apply
-// app.site_scope. It is resolved through the same production chain as
+// F-014, F-141; WP-844, E-40): a principal holding a role at site 1 of
+// client 1 sees the assets and the stock rows (stock_level) of site 1 only,
+// not those placed at another site of the same client (site 1b). An asset
+// carries the site of its location (site_id, migration 000151), a stock row
+// the site of its bin (000252); their policies apply app.site_scope. It is
+// resolved through the same production chain as
 // TestSiteGrantConfinedToClient.
-//   - Asset and quantity item of client 1 at site 1b are invisible; so are
-//     those of client 2 at site 2 (TEN-09).
-//   - Asset and quantity item of client 1 at site 1, and an unplaced asset of
+//   - Asset and stock row of client 1 at site 1b are invisible; so are those
+//     of client 2 at site 2 (TEN-09).
+//   - Asset and stock row of client 1 at site 1, and an unplaced asset of
 //     client 1 (no site, TEN-05), are visible.
 //   - Grants on sites 1 and 1b see both sites.
 //
@@ -132,9 +134,9 @@ func TestSiteGrantConfinedToClientAndSite(t *testing.T) {
 	asset2 := f.Asset(t, f.OrgA, f.Client2, "audit-09-asset-c2-s2")
 	placeIn(t, f, "asset", asset2, room2)
 	asset1Unplaced := f.Asset(t, f.OrgA, f.Client1, "audit-09-asset-c1-unplaced")
-	item1 := quantityItem(t, f, f.Client1, "audit-09-item-c1-s1", room1)
-	item1b := quantityItem(t, f, f.Client1, "audit-09-item-c1-s1b", room1b)
-	item2 := quantityItem(t, f, f.Client2, "audit-09-item-c2-s2", room2)
+	stock1 := stockInBin(t, f, f.Client1, "audit-09-stock-c1-s1", siteOfRoom(t, f, room1))
+	stock1b := stockInBin(t, f, f.Client1, "audit-09-stock-c1-s1b", siteOfRoom(t, f, room1b))
+	stock2 := stockInBin(t, f, f.Client2, "audit-09-stock-c2-s2", siteOfRoom(t, f, room2))
 
 	site1Only := viewerAtSites(t, f, "audit-09-site1", siteOfRoom(t, f, room1))
 	site1And1b := viewerAtSites(t, f, "audit-09-site1-site1b", siteOfRoom(t, f, room1), siteOfRoom(t, f, room1b))
@@ -148,17 +150,18 @@ func TestSiteGrantConfinedToClientAndSite(t *testing.T) {
 	}{
 		// P2 (TEN-02): placed at another site of the same client.
 		{"site1: asset of client 1 at site 1b invisible (P2 TEN-02)", site1Only, "asset", asset1b, false},
-		{"site1: quantity item of client 1 at site 1b invisible", site1Only, "quantity_item", item1b, false},
+		{"site1: stock of client 1 in a bin of site 1b invisible", site1Only, "stock_level", stock1b, false},
 		{"site1: asset of client 2 at site 2 invisible", site1Only, "asset", asset2, false},
-		{"site1: quantity item of client 2 at site 2 invisible", site1Only, "quantity_item", item2, false},
+		{"site1: stock of client 2 in a bin of site 2 invisible", site1Only, "stock_level", stock2, false},
 		// The own site and rows without site.
 		{"site1: asset of client 1 at site 1 visible", site1Only, "asset", asset1, true},
-		{"site1: quantity item of client 1 at site 1 visible", site1Only, "quantity_item", item1, true},
+		{"site1: stock of client 1 in a bin of site 1 visible", site1Only, "stock_level", stock1, true},
 		{"site1: unplaced asset of client 1 visible", site1Only, "asset", asset1Unplaced, true},
 		// Edge: grants on both sites of client 1 see both.
 		{"site1+site1b: asset of client 1 at site 1b visible", site1And1b, "asset", asset1b, true},
-		{"site1+site1b: quantity item of client 1 at site 1b visible", site1And1b, "quantity_item", item1b, true},
+		{"site1+site1b: stock of client 1 in a bin of site 1b visible", site1And1b, "stock_level", stock1b, true},
 		{"site1+site1b: asset of client 2 at site 2 invisible", site1And1b, "asset", asset2, false},
+		{"site1+site1b: stock of client 2 in a bin of site 2 invisible", site1And1b, "stock_level", stock2, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := visibleTo(tc.ctx, t, f, tc.table, tc.id); got != tc.want {
@@ -168,14 +171,23 @@ func TestSiteGrantConfinedToClientAndSite(t *testing.T) {
 	}
 }
 
-// quantityItem inserts a quantity item of clientID placed in room through the
-// maintenance pool and returns its id.
-func quantityItem(t *testing.T, f *scopetest.Fixture, clientID, name, room string) string {
+// stockInBin creates the branch warehouse > zone > shelf > bin below site
+// and a consumable of clientID with stock in the bin through the maintenance
+// pool and returns the id of the stock_level row; the row takes client and
+// site of the bin (stock_level_derive_location, 000252).
+func stockInBin(t *testing.T, f *scopetest.Fixture, clientID, name, site string) string {
 	t.Helper()
+	bg := context.Background()
+	repo := locations.NewPGRepository(f.App)
+	parent := site
+	for _, kind := range []locations.Kind{locations.KindWarehouse, locations.KindZone, locations.KindShelf, locations.KindBin} {
+		parent = mustCreate(t, repo, f.OrgCtx(f.OrgA), f.OrgA, locations.CreateRequest{Kind: kind, ParentID: parent, Name: name + "-" + string(kind)}).ID
+	}
 	var id string
-	if err := f.Admin.QueryRow(context.Background(), `INSERT INTO quantity_item (organization_id, client_id, name, location_id)
-		VALUES ($1, $2, $3, $4) RETURNING id::text`, f.OrgA, clientID, name, room).Scan(&id); err != nil {
-		t.Fatalf("insert quantity item %s: %v", name, err)
+	if err := f.Admin.QueryRow(bg, `WITH c AS (INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, $3) RETURNING id)
+		INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) SELECT $1, id, $4, 3 FROM c RETURNING id::text`,
+		f.OrgA, clientID, name, parent).Scan(&id); err != nil {
+		t.Fatalf("insert stock %s: %v", name, err)
 	}
 	return id
 }

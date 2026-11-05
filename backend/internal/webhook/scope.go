@@ -26,10 +26,13 @@ type ObjectScope struct {
 // ObjectKind is the table of an object an event references by ID.
 type ObjectKind string
 
-// The object kinds scope resolution reads.
+// The object kinds scope resolution reads. ObjectQuantityItem is the kind of
+// the alias field quantity_item_id: since WP-757 (E-40) a quantity item is a
+// consumable with the same ID and resolves like ObjectConsumable.
 const (
 	ObjectCI           ObjectKind = "ci"
 	ObjectAsset        ObjectKind = "asset"
+	ObjectConsumable   ObjectKind = "consumable"
 	ObjectQuantityItem ObjectKind = "quantity_item"
 )
 
@@ -84,15 +87,17 @@ var (
 	organizational  = scopeRule{orgWide: true}
 	inventoryObject = scopeRule{refs: []refField{
 		{field: "asset_id", kind: ObjectAsset, optional: true},
+		{field: "consumable_id", kind: ObjectConsumable, optional: true},
 		{field: "quantity_item_id", kind: ObjectQuantityItem, optional: true},
 	}}
 	notResolvable = scopeRule{}
 
 	// The phase 2 types (EVT-03, WP-246) read client_id/site_id of their
 	// payload frame (api/events.schema.json) and resolve only CIs, assets
-	// and quantity items; for objects of other kinds (contract, ticket)
-	// without client_id/site_id the scope is unknown until the producing
-	// work package adds the kind to the resolver.
+	// and consumables (also by the alias quantity_item_id); for objects of
+	// other kinds (contract, ticket) without client_id/site_id the scope is
+	// unknown until the producing work package adds the kind to the
+	// resolver.
 	assetByID          = scopeRule{payload: true, refs: []refField{{field: "id", kind: ObjectAsset}}}
 	quantityItemByID   = scopeRule{payload: true, refs: []refField{{field: "id", kind: ObjectQuantityItem}}}
 	payloadScope       = scopeRule{payload: true}
@@ -283,16 +288,23 @@ func optionalString(fields map[string]json.RawMessage, name string) (string, boo
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // objectQueries read id, client and site of the rows of a kind, deleted_at
-// ignored: a deleted CI keeps the scope its events were about. Assets and
-// quantity items carry the site of their location (WP-392).
+// ignored: a deleted CI keeps the scope its events were about. Assets carry
+// the site of their location (WP-392). A consumable has no location of its
+// own: its stock lies per bin in stock_level (WP-283), so it resolves to its
+// client without a site (WP-844, E-40); events about the stock of a bin
+// carry client_id and site_id of the bin in their payload (WP-284).
 var objectQueries = map[ObjectKind]string{
 	ObjectCI: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
 	ObjectAsset: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
 		FROM asset WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
-	ObjectQuantityItem: `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
-		FROM quantity_item WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
+	ObjectConsumable:   consumableQuery,
+	ObjectQuantityItem: consumableQuery,
 }
+
+// consumableQuery reads the client of consumables; the site is NULL.
+const consumableQuery = `SELECT id::text, COALESCE(client_id::text, ''), ''
+	FROM consumable WHERE organization_id = $1 AND id = ANY($2::uuid[])`
 
 // mergeVictimQuery reads the scope of merged CIs that left table ci from the
 // snapshot of their last merge.
