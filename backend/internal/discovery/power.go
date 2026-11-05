@@ -339,6 +339,16 @@ func (h *Handler) writePowerFeeds(ctx context.Context, orgID string, items []Ing
 // ciNameIndex finds the CIs named by outlets: by hostname or FQDN through
 // the identity index, otherwise by CI name.
 func (h *Handler) ciNameIndex(ctx context.Context, orgID string, names []string) map[string]string {
+	// Every name is looked up once (the device of several outlets).
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			unique = append(unique, n)
+		}
+	}
+	names = unique
 	out := map[string]string{}
 	finder, ok := h.repo.(IdentityCandidateFinder)
 	if ok {
