@@ -270,6 +270,16 @@ func authorNamesTx(ctx context.Context, tx pgx.Tx, values []*FieldValue) (map[st
 // that mark instead of ErrNotFound, so the central write decision refuses
 // it (ReasonInstanceAttribute).
 func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
+	return r.get(ctx, orgID, ciID, fieldName, true)
+}
+
+// getForDecision is Get without EffectiveValue and Diverged, which
+// DecideAutomatedWrite does not read: it saves the policy query.
+func (r *PGRepository) getForDecision(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, error) {
+	return r.get(ctx, orgID, ciID, fieldName, false)
+}
+
+func (r *PGRepository) get(ctx context.Context, orgID, ciID, fieldName string, effective bool) (*FieldValue, error) {
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// One statement: the row, if any, and whether the field is an
@@ -299,7 +309,10 @@ func (r *PGRepository) Get(ctx context.Context, orgID, ciID, fieldName string) (
 			out = &FieldValue{OrganizationID: orgID, CIID: ciID, FieldName: fieldName, InstanceAttribute: true}
 			return nil
 		}
-		out = r.withEffectiveTx(ctx, tx, fv)
+		out = fv
+		if effective {
+			out = r.withEffectiveTx(ctx, tx, fv)
+		}
 		out.InstanceAttribute = instance
 		return nil
 	})
