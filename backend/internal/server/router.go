@@ -686,11 +686,39 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// implementation under its identity locks, decide every field with
 	// source import (rank 95) and open the ingest's reviews; the policy of
 	// the starter is resolved like a request's.
+	// Assets, contracts, consumables and relationships (WP-776) are
+	// written through their repositories in the row's transaction; the
+	// identity lookups and the audit entry of a row go through the
+	// profile store (PostgreSQL only). Relation columns of CI rows use the
+	// relationship writer.
+	var relWriter *importer.RelationshipWriter
+	if store, ok := repos.Import.(importer.EntityStore); ok {
+		if repos.Asset != nil {
+			assetWriter := importer.NewAssetWriter(repos.Asset, store, fieldResolver)
+			if opts.CIService != nil {
+				assetWriter.WithCILinks(opts.CIService)
+			}
+			importHandler.WithWriter(assetWriter)
+		}
+		if repos.Contract != nil {
+			importHandler.WithWriter(importer.NewContractWriter(repos.Contract, store, fieldResolver))
+		}
+		if repos.Consumable != nil {
+			importHandler.WithWriter(importer.NewConsumableWriter(repos.Consumable, store))
+		}
+		if repos.Relationship != nil {
+			relWriter = importer.NewRelationshipWriter(repos.Relationship, store, fieldResolver).WithIdentities(discoveryHandler)
+			importHandler.WithWriter(relWriter)
+		}
+	}
 	if opts.CIService != nil && repos.Override != nil {
 		ciWriter := importer.NewCIWriter(opts.CIService, discoveryHandler, repos.Override, fieldResolver).
 			WithInstanceFields(repos.CIType).WithFields(repos.CIType).WithLocations(repos.LocationTree)
 		if analyzer, ok := repos.Discovery.(discovery.BulkAnalyzer); ok {
 			ciWriter.WithAnalyzer(analyzer)
+		}
+		if relWriter != nil {
+			ciWriter.WithRelations(relWriter)
 		}
 		importHandler.WithWriter(ciWriter)
 	}

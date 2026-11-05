@@ -46,10 +46,13 @@ var resourceTables = map[string][]string{
 	"ci_type":                  {"ci_type"},
 	"form_layout":              {"form_layout"},
 	"collector":                {"collector"},
+	"consumable":               {"consumable"}, // import rows (WP-776)
+	"contract":                 {"contract"},   // import rows (WP-776)
 	"disposal_record":          {"disposal_record"},
 	"location":                 {"location"},
 	"metamodel_draft":          {"metamodel_draft"},
 	"metamodel_rule":           {"metamodel_rule"},
+	"relationship":             {"ci_relationship"}, // import rows (WP-776)
 	"relationship_suppression": {"relationship_suppression"},
 	"review_item":              {"review_item"},
 	"role_assignment":          {"role_assignment", "user_custom_role"},

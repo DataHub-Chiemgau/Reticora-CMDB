@@ -80,7 +80,7 @@ func TestRestrictedResourceRule(t *testing.T) {
 		"CASE\n\tWHEN audit_log.resource_type IN ('audit', 'audit-log', 'audit_log', 'ci-fields', 'notification', 'org', 'org_dek', " +
 			"'organization', 'reconciliation', 'relationship-types', 'retention', 'search') THEN true",
 		"WHEN audit_log.resource_type IN ('racks') THEN EXISTS (SELECT 1 FROM rack t WHERE t.id = audit_log.resource_id)\n",
-		"WHEN audit_log.resource_type IN ('relationships') THEN EXISTS (SELECT 1 FROM ci_relationship t WHERE t.id = audit_log.resource_id)\n",
+		"WHEN audit_log.resource_type IN ('relationship', 'relationships') THEN EXISTS (SELECT 1 FROM ci_relationship t WHERE t.id = audit_log.resource_id)\n",
 		"WHEN audit_log.resource_type IN ('asset', 'assets') THEN EXISTS (SELECT 1 FROM asset t WHERE t.id = audit_log.resource_id)\n",
 		"WHEN audit_log.resource_type IN ('ticket', 'tickets') THEN EXISTS (SELECT 1 FROM ticket t WHERE t.id = audit_log.resource_id)\n",
 		"WHEN audit_log.resource_type IN ('buildings') THEN EXISTS (SELECT 1 FROM building t WHERE t.id = audit_log.resource_id " +

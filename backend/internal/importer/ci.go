@@ -98,6 +98,7 @@ type CIWriter struct {
 	fields    ci.FieldResolver
 	locations locations.Repository
 	analyzer  discovery.BulkAnalyzer
+	relations *RelationshipWriter
 }
 
 // NewCIWriter returns the writer of CI rows: cis creates and changes the
@@ -134,6 +135,14 @@ func (w *CIWriter) WithLocations(repo locations.Repository) *CIWriter {
 // CIs (WP-834).
 func (w *CIWriter) WithAnalyzer(a discovery.BulkAnalyzer) *CIWriter {
 	w.analyzer = a
+	return w
+}
+
+// WithRelations writes the relation columns of CI rows (relations.<type>,
+// WP-776) after the CI, in the transaction of the row; without it a row
+// that sets one fails.
+func (w *CIWriter) WithRelations(rw *RelationshipWriter) *CIWriter {
+	w.relations = rw
 	return w
 }
 
@@ -217,14 +226,33 @@ func (w *CIWriter) Write(ctx context.Context, row *WriteRow) (RowResult, error) 
 		if mode == "create_missing" {
 			return RowResult{Outcome: OutcomeSkipped, Message: fmt.Sprintf("the CI %s exists (mode create_missing)", res.Result.MatchedCIID)}, nil
 		}
-		return w.update(ctx, st, r, res)
+		out, updateErr := w.update(ctx, st, r, res)
+		return w.relate(ctx, row, res.Result.MatchedCIID, out, updateErr)
 	case len(res.Resurrected) > 0:
 		return w.resurrected(ctx, st, r, res), nil
 	case mode == "update_existing":
 		return RowResult{Outcome: OutcomeSkipped, Message: "no CI matches the row (mode update_existing)",
 			Issues: []Issue{{Code: CodeNoIdentityMatch, Message: "no CI matches the serial number, hardware UUID, MAC or management IP of the row"}}}, nil
 	}
-	return w.create(ctx, st, r, res)
+	out, err := w.create(ctx, st, r, res)
+	return w.relate(ctx, row, out.Message, out, err)
+}
+
+// relate writes the relation columns of a written row after its CI
+// ciID, through the relationship writer in the transaction of the row: a
+// refused edge fails the whole row.
+func (w *CIWriter) relate(ctx context.Context, row *WriteRow, ciID string, res RowResult, err error) (RowResult, error) {
+	if err != nil || res.Outcome == OutcomeFailed || w.relations == nil || !hasRelations(row.Values) {
+		return res, err
+	}
+	refusal, err := w.relations.WriteRelations(ctx, row, ciID)
+	if err != nil {
+		return RowResult{}, err
+	}
+	if refusal != nil {
+		return *refusal, nil
+	}
+	return res, nil
 }
 
 func derefResult(r *RowResult) RowResult {
@@ -260,8 +288,11 @@ func (w *CIWriter) prepare(ctx context.Context, st *ciRun, row *WriteRow) (*ciRo
 		switch target {
 		case CITypeTarget, CITypeIDTarget, CIClientTarget, CIVRFTarget, CILocationTarget, CILocationKindTarget, CIObservedAtTarget:
 		default:
-			if !strings.HasPrefix(target, "relations.") { // relation columns: WP-776
+			if !strings.HasPrefix(target, relationsTargetPrefix) {
 				return refuse(target, CodeInvalidValue, fmt.Sprintf("%s is no field of a CI", target))
+			}
+			if w.relations == nil && !val.Empty() {
+				return refuse(target, CodeInvalidValue, "relation columns cannot be written")
 			}
 		}
 	}
