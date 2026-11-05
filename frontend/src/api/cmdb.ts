@@ -4,18 +4,16 @@
  * existing client.ts. All calls flow through the same fetchAPI (auth, RFC
  * 7807 errors, idempotency).
  */
-import { ApiError, fetchAllPages, fetchAPI, type CI, type PaginatedResponse } from './client';
+import {
+  ApiError,
+  buildQuery as qs,
+  fetchAllPages,
+  fetchAPI,
+  type CI,
+  type PaginatedResponse,
+} from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
-
-function qs(params: Record<string, string | number | boolean | undefined> = {}): string {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== '') q.set(k, String(v));
-  }
-  const s = q.toString();
-  return s ? `?${s}` : '';
-}
 
 // ─── Metamodel drafts (MET-53, WP-260, WP-720, WP-798) ──────────────────────
 
