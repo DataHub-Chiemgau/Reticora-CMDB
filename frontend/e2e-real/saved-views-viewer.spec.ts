@@ -166,25 +166,34 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
     expect(serverType, 'catalog type server').not.toBe('');
     await ok('POST', '/cis', { ci_type_id: serverType, name: w.ciName });
     // The inventory module is a P2 module and switched off in G1 by default:
-    // its routes answer 404 (WP-214). The asset view is saved either way; it
-    // carries the asset-kind permission check of S2, a hit only exists with
-    // the module on.
+    // its routes answer 404 (WP-214), and since WP-309 a view or query of the
+    // entity kind asset is refused with 403 feature-not-entitled. With the
+    // module on, the asset view carries the asset-kind permission check of S2.
     const created = await api(w.rq, w.token, 'POST', '/assets', {
       asset_tag: `sv-${s}`,
       name: w.assetName,
     });
     expect([201, 404], `POST /assets: ${JSON.stringify(created.body)}`).toContain(created.status);
     w.assets = created.status === 201;
-    for (const [name, kind] of [
-      [w.ciView, 'ci'],
-      [w.assetView, 'asset'],
-    ] as const) {
-      await ok('POST', '/saved-views', {
-        name,
-        entity_kind: kind,
-        filter_spec: { search: `sv-${s}` },
-        shared: true,
-      });
+    await ok('POST', '/saved-views', {
+      name: w.ciView,
+      entity_kind: 'ci',
+      filter_spec: { search: `sv-${s}` },
+      shared: true,
+    });
+    const assetView = await api<{ type?: string }>(w.rq, w.token, 'POST', '/saved-views', {
+      name: w.assetView,
+      entity_kind: 'asset',
+      filter_spec: { search: `sv-${s}` },
+      shared: true,
+    });
+    if (w.assets) {
+      expect(assetView.status, `POST /saved-views (asset): ${JSON.stringify(assetView.body)}`).toBe(
+        201,
+      );
+    } else {
+      expect(assetView.status, `POST /saved-views (asset) without inventory`).toBe(403);
+      expect(assetView.body.type).toBe('https://reticora.io/problems/feature-not-entitled');
     }
 
     const roles = await ok<List<{ id: string; name: string }>>('GET', '/roles?limit=100');
@@ -231,14 +240,22 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
       await expect(main.getByRole('link', { name: w.ciName, exact: true })).toBeVisible();
       await expect(main.getByRole('alert')).toHaveCount(0);
 
-      const ranAsset = waitForSearch(page);
-      await viewButton(page, w.assetView).click();
-      const assetRes = await ranAsset;
-      expect(assetRes.status(), `POST /search/query (asset) as viewer`).toBe(200);
       if (w.assets) {
+        const ranAsset = waitForSearch(page);
+        await viewButton(page, w.assetView).click();
+        const assetRes = await ranAsset;
+        expect(assetRes.status(), `POST /search/query (asset) as viewer`).toBe(200);
         await expect(main.getByRole('link', { name: w.assetName, exact: true })).toBeVisible();
+        await expect(main.getByRole('alert')).toHaveCount(0);
+      } else {
+        // Without the module the asset query is refused for the viewer too.
+        const assetRes = await api(page.request, token, 'POST', '/search/query', {
+          entity_kind: 'asset',
+          search: w.assetName,
+        });
+        expect(assetRes.status, 'POST /search/query (asset) without inventory').toBe(403);
+        await expect(viewButton(page, w.assetView)).toHaveCount(0);
       }
-      await expect(main.getByRole('alert')).toHaveCount(0);
 
       // Rebuilding the index is a write operation (search:write).
       const reindex = await api(page.request, token, 'POST', '/search/reindex', {});
@@ -254,7 +271,7 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
   test('S2 without asset:read the CI view shows its hit and the asset view the permission hint', async ({
     browser,
   }) => {
-    const { ctx, page } = await signIn(browser, w.ciOnly);
+    const { ctx, page, token } = await signIn(browser, w.ciOnly);
     try {
       const main = page.locator('#main-content');
       const ranCI = waitForSearch(page);
@@ -262,6 +279,15 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
       expect((await ranCI).status(), 'POST /search/query (ci) without asset:read').toBe(200);
       await expect(main.getByRole('link', { name: w.ciName, exact: true })).toBeVisible();
 
+      if (!w.assets) {
+        // Without the module no asset view exists; the query is refused.
+        const assetRes = await api(page.request, token, 'POST', '/search/query', {
+          entity_kind: 'asset',
+          search: w.assetName,
+        });
+        expect(assetRes.status, 'POST /search/query (asset) without asset:read').toBe(403);
+        return;
+      }
       const ranAsset = waitForSearch(page);
       await viewButton(page, w.assetView).click();
       expect((await ranAsset).status(), 'POST /search/query (asset) without asset:read').toBe(403);
