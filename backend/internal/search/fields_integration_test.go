@@ -97,7 +97,7 @@ func (w *sfWorld) search(t *testing.T, scope database.TenantScope, policy *permi
 	t.Helper()
 	granted := map[string]bool{"ci:read": true, "asset:read": true, "ipam:read": ipamRead}
 	mux := chi.NewRouter()
-	search.NewHandler(w.repo, permissionStub{granted: granted}).RegisterRoutes(mux)
+	search.NewHandler(w.repo, permissionStub{granted: granted}).WithGates(allFeatures{}, allModules).RegisterRoutes(mux)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/search?"+url.Values{"q": {text}, "limit": {"100"}}.Encode(), nil)
 	ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: w.f.OrgA, UserID: w.f.User})
 	ctx = permission.WithPolicy(database.ContextWithTenantScope(ctx, &scope), policy)

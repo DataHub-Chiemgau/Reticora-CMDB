@@ -303,6 +303,10 @@ func buildOpenSearchQuery(q *Query, scope *database.TenantScope) (map[string]any
 				should = append(should, identifierQuery(&ids, fields, q.Highlight))
 			}
 		}
+		// The users the text resolved to (HybridBackend, WP-788).
+		if fields := openUserFields(q, nil); len(q.userIDs) > 0 && len(fields) > 0 {
+			should = append(should, userQuery(fields, q.userIDs, q.Highlight))
+		}
 		must = append(must, map[string]any{"bool": map[string]any{"should": should, "minimum_should_match": 1}})
 	}
 	if len(must) == 0 {
@@ -376,6 +380,33 @@ func identifierQuery(ids *Identifiers, fields []string, inner bool) map[string]a
 		nested["inner_hits"] = map[string]any{
 			"name": identifierInnerHits, "size": identifierInnerHitsMax, "_source": false,
 			"docvalue_fields": []string{field, norm},
+		}
+	}
+	return map[string]any{"nested": nested}
+}
+
+// userInnerHits is the name of the inner hits of the user query.
+const userInnerHits = "users"
+
+// userQuery is the nested query on the user fields of the identifiers that
+// hold one of the users (userIn of the PostgreSQL index, WP-788). With
+// inner the matched fields come back as inner hits.
+func userQuery(fields, users []string, inner bool) map[string]any {
+	const norm, field = remoteIdentifiers + ".norm", remoteIdentifiers + ".field"
+	nested := map[string]any{
+		"path": remoteIdentifiers,
+		"query": map[string]any{"constant_score": map[string]any{"filter": map[string]any{"bool": map[string]any{
+			"filter": []any{
+				map[string]any{"terms": map[string]any{field: fields}},
+				map[string]any{"terms": map[string]any{norm: users}},
+			},
+		}}}},
+		"score_mode": "max",
+	}
+	if inner {
+		nested["inner_hits"] = map[string]any{
+			"name": userInnerHits, "size": identifierInnerHitsMax, "_source": false,
+			"docvalue_fields": []string{field},
 		}
 	}
 	return map[string]any{"nested": nested}
@@ -459,6 +490,7 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q *Query) (Result, error)
 	}
 	withFields := q.Highlight && strings.TrimSpace(q.Text) != ""
 	open := openIdentifierFields(q, nil)
+	openUsers := openUserFields(q, nil)
 	for i := range parsed.Hits.Hits {
 		item := &parsed.Hits.Hits[i]
 		// The filters run in OpenSearch; the check repeats them on the
@@ -472,7 +504,7 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q *Query) (Result, error)
 			h.Highlights = append(h.Highlights, item.Highlight[key]...)
 		}
 		if withFields {
-			h.MatchedFields = openSearchMatchedFields(item, open)
+			h.MatchedFields = openSearchMatchedFields(item, open, openUsers)
 		}
 		out.Data = append(out.Data, h)
 	}
@@ -485,8 +517,9 @@ func (b *OpenSearchBackend) Query(ctx context.Context, q *Query) (Result, error)
 // without field rows and the field rows with their highlight (marked with
 // <mark>, fragments joined like ts_headline), and the identifiers of the
 // inner hits with their value in canonical form, only of the fields that
-// count for a hit (open). A contact hit names no field.
-func openSearchMatchedFields(item *openSearchHit, open []string) []MatchedField {
+// count for a hit (open), and the user fields of the user inner hits
+// without highlight (openUsers, WP-788). A contact hit names no field.
+func openSearchMatchedFields(item *openSearchHit, open, openUsers []string) []MatchedField {
 	entityType := item.Source.EntityType
 	if entityType == "contact" {
 		return nil
@@ -535,6 +568,18 @@ func openSearchMatchedFields(item *openSearchHit, open []string) []MatchedField 
 			seen[m] = true
 			out = append(out, m)
 		}
+	}
+	for _, inner := range item.InnerHits[userInnerHits].Hits.Hits {
+		f := firstString(inner.Fields[remoteIdentifiers+".field"])
+		if f == "" && inner.Source != nil {
+			f = inner.Source.Field
+		}
+		m := MatchedField{Field: f}
+		if f == "" || seen[m] || !slices.Contains(openUsers, f) || !slices.Contains(userFields[entityType], f) {
+			continue
+		}
+		seen[m] = true
+		out = append(out, m)
 	}
 	sortMatchedFields(entityType, out)
 	return out

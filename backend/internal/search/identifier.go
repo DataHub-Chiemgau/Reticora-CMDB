@@ -26,21 +26,26 @@ const (
 
 // identifierKinds are the identifier fields the indexer writes from
 // Document.Fields with the kind of their value. They are never field rows.
+// The owner of a CI (UserFieldOwner, WP-788) is a user id.
 var identifierKinds = map[string]string{
 	IdentifierManagementIP:   identifierIP,
 	IdentifierPrimaryMAC:     identifierMAC,
 	IdentifierAssetInventory: identifierText,
+	UserFieldOwner:           identifierUser,
 }
 
 const (
 	identifierIP   = "ip"
 	identifierMAC  = "mac"
 	identifierText = "text"
+	identifierUser = "user"
 )
 
-// indexerIdentifiers are the identifier fields the indexer owns, in a fixed
-// order.
-var indexerIdentifiers = []string{IdentifierManagementIP, IdentifierPrimaryMAC, IdentifierAssetInventory}
+// indexerIdentifiers are the identifier fields the indexer owns at a CI, in
+// a fixed order: the holder of the asset (UserFieldAssetHolder) is read in
+// the statement of IndexDocuments.
+var indexerIdentifiers = []string{IdentifierManagementIP, IdentifierPrimaryMAC, IdentifierAssetInventory, UserFieldOwner,
+	UserFieldAssetHolder}
 
 // macFields are the identifier fields that hold a MAC.
 var macFields = []string{IdentifierPrimaryMAC, IdentifierNetworkMAC}

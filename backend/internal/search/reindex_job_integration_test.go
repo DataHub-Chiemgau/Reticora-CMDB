@@ -58,7 +58,7 @@ func TestSearchReindexJob(t *testing.T) {
 	svc.Register(jobs.Kind{Name: search.ReindexJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute})
 	granted := map[string]bool{"ci:read": true, "asset:read": true, "location:read": true}
 	mux := chi.NewRouter()
-	search.NewHandler(w.repo, permissionStub{granted: granted}).WithJobs(svc).RegisterRoutes(mux)
+	search.NewHandler(w.repo, permissionStub{granted: granted}).WithGates(allFeatures{}, allModules).WithJobs(svc).RegisterRoutes(mux)
 	client1 := database.OrgWideScope(f.OrgA, f.User)
 	client1.Clients = database.ScopeIDs(f.Client1)
 	serve := func(method, target string, scope *database.TenantScope) *httptest.ResponseRecorder {

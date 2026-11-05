@@ -227,14 +227,19 @@ const (
 	searchFieldManagementIP   = permission.NamespaceCore + ".management_ip"
 	searchFieldPrimaryMAC     = permission.NamespaceCore + ".primary_mac"
 	searchFieldAssetInventory = "asset.inventory_no"
+	// searchFieldOwner is the owner of the CI (app_user.id; SRC-02,
+	// WP-788): the index holds the id only, the search resolves names and
+	// e-mail addresses to ids at query time.
+	searchFieldOwner = permission.NamespaceCore + ".owner_user_id"
 )
 
 // ciSearchFields are the fields of the search document of the CI: the
 // summary columns by field key (the columns of ciSummary, WP-266), the
-// identifiers and the scalar attributes (attributes.<key>; WP-308), of which
-// the index keeps the searchable ones. Empty values are left out.
+// identifiers, the owner (WP-788) and the scalar attributes
+// (attributes.<key>; WP-308), of which the index keeps the searchable ones.
+// Empty values are left out.
 func ciSearchFields(item *Item) map[string]string {
-	fields := make(map[string]string, 9+len(item.Attributes))
+	fields := make(map[string]string, 10+len(item.Attributes))
 	inventory := ""
 	if item.Asset != nil {
 		inventory = item.Asset.InventoryNo
@@ -243,7 +248,7 @@ func ciSearchFields(item *Item) map[string]string {
 		{"core.hostname", item.Hostname}, {"core.manufacturer", item.Manufacturer}, {"core.model", item.Model},
 		{"core.serial_number", item.SerialNumber}, {"core.os_name", item.OSName}, {"core.os_version", item.OSVersion},
 		{searchFieldManagementIP, item.ManagementIP}, {searchFieldPrimaryMAC, item.PrimaryMAC},
-		{searchFieldAssetInventory, inventory},
+		{searchFieldAssetInventory, inventory}, {searchFieldOwner, item.OwnerUserID},
 	} {
 		if f.value != "" {
 			fields[f.key] = f.value

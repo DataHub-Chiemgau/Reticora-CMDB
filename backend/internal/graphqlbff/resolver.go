@@ -323,22 +323,34 @@ func (q *queryResolver) SearchEverything(ctx context.Context, text string, types
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
 	// WP-266), the addresses and MACs of the interfaces with ipam:read
-	// (WP-308).
+	// (WP-308), the users with user:read, their holders with assets_basic
+	// (WP-788).
 	principal, _ := identity.PrincipalFromContext(ctx)
 	sq := &search.Query{OrganizationID: orgID, UserID: tenant.FromContext(ctx).UserID,
 		Text: text, EntityTypes: types, Limit: pageSize(first, defaultPage, maxPage)}
-	if err = search.ApplyPrincipal(ctx, sq, func(perm string) bool { return principal.Has(identity.Permission(perm)) }); err != nil {
+	features := map[string]bool{}
+	enabled := func(key string) bool {
+		on, seen := features[key]
+		if !seen {
+			on = q.entitlements != nil && q.entitlements.IsEnabled(ctx, orgID, key)
+			features[key] = on
+		}
+		return on
+	}
+	if err = search.ApplyPrincipal(ctx, sq, func(perm string) bool { return principal.Has(identity.Permission(perm)) }, enabled); err != nil {
 		return nil, errNoPolicy()
 	}
 	res, err := q.sources.Search.Query(ctx, sq)
 	if err != nil {
 		return nil, gqlError(codeBadInput, err.Error())
 	}
-	// Only the entity types the caller may read (SRC-01).
+	// Only the entity types the caller may read (SRC-01) whose feature the
+	// organization has (WP-788); the module gate of the BFF follows with
+	// WP-311.
 	out := &generated.SearchResult{Hits: []*search.Hit{}}
 	for i := range res.Data {
 		perm, known := search.ReadPermission[res.Data[i].EntityType]
-		if known && principal.Has(identity.Permission(perm)) {
+		if known && principal.Has(identity.Permission(perm)) && search.HitAllowed(res.Data[i].EntityType, enabled, nil) {
 			out.Hits = append(out.Hits, &res.Data[i])
 		}
 	}

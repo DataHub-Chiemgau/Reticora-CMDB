@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000270_asset_snapshot
+Stand: Migration 000271_search_users_tags
 
 ## Prüfung
 
@@ -534,6 +534,19 @@ sie vom Indexer (`core.management_ip`, `core.primary_mac`,
 `search_identifier_interface_*` und `search_identifier_ip_*`. Feldzeilen
 haben die Spalte `source` (`indexer`, `trigger`); die Asset-Dokumente mit
 ihren Feldzeilen pflegt der Trigger.
+
+Migration 000271 (WP-788) macht Tags und Nutzer durchsuchbar, ohne neue
+Tabelle und ohne Policy-Änderung: Jedes CI- und Asset-Dokument erhält die
+Feldzeile `core.tags` (`source = 'trigger'`, Key und alle Sprachwerte von
+`tag.display_name`, `search_tag_text`), gepflegt von
+`search_index_ci_tag_*` (`ci_tag`), `search_index_asset_tag_*`
+(`asset_tag_link`) und `search_index_tag_update` (`tag`) über
+`search_refresh_tags`. Nutzer stehen nur als Surrogat (`app_user.id`) in
+`search_identifier`: `core.owner_user_id` an CI und Asset,
+`core.assigned_user_id` am Asset und `asset.assigned_user_id` an den CIs
+des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
+(zusätzlich `UPDATE OF owner_user_id, assigned_user_id`) sowie
+`search_identifier_rows` sind entsprechend erweitert.
 
 <!-- rls-leaky-indexes:begin -->
 

@@ -158,10 +158,21 @@ func (b *HybridBackend) Delete(ctx context.Context, orgID, entityType, entityID 
 // The remote index holds the field rows and identifiers (WP-787) but no
 // field permissions (TEC-12 [P5]): with restricted field permissions
 // PostgreSQL answers the query with its field rows (RBA-07, WP-266).
-func (b *HybridBackend) Query(ctx context.Context, q *Query) (Result, error) {
-	if len(q.restrictedTypes()) > 0 {
-		return b.Source.Query(ctx, q)
+//
+// Users (WP-788): PostgreSQL resolves the text to user ids
+// (PGRepository.ResolveUsers), the remote index finds them in its
+// identifiers.
+func (b *HybridBackend) Query(ctx context.Context, in *Query) (Result, error) {
+	if len(in.restrictedTypes()) > 0 {
+		return b.Source.Query(ctx, in)
 	}
+	query := *in
+	q := &query
+	users, err := b.Source.ResolveUsers(ctx, q)
+	if err != nil {
+		return Result{}, err
+	}
+	q.userIDs = users
 	res, err := b.Remote.Query(ctx, q)
 	if err != nil || len(res.Data) == 0 {
 		return res, err

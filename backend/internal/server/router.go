@@ -471,6 +471,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// wired in registerJobKinds; without the job model it runs in the
 	// request.
 	searchHandler := search.NewHandler(repos.Search, repos.Permission)
+	// Hits of asset, reservation, document and ticket need their feature
+	// and module, the holder fields assets_basic (WP-788).
+	if opts.Entitlements != nil {
+		searchHandler.WithGates(opts.Entitlements, opts.Modules.Enabled)
+	}
 	// The label batches of inventory areas (WP-763) are the job
 	// labels.batch, wired in registerJobKinds; they read through the
 	// PostgreSQL resolver (the memory one reads no batch: 503) and store
