@@ -1,9 +1,11 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -124,12 +127,20 @@ var (
 	errProfileNotFound    = ErrNotFound
 )
 
-// StartRequest is the body of POST /api/v1/imports.
+// StartRequest is the body of POST /api/v1/imports: a document or, for
+// the API import (WP-303), the JSON rows themselves, exactly one of both.
 type StartRequest struct {
-	DocumentID string `json:"document_id"`
-	ProfileID  string `json:"profile_id"`
-	Mode       string `json:"mode,omitempty"`
-	DryRun     bool   `json:"dry_run,omitempty"`
+	DocumentID string          `json:"document_id,omitempty"`
+	Rows       json.RawMessage `json:"rows,omitempty"`
+	ProfileID  string          `json:"profile_id"`
+	Mode       string          `json:"mode,omitempty"`
+	DryRun     bool            `json:"dry_run,omitempty"`
+}
+
+// hasRows reports whether the request carries rows (null counts as none).
+func (r *StartRequest) hasRows() bool {
+	raw := bytes.TrimSpace(r.Rows)
+	return len(raw) > 0 && !bytes.Equal(raw, []byte("null"))
 }
 
 // PreviewRequest is the body of POST /api/v1/imports/preview.
@@ -195,6 +206,10 @@ type source struct {
 	version *document.Version
 	format  string
 	profile *Profile
+	// staged are the JSON rows of an API run (WP-303), checked against
+	// rows_sha256, and rowCount their number; no document then.
+	staged   []byte
+	rowCount int
 }
 
 // lookupDocument returns the document when it lies in the caller's scope
@@ -240,8 +255,12 @@ func (h *ImportHandler) checkVersion(ctx context.Context, orgID string, doc *doc
 
 // openSource reads the blob of a checked version outside any database
 // transaction (K20), after the key check of the download (legacy keys
-// included). The caller closes the returned reader.
+// included); the rows of an API run were read and checked already
+// (apiSource). The caller closes the returned reader.
 func (h *ImportHandler) openSource(ctx context.Context, orgID string, src *source) (io.ReadCloser, error) {
+	if src.staged != nil {
+		return io.NopCloser(bytes.NewReader(src.staged)), nil
+	}
 	if !document.OwnsStorageKey(orgID, src.doc.ID, src.version.StorageKey) {
 		return nil, errForeignKey
 	}
@@ -257,6 +276,13 @@ var errForeignKey = errors.New("the document content is stored outside the organ
 // reference (StarterRef; the run reloads their rights, jobContext) and
 // answers 202 with the job. With a job queue the job is
 // submitted there, otherwise it runs in this process.
+//
+// Instead of document_id the body may carry the JSON rows themselves
+// (rows, WP-303; startRows); exactly one of both, else 422. The body is
+// limited to MaxAPIBodyBytes (413). With the header Idempotency-Key the
+// job gets the key jobIdempotencyKey, so a repeated start returns the
+// first job (202, no second run), also when the HTTP idempotency of the
+// cache fails open.
 func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -266,14 +292,29 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "imports require the job service and blob storage")
 		return
 	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxAPIBodyBytes))
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			api.WriteError(w, http.StatusRequestEntityTooLarge, "Payload Too Large",
+				fmt.Sprintf("the request body exceeds %d bytes (16 MiB)", MaxAPIBodyBytes))
+			return
+		}
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "could not read request body")
+		return
+	}
 	var req StartRequest
-	if err := api.ReadJSON(r, &req); err != nil {
+	if err = decodeStart(body, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	withRows := req.hasRows()
 	switch {
-	case req.DocumentID == "":
-		api.WriteFieldError(w, invalid("document_id", "is required"))
+	case withRows && req.DocumentID != "":
+		api.WriteFieldError(w, invalid("rows", "excludes document_id; send either a document or rows"))
+		return
+	case !withRows && req.DocumentID == "":
+		api.WriteFieldError(w, invalid("document_id", "is required unless rows are sent"))
 		return
 	case req.ProfileID == "":
 		api.WriteFieldError(w, invalid("profile_id", "is required"))
@@ -282,23 +323,20 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, invalid("mode", "must be create_missing, update_existing or both"))
 		return
 	}
+	key := jobIdempotencyKey(r.Context(), r.Header.Get("Idempotency-Key"), body)
+	if withRows {
+		h.startRows(w, r, &t, &req, key)
+		return
+	}
 	ctx := r.Context()
 	doc, f := h.lookupDocument(ctx, t.OrganizationID, req.DocumentID)
 	if f != nil {
 		f.write(w)
 		return
 	}
-	profile, err := h.profiles.Get(ctx, t.OrganizationID, req.ProfileID)
-	if err != nil {
-		if !errors.Is(err, ErrNotFound) {
-			slog.WarnContext(ctx, "import: read profile", "profile", req.ProfileID, "error", err)
-		}
-		api.WriteError(w, http.StatusNotFound, "Not Found", errProfileNotFound.Error())
-		return
-	}
-	principal, hasPrincipal := identity.PrincipalFromContext(ctx)
-	if perm := EntityWritePermissions[profile.Entity]; !hasPrincipal || perm == "" || !principal.Has(perm) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "importing "+profile.Entity+" requires "+string(perm))
+	profile, f := h.startProfile(ctx, t.OrganizationID, req.ProfileID)
+	if f != nil {
+		f.write(w)
 		return
 	}
 	want := profile.Format
@@ -321,20 +359,131 @@ func (h *ImportHandler) Start(w http.ResponseWriter, r *http.Request) {
 	if profile.Sheet != nil {
 		params.Sheet = *profile.Sheet
 	}
-	var job *jobs.Job
-	if h.queue != nil {
-		job, _, err = h.queue.Submit(ctx, t.OrganizationID, JobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
-	} else {
-		job, _, err = h.jobs.Enqueue(ctx, t.OrganizationID, JobKind, params, jobs.EnqueueOptions{CreatedBy: t.UserID})
+	job, created, err := h.enqueue(ctx, t.OrganizationID, t.UserID, &params, key)
+	if err != nil {
+		slog.ErrorContext(ctx, "import: enqueue job", "error", err)
+		api.WriteRepoError(w, err)
+		return
+	}
+	h.accepted(ctx, w, job, created)
+}
+
+// decodeStart decodes the buffered body of a start like api.ReadJSON: an
+// unknown field or malformed JSON is an error naming it.
+// validation: the JSON decoder names the malformed or unknown field of the request body.
+func decodeStart(body []byte, req *StartRequest) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	return dec.Decode(req)
+}
+
+// startProfile reads the profile of a start (404) and checks the write
+// right of its entity (403).
+func (h *ImportHandler) startProfile(ctx context.Context, orgID, profileID string) (*Profile, *refusal) {
+	profile, err := h.profiles.Get(ctx, orgID, profileID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			slog.WarnContext(ctx, "import: read profile", "profile", profileID, "error", err)
+		}
+		return nil, notFoundRefusal(errProfileNotFound.Error())
+	}
+	principal, hasPrincipal := identity.PrincipalFromContext(ctx)
+	if perm := EntityWritePermissions[profile.Entity]; !hasPrincipal || perm == "" || !principal.Has(perm) {
+		return nil, &refusal{status: http.StatusForbidden, title: "Forbidden", detail: "importing " + profile.Entity + " requires " + string(perm)}
+	}
+	return profile, nil
+}
+
+// startRows starts an API import over the JSON rows of the request
+// (WP-303): 1 to MaxAPIRows objects (422), the profile (404) with the
+// write right of its entity (403) and the format json (422). The rows go
+// to a staging object in the blob store before the job is queued; the job
+// parameters name it with the number and the SHA-256 of the rows, never a
+// value. When queueing fails or returns an existing job (created false,
+// the same idempotency key), the object is deleted again.
+func (h *ImportHandler) startRows(w http.ResponseWriter, r *http.Request, t *tenant.TenantInfo, req *StartRequest, key string) {
+	ctx := r.Context()
+	count, ferr := countRows(req.Rows)
+	if ferr != nil {
+		api.WriteFieldError(w, ferr)
+		return
+	}
+	profile, f := h.startProfile(ctx, t.OrganizationID, req.ProfileID)
+	if f != nil {
+		f.write(w)
+		return
+	}
+	if profile.Format != FormatJSON {
+		parseRefusal(CodeFormatUnsupported, "rows are imported with a profile of format json").write(w)
+		return
+	}
+	rows := bytes.TrimSpace(req.Rows)
+	stagingKey, err := h.stageRows(ctx, t.OrganizationID, rows)
+	if err != nil {
+		slog.ErrorContext(ctx, "import: stage rows", "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the rows cannot be staged in the blob storage")
+		return
+	}
+	params := JobParams{ImportSource: SourceAPI, StagingKey: stagingKey, RowCount: count, RowsSHA256: rowsDigest(rows),
+		ProfileID: profile.ID, Mode: profile.Mode, DryRun: req.DryRun, Starter: captureStarter(ctx), ScopeParams: jobs.CaptureScope(ctx)}
+	if req.Mode != "" {
+		params.Mode = req.Mode
+	}
+	job, created, err := h.enqueue(ctx, t.OrganizationID, t.UserID, &params, key)
+	if err != nil || !created {
+		// No run reads this object: the job was not queued, or the first
+		// job of the key runs with its own.
+		h.dropStagedLogged(context.WithoutCancel(ctx), t.OrganizationID, stagingKey)
 	}
 	if err != nil {
 		slog.ErrorContext(ctx, "import: enqueue job", "error", err)
 		api.WriteRepoError(w, err)
 		return
 	}
-	if h.queue == nil {
+	h.accepted(ctx, w, job, created)
+}
+
+// countRows checks the JSON rows of a request: an array of 1 to
+// MaxAPIRows objects (E-49), else 422. The values are checked by the run:
+// a nested value is a row error of the report.
+func countRows(raw json.RawMessage) (int, *api.FieldError) {
+	var elems []json.RawMessage
+	if err := json.Unmarshal(raw, &elems); err != nil {
+		return 0, invalid("rows", "must be an array of objects")
+	}
+	switch {
+	case len(elems) == 0:
+		return 0, invalid("rows", "must hold at least one row")
+	case len(elems) > MaxAPIRows:
+		return 0, invalid("rows", fmt.Sprintf("holds more than %d rows", MaxAPIRows))
+	}
+	for i := range elems {
+		if e := bytes.TrimSpace(elems[i]); len(e) == 0 || e[0] != '{' {
+			return 0, invalid(fmt.Sprintf("rows[%d]", i), "must be an object of column name and value")
+		}
+	}
+	return len(elems), nil
+}
+
+// enqueue queues the import job with the caller as creator and the job
+// key of the request (jobIdempotencyKey, empty without header): with a
+// job queue through Submit (never RunDetached, which takes no key),
+// otherwise in the job service. created is false when the key names an
+// existing job.
+func (h *ImportHandler) enqueue(ctx context.Context, orgID, userID string, params *JobParams, key string) (*jobs.Job, bool, error) {
+	opts := jobs.EnqueueOptions{CreatedBy: userID, IdempotencyKey: key}
+	if h.queue != nil {
+		return h.queue.Submit(ctx, orgID, JobKind, params, opts)
+	}
+	return h.jobs.Enqueue(ctx, orgID, JobKind, params, opts)
+}
+
+// accepted answers 202 with the job; without job queue a new job runs in
+// this process. An existing job (created false) is not started again.
+func (h *ImportHandler) accepted(ctx context.Context, w http.ResponseWriter, job *jobs.Job, created bool) {
+	if h.queue == nil && created {
 		// The run restores the caller from the job, after the request.
-		go h.run(context.WithoutCancel(ctx), t.OrganizationID, job.ID)
+		go h.run(context.WithoutCancel(ctx), job.OrganizationID, job.ID)
 	}
 	w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
 	api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
@@ -433,14 +582,17 @@ func asParseError(err error) *ParseError {
 
 // ImportRun is the projection of an import job (GET /api/v1/imports/{id}):
 // parameters, status, progress, counters and error code of the job; there
-// is no import table.
+// is no import table. A run over JSON rows (source api) has no document
+// but the number of its rows.
 type ImportRun struct {
 	ID              string      `json:"id"`
 	Kind            string      `json:"kind"`
 	Status          jobs.Status `json:"status"`
 	Progress        int         `json:"progress"`
-	DocumentID      string      `json:"document_id"`
-	DocumentVersion int         `json:"document_version"`
+	Source          string      `json:"source"`
+	DocumentID      *string     `json:"document_id"`
+	DocumentVersion *int        `json:"document_version"`
+	RowCount        *int        `json:"row_count"`
 	ProfileID       string      `json:"profile_id"`
 	Mode            string      `json:"mode"`
 	DryRun          bool        `json:"dry_run"`
@@ -474,11 +626,24 @@ func (h *ImportHandler) loadRun(w http.ResponseWriter, r *http.Request, orgID st
 		api.WriteError(w, http.StatusNotFound, "Not Found", errImportNotFound.Error())
 		return nil, nil, false
 	}
-	if _, f := h.lookupDocument(r.Context(), orgID, params.DocumentID); f != nil {
+	if !h.runReadable(r.Context(), orgID, job, &params) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", errImportNotFound.Error())
 		return nil, nil, false
 	}
 	return job, &params, true
+}
+
+// runReadable reports whether the caller may read the run: a run of a
+// document while the document lies in their scope; a run over JSON rows
+// (source api, WP-303), which has no document, only for the principal who
+// started it (subject = created_by, like the export jobs).
+func (h *ImportHandler) runReadable(ctx context.Context, orgID string, job *jobs.Job, params *JobParams) bool {
+	if params.ImportSource == SourceAPI {
+		p, ok := identity.PrincipalFromContext(ctx)
+		return ok && p.Subject != "" && p.Subject == job.CreatedBy
+	}
+	_, f := h.lookupDocument(ctx, orgID, params.DocumentID)
+	return f == nil
 }
 
 // Get handles GET /api/v1/imports/{id}: the projection of the import job.
@@ -495,10 +660,14 @@ func (h *ImportHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	run := ImportRun{ID: job.ID, Kind: job.Kind, Status: job.Status, Progress: job.Progress,
-		DocumentID: params.DocumentID, DocumentVersion: params.DocumentVersion, ProfileID: params.ProfileID,
-		Mode: params.Mode, DryRun: params.DryRun, Cancellable: h.jobs.Cancellable(job),
+	run := ImportRun{ID: job.ID, Kind: job.Kind, Status: job.Status, Progress: job.Progress, Source: "document",
+		ProfileID: params.ProfileID, Mode: params.Mode, DryRun: params.DryRun, Cancellable: h.jobs.Cancellable(job),
 		CreatedBy: job.CreatedBy, CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt}
+	if params.ImportSource == SourceAPI {
+		run.Source, run.RowCount = SourceAPI, &params.RowCount
+	} else {
+		run.DocumentID, run.DocumentVersion = &params.DocumentID, &params.DocumentVersion
+	}
 	if params.Sheet != "" {
 		run.Sheet = &params.Sheet
 	}

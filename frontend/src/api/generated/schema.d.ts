@@ -8996,6 +8996,10 @@ export interface paths {
     /**
      * Start an import run (IMP-IO-01)
      * @description Starts the import of the current version of a document with a mapping profile as a job of kind import.run (API-09, JOB-04). Before the job is created the request is checked in this order: the document lies in the caller's scope (404), the profile belongs to the organization (404), the version is scanned clean (409 document-pending-scan for pending_scan and scan_failed, 409 document-quarantined for infected; E-42), the version is at most 50 MB = 52428800 bytes (422 import-file-too-large, E-49) and its verified type fits the profile format (CSV: text/csv or text/plain, XLSX: the OOXML spreadsheet type; .xls, .ods, any other type and the profile format json are 422 import-format-unsupported). `mode` defaults to the mode of the profile, `dry_run` to false. The job reads exactly the checked version and checks it clean again before reading; at most 50000 data rows (more: the job fails with import-row-limit), 500 columns and 1 MiB per row (more: import-file-too-complex). Progress and status are in the job (/api/v1/jobs/{id}), which a holder of import:run cancels while it runs. Without job service or blob storage 503. Requires import:run.
+     *
+     *     API import (WP-303): instead of `document_id` the body carries the JSON rows themselves (`rows`, application/json, no NDJSON): 1 to 5000 objects of column name and scalar (string, number, boolean, null) with a profile of format json. `rows` and `document_id` together or neither, an empty `rows`, more than 5000 rows (E-49) or a profile of another format are 422; an object or array as value is a row error of the report, not a 422. The body is at most 16 MiB (413). The rows pass the same pipeline as a file (mapping, validation, field permissions, identity, write decision with source import, max_cis and identity locks); they are staged in the blob storage and the job parameters name only the staging object, the number and the SHA-256 of the rows, never a value. Only the principal who started an API run reads it and its report (404 for everyone else). Without blob storage 503.
+     *
+     *     Double imports are prevented in two stages: the HTTP idempotency (`Idempotency-Key`, 24 hours) replays the first 202 with `Idempotency-Replayed: true`; beyond it the job carries a key derived from principal, header value and body hash, so a repeated start returns the first job with 202 and no second run, also when the idempotency cache is down. The header value is not stored.
      */
     post: operations['createImport'];
     delete?: never;
@@ -9036,7 +9040,7 @@ export interface paths {
     };
     /**
      * Get an import run
-     * @description The projection of an import job: profile, document and version, mode, status, progress, the counters of the result and the error code of a failed run. A job of another kind, one outside the caller's scope and one whose document the caller does not see are 404. The runs are listed by the job list with kind=import.run. Without job service 503. Requires import:run.
+     * @description The projection of an import job: profile, document and version, mode, status, progress, the counters of the result and the error code of a failed run. A job of another kind, one outside the caller's scope and one whose document the caller does not see are 404. A run over JSON rows (source api, WP-303) has no document: only the principal who started it reads it and its report, everyone else gets 404. The runs are listed by the job list with kind=import.run. Without job service 503. Requires import:run.
      */
     get: operations['getImport'];
     put?: never;
@@ -14878,8 +14882,27 @@ export interface components {
     ImportProfileListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ImportProfile'][];
     };
-    ImportStartRequest: {
+    /** @description The start of an import: a document (ImportStartDocumentRequest) or the JSON rows themselves (ImportStartRowsRequest, WP-303). */
+    ImportStartRequest:
+      | components['schemas']['ImportStartDocumentRequest']
+      | components['schemas']['ImportStartRowsRequest'];
+    ImportStartDocumentRequest: {
       document_id: string;
+      profile_id: string;
+      /**
+       * @description Defaults to the mode of the profile.
+       * @enum {string}
+       */
+      mode?: 'create_missing' | 'update_existing' | 'both';
+      /** @default false */
+      dry_run: boolean;
+    };
+    ImportStartRowsRequest: {
+      /** @description The rows, each an object of column name and scalar; the profile (format json) maps the column names. An object or array as value is a row error (import-row-nested-value) of the report. */
+      rows: {
+        [key: string]: string | number | boolean | Record<string, never> | unknown[] | null;
+      }[];
+      /** @description A profile of format json. */
       profile_id: string;
       /**
        * @description Defaults to the mode of the profile.
@@ -14915,8 +14938,17 @@ export interface components {
       /** @enum {string} */
       status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
       progress: number;
-      document_id: string;
-      document_version: number;
+      /**
+       * @description A document or the JSON rows of the request (api, WP-303).
+       * @enum {string}
+       */
+      source: 'document' | 'api';
+      /** @description The document; null for a run over JSON rows. */
+      document_id: string | null;
+      /** @description The document version; null for a run over JSON rows. */
+      document_version: number | null;
+      /** @description The JSON rows of the request; null for a run of a document. */
+      row_count: number | null;
       profile_id: string;
       /** @enum {string} */
       mode: 'create_missing' | 'update_existing' | 'both';
@@ -41016,7 +41048,27 @@ export interface operations {
   createImport: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description Deduplicates a POST for 24 hours (API-04); every POST endpoint
+         *     accepts it. The key is bound to the caller (organization and
+         *     principal), the method and the path. The first request reserves
+         *     it: a concurrent request with the same key gets 409, a later one
+         *     with the same body gets the stored answer with
+         *     `Idempotency-Replayed: true` without running the request again,
+         *     one with a different body 409.
+         *
+         *     2xx, 3xx and 4xx answers are stored. A 5xx answer is not stored
+         *     and releases the key: a retry with the same key runs the request
+         *     again, e.g. after a 503 with `Retry-After` during a dependency or
+         *     audit outage.
+         *
+         *     A replayed answer is the stored one verbatim: the `trace_id` of a
+         *     replayed problem is that of the first request, while the
+         *     `X-Request-ID` header always names the current request.
+         */
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
       path?: never;
       cookie?: never;
     };
@@ -41026,10 +41078,12 @@ export interface operations {
       };
     };
     responses: {
-      /** @description The import runs as a job; the Location header names it. */
+      /** @description The import runs as a job; the Location header names it. A repeated start with the same Idempotency-Key and body returns the first job. */
       202: {
         headers: {
           Location?: string;
+          /** @description true when the answer is the stored one of the first request. */
+          'Idempotency-Replayed'?: string;
           [name: string]: unknown;
         };
         content: {
@@ -41040,8 +41094,33 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The document version is not scanned clean (document-pending-scan, document-quarantined), the Idempotency-Key was used with another body (urn:reticora:problem:idempotency-mismatch) or a request with the key is still in progress. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Body larger than 16 MiB (16777216 bytes) */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field is missing or invalid (rows and document_id together or neither, an empty rows, more than 5000 rows, a row that is no object) or the file or the profile format is refused (import-format-unsupported, import-file-too-large). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       503: components['responses']['ServiceUnavailable'];
     };
   };

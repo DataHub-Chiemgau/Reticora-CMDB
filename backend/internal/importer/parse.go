@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,9 @@ var (
 const (
 	FormatCSV  = "csv"
 	FormatXLSX = "xlsx"
+	// FormatJSON are the JSON rows of the API import (WP-303); a document
+	// is never read with it.
+	FormatJSON = "json"
 )
 
 // Verified media types of a document version (sniff of WP-268) that an
@@ -64,6 +68,9 @@ const (
 	// CodeRowMalformed is a row the CSV reader cannot split (a stray
 	// quote); the run reports it and goes on with the next row.
 	CodeRowMalformed = "import-row-malformed"
+	// CodeNestedValue is a JSON row with an object or an array as value
+	// (WP-303); the run reports it and goes on with the next row.
+	CodeNestedValue = "import-row-nested-value"
 )
 
 // ProblemType returns the problem type URI of an error code.
@@ -128,6 +135,8 @@ func Open(format string, r io.Reader, sheet string) (Reader, error) {
 		return OpenCSV(r)
 	case FormatXLSX:
 		return OpenXLSX(r, sheet)
+	case FormatJSON:
+		return OpenJSON(r)
 	}
 	return nil, fatal(CodeFormatUnsupported, 0, "the import format %q is not supported", format)
 }
@@ -390,4 +399,159 @@ func (x *xlsxReader) Close() error {
 		err = x.rows.Close()
 	}
 	return errors.Join(err, x.f.Close())
+}
+
+// jsonCell is one value of a JSON row: its key, its text and whether it
+// was an object or an array.
+type jsonCell struct {
+	key    string
+	text   string
+	nested bool
+}
+
+// jsonRow is one object of the JSON rows with its position (1-based).
+type jsonRow struct {
+	line  int
+	cells []jsonCell
+}
+
+// jsonReader reads the JSON rows of an API import (WP-303): an array of
+// objects of column name and scalar. The header is the union of the keys
+// in the order of their first occurrence; a row lacking a key has an
+// empty cell there. The line of a row is its position in the array
+// (1-based).
+type jsonReader struct {
+	header  []string
+	index   map[string]int
+	rows    []jsonRow
+	next    int
+	counter rowCounter
+	cells   []string
+}
+
+// OpenJSON reads the JSON rows from r (at most MaxAPIBodyBytes): string,
+// number and boolean become the text of the cell, null an empty cell. An
+// object or an array as value is a row error (CodeNestedValue), not a
+// fatal one. A document that is no array of objects is
+// CodeFormatUnsupported; more than MaxColumns keys or a row above
+// MaxRowBytes is CodeFileTooComplex.
+func OpenJSON(r io.Reader) (Reader, error) {
+	dec := json.NewDecoder(io.LimitReader(r, MaxAPIBodyBytes))
+	notRows := fatal(CodeFormatUnsupported, 0, "the rows are no JSON array of objects")
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
+		return nil, notRows
+	}
+	x := &jsonReader{index: map[string]int{}}
+	for dec.More() {
+		start := dec.InputOffset()
+		row, err := x.readRow(dec, len(x.rows)+1)
+		if err != nil {
+			return nil, err
+		}
+		if dec.InputOffset()-start > MaxRowBytes {
+			return nil, fatal(CodeFileTooComplex, row.line, "row %d is larger than %d bytes", row.line, MaxRowBytes)
+		}
+		x.rows = append(x.rows, row)
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim(']') {
+		return nil, notRows
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, notRows
+	}
+	return x, nil
+}
+
+// readRow reads one object of the array.
+func (x *jsonReader) readRow(dec *json.Decoder, line int) (jsonRow, error) {
+	row := jsonRow{line: line}
+	notObject := fatal(CodeFormatUnsupported, line, "row %d is no JSON object", line)
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return row, notObject
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return row, notObject
+		}
+		key, _ := tok.(string)
+		var raw json.RawMessage
+		if err = dec.Decode(&raw); err != nil {
+			return row, notObject
+		}
+		text, nested := jsonText(raw)
+		row.cells = append(row.cells, jsonCell{key: key, text: text, nested: nested})
+		if _, known := x.index[key]; !known {
+			if len(x.header) >= MaxColumns {
+				return row, fatal(CodeFileTooComplex, line, "the rows have more than %d columns", MaxColumns)
+			}
+			x.index[key] = len(x.header)
+			x.header = append(x.header, key)
+		}
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return row, notObject
+	}
+	return row, nil
+}
+
+// jsonText is the cell text of a JSON value: a string unquoted, a number
+// as written, true or false, null empty; nested reports an object or an
+// array.
+func jsonText(raw json.RawMessage) (text string, nested bool) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "", false
+	}
+	switch raw[0] {
+	case '"':
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return "", false
+		}
+		return s, false
+	case 'n':
+		return "", false
+	case '{', '[':
+		return "", true
+	}
+	return string(raw), false
+}
+
+func (x *jsonReader) Format() string   { return FormatJSON }
+func (x *jsonReader) Sheets() []string { return nil }
+func (x *jsonReader) Header() []string { return x.header }
+func (x *jsonReader) Close() error     { return nil }
+
+// Next returns the next row; a row with a nested value comes with a
+// non-fatal CodeNestedValue error that names its first such column.
+func (x *jsonReader) Next() (Row, error) {
+	if x.next >= len(x.rows) {
+		return Row{}, io.EOF
+	}
+	row := &x.rows[x.next]
+	x.next++
+	if cerr := x.counter.count(row.line); cerr != nil {
+		return Row{}, cerr
+	}
+	if cap(x.cells) < len(x.header) {
+		x.cells = make([]string, len(x.header))
+	}
+	x.cells = x.cells[:len(x.header)]
+	clear(x.cells)
+	var nestedErr *ParseError
+	for i := range row.cells {
+		c := &row.cells[i]
+		col := x.index[c.key]
+		x.cells[col] = c.text
+		if c.nested && nestedErr == nil {
+			nestedErr = &ParseError{Code: CodeNestedValue, Line: row.line, Column: col + 1,
+				Message: fmt.Sprintf("the value of %q is an object or an array; a row holds scalars only", c.key)}
+		}
+	}
+	out := Row{Line: row.line, Cells: x.cells}
+	if nestedErr != nil {
+		return out, nestedErr
+	}
+	return out, nil
 }
