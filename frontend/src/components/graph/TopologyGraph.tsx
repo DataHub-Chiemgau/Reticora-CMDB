@@ -2,6 +2,7 @@ import { FC, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Graph from 'graphology';
 import Sigma from 'sigma';
+import { cn } from '../ui/utils';
 
 export interface GraphNode {
   id: string;
@@ -41,6 +42,55 @@ const HIGHLIGHT_COLOR = '#dc2626';
 export const SPOF_COLOR = '#d97706';
 
 /**
+ * The colours of the graph that follow the theme: the WebGL canvas takes no
+ * CSS classes, so they are read from the design tokens (text, hairline) of
+ * the container and applied as sigma settings. A value is undefined when
+ * the token cannot be resolved (no stylesheet), and the sigma default stays.
+ */
+interface GraphTheme {
+  label?: string;
+  edge?: string;
+  dimmedNode?: string;
+  dimmedEdge?: string;
+  font?: string;
+}
+
+/** resolveColor lets the browser turn a token expression into rgb(). */
+function resolveColor(host: HTMLElement, expression: string): string | undefined {
+  const probe = document.createElement('span');
+  probe.style.color = expression;
+  host.appendChild(probe);
+  const resolved = getComputedStyle(probe).color;
+  host.removeChild(probe);
+  return /^rgba?\(/.test(resolved) ? resolved : undefined;
+}
+
+function readTheme(host: HTMLElement): GraphTheme {
+  const style = getComputedStyle(host);
+  return {
+    label: resolveColor(host, 'hsl(var(--fg-muted))'),
+    edge: resolveColor(host, 'hsl(var(--line-strong))'),
+    dimmedNode: resolveColor(host, 'hsl(var(--line-strong))'),
+    dimmedEdge: resolveColor(host, 'hsl(var(--line))'),
+    font: style.fontFamily || undefined,
+  };
+}
+
+function themeSettings(theme: GraphTheme) {
+  return {
+    ...(theme.label
+      ? { labelColor: { color: theme.label }, edgeLabelColor: { color: theme.label } }
+      : {}),
+    ...(theme.edge ? { defaultEdgeColor: theme.edge } : {}),
+    ...(theme.font ? { labelFont: theme.font, edgeLabelFont: theme.font } : {}),
+    labelSize: 12,
+    edgeLabelSize: 11,
+    // Room at the edge of the canvas for the label of a node placed there.
+    stagePadding: 96,
+  };
+}
+
+/**
  * TopologyGraph renders an interactive graph of CI relationships
  * using Sigma.js backed by a graphology instance.
  */
@@ -55,6 +105,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
+  const themeRef = useRef<GraphTheme>({});
   // Sigma draws with WebGL; without it (disabled, blocklisted GPU) the
   // renderer throws. The graph then shows a note and the rest of the page
   // (node list, simulation) stays usable.
@@ -71,7 +122,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
         x: node.x ?? Math.cos((2 * Math.PI * i) / nodes.length),
         y: node.y ?? Math.sin((2 * Math.PI * i) / nodes.length),
         size: node.size ?? 10,
-        color: node.color ?? '#4f46e5',
+        color: node.color ?? '#087680',
       });
     });
 
@@ -81,10 +132,12 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
       }
     });
 
+    themeRef.current = readTheme(containerRef.current);
     let renderer: Sigma;
     try {
       renderer = new Sigma(graph, containerRef.current, {
         renderEdgeLabels: true,
+        ...themeSettings(themeRef.current),
       });
     } catch {
       setUnavailable(true);
@@ -105,7 +158,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
           result.forceLabel = true;
           result.highlighted = true;
         } else if (dimmedNodes?.has(node)) {
-          result.color = DIMMED_COLOR;
+          result.color = themeRef.current.dimmedNode ?? DIMMED_COLOR;
         }
         return result;
       });
@@ -113,7 +166,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
         const result = { ...data };
         const [source, target] = graph.extremities(edge);
         if (dimmedNodes?.has(source) || dimmedNodes?.has(target)) {
-          result.color = DIMMED_EDGE_COLOR;
+          result.color = themeRef.current.dimmedEdge ?? DIMMED_EDGE_COLOR;
           result.label = '';
         }
         return result;
@@ -128,16 +181,36 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
     };
   }, [nodes, edges, dimmedNodes, highlightedNodes, spofNodes]);
 
+  // A change of the theme re-reads the token colours and redraws the canvas,
+  // keeping the camera (the renderer is not rebuilt).
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const host = containerRef.current;
+      const renderer = sigmaRef.current;
+      if (!host || !renderer) return;
+      themeRef.current = readTheme(host);
+      for (const [key, value] of Object.entries(themeSettings(themeRef.current))) {
+        renderer.setSetting(key as 'labelColor', value as never);
+      }
+      renderer.refresh();
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div
       ref={containerRef}
-      className={className}
+      className={cn('text-fg', className)}
       style={{ width: '100%', height: '100%', position: 'relative' }}
     >
       {unavailable ? (
         <p
           role="status"
-          className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-gray-600 dark:text-gray-300"
+          className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-fg-muted"
         >
           {t('topology.graphUnavailable')}
         </p>

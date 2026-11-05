@@ -82,7 +82,7 @@ describe('buildGraphModel', () => {
       edges: [],
     });
 
-    expect(model.nodes[0]?.color).toBe('#4f46e5');
+    expect(model.nodes[0]?.color).toBe('#087680');
   });
 });
 

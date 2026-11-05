@@ -6,10 +6,12 @@
  * goes to the parent), Home/End, Enter or Space selects. The search filters
  * the loaded tree and keeps the ancestors of the matches visible.
  */
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { CIType } from '../../api/cmdb';
 import { Badge } from '../ui/Badge';
+import { cn } from '../ui/utils';
 
 export interface TypeTreeProps {
   types: CIType[];
@@ -200,33 +202,37 @@ export function TypeTree({ types, selectedId, onSelect, search = '', label }: Ty
               setFocusedId(ty.id);
               onSelect(ty.id);
             }}
-            className="outline-none [&:focus-visible>div]:ring-2 [&:focus-visible>div]:ring-primary/40"
+            className="outline-none [&:focus-visible>div]:ring-2 [&:focus-visible>div]:ring-accent/40"
           >
             <div
-              className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 transition ${
+              className={cn(
+                'flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 transition-colors',
                 selected
-                  ? 'border-primary bg-primary/5'
-                  : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-              }`}
+                  ? 'border-accent bg-accent-soft'
+                  : 'border-line bg-panel hover:border-line-strong hover:bg-fg/[0.025]',
+              )}
               style={{ marginLeft: `${(row.level - 1) * 1.25}rem` }}
             >
               <span
                 aria-hidden
-                className="mt-0.5 w-4 shrink-0 text-center text-gray-500 dark:text-gray-400"
+                className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center text-fg-muted"
                 onClick={(e) => {
                   if (!row.hasChildren || visible) return;
                   e.stopPropagation();
                   setOpen(ty.id, !open);
                 }}
               >
-                {row.hasChildren ? (open ? '▾' : '▸') : ''}
+                {row.hasChildren ? (
+                  open ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )
+                ) : null}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span
-                    id={labelId}
-                    className="font-medium text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100"
-                  >
+                  <span id={labelId} className="font-medium text-fg [overflow-wrap:anywhere]">
                     {label(ty)}
                   </span>
                   <span id={metaId} className="flex flex-wrap gap-1">
@@ -240,7 +246,7 @@ export function TypeTree({ types, selectedId, onSelect, search = '', label }: Ty
                     ) : null}
                   </span>
                 </div>
-                <p className="mt-0.5 text-xs text-muted [overflow-wrap:anywhere]">
+                <p className="mt-0.5 text-xs text-fg-muted [overflow-wrap:anywhere]">
                   {ty.key} · v{ty.version} · {t('citypes.schemaVersion')} {ty.schema_version}
                   {ty.category ? ` · ${ty.category}` : ''}
                 </p>
@@ -257,7 +263,7 @@ export function TypeTree({ types, selectedId, onSelect, search = '', label }: Ty
 
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-muted">
+      <p className="text-sm text-fg-muted">
         {query ? t('citypes.tree.noMatch') : t('citypes.tree.empty')}
       </p>
     );

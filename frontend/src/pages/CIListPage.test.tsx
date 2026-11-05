@@ -47,7 +47,7 @@ describe('CIListPage', () => {
     renderWithProviders(<CIListPage onCreateCI={onCreateCI} />, { route: '/cmdb' });
 
     expect(await screen.findByText('Noch keine Configuration Items')).toBeInTheDocument();
-    const createButtons = screen.getAllByRole('button', { name: 'CI erstellen' });
+    const createButtons = screen.getAllByRole('button', { name: 'CI anlegen' });
     fireEvent.click(createButtons[createButtons.length - 1]!);
     expect(onCreateCI).toHaveBeenCalledTimes(1);
   });

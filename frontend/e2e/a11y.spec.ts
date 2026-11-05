@@ -93,13 +93,13 @@ const ROUTES: A11yRoute[] = [
     path: '/auth/callback',
     url: '/auth/callback?code=a11y&state=unknown',
     signedIn: false,
-    ready: (page) => page.locator('section h2'),
+    ready: (page) => page.locator('section h1'),
   },
   {
     path: '/onboarding',
     url: '/onboarding',
     signedIn: false,
-    ready: (page) => page.locator('#main-content form, #main-content h2').first(),
+    ready: (page) => page.locator('#main-content form, #main-content h1').first(),
   },
   {
     path: '/invitations/accept',
@@ -329,7 +329,8 @@ async function expectLanguage(page: Page, language: Language) {
  * expectTheme checks that the chosen theme is in effect whatever the OS
  * prefers: the class of the dark: variants, data-theme (which switches off the
  * pre-JS OS fallback of src/index.css), the colour scheme of native controls
- * and the canvas colour (white, or the dark surface hsl(220 13% 10%)).
+ * and the canvas colour (the light canvas, or the dark one: both are near-neutral
+ * and clearly on their side of the scale).
  */
 async function expectTheme(page: Page, theme: Theme) {
   const html = page.locator('html');
@@ -347,7 +348,7 @@ async function expectTheme(page: Page, theme: Theme) {
     if (theme === 'dark') {
       expect(channel, `html background ${canvas}`).toBeLessThan(40);
     } else {
-      expect(channel, `html background ${canvas}`).toBeGreaterThan(250);
+      expect(channel, `html background ${canvas}`).toBeGreaterThan(235);
     }
   }
 }

@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { KeyboardEvent, SelectHTMLAttributes } from 'react';
 import { cn } from './utils';
+import { fieldClasses, fieldErrorClasses, labelClasses } from './Input';
 
 export interface SelectOption {
   value: string;
@@ -66,10 +67,7 @@ export function Select({ label, options, error, id, className, onKeyDown, ...pro
   return (
     <div className="space-y-1.5">
       {label ? (
-        <label
-          htmlFor={selectId}
-          className="block text-sm font-medium text-gray-700 dark:text-gray-200"
-        >
+        <label htmlFor={selectId} className={labelClasses}>
           {label}
         </label>
       ) : null}
@@ -77,12 +75,7 @@ export function Select({ label, options, error, id, className, onKeyDown, ...pro
         id={selectId}
         aria-invalid={error ? true : undefined}
         aria-describedby={errorId}
-        className={cn(
-          'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100',
-          error &&
-            'border-red-500 focus:border-red-500 focus:ring-red-200 dark:border-red-500 dark:focus:ring-red-500/20',
-          className,
-        )}
+        className={cn(fieldClasses, 'field-select', error && fieldErrorClasses, className)}
         {...props}
         onKeyDown={(event) => {
           onKeyDown?.(event);
@@ -96,7 +89,7 @@ export function Select({ label, options, error, id, className, onKeyDown, ...pro
         ))}
       </select>
       {error ? (
-        <p id={errorId} className="text-sm text-red-600 dark:text-red-400">
+        <p id={errorId} className="text-sm text-danger">
           {error}
         </p>
       ) : null}

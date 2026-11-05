@@ -15,9 +15,22 @@ import { useEffectivePermissions, useHasPermission } from '../api/hooks';
 import { ApiError, roleApi } from '../api/client';
 import { VIEW_FIELDS, type QueryResult, type SavedView, type SavedViewSortKey } from '../api/cmdb';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Bookmark, Save, X } from 'lucide-react';
+import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import {
+  tableClasses,
+  tdClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 import { fieldValueText } from '../components/cmdb/fieldValue';
@@ -81,6 +94,14 @@ function formatCell(value: unknown): string {
 /** The text of one cell; a catalog-keyed field shows its label (GLO-10). */
 function cellText(t: TFunction, row: QueryResult, field: string): string {
   return fieldValueText(t, field, row.columns?.[field], formatCell);
+}
+
+/** The row of a view in the lists: a quiet button, the open view highlighted. */
+function viewRowClasses(active: boolean) {
+  return cn(
+    'flex min-h-9 w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-3 py-1.5 text-left text-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+    active ? 'bg-accent-soft font-medium text-accent-strong' : 'text-fg hover:bg-fg/[0.05]',
+  );
 }
 
 export function SavedViewsPage() {
@@ -212,32 +233,28 @@ export function SavedViewsPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {t('savedviews.title', 'Gespeicherte Ansichten')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          {t(
-            'savedviews.subtitle',
-            'Vorlagen und eigene Filter — z. B. „Produktiv-Server ohne Backup“ oder „Garantie läuft in 90 Tagen ab“.',
-          )}
-        </p>
-      </div>
+      <PageHeader
+        title={t('savedviews.title', 'Gespeicherte Ansichten')}
+        description={t(
+          'savedviews.subtitle',
+          'Vorlagen und eigene Filter — z. B. „Produktiv-Server ohne Backup“ oder „Garantie läuft in 90 Tagen ab“.',
+        )}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-1">
+        <div className="min-w-0 space-y-4 lg:col-span-1">
           <Card title={t('savedviews.presets', 'Vorlagen')}>
-            <ul className="space-y-1">
+            <ul className="-mx-2 space-y-0.5">
               {(presets.data?.data ?? []).map((p) => (
                 <li key={p.name}>
                   <button
+                    type="button"
                     onClick={() => run(p.name, p.filter_spec as ActiveSpec, p.entity_kind)}
-                    className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${activeView === p.name ? 'bg-primary/5 text-primary' : ''}`}
+                    aria-current={activeView === p.name ? 'true' : undefined}
+                    className={viewRowClasses(activeView === p.name)}
                   >
-                    {p.name}
-                    <Badge variant="neutral" className="ml-2">
-                      {p.entity_kind}
-                    </Badge>
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}</span>
+                    <Badge variant="neutral">{p.entity_kind}</Badge>
                   </button>
                 </li>
               ))}
@@ -245,21 +262,21 @@ export function SavedViewsPage() {
           </Card>
           <Card title={t('savedviews.mine', 'Meine Ansichten')}>
             {views.isLoading ? <SkeletonList rows={3} label="…" /> : null}
-            <ul className="space-y-1">
+            <ul className="-mx-2 space-y-0.5">
               {(views.data?.data ?? []).map((v) => (
                 <li key={v.id} className="flex items-center gap-1">
                   <button
+                    type="button"
                     onClick={() => run(v.name, v.filter_spec as ActiveSpec, v.entity_kind, v)}
-                    className={`w-full rounded-md px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-800 ${activeView === v.name ? 'bg-primary/5 text-primary' : ''}`}
+                    aria-current={activeView === v.name ? 'true' : undefined}
+                    className={viewRowClasses(activeView === v.name)}
                   >
-                    {v.name}
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{v.name}</span>
                     {v.shared ? (
-                      <Badge variant="info" className="ml-2">
-                        {t('savedviews.shared', 'geteilt')}
-                      </Badge>
+                      <Badge variant="info">{t('savedviews.shared', 'geteilt')}</Badge>
                     ) : null}
                     {!v.shared && (v.shared_with_roles?.length ?? 0) > 0 ? (
-                      <Badge variant="info" className="ml-2">
+                      <Badge variant="info">
                         {t('savedviews.sharedWithRoles', {
                           count: v.shared_with_roles?.length ?? 0,
                           defaultValue: 'für {{count}} Rollen',
@@ -268,18 +285,18 @@ export function SavedViewsPage() {
                     ) : null}
                   </button>
                   {me && v.owner_id === me ? (
-                    <button
+                    <IconButton
+                      size="sm"
+                      icon={<X />}
+                      label={`${t('common.delete')}: ${v.name}`}
                       onClick={() => deleteView.mutate(v.id)}
-                      aria-label={`${t('common.delete')}: ${v.name}`}
-                      className="rounded-md px-2 py-2 text-sm text-muted hover:text-danger"
-                    >
-                      ×
-                    </button>
+                      className="shrink-0 hover:text-danger"
+                    />
                   ) : null}
                 </li>
               ))}
               {(views.data?.data ?? []).length === 0 && !views.isLoading ? (
-                <li className="px-3 py-2 text-sm text-muted">
+                <li className="px-3 py-2 text-sm text-fg-muted">
                   {t('savedviews.none', 'Noch keine eigenen Ansichten.')}
                 </li>
               ) : null}
@@ -287,11 +304,11 @@ export function SavedViewsPage() {
           </Card>
         </div>
 
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           {filter ? (
             <Card title={t('savedviews.presentation', 'Darstellung und Freigabe')}>
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-5">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Select
                     label={t('savedviews.sortBy', 'Sortieren nach')}
                     value={sortField}
@@ -312,16 +329,16 @@ export function SavedViewsPage() {
                     ]}
                   />
                 </div>
-                <fieldset>
-                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                <fieldset className="min-w-0">
+                  <legend className="text-sm font-medium text-fg">
                     {t('savedviews.columns', 'Spalten')}
                   </legend>
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-fg-muted">
                     {t('savedviews.columnsHint', 'Ohne Auswahl: Name und Zusammenfassung.')}
                   </p>
-                  <div className="mt-2 grid grid-cols-2 gap-1 sm:grid-cols-3">
+                  <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-3">
                     {fieldOptions.map((f) => (
-                      <label key={f} className="flex items-center gap-2 text-sm">
+                      <label key={f} className="flex items-center gap-2 text-sm text-fg">
                         <input
                           type="checkbox"
                           checked={presentation.columns.includes(f)}
@@ -332,11 +349,11 @@ export function SavedViewsPage() {
                     ))}
                   </div>
                 </fieldset>
-                <fieldset>
-                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                <fieldset className="min-w-0">
+                  <legend className="text-sm font-medium text-fg">
                     {t('savedviews.sharing', 'Freigabe')}
                   </legend>
-                  <label className="mt-2 flex items-center gap-2 text-sm">
+                  <label className="mt-3 flex items-center gap-2 text-sm text-fg">
                     <input
                       type="checkbox"
                       checked={presentation.shared}
@@ -344,17 +361,17 @@ export function SavedViewsPage() {
                     />
                     {t('savedviews.shareOrg', 'Für die ganze Organisation freigeben')}
                   </label>
-                  <p className="mt-2 text-sm text-gray-700 dark:text-gray-200">
+                  <p className="mt-3 text-sm font-medium text-fg">
                     {t('savedviews.shareRoles', 'Für Rollen freigeben')}
                   </p>
                   {!mayReadRoles || roles.error ? (
-                    <p className="text-xs text-muted">
+                    <p className="text-sm text-fg-muted">
                       {t('savedviews.rolesUnavailable', 'Die Rollen können nicht geladen werden.')}
                     </p>
                   ) : (
-                    <div className="mt-1 grid grid-cols-2 gap-1 sm:grid-cols-3">
+                    <div className="mt-2 grid grid-cols-2 gap-2 xl:grid-cols-3">
                       {(roles.data?.data ?? []).map((r) => (
-                        <label key={r.id} className="flex items-center gap-2 text-sm">
+                        <label key={r.id} className="flex items-center gap-2 text-sm text-fg">
                           <input
                             type="checkbox"
                             checked={presentation.roles.includes(r.id)}
@@ -367,7 +384,7 @@ export function SavedViewsPage() {
                   )}
                 </fieldset>
                 {runningView && !own ? (
-                  <p className="text-xs text-muted">
+                  <p className="text-sm text-fg-muted">
                     {t(
                       'savedviews.readOnly',
                       'Diese Ansicht wurde mit Ihnen geteilt; Änderungen speichern Sie als eigene Ansicht.',
@@ -375,62 +392,76 @@ export function SavedViewsPage() {
                   </p>
                 ) : null}
                 {own ? (
-                  <Button onClick={updateCurrent} disabled={updateView.isPending}>
+                  <Button icon={<Save />} onClick={updateCurrent} disabled={updateView.isPending}>
                     {t('savedviews.update', 'Änderungen speichern')}
                   </Button>
                 ) : null}
               </div>
             </Card>
           ) : null}
-          <Card
-            title={activeView || t('savedviews.results', 'Ergebnisse')}
-            actions={
-              filter ? (
-                <Button variant="secondary" onClick={saveCurrent} disabled={saveView.isPending}>
+          <Card className="overflow-hidden p-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-4 pt-5">
+              <h3 className="min-w-0 text-base font-semibold text-fg [overflow-wrap:anywhere]">
+                {activeView || t('savedviews.results', 'Ergebnisse')}
+              </h3>
+              {filter ? (
+                <Button
+                  variant="secondary"
+                  icon={<Bookmark />}
+                  onClick={saveCurrent}
+                  disabled={saveView.isPending}
+                >
                   {t('savedviews.save', 'Als Ansicht speichern')}
                 </Button>
-              ) : null
-            }
-          >
-            {query.isFetching ? <SkeletonList rows={5} label="…" /> : null}
+              ) : null}
+            </div>
+            {query.isFetching ? (
+              <div className="px-5 pb-5">
+                <SkeletonList rows={5} label="…" />
+              </div>
+            ) : null}
             {forbidden ? (
-              <ErrorState
-                title={t('savedviews.forbidden', 'Keine Berechtigung für diese Ansicht')}
-                description={t(
-                  'savedviews.forbiddenHint',
-                  'Ihnen fehlt das Leserecht für die Objekte, die diese Ansicht abfragt. Wenden Sie sich an Ihre Administration.',
-                )}
-              />
+              <div className="px-5 pb-5">
+                <ErrorState
+                  title={t('savedviews.forbidden', 'Keine Berechtigung für diese Ansicht')}
+                  description={t(
+                    'savedviews.forbiddenHint',
+                    'Ihnen fehlt das Leserecht für die Objekte, die diese Ansicht abfragt. Wenden Sie sich an Ihre Administration.',
+                  )}
+                />
+              </div>
             ) : query.error ? (
-              <ErrorState
-                title={t('app.error')}
-                retryLabel={t('common.retry')}
-                onRetry={() => void query.refetch()}
-              />
+              <div className="px-5 pb-5">
+                <ErrorState
+                  title={t('app.error')}
+                  retryLabel={t('common.retry')}
+                  onRetry={() => void query.refetch()}
+                />
+              </div>
             ) : null}
             {results && columns.length > 0 ? (
               // The saved columns only, in the saved order; the first one
               // links to the object.
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-left dark:border-gray-700">
+              <ScrollRegion label={activeView || t('savedviews.results', 'Ergebnisse')}>
+                <table className={tableClasses}>
+                  <thead className={cn(theadClasses, 'border-t')}>
+                    <tr>
                       {columns.map((c) => (
-                        <th key={c} scope="col" className="px-2 py-2 font-medium">
+                        <th key={c} scope="col" className={thClasses}>
                           {fieldLabel(t, c)}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                  <tbody>
                     {results.map((r) => (
-                      <tr key={r.id}>
+                      <tr key={r.id} className={trClasses}>
                         {columns.map((c, i) => (
-                          <td key={c} className="px-2 py-2">
+                          <td key={c} className={i === 0 ? tdPrimaryClasses : tdClasses}>
                             {i === 0 ? (
                               <Link
                                 to={r.entity_kind === 'asset' ? `/assets` : `/cmdb/${r.id}`}
-                                className="font-medium text-primary hover:underline"
+                                className="rounded font-medium text-accent hover:underline"
                               >
                                 {cellText(t, r, c)}
                               </Link>
@@ -443,37 +474,40 @@ export function SavedViewsPage() {
                     ))}
                     {results.length === 0 ? (
                       <tr>
-                        <td colSpan={columns.length} className="py-4 text-center text-muted">
+                        <td colSpan={columns.length} className={cn(tdClasses, 'py-6 text-center')}>
                           {t('savedviews.noResults', 'Keine Treffer.')}
                         </td>
                       </tr>
                     ) : null}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             ) : results ? (
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              <ul className="divide-y divide-line border-t border-line">
                 {results.map((r) => (
-                  <li key={r.id} className="py-2 text-sm">
+                  <li key={r.id} className="px-5 py-3 text-sm">
                     <Link
                       to={r.entity_kind === 'asset' ? `/assets` : `/cmdb/${r.id}`}
-                      className="font-medium text-primary hover:underline"
+                      className="rounded font-medium text-accent hover:underline"
                     >
                       {r.name}
                     </Link>
-                    {r.summary ? <p className="text-xs text-muted">{r.summary}</p> : null}
+                    {r.summary ? <p className="text-xs text-fg-muted">{r.summary}</p> : null}
                   </li>
                 ))}
                 {results.length === 0 ? (
-                  <li className="py-4 text-center text-sm text-muted">
+                  <li className="px-5 py-6 text-center text-sm text-fg-muted">
                     {t('savedviews.noResults', 'Keine Treffer.')}
                   </li>
                 ) : null}
               </ul>
             ) : !filter ? (
-              <p className="text-sm text-muted">
-                {t('savedviews.hint', 'Wählen Sie links eine Ansicht aus.')}
-              </p>
+              <div className="px-5 pb-5">
+                <EmptyState
+                  icon={<Bookmark />}
+                  title={t('savedviews.hint', 'Wählen Sie links eine Ansicht aus.')}
+                />
+              </div>
             ) : null}
           </Card>
         </div>

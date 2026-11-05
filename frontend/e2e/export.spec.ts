@@ -93,7 +93,7 @@ test('starts an export job and downloads the file', async ({ page }) => {
   await page.goto('/export');
 
   await page.getByLabel('Format').selectOption('csv');
-  await page.getByRole('button', { name: 'Auftrag erstellen' }).click();
+  await page.getByRole('button', { name: 'Export starten' }).click();
   await expect
     .poll(() =>
       calls.filter((c) => c.method === 'POST' && c.path === '/exports').map((c) => c.body),

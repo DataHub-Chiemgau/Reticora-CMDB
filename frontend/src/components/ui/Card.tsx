@@ -8,21 +8,19 @@ interface CardProps {
   actions?: ReactNode;
 }
 
+/**
+ * Card is the one panel of the system: a hairline border on the panel
+ * colour, no shadow (shadows are for floating layers). Tables and lists put
+ * `p-0 overflow-hidden` on it and bring their own padding.
+ */
 export function Card({ children, className, title, actions }: CardProps) {
   return (
-    <section
-      className={cn(
-        'rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900',
-        className,
-      )}
-    >
+    <section className={cn('rounded-xl border border-line bg-panel p-5', className)}>
       {title || actions ? (
         <div className="mb-4 flex items-start justify-between gap-4">
           <div className="min-w-0">
             {title ? (
-              <h3 className="text-base font-semibold text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
-                {title}
-              </h3>
+              <h3 className="text-base font-semibold text-fg [overflow-wrap:anywhere]">{title}</h3>
             ) : null}
           </div>
           {actions ? <div className="shrink-0">{actions}</div> : null}

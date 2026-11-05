@@ -25,12 +25,7 @@ describe('Modal theme', () => {
     // Rendered outside the tree of the caller: nothing is inherited from it.
     expect(container.contains(dialog)).toBe(false);
     expect(dialog.closest('body')).toBe(document.body);
-    expect(dialog).toHaveClass(
-      'bg-white',
-      'text-gray-900',
-      'dark:bg-gray-900',
-      'dark:text-gray-100',
-    );
+    expect(dialog).toHaveClass('bg-panel', 'text-gray-900', 'dark:text-gray-100');
     expect(screen.getByLabelText('Eindeutig').closest('[role="dialog"]')).toBe(dialog);
   });
 });

@@ -1,3 +1,4 @@
+import { Armchair, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,18 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 function statusVariant(status: string): 'neutral' | 'warning' | 'success' | 'danger' {
   switch (status) {
@@ -59,57 +72,83 @@ export function DeskListPage() {
     onError: (e) => setBookingError(e instanceof Error ? e.message : t('app.error')),
   });
 
+  const desks = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.desks', 'Arbeitsplätze')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('desks.summary', 'Wechselnde Arbeitsplätze buchen.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('desks.create', 'Arbeitsplatz anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.desks', 'Arbeitsplätze')}
+        description={t('desks.summary', 'Wechselnde Arbeitsplätze buchen.')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('desks.create', 'Arbeitsplatz anlegen')}
+          </Button>
+        }
+      />
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {(data?.data ?? []).map((d: Desk) => (
-          <Card
-            key={d.id}
-            title={d.name}
-            actions={
-              <Badge variant={statusVariant(d.status)}>
-                {t(`desks.statuses.${d.status}`, d.status)}
-              </Badge>
-            }
-          >
-            <div className="mt-3">
-              <Button size="sm" onClick={() => setBookFor(d)}>
-                {t('desks.book', 'Buchen')}
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.desks', 'Arbeitsplätze')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {desks.map((d: Desk) => (
+                  <tr key={d.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{d.name}</td>
+                    <td className={tdClasses}>
+                      <Badge variant={statusVariant(d.status)}>
+                        {t(`desks.statuses.${d.status}`, d.status)}
+                      </Badge>
+                    </td>
+                    <td className={cn(tdClasses, 'text-right')}>
+                      <Button size="sm" variant="secondary" onClick={() => setBookFor(d)}>
+                        {t('desks.book', 'Buchen')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {desks.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={3}
+                    icon={<Armchair />}
+                    title={t('desks.emptyTitle')}
+                    description={t('desks.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('desks.create', 'Arbeitsplatz anlegen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.name', 'Name')}
             value={name}
@@ -139,7 +178,7 @@ export function DeskListPage() {
         }}
         title={t('desks.bookTitle', 'Arbeitsplatz buchen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('desks.startsAt', 'Von')}
             type="datetime-local"

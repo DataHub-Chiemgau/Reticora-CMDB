@@ -96,7 +96,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
       {n.ci_type ? (
         <>
           {' '}
-          <span className="text-xs text-gray-500 dark:text-gray-400">({typeLabel(n.ci_type)})</span>
+          <span className="text-xs text-fg-muted">({typeLabel(n.ci_type)})</span>
         </>
       ) : null}
     </>
@@ -104,7 +104,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
   return (
     <div className="space-y-3" data-testid="impact-panel">
-      <div className="flex flex-wrap gap-4 text-sm">
+      <div className="flex flex-wrap gap-1.5 text-xs text-fg-muted [&>span]:rounded-md [&>span]:border [&>span]:border-line [&>span]:bg-canvas [&>span]:px-2 [&>span]:py-1 [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-fg">
         <span>
           {t('impact.affected')}:{' '}
           <strong>{counts?.cis ?? impact.affected_count ?? certain.length}</strong>
@@ -125,7 +125,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
         <span>
           {t('impact.sites')}: <strong>{counts?.sites ?? siteIds.length}</strong>
         </span>
-        <span className="text-red-600 dark:text-red-400">
+        <span className="text-danger">
           {t('impact.spof')}: <strong>{counts?.spof ?? spofs.length}</strong>
         </span>
       </div>
@@ -137,10 +137,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {services.length > 0 ? (
         <div>
-          <p
-            id={headingId('services')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('services')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.servicesList')}
           </p>
           <ul aria-labelledby={headingId('services')} className="max-h-40 overflow-y-auto text-sm">
@@ -161,13 +158,10 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {clientIds.length > 0 ? (
         <div>
-          <p
-            id={headingId('clients')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('clients')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.clientsList')}
           </p>
-          <ul aria-labelledby={headingId('clients')} className="text-sm">
+          <ul aria-labelledby={headingId('clients')} className="text-sm text-fg">
             {clientIds.map((id) => (
               <li key={id}>• {nameOf(clientNames, id)}</li>
             ))}
@@ -177,10 +171,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {siteIds.length > 0 ? (
         <div>
-          <p
-            id={headingId('sites')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('sites')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.sitesList')}
           </p>
           <ul aria-labelledby={headingId('sites')} className="text-sm">
@@ -193,10 +184,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {spofs.length > 0 || impact.spof_truncated ? (
         <div>
-          <p
-            id={headingId('spof')}
-            className="text-xs font-semibold text-red-600 dark:text-red-400"
-          >
+          <p id={headingId('spof')} className="mb-1 text-xs font-medium text-danger">
             {t('impact.spofList')}
           </p>
           {impact.spof_truncated ? (
@@ -209,7 +197,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
               <li key={n.id}>
                 {ciItem(n)} <Badge variant="danger">{t('impact.spofBadge')}</Badge>
                 {n.service_ids.length > 0 ? (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                  <span className="text-xs text-fg-muted">
                     {' '}
                     {t('impact.spofFor', {
                       services: n.service_ids.map((id) => nameOf(serviceNames, id)).join(', '),
@@ -224,10 +212,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {direct.length > 0 ? (
         <div>
-          <p
-            id={headingId('direct')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('direct')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.directList')}
           </p>
           <ul aria-labelledby={headingId('direct')} className="text-sm">
@@ -240,10 +225,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {redundant.length > 0 ? (
         <div>
-          <p
-            id={headingId('redundant')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('redundant')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.redundantList')}
           </p>
           <ul aria-labelledby={headingId('redundant')} className="text-sm">
@@ -256,10 +238,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
 
       {byCategory.length > 0 ? (
         <div>
-          <p
-            id={headingId('category')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('category')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.byCategory')}
           </p>
           <ul aria-labelledby={headingId('category')} className="flex flex-wrap gap-x-4 text-sm">
@@ -273,10 +252,7 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
       ) : null}
 
       <div>
-        <p
-          id={headingId('affected')}
-          className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-        >
+        <p id={headingId('affected')} className="mb-1 text-xs font-medium text-fg-muted">
           {t('impact.affectedList')}
         </p>
         {certain.length > 0 ? (
@@ -286,18 +262,15 @@ export function ImpactPanel({ impact, typeLabel = (type) => type }: ImpactPanelP
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t('impact.noneAffected')}</p>
+          <p className="text-sm text-fg-muted">{t('impact.noneAffected')}</p>
         )}
       </div>
       {heuristic.length > 0 ? (
         <div>
-          <p
-            id={headingId('heuristic')}
-            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
-          >
+          <p id={headingId('heuristic')} className="mb-1 text-xs font-medium text-fg-muted">
             {t('impact.heuristicList')}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{t('impact.heuristicHint')}</p>
+          <p className="mb-1 text-xs text-fg-muted">{t('impact.heuristicHint')}</p>
           <ul aria-labelledby={headingId('heuristic')} className="max-h-40 overflow-y-auto text-sm">
             {heuristic.map((n) => (
               <li key={n.id}>

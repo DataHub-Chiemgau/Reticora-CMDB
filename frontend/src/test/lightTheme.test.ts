@@ -156,9 +156,9 @@ describe('theme source in src/index.css', () => {
     const root = topLevelRule(css, ':root');
     const dark = topLevelRule(css, '.dark');
     expect(root).toMatch(/(^|;|\s)color-scheme:\s*light\s*;/);
-    expect(root).toMatch(/--color-surface:\s*0 0% 100%\s*;/);
+    expect(root).toMatch(/--color-surface:\s*200 18% 96\.7%\s*;/);
     expect(dark).toMatch(/(^|;|\s)color-scheme:\s*dark\s*;/);
-    expect(dark).toMatch(/--color-surface:\s*220 13% 10%\s*;/);
+    expect(dark).toMatch(/--color-surface:\s*202 24% 6\.7%\s*;/);
     expect(topLevelRule(css, 'html')).toMatch(
       /background-color:\s*hsl\(var\(--color-surface\)\)\s*;/,
     );
@@ -377,19 +377,19 @@ function hexColours(fileName: string, source: string): Hit[] {
 // longer occurs fails, so the list only shrinks.
 const HEX_EXCEPTIONS: Record<string, { colours: readonly string[]; reason: string }> = {
   '../pages/TopologyPage.tsx': {
-    colours: ['#16a34a', '#6b7280', '#d97706', '#dc2626', '#4f46e5', '#0891b2', '#7c3aed'],
+    colours: ['#16a34a', '#6b7280', '#d97706', '#dc2626', '#087680', '#0891b2', '#7c3aed'],
     reason:
       'status colours of the graph nodes and the colours of the projected subnets and VLANs (WP-818), drawn by sigma on a WebGL canvas (no CSS classes)',
   },
   '../components/graph/TopologyGraph.tsx': {
-    colours: ['#d1d5db', '#e5e7eb', '#dc2626', '#d97706', '#4f46e5'],
+    colours: ['#d1d5db', '#e5e7eb', '#dc2626', '#d97706', '#087680'],
     reason:
       'dimmed, highlight, SPOF (WP-818) and default colours of the sigma WebGL graph (no CSS classes)',
   },
   '../components/rack/RackSVG.tsx': {
-    colours: ['#4f46e5'],
+    colours: ['#087680'],
     reason:
-      'default fill of a rack item: items carry their own data colour as fill; white label 6.3:1 in both themes',
+      'default fill of a rack item: items carry their own data colour as fill; the brand petrol, white label 5.4:1 in both themes',
   },
 };
 

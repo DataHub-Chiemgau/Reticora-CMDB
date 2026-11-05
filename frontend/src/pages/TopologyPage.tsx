@@ -1,3 +1,4 @@
+import { Crosshair, Network, Plus, Zap, ZapOff } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -15,13 +16,17 @@ import { MAX_IMPACT_CIS, useTopology, useImpactMany, useSites } from '../api/hoo
 import { ImpactPanel } from '../components/graph/ImpactPanel';
 import { SPOF_COLOR, TopologyGraph } from '../components/graph/TopologyGraph';
 import type { GraphEdge, GraphNode } from '../components/graph/TopologyGraph';
+import { Panel } from '../components/spatial/Panel';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import { cn } from '../components/ui/utils';
 import { useEntitlements } from '../hooks/useEntitlements';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
 
@@ -97,7 +102,7 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
       return {
         id: node.id,
         label: node.name,
-        color: statusColors[node.status ?? ''] ?? '#4f46e5',
+        color: statusColors[node.status ?? ''] ?? '#087680',
       };
     }),
     edges: [...edgesByPair.values()],
@@ -326,77 +331,81 @@ export function TopologyPage() {
 
   const nameOf = (id: string) => data?.nodes.find((node) => node.id === id)?.name ?? id;
 
+  const simulating = simulated.length > 0;
+  const hasGraph = data !== undefined && model.nodes.length > 0;
+  // The chevron of a native select needs room next to a fixed width.
+  const selectClasses = 'pr-8';
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.topology')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('topology.subtitle')}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {simulated.length > 0 ? (
-            <Button variant="danger" onClick={() => updateParam('simulate', '')}>
-              {t('topology.simulation.stop')}
-            </Button>
-          ) : null}
-          {rootCiId ? (
-            <Button variant="secondary" onClick={() => updateParam('root', '')}>
+      <PageHeader
+        title={t('nav.topology')}
+        description={t('topology.subtitle')}
+        actions={
+          rootCiId ? (
+            <Button
+              variant="secondary"
+              icon={<Crosshair />}
+              onClick={() => updateParam('root', '')}
+            >
               {t('topology.clearRoot')}
             </Button>
-          ) : null}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
-      <Card>
-        <div className="flex flex-wrap gap-3">
-          <Select
-            value={ciType}
-            onChange={(event) => updateParam('type', event.target.value)}
-            aria-label={t('topology.filterType')}
-            className="max-w-xs"
-            options={[{ value: '', label: t('topology.allTypes') }, ...typeOptions]}
+      <Toolbar label={t('topology.filters')} className="grid grid-cols-2 sm:flex sm:flex-wrap">
+        <Select
+          value={ciType}
+          onChange={(event) => updateParam('type', event.target.value)}
+          aria-label={t('topology.filterType')}
+          className={cn('w-full sm:w-48', selectClasses)}
+          options={[{ value: '', label: t('topology.allTypes') }, ...typeOptions]}
+        />
+        <Select
+          value={siteId}
+          onChange={(event) => updateParam('site', event.target.value)}
+          aria-label={t('topology.filterSite')}
+          className={cn('w-full sm:w-48', selectClasses)}
+          options={[{ value: '', label: t('topology.allSites') }, ...siteOptions]}
+        />
+        <Select
+          value={depth}
+          onChange={(event) => updateParam('depth', event.target.value)}
+          aria-label={t('topology.filterDepth')}
+          className={cn('w-full sm:w-32', selectClasses)}
+          disabled={!rootCiId}
+          options={depthValues.map((value) => ({
+            value,
+            label: `${t('topology.depth')} ${value}`,
+          }))}
+        />
+        <Select
+          value={relTypeFacet}
+          onChange={(event) => updateParam('rel_type', event.target.value)}
+          aria-label={t('topology.filterRelType', 'Beziehungstyp')}
+          className={cn('w-full sm:w-48', selectClasses)}
+          options={[
+            { value: '', label: t('topology.allRelTypes', 'Alle Beziehungen') },
+            ...relTypeOptions,
+          ]}
+        />
+        <label className="col-span-2 flex h-9 items-center gap-2 px-1 text-sm text-fg sm:col-span-1">
+          <input
+            type="checkbox"
+            checked={includeNetwork}
+            onChange={(event) => updateParam('network', event.target.checked ? '1' : '')}
           />
-          <Select
-            value={siteId}
-            onChange={(event) => updateParam('site', event.target.value)}
-            aria-label={t('topology.filterSite')}
-            className="max-w-xs"
-            options={[{ value: '', label: t('topology.allSites') }, ...siteOptions]}
-          />
-          <Select
-            value={depth}
-            onChange={(event) => updateParam('depth', event.target.value)}
-            aria-label={t('topology.filterDepth')}
-            className="max-w-xs"
-            disabled={!rootCiId}
-            options={depthValues.map((value) => ({
-              value,
-              label: `${t('topology.depth')} ${value}`,
-            }))}
-          />
-          <Select
-            value={relTypeFacet}
-            onChange={(event) => updateParam('rel_type', event.target.value)}
-            aria-label={t('topology.filterRelType', 'Beziehungstyp')}
-            className="max-w-xs"
-            options={[
-              { value: '', label: t('topology.allRelTypes', 'Alle Beziehungen') },
-              ...relTypeOptions,
-            ]}
-          />
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input
-              type="checkbox"
-              checked={includeNetwork}
-              onChange={(event) => updateParam('network', event.target.checked ? '1' : '')}
-              className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            {t('topology.filterNetwork')}
-          </label>
-        </div>
-      </Card>
+          {t('topology.filterNetwork')}
+        </label>
+        {hasGraph ? (
+          <ToolbarEnd className="col-span-2 sm:col-span-1">
+            <span className="text-sm tabular-nums text-fg-muted">
+              {t('topology.counts', { nodes: model.nodes.length, edges: visibleEdges.length })}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
 
@@ -408,6 +417,7 @@ export function TopologyPage() {
         />
       ) : rootNotFound ? (
         <EmptyState
+          icon={<Network />}
           title={t('topology.rootNotFound')}
           description={t('topology.rootNotFoundHint')}
           action={
@@ -426,166 +436,185 @@ export function TopologyPage() {
       ) : null}
 
       {data && model.nodes.length === 0 ? (
-        <EmptyState title={t('topology.empty')} description={t('topology.emptyHint')} />
+        <EmptyState
+          icon={<Network />}
+          title={t('topology.empty')}
+          description={t('topology.emptyHint')}
+        />
       ) : null}
 
-      {data && model.nodes.length > 0 ? (
-        <>
-          {simulated.length > 0 && !outageImpact ? (
-            <Card
-              className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
-              title={t('topology.simulation.active')}
-            >
-              {impactFailed ? (
-                <ErrorState
-                  title={t('topology.simulation.unavailable')}
-                  description={
-                    tooManyFailed
-                      ? t('topology.simulation.tooMany', { max: MAX_IMPACT_CIS })
-                      : t('topology.simulation.failedHint')
-                  }
-                  retryLabel={t('common.retry')}
-                  onRetry={() => void refetchImpact()}
-                />
-              ) : (
-                <p className="text-sm text-red-900 dark:text-red-100">
-                  {t('topology.simulation.loading')}
-                </p>
-              )}
-            </Card>
-          ) : null}
-          {simulated.length > 0 && outageImpact ? (
-            <Card
-              className="border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
-              title={t('topology.simulation.active')}
-            >
-              {outage?.preview ? (
-                <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-                  <Badge variant="warning">{t('topology.simulation.preview')}</Badge>
-                  <span>{t('topology.simulation.provisionalLoading')}</span>
-                </p>
-              ) : null}
-              <p className="text-sm text-red-900 dark:text-red-100">
-                {simulated.length === 1
-                  ? t('topology.simulation.impact', {
-                      name: nameOf(simulated[0]!),
-                      count: outageImpact.size,
-                    })
-                  : t('topology.simulation.impactMany', {
-                      names: simulated.map(nameOf).join(', '),
-                      failed: simulated.length,
-                      count: outageImpact.size,
-                    })}
-              </p>
-              {outageImpact.size === 0 ? (
-                // Nothing depends on the failed CIs: the plain hint, also with the server analysis
-                // (ABN-01 d, frozen onboarding scenario).
-                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-                  {t('topology.simulation.noImpact')}
-                </p>
-              ) : !outage?.preview && impact && isEnabled('topology') ? (
-                // The server analysis with the blocks of WP-297 (UI-14).
-                <div className="mt-3">
-                  <ImpactPanel
-                    impact={{ ...impact, affected: impact.impacted }}
-                    typeLabel={(type) => typeLabels.get(type) ?? type}
-                  />
-                </div>
-              ) : (
-                <ul className="mt-2 flex flex-wrap gap-1 text-xs">
-                  {[...outageImpact].map((id) => (
-                    <li key={id}>
-                      <Badge variant="danger">{nameOf(id)}</Badge>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Card>
-          ) : null}
-
-          <Card className="p-0">
-            <div className="h-[28rem] w-full overflow-hidden rounded-2xl">
+      {hasGraph ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
+          <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel">
+            <div className="h-[calc(100vh-17rem)] min-h-[24rem] w-full">
               <TopologyGraph
                 nodes={model.nodes}
                 edges={visibleEdges}
                 dimmedNodes={outageImpact}
-                highlightedNodes={simulated.length > 0 ? new Set(simulated) : undefined}
+                highlightedNodes={simulating ? new Set(simulated) : undefined}
                 spofNodes={spofIds}
               />
             </div>
             {includeNetwork || (spofIds?.size ?? 0) > 0 ? (
               <TopologyLegend network={includeNetwork} spof={(spofIds?.size ?? 0) > 0} />
             ) : null}
-          </Card>
+          </div>
 
-          <Card title={t('topology.nodeList')}>
-            <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-              {t('topology.nodeListHint')}
-            </p>
-            <ul className="space-y-2 text-sm">
-              {data.nodes.map((node) =>
-                isProjectedNode(node) ? (
-                  // A projected subnet or VLAN is no CI: no page, no
-                  // simulation, no focus (IMP-11).
-                  <li
-                    key={node.id}
-                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
-                  >
-                    <span className="font-medium text-gray-900 dark:text-gray-100">
-                      {node.name}
-                    </span>
-                    <Badge variant="neutral">
-                      {t(`topology.nodeKinds.${nodeKindOf(node)}`, nodeKindOf(node))}
-                    </Badge>
-                  </li>
+          <div className="min-w-0 space-y-4">
+            {simulating && !outageImpact ? (
+              <Panel
+                title={t('topology.simulation.active')}
+                leading={<Zap className="text-danger" />}
+                onClose={() => updateParam('simulate', '')}
+                closeLabel={t('topology.simulation.stop')}
+              >
+                {impactFailed ? (
+                  <ErrorState
+                    title={t('topology.simulation.unavailable')}
+                    description={
+                      tooManyFailed
+                        ? t('topology.simulation.tooMany', { max: MAX_IMPACT_CIS })
+                        : t('topology.simulation.failedHint')
+                    }
+                    retryLabel={t('common.retry')}
+                    onRetry={() => void refetchImpact()}
+                  />
                 ) : (
-                  <li
-                    key={node.id}
-                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/cmdb/${node.id}`)}
-                      className="font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                  <p className="text-sm text-fg-muted">{t('topology.simulation.loading')}</p>
+                )}
+              </Panel>
+            ) : null}
+            {simulating && outageImpact ? (
+              <Panel
+                title={t('topology.simulation.active')}
+                leading={<Zap className="text-danger" />}
+                onClose={() => updateParam('simulate', '')}
+                closeLabel={t('topology.simulation.stop')}
+              >
+                {outage?.preview ? (
+                  <p className="mb-2 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
+                    <Badge variant="warning">{t('topology.simulation.preview')}</Badge>
+                    <span>{t('topology.simulation.provisionalLoading')}</span>
+                  </p>
+                ) : null}
+                <p className="text-sm text-fg">
+                  {simulated.length === 1
+                    ? t('topology.simulation.impact', {
+                        name: nameOf(simulated[0]!),
+                        count: outageImpact.size,
+                      })
+                    : t('topology.simulation.impactMany', {
+                        names: simulated.map(nameOf).join(', '),
+                        failed: simulated.length,
+                        count: outageImpact.size,
+                      })}
+                </p>
+                {outageImpact.size === 0 ? (
+                  // Nothing depends on the failed CIs: the plain hint, also with the server analysis
+                  // (ABN-01 d, frozen onboarding scenario).
+                  <p className="mt-2 text-sm text-fg-muted">{t('topology.simulation.noImpact')}</p>
+                ) : !outage?.preview && impact && isEnabled('topology') ? (
+                  // The server analysis with the blocks of WP-297 (UI-14).
+                  <div className="mt-3 border-t border-line pt-3">
+                    <ImpactPanel
+                      impact={{ ...impact, affected: impact.impacted }}
+                      typeLabel={(type) => typeLabels.get(type) ?? type}
+                    />
+                  </div>
+                ) : (
+                  <ul className="mt-2 flex flex-wrap gap-1 text-xs">
+                    {[...outageImpact].map((id) => (
+                      <li key={id}>
+                        <Badge variant="danger">{nameOf(id)}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            ) : null}
+
+            <Panel
+              title={t('topology.nodeList')}
+              description={t('topology.nodeListHint')}
+              padded={false}
+            >
+              <ul className="max-h-[32rem] divide-y divide-line overflow-y-auto text-sm">
+                {data.nodes.map((node) =>
+                  isProjectedNode(node) ? (
+                    // A projected subnet or VLAN is no CI: no page, no
+                    // simulation, no focus (IMP-11).
+                    <li
+                      key={node.id}
+                      className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5"
                     >
-                      {node.name}
-                    </button>
-                    <span className="flex flex-wrap items-center gap-2">
-                      {spofIds?.has(node.id) ? (
-                        <Badge variant="warning">{t('impact.spofBadge')}</Badge>
-                      ) : null}
-                      <Badge variant="info">
-                        {typeLabels.get(node.ci_type ?? '') ?? node.ci_type}
+                      <span className="font-medium text-fg">{node.name}</span>
+                      <Badge variant="neutral">
+                        {t(`topology.nodeKinds.${nodeKindOf(node)}`, nodeKindOf(node))}
                       </Badge>
-                      <Badge variant={getStatusBadgeVariant(node.status ?? '')}>
-                        {t(getStatusTranslationKey(node.status ?? ''))}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        aria-pressed={simulated.includes(node.id)}
-                        onClick={() => toggleSimulated(node.id)}
-                      >
-                        {simulated.includes(node.id)
-                          ? t('topology.simulation.remove')
-                          : simulated.length > 0
-                            ? t('topology.simulation.add')
-                            : t('topology.simulation.simulate')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => updateParam('root', node.id)}
-                      >
-                        {t('topology.focus')}
-                      </Button>
-                    </span>
-                  </li>
-                ),
-              )}
-            </ul>
-          </Card>
-        </>
+                    </li>
+                  ) : (
+                    <li key={node.id} className="space-y-1.5 px-4 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/cmdb/${node.id}`)}
+                          className="min-w-0 rounded text-left font-medium text-accent underline-offset-2 [overflow-wrap:anywhere] hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        >
+                          {node.name}
+                        </button>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <IconButton
+                            size="sm"
+                            aria-pressed={simulated.includes(node.id)}
+                            label={
+                              simulated.includes(node.id)
+                                ? t('topology.simulation.remove')
+                                : simulating
+                                  ? t('topology.simulation.add')
+                                  : t('topology.simulation.simulate')
+                            }
+                            icon={
+                              simulated.includes(node.id) ? (
+                                <ZapOff />
+                              ) : simulating ? (
+                                <Plus />
+                              ) : (
+                                <Zap />
+                              )
+                            }
+                            className={
+                              simulated.includes(node.id)
+                                ? 'bg-red-50 text-danger hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20'
+                                : undefined
+                            }
+                            onClick={() => toggleSimulated(node.id)}
+                          />
+                          <IconButton
+                            size="sm"
+                            label={t('topology.focus')}
+                            icon={<Crosshair />}
+                            onClick={() => updateParam('root', node.id)}
+                          />
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Badge variant="info">
+                          {typeLabels.get(node.ci_type ?? '') ?? node.ci_type}
+                        </Badge>
+                        <Badge variant={getStatusBadgeVariant(node.status ?? '')}>
+                          {t(getStatusTranslationKey(node.status ?? ''))}
+                        </Badge>
+                        {spofIds?.has(node.id) ? (
+                          <Badge variant="warning">{t('impact.spofBadge')}</Badge>
+                        ) : null}
+                      </div>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </Panel>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -606,11 +635,9 @@ function TopologyLegend({ network, spof }: { network: boolean; spof: boolean }) 
     />
   );
   return (
-    <div className="border-t border-gray-100 px-4 py-3 dark:border-gray-800">
-      <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-        {t('topology.legend.title')}
-      </p>
-      <ul aria-label={t('topology.legend.title')} className="mt-1 flex flex-wrap gap-4 text-xs">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2.5 text-xs text-fg-muted">
+      <p className="font-medium text-fg">{t('topology.legend.title')}</p>
+      <ul aria-label={t('topology.legend.title')} className="flex flex-wrap gap-x-4 gap-y-1">
         <li className="flex items-center gap-2">
           {swatch(statusColors.active!, 12)}
           {t('topology.legend.ci')}
@@ -660,17 +687,19 @@ function TopologyStartDialog({
           if (type || site) onStart(type, site);
         }}
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('topology.tooLarge')}</p>
+        <p className="text-sm text-fg-muted">{t('topology.tooLarge')}</p>
         <div className="flex flex-wrap gap-3">
           <Select
             label={t('topology.start.site')}
             value={site}
+            className="w-56 pr-8"
             onChange={(event) => setSite(event.target.value)}
             options={[{ value: '', label: t('topology.allSites') }, ...siteOptions]}
           />
           <Select
             label={t('topology.start.type')}
             value={type}
+            className="w-56 pr-8"
             onChange={(event) => setType(event.target.value)}
             options={[{ value: '', label: t('topology.allTypes') }, ...typeOptions]}
           />

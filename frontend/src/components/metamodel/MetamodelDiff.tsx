@@ -8,6 +8,16 @@
 import { useTranslation } from 'react-i18next';
 import { Badge } from '../ui/Badge';
 import { ScrollRegion } from '../ScrollRegion';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../ui/table';
+import { cn } from '../ui/utils';
 
 /** One entry of a list: its key, a display name and its values per field. */
 export interface DiffEntry {
@@ -110,58 +120,62 @@ export function MetamodelDiff({
   const { t } = useTranslation();
   const rows = diffEntries(before, after);
   if (rows.length === 0) {
-    return <p className="text-sm text-muted">{t('templates.diff.none')}</p>;
+    return <p className="text-sm text-fg-muted">{t('templates.diff.none')}</p>;
   }
   const empty = t('templates.diff.empty');
   return (
-    <ScrollRegion label={caption}>
-      <table className="w-full text-left text-sm">
+    <ScrollRegion label={caption} className="rounded-lg border border-line">
+      <table className={tableClasses}>
         <caption className="sr-only">{caption}</caption>
-        <thead className="text-xs uppercase text-muted">
-          <tr>
-            <th scope="col" className="py-2 pr-3">
+        <thead className={theadClasses}>
+          <tr className="text-fg-muted">
+            <th scope="col" className={thClasses}>
               {t('templates.diff.entry')}
             </th>
-            <th scope="col" className="py-2 pr-3">
+            <th scope="col" className={thClasses}>
               {t('templates.diff.change')}
             </th>
-            <th scope="col" className="py-2 pr-3">
+            <th scope="col" className={thClasses}>
               {t('templates.diff.field')}
             </th>
-            <th scope="col" className="py-2 pr-3">
+            <th scope="col" className={thClasses}>
               {t('templates.diff.before')}
             </th>
-            <th scope="col" className="py-2">
+            <th scope="col" className={thClasses}>
               {t('templates.diff.after')}
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+        <tbody>
           {rows.map((row) => {
             const fields = row.fields.length > 0 ? row.fields : [null];
             return fields.map((f, i) => (
-              <tr key={`${row.key}-${f?.field ?? ''}`} data-change={row.change}>
+              <tr
+                key={`${row.key}-${f?.field ?? ''}`}
+                data-change={row.change}
+                className={trClasses}
+              >
                 {i === 0 ? (
                   <>
                     <th
                       scope="row"
                       rowSpan={fields.length}
-                      className="py-2 pr-3 align-top font-medium"
+                      className={cn(tdPrimaryClasses, 'text-left align-top')}
                     >
                       {row.label}
                     </th>
-                    <td rowSpan={fields.length} className="py-2 pr-3 align-top">
+                    <td rowSpan={fields.length} className={cn(tdClasses, 'align-top')}>
                       <Badge variant={CHANGE_VARIANT[row.change]}>
                         {t(`templates.diff.changes.${row.change}`)}
                       </Badge>
                     </td>
                   </>
                 ) : null}
-                <td className="py-2 pr-3">{f ? fieldLabel(f.field) : ''}</td>
-                <td className="py-2 pr-3 font-mono text-xs">
+                <td className={tdClasses}>{f ? fieldLabel(f.field) : ''}</td>
+                <td className={cn(tdMonoClasses, 'break-all')}>
                   {f && row.change !== 'added' ? formatValue(f.field, f.before) || empty : ''}
                 </td>
-                <td className="py-2 font-mono text-xs">
+                <td className={cn(tdMonoClasses, 'break-all')}>
                   {f && row.change !== 'removed' ? formatValue(f.field, f.after) || empty : ''}
                 </td>
               </tr>

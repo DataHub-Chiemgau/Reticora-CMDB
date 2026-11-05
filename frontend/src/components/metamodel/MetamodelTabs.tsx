@@ -10,13 +10,13 @@
 import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useModules } from '../../hooks/useEntitlements';
+import { cn } from '../ui/utils';
 
 const tabClass = ({ isActive }: { isActive: boolean }) =>
-  `-mb-px border-b-2 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
-    isActive
-      ? 'border-primary text-primary'
-      : 'border-transparent text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100'
-  }`;
+  cn(
+    '-mb-px shrink-0 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+    isActive ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+  );
 
 export function MetamodelTabs() {
   const { t } = useTranslation();
@@ -25,7 +25,7 @@ export function MetamodelTabs() {
   return (
     <nav
       aria-label={t('templates.tabs.label')}
-      className="flex gap-1 border-b border-gray-200 dark:border-gray-700"
+      className="flex gap-1 overflow-x-auto border-b border-line"
     >
       <NavLink to="/ci-types" end className={tabClass}>
         {t('templates.tabs.types')}

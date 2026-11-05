@@ -3,6 +3,20 @@ import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import type { TFunction } from 'i18next';
 import {
+  Building2,
+  ChevronDown,
+  ChevronRight,
+  DoorOpen,
+  LayoutGrid,
+  MapPin,
+  Package,
+  Plus,
+  Rows3,
+  Server,
+  Warehouse,
+  type LucideIcon,
+} from 'lucide-react';
+import {
   useClients,
   useCreateLocation,
   useDeleteLocation,
@@ -17,8 +31,10 @@ import {
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
@@ -26,15 +42,15 @@ import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 import { cn } from '../components/ui/utils';
 
-const KIND_ICONS: Record<LocationKind, string> = {
-  site: '🏢',
-  building: '🏗️',
-  room: '🚪',
-  rack: '🗼',
-  warehouse: '🏭',
-  zone: '▦',
-  shelf: '🗄️',
-  bin: '🧺',
+const KIND_ICONS: Record<LocationKind, LucideIcon> = {
+  site: MapPin,
+  building: Building2,
+  room: DoorOpen,
+  rack: Server,
+  warehouse: Warehouse,
+  zone: LayoutGrid,
+  shelf: Rows3,
+  bin: Package,
 };
 
 /**
@@ -172,22 +188,18 @@ export function LocationTreePage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('locations.title', 'Standorte & Lager')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t(
-              'locations.subtitle',
-              'Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Standort → Lager → Zone → Regal → Fach.',
-            )}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => openCreate(undefined)}>
-          {t('locations.createRoot', 'Standort anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('locations.title', 'Standorte & Lager')}
+        description={t(
+          'locations.subtitle',
+          'Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Standort → Lager → Zone → Regal → Fach.',
+        )}
+        actions={
+          <Button icon={<Plus />} onClick={() => openCreate(undefined)}>
+            {t('locations.createRoot', 'Standort anlegen')}
+          </Button>
+        }
+      />
 
       {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
@@ -198,12 +210,12 @@ export function LocationTreePage() {
         />
       ) : null}
       {deleteError ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {t('locations.deleteFailed', 'Löschen nicht möglich')}: {deleteError}
-        </p>
+        <ErrorState
+          title={`${t('locations.deleteFailed', 'Löschen nicht möglich')}: ${deleteError}`}
+        />
       ) : null}
       {targetId && data && !targetPath ? (
-        <p role="status" className="text-sm text-muted">
+        <p role="status" className="text-sm text-fg-muted">
           {t(
             'locations.nodeNotFound',
             'Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.',
@@ -211,13 +223,18 @@ export function LocationTreePage() {
         </p>
       ) : null}
 
-      <Card>
+      <Card className="p-2">
         {roots.length === 0 && !isLoading ? (
-          <p className="text-sm text-muted">
-            {t('locations.empty', 'Noch keine Standorte. Legen Sie zuerst einen Standort an.')}
-          </p>
+          <EmptyState
+            icon={<MapPin />}
+            className="border-0"
+            title={t(
+              'locations.empty',
+              'Noch keine Standorte. Legen Sie zuerst einen Standort an.',
+            )}
+          />
         ) : (
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {roots.map((node) => (
               <LocationTreeItem
                 key={node.id}
@@ -249,7 +266,7 @@ export function LocationTreePage() {
         }
       >
         <form
-          className="space-y-3"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             create.mutate(
@@ -272,7 +289,7 @@ export function LocationTreePage() {
               label={t('locations.type', 'Typ')}
               options={childKinds.map((kind) => ({
                 value: kind,
-                label: `${KIND_ICONS[kind]} ${kindLabel(kind)}`,
+                label: kindLabel(kind),
               }))}
               value={draft.kind}
               error={violations.kind ?? violations.parent_id}
@@ -289,7 +306,7 @@ export function LocationTreePage() {
             />
           )}
           {generalError ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm text-danger">
               {generalError}
             </p>
           ) : null}
@@ -315,7 +332,7 @@ export function LocationTreePage() {
         })}
       >
         <form
-          className="space-y-3"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             if (!editing) return;
@@ -353,7 +370,7 @@ export function LocationTreePage() {
             />
           ) : null}
           {editGeneralError ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm text-danger">
               {editGeneralError}
             </p>
           ) : null}
@@ -440,6 +457,7 @@ function LocationTreeItem({
   }, [selected]);
   const children = node.children;
   const canHaveChildren = LOCATION_CHILD_KINDS[node.kind].length > 0;
+  const KindIcon = KIND_ICONS[node.kind];
   return (
     <li>
       <div
@@ -447,44 +465,56 @@ function LocationTreeItem({
         tabIndex={selected ? -1 : undefined}
         aria-current={selected ? 'true' : undefined}
         className={cn(
-          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-800',
+          'flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1 transition-colors hover:bg-fg/[0.04]',
           selected &&
-            'bg-primary/10 outline-none ring-2 ring-inset ring-primary hover:bg-primary/10 dark:bg-primary/20 dark:hover:bg-primary/20',
+            'bg-accent-soft outline-none ring-2 ring-inset ring-accent hover:bg-accent-soft',
         )}
         style={{ paddingLeft: `${depth * 1.25 + 0.5}rem` }}
       >
         {children.length > 0 ? (
-          <button
-            onClick={() => setOpen(!open)}
-            aria-label={open ? 'collapse' : 'expand'}
+          <IconButton
+            size="sm"
+            variant="ghost"
+            label={open ? 'collapse' : 'expand'}
             aria-expanded={open}
-            className="w-4 text-muted"
-          >
-            {open ? '▾' : '▸'}
-          </button>
+            icon={open ? <ChevronDown /> : <ChevronRight />}
+            onClick={() => setOpen(!open)}
+            className="-ml-1 h-7 w-7"
+          />
         ) : (
-          <span className="w-4" />
+          <span className="w-6" />
         )}
-        <span aria-hidden>{KIND_ICONS[node.kind]}</span>
-        <span className="min-w-0 font-medium text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
-          {node.name}
-        </span>
+        <KindIcon aria-hidden="true" className="h-4 w-4 shrink-0 text-fg-subtle" />
+        <span className="min-w-0 font-medium text-fg [overflow-wrap:anywhere]">{node.name}</span>
         <Badge variant="neutral">{kindLabel(node.kind)}</Badge>
-        <span className="ml-auto flex flex-wrap gap-2">
+        <span className="ml-auto flex flex-wrap items-center gap-x-0.5">
           {canHaveChildren ? (
-            <button
-              className="text-xs text-primary hover:underline"
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Plus />}
+              className="px-2 text-accent hover:text-accent"
               onClick={() => onAddChild(node)}
             >
-              + {t('locations.addChild', 'Unterpunkt')}
-            </button>
+              {t('locations.addChild', 'Unterpunkt')}
+            </Button>
           ) : null}
-          <button className="text-xs text-primary hover:underline" onClick={() => onEdit(node)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-2 text-accent hover:text-accent"
+            onClick={() => onEdit(node)}
+          >
             {t('common.edit', 'Bearbeiten')}
-          </button>
-          <button className="text-xs text-danger hover:underline" onClick={() => onDelete(node)}>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="px-2 text-danger hover:text-danger"
+            onClick={() => onDelete(node)}
+          >
             {t('common.delete', 'Löschen')}
-          </button>
+          </Button>
         </span>
       </div>
       {open && children.length > 0 ? (

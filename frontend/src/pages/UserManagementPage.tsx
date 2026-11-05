@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { MailPlus, Search, Send, UserPlus, Users } from 'lucide-react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError } from '../api/client';
@@ -21,13 +22,130 @@ import { useClients } from '../api/cmdbHooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { AdminSection } from '../components/admin/AdminSection';
 import { ScrollRegion } from '../components/ScrollRegion';
 
 type Tab = 'users' | 'teams' | 'roles' | 'invitations';
+
+const dangerTextClasses = 'text-danger hover:text-danger';
+
+/**
+ * tabId and panelId tie each tab to its panel (WAI-ARIA tabs pattern).
+ */
+const tabId = (tab: Tab) => `user-mgmt-tab-${tab}`;
+const panelId = (tab: Tab) => `user-mgmt-panel-${tab}`;
+
+/**
+ * Tabs is the one tab pattern of the page after the WAI-ARIA tabs pattern:
+ * role tablist/tab, aria-selected, one tab stop (roving tabindex), arrow keys
+ * and Home/End move and select.
+ */
+function Tabs({
+  tabs,
+  current,
+  onChange,
+  label,
+}: {
+  tabs: { id: Tab; label: string }[];
+  current: Tab;
+  onChange: (tab: Tab) => void;
+  label: string;
+}) {
+  const refs = useRef(new Map<Tab, HTMLButtonElement>());
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next: number;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = (index + 1) % tabs.length;
+        break;
+      case 'ArrowLeft':
+        next = (index - 1 + tabs.length) % tabs.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    const target = tabs[next]!;
+    onChange(target.id);
+    refs.current.get(target.id)?.focus();
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={label}
+      className="flex gap-1 overflow-x-auto border-b border-line"
+    >
+      {tabs.map((tab, index) => {
+        const selected = tab.id === current;
+        return (
+          <button
+            key={tab.id}
+            ref={(element) => {
+              if (element) refs.current.set(tab.id, element);
+              else refs.current.delete(tab.id);
+            }}
+            id={tabId(tab.id)}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            aria-controls={panelId(tab.id)}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(tab.id)}
+            onKeyDown={(event) => onKeyDown(event, index)}
+            className={cn(
+              '-mb-px shrink-0 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+              selected ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+            )}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** SearchField filters the list of its section: a search box in a toolbar. */
+function SearchField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <Toolbar>
+      <Input
+        type="text"
+        icon={<Search />}
+        placeholder={t('common.search', 'Suche')}
+        aria-label={t('common.search', 'Suche')}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-72 max-w-full"
+      />
+    </Toolbar>
+  );
+}
 
 export function UserManagementPage() {
   const { t } = useTranslation();
@@ -39,47 +157,51 @@ export function UserManagementPage() {
   // The own account is never offered for deactivation or deletion (TLC-04):
   // /me/permissions names the caller's user id.
   const ownUserId = useEffectivePermissions().data?.user_id;
-  const tabClass = (current: Tab) =>
-    `px-4 py-2 text-sm font-medium border-b-2 ${tab === current ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`;
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'users', label: t('userMgmt.users', 'Benutzer') },
+    { id: 'teams', label: t('userMgmt.teams', 'Teams') },
+    { id: 'roles', label: t('userMgmt.roles', 'Rollen') },
+    ...(canManage ? [{ id: 'invitations' as const, label: t('invitations.title') }] : []),
+  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('userMgmt.title', 'Benutzer & Teams')}
-        </h1>
-        {canManage && tab !== 'invitations' ? (
-          <Button onClick={() => setTab('invitations')}>{t('invitations.invite')}</Button>
-        ) : null}
-      </div>
-
-      <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
-        <button className={tabClass('users')} onClick={() => setTab('users')}>
-          {t('userMgmt.users', 'Benutzer')}
-        </button>
-        <button className={tabClass('teams')} onClick={() => setTab('teams')}>
-          {t('userMgmt.teams', 'Teams')}
-        </button>
-        <button className={tabClass('roles')} onClick={() => setTab('roles')}>
-          {t('userMgmt.roles', 'Rollen')}
-        </button>
-        {canManage ? (
-          <button className={tabClass('invitations')} onClick={() => setTab('invitations')}>
-            {t('invitations.title')}
-          </button>
-        ) : null}
-      </div>
-
-      <Input
-        label={t('common.search', 'Suche')}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
+      <PageHeader
+        title={t('userMgmt.title', 'Benutzer & Teams')}
+        description={t('userMgmt.subtitle')}
+        actions={
+          canManage && tab !== 'invitations' ? (
+            <Button icon={<UserPlus />} onClick={() => setTab('invitations')}>
+              {t('invitations.invite')}
+            </Button>
+          ) : null
+        }
       />
 
-      {tab === 'users' && <UsersTab search={search} canManage={canManage} ownUserId={ownUserId} />}
-      {tab === 'teams' && <TeamsTab search={search} />}
-      {tab === 'roles' && <RolesTab />}
-      {tab === 'invitations' && canManage && <InvitationsTab search={search} />}
+      <div className="space-y-4">
+        <Tabs
+          tabs={tabs}
+          current={tab}
+          onChange={setTab}
+          label={t('userMgmt.title', 'Benutzer & Teams')}
+        />
+
+        <div role="tabpanel" id={panelId(tab)} aria-labelledby={tabId(tab)}>
+          {tab === 'users' && (
+            <UsersTab
+              search={search}
+              onSearch={setSearch}
+              canManage={canManage}
+              ownUserId={ownUserId}
+            />
+          )}
+          {tab === 'teams' && <TeamsTab search={search} onSearch={setSearch} />}
+          {tab === 'roles' && <RolesTab />}
+          {tab === 'invitations' && canManage && (
+            <InvitationsTab search={search} onSearch={setSearch} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -120,24 +242,23 @@ function describeUserRefusal(error: unknown, name: string, t: TFunction): string
  */
 function UsersTab({
   search,
+  onSearch,
   canManage,
   ownUserId,
 }: {
   search: string;
+  onSearch: (value: string) => void;
   canManage: boolean;
   ownUserId?: string;
 }) {
-  const { t } = useTranslation();
-  const { data, isLoading } = useUserList({ search });
+  const { t, i18n } = useTranslation();
+  const { data, isLoading, error, refetch } = useUserList({ search });
   const setStatus = useSetUserStatus();
   const deleteUser = useDeleteUser();
   const [pending, setPending] = useState<{ user: AppUser; action: UserAction } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const withActions = canManage && !!ownUserId;
   const busy = setStatus.isPending || deleteUser.isPending;
-
-  if (isLoading)
-    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
 
   const confirm = () => {
     if (!pending) return;
@@ -181,88 +302,115 @@ function UsersTab({
     }
   };
   const dialog = pending ? confirmText(pending.action, pending.user) : null;
-  const columns = withActions ? 5 : 4;
+  const total = data?.total ?? 0;
 
   return (
-    <Card title={`${t('userMgmt.users', 'Benutzer')} (${data?.total ?? 0})`}>
+    <AdminSection
+      title={`${t('userMgmt.users', 'Benutzer')} (${total})`}
+      description={t('userMgmt.usersHint')}
+    >
+      <SearchField value={search} onChange={onSearch} />
       {actionError ? (
-        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {actionError}
         </p>
       ) : null}
-      <ScrollRegion label={t('userMgmt.users', 'Benutzer')}>
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead>
-            <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-              <th className="pb-2">{t('userMgmt.displayName', 'Name')}</th>
-              <th className="pb-2">{t('userMgmt.email', 'E-Mail')}</th>
-              <th className="pb-2">{t('ci.status', 'Status')}</th>
-              <th className="pb-2">{t('userMgmt.lastLogin', 'Letzter Login')}</th>
-              {withActions ? <th className="pb-2">{t('common.actions')}</th> : null}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {data?.data.map((user) => (
-              <tr key={user.id} className="text-sm text-gray-700 dark:text-gray-300">
-                <td className="py-2 font-medium">{user.display_name}</td>
-                <td className="py-2">{user.email}</td>
-                <td className="py-2">
-                  <Badge variant={user.status === 'active' ? 'success' : 'danger'}>
-                    {t(`userMgmt.statuses.${user.status}`, user.status)}
-                  </Badge>
-                </td>
-                <td className="py-2">
-                  {user.last_login_at
-                    ? new Date(user.last_login_at).toLocaleDateString('de-DE')
-                    : '—'}
-                </td>
-                {withActions ? (
-                  <td className="py-2">
-                    {user.id === ownUserId ? (
-                      <span className="text-gray-500 dark:text-gray-400">
-                        {t('userMgmt.ownAccount')}
-                      </span>
-                    ) : (
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() =>
-                            setPending({
-                              user,
-                              action: user.status === 'active' ? 'deactivate' : 'reactivate',
-                            })
-                          }
-                        >
-                          {user.status === 'active'
-                            ? t('userMgmt.deactivate')
-                            : t('userMgmt.reactivate')}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => setPending({ user, action: 'delete' })}
-                        >
-                          {t('userMgmt.delete')}
-                        </Button>
-                      </div>
-                    )}
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-            {(!data?.data || data.data.length === 0) && (
-              <tr>
-                <td colSpan={columns} className="py-4 text-center text-gray-600 dark:text-gray-400">
-                  {t('common.noData', 'Keine Daten')}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </ScrollRegion>
+      {isLoading ? <SkeletonList rows={4} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('userMgmt.loadError')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+      {!isLoading && !error && (!data?.data || data.data.length === 0) ? (
+        <EmptyState
+          icon={<Users />}
+          title={t(search ? 'common.noResults' : 'common.noData', 'Keine Daten')}
+        />
+      ) : null}
+      {data?.data.length ? (
+        <Card className="overflow-hidden p-0">
+          <ScrollRegion label={t('userMgmt.users', 'Benutzer')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr className="text-fg-muted">
+                  <th scope="col" className={thClasses}>
+                    {t('userMgmt.displayName', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('userMgmt.email', 'E-Mail')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('userMgmt.lastLogin', 'Letzter Login')}
+                  </th>
+                  {withActions ? (
+                    <th scope="col" className={cn(thClasses, 'text-right')}>
+                      {t('common.actions')}
+                    </th>
+                  ) : null}
+                </tr>
+              </thead>
+              <tbody>
+                {data.data.map((user) => (
+                  <tr key={user.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{user.display_name}</td>
+                    <td className={tdClasses}>{user.email}</td>
+                    <td className={tdClasses}>
+                      <Badge variant={user.status === 'active' ? 'success' : 'danger'}>
+                        {t(`userMgmt.statuses.${user.status}`, user.status)}
+                      </Badge>
+                    </td>
+                    <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
+                      {user.last_login_at
+                        ? new Date(user.last_login_at).toLocaleDateString(i18n.language)
+                        : '—'}
+                    </td>
+                    {withActions ? (
+                      <td className={cn(tdClasses, 'text-right')}>
+                        {user.id === ownUserId ? (
+                          <span className="text-fg-subtle">{t('userMgmt.ownAccount')}</span>
+                        ) : (
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() =>
+                                setPending({
+                                  user,
+                                  action: user.status === 'active' ? 'deactivate' : 'reactivate',
+                                })
+                              }
+                            >
+                              {user.status === 'active'
+                                ? t('userMgmt.deactivate')
+                                : t('userMgmt.reactivate')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className={dangerTextClasses}
+                              disabled={busy}
+                              onClick={() => setPending({ user, action: 'delete' })}
+                            >
+                              {t('userMgmt.delete')}
+                            </Button>
+                          </div>
+                        )}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
       {withActions ? (
         <Modal
           open={pending !== null}
@@ -271,6 +419,7 @@ function UsersTab({
           }}
           title={dialog?.title ?? ''}
           description={dialog?.text}
+          size="sm"
         >
           <div className="flex justify-end gap-2">
             <Button variant="secondary" disabled={busy} onClick={() => setPending(null)}>
@@ -286,95 +435,129 @@ function UsersTab({
           </div>
         </Modal>
       ) : null}
-    </Card>
+    </AdminSection>
   );
 }
 
-function TeamsTab({ search }: { search: string }) {
+function TeamsTab({ search, onSearch }: { search: string; onSearch: (value: string) => void }) {
   const { t } = useTranslation();
-  const { data, isLoading } = useTeamList({ search });
-
-  if (isLoading)
-    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
+  const { data, isLoading, error, refetch } = useTeamList({ search });
 
   return (
-    <Card title={`${t('userMgmt.teams', 'Teams')} (${data?.total ?? 0})`}>
-      <ScrollRegion label={t('userMgmt.teams', 'Teams')}>
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead>
-            <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-              <th className="pb-2">{t('ci.name', 'Name')}</th>
-              <th className="pb-2">{t('common.description', 'Beschreibung')}</th>
-              <th className="pb-2">{t('userMgmt.memberCount', 'Mitglieder')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {data?.data.map((team) => (
-              <tr key={team.id} className="text-sm text-gray-700 dark:text-gray-300">
-                <td className="py-2 font-medium">{team.name}</td>
-                <td className="py-2">{team.description || '—'}</td>
-                <td className="py-2">
-                  <Badge variant="info">{team.member_count}</Badge>
-                </td>
-              </tr>
-            ))}
-            {(!data?.data || data.data.length === 0) && (
-              <tr>
-                <td colSpan={3} className="py-4 text-center text-gray-600 dark:text-gray-400">
-                  {t('common.noData', 'Keine Daten')}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </ScrollRegion>
-    </Card>
+    <AdminSection
+      title={`${t('userMgmt.teams', 'Teams')} (${data?.total ?? 0})`}
+      description={t('userMgmt.teamsHint')}
+    >
+      <SearchField value={search} onChange={onSearch} />
+      {isLoading ? <SkeletonList rows={4} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('userMgmt.loadError')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+      {!isLoading && !error && (!data?.data || data.data.length === 0) ? (
+        <EmptyState
+          icon={<Users />}
+          title={t(search ? 'common.noResults' : 'common.noData', 'Keine Daten')}
+        />
+      ) : null}
+      {data?.data.length ? (
+        <Card className="overflow-hidden p-0">
+          <ScrollRegion label={t('userMgmt.teams', 'Teams')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr className="text-fg-muted">
+                  <th scope="col" className={thClasses}>
+                    {t('ci.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('common.description', 'Beschreibung')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('userMgmt.memberCount', 'Mitglieder')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.data.map((team) => (
+                  <tr key={team.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{team.name}</td>
+                    <td className={tdClasses}>{team.description || '—'}</td>
+                    <td className={tdNumericClasses}>{team.member_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
+    </AdminSection>
   );
 }
 
 function RolesTab() {
   const { t } = useTranslation();
-  const { data, isLoading } = useRoleList();
-
-  if (isLoading)
-    return <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>;
+  const { data, isLoading, error, refetch } = useRoleList();
 
   return (
-    <Card title={`${t('userMgmt.roles', 'Rollen')} (${data?.total ?? 0})`}>
-      <ScrollRegion label={t('userMgmt.roles', 'Rollen')}>
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead>
-            <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-              <th className="pb-2">{t('ci.name', 'Name')}</th>
-              <th className="pb-2">{t('common.description', 'Beschreibung')}</th>
-              <th className="pb-2">{t('userMgmt.permissions', 'Berechtigungen')}</th>
-              <th className="pb-2">{t('userMgmt.type', 'Typ')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-            {data?.data.map((role) => (
-              <tr key={role.id} className="text-sm text-gray-700 dark:text-gray-300">
-                <td className="py-2 font-medium">{role.name}</td>
-                <td className="py-2">{role.description || '—'}</td>
-                <td className="py-2">{role.permissions.length}</td>
-                <td className="py-2">
-                  <Badge variant={role.is_system ? 'neutral' : 'info'}>
-                    {role.is_system ? 'System' : 'Custom'}
-                  </Badge>
-                </td>
-              </tr>
-            ))}
-            {(!data?.data || data.data.length === 0) && (
-              <tr>
-                <td colSpan={4} className="py-4 text-center text-gray-600 dark:text-gray-400">
-                  {t('common.noData', 'Keine Daten')}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </ScrollRegion>
-    </Card>
+    <AdminSection
+      title={`${t('userMgmt.roles', 'Rollen')} (${data?.total ?? 0})`}
+      description={t('userMgmt.rolesHint')}
+    >
+      {isLoading ? <SkeletonList rows={4} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('userMgmt.loadError')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+      {!isLoading && !error && (!data?.data || data.data.length === 0) ? (
+        <EmptyState icon={<Users />} title={t('common.noData', 'Keine Daten')} />
+      ) : null}
+      {data?.data.length ? (
+        <Card className="overflow-hidden p-0">
+          <ScrollRegion label={t('userMgmt.roles', 'Rollen')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr className="text-fg-muted">
+                  <th scope="col" className={thClasses}>
+                    {t('ci.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('common.description', 'Beschreibung')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('userMgmt.permissions', 'Berechtigungen')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('userMgmt.type', 'Typ')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.data.map((role) => (
+                  <tr key={role.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{role.name}</td>
+                    <td className={tdClasses}>{role.description || '—'}</td>
+                    <td className={tdNumericClasses}>{role.permissions.length}</td>
+                    <td className={tdClasses}>
+                      <Badge variant={role.is_system ? 'neutral' : 'info'}>
+                        {role.is_system ? 'System' : 'Custom'}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
+    </AdminSection>
   );
 }
 
@@ -466,7 +649,13 @@ function invitationLink(token: string): string {
  * is rendered for user:manage holders only; the server still decides every
  * request (grant ceiling, RBA-03).
  */
-function InvitationsTab({ search }: { search: string }) {
+function InvitationsTab({
+  search,
+  onSearch,
+}: {
+  search: string;
+  onSearch: (value: string) => void;
+}) {
   const { t, i18n } = useTranslation();
   const invitations = useInvitations();
   const roles = useRoleList({ limit: 200 });
@@ -545,86 +734,99 @@ function InvitationsTab({ search }: { search: string }) {
   );
 
   return (
-    <div className="space-y-6">
-      <Card title={t('invitations.invite')}>
-        <div className="space-y-4">
-          {issueError ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-              {issueError.message}
-            </p>
-          ) : null}
-          {sent ? (
-            <div role="status" className="space-y-2 text-sm text-green-700 dark:text-green-400">
-              <p>
-                {t('invitations.sent', { email: sent.email, expires: formatDate(sent.expires_at) })}
+    <div className="space-y-8">
+      <AdminSection title={t('invitations.invite')} description={t('invitations.inviteHint')}>
+        <Card>
+          <div className="space-y-4">
+            {issueError ? (
+              <p role="alert" className="text-sm text-danger">
+                {issueError.message}
               </p>
-              {/* Where the acceptance creates the IdP account, the server
+            ) : null}
+            {sent ? (
+              <div
+                role="status"
+                className="space-y-3 rounded-lg border border-green-600/20 bg-green-50 p-3 text-sm text-green-800 dark:border-green-400/25 dark:bg-green-500/10 dark:text-green-300"
+              >
+                <p>
+                  {t('invitations.sent', {
+                    email: sent.email,
+                    expires: formatDate(sent.expires_at),
+                  })}
+                </p>
+                {/* Where the acceptance creates the IdP account, the server
                   returns no token: it has mailed the link straight to the
                   invited address (a refused mail is a 503, nothing stored). */}
-              {sent.token ? (
-                <Input
-                  label={t('invitations.link')}
-                  readOnly
-                  value={invitationLink(sent.token)}
-                  onFocus={(event) => event.target.select()}
-                />
-              ) : (
-                <p>{t('invitations.mailOnly')}</p>
-              )}
-            </div>
-          ) : null}
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input
-              label={t('invitations.email')}
-              type="email"
-              value={form.email}
-              maxLength={254}
-              error={issueError?.fields.email}
-              onChange={(event) => setForm({ ...form, email: event.target.value })}
-            />
-            <Select
-              label={t('invitations.role')}
-              value={form.role_id}
-              error={issueError?.fields.role_id}
-              options={[
-                { value: '', label: t('invitations.chooseRole') },
-                ...invitableRoles.map((role) => ({ value: role.id, label: role.name })),
-              ]}
-              onChange={(event) => setForm({ ...form, role_id: event.target.value })}
-            />
-            <Select
-              label={t('invitations.scopeType')}
-              value={form.scope_type}
-              error={issueError?.fields.scope_type}
-              options={SCOPE_TYPES.map((type) => ({
-                value: type,
-                label: t(`invitations.scopeTypes.${type}`),
-              }))}
-              onChange={(event) =>
-                setForm({ ...form, scope_type: event.target.value as ScopeType, scope_id: '' })
-              }
-            />
-            {form.scope_type !== 'org' ? (
-              <Select
-                label={t('invitations.scopeTarget')}
-                value={form.scope_id}
-                error={issueError?.fields.scope_id}
-                options={[
-                  { value: '', label: t('invitations.chooseTarget') },
-                  ...(form.scope_type === 'client' ? clientOptions : siteOptions),
-                ]}
-                onChange={(event) => setForm({ ...form, scope_id: event.target.value })}
-              />
+                {sent.token ? (
+                  <Input
+                    label={t('invitations.link')}
+                    readOnly
+                    value={invitationLink(sent.token)}
+                    className="font-mono text-xs"
+                    onFocus={(event) => event.target.select()}
+                  />
+                ) : (
+                  <p>{t('invitations.mailOnly')}</p>
+                )}
+              </div>
             ) : null}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Input
+                label={t('invitations.email')}
+                type="email"
+                value={form.email}
+                maxLength={254}
+                error={issueError?.fields.email}
+                onChange={(event) => setForm({ ...form, email: event.target.value })}
+              />
+              <Select
+                label={t('invitations.role')}
+                value={form.role_id}
+                error={issueError?.fields.role_id}
+                options={[
+                  { value: '', label: t('invitations.chooseRole') },
+                  ...invitableRoles.map((role) => ({ value: role.id, label: role.name })),
+                ]}
+                onChange={(event) => setForm({ ...form, role_id: event.target.value })}
+              />
+              <Select
+                label={t('invitations.scopeType')}
+                value={form.scope_type}
+                error={issueError?.fields.scope_type}
+                options={SCOPE_TYPES.map((type) => ({
+                  value: type,
+                  label: t(`invitations.scopeTypes.${type}`),
+                }))}
+                onChange={(event) =>
+                  setForm({ ...form, scope_type: event.target.value as ScopeType, scope_id: '' })
+                }
+              />
+              {form.scope_type !== 'org' ? (
+                <Select
+                  label={t('invitations.scopeTarget')}
+                  value={form.scope_id}
+                  error={issueError?.fields.scope_id}
+                  options={[
+                    { value: '', label: t('invitations.chooseTarget') },
+                    ...(form.scope_type === 'client' ? clientOptions : siteOptions),
+                  ]}
+                  onChange={(event) => setForm({ ...form, scope_id: event.target.value })}
+                />
+              ) : null}
+            </div>
+            <div className="flex justify-end border-t border-line pt-4">
+              <Button
+                icon={<Send />}
+                loading={issueInvitation.isPending}
+                onClick={submit}
+                disabled={!form.email || !form.role_id}
+              >
+                {t('invitations.send')}
+              </Button>
+            </div>
           </div>
-          <Button
-            onClick={submit}
-            disabled={issueInvitation.isPending || !form.email || !form.role_id}
-          >
-            {t('invitations.send')}
-          </Button>
-        </div>
-      </Card>
+        </Card>
+      </AdminSection>
 
       {invitations.isError ? (
         <ErrorState
@@ -634,71 +836,96 @@ function InvitationsTab({ search }: { search: string }) {
           onRetry={() => invitations.refetch()}
         />
       ) : (
-        <Card title={`${t('invitations.title')} (${rows.length})`}>
+        <AdminSection
+          title={`${t('invitations.title')} (${rows.length})`}
+          description={t('invitations.listHint')}
+        >
+          <SearchField value={search} onChange={onSearch} />
           {actionError ? (
-            <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm text-danger">
               {actionError}
             </p>
           ) : null}
-          <ScrollRegion label={t('invitations.title')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('invitations.email')}</th>
-                  <th className="pb-2">{t('invitations.role')}</th>
-                  <th className="pb-2">{t('invitations.scope')}</th>
-                  <th className="pb-2">{t('invitations.expires')}</th>
-                  <th className="pb-2">{t('invitations.status')}</th>
-                  <th className="pb-2">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {rows.map((inv) => (
-                  <tr key={inv.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-medium">{inv.email}</td>
-                    <td className="py-2">{roleName(inv.role_id)}</td>
-                    <td className="py-2">{scopeLabel(inv)}</td>
-                    <td className="py-2">{formatDate(inv.expires_at)}</td>
-                    <td className="py-2">
-                      <Badge variant={statusVariant(inv.status)}>
-                        {t(`invitations.statuses.${inv.status}`)}
-                      </Badge>
-                    </td>
-                    <td className="py-2">
-                      {inv.status !== 'accepted' ? (
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => renew(inv)}
-                            disabled={renewInvitation.isPending}
-                          >
-                            {t('invitations.renew')}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => revoke(inv)}
-                            disabled={revokeInvitation.isPending}
-                          >
-                            {t('invitations.revoke')}
-                          </Button>
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-                {!invitations.isLoading && rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-400">
-                      {t('common.noData', 'Keine Daten')}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </ScrollRegion>
-        </Card>
+          {invitations.isLoading ? (
+            <SkeletonList rows={3} label={t('app.loading', 'Laden...')} />
+          ) : null}
+          {!invitations.isLoading && rows.length === 0 ? (
+            <EmptyState
+              icon={<MailPlus />}
+              title={t(needle ? 'common.noResults' : 'common.noData', 'Keine Daten')}
+            />
+          ) : null}
+          {rows.length > 0 ? (
+            <Card className="overflow-hidden p-0">
+              <ScrollRegion label={t('invitations.title')}>
+                <table className={tableClasses}>
+                  <thead className={theadClasses}>
+                    <tr className="text-fg-muted">
+                      <th scope="col" className={thClasses}>
+                        {t('invitations.email')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('invitations.role')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('invitations.scope')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('invitations.expires')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('invitations.status')}
+                      </th>
+                      <th scope="col" className={cn(thClasses, 'text-right')}>
+                        {t('common.actions')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((inv) => (
+                      <tr key={inv.id} className={trClasses}>
+                        <td className={tdPrimaryClasses}>{inv.email}</td>
+                        <td className={tdClasses}>{roleName(inv.role_id)}</td>
+                        <td className={tdClasses}>{scopeLabel(inv)}</td>
+                        <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
+                          {formatDate(inv.expires_at)}
+                        </td>
+                        <td className={tdClasses}>
+                          <Badge variant={statusVariant(inv.status)}>
+                            {t(`invitations.statuses.${inv.status}`)}
+                          </Badge>
+                        </td>
+                        <td className={cn(tdClasses, 'text-right')}>
+                          {inv.status !== 'accepted' ? (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => renew(inv)}
+                                disabled={renewInvitation.isPending}
+                              >
+                                {t('invitations.renew')}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={dangerTextClasses}
+                                onClick={() => revoke(inv)}
+                                disabled={revokeInvitation.isPending}
+                              >
+                                {t('invitations.revoke')}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollRegion>
+            </Card>
+          ) : null}
+        </AdminSection>
       )}
     </div>
   );

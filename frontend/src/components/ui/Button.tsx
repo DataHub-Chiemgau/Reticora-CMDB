@@ -10,29 +10,38 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   loading?: boolean;
+  /** A 16px icon before the label (decorative, the label names the action). */
+  icon?: ReactNode;
+  /** A 16px icon after the label (forward actions such as "Next"). */
+  iconAfter?: ReactNode;
   children: ReactNode;
 }
 
-const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-primary text-white hover:bg-primary/90 focus-visible:ring-primary/40',
+export const buttonVariantClasses: Record<ButtonVariant, string> = {
+  primary:
+    'bg-accent text-accent-fg shadow-sm hover:bg-accent-strong hover:text-accent-fg active:translate-y-px',
   secondary:
-    'border border-gray-200 bg-white text-gray-900 hover:bg-gray-50 focus-visible:ring-primary/30 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700',
-  ghost:
-    'text-gray-700 hover:bg-gray-100 focus-visible:ring-primary/30 dark:text-gray-200 dark:hover:bg-gray-800',
-  danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-400/50',
+    'border border-line-strong bg-panel text-fg shadow-sm hover:bg-fg/[0.04] active:translate-y-px',
+  ghost: 'text-fg-muted hover:bg-fg/[0.06] hover:text-fg',
+  danger: 'bg-red-600 text-white shadow-sm hover:bg-red-700 active:translate-y-px',
 };
 
-const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-sm',
-  md: 'h-10 px-4 text-sm',
-  lg: 'h-11 px-5 text-base',
+export const buttonSizeClasses: Record<ButtonSize, string> = {
+  sm: 'h-8 gap-1.5 px-3 text-sm',
+  md: 'h-9 gap-2 px-3.5 text-sm',
+  lg: 'h-10 gap-2 px-4 text-sm',
 };
+
+export const buttonBaseClasses =
+  'inline-flex shrink-0 select-none items-center justify-center whitespace-nowrap rounded-lg font-medium transition-[background-color,color,box-shadow,transform] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0';
 
 export function Button({
   asChild = false,
   variant = 'primary',
   size = 'md',
   loading = false,
+  icon,
+  iconAfter,
   disabled,
   className,
   children,
@@ -45,9 +54,9 @@ export function Button({
   return (
     <Comp
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:pointer-events-none disabled:opacity-60',
-        variantClasses[variant],
-        sizeClasses[size],
+        buttonBaseClasses,
+        buttonVariantClasses[variant],
+        buttonSizeClasses[size],
         className,
       )}
       {...(!asChild
@@ -64,10 +73,58 @@ export function Button({
               aria-hidden="true"
               className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent"
             />
+          ) : icon ? (
+            <span aria-hidden="true" className="inline-flex">
+              {icon}
+            </span>
           ) : null}
           <span>{children}</span>
+          {iconAfter ? (
+            <span aria-hidden="true" className="inline-flex">
+              {iconAfter}
+            </span>
+          ) : null}
         </>
       )}
     </Comp>
+  );
+}
+
+export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  /** The accessible name; an icon alone names nothing. */
+  label: string;
+  icon: ReactNode;
+  variant?: Exclude<ButtonVariant, 'primary'>;
+  size?: 'sm' | 'md';
+  loading?: boolean;
+}
+
+/** IconButton is a square button with an icon and a required accessible name. */
+export function IconButton({
+  label,
+  icon,
+  variant = 'ghost',
+  size = 'md',
+  className,
+  type = 'button',
+  ...props
+}: IconButtonProps) {
+  return (
+    <button
+      type={type}
+      aria-label={label}
+      title={props.title ?? label}
+      className={cn(
+        buttonBaseClasses,
+        buttonVariantClasses[variant],
+        size === 'sm' ? 'h-8 w-8' : 'h-9 w-9',
+        className,
+      )}
+      {...props}
+    >
+      <span aria-hidden="true" className="inline-flex">
+        {icon}
+      </span>
+    </button>
   );
 }

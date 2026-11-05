@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { CalendarClock, ChevronDown, Plus, X } from 'lucide-react';
+import { Fragment, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ciApi, maintenanceApi } from '../api/client';
@@ -11,6 +12,18 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 function statusVariant(status: string): 'neutral' | 'warning' | 'success' | 'danger' | 'info' {
   switch (status) {
@@ -87,7 +100,7 @@ function WindowNotifications({ windowId }: { windowId: string }) {
   const rows: MaintenanceNotification[] = data?.data ?? [];
   if (rows.length === 0) {
     return (
-      <p className="text-sm text-gray-500 dark:text-gray-400">
+      <p className="text-sm text-fg-muted">
         {t('maintenance.noNotifications', 'Keine Benachrichtigungen gespeichert')}
       </p>
     );
@@ -95,33 +108,33 @@ function WindowNotifications({ windowId }: { windowId: string }) {
   return (
     <table className="w-full text-left text-sm">
       <caption className="sr-only">{t('maintenance.notifications', 'Benachrichtigungen')}</caption>
-      <thead className="text-gray-500 dark:text-gray-400">
+      <thead className="text-fg-muted">
         <tr>
-          <th scope="col" className="py-1 pr-3 font-medium">
+          <th scope="col" className="py-1.5 pr-4 font-medium">
             {t('maintenance.client', 'Kunde')}
           </th>
-          <th scope="col" className="py-1 pr-3 font-medium">
+          <th scope="col" className="py-1.5 pr-4 font-medium">
             {t('maintenance.channel', 'Kanal')}
           </th>
-          <th scope="col" className="py-1 pr-3 font-medium">
+          <th scope="col" className="py-1.5 pr-4 font-medium">
             {t('maintenance.status', 'Status')}
           </th>
-          <th scope="col" className="py-1 font-medium">
+          <th scope="col" className="py-1.5 font-medium">
             {t('maintenance.time', 'Zeit')}
           </th>
         </tr>
       </thead>
-      <tbody className="text-gray-700 dark:text-gray-200">
+      <tbody className="text-fg">
         {rows.map((n) => (
-          <tr key={n.id} data-testid="maintenance-notification">
-            <td className="py-1 pr-3">{clientName(n.client_id)}</td>
-            <td className="py-1 pr-3">{t(`maintenance.channels.${n.channel}`, n.channel)}</td>
-            <td className="py-1 pr-3">
+          <tr key={n.id} data-testid="maintenance-notification" className="border-t border-line">
+            <td className="py-2 pr-4">{clientName(n.client_id)}</td>
+            <td className="py-2 pr-4">{t(`maintenance.channels.${n.channel}`, n.channel)}</td>
+            <td className="py-2 pr-4">
               <Badge variant={notificationVariant(n.status)}>
                 {t(`maintenance.notificationStatuses.${n.status}`, n.status)}
               </Badge>
             </td>
-            <td className="py-1">
+            <td className="py-2 tabular-nums">
               {/* sent_at only exists once a channel has delivered it. */}
               {new Date(n.sent_at ?? n.created_at).toLocaleString()}
             </td>
@@ -209,106 +222,165 @@ export function MaintenancePage() {
 
   const selectedIDs = new Set(selectedCIs.map((ci) => ci.id));
 
+  const windows = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.maintenance', 'Wartungsfenster')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('maintenance.summary', 'Wartungen planen und betroffene Kunden benachrichtigen.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('maintenance.create', 'Wartung planen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.maintenance', 'Wartungsfenster')}
+        description={t(
+          'maintenance.summary',
+          'Wartungen planen und betroffene Kunden benachrichtigen.',
+        )}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('maintenance.create', 'Wartung planen')}
+          </Button>
+        }
+      />
 
       {notifyResult ? (
-        <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950">
-          <p role="status" className="text-sm text-amber-900 dark:text-amber-100">
-            {notifyResult}
-          </p>
-        </Card>
+        <p
+          role="status"
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"
+        >
+          {notifyResult}
+        </p>
       ) : null}
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="space-y-3">
-        {(data?.data ?? []).map((w: MaintenanceWindow) => (
-          <Card
-            key={w.id}
-            title={w.title}
-            actions={
-              <Badge variant={statusVariant(w.status)}>
-                {t(`maintenance.statuses.${w.status}`, w.status)}
-              </Badge>
-            }
-          >
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {new Date(w.starts_at).toLocaleString()} → {new Date(w.ends_at).toLocaleString()}
-            </p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {(w.ci_ids ?? []).length} {t('maintenance.affectedCIs', 'betroffene CIs')}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                aria-expanded={!!expanded[w.id]}
-                onClick={() => setExpanded((prev) => ({ ...prev, [w.id]: !prev[w.id] }))}
-              >
-                {t('maintenance.notifications', 'Benachrichtigungen')}
-              </Button>
-              {w.status === 'scheduled' ? (
-                <>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => statusMutation.mutate({ id: w.id, status: 'in_progress' })}
-                  >
-                    {t('maintenance.start', 'Starten')}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => notifyMutation.mutate(w.id)}
-                    disabled={notifyMutation.isPending}
-                  >
-                    {t('maintenance.notify', 'Kunden benachrichtigen')}
-                  </Button>
-                </>
-              ) : null}
-              {w.status === 'in_progress' ? (
-                <Button
-                  size="sm"
-                  onClick={() => statusMutation.mutate({ id: w.id, status: 'completed' })}
-                >
-                  {t('maintenance.complete', 'Abschließen')}
-                </Button>
-              ) : null}
-            </div>
-            {expanded[w.id] ? (
-              <div className="mt-3 border-t border-gray-200 pt-3 dark:border-gray-700">
-                <WindowNotifications windowId={w.id} />
-              </div>
-            ) : null}
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.maintenance', 'Wartungsfenster')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.title', 'Titel')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('maintenance.period')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('maintenance.affected')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {windows.map((w: MaintenanceWindow) => (
+                  <Fragment key={w.id}>
+                    <tr className={trClasses}>
+                      <td className={tdPrimaryClasses}>{w.title}</td>
+                      <td className={tdClasses}>
+                        <Badge variant={statusVariant(w.status)}>
+                          {t(`maintenance.statuses.${w.status}`, w.status)}
+                        </Badge>
+                      </td>
+                      <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
+                        <span className="block">{new Date(w.starts_at).toLocaleString()} –</span>
+                        <span className="block">{new Date(w.ends_at).toLocaleString()}</span>
+                      </td>
+                      <td className={cn(tdClasses, 'whitespace-nowrap')}>
+                        {(w.ci_ids ?? []).length} {t('maintenance.affectedCIs', 'betroffene CIs')}
+                      </td>
+                      <td className={tdClasses}>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-expanded={!!expanded[w.id]}
+                            iconAfter={
+                              <ChevronDown
+                                className={cn(
+                                  'transition-transform',
+                                  expanded[w.id] && 'rotate-180',
+                                )}
+                              />
+                            }
+                            onClick={() =>
+                              setExpanded((prev) => ({ ...prev, [w.id]: !prev[w.id] }))
+                            }
+                          >
+                            {t('maintenance.notifications', 'Benachrichtigungen')}
+                          </Button>
+                          {w.status === 'scheduled' ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  statusMutation.mutate({ id: w.id, status: 'in_progress' })
+                                }
+                              >
+                                {t('maintenance.start', 'Starten')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => notifyMutation.mutate(w.id)}
+                                disabled={notifyMutation.isPending}
+                              >
+                                {t('maintenance.notify', 'Kunden benachrichtigen')}
+                              </Button>
+                            </>
+                          ) : null}
+                          {w.status === 'in_progress' ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() =>
+                                statusMutation.mutate({ id: w.id, status: 'completed' })
+                              }
+                            >
+                              {t('maintenance.complete', 'Abschließen')}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                    {expanded[w.id] ? (
+                      <tr>
+                        <td colSpan={5} className="border-b border-line bg-canvas/60 px-4 py-3">
+                          <WindowNotifications windowId={w.id} />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                ))}
+                {windows.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={5}
+                    icon={<CalendarClock />}
+                    title={t('maintenance.emptyTitle')}
+                    description={t('maintenance.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('maintenance.create', 'Wartung planen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.title', 'Titel')}
             value={form.title}
@@ -344,7 +416,7 @@ export function MaintenancePage() {
                     <li key={ci.id}>
                       <button
                         type="button"
-                        className="w-full rounded px-2 py-1 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-800"
+                        className="w-full rounded-md px-2 py-1.5 text-left text-sm text-fg hover:bg-fg/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                         onClick={() =>
                           setSelectedCIs((prev) => [...prev, { id: ci.id, name: ci.name }])
                         }
@@ -363,7 +435,7 @@ export function MaintenancePage() {
                 {selectedCIs.map((ci) => (
                   <li
                     key={ci.id}
-                    className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-sm dark:bg-gray-800"
+                    className="flex items-center gap-1 rounded-md bg-fg/[0.06] py-0.5 pl-2 pr-0.5 text-sm text-fg"
                   >
                     {ci.name}
                     <button
@@ -371,18 +443,18 @@ export function MaintenancePage() {
                       aria-label={t('maintenance.removeCI', '{{name}} entfernen', {
                         name: ci.name,
                       })}
-                      className="px-1 text-muted hover:text-gray-900 dark:hover:text-gray-100"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-fg-muted hover:bg-fg/[0.08] hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       onClick={() =>
                         setSelectedCIs((prev) => prev.filter((other) => other.id !== ci.id))
                       }
                     >
-                      ×
+                      <X aria-hidden="true" className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="text-sm text-fg-muted">
                 {t(
                   'maintenance.noCIsSelected',
                   'Ohne CI gilt die Wartung für die ganze Organisation.',

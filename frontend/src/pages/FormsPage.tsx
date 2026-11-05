@@ -1,3 +1,4 @@
+import { FileText } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFormDefinitions, useSubmitForm } from '../api/hooks';
@@ -7,7 +8,9 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { cn } from '../components/ui/utils';
 
 type JsonSchema = {
   properties?: Record<string, { type?: string; title?: string; enum?: string[] }>;
@@ -25,54 +28,84 @@ export function FormsPage() {
     [forms.data, selectedId],
   );
 
-  if (forms.isLoading) return <SkeletonList rows={5} label={t('forms.loading')} />;
+  const header = <PageHeader title={t('forms.title')} description={t('forms.subtitle')} />;
+
+  if (forms.isLoading)
+    return (
+      <div className="space-y-4">
+        {header}
+        <SkeletonList rows={5} label={t('forms.loading')} />
+      </div>
+    );
   if (forms.isError)
     return (
-      <ErrorState
-        title={t('forms.errorTitle')}
-        description={forms.error.message}
-        retryLabel={t('common.retry')}
-        onRetry={() => forms.refetch()}
-      />
+      <div className="space-y-4">
+        {header}
+        <ErrorState
+          title={t('forms.errorTitle')}
+          description={forms.error.message}
+          retryLabel={t('common.retry')}
+          onRetry={() => forms.refetch()}
+        />
+      </div>
     );
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('forms.title')}</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('forms.subtitle')}</p>
-      </div>
-      <Card title={t('forms.definitions')}>
-        {forms.data?.data.length ? (
-          <div className="grid gap-3 md:grid-cols-2">
-            {forms.data.data.map((form) => (
-              <button
-                key={form.id}
-                className="rounded-lg border border-gray-200 p-3 text-left text-sm hover:border-primary dark:border-gray-800"
-                onClick={() => setSelectedId(form.id)}
+      {header}
+      {forms.data?.data.length ? (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+          <section aria-labelledby="forms-definitions">
+            <Card className="overflow-hidden p-0">
+              <h2
+                id="forms-definitions"
+                className="border-b border-line px-4 py-3 text-base font-semibold text-fg"
               >
-                <span className="font-medium">{form.name}</span>
-                <p className="text-muted">{form.description || t('forms.noDescription')}</p>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title={t('forms.emptyTitle')} description={t('forms.emptyHint')} />
-        )}
-      </Card>
-      {selected ? (
-        <Card title={`${t('forms.render')} · ${selected.name}`}>
-          <FormRenderer
-            form={selected}
-            values={values}
-            setValues={setValues}
-            onSubmit={() =>
-              submit.mutate({ id: selected.id, values }, { onSuccess: () => setValues({}) })
-            }
-            submitting={submit.isPending}
-          />
-        </Card>
-      ) : null}
+                {t('forms.definitions')}
+              </h2>
+              <ul className="divide-y divide-line">
+                {forms.data.data.map((form) => (
+                  <li key={form.id}>
+                    <button
+                      type="button"
+                      aria-current={selected?.id === form.id ? 'true' : undefined}
+                      className={cn(
+                        'block w-full px-4 py-3 text-left text-sm transition-colors hover:bg-fg/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+                        selected?.id === form.id && 'bg-accent-soft hover:bg-accent-soft',
+                      )}
+                      onClick={() => setSelectedId(form.id)}
+                    >
+                      <span className="font-medium text-fg">{form.name}</span>
+                      <span className="mt-0.5 block text-fg-muted">
+                        {form.description || t('forms.noDescription')}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </section>
+          {selected ? (
+            <Card title={`${t('forms.render')} · ${selected.name}`}>
+              <FormRenderer
+                form={selected}
+                values={values}
+                setValues={setValues}
+                onSubmit={() =>
+                  submit.mutate({ id: selected.id, values }, { onSuccess: () => setValues({}) })
+                }
+                submitting={submit.isPending}
+              />
+            </Card>
+          ) : null}
+        </div>
+      ) : (
+        <EmptyState
+          icon={<FileText />}
+          title={t('forms.emptyTitle')}
+          description={t('forms.emptyHint')}
+        />
+      )}
     </div>
   );
 }
@@ -94,7 +127,7 @@ function FormRenderer({
   const schema = form.schema as JsonSchema;
   const properties = Object.entries(schema.properties ?? {});
   return (
-    <div className="space-y-4">
+    <div className="max-w-md space-y-4">
       {properties.map(([name, prop]) => (
         <Input
           key={name}

@@ -62,7 +62,7 @@ describe('DocumentListPage create form', () => {
     const posts = stubDocumentApi();
     renderWithProviders(<DocumentListPage />, { route: '/documents' });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Anlegen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Dokument anlegen' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByLabelText(/storage/i)).toBeNull();
     expect(within(dialog).queryByText(/storage/i)).toBeNull();
@@ -73,7 +73,7 @@ describe('DocumentListPage create form', () => {
     fireEvent.change(within(dialog).getByLabelText(/Dateiname/), {
       target: { value: 'vertrag.pdf' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Anlegen' }));
 
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({
@@ -90,12 +90,12 @@ describe('DocumentListPage create form', () => {
     const posts = stubDocumentApi();
     renderWithProviders(<DocumentListPage />, { route: '/documents' });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Anlegen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Dokument anlegen' }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(/Titel/), {
       target: { value: 'Ohne Dateiname' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Anlegen' }));
 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(posts).toHaveLength(0);

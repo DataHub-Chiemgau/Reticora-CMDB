@@ -222,11 +222,12 @@ async function expectScopeError(scope: Scope, cause: string) {
   const { page } = w;
   await page.goto('/discovery');
   const item = collectorCard(page)
-    .getByRole('listitem')
+    .getByRole('row')
     .filter({ has: page.getByRole('button', { name: `Scope ${scope.name} bearbeiten` }) });
   await expect(item).toHaveCount(1);
   await expect(item.getByText(HEALTH_LABEL[stored.health!.state]!, { exact: true })).toBeVisible();
-  const error = item.getByRole('listitem');
+  // The errors of a scope stand in the row below it.
+  const error = item.locator('xpath=following-sibling::tr[1]').getByRole('listitem');
   await expect(error).toHaveCount(1);
   await expect(error).toContainText(`${CAUSE_LABEL[cause]} · snmp · ${scope.target}`);
 }

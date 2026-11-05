@@ -1,7 +1,7 @@
 /**
  * UI-18: the rack drawing follows the theme. The frame, the unit lines and
- * the unit numbers (outside the frame, on the card background) use fill-/
- * stroke- classes with dark: variants instead of colours chosen for the dark
+ * the unit numbers (outside the frame, on the panel background) use fill-/
+ * stroke- classes with design tokens (they switch with the theme) instead of colours chosen for the dark
  * theme (#9ca3af numbers reached only 2.5:1 on the white card). Items keep
  * their data colour.
  */
@@ -32,22 +32,20 @@ describe('RackSVG theme', () => {
     const frame = svg.querySelector(':scope > rect')!;
     expect(frame).not.toHaveAttribute('fill');
     expect(frame).not.toHaveAttribute('stroke');
-    expect(frame.getAttribute('class')).toBe(
-      'fill-gray-100 stroke-gray-300 dark:fill-gray-800 dark:stroke-gray-700',
-    );
+    expect(frame.getAttribute('class')).toBe('fill-canvas stroke-line-strong');
 
     const lines = [...svg.querySelectorAll('line')];
     expect(lines).toHaveLength(3);
     for (const line of lines) {
       expect(line).not.toHaveAttribute('stroke');
-      expect(line.getAttribute('class')).toBe('stroke-gray-300 dark:stroke-gray-700');
+      expect(line.getAttribute('class')).toBe('stroke-line');
     }
 
     const numbers = lines.map((line) => line.nextElementSibling!);
     expect(numbers.map((n) => n.textContent)).toEqual(['3', '2', '1']);
     for (const number of numbers) {
       expect(number).not.toHaveAttribute('fill');
-      expect(number.getAttribute('class')).toBe('fill-gray-600 dark:fill-gray-400');
+      expect(number.getAttribute('class')).toBe('fill-fg-muted');
     }
   });
 
@@ -64,7 +62,7 @@ describe('RackSVG theme', () => {
   it('keeps the item colours', () => {
     const { container } = renderRack();
     const items = [...container.querySelectorAll('svg g > rect')];
-    expect(items.map((rect) => rect.getAttribute('fill'))).toEqual(['#4f46e5', '#16a34a']);
+    expect(items.map((rect) => rect.getAttribute('fill'))).toEqual(['#087680', '#16a34a']);
     const labels = [...container.querySelectorAll('svg g > rect + text')];
     expect(labels.map((label) => [label.textContent, label.getAttribute('class')])).toEqual([
       ['pdu-01', 'fill-white'],

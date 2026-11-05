@@ -1,3 +1,4 @@
+import { Boxes, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,21 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 export function ConsumableListPage() {
   const { t } = useTranslation();
@@ -47,96 +63,152 @@ export function ConsumableListPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consumables'] }),
   });
 
+  const consumables = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.consumables', 'Lagerverwaltung')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('consumables.summary', 'Verbrauchsmaterial mit Bestand und Mindestbestand.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('consumables.create', 'Artikel anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.consumables', 'Lagerverwaltung')}
+        description={t('consumables.summary', 'Verbrauchsmaterial mit Bestand und Mindestbestand.')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('consumables.create', 'Artikel anlegen')}
+          </Button>
+        }
+      />
 
-      <Card>
-        <div className="flex flex-wrap gap-3">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('common.search', 'Suchen')}
-            className="max-w-xs"
-            aria-label={t('common.search', 'Suchen')}
+      <Toolbar>
+        <Input
+          type="text"
+          icon={<Search />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t('common.search', 'Suchen')}
+          className="w-full sm:w-64"
+          aria-label={t('common.search', 'Suchen')}
+        />
+        <label className="inline-flex h-9 items-center gap-2 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={lowStockOnly}
+            onChange={(e) => setLowStockOnly(e.target.checked)}
           />
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={lowStockOnly}
-              onChange={(e) => setLowStockOnly(e.target.checked)}
-            />
-            {t('consumables.lowStockOnly', 'Nur Mindestbestand unterschritten')}
-          </label>
-        </div>
-      </Card>
+          {t('consumables.lowStockOnly', 'Nur Mindestbestand unterschritten')}
+        </label>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {(data?.data ?? []).map((c: Consumable) => (
-          <Card
-            key={c.id}
-            title={c.name}
-            actions={
-              c.stock_level < c.min_level ? (
-                <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
-              ) : (
-                <Badge variant="success">{t('consumables.ok', 'OK')}</Badge>
-              )
-            }
-          >
-            <p className="text-sm text-gray-600 dark:text-gray-300">{c.sku || '—'}</p>
-            <p className="mt-1 text-lg font-semibold">
-              {c.stock_level} {c.unit}{' '}
-              <span className="text-xs font-normal text-muted">/ min {c.min_level}</span>
-            </p>
-            <div className="mt-3 flex gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => moveMutation.mutate({ id: c.id, direction: 'in', quantity: 1 })}
-              >
-                +1
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => moveMutation.mutate({ id: c.id, direction: 'out', quantity: 1 })}
-                disabled={c.stock_level <= 0}
-              >
-                −1
-              </Button>
-            </div>
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.consumables', 'Lagerverwaltung')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    SKU
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('consumables.stock')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('consumables.minLevel', 'Mindestbestand')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {consumables.map((c: Consumable) => (
+                  <tr key={c.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{c.name}</td>
+                    <td className={tdMonoClasses}>{c.sku || '—'}</td>
+                    <td className={cn(tdNumericClasses, 'whitespace-nowrap text-fg')}>
+                      {c.stock_level} {c.unit}
+                    </td>
+                    <td className={tdNumericClasses}>{c.min_level}</td>
+                    <td className={tdClasses}>
+                      {c.stock_level < c.min_level ? (
+                        <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
+                      ) : (
+                        <Badge variant="success">{t('consumables.ok', 'OK')}</Badge>
+                      )}
+                    </td>
+                    <td className={cn(tdClasses, 'text-right')}>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label={`+1 ${c.name}`}
+                          onClick={() =>
+                            moveMutation.mutate({ id: c.id, direction: 'in', quantity: 1 })
+                          }
+                        >
+                          +1
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          aria-label={`−1 ${c.name}`}
+                          onClick={() =>
+                            moveMutation.mutate({ id: c.id, direction: 'out', quantity: 1 })
+                          }
+                          disabled={c.stock_level <= 0}
+                        >
+                          −1
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {consumables.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<Boxes />}
+                    title={
+                      search || lowStockOnly ? t('common.noResults') : t('consumables.emptyTitle')
+                    }
+                    description={
+                      search || lowStockOnly
+                        ? t('common.noResultsHint')
+                        : t('consumables.emptyHint')
+                    }
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('consumables.create', 'Artikel anlegen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.name', 'Name')}
             value={form.name}

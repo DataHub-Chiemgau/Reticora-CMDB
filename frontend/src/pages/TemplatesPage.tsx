@@ -14,7 +14,18 @@
  * /ci-types/templates ("Typvorlagen"). The page belongs to the module
  * metamodel (E-105); switched off, it shows a note instead.
  */
-import { useMemo, useState, type FormEvent } from 'react';
+import {
+  Copy,
+  FileText,
+  GitCompare,
+  LayoutTemplate,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Rocket,
+} from 'lucide-react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -42,20 +53,28 @@ import { useHasPermission } from '../api/hooks';
 import { ApiError } from '../api/client';
 import { useModules } from '../hooks/useEntitlements';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
-import { SkeletonList } from '../components/ui/Skeleton';
+import { Skeleton, SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import { cn } from '../components/ui/utils';
 import { MetamodelTabs } from '../components/metamodel/MetamodelTabs';
 import {
   MetamodelDiff,
   formatDiffValue,
   type DiffEntry,
 } from '../components/metamodel/MetamodelDiff';
-import { TemplateVersionEditor, rulesOf } from '../components/metamodel/TemplateVersionEditor';
+import {
+  TemplateVersionEditor,
+  VERSION_STATUS_VARIANT,
+  rulesOf,
+} from '../components/metamodel/TemplateVersionEditor';
 import { ancestorsOf } from '../components/metamodel/TypeTree';
 import { describeFlagRefusal, fieldErrors } from '../components/metamodel/AttributeEditor';
 import {
@@ -86,23 +105,27 @@ export function TemplatesPage() {
   const modules = useModules();
   const moduleOff = !modules.isLoading && !modules.isModuleEnabled('metamodel');
 
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {t('citypes.title')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('templates.subtitle')}</p>
+  if (moduleOff) {
+    return (
+      <div className="space-y-6">
+        <TemplatesHeader />
+        <MetamodelTabs />
+        <EmptyState icon={<LayoutTemplate />} title={t('templates.moduleOff')} />
       </div>
-      <MetamodelTabs />
-      {moduleOff ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('templates.moduleOff')}</p>
-      ) : id ? (
-        <TemplateDetail id={id} />
-      ) : (
-        <TemplateList />
-      )}
-    </div>
+    );
+  }
+  return id ? <TemplateDetail id={id} /> : <TemplateList />;
+}
+
+/** TemplatesHeader is the heading the three metamodel pages share (title, sentence, actions). */
+function TemplatesHeader({ actions }: { actions?: ReactNode }) {
+  const { t } = useTranslation();
+  return (
+    <PageHeader
+      title={t('citypes.title')}
+      description={t('templates.subtitle')}
+      actions={actions}
+    />
   );
 }
 
@@ -139,13 +162,32 @@ function TemplateList() {
   );
 
   if (notFound(query.error)) {
-    return <p className="text-sm text-gray-600 dark:text-gray-300">{t('templates.moduleOff')}</p>;
+    return (
+      <div className="space-y-6">
+        <TemplatesHeader />
+        <MetamodelTabs />
+        <EmptyState icon={<LayoutTemplate />} title={t('templates.moduleOff')} />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <div className="flex flex-wrap items-end gap-3">
+    <div className="space-y-6">
+      <TemplatesHeader
+        actions={
+          canManage ? (
+            <Button icon={<Plus />} onClick={() => setDialog({ mode: 'create' })}>
+              {t('templates.create')}
+            </Button>
+          ) : null
+        }
+      />
+      <MetamodelTabs />
+
+      <div className="space-y-4">
+        <p className="max-w-[68ch] text-sm text-fg-muted">{t('templates.hint')}</p>
+
+        <Toolbar className="items-end">
           <div className="min-w-[12rem]">
             <Select
               label={t('templates.filterType')}
@@ -168,150 +210,158 @@ function TemplateList() {
               }))}
             />
           </div>
-          <div className="flex-1" />
-          {canManage ? (
-            <Button size="sm" onClick={() => setDialog({ mode: 'create' })}>
-              {t('templates.create')}
-            </Button>
+          {query.isSuccess ? (
+            <ToolbarEnd>
+              <span className="text-sm tabular-nums text-fg-muted">
+                {t('templates.count', { count: rows.length })}
+              </span>
+            </ToolbarEnd>
           ) : null}
-        </div>
-      </Card>
+        </Toolbar>
 
-      <p className="text-sm text-gray-600 dark:text-gray-300">{t('templates.hint')}</p>
-
-      {query.isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
-      {query.error ? (
-        <ErrorState
-          title={t('app.error')}
-          retryLabel={t('common.retry')}
-          onRetry={() => void query.refetch()}
-        />
-      ) : null}
-      {update.error ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {t('templates.notSaved', { reason: describeFlagRefusal(update.error, t) })}
-        </p>
-      ) : null}
-      {query.isSuccess && rows.length === 0 && newTemplates.length === 0 ? (
-        <p className="text-sm text-muted">{t('templates.empty')}</p>
-      ) : null}
-      {newTemplates.length > 0 ? (
-        <Card title={t('metamodelDrafts.newParts')}>
-          <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-            {newTemplates.map((item) => (
-              <li
-                key={item.id}
-                data-draft-item={item.id}
-                className="flex flex-wrap items-center gap-2 py-2 text-sm"
-              >
-                <span className="font-medium">
-                  {draftItemName(item, i18n.language) || t('metamodelDrafts.noTarget')}
-                </span>
-                <DraftMarker change="created" />
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
-      {rows.length > 0 ? (
-        <Card>
-          <ul
-            aria-label={t('templates.listLabel')}
-            className="divide-y divide-gray-100 dark:divide-gray-800"
-          >
-            {rows.map((tpl) => {
-              const name = templateName(tpl, i18n.language);
-              const own = !tpl.is_system;
-              const change = draftChangeFor(draftItems, {
-                kinds: ['template', 'template_version'],
-                id: tpl.id,
-              });
-              return (
-                <li
-                  key={tpl.id}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm"
+        {query.isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
+        {query.error ? (
+          <ErrorState
+            title={t('app.error')}
+            retryLabel={t('common.retry')}
+            onRetry={() => void query.refetch()}
+          />
+        ) : null}
+        {update.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {t('templates.notSaved', { reason: describeFlagRefusal(update.error, t) })}
+          </p>
+        ) : null}
+        {query.isSuccess && rows.length === 0 && newTemplates.length === 0 ? (
+          <EmptyState
+            icon={<LayoutTemplate />}
+            title={t('templates.empty')}
+            action={
+              canManage ? (
+                <Button
+                  variant="secondary"
+                  icon={<Plus />}
+                  onClick={() => setDialog({ mode: 'create' })}
                 >
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        to={`/ci-types/templates/${tpl.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {name}
-                      </Link>
-                      <span className="text-xs text-muted">{tpl.key}</span>
-                      {tpl.is_system ? <Badge variant="info">{t('templates.system')}</Badge> : null}
-                      {!tpl.is_active ? (
-                        <Badge variant="neutral">{t('templates.inactive')}</Badge>
-                      ) : null}
-                      {change ? <DraftMarker change={change} /> : null}
-                    </div>
-                    <div className="text-xs text-muted">
-                      {t('templates.typeAndVersion', {
-                        type: nameOf(tpl.ci_type_id),
-                        version:
-                          tpl.current_version != null
-                            ? t('templates.versionShort', { version: tpl.current_version })
-                            : t('templates.unpublished'),
-                      })}
-                    </div>
-                  </div>
-                  {canManage ? (
-                    <div className="flex flex-wrap gap-3">
-                      {own ? (
-                        <>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline"
-                            aria-label={t('templates.editAction', { name })}
-                            onClick={() => setDialog({ mode: 'edit', template: tpl })}
-                          >
-                            {t('common.edit')}
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs text-primary hover:underline"
-                            aria-label={t(
-                              tpl.is_active
-                                ? 'templates.deactivateAction'
-                                : 'templates.activateAction',
-                              { name },
-                            )}
-                            disabled={update.isPending}
-                            onClick={() =>
-                              update.mutate({ id: tpl.id, patch: { is_active: !tpl.is_active } })
-                            }
-                          >
-                            {tpl.is_active ? t('templates.deactivate') : t('templates.activate')}
-                          </button>
-                        </>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="text-xs text-primary hover:underline"
-                        aria-label={t('templates.cloneAction', { name })}
-                        onClick={() => setDialog({ mode: 'clone', template: tpl })}
-                      >
-                        {t('templates.clone')}
-                      </button>
-                      {tpl.current_version != null ? (
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
-                          aria-label={t('templates.migrate.action', { name })}
-                          onClick={() => setMigrating(tpl)}
-                        >
-                          {t('templates.migrate.open')}
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  {t('templates.create')}
+                </Button>
+              ) : undefined
+            }
+          />
+        ) : null}
+        {newTemplates.length > 0 ? (
+          <Card title={t('metamodelDrafts.newParts')}>
+            <ul className="divide-y divide-line">
+              {newTemplates.map((item) => (
+                <li
+                  key={item.id}
+                  data-draft-item={item.id}
+                  className="flex flex-wrap items-center gap-2 py-3 text-sm"
+                >
+                  <span className="font-medium text-fg">
+                    {draftItemName(item, i18n.language) || t('metamodelDrafts.noTarget')}
+                  </span>
+                  <DraftMarker change="created" />
                 </li>
-              );
-            })}
-          </ul>
-        </Card>
-      ) : null}
+              ))}
+            </ul>
+          </Card>
+        ) : null}
+        {rows.length > 0 ? (
+          <Card className="p-0 overflow-hidden">
+            <ul aria-label={t('templates.listLabel')} className="divide-y divide-line">
+              {rows.map((tpl) => {
+                const name = templateName(tpl, i18n.language);
+                const own = !tpl.is_system;
+                const change = draftChangeFor(draftItems, {
+                  kinds: ['template', 'template_version'],
+                  id: tpl.id,
+                });
+                return (
+                  <li
+                    key={tpl.id}
+                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 text-sm transition-colors hover:bg-fg/[0.025]"
+                  >
+                    <div className="min-w-0 flex-1 basis-60 space-y-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Link
+                          to={`/ci-types/templates/${tpl.id}`}
+                          className="rounded font-medium text-accent underline-offset-2 hover:underline"
+                        >
+                          {name}
+                        </Link>
+                        <span className="font-mono text-xs text-fg-muted">{tpl.key}</span>
+                        {tpl.is_system ? (
+                          <Badge variant="info">{t('templates.system')}</Badge>
+                        ) : null}
+                        {!tpl.is_active ? (
+                          <Badge variant="neutral">{t('templates.inactive')}</Badge>
+                        ) : null}
+                        {change ? <DraftMarker change={change} /> : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+                        <span>{nameOf(tpl.ci_type_id)}</span>
+                        {tpl.current_version != null ? (
+                          <Badge variant="success">
+                            {t('templates.versionShort', { version: tpl.current_version })}
+                          </Badge>
+                        ) : (
+                          <Badge variant="neutral">{t('templates.unpublished')}</Badge>
+                        )}
+                      </div>
+                    </div>
+                    {canManage ? (
+                      <div className="flex flex-wrap items-center gap-1">
+                        {tpl.current_version != null ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            icon={<Rocket />}
+                            aria-label={t('templates.migrate.action', { name })}
+                            onClick={() => setMigrating(tpl)}
+                          >
+                            {t('templates.migrate.open')}
+                          </Button>
+                        ) : null}
+                        {own ? (
+                          <>
+                            <IconButton
+                              size="sm"
+                              icon={<Pencil />}
+                              label={t('templates.editAction', { name })}
+                              onClick={() => setDialog({ mode: 'edit', template: tpl })}
+                            />
+                            <IconButton
+                              size="sm"
+                              icon={tpl.is_active ? <PowerOff /> : <Power />}
+                              label={t(
+                                tpl.is_active
+                                  ? 'templates.deactivateAction'
+                                  : 'templates.activateAction',
+                                { name },
+                              )}
+                              disabled={update.isPending}
+                              onClick={() =>
+                                update.mutate({ id: tpl.id, patch: { is_active: !tpl.is_active } })
+                              }
+                            />
+                          </>
+                        ) : null}
+                        <IconButton
+                          size="sm"
+                          icon={<Copy />}
+                          label={t('templates.cloneAction', { name })}
+                          onClick={() => setDialog({ mode: 'clone', template: tpl })}
+                        />
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </Card>
+        ) : null}
+      </div>
       {migrating ? (
         <MigrateDialog open template={migrating} onClose={() => setMigrating(null)} />
       ) : null}
@@ -405,7 +455,7 @@ function TemplateDialog({
           onChange={(e) => setKey(e.target.value)}
         />
         {dialog.mode === 'edit' ? (
-          <p className="text-xs text-muted">{t('templates.immutable')}</p>
+          <p className="text-xs text-fg-muted">{t('templates.immutable')}</p>
         ) : null}
         {dialog.mode === 'create' ? (
           <Select
@@ -420,7 +470,7 @@ function TemplateDialog({
             ]}
           />
         ) : (
-          <p className="text-sm">
+          <p className="text-sm text-fg-muted">
             {t('templates.typeIs', { type: typeName(source?.ci_type_id ?? '') })}
           </p>
         )}
@@ -443,18 +493,18 @@ function TemplateDialog({
           onChange={(e) => setDescription(e.target.value)}
         />
         {dialog.mode === 'edit' ? (
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-fg">
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             {t('templates.active')}
           </label>
         ) : null}
         {mutation.error && (otherErrors.length > 0 || Object.keys(errors).length === 0) ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {t('templates.notSaved', { reason: describeFlagRefusal(mutation.error, t) })}
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
           <Button
@@ -516,22 +566,41 @@ function TemplateDetail({ id }: { id: string }) {
 
   if (notFound(template.error)) {
     return (
-      <div className="space-y-2">
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('templates.notFound')}</p>
-        <Link to="/ci-types/templates" className="text-sm text-primary hover:underline">
-          {t('templates.back')}
-        </Link>
+      <div className="space-y-6">
+        <TemplatesHeader />
+        <MetamodelTabs />
+        <EmptyState
+          icon={<FileText />}
+          title={t('templates.notFound')}
+          action={
+            <Button variant="secondary" asChild>
+              <Link to="/ci-types/templates">{t('templates.back')}</Link>
+            </Button>
+          }
+        />
       </div>
     );
   }
-  if (template.isLoading) return <SkeletonList rows={3} label={t('app.loading')} />;
+  if (template.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-16 w-full max-w-lg" />
+        <MetamodelTabs />
+        <SkeletonList rows={3} label={t('app.loading')} />
+      </div>
+    );
+  }
   if (template.error || !template.data) {
     return (
-      <ErrorState
-        title={t('app.error')}
-        retryLabel={t('common.retry')}
-        onRetry={() => void template.refetch()}
-      />
+      <div className="space-y-6">
+        <TemplatesHeader />
+        <MetamodelTabs />
+        <ErrorState
+          title={t('app.error')}
+          retryLabel={t('common.retry')}
+          onRetry={() => void template.refetch()}
+        />
+      </div>
     );
   }
 
@@ -564,48 +633,33 @@ function TemplateDetail({ id }: { id: string }) {
   );
 
   return (
-    <div className="space-y-4">
-      <Link to="/ci-types/templates" className="text-sm text-primary hover:underline">
-        {t('templates.back')}
-      </Link>
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h3 className="flex flex-wrap items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {name}
-              {tpl.is_system ? <Badge variant="info">{t('templates.system')}</Badge> : null}
-              {!tpl.is_active ? <Badge variant="neutral">{t('templates.inactive')}</Badge> : null}
-              {templateChange ? <DraftMarker change={templateChange} /> : null}
-            </h3>
-            <p className="text-xs text-muted">
-              {t('templates.detailMeta', {
-                key: tpl.key,
-                type: nameOf(tpl.ci_type_id),
-                version:
-                  tpl.current_version != null
-                    ? t('templates.versionShort', { version: tpl.current_version })
-                    : t('templates.unpublished'),
-              })}
-            </p>
-            {tpl.description ? (
-              <p className="text-sm text-gray-700 dark:text-gray-300">{tpl.description}</p>
-            ) : null}
-            {tpl.is_system ? (
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                {t('templates.systemReadOnly')}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap gap-2">
+    <div className="space-y-6">
+      <PageHeader
+        breadcrumbs={[
+          { label: t('citypes.title'), to: '/ci-types' },
+          { label: t('templates.tabs.templates'), to: '/ci-types/templates' },
+          { label: name },
+        ]}
+        title={name}
+        meta={
+          <>
+            {tpl.is_system ? <Badge variant="info">{t('templates.system')}</Badge> : null}
+            {!tpl.is_active ? <Badge variant="neutral">{t('templates.inactive')}</Badge> : null}
+            {templateChange ? <DraftMarker change={templateChange} /> : null}
+          </>
+        }
+        description={tpl.description || undefined}
+        actions={
+          <>
             {canManage && tpl.current_version != null ? (
-              <Button size="sm" variant="secondary" onClick={() => setConfirm('migrate')}>
+              <Button variant="secondary" icon={<Rocket />} onClick={() => setConfirm('migrate')}>
                 {t('templates.migrate.open')}
               </Button>
             ) : null}
             {own && canManage ? (
               <Button
-                size="sm"
                 variant="secondary"
+                icon={<Plus />}
                 onClick={() => {
                   createVersion.reset();
                   setConfirm('version');
@@ -614,49 +668,94 @@ function TemplateDetail({ id }: { id: string }) {
                 {t('templates.newVersion')}
               </Button>
             ) : null}
-          </div>
+          </>
+        }
+      />
+      <MetamodelTabs />
+
+      <dl className="flex flex-wrap gap-x-10 gap-y-3 text-sm">
+        <div>
+          <dt className="text-xs text-fg-muted">{t('templates.key')}</dt>
+          <dd className="mt-0.5 font-mono text-xs text-fg">{tpl.key}</dd>
         </div>
-      </Card>
+        <div>
+          <dt className="text-xs text-fg-muted">{t('templates.ciType')}</dt>
+          <dd className="mt-0.5 font-medium text-fg">{nameOf(tpl.ci_type_id)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-fg-muted">{t('templates.currentVersion')}</dt>
+          <dd className="mt-0.5">
+            {tpl.current_version != null ? (
+              <Badge variant="success">
+                {t('templates.versionShort', { version: tpl.current_version })}
+              </Badge>
+            ) : (
+              <Badge variant="neutral">{t('templates.unpublished')}</Badge>
+            )}
+          </dd>
+        </div>
+      </dl>
+      {tpl.is_system ? (
+        <p role="note" className="text-sm text-fg-muted">
+          {t('templates.systemReadOnly')}
+        </p>
+      ) : null}
 
       <Card>
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {t('templates.versions')}
-        </h3>
-        {versions.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h3 className="text-base font-semibold text-fg">{t('templates.versions')}</h3>
+          {version?.status === 'draft' && own ? (
+            <div className="flex flex-wrap items-center gap-3">
+              {!canPublish ? (
+                <span className="text-xs text-fg-muted">
+                  {t('templates.publishNeedsPermission')}
+                </span>
+              ) : null}
+              <Button
+                variant="secondary"
+                icon={<Rocket />}
+                disabled={!canPublish || publish.isPending}
+                onClick={() => {
+                  publish.reset();
+                  setConfirm('publish');
+                }}
+              >
+                {t('templates.publish', { version: version.version })}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+        {versions.isLoading ? (
+          <SkeletonList rows={2} label={t('app.loading')} className="mt-3" />
+        ) : null}
         {versions.error ? (
           <ErrorState
+            className="mt-3"
             title={t('app.error')}
             retryLabel={t('common.retry')}
             onRetry={() => void versions.refetch()}
           />
         ) : null}
         {versions.isSuccess && list.length === 0 && newVersions.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">{t('templates.noVersions')}</p>
+          <p className="mt-2 text-sm text-fg-muted">{t('templates.noVersions')}</p>
         ) : null}
         {list.length > 0 ? (
-          <ul aria-label={t('templates.versions')} className="mt-2 flex flex-wrap gap-2">
+          <ul aria-label={t('templates.versions')} className="mt-3 flex flex-wrap gap-2">
             {list.map((v) => (
               <li key={v.id}>
                 <button
                   type="button"
                   aria-pressed={v.version === version?.version}
                   onClick={() => setSelected(v.version)}
-                  className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium text-fg transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent',
                     v.version === version?.version
-                      ? 'border-primary'
-                      : 'border-gray-200 dark:border-gray-700'
-                  }`}
+                      ? 'border-accent bg-accent-soft'
+                      : 'border-line hover:border-line-strong hover:bg-fg/[0.04]',
+                  )}
                 >
                   {t('templates.versionShort', { version: v.version })}
-                  <Badge
-                    variant={
-                      v.status === 'draft'
-                        ? 'info'
-                        : v.status === 'published'
-                          ? 'success'
-                          : 'neutral'
-                    }
-                  >
+                  <Badge variant={VERSION_STATUS_VARIANT[v.status]}>
                     {t(`templates.versionStatuses.${v.status}`)}
                   </Badge>
                   <VersionDraftMarker
@@ -673,7 +772,7 @@ function TemplateDetail({ id }: { id: string }) {
               <li
                 key={item.id}
                 data-draft-item={item.id}
-                className="flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-1.5 text-sm dark:border-gray-600"
+                className="flex items-center gap-2 rounded-lg border border-dashed border-line-strong px-3 py-1.5 text-sm text-fg"
               >
                 {t('metamodelDrafts.newVersion')}
                 <DraftMarker change="created" />
@@ -684,31 +783,14 @@ function TemplateDetail({ id }: { id: string }) {
       </Card>
 
       {version ? (
-        <div className="space-y-2">
-          {version.status === 'draft' && own ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                disabled={!canPublish || publish.isPending}
-                onClick={() => {
-                  publish.reset();
-                  setConfirm('publish');
-                }}
-              >
-                {t('templates.publish', { version: version.version })}
-              </Button>
-              {!canPublish ? (
-                <span className="text-xs text-muted">{t('templates.publishNeedsPermission')}</span>
-              ) : null}
-            </div>
-          ) : null}
+        <div className="space-y-3">
           {publishGeneral ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm text-danger">
               {t('templates.publishFailed', { reason: publishGeneral })}
             </p>
           ) : null}
           {Object.keys(itemErrors).length > 0 ? (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="text-sm text-danger">
               {t('templates.publishConflict')}
             </p>
           ) : null}
@@ -725,10 +807,11 @@ function TemplateDetail({ id }: { id: string }) {
 
       {list.length > 1 ? (
         <Card>
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-fg">
+            <GitCompare aria-hidden="true" className="h-4 w-4 text-fg-muted" />
             {t('templates.compare')}
           </h3>
-          <div className="mt-2 flex flex-wrap gap-3">
+          <Toolbar className="mt-3 items-end">
             <div className="min-w-[10rem]">
               <Select
                 label={t('templates.compareFrom')}
@@ -745,8 +828,8 @@ function TemplateDetail({ id }: { id: string }) {
                 options={versionOptions}
               />
             </div>
-          </div>
-          <div className="mt-3">
+          </Toolbar>
+          <div className="mt-4">
             <MetamodelDiff
               caption={t('templates.compareCaption', { from: fromVersion, to: toVersion })}
               before={diffEntriesOf(list.find((v) => v.version === fromVersion))}
@@ -780,12 +863,12 @@ function TemplateDetail({ id }: { id: string }) {
         })}
       >
         {createVersion.error ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mb-3 text-sm text-danger">
             {t('templates.notSaved', { reason: describeFlagRefusal(createVersion.error, t) })}
           </p>
         ) : null}
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirm(null)}>
+          <Button variant="secondary" onClick={() => setConfirm(null)}>
             {t('common.cancel')}
           </Button>
           <Button
@@ -816,7 +899,7 @@ function TemplateDetail({ id }: { id: string }) {
         }
       >
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirm(null)}>
+          <Button variant="secondary" onClick={() => setConfirm(null)}>
             {t('common.cancel')}
           </Button>
           <Button

@@ -115,7 +115,7 @@ describe('InventoryPage movements', () => {
     fireEvent.change(within(dialog).getByLabelText('Asset-ID (serialisiert)'), {
       target: { value: ASSET },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Bewegung erfassen' }));
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ asset_id: ASSET, movement_type: 'transfer' });
 
@@ -131,7 +131,7 @@ describe('InventoryPage movements', () => {
       target: { value: ITEM },
     });
     fireEvent.change(within(second).getByLabelText('Menge'), { target: { value: '3' } });
-    fireEvent.click(within(second).getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(within(second).getByRole('button', { name: 'Bewegung erfassen' }));
     await waitFor(() => expect(posts).toHaveLength(2));
     expect(posts[1]).toEqual({ quantity_item_id: ITEM, quantity: 3, movement_type: 'retrieval' });
   });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { AuthCard } from '../../components/shell/AuthCard';
 import {
   AuthCallbackError,
   clearAuthTransaction,
@@ -46,21 +47,23 @@ export function CallbackPage() {
   }, [location.search, navigate, t]);
 
   return (
-    <section className="mx-auto flex min-h-[60vh] max-w-md flex-col justify-center text-center">
-      <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-50">
-          {t('auth.callbackTitle')}
-        </h2>
-        {error ? (
-          <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-            {error}
-          </p>
-        ) : (
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-            {t('auth.callbackProgress')}
-          </p>
-        )}
-      </div>
-    </section>
+    <AuthCard title={t('auth.callbackTitle')}>
+      {error ? (
+        <p
+          role="alert"
+          className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
+        >
+          {error}
+        </p>
+      ) : (
+        <p role="status" className="mt-2 flex items-center gap-2.5 text-sm text-fg-muted">
+          <span
+            aria-hidden="true"
+            className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
+          />
+          {t('auth.callbackProgress')}
+        </p>
+      )}
+    </AuthCard>
   );
 }

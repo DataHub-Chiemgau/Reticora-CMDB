@@ -6,6 +6,7 @@
  * job's partial report, F-347). The list refreshes while a job is active and
  * after a cancel until the partial report is there.
  */
+import { ListChecks } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
@@ -16,8 +17,19 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 import {
   JOB_STATUSES,
   isCancellable,
@@ -107,23 +119,27 @@ export function JobCenterPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('jobs.title')}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('jobs.subtitle')}</p>
-      </div>
+      <PageHeader title={t('jobs.title')} description={t('jobs.subtitle')} />
 
-      <Card>
+      <Toolbar>
         <Select
-          label={t('jobs.status')}
+          aria-label={t('jobs.status')}
           value={status}
           onChange={(event) => setStatus(event.target.value)}
-          className="max-w-xs"
+          className="w-44"
           options={[
             { value: '', label: t('jobs.allStatuses') },
             ...JOB_STATUSES.map((value) => ({ value, label: t(`jobs.statuses.${value}`) })),
           ]}
         />
-      </Card>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
       {error ? (
@@ -134,86 +150,110 @@ export function JobCenterPage() {
           onRetry={() => void refetch()}
         />
       ) : null}
-      {data && jobs.length === 0 ? <EmptyState title={t('jobs.empty')} /> : null}
-      {cancelError ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {cancelError}
-        </p>
+      {data && jobs.length === 0 ? (
+        <EmptyState
+          icon={<ListChecks />}
+          title={t('jobs.empty')}
+          description={t('jobs.emptyHint')}
+        />
       ) : null}
+      {cancelError ? <ErrorState title={cancelError} /> : null}
       {cancel.isSuccess ? (
-        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {t('jobs.cancelDone')}
         </p>
       ) : null}
 
       {jobs.length > 0 ? (
-        <Card>
+        <Card className="overflow-hidden p-0">
           <ScrollRegion label={t('jobs.title')}>
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-muted">
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
                 <tr>
-                  <th className="pb-2">{t('jobs.kind')}</th>
-                  <th className="pb-2">{t('jobs.status')}</th>
-                  <th className="pb-2">{t('jobs.progress')}</th>
-                  <th className="pb-2">{t('jobs.created')}</th>
-                  <th className="pb-2">{t('common.actions')}</th>
+                  <th scope="col" className={thClasses}>
+                    {t('jobs.kind')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('jobs.status')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('jobs.progress')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('jobs.created')}
+                  </th>
+                  <th scope="col" className={`${thClasses} text-right`}>
+                    {t('common.actions')}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              <tbody>
                 {jobs.map((job) => {
                   const counts = job.status === 'cancelled' ? reportCounts(job.result) : undefined;
                   return (
-                    <tr key={job.id} data-job-id={job.id}>
-                      <td className="py-2 font-mono text-xs">
+                    <tr key={job.id} data-job-id={job.id} className={trClasses}>
+                      <td className={`${tdMonoClasses} font-medium`}>
                         {t(`jobs.kinds.${job.kind}`, job.kind)}
                       </td>
-                      <td className="py-2">
+                      <td className={tdClasses}>
                         <Badge variant={statusVariant[job.status] ?? 'neutral'}>
                           {t(`jobs.statuses.${job.status}`, job.status)}
                         </Badge>
                         {job.error ? <p className="mt-1 text-xs text-danger">{job.error}</p> : null}
                         {counts ? (
-                          <p className="mt-1 text-xs text-gray-700 dark:text-gray-300">
+                          <p className="mt-1 text-xs text-fg-muted">
                             {t('jobs.partialReportSummary', { ...counts })}
                           </p>
                         ) : null}
                       </td>
-                      <td className="py-2">
-                        <div
-                          role="progressbar"
-                          aria-label={t('jobs.progressOf', { kind: job.kind })}
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-valuenow={job.progress}
-                          className="h-2 w-32 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
-                        >
+                      <td className={tdClasses}>
+                        <div className="flex items-center gap-2.5">
                           <div
-                            className="h-full bg-primary"
-                            style={{ width: `${job.progress}%` }}
-                          />
+                            role="progressbar"
+                            aria-label={t('jobs.progressOf', { kind: job.kind })}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={job.progress}
+                            className="h-1.5 w-28 overflow-hidden rounded-full bg-fg/10"
+                          >
+                            <div
+                              className={cn(
+                                'h-full rounded-full',
+                                job.status === 'failed'
+                                  ? 'bg-red-600 dark:bg-red-400'
+                                  : 'bg-accent',
+                              )}
+                              style={{ width: `${job.progress}%` }}
+                            />
+                          </div>
+                          <span className="w-9 text-right text-xs tabular-nums">
+                            {job.progress}%
+                          </span>
                         </div>
                       </td>
-                      <td className="py-2 text-xs">
+                      <td className={`${tdClasses} whitespace-nowrap tabular-nums`}>
                         <time dateTime={job.created_at}>
                           {new Date(job.created_at).toLocaleString(i18n.language)}
                         </time>
                       </td>
-                      <td className="py-2">
-                        {isCancellable(job) && mayControl(job) ? (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={cancel.isPending}
-                            onClick={() => cancelJob(job)}
-                          >
-                            {t('jobs.cancel')}
-                          </Button>
-                        ) : null}
-                        {hasResult(job) ? (
-                          <Button size="sm" variant="ghost" onClick={() => setResultId(job.id)}>
-                            {t(job.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
-                          </Button>
-                        ) : null}
+                      <td className={tdClasses}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isCancellable(job) && mayControl(job) ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={cancel.isPending}
+                              onClick={() => cancelJob(job)}
+                            >
+                              {t('jobs.cancel')}
+                            </Button>
+                          ) : null}
+                          {hasResult(job) ? (
+                            <Button size="sm" variant="ghost" onClick={() => setResultId(job.id)}>
+                              {t(job.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
+                            </Button>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -231,7 +271,7 @@ export function JobCenterPage() {
         }}
         title={t(shown?.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
       >
-        <pre className="max-h-96 overflow-auto rounded bg-gray-50 p-3 text-xs dark:bg-gray-800">
+        <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-fg">
           {JSON.stringify(shown?.result, null, 2)}
         </pre>
       </Modal>

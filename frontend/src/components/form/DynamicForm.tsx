@@ -8,6 +8,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
+import { Textarea } from '../ui/Textarea';
 import {
   evaluateField,
   validateValue,
@@ -66,23 +67,23 @@ export function DynamicForm({
   return (
     <div className="space-y-6">
       {Array.from(groups.entries()).map(([group, rendered]) => (
-        <fieldset key={group || '_default'} className="space-y-4">
+        <fieldset key={group || '_default'} className="min-w-0">
           {group ? (
-            <legend className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {group}
-            </legend>
+            <legend className="mb-3 text-sm font-medium text-fg-muted">{group}</legend>
           ) : null}
-          {rendered.map(({ def, state }) => (
-            <DynamicField
-              key={def.name}
-              def={def}
-              state={state}
-              value={values[def.name]}
-              error={errorText(errors[def.name])}
-              options={referenceOptions[def.name]}
-              onChange={(v) => onChange(def.name, v)}
-            />
-          ))}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {rendered.map(({ def, state }) => (
+              <DynamicField
+                key={def.name}
+                def={def}
+                state={state}
+                value={values[def.name]}
+                error={errorText(errors[def.name])}
+                options={referenceOptions[def.name]}
+                onChange={(v) => onChange(def.name, v)}
+              />
+            ))}
+          </div>
         </fieldset>
       ))}
     </div>
@@ -98,7 +99,18 @@ interface DynamicFieldProps {
   onChange: (value: unknown) => void;
 }
 
-function DynamicField({ def, state, value, error, options, onChange }: DynamicFieldProps) {
+/** Long-form controls take the full row; the others sit two to a row. */
+const WIDE_TYPES = new Set(['multiline', 'textarea', 'json']);
+
+function DynamicField(props: DynamicFieldProps) {
+  return (
+    <div className={WIDE_TYPES.has(props.def.data_type) ? 'min-w-0 sm:col-span-2' : 'min-w-0'}>
+      <DynamicFieldControl {...props} />
+    </div>
+  );
+}
+
+function DynamicFieldControl({ def, state, value, error, options, onChange }: DynamicFieldProps) {
   const label = (def.label || def.name) + (state.required ? ' *' : '');
   const common = {
     label,
@@ -114,30 +126,21 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
     case 'multiline':
     case 'textarea':
       return (
-        <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-            {label}
-          </label>
-          <textarea
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            value={textValue}
-            disabled={state.readOnly}
-            required={state.required}
-            rows={3}
-            onChange={(e) => onChange(e.target.value)}
-          />
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-        </div>
+        <Textarea
+          {...common}
+          rows={3}
+          value={textValue}
+          onChange={(e) => onChange(e.target.value)}
+        />
       );
     case 'boolean':
       return (
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+        <label className="flex min-h-9 items-center gap-2 text-sm text-fg sm:mt-[1.625rem]">
           <input
             type="checkbox"
             checked={value === true}
             disabled={state.readOnly}
             onChange={(e) => onChange(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300"
           />
           {label}
         </label>
@@ -198,31 +201,27 @@ function DynamicField({ def, state, value, error, options, onChange }: DynamicFi
       );
     case 'json':
       return (
-        <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-            {label}
-          </label>
-          <textarea
-            className="w-full rounded-lg border border-gray-300 bg-white font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
-            rows={4}
-            value={
-              typeof value === 'string'
-                ? value
-                : value === undefined
-                  ? ''
-                  : JSON.stringify(value, null, 2)
+        <Textarea
+          label={label}
+          error={error ?? undefined}
+          className="font-mono text-xs"
+          rows={4}
+          value={
+            typeof value === 'string'
+              ? value
+              : value === undefined
+                ? ''
+                : JSON.stringify(value, null, 2)
+          }
+          disabled={state.readOnly}
+          onChange={(e) => {
+            try {
+              onChange(JSON.parse(e.target.value));
+            } catch {
+              onChange(e.target.value);
             }
-            disabled={state.readOnly}
-            onChange={(e) => {
-              try {
-                onChange(JSON.parse(e.target.value));
-              } catch {
-                onChange(e.target.value);
-              }
-            }}
-          />
-          {error ? <p className="text-sm text-danger">{error}</p> : null}
-        </div>
+          }}
+        />
       );
     default:
       // text, ip, mac, url, email, file, multi_enum-as-text fallback.

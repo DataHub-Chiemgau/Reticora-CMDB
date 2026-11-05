@@ -1,12 +1,17 @@
+import { ArrowRight, MapPin } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { siteApi } from '../api/client';
 import type { Site } from '../api/client';
-import { Card } from '../components/ui/Card';
-import { Skeleton } from '../components/ui/Skeleton';
+import { Panel } from '../components/spatial/Panel';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Skeleton } from '../components/ui/Skeleton';
 
 /**
  * MapPage renders a dependency-free SVG world map (equirectangular
@@ -49,7 +54,20 @@ function project(
   return { x, y };
 }
 
-function SiteMarker({ site, onOpen }: { site: Site; onOpen: (id: string) => void }) {
+// A graticule every 10 % of the width/height: structure that makes the
+// position of a marker readable without a real basemap.
+const GRATICULE_X = [10, 20, 30, 40, 50, 60, 70, 80, 90];
+const GRATICULE_Y = [10, 20, 30, 40];
+
+function SiteMarker({
+  site,
+  selected,
+  onOpen,
+}: {
+  site: Site;
+  selected: boolean;
+  onOpen: (id: string) => void;
+}) {
   if (site.geo_lat == null || site.geo_lon == null) return null;
   const { x, y } = project(site.geo_lat, site.geo_lon, 100, 50);
   return (
@@ -57,6 +75,7 @@ function SiteMarker({ site, onOpen }: { site: Site; onOpen: (id: string) => void
       role="button"
       tabIndex={0}
       aria-label={site.name}
+      aria-pressed={selected}
       onClick={() => onOpen(site.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -67,14 +86,23 @@ function SiteMarker({ site, onOpen }: { site: Site; onOpen: (id: string) => void
       }}
       className="group cursor-pointer focus:outline-none"
     >
-      <circle cx={x} cy={y} r={1.6} className="fill-primary opacity-90" />
-      <circle cx={x} cy={y} r={3.2} className="fill-primary opacity-20" />
+      <circle
+        cx={x}
+        cy={y}
+        r={3.2}
+        className={
+          selected
+            ? 'fill-accent opacity-30'
+            : 'fill-accent opacity-15 transition-opacity group-hover:opacity-30'
+        }
+      />
+      <circle cx={x} cy={y} r={1.4} strokeWidth={0.5} className="fill-accent stroke-panel" />
       <circle
         cx={x}
         cy={y}
         r={4.2}
-        strokeWidth={0.6}
-        className="fill-none stroke-gray-900 opacity-0 group-focus-visible:opacity-100 dark:stroke-gray-100"
+        strokeWidth={0.5}
+        className="fill-none stroke-fg opacity-0 group-focus-visible:opacity-100"
       />
       <title>{site.name}</title>
     </g>
@@ -86,7 +114,7 @@ export function MapPage() {
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Site | null>(null);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['sites', 'map'],
     // Every site, page by page: the API answers at most 200 per page (F-362).
     queryFn: () => siteApi.listAll(),
@@ -102,85 +130,141 @@ export function MapPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.map', 'Karte')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('map.summary', 'Standorte auf der Karte. Marker öffnen den Standort.')}
-          </p>
-        </div>
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {withGeo.length} {t('map.located', 'lokalisiert')} · {withoutGeo.length}{' '}
-          {t('map.unlocated', 'ohne Koordinaten')}
-        </span>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={t('nav.map', 'Karte')}
+        description={t('map.summary', 'Standorte auf der Karte. Marker öffnen den Standort.')}
+        meta={
+          data ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <Badge variant="neutral">
+                {withGeo.length} {t('map.located', 'lokalisiert')}
+              </Badge>
+              <Badge variant="neutral">
+                {withoutGeo.length} {t('map.unlocated', 'ohne Koordinaten')}
+              </Badge>
+            </span>
+          ) : null
+        }
+      />
 
       {isLoading ? (
         <Skeleton className="h-96 w-full" />
       ) : error ? (
-        <ErrorState title={t('app.error')} />
+        <ErrorState
+          title={t('app.error')}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : sites.length === 0 ? (
+        <EmptyState
+          icon={<MapPin />}
+          title={t('map.empty')}
+          description={t('map.emptyHint')}
+          action={
+            <Button asChild variant="secondary">
+              <Link to="/locations">{t('nav.locations')}</Link>
+            </Button>
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Card className="lg:col-span-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="min-w-0 overflow-hidden rounded-xl border border-line bg-panel">
             <svg
               viewBox="0 0 100 50"
               role="group"
               aria-label={t('map.worldAria', 'Weltkarte mit Standortmarkern')}
-              className="h-auto w-full rounded-lg bg-blue-50 dark:bg-gray-900"
+              className="block h-auto w-full"
             >
-              {LANDMASSES.map((d, i) => (
-                <path key={i} d={d} className="fill-gray-300 dark:fill-gray-700" />
+              {GRATICULE_X.map((x) => (
+                <line
+                  key={`x${x}`}
+                  x1={x}
+                  y1={0}
+                  x2={x}
+                  y2={50}
+                  strokeWidth={0.1}
+                  className="stroke-line"
+                />
               ))}
+              {GRATICULE_Y.map((y) => (
+                <line
+                  key={`y${y}`}
+                  x1={0}
+                  y1={y}
+                  x2={100}
+                  y2={y}
+                  strokeWidth={0.1}
+                  className="stroke-line"
+                />
+              ))}
+              {/* The outlines are drawn on a 100 x 100 grid: squeeze them into the 2:1 map. */}
+              <g transform="scale(1 0.5)">
+                {LANDMASSES.map((d, i) => (
+                  <path
+                    key={i}
+                    d={d}
+                    strokeWidth={1}
+                    strokeLinejoin="round"
+                    className="fill-fg/10 stroke-line-strong [vector-effect:non-scaling-stroke]"
+                  />
+                ))}
+              </g>
               {withGeo.map((site) => (
-                <SiteMarker key={site.id} site={site} onOpen={openSite} />
+                <SiteMarker
+                  key={site.id}
+                  site={site}
+                  selected={selected?.id === site.id}
+                  onOpen={openSite}
+                />
               ))}
             </svg>
-          </Card>
+          </div>
 
-          <div className="space-y-3">
+          <div className="min-w-0 space-y-4">
             {selected ? (
-              <Card>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  {selected.name}
-                </h3>
+              <Panel
+                title={selected.name}
+                leading={<MapPin className="text-accent" />}
+                onClose={() => setSelected(null)}
+                closeLabel={t('accessibility.closePanel')}
+              >
                 {selected.address ? (
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                    {selected.address}
-                  </p>
+                  <p className="text-sm text-fg-muted">{selected.address}</p>
                 ) : null}
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                <p className="mt-1 font-mono text-xs text-fg-muted">
                   {selected.geo_lat?.toFixed(4)}, {selected.geo_lon?.toFixed(4)}
                 </p>
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3"
+                  iconAfter={<ArrowRight />}
                   onClick={() => navigate(`/cmdb?site_id=${selected.id}`)}
-                  className="mt-3 text-sm font-medium text-primary hover:underline"
                 >
-                  {t('map.openSite', 'Standort-CIs anzeigen')} →
-                </button>
-              </Card>
+                  {t('map.openSite', 'Standort-CIs anzeigen')}
+                </Button>
+              </Panel>
             ) : (
-              <Card>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {t('map.hint', 'Wählen Sie einen Marker, um Details zu sehen.')}
-                </p>
-              </Card>
+              <p className="rounded-xl border border-dashed border-line-strong px-4 py-6 text-center text-sm text-fg-muted">
+                {t('map.hint', 'Wählen Sie einen Marker, um Details zu sehen.')}
+              </p>
             )}
 
             {withoutGeo.length > 0 ? (
-              <Card>
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  {t('map.noCoords', 'Ohne Koordinaten')}
-                </h4>
-                <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              <Panel
+                title={t('map.noCoords', 'Ohne Koordinaten')}
+                actions={<Badge variant="neutral">{withoutGeo.length}</Badge>}
+                padded={false}
+              >
+                <ul className="max-h-72 divide-y divide-line overflow-y-auto text-sm text-fg">
                   {withoutGeo.map((s) => (
-                    <li key={s.id}>{s.name}</li>
+                    <li key={s.id} className="px-4 py-2">
+                      {s.name}
+                    </li>
                   ))}
                 </ul>
-              </Card>
+              </Panel>
             ) : null}
           </div>
         </div>

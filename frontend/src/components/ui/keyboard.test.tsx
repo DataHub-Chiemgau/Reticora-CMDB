@@ -110,8 +110,9 @@ describe('Modal keyboard operation', () => {
     renderWithProviders(<ModalHarness />);
     fireEvent.click(screen.getByRole('button', { name: 'open dialog' }));
     const dialog = await screen.findByRole('dialog');
+    // The close button is an icon: it is named by its label alone.
     const close = Array.from(dialog.querySelectorAll('button')).find(
-      (b) => b.getAttribute('aria-label') && b.textContent === '✕',
+      (b) => b.getAttribute('aria-label') && !b.textContent,
     );
     expect(close).toBeDefined();
     expect(close?.tabIndex).not.toBe(-1);

@@ -81,11 +81,9 @@ function local(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** windowCard is the card of the maintenance page that shows the window `title`. */
+/** windowCard is the table row of the maintenance page that shows the window `title`. */
 function windowCard(page: Page, title: string) {
-  return page
-    .locator('#main-content section')
-    .filter({ has: page.getByRole('heading', { name: title, exact: true }) });
+  return page.locator('#main-content').getByRole('row').filter({ hasText: title });
 }
 
 /** storedNotifications reads the notifications of one window from the stack database. */
@@ -196,7 +194,8 @@ test.describe('maintenance announcement (MGT-04, NTF-05, NFR-04)', () => {
     await page.reload();
     const reloaded = windowCard(page, title);
     await reloaded.getByRole('button', { name: 'Benachrichtigungen', exact: true }).click();
-    const notifications = reloaded.getByTestId('maintenance-notification');
+    // The notifications open in the detail row below the window's row.
+    const notifications = page.getByTestId('maintenance-notification');
     await expect(notifications).toHaveCount(2);
     for (const client of w.clients) {
       const row = notifications.filter({ hasText: client.name });
@@ -230,7 +229,7 @@ test.describe('maintenance announcement (MGT-04, NTF-05, NFR-04)', () => {
     await page.reload();
     const final = windowCard(page, title);
     await final.getByRole('button', { name: 'Benachrichtigungen', exact: true }).click();
-    await expect(final.getByTestId('maintenance-notification')).toHaveCount(2);
+    await expect(page.getByTestId('maintenance-notification')).toHaveCount(2);
   });
 
   test('M2 a principal of organization B does not see the window of organization A', async () => {

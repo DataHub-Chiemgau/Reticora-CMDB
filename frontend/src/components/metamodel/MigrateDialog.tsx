@@ -26,9 +26,22 @@ import { useSavedViews, useStartTemplateMigration, useTemplateVersions } from '.
 import { ApiError } from '../../api/client';
 import type { components } from '../../api/generated/schema';
 import { isActive, useJob, useJobResult } from '../../hooks/useJobs';
+import { ScrollRegion } from '../ScrollRegion';
 import { Button } from '../ui/Button';
+import { Card } from '../ui/Card';
 import { Modal } from '../ui/Modal';
 import { Select } from '../ui/Select';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../ui/table';
+import { Textarea } from '../ui/Textarea';
+import { cn } from '../ui/utils';
 
 type FilterExpr = components['schemas']['FilterExpr'];
 
@@ -71,6 +84,7 @@ export function MigrateDialog({ template, open, onClose, ...rest }: MigrateDialo
       onOpenChange={(next) => (next ? undefined : onClose())}
       title={t('templates.migrate.title', { name })}
       description={t('templates.migrate.description')}
+      size="lg"
     >
       {open ? <MigrateForm template={template} onClose={onClose} {...rest} /> : null}
     </Modal>
@@ -193,16 +207,16 @@ function MigrateForm({
         </div>
 
         {ciIds ? (
-          <p className="text-sm text-gray-700 dark:text-gray-300">
+          <p className="text-sm text-fg-muted">
             {t('templates.migrate.fixedSelection', { count: ciIds.length })}
           </p>
         ) : (
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            <legend className="text-sm font-medium text-fg">
               {t('templates.migrate.selection')}
             </legend>
             {MIGRATION_MODES.map((value) => (
-              <label key={value} className="flex items-center gap-2 text-sm">
+              <label key={value} className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="radio"
                   name="migrate-mode"
@@ -215,14 +229,16 @@ function MigrateForm({
             ))}
             {mode === 'view' ? (
               <fieldset className="ml-6 space-y-1">
-                <legend className="text-xs text-muted">{t('templates.migrate.viewLegend')}</legend>
+                <legend className="text-xs text-fg-muted">
+                  {t('templates.migrate.viewLegend')}
+                </legend>
                 {ciViews.length === 0 ? (
-                  <p className="text-xs text-muted">{t('templates.migrate.noViews')}</p>
+                  <p className="text-xs text-fg-muted">{t('templates.migrate.noViews')}</p>
                 ) : null}
                 {ciViews.map((view) => {
                   const usable = !!whereOf(view.filter_spec);
                   return (
-                    <label key={view.id} className="flex items-center gap-2 text-sm">
+                    <label key={view.id} className="flex items-center gap-2 text-sm text-fg">
                       <input
                         type="radio"
                         name="migrate-view"
@@ -233,7 +249,7 @@ function MigrateForm({
                       />
                       {view.name}
                       {!usable ? (
-                        <span className="text-xs text-muted">
+                        <span className="text-xs text-fg-muted">
                           {t('templates.migrate.viewNoWhere')}
                         </span>
                       ) : null}
@@ -243,29 +259,27 @@ function MigrateForm({
               </fieldset>
             ) : null}
             {mode === 'ids' ? (
-              <div className="ml-6 space-y-1">
-                <label htmlFor="migrate-ids" className="block text-sm">
-                  {t('templates.migrate.idsLabel', { max: MIGRATION_MAX_IDS })}
-                </label>
-                <textarea
+              <div className="ml-6">
+                <Textarea
                   id="migrate-ids"
+                  label={t('templates.migrate.idsLabel', { max: MIGRATION_MAX_IDS })}
                   rows={3}
                   value={idsText}
                   onChange={(e) => setIdsText(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-mono text-xs dark:border-gray-700 dark:bg-gray-900"
+                  className="font-mono text-xs"
                 />
               </div>
             ) : null}
           </fieldset>
         )}
 
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm text-fg">
           <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} />
           {t('templates.migrate.dryRun')}
         </label>
 
         {localError ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {localError}
           </p>
         ) : null}
@@ -277,7 +291,11 @@ function MigrateForm({
           <Button type="button" variant="ghost" onClick={onClose}>
             {t('templates.migrate.close')}
           </Button>
-          <Button type="submit" disabled={start.isPending || versions.isLoading}>
+          <Button
+            type="submit"
+            variant={run ? 'secondary' : 'primary'}
+            disabled={start.isPending || versions.isLoading}
+          >
             {dryRun ? t('templates.migrate.startDryRun') : t('templates.migrate.start')}
           </Button>
         </div>
@@ -334,22 +352,22 @@ function MigrationRun({
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={job.data.progress}
-            className="h-2 w-32 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
+            className="h-2 w-32 overflow-hidden rounded-full bg-fg/10"
           >
-            <div className="h-full bg-primary" style={{ width: `${job.data.progress}%` }} />
+            <div className="h-full bg-accent" style={{ width: `${job.data.progress}%` }} />
           </div>
         ) : null}
-        <Link to="/jobs" className="text-primary hover:underline">
+        <Link to="/jobs" className="text-accent hover:underline underline-offset-2">
           {t('templates.migrate.jobsLink')}
         </Link>
       </div>
       {job.data?.status === 'failed' ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {t('templates.migrate.jobFailed', { error: job.data.error ?? '' })}
         </p>
       ) : null}
       {job.data?.status === 'cancelled' ? (
-        <p className="text-sm text-muted">{t('templates.migrate.jobCancelled')}</p>
+        <p className="text-sm text-fg-muted">{t('templates.migrate.jobCancelled')}</p>
       ) : null}
       {result.error ? (
         <ProblemNotice error={result.error} prefix={t('templates.migrate.reportFailed')} />
@@ -372,7 +390,7 @@ export function MigrationReport({ report }: { report: TemplateMigrationReport })
   const keys = (list: string[]) => (list.length > 0 ? list.join(', ') : '—');
   return (
     <div className="space-y-2">
-      <h4 className="text-sm font-semibold">
+      <h4 className="text-sm font-semibold text-fg">
         {report.dry_run ? t('templates.migrate.reportDryRun') : t('templates.migrate.report')}
       </h4>
       <dl
@@ -381,79 +399,90 @@ export function MigrationReport({ report }: { report: TemplateMigrationReport })
       >
         {TOTALS.map((key) => (
           <div key={key}>
-            <dt className="text-xs text-muted">{t(`templates.migrate.totalsFields.${key}`)}</dt>
-            <dd className="font-medium" data-total={key}>
+            <dt className="text-xs text-fg-muted">{t(`templates.migrate.totalsFields.${key}`)}</dt>
+            <dd className="font-medium tabular-nums text-fg" data-total={key}>
               {report.totals[key]}
             </dd>
           </div>
         ))}
       </dl>
       {report.items.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <caption className="sr-only">{t('templates.migrate.itemsCaption')}</caption>
-            <thead>
-              <tr>
-                <th scope="col" className="pb-1 pr-2">
-                  {t('templates.migrate.columns.ci')}
-                </th>
-                <th scope="col" className="pb-1 pr-2">
-                  {t('templates.migrate.columns.outcome')}
-                </th>
-                <th scope="col" className="pb-1 pr-2">
-                  {t('templates.migrate.columns.defaults')}
-                </th>
-                <th scope="col" className="pb-1 pr-2">
-                  {t('templates.migrate.columns.overridden')}
-                </th>
-                <th scope="col" className="pb-1 pr-2">
-                  {t('templates.migrate.columns.findings')}
-                </th>
-                <th scope="col" className="pb-1">
-                  {t('templates.migrate.columns.error')}
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-              {report.items.map((item) => (
-                <tr key={item.ci_id} data-ci-id={item.ci_id} className="align-top">
-                  <td className="py-1 pr-2 font-mono">
-                    <Link to={`/cmdb/${item.ci_id}`} className="text-primary hover:underline">
-                      {item.ci_id}
-                    </Link>
-                  </td>
-                  <td className="py-1 pr-2">{t(`templates.migrate.outcomes.${item.outcome}`)}</td>
-                  <td className="py-1 pr-2">{keys(item.defaults)}</td>
-                  <td className="py-1 pr-2">{keys(item.overridden)}</td>
-                  <td className="py-1 pr-2">
-                    {item.findings.length > 0 ? (
-                      <ul>
-                        {item.findings.map((f, i) => (
-                          <li key={`${f.field}-${i}`}>
-                            {f.field}: {f.detail}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td className="py-1">
-                    {item.error
-                      ? t('templates.migrate.errorText', {
-                          code: t(`templates.migrate.errorCodes.${item.error.code}`),
-                          field: item.error.field ?? '—',
-                          detail: item.error.detail,
-                        })
-                      : '—'}
-                  </td>
+        <Card className="overflow-hidden p-0">
+          <ScrollRegion label={t('templates.migrate.itemsCaption')}>
+            <table className={cn(tableClasses, 'text-xs')}>
+              <caption className="sr-only">{t('templates.migrate.itemsCaption')}</caption>
+              <thead className={theadClasses}>
+                <tr className="text-fg-muted">
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.ci')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.outcome')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.defaults')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.overridden')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.findings')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('templates.migrate.columns.error')}
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {report.items.map((item) => (
+                  <tr
+                    key={item.ci_id}
+                    data-ci-id={item.ci_id}
+                    className={cn(trClasses, 'align-top')}
+                  >
+                    <td className={cn(tdMonoClasses, 'py-2')}>
+                      <Link
+                        to={`/cmdb/${item.ci_id}`}
+                        className="text-accent hover:underline underline-offset-2"
+                      >
+                        {item.ci_id}
+                      </Link>
+                    </td>
+                    <td className={cn(tdPrimaryClasses, 'py-2 font-normal')}>
+                      {t(`templates.migrate.outcomes.${item.outcome}`)}
+                    </td>
+                    <td className={cn(tdClasses, 'py-2')}>{keys(item.defaults)}</td>
+                    <td className={cn(tdClasses, 'py-2')}>{keys(item.overridden)}</td>
+                    <td className={cn(tdClasses, 'py-2')}>
+                      {item.findings.length > 0 ? (
+                        <ul>
+                          {item.findings.map((f, i) => (
+                            <li key={`${f.field}-${i}`}>
+                              {f.field}: {f.detail}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className={cn(tdClasses, 'py-2')}>
+                      {item.error
+                        ? t('templates.migrate.errorText', {
+                            code: t(`templates.migrate.errorCodes.${item.error.code}`),
+                            field: item.error.field ?? '—',
+                            detail: item.error.detail,
+                          })
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
       ) : (
-        <p className="text-sm text-muted">{t('templates.migrate.noItems')}</p>
+        <p className="text-sm text-fg-muted">{t('templates.migrate.noItems')}</p>
       )}
       {report.truncated ? (
         <p className="text-sm text-amber-700 dark:text-amber-300">
@@ -483,7 +512,7 @@ export function ProblemNotice({
   return (
     <div
       role="alert"
-      className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+      className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
     >
       <p className="font-medium">{prefix}</p>
       <p>{api ? t('metamodelDrafts.problem.detail', { status: api.status, detail }) : detail}</p>

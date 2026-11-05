@@ -500,7 +500,7 @@ test.describe('Onboarding with a real collector: scope suggestion, credential bu
     // UI: the card of the collector lists the scope as enabled.
     await expect(
       collectorCard(page)
-        .locator('li')
+        .getByRole('row')
         .filter({ hasText: cidr })
         .getByText('Aktiv', { exact: true }),
     ).toBeVisible();
@@ -672,7 +672,7 @@ test.describe('Onboarding with a real collector: scope suggestion, credential bu
 
     // UI: the CI detail shows the discovered CI with its source.
     await page.goto(`/cmdb/${ci!.id}`);
-    await expect(page.getByRole('heading', { level: 2, name: ci!.name })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: ci!.name })).toBeVisible();
     await expect(detailValue(page, 'Quelle')).toHaveText('snmp');
 
     // COL-02: the fake saw the community of the scope's credential and no other secret.

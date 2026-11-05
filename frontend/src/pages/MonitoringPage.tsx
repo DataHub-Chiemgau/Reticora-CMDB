@@ -1,3 +1,4 @@
+import { BellRing, Play, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -13,8 +14,18 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
 import { ScrollRegion } from '../components/ScrollRegion';
 
 const severityVariants = {
@@ -51,18 +62,30 @@ export function MonitoringPage() {
     createAlert.mutate(form, { onSuccess: () => setForm(initialAlertForm) });
   };
 
+  const header = (
+    <PageHeader title={t('monitoring.title')} description={t('monitoring.subtitle')} />
+  );
+
   if (alerts.isLoading) {
-    return <SkeletonList rows={6} label={t('monitoring.loading')} />;
+    return (
+      <div className="space-y-4">
+        {header}
+        <SkeletonList rows={6} label={t('monitoring.loading')} />
+      </div>
+    );
   }
 
   if (alerts.isError) {
     return (
-      <ErrorState
-        title={t('monitoring.errorTitle')}
-        description={alerts.error.message}
-        retryLabel={t('common.retry')}
-        onRetry={() => alerts.refetch()}
-      />
+      <div className="space-y-4">
+        {header}
+        <ErrorState
+          title={t('monitoring.errorTitle')}
+          description={alerts.error.message}
+          retryLabel={t('common.retry')}
+          onRetry={() => alerts.refetch()}
+        />
+      </div>
     );
   }
 
@@ -70,12 +93,7 @@ export function MonitoringPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('monitoring.title')}
-        </h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('monitoring.subtitle')}</p>
-      </div>
+      {header}
 
       <Card title={t('monitoring.queryMetrics')}>
         <div className="grid gap-4 md:grid-cols-3 md:items-end">
@@ -90,6 +108,8 @@ export function MonitoringPage() {
             onChange={(event) => setCiId(event.target.value)}
           />
           <Button
+            variant="secondary"
+            icon={<Play />}
             onClick={() => setQuery({ name: metricName, ci_id: ciId })}
             disabled={!metricName}
           >
@@ -97,7 +117,7 @@ export function MonitoringPage() {
           </Button>
         </div>
         {points.isFetching ? (
-          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{t('monitoring.loading')}</p>
+          <p className="mt-4 text-sm text-fg-muted">{t('monitoring.loading')}</p>
         ) : points.data?.length ? (
           <div className="mt-4">
             <div
@@ -108,7 +128,7 @@ export function MonitoringPage() {
               {points.data.map((point) => (
                 <div
                   key={point.timestamp}
-                  className="flex-1 rounded-t bg-primary/70"
+                  className="flex-1 rounded-t-sm bg-accent/70"
                   style={{
                     height: `${maxValue > 0 ? Math.max((point.value / maxValue) * 100, 2) : 2}%`,
                   }}
@@ -116,7 +136,7 @@ export function MonitoringPage() {
                 />
               ))}
             </div>
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-2 text-xs text-fg-muted tabular-nums">
               {t('monitoring.points', { count: points.data.length })}
             </p>
           </div>
@@ -176,60 +196,85 @@ export function MonitoringPage() {
             }
           />
           <Button
+            icon={<Plus />}
             onClick={submitRule}
-            disabled={createAlert.isPending || !form.name || !form.metric_name}
+            loading={createAlert.isPending}
+            disabled={!form.name || !form.metric_name}
           >
             {t('common.save')}
           </Button>
         </div>
       </Card>
 
-      <Card title={`${t('monitoring.alertRules')} (${alerts.data?.length ?? 0})`}>
+      <section className="space-y-3" aria-labelledby="monitoring-rules">
+        <h2 id="monitoring-rules" className="text-base font-semibold text-fg">
+          {t('monitoring.alertRules')}{' '}
+          <span className="tabular-nums text-fg-muted">({alerts.data?.length ?? 0})</span>
+        </h2>
         {alerts.data?.length ? (
-          <ScrollRegion label={t('monitoring.alertRules')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('monitoring.ruleName')}</th>
-                  <th className="pb-2">{t('monitoring.metricName')}</th>
-                  <th className="pb-2">{t('monitoring.condition')}</th>
-                  <th className="pb-2">{t('monitoring.severity')}</th>
-                  <th className="pb-2">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {alerts.data.map((rule) => (
-                  <tr key={rule.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-medium">{rule.name}</td>
-                    <td className="py-2 font-mono text-xs">{rule.metric_name}</td>
-                    <td className="py-2">
-                      {rule.condition === 'gt' ? '>' : rule.condition === 'lt' ? '<' : '='}{' '}
-                      {rule.threshold} ({rule.duration})
-                    </td>
-                    <td className="py-2">
-                      <Badge variant={severityVariants[rule.severity] ?? 'neutral'}>
-                        {t(`monitoring.severity_${rule.severity}`)}
-                      </Badge>
-                    </td>
-                    <td className="py-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteAlert.mutate(rule.id)}
-                        disabled={deleteAlert.isPending}
-                      >
-                        {t('common.delete')}
-                      </Button>
-                    </td>
+          <Card className="overflow-hidden p-0">
+            <ScrollRegion label={t('monitoring.alertRules')}>
+              <table className={tableClasses}>
+                <thead className={theadClasses}>
+                  <tr>
+                    <th scope="col" className={thClasses}>
+                      {t('monitoring.ruleName')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('monitoring.metricName')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('monitoring.condition')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('monitoring.severity')}
+                    </th>
+                    <th scope="col" className={`${thClasses} text-right`}>
+                      {t('common.actions')}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollRegion>
+                </thead>
+                <tbody>
+                  {alerts.data.map((rule) => (
+                    <tr key={rule.id} className={trClasses}>
+                      <td className={tdPrimaryClasses}>{rule.name}</td>
+                      <td className={tdMonoClasses}>{rule.metric_name}</td>
+                      <td className={`${tdClasses} whitespace-nowrap font-mono text-xs`}>
+                        {rule.condition === 'gt' ? '>' : rule.condition === 'lt' ? '<' : '='}{' '}
+                        {rule.threshold} ({rule.duration})
+                      </td>
+                      <td className={tdClasses}>
+                        <Badge variant={severityVariants[rule.severity] ?? 'neutral'}>
+                          {t(`monitoring.severity_${rule.severity}`)}
+                        </Badge>
+                      </td>
+                      <td className={tdClasses}>
+                        <div className="flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-danger"
+                            onClick={() => deleteAlert.mutate(rule.id)}
+                            disabled={deleteAlert.isPending}
+                          >
+                            {t('common.delete')}
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          </Card>
         ) : (
-          <EmptyState title={t('monitoring.noAlerts')} description={t('monitoring.noAlertsHint')} />
+          <EmptyState
+            icon={<BellRing />}
+            title={t('monitoring.noAlerts')}
+            description={t('monitoring.noAlertsHint')}
+          />
         )}
-      </Card>
+      </section>
     </div>
   );
 }

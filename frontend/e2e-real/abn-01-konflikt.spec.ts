@@ -303,7 +303,7 @@ function storedReview(ci: CI, id: string): StoredReview {
 
 async function openCI(page: Page, ci: CI) {
   await page.goto(`/cmdb/${ci.id}`);
-  await expect(page.getByRole('heading', { level: 2, name: ci.name })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: ci.name })).toBeVisible();
 }
 
 /** detailValue is the value of a row of the overview card ("Modell", …). */
@@ -362,7 +362,7 @@ async function setOverrideUI(
 
 /** reviewEntry is the entry of an item in the review inbox list, named by its field. */
 function reviewEntry(page: Page, field: string) {
-  return page.locator('main ul li button', { hasText: field });
+  return page.locator('main tbody tr button', { hasText: field });
 }
 
 async function inboxFilter(page: Page, status: 'open' | 'resolved' | 'dismissed') {
@@ -376,8 +376,12 @@ async function openReview(page: Page, field: string, ciName: string) {
   await expect(entry).toHaveCount(1);
   await expect(entry).toContainText('Konflikt mit Override');
   await entry.click();
-  await expect(page.locator('main table thead th').nth(2)).toHaveText(ciName);
-  return page.locator('main table').locator('..');
+  // The inbox has two tables: the queue and, beside it, the comparison of the opened item.
+  const diff = page.locator('main table', {
+    has: page.getByRole('columnheader', { name: 'Beobachtet' }),
+  });
+  await expect(diff.locator('thead th').nth(2)).toHaveText(ciName);
+  return diff.locator('xpath=ancestor::section[1]');
 }
 
 // ─── The scenario ───────────────────────────────────────────────────────────
@@ -574,7 +578,7 @@ test('ABN-01 (e) with the frozen data: override, deviating discovery, override_c
   await test.step('3 override_conflict visible in the review inbox', async () => {
     await page.goto('/reviews');
     await inboxFilter(page, 'open');
-    await expect(page.locator('main ul li button')).toHaveCount(2);
+    await expect(page.locator('main tbody tr button')).toHaveCount(2);
     const detail = await openReview(page, ACCEPT.payload.field, first.name);
     const diff = detail.locator('tbody tr').filter({ hasText: ACCEPT.payload.field });
     await expect(diff.locator('td').nth(1)).toHaveText(ACCEPT.payload.observed);
@@ -672,9 +676,13 @@ test('ABN-01 (e) with the frozen data: override, deviating discovery, override_c
     await inboxFilter(page, 'open');
     await expect(page.getByText('Keine Review-Items')).toBeVisible();
     await inboxFilter(page, 'resolved');
-    await expect(reviewEntry(page, ACCEPT.payload.field)).toContainText('Erledigt');
+    await expect(
+      reviewEntry(page, ACCEPT.payload.field).locator('xpath=ancestor::tr'),
+    ).toContainText('Erledigt');
     await inboxFilter(page, 'dismissed');
-    await expect(reviewEntry(page, DISMISS.payload.field)).toContainText('Verworfen');
+    await expect(
+      reviewEntry(page, DISMISS.payload.field).locator('xpath=ancestor::tr'),
+    ).toContainText('Verworfen');
 
     await openCI(page, second);
     const row = await provenanceRow(page, DISMISS.payload.field);

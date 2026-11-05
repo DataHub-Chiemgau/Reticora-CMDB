@@ -1117,7 +1117,7 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     await expect(main.getByRole('heading', { name: 'Export', exact: true })).toBeVisible();
     await main.getByLabel('Format').selectOption('csv');
     const created = waitForPath(page, '/exports', 'POST');
-    await main.getByRole('button', { name: 'Auftrag erstellen' }).click();
+    await main.getByRole('button', { name: 'Export starten' }).click();
     const createdRes = await created;
     expect(createdRes.status(), 'POST /exports answers 202 (job)').toBe(202);
     const job = (await createdRes.json()) as ExportJob;
@@ -1222,7 +1222,7 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     const main = page.locator('#main-content');
     await main.getByLabel('Format').selectOption('csv');
     const created = waitForPath(page, '/exports', 'POST');
-    await main.getByRole('button', { name: 'Auftrag erstellen' }).click();
+    await main.getByRole('button', { name: 'Export starten' }).click();
     const job = (await (await created).json()) as ExportJob;
     let done: ExportJob | undefined;
     await expect

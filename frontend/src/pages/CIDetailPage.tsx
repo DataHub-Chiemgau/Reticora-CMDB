@@ -1,3 +1,4 @@
+import { Braces, Network, Pencil } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +12,9 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { ScrollRegion } from '../components/ScrollRegion';
 import { CIFormModal } from './CIFormModal';
 import { getStatusBadgeVariant, getStatusTranslationKey } from './ciStatus';
 import {
@@ -21,6 +24,7 @@ import {
   ImpactSection,
   CIMetricsSection,
   CIHistorySection,
+  DetailRow,
   formatDate,
   formatDateTime,
   useLocationNames,
@@ -191,23 +195,11 @@ export function CIDetailPage() {
 
   return (
     <div className="space-y-4">
-      <nav aria-label={t('accessibility.breadcrumb')} className="text-sm">
-        <Link
-          to="/cmdb"
-          className="text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        >
-          ← {t('nav.cmdb')}
-        </Link>
-      </nav>
-
-      {/* A CI outside the chosen client or site is shown with a notice
-          (E-87 option 1); access stays with the server (row-level security). */}
-      <ScopeBanner object={ci} />
-
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{ci.name}</h2>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+      <PageHeader
+        title={ci.name}
+        breadcrumbs={[{ label: t('nav.cmdb'), to: '/cmdb' }, { label: ci.name }]}
+        meta={
+          <span className="flex flex-wrap items-center gap-1.5">
             <Badge variant={getStatusBadgeVariant(ci.status)}>
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
@@ -217,136 +209,171 @@ export function CIDetailPage() {
                 {t(`ci.healthState.${ci.health}`)}
               </Badge>
             ) : null}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={() => setIsEditOpen(true)}>
-            {t('common.edit')}
-          </Button>
-          <Button variant="secondary" onClick={() => navigate(`/topology?root=${ci.id}`)}>
-            {t('topology.showInTopology')}
-          </Button>
-        </div>
-      </div>
+          </span>
+        }
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              icon={<Network />}
+              onClick={() => navigate(`/topology?root=${ci.id}`)}
+            >
+              {t('topology.showInTopology')}
+            </Button>
+            <Button icon={<Pencil />} onClick={() => setIsEditOpen(true)}>
+              {t('common.edit')}
+            </Button>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card title={t('ci.overview')}>
-          <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <DetailRow label="ID" value={ci.id} />
-            <DetailRow label={t('form.fields.ciType')} value={typeLabel} />
-            <DetailRow label={t('ci.manufacturer')} value={ci.manufacturer} />
-            <DetailRow label={t('ci.model')} value={ci.model} />
-            <DetailRow
-              label={ci.asset ? t('ci.observedSerialNumber') : t('ci.serialNumber')}
-              value={ci.serial_number}
-            />
-            <DetailRow label={t('ci.managementIp')} value={ci.management_ip} />
-            <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
-            <DetailRow label={t('ci.source')} value={ci.discovery_source} />
-            <DetailRow label={t('ci.location')} value={locations.path(ci.location_id)} />
-            <DetailRow label={t('ci.site')} value={locations.name(ci.site_id)} />
-            <DetailRow label={t('ci.room')} value={locations.name(ci.room_id)} />
-            <DetailRow
-              label={t('ci.firstSeen')}
-              value={formatDateTime(ci.first_seen_at, i18n.language)}
-            />
-            <DetailRow
-              label={t('ci.lastSeen')}
-              value={formatDateTime(ci.last_seen_at, i18n.language)}
-            />
-            <DetailRow
-              label={t('ci.created')}
-              value={formatDateTime(ci.created_at, i18n.language)}
-            />
-            <DetailRow
-              label={t('ci.updated')}
-              value={formatDateTime(ci.updated_at, i18n.language)}
-            />
-          </dl>
-        </Card>
+      {/* A CI outside the chosen client or site is shown with a notice
+          (E-87 option 1); access stays with the server (row-level security). */}
+      <ScopeBanner object={ci} />
 
-        <Card title={t('ci.attributes')}>
-          {Object.keys(ci.attributes ?? {}).length === 0 ? (
-            <EmptyState title={t('ci.noAttributes')} />
-          ) : (
-            <pre className="overflow-x-auto rounded-lg bg-gray-100 p-3 text-xs dark:bg-gray-950">
-              {JSON.stringify(ci.attributes, null, 2)}
-            </pre>
+      {/* Facts about the device first, then how it connects; the quieter
+          material (provenance, history, metrics) follows below. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-4">
+          <Card title={t('ci.overview')}>
+            <div className="divide-y divide-line [&>dl]:py-3 [&>dl:first-child]:pt-0 [&>dl:last-child]:pb-0">
+              <dl>
+                <DetailRow label={t('form.fields.ciType')} value={typeLabel} />
+                <DetailRow label={t('ci.manufacturer')} value={ci.manufacturer} />
+                <DetailRow label={t('ci.model')} value={ci.model} />
+                <DetailRow label={t('ci.managementIp')} value={ci.management_ip} mono />
+                <DetailRow
+                  label={ci.asset ? t('ci.observedSerialNumber') : t('ci.serialNumber')}
+                  value={ci.serial_number}
+                  mono
+                />
+                <DetailRow label={t('ci.firmware')} value={ci.firmware_version} />
+              </dl>
+              <dl>
+                <DetailRow label={t('ci.location')} value={locations.path(ci.location_id)} />
+                <DetailRow label={t('ci.site')} value={locations.name(ci.site_id)} />
+                <DetailRow label={t('ci.room')} value={locations.name(ci.room_id)} />
+              </dl>
+              <dl>
+                <DetailRow label="ID" value={ci.id} mono />
+                <DetailRow label={t('ci.source')} value={ci.discovery_source} />
+              </dl>
+            </div>
+          </Card>
+
+          {ci.asset && (
+            <Card title={t('ci.assetCanonical')}>
+              <p className="mb-3 max-w-[68ch] text-sm text-fg-muted">
+                {t('ci.assetCanonicalHint')}
+              </p>
+              <dl>
+                {/* Every canonical field of the asset, read-only (DB-05, AST-04, F-238). */}
+                <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} mono />
+                <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} mono />
+                <DetailRow label={t('ci.location')} value={locations.path(ci.asset.location_id)} />
+                <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
+                <DetailRow label={t('ci.rfidTag')} value={ci.asset.rfid_tag} mono />
+                <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} mono />
+                <DetailRow
+                  label={t('ci.purchaseDate')}
+                  value={formatDate(ci.asset.purchase_date, i18n.language)}
+                />
+                <DetailRow
+                  label={t('ci.warrantyEnd')}
+                  value={formatDate(ci.asset.warranty_end, i18n.language)}
+                />
+                <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
+                <DetailRow label={t('ci.invoiceNumber')} value={ci.asset.invoice_number} mono />
+              </dl>
+            </Card>
           )}
-        </Card>
 
-        {ci.asset && (
-          <Card title={t('ci.assetCanonical')}>
-            <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-              {t('ci.assetCanonicalHint')}
-            </p>
-            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              {/* Every canonical field of the asset, read-only (DB-05, AST-04, F-238). */}
-              <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} />
-              <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} />
-              <DetailRow label={t('ci.location')} value={locations.path(ci.asset.location_id)} />
-              <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
-              <DetailRow label={t('ci.rfidTag')} value={ci.asset.rfid_tag} />
-              <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} />
+          <CIParentAssetCard ciId={ci.id} />
+
+          <CIRelationshipsCard ciId={ci.id} />
+        </div>
+
+        <div className="min-w-0 space-y-4">
+          <Card title={t('ci.attributes')}>
+            {Object.keys(ci.attributes ?? {}).length === 0 ? (
+              <EmptyState title={t('ci.noAttributes')} icon={<Braces />} className="py-8" />
+            ) : (
+              <ScrollRegion label={t('ci.attributes')} className="rounded-lg">
+                <pre className="rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-fg">
+                  {JSON.stringify(ci.attributes, null, 2)}
+                </pre>
+              </ScrollRegion>
+            )}
+          </Card>
+
+          <Card title={t('topology.neighbors')}>
+            {neighborsQuery.isLoading ? (
+              <SkeletonList rows={3} label={t('app.loading')} />
+            ) : neighborsQuery.error ? (
+              <ErrorState
+                title={t('topology.neighborsLoadError')}
+                retryLabel={t('common.retry')}
+                onRetry={() => void neighborsQuery.refetch()}
+              />
+            ) : neighbors.length === 0 ? (
+              <EmptyState title={t('topology.noNeighbors')} icon={<Network />} className="py-8" />
+            ) : (
+              <ul className="-my-2 divide-y divide-line text-sm">
+                {neighbors.map((neighbor) => (
+                  <li
+                    key={`${neighbor.id}-${neighbor.relType}-${neighbor.direction}`}
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 py-2.5"
+                  >
+                    <Link
+                      to={`/cmdb/${neighbor.id}`}
+                      className="min-w-0 rounded font-medium text-accent underline-offset-2 [overflow-wrap:anywhere] hover:underline"
+                    >
+                      {neighbor.name}
+                    </Link>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="neutral">{neighbor.relType}</Badge>
+                      <Badge variant={getStatusBadgeVariant(neighbor.status)}>
+                        {t(getStatusTranslationKey(neighbor.status))}
+                      </Badge>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card title={t('ci.timeline')}>
+            <dl>
               <DetailRow
-                label={t('ci.purchaseDate')}
-                value={formatDate(ci.asset.purchase_date, i18n.language)}
+                compact
+                label={t('ci.firstSeen')}
+                value={formatDateTime(ci.first_seen_at, i18n.language)}
               />
               <DetailRow
-                label={t('ci.warrantyEnd')}
-                value={formatDate(ci.asset.warranty_end, i18n.language)}
+                compact
+                label={t('ci.lastSeen')}
+                value={formatDateTime(ci.last_seen_at, i18n.language)}
               />
-              <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
-              <DetailRow label={t('ci.invoiceNumber')} value={ci.asset.invoice_number} />
+              <DetailRow
+                compact
+                label={t('ci.created')}
+                value={formatDateTime(ci.created_at, i18n.language)}
+              />
+              <DetailRow
+                compact
+                label={t('ci.updated')}
+                value={formatDateTime(ci.updated_at, i18n.language)}
+              />
             </dl>
           </Card>
-        )}
-
-        <CIParentAssetCard ciId={ci.id} />
-
-        <CIRelationshipsCard ciId={ci.id} />
-
-        <Card title={t('topology.neighbors')}>
-          {neighborsQuery.isLoading ? (
-            <SkeletonList rows={3} label={t('app.loading')} />
-          ) : neighborsQuery.error ? (
-            <ErrorState
-              title={t('topology.neighborsLoadError')}
-              retryLabel={t('common.retry')}
-              onRetry={() => void neighborsQuery.refetch()}
-            />
-          ) : neighbors.length === 0 ? (
-            <EmptyState title={t('topology.noNeighbors')} />
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {neighbors.map((neighbor) => (
-                <li
-                  key={`${neighbor.id}-${neighbor.relType}-${neighbor.direction}`}
-                  className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
-                >
-                  <Link
-                    to={`/cmdb/${neighbor.id}`}
-                    className="font-medium text-primary underline-offset-2 hover:underline"
-                  >
-                    {neighbor.name}
-                  </Link>
-                  <span className="flex items-center gap-2">
-                    <Badge variant="neutral">{neighbor.relType}</Badge>
-                    <Badge variant={getStatusBadgeVariant(neighbor.status)}>
-                      {t(getStatusTranslationKey(neighbor.status))}
-                    </Badge>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        </div>
       </div>
 
       {/* Advanced sections (progressive disclosure, spec §18): instance
-          fields, provenance/overrides, lifecycle, and impact analysis live
-          behind expandable sections so the simple view stays simple. */}
-      <div className="space-y-3">
+          fields, lifecycle, impact analysis, then provenance, metrics and
+          history live behind expandable sections so the simple view stays
+          simple. */}
+      <div className="space-y-2">
         <InstanceFieldsSection
           ciId={ci.id}
           attributes={ci.attributes ?? {}}
@@ -356,9 +383,9 @@ export function CIDetailPage() {
         {/* Templates of the CI (WP-800): only with citype:manage and the
             module metamodel; otherwise neither shown nor read (UI-12). */}
         <CITemplatesSection ciId={ci.id} ciTypeId={ci.ci_type_id} version={ci.version} />
-        <ProvenanceSection ciId={ci.id} />
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
+        <ProvenanceSection ciId={ci.id} />
         <CIMetricsSection ciId={ci.id} />
         <CIHistorySection ciId={ci.id} />
       </div>
@@ -379,13 +406,4 @@ function healthBadgeVariant(health: string) {
     default:
       return 'neutral' as const;
   }
-}
-
-function DetailRow({ label, value }: { label: string; value?: string }) {
-  return (
-    <div>
-      <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
-      <dd className="break-all font-medium text-gray-900 dark:text-gray-100">{value || '—'}</dd>
-    </div>
-  );
 }

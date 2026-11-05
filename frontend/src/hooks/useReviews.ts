@@ -136,6 +136,24 @@ export function useEscalatedReviewCount(enabled = true) {
 }
 
 /**
+ * useOpenReviewCount reads how many review items are open (the total of GET
+ * /review-items?status=open with one row): the number the navigation shows
+ * beside the inbox. enabled holds the request back like
+ * useEscalatedReviewCount. The key starts with review-items, so a
+ * resolution refreshes it.
+ */
+export function useOpenReviewCount(enabled = true) {
+  return useQuery({
+    queryKey: ['review-items', 'open-count'],
+    queryFn: () => fetchAPI<PaginatedResponse<ReviewItem>>('/review-items?status=open&limit=1'),
+    select: (page) => page.total ?? 0,
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  });
+}
+
+/**
  * fetchAllReviewItems loads every item that matches the filter page by page,
  * following has_more with the next offset, so a bulk resolution can cover
  * all of them, not only the page shown (F-345).

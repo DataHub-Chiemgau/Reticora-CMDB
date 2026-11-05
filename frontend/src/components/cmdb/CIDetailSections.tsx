@@ -4,6 +4,7 @@
  * manual overrides, lifecycle, impact analysis and metrics. Each is an expandable
  * <details> so normal users never see the metadata model.
  */
+import { ChevronRight, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -28,6 +29,7 @@ import { ProvenanceTooltip } from './ProvenanceTooltip';
 import { fieldValueText } from './fieldValue';
 import type { FieldDefinition, FieldError } from '../../lib/fieldmeta';
 import { Badge } from '../ui/Badge';
+import { cn } from '../ui/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -36,6 +38,34 @@ import { SkeletonList } from '../ui/Skeleton';
 import { ImpactPanel } from '../graph/ImpactPanel';
 import { useEntitlements } from '../../hooks/useEntitlements';
 import { ErrorState } from '../ui/ErrorState';
+
+/** One fact of a definition list: a fixed label column, the value beside it. */
+export function DetailRow({
+  label,
+  value,
+  mono,
+  compact,
+}: {
+  label: string;
+  value?: string;
+  mono?: boolean;
+  /** A narrower label column for panels in a side column. */
+  compact?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'grid grid-cols-1 gap-0.5 py-1.5 sm:gap-4',
+        compact ? 'sm:grid-cols-[6.5rem_minmax(0,1fr)]' : 'sm:grid-cols-[10rem_minmax(0,1fr)]',
+      )}
+    >
+      <dt className="text-sm text-fg-muted">{label}</dt>
+      <dd className={cn('min-w-0 text-sm text-fg [overflow-wrap:anywhere]', mono && 'font-mono')}>
+        {value || <span className="text-fg-subtle">—</span>}
+      </dd>
+    </div>
+  );
+}
 
 // ─── Location names and times (CI-06, DB-05) ────────────────────────────────
 
@@ -106,7 +136,12 @@ export function useLocationNames(enabled: boolean): LocationNames {
 /** The location fields of a CI whose values are nodes of the location tree. */
 const LOCATION_FIELDS = new Set(['location_id', 'site_id', 'room_id']);
 
-function Section({
+/**
+ * CollapsibleSection is the quiet panel of the advanced sections of a CI: a
+ * native <details> (open and closed state stay with the browser, the summary
+ * is reachable by keyboard) with a chevron that turns when it opens.
+ */
+export function CollapsibleSection({
   title,
   children,
   defaultOpen = false,
@@ -118,19 +153,21 @@ function Section({
   count?: number;
 }) {
   return (
-    <details open={defaultOpen} className="rounded-lg border border-gray-200 dark:border-gray-700">
-      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+    <details open={defaultOpen} className="group rounded-xl border border-line bg-panel">
+      <summary className="flex min-h-11 cursor-pointer select-none list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-fg outline-none transition-colors hover:bg-fg/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent group-open:rounded-b-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-fg-subtle transition-transform group-open:rotate-90"
+        />
         {title}
-        {count !== undefined ? (
-          <Badge variant="neutral" className="ml-2">
-            {count}
-          </Badge>
-        ) : null}
+        {count !== undefined ? <Badge variant="neutral">{count}</Badge> : null}
       </summary>
-      <div className="border-t border-gray-200 px-4 py-3 dark:border-gray-700">{children}</div>
+      <div className="border-t border-line px-4 py-4">{children}</div>
     </details>
   );
 }
+
+const Section = CollapsibleSection;
 
 // ─── Instance fields (§2) ────────────────────────────────────────────────────
 
@@ -193,7 +230,7 @@ export function InstanceFieldsSection({
     ) : null;
   const saveError =
     serverError && Object.keys(serverViolations).length === 0 ? (
-      <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+      <p role="alert" className="mt-2 text-sm text-danger">
         {serverError.message}
       </p>
     ) : null;
@@ -211,36 +248,40 @@ export function InstanceFieldsSection({
 
   return (
     <Section title={t('ci.instanceFields', 'Instanzfelder')} count={defs.length}>
-      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      <p className="mb-3 text-sm text-fg-muted">
         {t(
           'ci.instanceFieldsHint',
           'Felder nur für dieses Gerät (z. B. iLO-IP, SAP-SID) — ohne den Typ zu ändern.',
         )}
       </p>
       {fields.isLoading ? <SkeletonList rows={2} label="…" /> : null}
-      <ul className="mb-3 space-y-1 text-sm">
+      <ul className="mb-3 divide-y divide-line text-sm">
         {defs.map((f) => (
-          <li key={f.name} className="flex items-center justify-between">
-            <span>
-              <span className="font-medium">{f.label || f.name}</span>
-              <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">{f.data_type}</span>
+          <li key={f.name} className="flex items-center justify-between gap-3 py-1.5">
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+              <span className="font-medium text-fg [overflow-wrap:anywhere]">
+                {f.label || f.name}
+              </span>
+              <span className="font-mono text-xs text-fg-muted">{f.data_type}</span>
             </span>
-            <button
-              className="text-xs text-red-600 dark:text-red-400 hover:underline"
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-danger hover:text-danger"
               onClick={() => remove.mutate(f.name)}
             >
               {t('common.delete', 'Löschen')}
-            </button>
+            </Button>
           </li>
         ))}
         {defs.length === 0 ? (
-          <li className="text-sm text-gray-500 dark:text-gray-400">
+          <li className="py-1.5 text-sm text-fg-muted">
             {t('ci.noInstanceFields', 'Keine Instanzfelder.')}
           </li>
         ) : null}
       </ul>
-      <Button size="sm" variant="secondary" onClick={() => setShowAdd(true)}>
-        + {t('ci.addInstanceField', 'Instanzfeld hinzufügen')}
+      <Button size="sm" variant="secondary" icon={<Plus />} onClick={() => setShowAdd(true)}>
+        {t('ci.addInstanceField', 'Instanzfeld hinzufügen')}
       </Button>
 
       {saveError}
@@ -304,9 +345,7 @@ export function InstanceFieldsSection({
       </Modal>
 
       {/* Instance-field values edit inline through the same DynamicForm. */}
-      {valuesForm ? (
-        <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">{valuesForm}</div>
-      ) : null}
+      {valuesForm ? <div className="mt-4 border-t border-line pt-4">{valuesForm}</div> : null}
     </Section>
   );
 }
@@ -334,7 +373,7 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
       title={t('ci.provenance', 'Herkunft & Overrides')}
       count={values.data ? diverged.length : undefined}
     >
-      <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+      <p className="mb-3 text-sm text-fg-muted">
         {t(
           'ci.provenanceHint',
           'Discovery-Wert vs. effektiver Wert. Geschützte manuelle Overrides werden nie von Discovery überschrieben.',
@@ -349,18 +388,15 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
           onRetry={() => void values.refetch()}
         />
       ) : null}
-      <ul className="space-y-2 text-sm">
+      <ul className="divide-y divide-line text-sm">
         {rows.map((fv) => (
-          <li
-            key={fv.field}
-            className="rounded-md border border-gray-100 px-3 py-2 dark:border-gray-800"
-          >
+          <li key={fv.field} className="py-3 first:pt-0 last:pb-0">
             {/* Values without a break opportunity (an identity field as JSON)
                 wrap anywhere, and the three columns stack on a phone: before,
                 a row was wider than the 412 px of mobile-chrome and every
                 click on its actions landed on the neighbouring row (WP-646). */}
             <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-              <span className="flex min-w-0 items-center gap-1 font-medium [overflow-wrap:anywhere]">
+              <span className="flex min-w-0 items-center gap-1 font-medium text-fg [overflow-wrap:anywhere]">
                 {fv.field}
                 <ProvenanceTooltip provenance={fv} />
               </span>
@@ -372,31 +408,33 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                   <Badge variant="info">{t('ci.protected', 'geschützt')}</Badge>
                 ) : null}
                 {fv.reason === 'override' ? (
-                  <button
-                    className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-danger hover:text-danger"
                     onClick={() => clearOverride.mutate(fv.field)}
                   >
                     {t('ci.clearOverride', 'Override aufheben')}
-                  </button>
+                  </Button>
                 ) : (
-                  <button
-                    className="text-xs text-primary hover:underline"
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-accent hover:text-accent"
                     onClick={() => {
                       setOverrideField(fv.field);
                       setDraft({ value: '', reason: '' });
                     }}
                   >
                     {t('ci.setOverride', 'Override setzen')}
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
-            <dl className="mt-1 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 [&>div]:min-w-0 [&_dd]:[overflow-wrap:anywhere]">
+            <dl className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-3 [&>div]:min-w-0 [&_dd]:[overflow-wrap:anywhere]">
               <div>
-                <dt className="text-gray-500 dark:text-gray-400">
-                  {t('ci.discovered', 'Discovery')}
-                </dt>
-                <dd className="font-mono">
+                <dt className="text-fg-muted">{t('ci.discovered', 'Discovery')}</dt>
+                <dd className="font-mono text-fg">
                   {fieldValueText(
                     t,
                     fv.field,
@@ -406,29 +444,27 @@ export function ProvenanceSection({ ciId }: { ciId: string }) {
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-500 dark:text-gray-400">{t('ci.override', 'Override')}</dt>
-                <dd className="font-mono">
+                <dt className="text-fg-muted">{t('ci.override', 'Override')}</dt>
+                <dd className="font-mono text-fg">
                   {fv.reason === 'override'
                     ? fieldValueText(t, fv.field, fv.value, jsonValue)
                     : '—'}
                 </dd>
               </div>
               <div>
-                <dt className="text-gray-500 dark:text-gray-400">
-                  {t('ci.effective', 'Effektiv')}
-                </dt>
-                <dd className="font-mono font-semibold">
+                <dt className="text-fg-muted">{t('ci.effective', 'Effektiv')}</dt>
+                <dd className="font-mono font-semibold text-fg">
                   {fieldValueText(t, fv.field, fv.value, jsonValue)}
                 </dd>
               </div>
             </dl>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            <p className="mt-1 text-xs text-fg-muted">
               {t('ci.source', 'Quelle')}: {fv.source}
             </p>
           </li>
         ))}
         {rows.length === 0 && !values.isLoading && !values.isError ? (
-          <li className="text-sm text-gray-500 dark:text-gray-400">
+          <li className="text-sm text-fg-muted">
             {t(
               'ci.noProvenance',
               'Noch keine Provenienz-Daten (erstellt bei der nächsten Discovery).',
@@ -556,9 +592,7 @@ export function LifecycleSection({
   return (
     <Section title={t('lifecycle.title', 'Lebenszyklus')}>
       <div className="mb-3 flex items-center gap-2">
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {t('lifecycle.current', 'Aktuell')}:
-        </span>
+        <span className="text-sm text-fg-muted">{t('lifecycle.current', 'Aktuell')}:</span>
         <Badge variant="info">{current || '—'}</Badge>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -570,7 +604,7 @@ export function LifecycleSection({
           ]}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
-          className="max-w-xs"
+          className="w-56 max-w-full"
         />
         {required.map((field) => (
           <Input
@@ -579,21 +613,21 @@ export function LifecycleSection({
             required
             value={context[field] ?? ''}
             onChange={(e) => setContext((c) => ({ ...c, [field]: e.target.value }))}
-            className="max-w-xs"
+            className="w-56 max-w-full"
           />
         ))}
         <Input
           label={t('lifecycle.reason', 'Grund')}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          className="max-w-xs"
+          className="w-56 max-w-full"
         />
-        <Button size="sm" disabled={!target || transition.isPending} onClick={apply}>
+        <Button variant="secondary" disabled={!target || transition.isPending} onClick={apply}>
           {t('lifecycle.apply', 'Anwenden')}
         </Button>
       </div>
       {error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {String(error.message || error)}
           {violated.length > 0 ? `: ${violated.join(', ')}` : null}
         </p>
@@ -668,16 +702,16 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
       ) : metrics.isLoading ? (
         <SkeletonList rows={2} label="…" />
       ) : forbidden ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-fg-muted">
           {t(
             'monitoring.ciNotLicensed',
             'Monitoring ist für diese Organisation nicht freigeschaltet.',
           )}
         </p>
       ) : metrics.error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{(metrics.error as Error).message}</p>
+        <p className="text-sm text-danger">{(metrics.error as Error).message}</p>
       ) : (metrics.data?.series.length ?? 0) === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-fg-muted">
           {t('monitoring.ciNone', 'Keine Messwerte in den letzten 24 Stunden.')}
         </p>
       ) : (
@@ -686,13 +720,13 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
             const latest = series.points[series.points.length - 1];
             return (
               <li key={series.name} className="flex items-center gap-3 text-sm">
-                <span className="w-56 truncate font-mono text-xs">{series.name}</span>
+                <span className="w-56 truncate font-mono text-xs text-fg">{series.name}</span>
                 <svg
                   role="img"
                   aria-label={series.name}
                   width={160}
                   height={28}
-                  className="text-blue-600 dark:text-blue-400"
+                  className="text-accent"
                 >
                   <path
                     d={sparklinePath(series.points, 160, 28)}
@@ -701,7 +735,7 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
                     strokeWidth={1.5}
                   />
                 </svg>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-xs text-fg-muted">
                   {t('monitoring.ciLatest', 'Aktuell')}:{' '}
                   <strong>{latest ? latest.value : '–'}</strong>
                 </span>
@@ -755,20 +789,20 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
       {history.isLoading ? (
         <SkeletonList rows={3} label={t('app.loading')} />
       ) : history.error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{t('ci.historyLoadError')}</p>
+        <p className="text-sm text-danger">{t('ci.historyLoadError')}</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">{t('ci.historyEmpty')}</p>
+        <p className="text-sm text-fg-muted">{t('ci.historyEmpty')}</p>
       ) : (
-        <ol className="space-y-2 text-sm" aria-label={t('ci.history')}>
+        <ol className="divide-y divide-line text-sm" aria-label={t('ci.history')}>
           {entries.map((entry) => (
             <li
               key={`${entry.source ?? 'change'}-${entry.id}`}
-              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2.5 first:pt-0 last:pb-0"
             >
-              <time dateTime={entry.created_at} className="text-gray-500 dark:text-gray-400">
+              <time dateTime={entry.created_at} className="text-fg-muted">
                 {formatDateTime(entry.created_at, i18n.language)}
               </time>
-              <span className="font-medium">
+              <span className="font-medium text-fg">
                 {entry.change_type}
                 {entry.field_name ? ` · ${entry.field_name}` : ''}
               </span>
@@ -776,12 +810,12 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
                 <Badge variant="neutral">{t(`ci.historySource.${entry.source}`)}</Badge>
               ) : null}
               {entry.site_id ? (
-                <span className="text-gray-500 dark:text-gray-400">
+                <span className="text-fg-muted">
                   {t('ci.historySite', { site: locations.name(entry.site_id) })}
                 </span>
               ) : null}
               {entry.change_set_id && entry.field_changes?.length ? (
-                <ul className="basis-full space-y-0.5 pl-4 text-gray-700 dark:text-gray-300">
+                <ul className="basis-full space-y-0.5 pl-4 text-fg">
                   {entry.field_changes.map((change) => (
                     <li key={change.field} className="break-all">
                       {`${change.field}: ${fieldValueText(t, change.field, change.old, changeText(change.field))} → ${fieldValueText(t, change.field, change.new, changeText(change.field))}`}
@@ -794,7 +828,7 @@ export function CIHistorySection({ ciId }: { ciId: string }) {
         </ol>
       )}
       {history.data?.audit_included === false ? (
-        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{t('ci.historyAuditHint')}</p>
+        <p className="mt-2 text-xs text-fg-muted">{t('ci.historyAuditHint')}</p>
       ) : null}
     </Section>
   );

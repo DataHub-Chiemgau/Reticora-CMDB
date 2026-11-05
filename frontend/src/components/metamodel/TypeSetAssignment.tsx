@@ -9,6 +9,7 @@
  * the entry the change concerned; the list stays as changed until it is
  * corrected.
  */
+import { Plus, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../../api/client';
@@ -43,11 +44,9 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
 
   if (type.is_system) {
     return (
-      <div className="mt-4">
-        <h4 className="text-sm font-semibold">{t('citypes.sets.assignment.title')}</h4>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          {t('citypes.sets.assignment.systemType')}
-        </p>
+      <div>
+        <h4 className="text-sm font-semibold text-fg">{t('citypes.sets.assignment.title')}</h4>
+        <p className="mt-1 text-sm text-fg-muted">{t('citypes.sets.assignment.systemType')}</p>
       </div>
     );
   }
@@ -89,25 +88,25 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
   };
 
   return (
-    <div className="mt-4" role="group" aria-labelledby={headingId}>
-      <h4 id={headingId} className="text-sm font-semibold">
+    <div role="group" aria-labelledby={headingId}>
+      <h4 id={headingId} className="text-sm font-semibold text-fg">
         {t('citypes.sets.assignment.title')}
       </h4>
-      <p className="mt-1 text-xs text-muted">{t('citypes.sets.assignment.hint')}</p>
+      <p className="mt-1 max-w-[68ch] text-xs text-fg-muted">{t('citypes.sets.assignment.hint')}</p>
       {assignment.error && !notFound ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {t('citypes.sets.assignment.loadFailed', {
             reason: describeFlagRefusal(assignment.error, t),
           })}
         </p>
       ) : null}
       {error && !atEntry ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {t('citypes.sets.assignment.notSaved', { reason: describeFlagRefusal(error, t) })}
         </p>
       ) : null}
       {assignment.isSuccess && ids.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">{t('citypes.sets.assignment.empty')}</p>
+        <p className="mt-2 text-sm text-fg-muted">{t('citypes.sets.assignment.empty')}</p>
       ) : null}
       <SortableList
         items={ids}
@@ -119,7 +118,7 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
         label={t('citypes.sets.assignment.listLabel', {
           type: localizedText(type.display_name, i18n.language) || type.name,
         })}
-        className="mt-2 divide-y divide-gray-100 dark:divide-gray-800"
+        className="mt-2 divide-y divide-line"
         renderItem={(id) => {
           const set = sets.find((s) => s.id === id);
           const entryError = atEntry === id && error instanceof ApiError ? error : undefined;
@@ -128,7 +127,10 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
             <div className="space-y-1 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium" aria-describedby={entryError ? errorId : undefined}>
+                  <span
+                    className="font-medium text-fg"
+                    aria-describedby={entryError ? errorId : undefined}
+                  >
                     {setName(id)}
                   </span>
                   {set?.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
@@ -136,9 +138,11 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
                     <Badge variant="warning">{t('citypes.inactive')}</Badge>
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  className="text-xs text-danger hover:underline"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={<X />}
+                  className="text-danger hover:text-danger"
                   disabled={replace.isPending}
                   aria-label={t('citypes.sets.assignment.removeAction', { name: setName(id) })}
                   onClick={() =>
@@ -149,10 +153,10 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
                   }
                 >
                   {t('citypes.sets.assignment.remove')}
-                </button>
+                </Button>
               </div>
               {entryError ? (
-                <p id={errorId} role="alert" className="text-sm text-red-600 dark:text-red-400">
+                <p id={errorId} role="alert" className="text-sm text-danger">
                   {t('citypes.sets.assignment.entryError', { detail: fieldDetail(entryError) })}
                 </p>
               ) : null}
@@ -161,19 +165,22 @@ export function TypeSetAssignment({ type, sets }: TypeSetAssignmentProps) {
         }}
       />
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <Select
-          label={t('citypes.sets.assignment.choose')}
-          options={[
-            { value: '', label: t('citypes.sets.assignment.choosePlaceholder') },
-            ...addable.map((s) => ({ value: s.id, label: setName(s.id) })),
-          ]}
-          value={choice}
-          onChange={(e) => setChoice(e.target.value)}
-          disabled={addable.length === 0}
-        />
+        <div className="min-w-[14rem]">
+          <Select
+            label={t('citypes.sets.assignment.choose')}
+            options={[
+              { value: '', label: t('citypes.sets.assignment.choosePlaceholder') },
+              ...addable.map((s) => ({ value: s.id, label: setName(s.id) })),
+            ]}
+            value={choice}
+            onChange={(e) => setChoice(e.target.value)}
+            disabled={addable.length === 0}
+          />
+        </div>
         <Button
-          size="sm"
+          size="md"
           variant="secondary"
+          icon={<Plus />}
           disabled={!choice || replace.isPending}
           onClick={() => {
             save([...ids, choice], choice);

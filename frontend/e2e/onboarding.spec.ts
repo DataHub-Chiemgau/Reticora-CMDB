@@ -508,7 +508,7 @@ test.describe.serial('install → signup/login → dashboard (INS-04, ABN-01 d)'
 
     // A review item of the discovery is resolved in the inbox.
     await page.goto('/reviews');
-    const firstItem = page.locator('main ul li button').first();
+    const firstItem = page.locator('main tbody tr button').first();
     await expect(firstItem, 'an open review item of the simulated fleet').toBeVisible({
       timeout: 60_000,
     });

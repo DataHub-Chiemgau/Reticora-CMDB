@@ -1,3 +1,4 @@
+import { ArrowRight, Check, Plus } from 'lucide-react';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -14,7 +15,8 @@ import {
 } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
+import { MetricCard } from '../components/ui/MetricCard';
+import { PageHeader } from '../components/ui/PageHeader';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
 import { useEntitlements, useModules } from '../hooks/useEntitlements';
@@ -52,25 +54,6 @@ const widgetFeature: Partial<Record<DashboardWidget, string>> = {
   compliance: 'compliance',
 };
 
-function MetricCard({
-  label,
-  value,
-  isLoading,
-}: {
-  label: string;
-  value?: number;
-  isLoading: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Card title={label}>
-      <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
-        {isLoading ? t('app.loading') : (value ?? 0)}
-      </p>
-    </Card>
-  );
-}
-
 function CISummaryWidget() {
   const { t } = useTranslation();
   const totalCIs = useCIList({ limit: 1, offset: 0 });
@@ -82,17 +65,20 @@ function CISummaryWidget() {
       <MetricCard
         label={t('dashboard.totalCIs')}
         value={totalCIs.data?.total}
-        isLoading={totalCIs.isLoading}
+        loading={totalCIs.isLoading}
+        to="/cmdb"
       />
       <MetricCard
         label={t('dashboard.activeCIs')}
         value={activeCIs.data?.total}
-        isLoading={activeCIs.isLoading}
+        loading={activeCIs.isLoading}
+        to="/cmdb?status=active"
       />
       <MetricCard
         label={t('dashboard.maintenanceCIs')}
         value={maintenanceCIs.data?.total}
-        isLoading={maintenanceCIs.isLoading}
+        loading={maintenanceCIs.isLoading}
+        to="/cmdb?status=maintenance"
       />
     </>
   );
@@ -110,7 +96,8 @@ function CollectorsWidget() {
     <MetricCard
       label={t('dashboard.collectorsOnline')}
       value={collectorCount}
-      isLoading={collectors.isLoading}
+      loading={collectors.isLoading}
+      to="/discovery"
     />
   );
 }
@@ -128,62 +115,59 @@ function ReviewEscalationWidget() {
     return null;
   }
   const count = escalated.data;
-  return (
-    <Card title={t('dashboard.widgets.reviewEscalation')}>
-      {escalated.error ? (
+  const label = t('dashboard.widgets.reviewEscalation');
+
+  if (escalated.error) {
+    return (
+      <MetricCard label={label} value="—">
         <ErrorState
           title={t('dashboard.reviewEscalation.loadError')}
           description={escalated.error instanceof Error ? escalated.error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void escalated.refetch()}
         />
-      ) : count === undefined ? (
-        <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
-          {t('app.loading')}
-        </p>
-      ) : (
-        <>
-          <p
-            className={
-              count > 0
-                ? 'text-3xl font-semibold text-amber-700 dark:text-amber-300'
-                : 'text-3xl font-semibold text-gray-900 dark:text-gray-100'
-            }
-          >
-            {count}
-          </p>
-          {count > 0 ? (
-            <>
-              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                {t('dashboard.reviewEscalation.hint')}
-              </p>
-              <Link
-                to="/reviews?escalated=true"
-                className="mt-2 inline-block text-sm font-medium text-primary underline"
-              >
-                {t('dashboard.reviewEscalation.open')}
-              </Link>
-            </>
-          ) : (
-            <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-              {t('dashboard.reviewEscalation.none')}
-            </p>
-          )}
-        </>
-      )}
-    </Card>
+      </MetricCard>
+    );
+  }
+  return (
+    <MetricCard
+      label={label}
+      value={count}
+      loading={count === undefined}
+      tone={count !== undefined && count > 0 ? 'warning' : 'default'}
+      hint={
+        count === undefined
+          ? undefined
+          : count > 0
+            ? t('dashboard.reviewEscalation.hint')
+            : t('dashboard.reviewEscalation.none')
+      }
+    >
+      {count !== undefined && count > 0 ? (
+        <Link
+          to="/reviews?escalated=true"
+          className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+        >
+          {t('dashboard.reviewEscalation.open')}
+          <ArrowRight aria-hidden="true" className="h-3.5 w-3.5" />
+        </Link>
+      ) : null}
+    </MetricCard>
   );
 }
 
 function SLABreachesWidget() {
   const { t } = useTranslation();
   const breaches = useSLABreaches({ limit: 1 });
+  const total = breaches.data?.total;
 
   return (
     <MetricCard
       label={t('dashboard.widgets.slaBreaches')}
-      value={breaches.data?.total}
-      isLoading={breaches.isLoading}
+      value={total}
+      loading={breaches.isLoading}
+      tone={total !== undefined && total > 0 ? 'danger' : 'default'}
+      to="/slas"
     />
   );
 }
@@ -193,25 +177,22 @@ function ComplianceWidget() {
   const score = useComplianceScore();
 
   return (
-    <Card title={t('dashboard.widgets.compliance')}>
-      {score.isLoading ? (
-        <p className="text-3xl font-semibold text-gray-900 dark:text-gray-100">
-          {t('app.loading')}
-        </p>
-      ) : (
-        <p className="flex items-center gap-2 text-3xl font-semibold text-gray-900 dark:text-gray-100">
-          {score.data ? `${Math.round(score.data.overall.score)} %` : '—'}
-          {score.data ? (
-            <Badge variant={score.data.overall.score >= 80 ? 'success' : 'warning'}>
-              {t('compliance.scoreHint', {
-                passed: score.data.overall.passed,
-                failed: score.data.overall.failed,
-              })}
-            </Badge>
-          ) : null}
-        </p>
-      )}
-    </Card>
+    <MetricCard
+      label={t('dashboard.widgets.compliance')}
+      value={score.data ? `${Math.round(score.data.overall.score)} %` : '—'}
+      loading={score.isLoading}
+      to="/compliance"
+      badge={
+        score.data ? (
+          <Badge variant={score.data.overall.score >= 80 ? 'success' : 'warning'}>
+            {t('compliance.scoreHint', {
+              passed: score.data.overall.passed,
+              failed: score.data.overall.failed,
+            })}
+          </Badge>
+        ) : null
+      }
+    />
   );
 }
 
@@ -225,12 +206,14 @@ function AssetsWidget() {
       <MetricCard
         label={t('dashboard.widgets.assetsTotal')}
         value={total.data?.total}
-        isLoading={total.isLoading}
+        loading={total.isLoading}
+        to="/assets"
       />
       <MetricCard
         label={t('dashboard.widgets.assetsAssigned')}
         value={assigned.data?.total}
-        isLoading={assigned.isLoading}
+        loading={assigned.isLoading}
+        to="/assignments"
       />
     </>
   );
@@ -244,7 +227,8 @@ function StocktakeWidget() {
     <MetricCard
       label={t('dashboard.widgets.stocktakeOpen')}
       value={open.data?.total}
-      isLoading={open.isLoading}
+      loading={open.isLoading}
+      to="/stocktake"
     />
   );
 }
@@ -253,18 +237,22 @@ function TicketsWidget() {
   const { t } = useTranslation();
   const openTickets = useTicketList({ status: 'open', limit: 1 });
   const critical = useTicketList({ status: 'open', priority: 'critical', limit: 1 });
+  const criticalTotal = critical.data?.total;
 
   return (
     <>
       <MetricCard
         label={t('dashboard.widgets.openTickets')}
         value={openTickets.data?.total}
-        isLoading={openTickets.isLoading}
+        loading={openTickets.isLoading}
+        to="/tickets"
       />
       <MetricCard
         label={t('dashboard.widgets.criticalTickets')}
-        value={critical.data?.total}
-        isLoading={critical.isLoading}
+        value={criticalTotal}
+        loading={critical.isLoading}
+        tone={criticalTotal !== undefined && criticalTotal > 0 ? 'danger' : 'default'}
+        to="/tickets"
       />
     </>
   );
@@ -287,15 +275,17 @@ function SetupBanner() {
   return (
     <section
       aria-labelledby="dashboard-setup-title"
-      className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm"
     >
-      <h3 id="dashboard-setup-title" className="font-semibold">
-        {t('dashboard.setup.title')}
-      </h3>
-      <p className="mt-1">{t('dashboard.setup.text')}</p>
-      <Link to="/onboarding" className="mt-2 inline-block font-medium underline">
-        {t('dashboard.setup.continue')}
-      </Link>
+      <div>
+        <h3 id="dashboard-setup-title" className="font-semibold text-fg">
+          {t('dashboard.setup.title')}
+        </h3>
+        <p className="mt-0.5 text-fg-muted">{t('dashboard.setup.text')}</p>
+      </div>
+      <Button asChild size="sm">
+        <Link to="/onboarding">{t('dashboard.setup.continue')}</Link>
+      </Button>
     </section>
   );
 }
@@ -311,6 +301,17 @@ const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element | null> =
   tickets: TicketsWidget,
 };
 
+/**
+ * The sections the widgets are grouped in: what the estate looks like,
+ * what needs a decision, what runs day to day. A section without a visible
+ * widget is not shown.
+ */
+const sections: { id: string; widgets: DashboardWidget[] }[] = [
+  { id: 'infrastructure', widgets: ['ciSummary', 'collectors'] },
+  { id: 'attention', widgets: ['reviewEscalation', 'slaBreaches', 'compliance'] },
+  { id: 'operations', widgets: ['assets', 'stocktake', 'tickets'] },
+];
+
 export function DashboardPage() {
   const { t } = useTranslation();
   const role = useDashboardStore((state) => state.role);
@@ -320,47 +321,67 @@ export function DashboardPage() {
   const isVisible = useDashboardStore((state) => state.isVisible);
   const { isModuleEnabled } = useModules();
   const { isEnabled } = useEntitlements();
+  const canReadReviews = useHasPermission('discovery:read');
   const widgets = allWidgets.filter((widget) => {
     const module = widgetModule[widget];
-    return (!module || isModuleEnabled(module)) && isEnabled(widgetFeature[widget]);
+    return (
+      (!module || isModuleEnabled(module)) &&
+      isEnabled(widgetFeature[widget]) &&
+      // The escalation widget needs discovery:read and is not rendered without it.
+      (widget !== 'reviewEscalation' || canReadReviews !== false)
+    );
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.dashboard')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('dashboard.summary')} {t('dashboard.roleHint')}
-          </p>
-        </div>
-        <Select
-          value={role}
-          onChange={(event) => setRole(event.target.value as DashboardRole)}
-          aria-label={t('dashboard.roleLabel')}
-          className="max-w-xs"
-          options={DASHBOARD_ROLES.map((value) => ({
-            value,
-            label: t(`dashboard.roles.${value}`),
-          }))}
-        />
-      </div>
+    <div className="space-y-8">
+      <PageHeader
+        title={t('nav.dashboard')}
+        description={`${t('dashboard.summary')} ${t('dashboard.roleHint')}`}
+        actions={
+          <Select
+            value={role}
+            onChange={(event) => setRole(event.target.value as DashboardRole)}
+            aria-label={t('dashboard.roleLabel')}
+            className="w-44"
+            options={DASHBOARD_ROLES.map((value) => ({
+              value,
+              label: t(`dashboard.roles.${value}`),
+            }))}
+          />
+        }
+      />
 
       <SetupBanner />
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {widgets.map((widget) => {
-          if (!isVisible(widget)) {
-            return null;
-          }
-          const Widget = widgetRenderers[widget];
-          return <Widget key={widget} />;
-        })}
-      </div>
+      {sections.map((section) => {
+        const shown = section.widgets.filter(
+          (widget) => widgets.includes(widget) && isVisible(widget),
+        );
+        if (shown.length === 0) {
+          return null;
+        }
+        return (
+          <div key={section.id} role="group" aria-labelledby={`dashboard-section-${section.id}`}>
+            <h2
+              id={`dashboard-section-${section.id}`}
+              className="mb-3 text-sm font-semibold text-fg"
+            >
+              {t(`dashboard.sections.${section.id}`)}
+            </h2>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {shown.map((widget) => {
+                const Widget = widgetRenderers[widget];
+                return <Widget key={widget} />;
+              })}
+            </div>
+          </div>
+        );
+      })}
 
-      <Card title={t('dashboard.customize')}>
+      <section aria-labelledby="dashboard-customize" className="border-t border-line pt-5">
+        <h2 id="dashboard-customize" className="mb-3 text-sm font-semibold text-fg">
+          {t('dashboard.customize')}
+        </h2>
         <div className="flex flex-wrap gap-2">
           {widgets.map((widget) => {
             const active = !hidden.includes(widget);
@@ -370,6 +391,7 @@ export function DashboardPage() {
                 variant={active ? 'secondary' : 'ghost'}
                 size="sm"
                 aria-pressed={active}
+                icon={active ? <Check /> : <Plus />}
                 onClick={() => toggleWidget(widget)}
               >
                 {t(`dashboard.widgets.${widget}`)}
@@ -377,7 +399,7 @@ export function DashboardPage() {
             );
           })}
         </div>
-      </Card>
+      </section>
     </div>
   );
 }

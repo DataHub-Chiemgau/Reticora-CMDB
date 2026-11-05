@@ -53,7 +53,9 @@ test.describe('login flow', () => {
     const logoutRequest = page.waitForRequest((request) => request.url().startsWith(endSession));
 
     await page.goto('/login');
-    await page.getByRole('button', { name: /^(abmelden|log out)$/i }).click();
+    // Sign-out lives in the account menu of the header.
+    await page.getByRole('button', { name: /kontomenü|account menu/i }).click();
+    await page.getByRole('menuitem', { name: /^(abmelden|log out)$/i }).click();
 
     const url = new URL((await logoutRequest).url());
     expect(url.searchParams.get('client_id')).toBe(AUTH_CONFIG.client_id);

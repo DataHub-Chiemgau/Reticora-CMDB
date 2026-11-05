@@ -1,3 +1,4 @@
+import { GraduationCap, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,19 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 export function TrainingListPage() {
   const { t } = useTranslation();
@@ -36,56 +50,83 @@ export function TrainingListPage() {
     },
   });
 
+  const courses = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.trainings', 'Schulungen')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('trainings.summary', 'Kurse mit Zuweisung, Fälligkeit und Nachweis.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('trainings.create', 'Kurs anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.trainings', 'Schulungen')}
+        description={t('trainings.summary', 'Kurse mit Zuweisung, Fälligkeit und Nachweis.')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('trainings.create', 'Kurs anlegen')}
+          </Button>
+        }
+      />
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {(data?.data ?? []).map((c: TrainingCourse) => (
-          <Card
-            key={c.id}
-            title={c.title}
-            actions={
-              <Badge variant="info">{c.category || t('trainings.general', 'Allgemein')}</Badge>
-            }
-          >
-            {c.validity_months ? (
-              <p className="text-sm text-gray-600 dark:text-gray-300">
-                {t('trainings.validity', 'Gültigkeit')}: {c.validity_months}{' '}
-                {t('trainings.months', 'Monate')}
-              </p>
-            ) : null}
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.trainings', 'Schulungen')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.title', 'Titel')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('trainings.category', 'Kategorie')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('trainings.validity', 'Gültigkeit')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {courses.map((c: TrainingCourse) => (
+                  <tr key={c.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{c.title}</td>
+                    <td className={tdClasses}>
+                      <Badge variant="neutral">
+                        {c.category || t('trainings.general', 'Allgemein')}
+                      </Badge>
+                    </td>
+                    <td className={cn(tdNumericClasses, 'whitespace-nowrap')}>
+                      {c.validity_months
+                        ? `${c.validity_months} ${t('trainings.months', 'Monate')}`
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {courses.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={3}
+                    icon={<GraduationCap />}
+                    title={t('trainings.emptyTitle')}
+                    description={t('trainings.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('trainings.create', 'Kurs anlegen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.title', 'Titel')}
             value={form.title}

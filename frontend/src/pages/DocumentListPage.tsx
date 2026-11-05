@@ -1,3 +1,4 @@
+import { FileText, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDocumentList, useCreateDocument, useDeleteDocument } from '../api/hooks';
@@ -5,9 +6,24 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 // Stored document categories (English keys); the labels come from the catalog.
 export const DOCUMENT_CATEGORIES = [
@@ -29,18 +45,16 @@ function formatFileSize(bytes: number): string {
 
 export function DocumentListPage() {
   const { t } = useTranslation();
-  const categoryOptions = [
-    { value: '', label: t('common.all', 'Alle') },
-    ...DOCUMENT_CATEGORIES.map((value) => ({
-      value,
-      label: t(`document.categories.${value}`, value),
-    })),
-  ];
+  const categoryValues = DOCUMENT_CATEGORIES.map((value) => ({
+    value,
+    label: t(`document.categories.${value}`, value),
+  }));
+  const categoryOptions = [{ value: '', label: t('common.allCategories') }, ...categoryValues];
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data, isLoading } = useDocumentList({ search, category });
+  const { data, isLoading, error, refetch } = useDocumentList({ search, category });
   const createMutation = useCreateDocument();
   const deleteMutation = useDeleteDocument();
 
@@ -65,58 +79,98 @@ export function DocumentListPage() {
     );
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('document.title', 'Dokumente')}
-        </h1>
-        <Button onClick={() => setShowCreate(true)}>{t('common.create', 'Erstellen')}</Button>
-      </div>
+  const documents = data?.data ?? [];
+  const filtered = Boolean(search || category);
 
-      <div className="flex gap-4 flex-wrap">
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={t('document.title', 'Dokumente')}
+        description={t('document.summary')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('document.upload', 'Dokument anlegen')}
+          </Button>
+        }
+      />
+
+      <Toolbar>
         <Input
-          label={t('common.search', 'Suche')}
+          type="text"
+          icon={<Search />}
+          placeholder={t('common.search', 'Suche')}
+          aria-label={t('common.search', 'Suche')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:w-64"
         />
         <Select
-          label={t('document.category', 'Kategorie')}
+          aria-label={t('document.category', 'Kategorie')}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           options={categoryOptions}
+          className="w-40 sm:w-44"
         />
-      </div>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
-      {isLoading ? (
-        <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
-      ) : (
-        <Card title={`${t('document.title', 'Dokumente')} (${data?.total ?? 0})`}>
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+
+      {data ? (
+        <Card className="p-0 overflow-hidden">
           <ScrollRegion label={t('document.title', 'Dokumente')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('document.docTitle', 'Titel')}</th>
-                  <th className="pb-2">{t('document.fileName', 'Dateiname')}</th>
-                  <th className="pb-2">{t('document.category', 'Kategorie')}</th>
-                  <th className="pb-2">{t('document.size', 'Größe')}</th>
-                  <th className="pb-2">{t('document.version', 'Version')}</th>
-                  <th className="pb-2">{t('common.actions', 'Aktionen')}</th>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('document.docTitle', 'Titel')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('document.fileName', 'Dateiname')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('document.category', 'Kategorie')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('document.size', 'Größe')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('document.version', 'Version')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {data?.data.map((doc) => (
-                  <tr key={doc.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-medium">{doc.title}</td>
-                    <td className="py-2 font-mono text-xs">{doc.file_name}</td>
-                    <td className="py-2">
+              <tbody>
+                {documents.map((doc) => (
+                  <tr key={doc.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{doc.title}</td>
+                    <td className={tdMonoClasses}>{doc.file_name}</td>
+                    <td className={tdClasses}>
                       <Badge variant="neutral">
                         {t(`document.categories.${doc.category}`, doc.category)}
                       </Badge>
                     </td>
-                    <td className="py-2">{formatFileSize(doc.file_size)}</td>
-                    <td className="py-2">v{doc.version}</td>
-                    <td className="py-2">
+                    <td className={cn(tdClasses, 'whitespace-nowrap text-right tabular-nums')}>
+                      {formatFileSize(doc.file_size)}
+                    </td>
+                    <td className={cn(tdClasses, 'tabular-nums')}>v{doc.version}</td>
+                    <td className={cn(tdClasses, 'text-right')}>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -127,23 +181,24 @@ export function DocumentListPage() {
                     </td>
                   </tr>
                 ))}
-                {(!data?.data || data.data.length === 0) && (
-                  <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
-                      {t('common.noData', 'Keine Daten')}
-                    </td>
-                  </tr>
-                )}
+                {documents.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<FileText />}
+                    title={filtered ? t('common.noResults') : t('document.emptyTitle')}
+                    description={filtered ? t('common.noResultsHint') : t('document.emptyHint')}
+                  />
+                ) : null}
               </tbody>
             </table>
           </ScrollRegion>
         </Card>
-      )}
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
-        title={t('document.upload', 'Dokument erstellen')}
+        title={t('document.upload', 'Dokument anlegen')}
       >
         <div className="space-y-4">
           <Input
@@ -162,13 +217,13 @@ export function DocumentListPage() {
             label={t('document.category', 'Kategorie')}
             value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })}
-            options={categoryOptions.slice(1)}
+            options={categoryValues}
           />
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('common.create', 'Anlegen')}</Button>
           </div>
         </div>
       </Modal>

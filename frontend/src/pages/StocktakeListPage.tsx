@@ -1,3 +1,4 @@
+import { ClipboardCheck, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStocktakeList, useCreateStocktake, useDeleteStocktake } from '../api/hooks';
@@ -5,9 +6,24 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 /** The stocktake statuses and scopes; their labels come from the catalog. */
 export const STOCKTAKE_STATUSES = ['planned', 'in_progress', 'completed', 'cancelled'] as const;
@@ -34,7 +50,7 @@ export function StocktakeListPage() {
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data, isLoading } = useStocktakeList({ status, search });
+  const { data, isLoading, error, refetch } = useStocktakeList({ status, search });
   const createMutation = useCreateStocktake();
   const deleteMutation = useDeleteStocktake();
 
@@ -50,74 +66,110 @@ export function StocktakeListPage() {
     });
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('stocktake.title', 'Inventur')}
-        </h1>
-        <Button onClick={() => setShowCreate(true)}>
-          {t('stocktake.create', 'Inventur starten')}
-        </Button>
-      </div>
+  const stocktakes = data?.data ?? [];
+  const filtered = Boolean(search || status);
 
-      <div className="flex gap-4 flex-wrap">
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={t('stocktake.title', 'Inventur')}
+        description={t('stocktake.summary')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('stocktake.create', 'Inventur starten')}
+          </Button>
+        }
+      />
+
+      <Toolbar>
         <Input
-          label={t('common.search', 'Suche')}
+          type="text"
+          icon={<Search />}
+          placeholder={t('common.search', 'Suche')}
+          aria-label={t('common.search', 'Suche')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:w-64"
         />
         <Select
-          label={t('ci.status', 'Status')}
+          aria-label={t('ci.status', 'Status')}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           options={[
-            { value: '', label: t('stocktake.allStatuses') },
+            { value: '', label: t('common.allStatuses') },
             ...STOCKTAKE_STATUSES.map((value) => ({
               value,
               label: t(`stocktake.statuses.${value}`),
             })),
           ]}
+          className="w-40 sm:w-44"
         />
-      </div>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
-      {isLoading ? (
-        <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
-      ) : (
-        <Card title={`${t('stocktake.title', 'Inventur')} (${data?.total ?? 0})`}>
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+
+      {data ? (
+        <Card className="p-0 overflow-hidden">
           <ScrollRegion label={t('stocktake.title', 'Inventur')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('stocktake.name', 'Bezeichnung')}</th>
-                  <th className="pb-2">{t('ci.status', 'Status')}</th>
-                  <th className="pb-2">{t('stocktake.scope', 'Umfang')}</th>
-                  <th className="pb-2">{t('stocktake.progress', 'Fortschritt')}</th>
-                  <th className="pb-2">{t('stocktake.missing', 'Fehlend')}</th>
-                  <th className="pb-2">{t('common.actions', 'Aktionen')}</th>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('stocktake.name', 'Bezeichnung')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('stocktake.scope', 'Umfang')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('stocktake.progress', 'Fortschritt')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('stocktake.missing', 'Fehlend')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {data?.data.map((st) => (
-                  <tr key={st.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-medium">{st.title}</td>
-                    <td className="py-2">
+              <tbody>
+                {stocktakes.map((st) => (
+                  <tr key={st.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{st.title}</td>
+                    <td className={tdClasses}>
                       <Badge variant={statusVariant(st.status)}>
                         {t(`stocktake.statuses.${st.status}`, st.status)}
                       </Badge>
                     </td>
-                    <td className="py-2">{t(`stocktake.scopes.${st.scope}`, st.scope)}</td>
-                    <td className="py-2">
+                    <td className={tdClasses}>{t(`stocktake.scopes.${st.scope}`, st.scope)}</td>
+                    <td className={tdNumericClasses}>
                       {st.total_scanned}/{st.total_expected}
                     </td>
-                    <td className="py-2">
+                    <td className={tdNumericClasses}>
                       {st.total_missing > 0 ? (
                         <Badge variant="danger">{st.total_missing}</Badge>
                       ) : (
                         '0'
                       )}
                     </td>
-                    <td className="py-2">
+                    <td className={cn(tdClasses, 'text-right')}>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -128,18 +180,19 @@ export function StocktakeListPage() {
                     </td>
                   </tr>
                 ))}
-                {(!data?.data || data.data.length === 0) && (
-                  <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
-                      {t('common.noData', 'Keine Daten')}
-                    </td>
-                  </tr>
-                )}
+                {stocktakes.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<ClipboardCheck />}
+                    title={filtered ? t('common.noResults') : t('stocktake.emptyTitle')}
+                    description={filtered ? t('common.noResultsHint') : t('stocktake.emptyHint')}
+                  />
+                ) : null}
               </tbody>
             </table>
           </ScrollRegion>
         </Card>
-      )}
+      ) : null}
 
       <Modal
         open={showCreate}
@@ -176,7 +229,7 @@ export function StocktakeListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('stocktake.create', 'Inventur starten')}</Button>
           </div>
         </div>
       </Modal>

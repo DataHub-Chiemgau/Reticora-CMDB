@@ -83,7 +83,8 @@ async function hitOf(text: string, entityId: string): Promise<SearchHit> {
 /** palette opens the command palette on the dashboard and types text. */
 async function palette(page: Page, text: string) {
   await page.goto('/dashboard');
-  await page.locator('body').click();
+  // Focus the page without hitting a dashboard card (each card is a link).
+  await page.locator('h1').first().click();
   await page.keyboard.press('Control+k');
   const box = page.getByRole('combobox', { name: 'Befehle durchsuchen' });
   await expect(box).toBeFocused();
