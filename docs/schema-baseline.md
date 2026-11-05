@@ -367,6 +367,26 @@ weil der Schreibende es nicht sieht oder nicht ändern darf, lehnt der
 Trigger die Änderung mit 42501 (`asset_location_ci_scope`) ab (Migration
 000181, F-380); Asset und CIs weichen nicht still voneinander ab.
 
+### Scope von Reservierungen (WP-750)
+
+`reservation` trägt `client_id` und `site_id` (Migration 000258, TEN-02,
+E-40) mit Fremdschlüsseln samt Organisation (K19):
+`reservation_client_id_fkey` auf `client (id, organization_id)` und
+`reservation_site_id_fkey` auf `site (id, organization_id)`, beide ohne
+Löschaktion. Der Trigger `reservation_scope` (`derive_reservation_scope`)
+leitet beide bei INSERT und bei einer Änderung von Objekt, Client oder
+Standort aus dem Asset ab, sonst aus dem Mengenartikel (`quantity_item`),
+und überschreibt geschriebene Werte; er liest unter der RLS des Schreibenden,
+ein Objekt außerhalb des Scopes ergibt NULL und scheitert für gescopte
+Prinzipale an WITH CHECK (E-09). Ändert ein Asset oder Mengenartikel Client
+oder Standort, leitet `propagate_reservation_scope` dessen Reservierungen mit
+erweitertem Scope (`app_scope_widen`) neu ab. Die Policies folgen `asset`
+(000151) mit den restriktiven UPDATE- und DELETE-Policies; die Unterabfrage
+`reservationVisible` des Repositorys entfällt. Ein gelöschter Standort mit
+Reservierungen meldet die Abhängigkeit `asset` (`locations.DeleteError`). Die
+Migration setzt `expires_at = reserved_until` für aktive Reservierungen ohne
+`expires_at` (Regel aus WP-277); die Down-Migration lässt diese Werte stehen.
+
 ### Standort von Räumen und Racks (WP-393)
 
 `room` und `rack` tragen `client_id` und `site_id` ihrer 1:1-Location-Zeile
@@ -1759,7 +1779,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_suppression` | ja | ja | relationship_suppression_scoped_delete (DELETE), relationship_suppression_scoped_update (UPDATE), suppression_isolation (ALL) |
 | `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
-| `reservation` | ja | ja | reservation_isolation (ALL) |
+| `reservation` | ja | ja | reservation_isolation (ALL), reservation_scoped_delete (DELETE), reservation_scoped_update (UPDATE) |
 | `review_item` | ja | ja | review_item_isolation (ALL), review_item_scoped_delete (DELETE), review_item_scoped_select (SELECT), review_item_scoped_update (UPDATE) |
 | `role` | ja | ja | role_isolation (ALL) |
 | `role_assignment` | ja | ja | role_assignment_isolation (ALL) |

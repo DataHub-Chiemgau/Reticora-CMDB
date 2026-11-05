@@ -1459,3 +1459,5 @@ STK-01;[P2];B;backend/internal/consumable/minlevel_integration_test.go;WP-285
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/consumable/minlevel_integration_test.go;WP-285
 INV-01;[P2];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-848
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-848
+TEN-02;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;WP-750
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/asset/handler_reservation_test.go;WP-750

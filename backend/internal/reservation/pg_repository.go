@@ -22,7 +22,8 @@ import (
 
 const selectColumns = `
 	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
-	COALESCE(quantity_item_id::text, ''), quantity, state, reserved_from,
+	COALESCE(quantity_item_id::text, ''), COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, ''), quantity, state, reserved_from,
 	reserved_until, COALESCE(assignee_id::text, ''), COALESCE(project_ref, ''),
 	COALESCE(order_id::text, ''), COALESCE(ticket_id::text, ''), expires_at,
 	COALESCE(reason, ''), COALESCE(created_by::text, ''), created_at, updated_at
@@ -95,27 +96,6 @@ func (r *PGRepository) inTx(ctx context.Context, orgID string, fn func(ctx conte
 	})
 }
 
-// reservationVisible restricts reservations to those whose asset or quantity
-// item is visible under the transaction's tenant scope: the asset and
-// quantity_item policies filter the subqueries, while reservation carries no
-// client column yet (WP-025).
-const reservationVisible = `(reservation.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = reservation.asset_id))
-	AND (reservation.quantity_item_id IS NULL OR EXISTS (SELECT 1 FROM quantity_item WHERE quantity_item.id = reservation.quantity_item_id))`
-
-// requireVisible fails with ErrNotFound when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
-func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
-	var ok bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
-		return fmt.Errorf("check %s visibility: %w", table, err)
-	}
-	if !ok {
-		return ErrNotFound
-	}
-	return nil
-}
-
 // requireItem fails with ErrAssetNotFound or ErrItemNotFound when the item
 // to reserve is not visible under the caller's scope. The foreign keys are
 // checked without row level security: an item of another organization
@@ -148,11 +128,10 @@ func requireItem(ctx context.Context, tx pgx.Tx, res *Reservation) error {
 	return nil
 }
 
-// lockedAsset is the client and site of a locked asset and whether it has
-// a holder (assigned_user_id, assigned_team_id; WP-745).
+// lockedAsset is a locked asset: whether it has a holder
+// (assigned_user_id, assigned_team_id; WP-745).
 type lockedAsset struct {
-	client, site string
-	assigned     bool
+	assigned bool
 }
 
 // lockAsset locks the asset in the transaction's scope; the update
@@ -163,9 +142,8 @@ func lockAsset(ctx context.Context, tx pgx.Tx, orgID, assetID string) (*lockedAs
 		return nil, ErrAssetNotFound
 	}
 	a := &lockedAsset{}
-	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, ''),
-			assigned_user_id IS NOT NULL OR assigned_team_id IS NOT NULL
-		FROM asset WHERE id = $1 AND organization_id = $2 FOR UPDATE`, assetID, orgID).Scan(&a.client, &a.site, &a.assigned)
+	err := tx.QueryRow(ctx, `SELECT assigned_user_id IS NOT NULL OR assigned_team_id IS NOT NULL
+		FROM asset WHERE id = $1 AND organization_id = $2 FOR UPDATE`, assetID, orgID).Scan(&a.assigned)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrAssetNotFound
 	}
@@ -175,31 +153,20 @@ func lockAsset(ctx context.Context, tx pgx.Tx, orgID, assetID string) (*lockedAs
 	return a, nil
 }
 
-// lockAssets locks the assets ids ordered by id (the order of WP-277) and
-// returns their client and site by id.
-func lockAssets(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (map[string]*lockedAsset, error) {
-	out := map[string]*lockedAsset{}
+// lockAssets locks the assets ids ordered by id (the order of WP-277).
+func lockAssets(ctx context.Context, tx pgx.Tx, orgID string, ids []string) error {
 	if len(ids) == 0 {
-		return out, nil
+		return nil
 	}
-	rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')
-		FROM asset WHERE id = ANY($1::uuid[]) AND organization_id = $2 ORDER BY id FOR UPDATE`, ids, orgID)
+	rows, err := tx.Query(ctx, `SELECT id FROM asset WHERE id = ANY($1::uuid[]) AND organization_id = $2 ORDER BY id FOR UPDATE`, ids, orgID)
 	if err != nil {
-		return nil, fmt.Errorf("lock assets: %w", err)
+		return fmt.Errorf("lock assets: %w", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		a := &lockedAsset{}
-		if err = rows.Scan(&id, &a.client, &a.site); err != nil {
-			return nil, fmt.Errorf("lock assets: %w", err)
-		}
-		out[id] = a
-	}
+	rows.Close()
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("lock assets: %w", err)
+		return fmt.Errorf("lock assets: %w", err)
 	}
-	return out, nil
+	return nil
 }
 
 // actor is the acting user of the request: the tenant user, else the
@@ -231,16 +198,15 @@ func (r *PGRepository) book(ctx context.Context, tx pgx.Tx, res *Reservation, ty
 }
 
 // emit registers the event typ of res last before the commit (K20); the
-// payload carries the client and site of the locked asset a.
-func (r *PGRepository) emit(ctx context.Context, tx pgx.Tx, res *Reservation, a *lockedAsset, typ string) error {
+// payload carries the client and site of the reservation's columns
+// (000258, WP-750).
+func (r *PGRepository) emit(ctx context.Context, tx pgx.Tx, res *Reservation, typ string) error {
 	if r.outbox == nil {
 		return nil
 	}
 	data := assignment.ReservationEventData{ID: res.ID, ItemKind: res.ItemKind, AssetID: res.AssetID,
-		QuantityItemID: res.QuantityItemID, State: res.State, ReservedUntil: res.ReservedUntil, ExpiresAt: res.ExpiresAt}
-	if a != nil {
-		data.ClientID, data.SiteID = a.client, a.site
-	}
+		QuantityItemID: res.QuantityItemID, State: res.State, ReservedUntil: res.ReservedUntil, ExpiresAt: res.ExpiresAt,
+		ClientID: res.ClientID, SiteID: res.SiteID}
 	e := &events.Event{OrgID: res.OrganizationID, Type: typ, EntityID: res.ID, Data: data}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := r.outbox.Append(ctx, tx, e); err != nil {
@@ -262,12 +228,12 @@ func (r *PGRepository) List(ctx context.Context, orgID, state string, page api.P
 			args = append(args, state)
 		}
 		clause := strings.Join(where, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM reservation WHERE "+reservationVisible+" AND "+clause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM reservation WHERE "+clause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count reservations: %w", err)
 		}
 		args = append(args, page.Limit, page.Offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM reservation WHERE "+reservationVisible+" AND %s ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d",
+			"SELECT %s FROM reservation WHERE %s ORDER BY created_at DESC, id DESC LIMIT $%d OFFSET $%d",
 			selectColumns, clause, len(args)-1, len(args)), args...)
 		if err != nil {
 			return fmt.Errorf("list reservations: %w", err)
@@ -290,7 +256,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Reservat
 	var out *Reservation
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		res, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
-			"SELECT %s FROM reservation WHERE "+reservationVisible+" AND id = $1 AND organization_id = $2",
+			"SELECT %s FROM reservation WHERE id = $1 AND organization_id = $2",
 			selectColumns), id, orgID))
 		if err != nil {
 			if err == pgx.ErrNoRows {
@@ -316,10 +282,9 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 		res.ExpiresAt = &until
 	}
 	return r.inTx(ctx, res.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var locked *lockedAsset
 		if nilIfEmpty(res.AssetID) != nil {
-			var err error
-			if locked, err = lockAsset(ctx, tx, res.OrganizationID, res.AssetID); err != nil {
+			locked, err := lockAsset(ctx, tx, res.OrganizationID, res.AssetID)
+			if err != nil {
 				return err
 			}
 			var reserved bool
@@ -355,19 +320,25 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 		scanned, err := scan(row)
 		if err != nil {
 			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_reservation_one_active_per_asset" {
+			switch {
+			case errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_reservation_one_active_per_asset":
 				return ErrConflict
+			case errors.As(err, &pgErr) && pgErr.Code == "42501":
+				// WITH CHECK of reservation_isolation: the derived client
+				// or site lies outside the caller's write scope, e.g. an
+				// org-wide item reserved by a scoped principal (E-09).
+				if res.AssetID != "" {
+					return ErrAssetNotFound
+				}
+				return ErrItemNotFound
 			}
 			return fmt.Errorf("create reservation: %w", err)
 		}
 		*res = *scanned
-		if visErr := requireVisible(ctx, tx, "reservation", reservationVisible, res.ID); visErr != nil {
-			return visErr
-		}
 		if bookErr := r.book(ctx, tx, res, "reservation"); bookErr != nil {
 			return bookErr
 		}
-		return r.emit(ctx, tx, res, locked, events.ReservationCreated)
+		return r.emit(ctx, tx, res, events.ReservationCreated)
 	})
 }
 
@@ -381,7 +352,7 @@ func lockReservation(ctx context.Context, tx pgx.Tx, orgID, id string) (*Reserva
 		return nil, nil, ErrNotFound
 	}
 	var assetID string
-	err := tx.QueryRow(ctx, "SELECT COALESCE(asset_id::text, '') FROM reservation WHERE "+reservationVisible+" AND id = $1 AND organization_id = $2",
+	err := tx.QueryRow(ctx, "SELECT COALESCE(asset_id::text, '') FROM reservation WHERE id = $1 AND organization_id = $2",
 		id, orgID).Scan(&assetID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
@@ -445,7 +416,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id, state string) 
 	}
 	var out *Reservation
 	err := r.inTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		res, locked, err := lockReservation(ctx, tx, orgID, id)
+		res, _, err := lockReservation(ctx, tx, orgID, id)
 		if err != nil {
 			return err
 		}
@@ -456,7 +427,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id, state string) 
 			return bookErr
 		}
 		out = res
-		return r.emit(ctx, tx, res, locked, effects.event)
+		return r.emit(ctx, tx, res, effects.event)
 	})
 	if err != nil {
 		return nil, err
@@ -501,7 +472,7 @@ func (r *PGRepository) Convert(ctx context.Context, orgID, id string, in *Conver
 			return err
 		}
 		out = &ConvertResult{Reservation: res, Assignment: a}
-		return r.emit(ctx, tx, res, locked, events.ReservationConverted)
+		return r.emit(ctx, tx, res, events.ReservationConverted)
 	})
 	if err != nil {
 		return nil, err
@@ -518,7 +489,7 @@ func (r *PGRepository) ActiveForItem(ctx context.Context, orgID, itemKind, itemI
 			column = "quantity_item_id"
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s FROM reservation WHERE "+reservationVisible+" AND organization_id = $1 AND %s = $2 AND state = 'active'",
+			"SELECT %s FROM reservation WHERE organization_id = $1 AND %s = $2 AND state = 'active'",
 			selectColumns, column), orgID, itemID)
 		if err != nil {
 			return fmt.Errorf("list active reservations: %w", err)
@@ -600,12 +571,11 @@ func (r *PGRepository) expireBatch(ctx context.Context, orgID string, now time.T
 				assetIDs = append(assetIDs, d.asset)
 			}
 		}
-		locked, lockErr := lockAssets(txCtx, tx, orgID, assetIDs)
-		if lockErr != nil {
+		if lockErr := lockAssets(txCtx, tx, orgID, assetIDs); lockErr != nil {
 			return lockErr
 		}
 		for _, d := range dues {
-			done, expireErr := r.expireOne(txCtx, tx, orgID, d.id, locked)
+			done, expireErr := r.expireOne(txCtx, tx, orgID, d.id)
 			if expireErr != nil {
 				return expireErr
 			}
@@ -624,7 +594,7 @@ func (r *PGRepository) expireBatch(ctx context.Context, orgID string, now time.T
 // expireOne sets the due reservation id to expired if it is still active
 // (its asset is locked) and writes movement, audit entry and event; done
 // is false for a reservation released or converted meanwhile.
-func (r *PGRepository) expireOne(ctx context.Context, tx pgx.Tx, orgID, id string, locked map[string]*lockedAsset) (done bool, err error) {
+func (r *PGRepository) expireOne(ctx context.Context, tx pgx.Tx, orgID, id string) (done bool, err error) {
 	res, err := scan(tx.QueryRow(ctx, fmt.Sprintf(
 		"UPDATE reservation SET state = 'expired', updated_at = now() WHERE id = $1 AND organization_id = $2 AND state = 'active' RETURNING %s",
 		selectColumns), id, orgID))
@@ -640,7 +610,7 @@ func (r *PGRepository) expireOne(ctx context.Context, tx pgx.Tx, orgID, id strin
 	if auditErr := r.auditExpiry(ctx, tx, res); auditErr != nil {
 		return false, auditErr
 	}
-	if emitErr := r.emit(ctx, tx, res, locked[res.AssetID], events.ReservationExpired); emitErr != nil {
+	if emitErr := r.emit(ctx, tx, res, events.ReservationExpired); emitErr != nil {
 		return false, emitErr
 	}
 	return true, nil
@@ -671,7 +641,7 @@ func scan(s scanner) (*Reservation, error) {
 	res := &Reservation{}
 	if err := s.Scan(
 		&res.ID, &res.OrganizationID, &res.ItemKind, &res.AssetID,
-		&res.QuantityItemID, &res.Quantity, &res.State, &res.ReservedFrom,
+		&res.QuantityItemID, &res.ClientID, &res.SiteID, &res.Quantity, &res.State, &res.ReservedFrom,
 		&res.ReservedUntil, &res.AssigneeID, &res.ProjectRef, &res.OrderID,
 		&res.TicketID, &res.ExpiresAt, &res.Reason, &res.CreatedBy,
 		&res.CreatedAt, &res.UpdatedAt,

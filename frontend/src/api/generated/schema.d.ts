@@ -1402,7 +1402,7 @@ export interface paths {
     };
     /**
      * Get an asset
-     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id).
+     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id). With an active reservation, active_reservation carries it (API-06, E-38, WP-750); it replaces GET /api/v1/inventory/availability for assets.
      */
     get: operations['getAsset'];
     put?: never;
@@ -12746,6 +12746,24 @@ export interface components {
       readonly version?: number;
       /** @description Read-only technical identity of the primary CI; only in GET /api/v1/assets/{id}, left out when the caller cannot read primary_ci_id. Under restricted CI field permissions only id, name and status. */
       readonly primary_ci?: components['schemas']['CIRef'];
+      /** @description The active reservation of the asset (API-06, E-38, WP-750); only in GET /api/v1/assets/{id} and absent without one. Under restricted asset field permissions it is left out (no grantable field key, fail-closed). */
+      readonly active_reservation?: components['schemas']['AssetActiveReservation'];
+    };
+    /** @description The active reservation of an asset in GET /api/v1/assets/{id} (WP-750): for a user (assignee_id) or a project (project_ref). */
+    AssetActiveReservation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      /**
+       * Format: uuid
+       * @description The user the asset is reserved for.
+       */
+      assignee_id?: string;
+      /** @description The project the asset is reserved for. */
+      project_ref?: string;
     };
     /** @description The read-only technical identity of a CI linked to an asset (spec §4, WP-740); the CI stays the source of truth. */
     CIRef: {
@@ -13569,6 +13587,16 @@ export interface components {
       asset_id?: string;
       /** Format: uuid */
       quantity_item_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the asset or quantity item, derived by the database (WP-750); absent for an org-wide item.
+       */
+      readonly client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the asset or quantity item, derived by the database (WP-750); absent without a location.
+       */
+      readonly site_id?: string;
       quantity: number;
       state: components['schemas']['ReservationState'];
       /** Format: date-time */

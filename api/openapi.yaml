@@ -3248,7 +3248,9 @@ paths:
         Always the schema Asset (WP-740). With a primary CI, primary_ci
         carries its read-only technical identity (field permissions of the
         CI apply; it is left out when the caller cannot read
-        primary_ci_id).
+        primary_ci_id). With an active reservation, active_reservation
+        carries it (API-06, E-38, WP-750); it replaces GET
+        /api/v1/inventory/availability for assets.
       responses:
         '200':
           description: Asset details
@@ -27226,6 +27228,33 @@ components:
             /api/v1/assets/{id}, left out when the caller cannot read
             primary_ci_id. Under restricted CI field permissions only id,
             name and status.
+        active_reservation:
+          allOf:
+            - $ref: '#/components/schemas/AssetActiveReservation'
+          readOnly: true
+          description: >-
+            The active reservation of the asset (API-06, E-38, WP-750); only
+            in GET /api/v1/assets/{id} and absent without one. Under
+            restricted asset field permissions it is left out (no grantable
+            field key, fail-closed).
+
+    AssetActiveReservation:
+      type: object
+      description: >-
+        The active reservation of an asset in GET /api/v1/assets/{id}
+        (WP-750): for a user (assignee_id) or a project (project_ref).
+      required: [id]
+      properties:
+        id: { type: string, format: uuid }
+        reserved_until: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        assignee_id:
+          type: string
+          format: uuid
+          description: The user the asset is reserved for.
+        project_ref:
+          type: string
+          description: The project the asset is reserved for.
 
     CIRef:
       type: object
@@ -28598,6 +28627,20 @@ components:
         item_kind: { type: string, enum: [asset, quantity_item] }
         asset_id: { type: string, format: uuid }
         quantity_item_id: { type: string, format: uuid }
+        client_id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: >-
+            Client of the asset or quantity item, derived by the database
+            (WP-750); absent for an org-wide item.
+        site_id:
+          type: string
+          format: uuid
+          readOnly: true
+          description: >-
+            Site of the asset or quantity item, derived by the database
+            (WP-750); absent without a location.
         quantity: { type: number }
         state: { $ref: '#/components/schemas/ReservationState' }
         reserved_from: { type: string, format: date-time }

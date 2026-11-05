@@ -84,6 +84,20 @@ type Asset struct {
 	// PrimaryCI is the read-only technical identity of the primary CI,
 	// set by GET /api/v1/assets/{id} only (WP-740).
 	PrimaryCI *CIRef `json:"primary_ci,omitempty"`
+	// ActiveReservation is the active reservation of the asset, set by
+	// GET /api/v1/assets/{id} only (API-06, E-38, WP-750).
+	ActiveReservation *ReservationRef `json:"active_reservation,omitempty"`
+}
+
+// ReservationRef is the active reservation of an asset in GET
+// /api/v1/assets/{id}: for a user (AssigneeID) or a project (ProjectRef),
+// with its end and expiry.
+type ReservationRef struct {
+	ID            string     `json:"id"`
+	ReservedUntil *time.Time `json:"reserved_until,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	AssigneeID    string     `json:"assignee_id,omitempty"`
+	ProjectRef    string     `json:"project_ref,omitempty"`
 }
 
 // CreateRequest is the payload for creating an asset. A missing currency is

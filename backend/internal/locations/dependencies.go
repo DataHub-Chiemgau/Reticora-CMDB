@@ -147,6 +147,10 @@ var referenceKinds = map[string]string{
 	"room":                 DependencyLocation,
 	"rack":                 DependencyLocation,
 	"service_account_role": DependencyRoleAssignment,
+	// A reservation carries the site of its asset (reservation_site_id_fkey,
+	// 000258, WP-750) and references a site only while its object stands
+	// there; the object is the dependency.
+	"reservation": DependencyAsset,
 }
 
 // DependencyError reports the kinds of objects that still reference a
