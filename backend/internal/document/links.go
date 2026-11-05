@@ -37,10 +37,13 @@ const (
 //   - disposal_record directly (its own client and site since 000145);
 //   - contract directly (its own client; org-wide with client_id NULL,
 //     WP-737);
-//   - stocktake on existence only (org-wide).
-//
-// stock_movement (WP-744, WP-276) follows.
+//   - stocktake on existence only (org-wide);
+//   - stock_movement directly (its own client and site, WP-744; the
+//     signature images of WP-276).
 var linkTargets = map[string]func(id string) string{
+	"stock_movement": func(id string) string {
+		return "EXISTS (SELECT 1 FROM stock_movement WHERE stock_movement.id = " + id + ")"
+	},
 	"ci": func(id string) string {
 		return "EXISTS (SELECT 1 FROM ci WHERE ci.id = " + id + ")"
 	},
@@ -137,6 +140,28 @@ func targetVisible(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 		return api.ErrNotFound
 	}
 	return nil
+}
+
+// LinkTx links a document to its target in tx, the transaction of the
+// caller (WP-276): the entity type must stand in the registry, the target
+// must be visible under the tenant scope (api.ErrNotFound otherwise), the
+// trigger derive_document_link_scope sets client, site and team, and the
+// WITH CHECK of document_link refuses a link outside a scoped principal's
+// scope. It sets the id and creation time of link.
+func LinkTx(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
+	if err := checkEntityType(link.EntityType); err != nil {
+		return err
+	}
+	if !api.IsUUID(link.EntityID) {
+		return errInvalidEntityID
+	}
+	if err := targetVisible(ctx, tx, link); err != nil {
+		return err
+	}
+	if err := insertLink(ctx, tx, link); err != nil {
+		return err
+	}
+	return requireVisible(ctx, tx, "document_link", linkVisible, link.ID)
 }
 
 // recordLinkAudit writes document.linked or document.unlinked as the last

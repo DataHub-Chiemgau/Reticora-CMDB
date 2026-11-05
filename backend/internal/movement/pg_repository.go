@@ -37,7 +37,8 @@ const movementSelectColumns = `
 	COALESCE(assignee_team_id::text, ''), due_at, COALESCE(reason, ''),
 	COALESCE(ticket_id::text, ''), COALESCE(order_id::text, ''),
 	COALESCE(workflow_run_id::text, ''), COALESCE(document_id::text, ''),
-	COALESCE(notes, ''), COALESCE(signature_hash, ''), occurred_at, created_at
+	COALESCE(notes, ''), COALESCE(signature_hash, ''), COALESCE(signer_user_id::text, ''),
+	COALESCE(signer_surrogate::text, ''), occurred_at, created_at
 `
 
 // canonicalMovementType returns the canonical type of a legacy or canonical
@@ -266,26 +267,42 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 			return refErr
 		}
 	}
+	if m.ID != "" && !api.IsUUID(m.ID) {
+		return fieldError("id", "must be a UUID")
+	}
+	// A signed movement comes with its id and occurred_at, signature_hash
+	// and signer (WP-276): the hash covers them and the row is append-only.
+	// Without them the database sets id and occurred_at.
+	var occurredAt *time.Time
+	if !m.OccurredAt.IsZero() {
+		at := SignatureTime(m.OccurredAt)
+		occurredAt = &at
+	}
 	var clientID, siteID *string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO stock_movement (
-			organization_id, item_kind, asset_id, consumable_id,
+			id, occurred_at, organization_id, item_kind, asset_id, consumable_id,
 			movement_type, from_location_id, to_location_id, quantity,
 			actor_id, assignee_user_id, assignee_team_id, due_at, reason, ticket_id,
-			order_id, workflow_run_id, document_id, notes
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+			order_id, workflow_run_id, document_id, notes,
+			signature_hash, signer_user_id, signer_surrogate
+		) VALUES (COALESCE($1::uuid, gen_random_uuid()), COALESCE($2::timestamptz, now()),
+			$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
 		RETURNING id::text, client_id::text, site_id::text, occurred_at, created_at`,
+		nilIfEmpty(m.ID), occurredAt,
 		m.OrganizationID, m.ItemKind, nilIfEmpty(m.AssetID), nilIfEmpty(m.ConsumableID),
 		m.MovementType, nilIfEmpty(m.FromLocationID), nilIfEmpty(m.ToLocationID),
 		m.Quantity, nilIfEmpty(m.ActorID), nilIfEmpty(m.AssigneeUserID), nilIfEmpty(m.AssigneeTeamID),
 		m.DueAt, nilIfEmpty(m.Reason), nilIfEmpty(m.TicketID), nilIfEmpty(m.OrderID),
 		nilIfEmpty(m.WorkflowRunID), nilIfEmpty(m.DocumentID), nilIfEmpty(m.Notes),
+		nilIfEmpty(m.SignatureHash), nilIfEmpty(m.SignerUserID), nilIfEmpty(m.SignerSurrogate),
 	).Scan(&m.ID, &clientID, &siteID, &m.OccurredAt, &m.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("record movement: %w", err)
 	}
 	m.ClientID, m.SiteID = deref(clientID), deref(siteID)
 	m.OccurredAt, m.CreatedAt = m.OccurredAt.UTC(), m.CreatedAt.UTC()
+	m.fillSignature()
 	entity := m.AssetID
 	if m.ItemKind == "consumable" {
 		entity = m.ConsumableID
@@ -651,7 +668,7 @@ func scanMovement(scanner movementScanner) (*Movement, error) {
 		&m.ConsumableID, &m.MovementType, &m.FromLocationID,
 		&m.ToLocationID, &m.Quantity, &m.ActorID, &m.AssigneeUserID, &m.AssigneeTeamID,
 		&m.DueAt, &m.Reason, &m.TicketID, &m.OrderID, &m.WorkflowRunID, &m.DocumentID,
-		&m.Notes, &m.SignatureHash, &m.OccurredAt, &m.CreatedAt,
+		&m.Notes, &m.SignatureHash, &m.SignerUserID, &m.SignerSurrogate, &m.OccurredAt, &m.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -660,6 +677,7 @@ func scanMovement(scanner movementScanner) (*Movement, error) {
 		due := m.DueAt.UTC()
 		m.DueAt = &due
 	}
+	m.fillSignature()
 	return m, nil
 }
 

@@ -10257,7 +10257,8 @@ paths:
       summary: Link a document to another entity
       description: >-
         entity_type is one of ci, asset, assignment, ticket, location,
-        disposal_record, stocktake and contract (WP-737); any other value
+        disposal_record, stocktake, contract (WP-737) and stock_movement
+        (WP-276); any other value
         answers 422. A target
         that does not exist or lies outside the caller's scope answers 404.
         The link takes client, site and team of its target (MGT-01). A
@@ -19135,13 +19136,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/return:
     x-phase: P2
@@ -19178,13 +19201,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/transfer:
     x-phase: P2
@@ -19221,13 +19266,35 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: a missing permission, the plan does not include the
+            feature `signature` for a signed request
+            (`https://reticora.io/problems/feature-not-entitled`) or the image
+            exceeds `max_storage_mb`
+            (`https://reticora.io/problems/entitlement-limit`, WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          description: The request body exceeds 1 MiB or the signature image 512 KiB (WP-276).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field value is outside its allowed range; `field` names it (a
+            former signature field included). A signature image that is no
+            PNG answers `https://reticora.io/problems/mime-mismatch`.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/assets/{id}/reserve:
     x-phase: P2
@@ -27661,6 +27728,8 @@ components:
         updated_at:
           type: string
           format: date-time
+        signature:
+          $ref: '#/components/schemas/SignatureRef'
 
     AssignAssetRequest:
       type: object
@@ -27679,6 +27748,8 @@ components:
           format: date-time
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
 
     ReturnAssetRequest:
       type: object
@@ -27693,6 +27764,8 @@ components:
           description: Booked as `reason` of the return movement.
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
 
     TransferAssetRequest:
       type: object
@@ -27714,16 +27787,63 @@ components:
           format: date-time
         notes:
           type: string
+        signature:
+          $ref: '#/components/schemas/SignatureInput'
+        return_signature:
+          $ref: '#/components/schemas/SignatureInput'
 
-    Signature:
+    SignatureInput:
       type: object
-      description: Digital signature captured at handover/return.
+      additionalProperties: false
+      description: >-
+        A digital signature captured with an assignment, return or transfer
+        (AST-02, E-51, WP-276): the PNG of the signature canvas in base64,
+        decoded at most 512 KiB (413 above, 422
+        `https://reticora.io/problems/mime-mismatch` for content that is no
+        PNG). It needs the feature `signature` (403
+        `https://reticora.io/problems/feature-not-entitled`) and counts
+        against `max_storage_mb` (403
+        `https://reticora.io/problems/entitlement-limit`). The image becomes
+        a document of the category `signature` linked to the movement,
+        bound to it by `signature_hash`; signed_at is the `occurred_at` of
+        the movement (server time). The former fields `image_base64`,
+        `object_key`, `signer_name`, `signed_at` and `method` answer 422.
+      required: [image_png_base64]
       properties:
-        image_base64: { type: string, description: Inline base64 image. }
-        object_key: { type: string, description: S3 object key of the stored signature image. }
-        signer_name: { type: string }
+        image_png_base64:
+          type: string
+          format: byte
+          maxLength: 716800
+        signer:
+          type: object
+          additionalProperties: false
+          description: >-
+            Exactly one of a user of the organization (422 otherwise), a
+            contact in the caller's scope (404 when not visible, 422 without
+            pseudonymized personal data) or the name of an external person,
+            stored only as a vault surrogate. Without it the holder of the
+            movement signs (on a return the previous holder); a team holder
+            requires it (422).
+          properties:
+            user_id: { type: string, format: uuid }
+            contact_id: { type: string, format: uuid }
+            name: { type: string }
+
+    SignatureRef:
+      type: object
+      description: >-
+        The signature of a movement (WP-276): the document of the category
+        `signature` holding the image, the hash binding image and movement
+        (hex SHA-256 of the PNG, a zero byte and the canonical JSON of the
+        movement ids), the signer as user id or surrogate (never a name) and
+        `signed_at`, the `occurred_at` of the movement.
+      required: [document_id, signature_hash, signed_at]
+      properties:
+        document_id: { type: string, format: uuid }
+        signature_hash: { type: string }
+        signer_user_id: { type: string, format: uuid }
+        signer_surrogate: { type: string, format: uuid }
         signed_at: { type: string, format: date-time }
-        method: { type: string, enum: [touchscreen, drawn, typed] }
 
     AssignmentListResponse:
       allOf:
@@ -28696,9 +28816,11 @@ components:
         order_id: { type: string, format: uuid }
         workflow_run_id: { type: string, format: uuid }
         document_id: { type: string, format: uuid }
-        signature_hash: { type: string, description: Hash of the signature (WP-276); absent until then. }
+        signature_hash: { type: string, description: Hash of the signature (WP-276); absent for an unsigned movement. }
         occurred_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
+        signature:
+          $ref: '#/components/schemas/SignatureRef'
     CreateStockMovementRequest:
       type: object
       description: >-

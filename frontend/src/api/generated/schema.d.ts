@@ -4430,7 +4430,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake and contract (WP-737); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -13000,6 +13000,7 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+      signature?: components['schemas']['SignatureRef'];
     };
     /** @description Exactly one of `assigned_user_id` and `assigned_team_id` (WP-275). */
     AssignAssetRequest: {
@@ -13016,6 +13017,7 @@ export interface components {
       /** Format: date-time */
       due_at?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
     };
     ReturnAssetRequest: {
       /**
@@ -13026,6 +13028,7 @@ export interface components {
       /** @description Booked as `reason` of the return movement. */
       return_condition?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
     };
     /** @description The current holder and exactly one new holder, a user or a team (WP-275). */
     TransferAssetRequest: {
@@ -13041,18 +13044,33 @@ export interface components {
       /** Format: date-time */
       due_at?: string;
       notes?: string;
+      signature?: components['schemas']['SignatureInput'];
+      return_signature?: components['schemas']['SignatureInput'];
     };
-    /** @description Digital signature captured at handover/return. */
-    Signature: {
-      /** @description Inline base64 image. */
-      image_base64?: string;
-      /** @description S3 object key of the stored signature image. */
-      object_key?: string;
-      signer_name?: string;
+    /** @description A digital signature captured with an assignment, return or transfer (AST-02, E-51, WP-276): the PNG of the signature canvas in base64, decoded at most 512 KiB (413 above, 422 `https://reticora.io/problems/mime-mismatch` for content that is no PNG). It needs the feature `signature` (403 `https://reticora.io/problems/feature-not-entitled`) and counts against `max_storage_mb` (403 `https://reticora.io/problems/entitlement-limit`). The image becomes a document of the category `signature` linked to the movement, bound to it by `signature_hash`; signed_at is the `occurred_at` of the movement (server time). The former fields `image_base64`, `object_key`, `signer_name`, `signed_at` and `method` answer 422. */
+    SignatureInput: {
+      /** Format: byte */
+      image_png_base64: string;
+      /** @description Exactly one of a user of the organization (422 otherwise), a contact in the caller's scope (404 when not visible, 422 without pseudonymized personal data) or the name of an external person, stored only as a vault surrogate. Without it the holder of the movement signs (on a return the previous holder); a team holder requires it (422). */
+      signer?: {
+        /** Format: uuid */
+        user_id?: string;
+        /** Format: uuid */
+        contact_id?: string;
+        name?: string;
+      };
+    };
+    /** @description The signature of a movement (WP-276): the document of the category `signature` holding the image, the hash binding image and movement (hex SHA-256 of the PNG, a zero byte and the canonical JSON of the movement ids), the signer as user id or surrogate (never a name) and `signed_at`, the `occurred_at` of the movement. */
+    SignatureRef: {
+      /** Format: uuid */
+      document_id: string;
+      signature_hash: string;
+      /** Format: uuid */
+      signer_user_id?: string;
+      /** Format: uuid */
+      signer_surrogate?: string;
       /** Format: date-time */
-      signed_at?: string;
-      /** @enum {string} */
-      method?: 'touchscreen' | 'drawn' | 'typed';
+      signed_at: string;
     };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
@@ -13609,12 +13627,13 @@ export interface components {
       workflow_run_id?: string;
       /** Format: uuid */
       document_id?: string;
-      /** @description Hash of the signature (WP-276); absent until then. */
+      /** @description Hash of the signature (WP-276); absent for an unsigned movement. */
       signature_hash?: string;
       /** Format: date-time */
       occurred_at: string;
       /** Format: date-time */
       created_at: string;
+      signature?: components['schemas']['SignatureRef'];
     };
     /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; quantity_item_id is its deprecated alias (E-40, WP-757). For an asset (asset_id) only transfer to to_location_id without quantity. */
     CreateStockMovementRequest: {
@@ -38896,10 +38915,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   returnAsset: {
@@ -38929,10 +38973,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   transferAsset: {
@@ -38962,10 +39031,35 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: a missing permission, the plan does not include the feature `signature` for a signed request (`https://reticora.io/problems/feature-not-entitled`) or the image exceeds `max_storage_mb` (`https://reticora.io/problems/entitlement-limit`, WP-276). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The request body exceeds 1 MiB or the signature image 512 KiB (WP-276). */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field value is outside its allowed range; `field` names it (a former signature field included). A signature image that is no PNG answers `https://reticora.io/problems/mime-mismatch`. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   reserveAsset: {

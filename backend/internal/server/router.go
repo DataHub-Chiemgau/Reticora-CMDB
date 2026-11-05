@@ -762,7 +762,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithReservations(reservationLookup{repo: repos.Reservation}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
-		assignment.NewHandler(repos.Assignment).WithService(repos.AssignmentService),
+		assignment.NewHandler(repos.Assignment).WithService(signingAssignments(&repos, &opts)),
 		documentHandler,
 		stocktake.NewHandler(repos.Stocktake),
 		consumable.NewHandler(repos.Consumable),
@@ -1306,6 +1306,23 @@ func exportLifecycleModel(d *lifecycle.Definition) citype.ExportLifecycleModelV2
 			FromStateKey: t.FromStateKey, ToStateKey: t.ToStateKey, RequiredFields: t.RequiredFields, Validation: t.Validation})
 	}
 	return citype.ExportLifecycleModelV2{ID: d.ID, Key: d.Key, IsSystem: d.IsSystem, ExportLifecycleModelBody: body}
+}
+
+// signingAssignments returns the assignment service with signatures
+// (AST-02, WP-276): the entitlements decide the feature signature and the
+// storage limit (fail-closed without them), the document repository counts
+// the storage, the blob store keeps the image and the job queue scans it
+// after the commit (only with the job repository, like the upload). Nil
+// without a service (profile without database).
+func signingAssignments(repos *Repositories, opts *Options) *assignment.Service {
+	if repos.AssignmentService == nil {
+		return nil
+	}
+	var scans document.ScanSubmitter
+	if opts.JobQueue != nil && repos.Jobs != nil {
+		scans = opts.JobQueue
+	}
+	return repos.AssignmentService.WithSignatures(opts.Entitlements, repos.Document, opts.Blobs, scans)
 }
 
 // importFeatureGate is the org gate of an import run (WP-775): the

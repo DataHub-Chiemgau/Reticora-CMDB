@@ -110,6 +110,9 @@ type AssignInput struct {
 	// DueAt is the due date of the assignment.
 	DueAt *time.Time
 	Notes string
+	// Signature is the optional signature bound to the assignment
+	// (WP-276).
+	Signature *SignatureInput
 }
 
 // ReturnInput is the return of an assigned asset.
@@ -118,6 +121,8 @@ type ReturnInput struct {
 	ExpectedHolder  string
 	ReturnCondition string
 	Notes           string
+	// Signature is the optional signature bound to the return (WP-276).
+	Signature *SignatureInput
 }
 
 // TransferInput is the change of the holder of an assigned asset.
@@ -127,6 +132,10 @@ type TransferInput struct {
 	Holder         Holder
 	DueAt          *time.Time
 	Notes          string
+	// Signature (new holder) is bound to the assignment, ReturnSignature
+	// (previous holder) to the return (WP-276).
+	Signature       *SignatureInput
+	ReturnSignature *SignatureInput
 }
 
 // Service is the one writer of assignments (AST-02, AST-07, WP-275):
@@ -144,10 +153,17 @@ type TransferInput struct {
 // commit (database.BeforeCommit). Any error rolls everything back. The
 // table assignment is not written anymore (WP-747): the assignments are
 // the projection assignment_projection of the ledger (000257).
+//
+// A signature (WP-276, WithSignatures) is checked before any side effect
+// (prepareSignature), its image stored before the transaction (K20); in the
+// transaction the signed movement gets its document, signer and
+// signature_hash before it is booked (sign) and the link to the document
+// after (bind). A failure or rollback deletes the stored images again.
 type Service struct {
-	pool      *pgxpool.Pool
-	movements MovementBooker
-	outbox    *events.Outbox
+	pool       *pgxpool.Pool
+	movements  MovementBooker
+	outbox     *events.Outbox
+	signatures *signatures
 }
 
 // NewService creates the assignment service.
@@ -163,6 +179,41 @@ func (s *Service) inTx(ctx context.Context, orgID string, fn func(ctx context.Co
 			return fn(txCtx, tx)
 		})
 	})
+}
+
+// inSignedTx runs fn like inTx after the images of pending are stored; a
+// failed store or transaction deletes them again (WP-276).
+func (s *Service) inSignedTx(ctx context.Context, orgID string, pending []*pendingSignature,
+	fn func(ctx context.Context, tx pgx.Tx) error) (err error) {
+	defer func() {
+		if err != nil {
+			s.discard(ctx, pending)
+		}
+	}()
+	if err = s.store(ctx, pending); err == nil {
+		err = s.inTx(ctx, orgID, fn)
+	}
+	return err
+}
+
+// book books m in tx, signed with p when set: sign before, bind after the
+// booking. holder is the holder of the movement.
+func (s *Service) book(ctx context.Context, tx pgx.Tx, m *movement.Movement, p *pendingSignature, holder Holder) error {
+	var at time.Time
+	if p != nil {
+		var err error
+		if at, err = transactionTime(ctx, tx); err != nil {
+			return err
+		}
+	}
+	v, err := s.sign(ctx, tx, p, m, holder, at)
+	if err != nil {
+		return err
+	}
+	if bookErr := s.movements.RecordTx(ctx, tx, m); bookErr != nil {
+		return bookErr
+	}
+	return s.bind(ctx, tx, m, v)
 }
 
 // lockedAsset is the state of the locked asset.
@@ -233,11 +284,15 @@ func (s *Service) Assign(ctx context.Context, orgID string, in *AssignInput) (*A
 	if err := in.Holder.validate("assigned_user_id", "assigned_team_id"); err != nil {
 		return nil, err
 	}
+	signed, err := s.prepareSignature(ctx, orgID, "signature", in.Signature)
+	if err != nil {
+		return nil, err
+	}
 	var out *Assignment
-	err := s.inTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		a, err := lock(ctx, tx, orgID, in.AssetID)
-		if err != nil {
-			return err
+	err = s.inSignedTx(ctx, orgID, []*pendingSignature{signed}, func(ctx context.Context, tx pgx.Tx) error {
+		a, lockErr := lock(ctx, tx, orgID, in.AssetID)
+		if lockErr != nil {
+			return lockErr
 		}
 		if a.holder.id() != "" {
 			return ErrAlreadyAssigned
@@ -247,14 +302,15 @@ func (s *Service) Assign(ctx context.Context, orgID string, in *AssignInput) (*A
 		}
 		m := &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: in.AssetID, MovementType: "assignment",
 			ActorID: actor(ctx), AssigneeUserID: in.Holder.UserID, AssigneeTeamID: in.Holder.TeamID, DueAt: in.DueAt, Notes: in.Notes}
-		if bookErr := s.movements.RecordTx(ctx, tx, m); bookErr != nil {
+		if bookErr := s.book(ctx, tx, m, signed, in.Holder); bookErr != nil {
 			return bookErr
 		}
 		if holderErr := setHolder(ctx, tx, orgID, in.AssetID, in.Holder, in.DueAt); holderErr != nil {
 			return holderErr
 		}
-		if out, err = assigned(ctx, tx, m, "assignment"); err != nil {
-			return err
+		var projErr error
+		if out, projErr = assigned(ctx, tx, m, "assignment"); projErr != nil {
+			return projErr
 		}
 		return s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetAssigned)
 	})
@@ -270,11 +326,15 @@ func (s *Service) Return(ctx context.Context, orgID string, in *ReturnInput) (*m
 	if err := requireExpected(in.ExpectedHolder); err != nil {
 		return nil, err
 	}
+	signed, err := s.prepareSignature(ctx, orgID, "signature", in.Signature)
+	if err != nil {
+		return nil, err
+	}
 	var out *movement.Movement
-	err := s.inTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		a, err := lock(ctx, tx, orgID, in.AssetID)
-		if err != nil {
-			return err
+	err = s.inSignedTx(ctx, orgID, []*pendingSignature{signed}, func(ctx context.Context, tx pgx.Tx) error {
+		a, lockErr := lock(ctx, tx, orgID, in.AssetID)
+		if lockErr != nil {
+			return lockErr
 		}
 		if expectErr := a.expect(in.ExpectedHolder); expectErr != nil {
 			return expectErr
@@ -282,7 +342,7 @@ func (s *Service) Return(ctx context.Context, orgID string, in *ReturnInput) (*m
 		m := &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: in.AssetID, MovementType: "return",
 			ActorID: actor(ctx), AssigneeUserID: a.holder.UserID, AssigneeTeamID: a.holder.TeamID,
 			Reason: in.ReturnCondition, Notes: in.Notes}
-		if bookErr := s.movements.RecordTx(ctx, tx, m); bookErr != nil {
+		if bookErr := s.book(ctx, tx, m, signed, a.holder); bookErr != nil {
 			return bookErr
 		}
 		if holderErr := setHolder(ctx, tx, orgID, in.AssetID, Holder{}, nil); holderErr != nil {
@@ -308,11 +368,19 @@ func (s *Service) Transfer(ctx context.Context, orgID string, in *TransferInput)
 	if err := in.Holder.validate("assigned_user_id", "assigned_team_id"); err != nil {
 		return nil, err
 	}
+	signed, err := s.prepareSignature(ctx, orgID, "signature", in.Signature)
+	if err != nil {
+		return nil, err
+	}
+	returnSigned, err := s.prepareSignature(ctx, orgID, "return_signature", in.ReturnSignature)
+	if err != nil {
+		return nil, err
+	}
 	var out *Assignment
-	err := s.inTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		a, err := lock(ctx, tx, orgID, in.AssetID)
-		if err != nil {
-			return err
+	err = s.inSignedTx(ctx, orgID, []*pendingSignature{signed, returnSigned}, func(ctx context.Context, tx pgx.Tx) error {
+		a, lockErr := lock(ctx, tx, orgID, in.AssetID)
+		if lockErr != nil {
+			return lockErr
 		}
 		if expectErr := a.expect(in.ExpectedHolder); expectErr != nil {
 			return expectErr
@@ -323,19 +391,20 @@ func (s *Service) Transfer(ctx context.Context, orgID string, in *TransferInput)
 		by := actor(ctx)
 		back := &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: in.AssetID, MovementType: "return",
 			ActorID: by, AssigneeUserID: a.holder.UserID, AssigneeTeamID: a.holder.TeamID, Notes: in.Notes}
-		if returnErr := s.movements.RecordTx(ctx, tx, back); returnErr != nil {
+		if returnErr := s.book(ctx, tx, back, returnSigned, a.holder); returnErr != nil {
 			return returnErr
 		}
 		next := &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: in.AssetID, MovementType: "assignment",
 			ActorID: by, AssigneeUserID: in.Holder.UserID, AssigneeTeamID: in.Holder.TeamID, DueAt: in.DueAt, Notes: in.Notes}
-		if assignErr := s.movements.RecordTx(ctx, tx, next); assignErr != nil {
+		if assignErr := s.book(ctx, tx, next, signed, in.Holder); assignErr != nil {
 			return assignErr
 		}
 		if holderErr := setHolder(ctx, tx, orgID, in.AssetID, in.Holder, in.DueAt); holderErr != nil {
 			return holderErr
 		}
-		if out, err = assigned(ctx, tx, next, "transfer"); err != nil {
-			return err
+		var projErr error
+		if out, projErr = assigned(ctx, tx, next, "transfer"); projErr != nil {
+			return projErr
 		}
 		if emitErr := s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetReturned); emitErr != nil {
 			return emitErr
@@ -406,7 +475,7 @@ func assigned(ctx context.Context, tx pgx.Tx, m *movement.Movement, kind string)
 	a := &Assignment{ID: m.ID, OrganizationID: m.OrganizationID, AssetID: m.AssetID,
 		AssignedTo: m.AssigneeUserID, AssignedTeamID: m.AssigneeTeamID, AssignedBy: m.ActorID, AssignmentType: kind,
 		Status: "active", AssignedAt: m.OccurredAt, DueAt: m.DueAt, Notes: m.Notes,
-		CreatedAt: m.CreatedAt, UpdatedAt: m.CreatedAt}
+		CreatedAt: m.CreatedAt, UpdatedAt: m.CreatedAt, Signature: m.Signature}
 	if m.DueAt != nil {
 		if err := tx.QueryRow(ctx, `SELECT to_char(($1::timestamptz AT TIME ZONE timezone)::date, 'YYYY-MM-DD') FROM organization WHERE id = $2`,
 			*m.DueAt, m.OrganizationID).Scan(&a.DueDate); err != nil {
