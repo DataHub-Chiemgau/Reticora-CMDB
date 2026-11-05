@@ -283,7 +283,7 @@ func TestTopologyFailsClosed(t *testing.T) {
 	rels := relationship.NewMemoryRepository()
 	h := NewHandler(brokenSuppressions{NewMemoryRepository()}, nil, rels)
 	items := []IngestItem{{Relationships: []wire.IngestRelationship{{TargetIP: "10.0.0.2", Protocol: "lldp"}}}}
-	existing := []ci.Item{{ID: "ci-peer", ManagementIP: "10.0.0.2"}}
+	existing := func() []ci.Item { return []ci.Item{{ID: "ci-peer", ManagementIP: "10.0.0.2"}} }
 	if n := h.deriveTopology(context.Background(), "org-1", items, []string{"ci-src"}, existing); n != 0 {
 		t.Fatalf("edges written without suppressions: %d", n)
 	}

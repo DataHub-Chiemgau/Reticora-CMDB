@@ -1410,7 +1410,9 @@ func (h *Handler) processItems(ctx context.Context, orgID string, items []Ingest
 			}
 		}
 	}
-	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, h.neighborCandidates(ctx, orgID, processed))
+	resp.Relationships += h.deriveTopology(ctx, orgID, processed, processedCIID, func() []ci.Item {
+		return h.neighborCandidates(ctx, orgID, processed)
+	})
 	// Outlet mappings of PDUs and UPS outlet groups (IMP-09).
 	resp.Relationships += h.derivePowerChain(ctx, orgID, processed, processedCIID)
 	// The new CIs of the batch take their feeds from the outlets of power
