@@ -32,13 +32,16 @@ func (h *Handler) WithService(service *Service) *Handler {
 
 // RegisterRoutes registers assignment routes on the given mux. Below
 // /api/v1/assignments only the reads remain (E-38, WP-746); every write
-// goes through /api/v1/assets/{id}/assign|return|transfer.
+// goes through /api/v1/assets/{id}/assign|return|transfer. The
+// verification of a signature (WP-748) stands here, not in package
+// movement, which assignment imports.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assignments", h.List)
 	r.Get("/api/v1/assignments/{id}", h.Get)
 	r.Post("/api/v1/assets/{id}/assign", h.AssignAsset)
 	r.Post("/api/v1/assets/{id}/return", h.ReturnAsset)
 	r.Post("/api/v1/assets/{id}/transfer", h.TransferAsset)
+	r.Get("/api/v1/stock-movements/{id}/signature", h.VerifySignature)
 }
 
 // writable answers 401 without tenant and 501 without service, and

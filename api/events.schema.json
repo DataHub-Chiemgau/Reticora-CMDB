@@ -751,9 +751,9 @@
       ]
     },
     "asset.assigned": {
-      "description": "Data frame of asset.assigned. entity_id: the asset. Origin: EVT-03. Producer: WP-275. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of asset.assigned. entity_id: the asset. Origin: EVT-03. Producer: WP-275, fields of the movement and the signature: WP-748. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "movement_id"],
       "additionalProperties": true,
       "properties": {
         "id": {
@@ -770,19 +770,69 @@
           "type": "string",
           "format": "uuid",
           "description": "Site of the object; absent without site."
+        },
+        "movement_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The booked movement of the ledger stock_movement (movement_type assignment)."
+        },
+        "assigned_user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The new holder as user (app_user.id, pseudonymous key); absent for a team."
+        },
+        "assigned_team_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The new holder as team; absent for a user."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Due date of the assignment; absent without one."
+        },
+        "signature_document_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Document of the category signature holding the image of a signed movement (WP-276); absent without signature. The event never carries the image."
+        },
+        "signature_hash": {
+          "type": "string",
+          "description": "signature_hash of a signed movement (hex SHA-256 binding image and movement ids); absent without signature."
+        },
+        "signer_user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Signer of a signed movement as user id; absent otherwise."
+        },
+        "signer_surrogate": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Signer of a signed movement as vault surrogate (contact or external person, SEC-05), never a name; absent otherwise."
         }
       },
       "examples": [
         {
           "id": "22222222-2222-4222-8222-222222222222",
-          "client_id": "33333333-3333-4333-8333-333333333333"
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "movement_id": "55555555-5555-4555-8555-555555555555",
+          "assigned_team_id": "66666666-6666-4666-8666-666666666666",
+          "due_at": "2026-12-01T17:00:00Z"
+        },
+        {
+          "id": "22222222-2222-4222-8222-222222222222",
+          "movement_id": "55555555-5555-4555-8555-555555555556",
+          "assigned_user_id": "77777777-7777-4777-8777-777777777777",
+          "signature_document_id": "88888888-8888-4888-8888-888888888888",
+          "signature_hash": "6efb969f1aaad208fc14dc6cfa6abb9b9988054bbd31245048bf784eaf8e1e83",
+          "signer_user_id": "77777777-7777-4777-8777-777777777777"
         }
       ]
     },
     "asset.returned": {
-      "description": "Data frame of asset.returned. entity_id: the asset. Origin: EVT-03. Producer: WP-275. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of asset.returned. entity_id: the asset. Origin: EVT-03. Producer: WP-275, fields of the movement and the signature: WP-748. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "movement_id"],
       "additionalProperties": true,
       "properties": {
         "id": {
@@ -799,12 +849,53 @@
           "type": "string",
           "format": "uuid",
           "description": "Site of the object; absent without site."
+        },
+        "movement_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The booked movement of the ledger stock_movement (movement_type return)."
+        },
+        "assigned_user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The previous holder as user (app_user.id, pseudonymous key); absent for a team."
+        },
+        "assigned_team_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The previous holder as team; absent for a user."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Not set on a return."
+        },
+        "signature_document_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Document of the category signature holding the image of a signed movement (WP-276); absent without signature. The event never carries the image."
+        },
+        "signature_hash": {
+          "type": "string",
+          "description": "signature_hash of a signed movement (hex SHA-256 binding image and movement ids); absent without signature."
+        },
+        "signer_user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Signer of a signed movement as user id; absent otherwise."
+        },
+        "signer_surrogate": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Signer of a signed movement as vault surrogate (contact or external person, SEC-05), never a name; absent otherwise."
         }
       },
       "examples": [
         {
           "id": "22222222-2222-4222-8222-222222222222",
-          "client_id": "33333333-3333-4333-8333-333333333333"
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "movement_id": "55555555-5555-4555-8555-555555555555",
+          "assigned_user_id": "77777777-7777-4777-8777-777777777777"
         }
       ]
     },

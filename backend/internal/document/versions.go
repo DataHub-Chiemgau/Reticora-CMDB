@@ -206,6 +206,9 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return nil, nil, false
 	}
+	if refuseSignatureChange(w, doc, nil) {
+		return nil, nil, false
+	}
 
 	// (1) Body, verified type (SEC-09, sniff.go), size and checksum.
 	mimeType, payload, ok := h.readUpload(w, r)

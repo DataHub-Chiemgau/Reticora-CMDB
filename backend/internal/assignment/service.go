@@ -312,7 +312,7 @@ func (s *Service) Assign(ctx context.Context, orgID string, in *AssignInput) (*A
 		if out, projErr = assigned(ctx, tx, m, "assignment"); projErr != nil {
 			return projErr
 		}
-		return s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetAssigned)
+		return s.emit(ctx, tx, a, m, events.AssetAssigned)
 	})
 	if err != nil {
 		return nil, err
@@ -349,7 +349,7 @@ func (s *Service) Return(ctx context.Context, orgID string, in *ReturnInput) (*m
 			return holderErr
 		}
 		out = m
-		return s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetReturned)
+		return s.emit(ctx, tx, a, m, events.AssetReturned)
 	})
 	if err != nil {
 		return nil, err
@@ -406,10 +406,10 @@ func (s *Service) Transfer(ctx context.Context, orgID string, in *TransferInput)
 		if out, projErr = assigned(ctx, tx, next, "transfer"); projErr != nil {
 			return projErr
 		}
-		if emitErr := s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetReturned); emitErr != nil {
+		if emitErr := s.emit(ctx, tx, a, back, events.AssetReturned); emitErr != nil {
 			return emitErr
 		}
-		return s.emit(ctx, tx, orgID, in.AssetID, a, events.AssetAssigned)
+		return s.emit(ctx, tx, a, next, events.AssetAssigned)
 	})
 	if err != nil {
 		return nil, err
@@ -485,11 +485,20 @@ func assigned(ctx context.Context, tx pgx.Tx, m *movement.Movement, kind string)
 	return a, nil
 }
 
-// emit registers the event typ of the asset last before the commit (K20,
-// database.BeforeCommit); the payload is the base form of WP-246.
-func (s *Service) emit(ctx context.Context, tx pgx.Tx, orgID, assetID string, a *lockedAsset, typ string) error {
-	e := &events.Event{OrgID: orgID, Type: typ, EntityID: assetID,
-		Data: events.AssetAssignmentData{ID: assetID, ClientID: a.client, SiteID: a.site}}
+// emit registers the event typ of the asset of the booked movement m last
+// before the commit (K20, database.BeforeCommit). Besides the base form of
+// WP-246 (asset, client and site of the locked asset a) the payload names
+// the movement, its holder (on a return the previous one) and due date
+// and, on a signed movement, the signature document, signature_hash and
+// signer (WP-748); never the image.
+func (s *Service) emit(ctx context.Context, tx pgx.Tx, a *lockedAsset, m *movement.Movement, typ string) error {
+	data := events.AssetAssignmentData{ID: m.AssetID, ClientID: a.client, SiteID: a.site, MovementID: m.ID,
+		AssignedUserID: m.AssigneeUserID, AssignedTeamID: m.AssigneeTeamID, DueAt: m.DueAt}
+	if m.SignatureHash != "" {
+		data.SignatureDocumentID, data.SignatureHash = m.DocumentID, m.SignatureHash
+		data.SignerUserID, data.SignerSurrogate = m.SignerUserID, m.SignerSurrogate
+	}
+	e := &events.Event{OrgID: m.OrganizationID, Type: typ, EntityID: m.AssetID, Data: data}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := s.outbox.Append(ctx, tx, e); err != nil {
 			return fmt.Errorf("append %s: %w", typ, err)

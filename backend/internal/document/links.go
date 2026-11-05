@@ -164,6 +164,27 @@ func LinkTx(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 	return requireVisible(ctx, tx, "document_link", linkVisible, link.ID)
 }
 
+// refuseSignatureChange answers a change that would break the evidence of
+// a signature (AST-02, E-51, WP-748) and reports whether it answered: a
+// document of the category signature (d) takes no PATCH, content, new
+// version, soft delete, new link and no removal of a link (409); no
+// creation or PATCH sets the category signature (category, 422), only the
+// signature path of WP-276 does (CreateWithFirstVersionTx). The signature
+// hash reveals an exchanged image, this lock prevents it. d or category
+// may be nil.
+func refuseSignatureChange(w http.ResponseWriter, d *Document, category *string) bool {
+	switch {
+	case d != nil && d.Category == CategorySignature:
+		api.WriteError(w, http.StatusConflict, "Conflict", "a signature document is locked and cannot be changed")
+	case category != nil && *category == CategorySignature:
+		api.WriteFieldError(w, &api.FieldError{Field: "category", Status: http.StatusUnprocessableEntity,
+			Message: "the category signature is set only by a signed assignment, return or transfer"})
+	default:
+		return false
+	}
+	return true
+}
+
 // recordLinkAudit writes document.linked or document.unlinked as the last
 // step of the transaction (WP-267). Record marks the request as audited.
 func recordLinkAudit(ctx context.Context, tx pgx.Tx, action string, link *DocumentLink) error {

@@ -3576,7 +3576,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A link with an entity type outside the registry, or `category`
+            `signature`, which only a signed assignment, return or transfer
+            sets (WP-276, WP-748).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -3624,6 +3631,23 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            `category` is `signature`; only a signed assignment, return or
+            transfer sets it (WP-276, WP-748).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
     delete:
       operationId: deleteDocument
       tags: [Documents]
@@ -3643,6 +3667,15 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/orders:
     x-phase: P2
@@ -10106,6 +10139,15 @@ paths:
           $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '413':
           description: Payload too large
           content:
@@ -10276,7 +10318,8 @@ paths:
             https://reticora.io/problems/document-quarantined); a document
             whose scan is pending (type
             https://reticora.io/problems/document-pending-scan) is linked
-            normally.
+            normally. A signature document (category `signature`) takes no
+            further link (type https://reticora.io/problems/409, WP-748).
           content:
             application/problem+json:
               schema:
@@ -19684,23 +19727,59 @@ paths:
   /api/v1/stock-movements/{id}/signature:
     x-phase: P2
     x-feature: signature
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: verifyStockMovementSignature
       tags: [Assets]
       summary: Verify the signature of a movement
-      description: Planned (E-38); WP-748 implements the operation.
+      description: >-
+        Verifies the signature of a signed movement (AST-02, E-51, WP-748):
+        it loads version 1 of the signature document (category
+        `signature`, locked against changes), compares the SHA-256 of the
+        stored image with `checksum_sha256` of the version and recomputes
+        the `signature_hash` of the movement. `valid` is true only when both
+        match. A version whose scan is pending is verified and answers
+        `scan_status` `pending_scan`. Every verification writes the audit
+        entry `stock_movement.signature_verified` (document_id, valid,
+        scan_status; never the image). Requires `asset:read` and the
+        feature `signature`.
       responses:
         '200':
-          description: Verify the signature of a movement. The response schema comes with WP-748.
+          description: The verification of the signature.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignatureVerification'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: >-
+            The movement is unknown or outside the caller's client and site
+            scope, or it carries no signature.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: >-
+            The signature image is quarantined (type
+            https://reticora.io/problems/document-quarantined) or its scan
+            failed (type https://reticora.io/problems/document-pending-scan).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '501':
+          description: The profile without database offers no verification.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/consumables/{id}/stock:
     x-phase: P2
@@ -20217,6 +20296,15 @@ paths:
           $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
         '413':
           description: Payload too large
           content:
@@ -20285,6 +20373,15 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The document is a signature document (category `signature`,
+            WP-748); it is locked against changes (type
+            https://reticora.io/problems/409).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/tickets/{id}/links:
     x-phase: P2
@@ -27911,6 +28008,40 @@ components:
         signer_user_id: { type: string, format: uuid }
         signer_surrogate: { type: string, format: uuid }
         signed_at: { type: string, format: date-time }
+
+    SignatureVerification:
+      type: object
+      description: >-
+        The verification of the signature of a movement (WP-748): the
+        signature reference, version 1 of the signature document with its
+        scan status and the result. Never the image or a name.
+      required: [movement_id, document_id, version, signature_hash, signed_at, scan_status, valid, legacy]
+      properties:
+        movement_id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        version:
+          type: integer
+          description: The verified version of the document, always 1.
+        signature_hash: { type: string }
+        signer_user_id: { type: string, format: uuid }
+        signer_surrogate:
+          type: string
+          format: uuid
+          description: The signer as vault surrogate (SEC-05), never a name.
+        signed_at: { type: string, format: date-time }
+        scan_status:
+          type: string
+          enum: [pending_scan, clean]
+        valid:
+          type: [boolean, 'null']
+          description: >-
+            True when the stored image matches checksum_sha256 and
+            signature_hash, false when not (an exchanged or missing image);
+            null is reserved for legacy signatures without a verifiable
+            image (WP-749).
+        legacy:
+          type: boolean
+          description: A signature taken over from the former assignment table (WP-749); false until then.
 
     AssignmentListResponse:
       allOf:

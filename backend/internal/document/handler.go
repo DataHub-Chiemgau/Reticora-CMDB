@@ -272,6 +272,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, ferr)
 		return
 	}
+	if refuseSignatureChange(w, nil, &req.Category) {
+		return
+	}
 
 	// A document without links is org-wide, so a principal restricted in the
 	// client, site or team scope creates one only with at least one link to
@@ -383,6 +386,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	current, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		return
+	}
+	if refuseSignatureChange(w, current, req.Category) {
+		return
+	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
@@ -402,6 +413,14 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	current, getErr := h.repo.GetByID(r.Context(), t.OrganizationID, id)
+	if getErr != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		return
+	}
+	if refuseSignatureChange(w, current, nil) {
+		return
+	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
@@ -479,9 +498,13 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	docID := chi.URLParam(r, "id")
-	// Verify document exists
-	if _, err := h.repo.GetByID(r.Context(), t.OrganizationID, docID); err != nil {
+	// Verify document exists; a signature document takes no further link.
+	doc, getErr := h.repo.GetByID(r.Context(), t.OrganizationID, docID)
+	if getErr != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
+		return
+	}
+	if refuseSignatureChange(w, doc, nil) {
 		return
 	}
 
@@ -533,6 +556,14 @@ func (h *Handler) Unlink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	docID, linkID := chi.URLParam(r, "id"), chi.URLParam(r, "link_id")
+	doc, getErr := h.repo.GetByID(r.Context(), t.OrganizationID, docID)
+	if getErr != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "document link not found")
+		return
+	}
+	if refuseSignatureChange(w, doc, nil) {
+		return
+	}
 	if err := h.repo.UnlinkDocument(r.Context(), t.OrganizationID, docID, linkID); err != nil {
 		if errors.Is(err, api.ErrNotFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "document link not found")

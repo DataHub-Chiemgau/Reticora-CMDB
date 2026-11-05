@@ -8470,7 +8470,7 @@ export interface paths {
     };
     /**
      * Verify the signature of a movement
-     * @description Planned (E-38); WP-748 implements the operation.
+     * @description Verifies the signature of a signed movement (AST-02, E-51, WP-748): it loads version 1 of the signature document (category `signature`, locked against changes), compares the SHA-256 of the stored image with `checksum_sha256` of the version and recomputes the `signature_hash` of the movement. `valid` is true only when both match. A version whose scan is pending is verified and answers `scan_status` `pending_scan`. Every verification writes the audit entry `stock_movement.signature_verified` (document_id, valid, scan_status; never the image). Requires `asset:read` and the feature `signature`.
      */
     get: operations['verifyStockMovementSignature'];
     put?: never;
@@ -13059,6 +13059,31 @@ export interface components {
       signer_surrogate?: string;
       /** Format: date-time */
       signed_at: string;
+    };
+    /** @description The verification of the signature of a movement (WP-748): the signature reference, version 1 of the signature document with its scan status and the result. Never the image or a name. */
+    SignatureVerification: {
+      /** Format: uuid */
+      movement_id: string;
+      /** Format: uuid */
+      document_id: string;
+      /** @description The verified version of the document, always 1. */
+      version: number;
+      signature_hash: string;
+      /** Format: uuid */
+      signer_user_id?: string;
+      /**
+       * Format: uuid
+       * @description The signer as vault surrogate (SEC-05), never a name.
+       */
+      signer_surrogate?: string;
+      /** Format: date-time */
+      signed_at: string;
+      /** @enum {string} */
+      scan_status: 'pending_scan' | 'clean';
+      /** @description True when the stored image matches checksum_sha256 and signature_hash, false when not (an exchanged or missing image); null is reserved for legacy signatures without a verifiable image (WP-749). */
+      valid: boolean | null;
+      /** @description A signature taken over from the former assignment table (WP-749); false until then. */
+      legacy: boolean;
     };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
@@ -20413,7 +20438,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description A link with an entity type outside the registry, or `category` `signature`, which only a signed assignment, return or transfer sets (WP-276, WP-748). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -20463,6 +20496,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateDocument: {
@@ -20493,6 +20535,24 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description `category` is `signature`; only a signed assignment, return or transfer sets it (WP-276, WP-748). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listOrders: {
@@ -27870,6 +27930,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Payload too large */
       413: {
         headers: {
@@ -27981,7 +28050,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. */
+      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. A signature document (category `signature`) takes no further link (type https://reticora.io/problems/409, WP-748). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -39421,16 +39490,45 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Verify the signature of a movement. The response schema comes with WP-748. */
+      /** @description The verification of the signature. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SignatureVerification'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
+      /** @description The movement is unknown or outside the caller's client and site scope, or it carries no signature. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The signature image is quarantined (type https://reticora.io/problems/document-quarantined) or its scan failed (type https://reticora.io/problems/document-pending-scan). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The profile without database offers no verification. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listConsumableStock: {
@@ -39900,6 +39998,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description Payload too large */
       413: {
         headers: {
@@ -39964,6 +40071,15 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listTicketLinks: {

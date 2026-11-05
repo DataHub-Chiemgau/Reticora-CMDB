@@ -293,6 +293,7 @@ GET /api/v1/slas sla:read
 GET /api/v1/slas/breaches sla:read
 GET /api/v1/slas/{id} sla:read
 GET /api/v1/stock-movements asset:read
+GET /api/v1/stock-movements/{id}/signature asset:read
 GET /api/v1/stocktakes stocktake:read
 GET /api/v1/stocktakes/{id} stocktake:read
 GET /api/v1/stocktakes/{id}/difference stocktake:read

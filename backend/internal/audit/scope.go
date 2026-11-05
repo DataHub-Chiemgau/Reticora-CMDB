@@ -54,6 +54,7 @@ var resourceTables = map[string][]string{
 	"review_item":              {"review_item"},
 	"role_assignment":          {"role_assignment", "user_custom_role"},
 	"service_account":          {"service_account"},
+	"stock_movement":           {"stock_movement"}, // signature verification (WP-748), legacy run (WP-749)
 	"tag":                      {"tag"},
 	"template":                 {"template"},
 	"template_version":         {"template_version"},
