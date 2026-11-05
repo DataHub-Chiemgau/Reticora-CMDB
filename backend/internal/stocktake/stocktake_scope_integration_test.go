@@ -194,10 +194,10 @@ func TestStocktakeForeignClientCorrectionAndComplete(t *testing.T) {
 	wantAssets, wantOpen := assets(), stored(st)
 
 	ctx := f.ClientCtx(f.Client1)
-	if completion, err := repo.Complete(ctx, f.OrgA, st); !errors.Is(err, stocktake.ErrNotFound) {
+	if completion, err := completer(f).Complete(ctx, f.OrgA, st, user); !errors.Is(err, stocktake.ErrNotFound) {
 		t.Errorf("client-1 completion of the organization-wide stocktake: %+v err=%v, want ErrNotFound", completion, err)
 	}
-	if completion, err := repo.Complete(orgCtx, f.OrgA, st); !errors.Is(err, stocktake.ErrNoSnapshot) {
+	if completion, err := completer(f).Complete(orgCtx, f.OrgA, st, user); !errors.Is(err, stocktake.ErrNoSnapshot) {
 		t.Errorf("org-wide completion of a stocktake without snapshot: %+v err=%v, want ErrNoSnapshot (409)", completion, err)
 	}
 	if got := assets(); got != wantAssets {
@@ -211,7 +211,7 @@ func TestStocktakeForeignClientCorrectionAndComplete(t *testing.T) {
 	}
 
 	wantB := stored(stB)
-	if _, err := repo.Complete(ctx, f.OrgA, stB); !errors.Is(err, stocktake.ErrNotFound) {
+	if _, err := completer(f).Complete(ctx, f.OrgA, stB, user); !errors.Is(err, stocktake.ErrNotFound) {
 		t.Errorf("completion of an organization-B stocktake: err=%v, want ErrNotFound", err)
 	}
 	title := "hijacked"
@@ -279,7 +279,7 @@ func TestAuditStocktakeOrgWideWritesNeedOrgWideScope(t *testing.T) {
 	if _, err := repo.Update(client1, f.OrgA, st, stocktake.UpdateRequest{Title: &title}); err == nil {
 		t.Errorf("client-1 update of the organization-wide stocktake: accepted, want refused (E-09)")
 	}
-	if _, err := repo.Complete(client1, f.OrgA, st); err == nil {
+	if _, err := completer(f).Complete(client1, f.OrgA, st, user); err == nil {
 		t.Errorf("client-1 completion of the organization-wide stocktake with client-2 differences: accepted, want refused (E-09)")
 	}
 	// Start and cancel are writes of the stocktake as well (WP-848).
@@ -294,7 +294,7 @@ func TestAuditStocktakeOrgWideWritesNeedOrgWideScope(t *testing.T) {
 	}
 	// The organization-wide principal cannot complete it either (no
 	// snapshot, WP-287), and no asset changes; it cancels it.
-	if _, err := repo.Complete(orgCtx, f.OrgA, st); !errors.Is(err, stocktake.ErrNoSnapshot) {
+	if _, err := completer(f).Complete(orgCtx, f.OrgA, st, user); !errors.Is(err, stocktake.ErrNoSnapshot) {
 		t.Errorf("organization-wide completion without snapshot: %v, want ErrNoSnapshot", err)
 	}
 	if got := stored(st); got != want {
@@ -333,7 +333,7 @@ func TestStocktakeHandlerOrgWideWritesForbidden(t *testing.T) {
 	repo := stocktake.NewPGRepository(f.App)
 	orgCtx := f.OrgCtx(f.OrgA)
 	mux := chi.NewRouter()
-	stocktake.NewHandler(repo).RegisterRoutes(mux)
+	stocktake.NewHandler(repo).WithService(completer(f)).RegisterRoutes(mux)
 	room := f.Room(t, f.Client1, "h287-room")
 
 	st := legacyStocktake(t, f, f.OrgA, "handler inventory")
@@ -519,6 +519,12 @@ func stockConsumable(t *testing.T, f *scopetest.Fixture, clientID, name string, 
 			t.Fatalf("seed stock of %s in %s: %v", name, bin, err)
 		}
 	}
+	// on_hand_total is the sum over the bins (000259), which the
+	// corrections of the completion book against (WP-761).
+	if _, err := f.Admin.Exec(ctx, `UPDATE consumable SET on_hand_total = (SELECT COALESCE(sum(on_hand), 0) FROM stock_level
+		WHERE consumable_id = $1) WHERE id = $1`, id); err != nil {
+		t.Fatalf("seed total stock of %s: %v", name, err)
+	}
 	return id
 }
 
@@ -533,7 +539,7 @@ type stocktakeAPI struct {
 
 func newStocktakeAPI(t *testing.T, f *scopetest.Fixture, user string) *stocktakeAPI {
 	mux := chi.NewRouter()
-	stocktake.NewHandler(stocktake.NewPGRepository(f.App)).RegisterRoutes(mux)
+	stocktake.NewHandler(stocktake.NewPGRepository(f.App)).WithService(completer(f)).RegisterRoutes(mux)
 	locations.NewHandler(locations.NewPGRepository(f.App)).RegisterRoutes(mux)
 	return &stocktakeAPI{t: t, mux: mux, org: f.OrgA, user: user}
 }
@@ -1244,8 +1250,8 @@ func (tr areaTree) shelfOf(t *testing.T, f *scopetest.Fixture) string {
 // consumable; it pages by cursor like GET …/scans, and the deprecated alias
 // …/difference answers the same. The transitional completion writes the
 // result into the snapshot (counted_quantity, classification, an item per
-// unexpected object) and the totals, leaves asset.status and asset.location
-// unchanged and takes no further scans.
+// unexpected object) and the totals; since WP-761 it books the corrections,
+// keeps asset.status and asset.location and takes no further scans.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestStocktakeDifferencesAndCompletion(t *testing.T) {
@@ -1333,7 +1339,7 @@ func TestStocktakeDifferencesAndCompletion(t *testing.T) {
 		t.Errorf("scans by pages of 3: %v, want the recorded scans newest first %v", got, reversed(scanIDs))
 	}
 
-	// The transitional completion fixes the result.
+	// The completion fixes the result and books the corrections (WP-761).
 	type assetRow struct{ status, location, locationID string }
 	assets := func() map[string]assetRow {
 		out := map[string]assetRow{}
@@ -1354,14 +1360,20 @@ func TestStocktakeDifferencesAndCompletion(t *testing.T) {
 		return out
 	}
 	wantAssets := assets()
+	// The moved and the unexpected asset get a transfer to the place found.
+	for _, id := range []string{w.moved, w.extra} {
+		r := wantAssets[id]
+		r.locationID = tr.room
+		wantAssets[id] = r
+	}
 	code, body := w.a.do(orgCtx, http.MethodPost, w.path+"/complete", `{"apply_corrections":true}`)
 	st, _ := body["stocktake"].(map[string]any)
 	if code != http.StatusOK || st["status"] != stocktake.StatusCompleted || st["total_scanned"] != float64(6) ||
-		st["total_missing"] != float64(1) || st["total_surplus"] != float64(2) || st["total_expected"] != float64(5) || body["corrections_applied"] != float64(0) {
+		st["total_missing"] != float64(1) || st["total_surplus"] != float64(2) || st["total_expected"] != float64(5) || body["corrections_applied"] != float64(4) {
 		t.Fatalf("completion: %d %v, want completed with 6 scanned, 1 missing, 2 unexpected", code, body)
 	}
 	if got := assets(); !maps.Equal(got, wantAssets) {
-		t.Errorf("assets after the completion: %v, want unchanged %v", got, wantAssets)
+		t.Errorf("assets after the completion: %v, want %v (status and free-text location unchanged)", got, wantAssets)
 	}
 	result := map[string]string{}
 	for _, it := range w.a.items(orgCtx, w.id, 200) {

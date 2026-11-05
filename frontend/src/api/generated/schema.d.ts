@@ -2473,7 +2473,10 @@ export interface paths {
     get: operations['getStocktake'];
     put?: never;
     post?: never;
-    /** Delete a stocktake */
+    /**
+     * Delete a stocktake
+     * @description Deletes a planned or in-progress stocktake with its scans and items. A completed or cancelled stocktake is immutable (409, WP-761).
+     */
     delete: operations['deleteStocktake'];
     options?: never;
     head?: never;
@@ -2549,7 +2552,7 @@ export interface paths {
     put?: never;
     /**
      * Complete a stocktake
-     * @description Moves an in-progress stocktake with frozen expected stock to completed and fixes its result in the same transaction (INV-01, WP-287): counted_quantity and classification of every item, an item with expected_quantity 0 per unexpected object, and total_scanned, total_missing and total_surplus. It books no inventory correction and changes no asset (the correction over stock movements follows in WP-761); apply_corrections is ignored, corrections stays empty. A stocktake without snapshot (an earlier release without area included) can only be cancelled.
+     * @description Moves an in-progress stocktake with frozen expected stock to completed in one transaction (INV-01, WP-287, WP-761): it fixes the result (counted_quantity and classification of every item, an item with expected_quantity 0 per unexpected object, total_scanned, total_missing and total_surplus) and books the corrections as stock movements with reason `stocktake:<id>`, each with its event stock.movement. An asset whose last scan shows another place than its location_id (found elsewhere or unexpected) gets a transfer to the place found; a missing asset gets no movement and keeps status and lifecycle state. Per consumable and bin a correction books the counted quantity minus the book stock of the bin at completion (to_location_id raises, from_location_id lowers; none for a difference of 0). A failed booking rolls the whole completion back, the stocktake stays in progress. apply_corrections is deprecated and ignored: every completion books its corrections. Afterwards the stocktake, its scans and items are immutable. A stocktake without snapshot (an earlier release without area included) can only be cancelled.
      */
     post: operations['completeStocktake'];
     delete?: never;
@@ -13422,30 +13425,34 @@ export interface components {
     CompleteStocktakeRequest: {
       /**
        * @deprecated
-       * @description Ignored (WP-287); the completion books no correction until WP-761.
+       * @description Ignored (WP-761); every completion books its corrections.
        */
       apply_corrections?: boolean;
     };
-    /**
-     * @deprecated
-     * @description No longer produced (WP-287); corrections stays empty.
-     */
+    /** @description A stock movement booked by the completion (WP-761): a transfer of an asset to the place found, or a correction of a consumable in a bin, raising (to_location_id) or lowering (from_location_id) its stock by quantity. */
     StocktakeCorrection: {
-      asset_id: string;
-      scan_result: string;
-      applied: boolean;
+      /** Format: uuid */
+      movement_id: string;
+      /** @enum {string} */
+      movement_type: 'transfer' | 'correction';
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      /** @description The booked quantity of a consumable correction; absent for an asset. */
+      quantity?: number;
     };
     StocktakeCompletion: {
       stocktake: components['schemas']['Stocktake'];
-      /**
-       * @deprecated
-       * @description Always 0 (WP-287).
-       */
+      /** @description The number of booked corrections (WP-761). */
       corrections_applied: number;
-      /**
-       * @deprecated
-       * @description Always empty (WP-287); the result is in the items and the difference list.
-       */
+      /** @description The movements booked as corrections (WP-761); the result per object is in the items and the difference list. */
       corrections: components['schemas']['StocktakeCorrection'][];
     };
     /** @description A ticket (TKT-01). The fields id, organization_id, ticket_number, title, resolved_at, closed_at and the timestamps are present (the optional ones when set); the others are left out when the field permissions do not let the caller read them (object kind ticket, field keys core.<field>, RBA-07, WP-765). */
@@ -22810,6 +22817,15 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description The stocktake is completed or cancelled; its result is immutable (WP-761). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateStocktake: {
@@ -22849,7 +22865,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description location_id changes while the stocktake is not planned. */
+      /** @description location_id changes while the stocktake is not planned, or the stocktake is completed or cancelled (its result is immutable, WP-761). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -23034,7 +23050,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Stocktake completed, including the applied corrections */
+      /** @description Stocktake completed, including the booked corrections */
       200: {
         headers: {
           [name: string]: unknown;
@@ -23054,8 +23070,26 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The stocktake is not in progress (planned, completed or cancelled) or has no frozen expected stock. */
+      /** @description The stocktake is not in progress (planned, completed or cancelled) or has no frozen expected stock, or a correction would lower the stock of a bin below on_hand − reserved (type insufficient-stock); nothing was booked. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A correction was refused by the movement service, e.g. a place found of another client than the asset; `field` names the location of the movement. Nothing was booked. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Without PostgreSQL (profile --no-db) the completion is not available, like start. */
+      501: {
         headers: {
           [name: string]: unknown;
         };

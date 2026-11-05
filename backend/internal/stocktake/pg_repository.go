@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -329,6 +330,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if err != nil {
 			return err
 		}
+		if current.terminal() {
+			return ErrAlreadyCompleted
+		}
 		setClauses := make([]string, 0, 5)
 		args := []any{id}
 		argPos := 2
@@ -370,7 +374,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if mapped := areaError(err); mapped != err {
 				return mapped
 			}
-			return fmt.Errorf("update stocktake: %w", err)
+			return immutableError(fmt.Errorf("update stocktake: %w", err))
 		}
 		return liveTotals(ctx, tx, []*Stocktake{stocktake})
 	})
@@ -474,8 +478,8 @@ func (r *PGRepository) Cancel(ctx context.Context, orgID, id string) (*Stocktake
 		if err != nil {
 			return err
 		}
-		if current.Status != StatusPlanned && current.Status != StatusInProgress {
-			return ErrInvalidTransition
+		if current.terminal() {
+			return ErrAlreadyCompleted
 		}
 		stocktake, err = scanStocktake(tx.QueryRow(ctx,
 			"UPDATE stocktake SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND "+stocktakeWritable+" RETURNING "+stocktakeSelectColumns, id))
@@ -483,7 +487,7 @@ func (r *PGRepository) Cancel(ctx context.Context, orgID, id string) (*Stocktake
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
-			return fmt.Errorf("cancel stocktake: %w", err)
+			return immutableError(fmt.Errorf("cancel stocktake: %w", err))
 		}
 		return nil
 	})
@@ -560,13 +564,23 @@ func ItemsNextCursor(items []Item, limit int) string {
 	return api.EncodeCursor(api.Cursor{Sort: itemSort, Dir: "asc", Value: last, ID: last})
 }
 
-// Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete
-// that cascades to the scans of all clients; only an org-wide principal may (stocktakeWritable).
+// Delete deletes a planned or in-progress stocktake. The stocktake table
+// has no deleted_at column, so this is a hard delete that cascades to the
+// scans and items of all clients; only an org-wide principal may
+// (stocktakeWritable). A completed or cancelled stocktake is immutable
+// (ErrAlreadyCompleted, WP-761).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if current.terminal() {
+			return ErrAlreadyCompleted
+		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1 AND "+stocktakeWritable, id)
 		if err != nil {
-			return fmt.Errorf("delete stocktake: %w", err)
+			return immutableError(fmt.Errorf("delete stocktake: %w", err))
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return ErrNotFound
@@ -635,6 +649,9 @@ func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
 		if err != nil {
 			return fmt.Errorf("lock stocktake: %w", err)
 		}
+		if st.terminal() {
+			return ErrAlreadyCompleted
+		}
 		if st.Status != StatusInProgress {
 			return ErrInvalidTransition
 		}
@@ -692,7 +709,7 @@ func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
 			scan.OrganizationID, scan.StocktakeID, nilIfEmpty(scan.AssetID), nilIfEmpty(scan.ConsumableID), scan.Quantity,
 			scan.LocationID, scan.ScannedBy, scan.ScanMethod, scan.ScanResult, nilIfEmpty(scan.Code), nilIfEmpty(scan.Notes)))
 		if err != nil {
-			return fmt.Errorf("add stock scan: %w", err)
+			return immutableError(fmt.Errorf("add stock scan: %w", err))
 		}
 		*scan = *created
 		return nil
@@ -866,18 +883,26 @@ func DifferencesNextCursor(entries []Difference, limit int) string {
 	return api.EncodeCursor(api.Cursor{Sort: differenceSort, Dir: "asc", Value: last, ID: last})
 }
 
-// Complete finalizes an in-progress stocktake with snapshot in one
-// transaction (WP-287): the totals are computed, every snapshot item gets
-// counted_quantity and classification, every unexpected object an item
-// with expected_quantity 0 at the place found; then the status is set.
-// It books no correction (WP-761) and writes no asset. The stocktake is
-// locked FOR UPDATE; only principals that may write it complete it
-// (stocktakeWritable and the restrictive policies of 000260).
-func (r *PGRepository) Complete(ctx context.Context, orgID, id string) (*Completion, error) {
-	completion := &Completion{Corrections: []Correction{}}
+// RunInTx runs fn in one transaction of the context's tenant scope, which
+// the repository calls and the movement service join through fn's context
+// (database.WithRequestTenantTx, WP-332).
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
 
+// fixResult locks the stocktake id for its completion (FOR UPDATE, only
+// principals that may write it: stocktakeWritable and the restrictive
+// policies of 000260), checks completeRule, computes the totals and fixes
+// the result (WP-287): every snapshot item gets counted_quantity and
+// classification, every unexpected object an item with expected_quantity 0
+// at the place found. It returns the stocktake with its totals and the
+// corrections of the result (plannedCorrections, WP-761).
+func (r *PGRepository) fixResult(ctx context.Context, orgID, id string) (*Stocktake, []plannedCorrection, error) {
+	var current *Stocktake
+	var planned []plannedCorrection
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		current, err := lockStocktake(ctx, tx, id)
+		var err error
+		current, err = lockStocktake(ctx, tx, id)
 		if err != nil {
 			return err
 		}
@@ -909,24 +934,113 @@ func (r *PGRepository) Complete(ctx context.Context, orgID, id string) (*Complet
 			ids, orgID); err != nil {
 			return fmt.Errorf("fix the unexpected items: %w", err)
 		}
-		st, err := scanStocktake(tx.QueryRow(ctx, `
+		planned, err = plannedCorrections(ctx, tx, id)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return current, planned, nil
+}
+
+// plannedCorrections derives the corrections of the fixed result of the
+// stocktake id (WP-761): a transfer per asset whose last scan shows another
+// place than its current location_id (found elsewhere or unexpected; a
+// missing asset gets none, and its status stays), and per consumable and
+// bin of the result a correction by the counted quantity minus the book
+// stock of the bin now (stock_level.on_hand, the snapshot plus the
+// movements since the start), none for a difference of 0. Assets and
+// consumables come in id order, the bins of a consumable in location
+// order, so concurrent completions lock in one order.
+func plannedCorrections(ctx context.Context, tx pgx.Tx, id string) ([]plannedCorrection, error) {
+	var planned []plannedCorrection
+	rows, err := tx.Query(ctx, `
+		SELECT l.asset_id::text, COALESCE(a.location_id::text, ''), l.location_id::text
+		  FROM (SELECT DISTINCT ON (s.asset_id) s.asset_id, s.location_id
+		          FROM stock_scan s
+		         WHERE s.stocktake_id = $1 AND s.asset_id IS NOT NULL AND s.location_id IS NOT NULL
+		         ORDER BY s.asset_id, s.scanned_at DESC, s.id DESC) l
+		  JOIN asset a ON a.id = l.asset_id
+		 WHERE a.location_id IS DISTINCT FROM l.location_id
+		 ORDER BY l.asset_id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("derive the asset corrections: %w", err)
+	}
+	for rows.Next() {
+		c := plannedCorrection{itemKind: ItemKindAsset}
+		if err = rows.Scan(&c.assetID, &c.from, &c.to); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan asset correction: %w", err)
+		}
+		planned = append(planned, c)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate asset corrections: %w", err)
+	}
+	rows, err = tx.Query(ctx, `
+		SELECT i.consumable_id::text, i.location_id::text,
+		       (COALESCE(i.counted_quantity, 0) - COALESCE(sl.on_hand, 0))::float8
+		  FROM stocktake_item i
+		  LEFT JOIN stock_level sl ON sl.organization_id = i.organization_id
+		       AND sl.consumable_id = i.consumable_id AND sl.location_id = i.location_id
+		 WHERE i.stocktake_id = $1 AND i.item_kind = 'consumable'
+		   AND COALESCE(i.counted_quantity, 0) <> COALESCE(sl.on_hand, 0)
+		 ORDER BY i.consumable_id, i.location_id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("derive the consumable corrections: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bin string
+		var diff float64
+		c := plannedCorrection{itemKind: ItemKindConsumable}
+		if err = rows.Scan(&c.consumableID, &bin, &diff); err != nil {
+			return nil, fmt.Errorf("scan consumable correction: %w", err)
+		}
+		c.quantity, c.to = diff, bin
+		if diff < 0 {
+			c.quantity, c.to, c.from = -diff, "", bin
+		}
+		planned = append(planned, c)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate consumable corrections: %w", err)
+	}
+	return planned, nil
+}
+
+// closeCompleted sets the totals of current and the status completed in
+// one UPDATE; fixResult locked the stocktake in the same transaction.
+func (r *PGRepository) closeCompleted(ctx context.Context, orgID string, current *Stocktake) (*Stocktake, error) {
+	var st *Stocktake
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		st, err = scanStocktake(tx.QueryRow(ctx, `
 			UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW(),
 			       total_scanned = $2, total_missing = $3, total_surplus = $4
 			 WHERE id = $1 AND `+stocktakeWritable+` RETURNING `+stocktakeSelectColumns,
-			id, current.TotalScanned, current.TotalMissing, current.TotalSurplus))
+			current.ID, current.TotalScanned, current.TotalMissing, current.TotalSurplus))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("complete stocktake: %w", err)
 		}
-		completion.Stocktake = *st
 		return nil
 	})
-	if err != nil {
-		return nil, err
+	return st, err
+}
+
+// immutableError maps the refusal of reject_completed_stocktake_mutation
+// (23514 on stocktake_immutable, 000267) to ErrAlreadyCompleted; other
+// errors are returned unchanged.
+func immutableError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "stocktake_immutable" {
+		return ErrAlreadyCompleted
 	}
-	return completion, nil
+	return err
 }
 
 type stockScanner interface {

@@ -1476,3 +1476,4 @@ API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/stocktake/stocktake_scope_integrati
 VIE-02;[P2];C;backend/internal/savedview/presets_integration_test.go;WP-307
 STK-03;[P2];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-844
 GQL-03;[P2];C;backend/internal/graphqlbff/ci_aggregates_test.go;WP-792
+INV-01;[P2];B;backend/internal/stocktake/complete_integration_test.go;WP-761

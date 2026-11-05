@@ -768,7 +768,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithCILinks(opts.CIService),
 		assignment.NewHandler(repos.Assignment).WithService(signingAssignments(&repos, &opts)),
 		documentHandler,
-		stocktake.NewHandler(repos.Stocktake),
+		// The completion books its corrections through the movement
+		// service (WP-761); without PostgreSQL it answers 501.
+		stocktake.NewHandler(repos.Stocktake).WithService(stocktake.NewService(repos.Stocktake, movements)),
 		consumable.NewHandler(repos.Consumable),
 		// The goods receipt books through the movement service (WP-760).
 		order.NewHandler(repos.Order).WithBookings(movements),

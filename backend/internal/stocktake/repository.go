@@ -20,7 +20,9 @@ var (
 	// ErrNotFound is returned when the referenced stocktake does not exist.
 	ErrNotFound = errors.New("stocktake not found")
 	// ErrAlreadyCompleted is returned when a stocktake that is already in a
-	// terminal state (completed or cancelled) is completed again.
+	// terminal state (completed or cancelled) is scanned, changed, deleted,
+	// cancelled or completed (409, WP-761): its result is immutable, which
+	// the trigger reject_completed_stocktake_mutation (000267) guards last.
 	ErrAlreadyCompleted = errors.New("stocktake already completed or cancelled")
 	// ErrInvalidTransition is returned when the status of the stocktake does
 	// not allow the transition or the change (409, WP-848): start needs
@@ -64,7 +66,8 @@ type Repository interface {
 	// AddScan records a scan of an in-progress stocktake with snapshot
 	// and classifies it (found when the object is in the snapshot, else
 	// unexpected). It fails with ErrNotFound for an unknown stocktake,
-	// ErrInvalidTransition when it is not in progress, ErrNoSnapshot
+	// ErrAlreadyCompleted when it is completed or cancelled,
+	// ErrInvalidTransition when it is planned, ErrNoSnapshot
 	// without snapshot, ErrObjectNotFound for an object outside the scope
 	// and ErrPlaceFound for a place found outside the area.
 	AddScan(ctx context.Context, scan *StockScan) error
@@ -74,20 +77,13 @@ type Repository interface {
 	// Differences returns a page of the difference list, computed from the
 	// snapshot and the scans (WP-287), ordered by object.
 	Differences(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]Difference, int, error)
-	// Complete finalizes an in-progress stocktake with snapshot: it writes
-	// counted_quantity and classification per item, an item per unexpected
-	// object and the totals, then the status, in one transaction (WP-287).
-	// It books no correction. A completed or cancelled stocktake fails with
-	// ErrAlreadyCompleted, a planned one with ErrInvalidTransition, one
-	// without snapshot with ErrNoSnapshot.
-	Complete(ctx context.Context, orgID, id string) (*Completion, error)
 	// Start moves a planned stocktake with an area to in_progress and
 	// freezes the expected stock of the area in one transaction (WP-848).
 	// It fails with ErrInvalidTransition for another status and with
 	// ErrNoArea without location_id.
 	Start(ctx context.Context, orgID, id, userID string) (*Stocktake, error)
-	// Cancel moves a planned or in-progress stocktake to cancelled;
-	// another status fails with ErrInvalidTransition.
+	// Cancel moves a planned or in-progress stocktake to cancelled; a
+	// completed or cancelled one fails with ErrAlreadyCompleted.
 	Cancel(ctx context.Context, orgID, id string) (*Stocktake, error)
 	// ListItems returns a page of the frozen expected stock, ordered by id.
 	ListItems(ctx context.Context, orgID, id string, page api.PaginationParams) ([]Item, int, error)
@@ -101,8 +97,8 @@ type MemoryRepository struct {
 }
 
 // NewMemoryRepository creates a new in-memory stocktake repository (profile
-// --no-db). It freezes no expected stock: start, items and the difference
-// list answer 501, scans and the completion 409 (WP-287). The asset lookup
+// --no-db). It freezes no expected stock: start, items, the difference list
+// and the completion answer 501 (WP-287, WP-761), scans 409. The asset lookup
 // of the wiring is no longer read.
 func NewMemoryRepository(_ asset.Lookup) *MemoryRepository {
 	return &MemoryRepository{stocktakes: make(map[string]*Stocktake)}
@@ -207,6 +203,9 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 		return nil, ErrNotFound
 	}
 
+	if s.terminal() {
+		return nil, ErrAlreadyCompleted
+	}
 	if req.LocationID != nil {
 		if s.Status != StatusPlanned {
 			return nil, ErrInvalidTransition
@@ -255,8 +254,8 @@ func (r *MemoryRepository) Cancel(_ context.Context, orgID, id string) (*Stockta
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
-	if s.Status != StatusPlanned && s.Status != StatusInProgress {
-		return nil, ErrInvalidTransition
+	if s.terminal() {
+		return nil, ErrAlreadyCompleted
 	}
 	s.Status = StatusCancelled
 	s.UpdatedAt = time.Now().UTC()
@@ -285,13 +284,16 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	if !ok || s.OrganizationID != orgID {
 		return ErrNotFound
 	}
+	if s.terminal() {
+		return ErrAlreadyCompleted
+	}
 	delete(r.stocktakes, id)
 	return nil
 }
 
 // AddScan follows the status rule of the PostgreSQL repository: a
-// stocktake that is not in progress is ErrInvalidTransition, an
-// in-progress one ErrNoSnapshot, since the in-memory repository freezes no
+// completed or cancelled stocktake is ErrAlreadyCompleted, a planned one
+// ErrInvalidTransition, an in-progress one ErrNoSnapshot, since the in-memory repository freezes no
 // expected stock.
 func (r *MemoryRepository) AddScan(_ context.Context, scan *StockScan) error {
 	r.mu.RLock()
@@ -300,6 +302,9 @@ func (r *MemoryRepository) AddScan(_ context.Context, scan *StockScan) error {
 	st, ok := r.stocktakes[scan.StocktakeID]
 	if !ok || st.OrganizationID != scan.OrganizationID {
 		return ErrNotFound
+	}
+	if st.terminal() {
+		return ErrAlreadyCompleted
 	}
 	if st.Status != StatusInProgress {
 		return ErrInvalidTransition
@@ -319,26 +324,12 @@ func (r *MemoryRepository) Differences(_ context.Context, orgID, stocktakeID str
 	return nil, 0, ErrSnapshotUnavailable
 }
 
-// Complete follows the status rule of the PostgreSQL repository; an
-// in-progress stocktake has no snapshot here (ErrNoSnapshot), so nothing
-// changes.
-func (r *MemoryRepository) Complete(_ context.Context, orgID, id string) (*Completion, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	s, ok := r.stocktakes[id]
-	if !ok || s.OrganizationID != orgID {
-		return nil, ErrNotFound
-	}
-	return nil, completeRule(s)
-}
-
 // completeRule returns the error of the completion of s: ErrAlreadyCompleted
 // when it is completed or cancelled, ErrInvalidTransition when it is
 // planned, ErrNoSnapshot without frozen expected stock, else nil.
 func completeRule(s *Stocktake) error {
 	switch {
-	case s.Status == StatusCompleted || s.Status == StatusCancelled:
+	case s.terminal():
 		return ErrAlreadyCompleted
 	case s.Status != StatusInProgress:
 		return ErrInvalidTransition
@@ -346,6 +337,12 @@ func completeRule(s *Stocktake) error {
 		return ErrNoSnapshot
 	}
 	return nil
+}
+
+// terminal reports whether s is completed or cancelled: its result is
+// immutable (WP-761).
+func (s *Stocktake) terminal() bool {
+	return s.Status == StatusCompleted || s.Status == StatusCancelled
 }
 
 // hasSnapshot reports whether start froze the expected stock of s: only a

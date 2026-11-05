@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // The tests of this file run the handler on the in-memory repository
@@ -160,24 +163,37 @@ func TestMemorySnapshotRoutesAnswer501(t *testing.T) {
 	}
 }
 
-// TestMemoryCompleteWithoutSnapshot: the completion of a stocktake without
-// snapshot is 409 and changes neither the stocktake nor an asset; the
-// completion corrects no inventory any more (WP-287).
-func TestMemoryCompleteWithoutSnapshot(t *testing.T) {
+// TestMemoryCompleteWithoutService: without the completion service
+// (profile --no-db, WP-761) POST …/complete follows the status rules (409
+// for planned, completed and cancelled, 404 for an unknown stocktake) and
+// answers an in-progress stocktake with 501 like start; apply_corrections
+// is ignored, the answer is the same with and without it. Nothing changes,
+// neither the stocktake nor an asset.
+func TestMemoryCompleteWithoutService(t *testing.T) {
 	repo, assetRepo, mux := setup()
 	a := &asset.Asset{OrganizationID: "org-1", AssetTag: "MISS-1", Name: "Asset", Category: "hardware", Status: "assigned", Location: "Raum A"}
 	if err := assetRepo.Create(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
 	planned := createStocktake(t, mux, `{"title":"planned"}`)
-	for _, st := range []Stocktake{planned, withStatus(t, repo, StatusInProgress), withStatus(t, repo, StatusCompleted), withStatus(t, repo, StatusCancelled)} {
-		w := doReq(mux, http.MethodPost, "/api/v1/stocktakes/"+st.ID+"/complete", `{"apply_corrections":true}`)
-		if w.Code != http.StatusConflict {
-			t.Errorf("complete of a %s stocktake: %d %s, want 409", st.Status, w.Code, w.Body.String())
+	for _, c := range []struct {
+		st   Stocktake
+		want int
+	}{
+		{planned, http.StatusConflict},
+		{withStatus(t, repo, StatusInProgress), http.StatusNotImplemented},
+		{withStatus(t, repo, StatusCompleted), http.StatusConflict},
+		{withStatus(t, repo, StatusCancelled), http.StatusConflict},
+	} {
+		for _, body := range []string{"", `{"apply_corrections":true}`, `{"apply_corrections":false}`} {
+			w := doReq(mux, http.MethodPost, "/api/v1/stocktakes/"+c.st.ID+"/complete", body)
+			if w.Code != c.want {
+				t.Errorf("complete of a %s stocktake with %q: %d %s, want %d", c.st.Status, body, w.Code, w.Body.String(), c.want)
+			}
 		}
-		stored, err := repo.GetByID(context.Background(), "org-1", st.ID)
-		if err != nil || stored.Status != st.Status || stored.CompletedAt != "" {
-			t.Errorf("%s stocktake after the refused completion: %+v %v", st.Status, stored, err)
+		stored, err := repo.GetByID(context.Background(), "org-1", c.st.ID)
+		if err != nil || stored.Status != c.st.Status || stored.CompletedAt != "" {
+			t.Errorf("%s stocktake after the refused completion: %+v %v", c.st.Status, stored, err)
 		}
 	}
 	got, err := assetRepo.GetByID(context.Background(), "org-1", a.ID)
@@ -186,5 +202,56 @@ func TestMemoryCompleteWithoutSnapshot(t *testing.T) {
 	}
 	if w := doReq(mux, http.MethodPost, "/api/v1/stocktakes/st-unknown/complete", `{}`); w.Code != http.StatusNotFound {
 		t.Errorf("complete of an unknown stocktake: %d, want 404", w.Code)
+	}
+	if NewService(repo, nil) != nil {
+		t.Error("NewService over the in-memory repository: want nil")
+	}
+}
+
+// TestMemoryCompletedStocktakeIsImmutable: PATCH, DELETE, a scan and
+// cancel of a completed or cancelled stocktake answer 409
+// (ErrAlreadyCompleted, WP-761), and the stocktake stays.
+func TestMemoryCompletedStocktakeIsImmutable(t *testing.T) {
+	repo, _, mux := setup()
+	scan := `{"asset_id":"00000000-0000-4000-8000-000000000002","location_id":"` + memoryArea + `"}`
+	for _, status := range []string{StatusCompleted, StatusCancelled} {
+		st := withStatus(t, repo, status)
+		path := "/api/v1/stocktakes/" + st.ID
+		for _, c := range []struct{ method, suffix, body string }{
+			{http.MethodPatch, "", `{"title":"renamed"}`},
+			{http.MethodDelete, "", ""},
+			{http.MethodPost, "/scans", scan},
+			{http.MethodPost, "/cancel", ""},
+		} {
+			w := doReq(mux, c.method, path+c.suffix, c.body)
+			if w.Code != http.StatusConflict {
+				t.Errorf("%s …%s of a %s stocktake: %d %s, want 409", c.method, c.suffix, status, w.Code, w.Body.String())
+			}
+		}
+		stored, err := repo.GetByID(context.Background(), "org-1", st.ID)
+		if err != nil || stored.Status != status || stored.Title != st.Title {
+			t.Errorf("%s stocktake after the refused writes: %+v %v", status, stored, err)
+		}
+	}
+}
+
+// TestAlreadyCompletedIs409: ErrAlreadyCompleted, also wrapped, and the
+// refusal of the immutability trigger answer 409.
+func TestAlreadyCompletedIs409(t *testing.T) {
+	trigger := &pgconn.PgError{Code: "23514", ConstraintName: "stocktake_immutable"}
+	for name, err := range map[string]error{
+		"sentinel": ErrAlreadyCompleted,
+		"wrapped":  fmt.Errorf("complete: %w", ErrAlreadyCompleted),
+		"trigger":  immutableError(fmt.Errorf("add stock scan: %w", trigger)),
+	} {
+		w := httptest.NewRecorder()
+		writeStocktakeError(w, err)
+		if w.Code != http.StatusConflict {
+			t.Errorf("%s: %d %s, want 409", name, w.Code, w.Body.String())
+		}
+	}
+	other := &pgconn.PgError{Code: "23514", ConstraintName: "stocktake_item_counted_check"}
+	if err := immutableError(other); errors.Is(err, ErrAlreadyCompleted) {
+		t.Errorf("another check violation: %v, want unchanged", err)
 	}
 }

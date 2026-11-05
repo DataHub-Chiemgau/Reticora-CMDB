@@ -185,23 +185,31 @@ type Supply struct {
 }
 
 // CompleteRequest is the payload for completing a stocktake.
-// ApplyCorrections is ignored (WP-287): the completion fixes the result in
-// the snapshot and books no correction until WP-761.
+// ApplyCorrections is deprecated and ignored (WP-761): every completion
+// books its corrections.
 type CompleteRequest struct {
 	ApplyCorrections *bool `json:"apply_corrections,omitempty"`
 }
 
-// Correction is a deprecated member of Completion: the completion applies
-// no correction any more (WP-287), the list stays empty.
+// Correction is one stock movement booked by the completion (WP-761): a
+// transfer of an asset found at another place than its location_id, or a
+// correction of a consumable in a bin, raising (ToLocationID) or lowering
+// (FromLocationID) its stock by Quantity to the counted quantity.
 type Correction struct {
-	AssetID    string `json:"asset_id"`
-	ScanResult string `json:"scan_result"`
-	Applied    bool   `json:"applied"`
+	MovementID     string   `json:"movement_id"`
+	MovementType   string   `json:"movement_type"`
+	ItemKind       string   `json:"item_kind"`
+	AssetID        string   `json:"asset_id,omitempty"`
+	ConsumableID   string   `json:"consumable_id,omitempty"`
+	FromLocationID string   `json:"from_location_id,omitempty"`
+	ToLocationID   string   `json:"to_location_id,omitempty"`
+	Quantity       *float64 `json:"quantity,omitempty"`
 }
 
 // Completion is the result of completing a stocktake: the completed
-// stocktake with its totals. CorrectionsApplied is 0 and Corrections empty
-// (WP-287); the result per object is in GET …/items and …/differences.
+// stocktake with its totals and the movements booked as corrections
+// (WP-761); CorrectionsApplied is their number. The result per object is
+// in GET …/items and …/differences.
 type Completion struct {
 	Stocktake          Stocktake    `json:"stocktake"`
 	CorrectionsApplied int          `json:"corrections_applied"`

@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -14,12 +15,21 @@ import (
 
 // Handler provides HTTP handlers for stocktake endpoints.
 type Handler struct {
-	repo Repository
+	repo    Repository
+	service *Service
 }
 
 // NewHandler creates a new stocktake handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithService sets the completion service with the movement service
+// (WP-761); without one (profile --no-db, NewService returns nil) POST
+// …/complete answers 501 like start.
+func (h *Handler) WithService(svc *Service) *Handler {
+	h.service = svc
+	return h
 }
 
 // RegisterRoutes registers stocktake routes on the given mux.
@@ -95,6 +105,10 @@ func writeStocktakeError(w http.ResponseWriter, err error) {
 		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the expected stock is not available without PostgreSQL")
 	case errors.Is(err, api.ErrInvalidCursor):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+	case errors.Is(err, consumable.ErrInsufficientStock):
+		// A correction would lower the stock of a bin below on_hand −
+		// reserved (WP-761); the completion rolled back.
+		api.WriteTypedProblem(w, http.StatusConflict, err)
 	default:
 		api.WriteRepoError(w, err)
 	}
@@ -268,11 +282,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
-		api.WriteRepoError(w, err)
+		writeStocktakeError(w, err)
 		return
 	}
 
@@ -444,10 +454,13 @@ func (h *Handler) Differences(w http.ResponseWriter, r *http.Request) {
 }
 
 // Complete handles POST /api/v1/stocktakes/{id}/complete (in_progress →
-// completed, WP-287): it fixes the result in the snapshot and the totals
-// and books no correction until WP-761; apply_corrections is ignored. A
-// stocktake without snapshot (an earlier release without area included)
-// answers 409, it can only be cancelled.
+// completed, WP-761): in one transaction it fixes the result in the
+// snapshot and the totals and books the corrections through the movement
+// service (Service.Complete); apply_corrections is deprecated and ignored.
+// A stocktake without snapshot (an earlier release without area included)
+// answers 409, it can only be cancelled; a refused booking answers 409
+// insufficient-stock or 422 and rolls the completion back. Without a
+// service (profile --no-db) it follows the status rules and answers 501.
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -466,18 +479,32 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if h.service == nil {
+		writeStocktakeError(w, h.completeUnavailable(r, t.OrganizationID, stocktakeID))
+		return
+	}
 
-	completion, err := h.repo.Complete(r.Context(), t.OrganizationID, stocktakeID)
+	completion, err := h.service.Complete(r.Context(), t.OrganizationID, stocktakeID, t.UserID)
 	if err != nil {
-		if errors.Is(err, ErrAlreadyCompleted) {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-			return
-		}
 		writeStocktakeError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, completion)
+}
+
+// completeUnavailable is the answer of a completion without service: the
+// status rule (ErrAlreadyCompleted, ErrInvalidTransition) and then
+// ErrSnapshotUnavailable (501), since only PostgreSQL freezes and books.
+func (h *Handler) completeUnavailable(r *http.Request, orgID, id string) error {
+	st, err := h.repo.GetByID(r.Context(), orgID, id)
+	if err != nil {
+		return err
+	}
+	if ruleErr := completeRule(st); ruleErr != nil && !errors.Is(ruleErr, ErrNoSnapshot) {
+		return ruleErr
+	}
+	return ErrSnapshotUnavailable
 }
 
 // Start handles POST /api/v1/stocktakes/{id}/start (planned → in_progress,
