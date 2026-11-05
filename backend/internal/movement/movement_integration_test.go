@@ -517,7 +517,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 	}
 	admin(`UPDATE asset SET location_id = $2 WHERE id = $1`, located, room2)
 	cons, team := f.ID(), f.ID()
-	admin(`INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'ledger')`, cons, f.OrgA, f.Client1)
+	admin(`INSERT INTO consumable (id, organization_id, client_id, name, on_hand_total) VALUES ($1, $2, $3, 'ledger', 10)`, cons, f.OrgA, f.Client1)
 	// The stock of the consumable lies in a bin since WP-283.
 	consBin := stockBin(t, f, f.Client1, "ledger-bin")
 	admin(`INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 10)`, f.OrgA, cons, consBin)

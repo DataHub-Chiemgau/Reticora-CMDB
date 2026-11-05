@@ -98,7 +98,7 @@ export function ConsumableListPage() {
             key={c.id}
             title={c.name}
             actions={
-              c.stock_level <= c.min_level ? (
+              c.stock_level < c.min_level ? (
                 <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
               ) : (
                 <Badge variant="success">{t('consumables.ok', 'OK')}</Badge>

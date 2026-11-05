@@ -232,11 +232,19 @@ type StockMovementData struct {
 }
 
 // StockBelowMinimumData is the data of stock.below_minimum, about a
-// quantity item (WP-285).
+// consumable whose total stock fell below its minimum level (WP-285):
+// on_hand_total (sum over all bins, independent of the scope) after the
+// booking or the change of min_level, with the article's SKU, name and
+// unit. client_id is absent for an article without client; a consumable
+// has no site (its bins have one each), so the frame carries none.
 type StockBelowMinimumData struct {
-	ID       string `json:"id"`
-	ClientID string `json:"client_id,omitempty"`
-	SiteID   string `json:"site_id,omitempty"`
+	ID          string  `json:"id"`
+	ClientID    string  `json:"client_id,omitempty"`
+	SKU         string  `json:"sku,omitempty"`
+	Name        string  `json:"name"`
+	Unit        string  `json:"unit"`
+	OnHandTotal float64 `json:"on_hand_total"`
+	MinLevel    float64 `json:"min_level"`
 }
 
 // ReservationData is the data of the reservation types (WP-277, WP-284):

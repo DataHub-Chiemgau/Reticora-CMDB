@@ -183,7 +183,7 @@ func TestMovementServiceRecordTx(t *testing.T) {
 	t.Run("stock", func(t *testing.T) {
 		item := f.ID()
 		bin, bin2 := stockBin(t, f, f.Client1, "svc-bin1"), stockBin(t, f, f.Client1, "svc-bin2")
-		if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'svc-cable')`,
+		if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name, on_hand_total) VALUES ($1, $2, $3, 'svc-cable', 5)`,
 			item, f.OrgA, f.Client1); err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +303,7 @@ func TestStockMovementAPI(t *testing.T) {
 	asset := f.Asset(t, f.OrgA, f.Client1, "api-a1")
 	item, cons := f.ID(), f.ID()
 	itemBin := stockBin(t, f, f.Client1, "api-item-bin")
-	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'api-cable')`,
+	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name, on_hand_total) VALUES ($1, $2, $3, 'api-cable', 3)`,
 		item, f.OrgA, f.Client1); err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestStockMovementAPI(t *testing.T) {
 		f.OrgA, item, itemBin); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'api-toner')`,
+	if _, err := f.Admin.Exec(bg, `INSERT INTO consumable (id, organization_id, client_id, name, on_hand_total) VALUES ($1, $2, $3, 'api-toner', 1)`,
 		cons, f.OrgA, f.Client1); err != nil {
 		t.Fatal(err)
 	}

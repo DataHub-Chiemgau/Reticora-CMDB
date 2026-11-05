@@ -11,12 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// stockTotal is the sum of on_hand over the bins of the consumable the
-// caller sees (stock_level_isolation); it backs the deprecated field
-// stock_level and the filter low_stock (WP-283).
-const stockTotal = `(SELECT COALESCE(sum(s.on_hand), 0) FROM stock_level s WHERE s.consumable_id = consumable.id AND s.organization_id = consumable.organization_id)`
-
-const consumableCols = `id::text, organization_id::text, COALESCE(client_id::text,''), name, COALESCE(sku,''), COALESCE(barcode,''), COALESCE(supplier_id::text,''), category, unit, ` + stockTotal + `::float8, min_level, COALESCE(notes,''), created_at, updated_at`
+// consumableCols read a consumable; the deprecated field stock_level is
+// on_hand_total, the sum of on_hand over all bins whatever the caller's
+// scope (E-128 (a), WP-285).
+const consumableCols = `id::text, organization_id::text, COALESCE(client_id::text,''), name, COALESCE(sku,''), COALESCE(barcode,''), COALESCE(supplier_id::text,''), category, unit, on_hand_total::float8, min_level, COALESCE(notes,''), created_at, updated_at`
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -54,7 +52,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 			pos++
 		}
 		if filter.LowStock {
-			where = append(where, stockTotal+" <= min_level")
+			// The threshold rule of the minimum level (WP-285).
+			where = append(where, "on_hand_total < min_level")
 		}
 		if filter.Search != "" {
 			where = append(where, fmt.Sprintf("name ILIKE $%d", pos))
@@ -112,9 +111,21 @@ func (r *PGRepository) Create(ctx context.Context, c *Consumable) error {
 	})
 }
 
+// Update changes the fields of req. A new min_level is compared with
+// on_hand_total under the row lock of the consumable (lockConsumable, as
+// in ApplyBooking): when it takes the consumable from "not below" to
+// "below" its minimum level, stock.below_minimum is the last write of the
+// transaction (WP-285). Lowering min_level and other fields write none.
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateConsumableRequest) (*Consumable, error) {
 	var c *Consumable
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var before *lockedConsumable
+		if req.MinLevel != nil {
+			var lockErr error
+			if before, lockErr = lockConsumable(ctx, tx, orgID, id); lockErr != nil {
+				return lockErr
+			}
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -160,7 +171,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateC
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil || before == nil || before.below || !c.LowStock() {
+			return err
+		}
+		return appendBelowMinimum(ctx, tx, orgID, &lockedConsumable{id: c.ID, client: c.ClientID, sku: c.SKU,
+			name: c.Name, unit: c.Unit, total: c.StockLevel, minLevel: c.MinLevel})
 	})
 	return c, err
 }

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000257_assignment_projection
+Stand: Migration 000259_consumable_on_hand_total
 
 ## Prüfung
 
@@ -1598,6 +1598,13 @@ Assets `id`, `organization_id`, `asset_id`, `assigned_to`,
 desselben Assets und Halters danach), `notes`, `created_at`, `updated_at`.
 Die Tabelle `assignment` bleibt unverändert bis WP-843; Down entfernt View,
 Index und Quarantäne-Einträge, die Bewegungen bleiben.
+Gesamtbestand von Mengenartikeln (STK-01, NTF-05, WP-285, E-128, Migration
+000259): `consumable` erhält `on_hand_total` (`numeric(12,2)` NOT NULL
+DEFAULT 0) mit `consumable_on_hand_total_check` (`on_hand_total >= 0`),
+befüllt mit Σ `stock_level.on_hand` je Artikel über alle Bins. Fortgeschrieben
+wird die Spalte nur von `consumable.ApplyBooking` unter der Zeilensperre des
+Artikels; Tabelle, Indizes und RLS bleiben unverändert. Down entfernt Spalte
+und Constraint.
 
 ## Tabellen, RLS und Policies
 

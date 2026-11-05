@@ -1455,3 +1455,5 @@ STK-03;[P2];B;backend/internal/consumable/quantity_item_merge_integration_test.g
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/consumable/quantity_item_merge_integration_test.go;WP-757
 AST-07;[P2];B;backend/internal/assignment/projection_integration_test.go;WP-747
 AST-02;[P2];B;backend/internal/assignment/projection_integration_test.go;WP-747
+STK-01;[P2];B;backend/internal/consumable/minlevel_integration_test.go;WP-285
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/consumable/minlevel_integration_test.go;WP-285

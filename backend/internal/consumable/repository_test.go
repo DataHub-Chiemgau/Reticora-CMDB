@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -104,7 +108,7 @@ func TestMemoryStockPerBin(t *testing.T) {
 		t.Fatalf("out of bin-b: %+v, %v; want stock_level 4", updated, err)
 	}
 	if n := low(); n != 1 {
-		t.Fatalf("4 <= 5: %d low-stock items, want one", n)
+		t.Fatalf("4 < 5: %d low-stock items, want one", n)
 	}
 
 	// Delete: stock keeps the consumable, an empty bin does not.
@@ -172,5 +176,134 @@ func TestStockPageCursor(t *testing.T) {
 	}
 	if _, _, err = repo.ListStock(ctx, "org-1", "unknown", page); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("stock of an unknown consumable: %v, want ErrNotFound", err)
+	}
+}
+
+// TestMemoryLowStockThreshold covers the threshold rule of the minimum
+// level in the in-memory filter low_stock (WP-285): below means total
+// stock < min_level, a total equal to the minimum is not below it, and
+// min_level 0 never is.
+func TestMemoryLowStockThreshold(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	for _, c := range []struct {
+		name          string
+		minLevel, qty float64
+		low           bool
+	}{
+		{"below", 5, 4, true},
+		{"equal", 5, 5, false},
+		{"above", 5, 6, false},
+		{"empty with minimum", 1, 0, true},
+		{"empty without minimum", 0, 0, false},
+		{"stocked without minimum", 0, 3, false},
+	} {
+		item := &Consumable{OrganizationID: "org-1", Name: c.name, MinLevel: c.minLevel}
+		if err := repo.Create(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+		if c.qty > 0 {
+			if err := repo.Book(ctx, &Booking{OrganizationID: "org-1", ConsumableID: item.ID, MovementType: "receipt",
+				ToLocationID: "bin-a", Quantity: c.qty}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		list, _, err := repo.List(ctx, "org-1", FilterParams{LowStock: true}, api.PaginationParams{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listed := false
+		for i := range list {
+			listed = listed || list[i].ID == item.ID
+		}
+		if listed != c.low {
+			t.Errorf("%s (total %v, min_level %v): listed by low_stock %v, want %v", c.name, c.qty, c.minLevel, listed, c.low)
+		}
+	}
+}
+
+// stockWrites are the SQL writes of on_hand and on_hand_total (WP-285):
+// an insert into stock_level, an assignment to on_hand in an update of
+// stock_level and one to on_hand_total in an update of consumable.
+var (
+	insertStockLevel = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+stock_level\b`)
+	updateStockLevel = regexp.MustCompile(`(?is)\bUPDATE\s+stock_level\s+SET\b(.*?)(\bWHERE\b|$)`)
+	updateConsumable = regexp.MustCompile(`(?is)\bUPDATE\s+consumable\s+SET\b(.*?)(\bWHERE\b|$)`)
+	assignsOnHand    = regexp.MustCompile(`(?i)\bon_hand\s*=`)
+	assignsTotal     = regexp.MustCompile(`(?i)\bon_hand_total\s*=`)
+)
+
+// sqlWritesStock reports which writes of on_hand or on_hand_total src
+// contains.
+func sqlWritesStock(src string) []string {
+	var found []string
+	if insertStockLevel.MatchString(src) {
+		found = append(found, "INSERT INTO stock_level")
+	}
+	for _, m := range updateStockLevel.FindAllStringSubmatch(src, -1) {
+		if assignsOnHand.MatchString(m[1]) {
+			found = append(found, "UPDATE stock_level SET on_hand")
+			break
+		}
+	}
+	for _, m := range updateConsumable.FindAllStringSubmatch(src, -1) {
+		if assignsTotal.MatchString(m[1]) {
+			found = append(found, "UPDATE consumable SET on_hand_total")
+			break
+		}
+	}
+	return found
+}
+
+// TestOnlyApplyBookingWritesStock guards the single writer of the stock
+// (WP-285, pattern of TestRepositoriesUseCanonicalSessionVariable): no
+// non-test file under backend/internal but consumable/stock.go writes
+// on_hand or on_hand_total by SQL, so every booking path, also a later one,
+// goes through consumable.ApplyBooking and its check of the minimum level.
+func TestOnlyApplyBookingWritesStock(t *testing.T) {
+	// The patterns find the writes of the single writer and nothing else.
+	own, err := os.ReadFile("stock.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sqlWritesStock(string(own)); len(got) != 3 {
+		t.Fatalf("stock.go: found %v, want all three writes (the patterns are stale)", got)
+	}
+	for _, other := range []string{
+		`"UPDATE consumable SET min_level = $3, updated_at = now() WHERE organization_id = $1"`,
+		"UPDATE stock_level SET reserved = reserved + $1 WHERE on_hand = 0",
+		"SELECT on_hand_total FROM consumable WHERE on_hand_total = 0",
+	} {
+		if got := sqlWritesStock(other); len(got) != 0 {
+			t.Fatalf("%s: found %v, want none", other, got)
+		}
+	}
+
+	root := ".."
+	single := filepath.Join(root, "consumable", "stock.go")
+	err = filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if info.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || path == single {
+			return nil
+		}
+		content, readErr := os.ReadFile(path) //nolint:gosec // test-only read of the backend sources
+		if readErr != nil {
+			return readErr
+		}
+		for _, write := range sqlWritesStock(string(content)) {
+			t.Errorf("%s writes the stock by SQL (%s); book through consumable.ApplyBooking", path, write)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk backend sources: %v", err)
 	}
 }

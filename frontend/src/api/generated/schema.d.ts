@@ -13297,7 +13297,7 @@ export interface components {
       unit: string;
       /**
        * @deprecated
-       * @description Sum of on_hand over the bins of the consumable the caller sees (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept as a computed field until WP-320 (WP-283).
+       * @description Total stock: the sum of on_hand over all bins of the consumable, also those outside the caller's scope (consumable.on_hand_total, E-128 (a)); the stock per bin within the scope is GET /api/v1/consumables/{id}/stock. The consumable is below its minimum level when stock_level < min_level (event stock.below_minimum, WP-285). Kept as a read-only field until WP-320 (WP-283).
        */
       readonly stock_level: number;
       min_level: number;
@@ -21989,7 +21989,7 @@ export interface operations {
         search?: components['parameters']['Search'];
         category?: string;
         client_id?: string;
-        /** @description When true, only items at or below their minimum level. */
+        /** @description When true, only consumables below their minimum level: the total stock over all bins (stock_level) is less than min_level. A total equal to min_level is not below it, and min_level 0 never is (WP-285). */
         low_stock?: boolean;
       };
       header?: never;
