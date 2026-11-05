@@ -28299,7 +28299,7 @@ components:
             image (WP-749).
         legacy:
           type: boolean
-          description: A signature taken over from the former assignment table (WP-749); false until then.
+          description: "A signature taken over from the former assignment table (WP-749) - true when the signature document was created by the system run signature.migrate from the former assignment table; then valid is null and signature_hash is empty."
 
     AssignmentListResponse:
       allOf:

@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -409,6 +410,18 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 				return status == entitlement.StatusActive, serr
 			}
 			systemJobs = append(systemJobs, expiry.Schedule())
+			// Legacy signatures of 000047 as signature documents at their
+			// movement (AST-02, E-51, WP-749), with the blob storage only.
+			if d.blobs != nil {
+				legacy := assignment.NewLegacySignatures(pool, d.blobs)
+				if d.entitlements != nil {
+					legacy.WithLimits(d.entitlements)
+				}
+				if d.jobQueue != nil && d.repos.Jobs != nil {
+					legacy.WithScans(d.jobQueue)
+				}
+				systemJobs = append(systemJobs, legacy.Schedule())
+			}
 		}
 		// Ad-hoc discovery jobs without a report from their collector within
 		// discovery.JobDeadline fail with cause timeout (JOB-01, F-358).

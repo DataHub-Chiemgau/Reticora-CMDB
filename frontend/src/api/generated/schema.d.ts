@@ -13124,7 +13124,7 @@ export interface components {
       scan_status: 'pending_scan' | 'clean';
       /** @description True when the stored image matches checksum_sha256 and signature_hash, false when not (an exchanged or missing image); null is reserved for legacy signatures without a verifiable image (WP-749). */
       valid: boolean | null;
-      /** @description A signature taken over from the former assignment table (WP-749); false until then. */
+      /** @description A signature taken over from the former assignment table (WP-749) - true when the signature document was created by the system run signature.migrate from the former assignment table; then valid is null and signature_hash is empty. */
       legacy: boolean;
     };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {

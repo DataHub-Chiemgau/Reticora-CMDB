@@ -1639,6 +1639,15 @@ projection`, Migration `000266`; ohne Signaturen, wenn das Archiv sie hält,
 mit `document_link_ids`), danach DROP TABLE `assignment`. Down baut
 `assignment` exakt wieder auf und stellt Zeilen, Signaturen, Links, CHECK und
 Funktionen wieder her.
+Altsignaturen als Unterschriftsdokumente (AST-02, WP-749, E-51, Migration
+000268): `guard_assignment_signature_legacy()` erlaubt zusätzlich, `payload`
+einmalig durch die bildfreie Form zu ersetzen: der alte Wert ein Objekt ohne
+`document_id`, der neue ein Objekt mit genau `document_id` (UUID),
+`signer_surrogate` (UUID oder null), `signed_at` und `method` (Text bis 64
+Zeichen oder null); alle übrigen Spalten bleiben. DELETE bleibt verboten,
+RLS und Policies unverändert. Den Austausch schreibt der Systemlauf
+`signature.migrate`. Down stellt die Funktion aus 000266 wieder her, ersetzte
+Werte bleiben.
 Gesamtbestand von Mengenartikeln (STK-01, NTF-05, WP-285, E-128, Migration
 000259): `consumable` erhält `on_hand_total` (`numeric(12,2)` NOT NULL
 DEFAULT 0) mit `consumable_on_hand_total_check` (`on_hand_total >= 0`),

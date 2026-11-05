@@ -46,8 +46,10 @@ var (
 // signature reference of the movement, version 1 of its document with the
 // scan status and the result. Valid is true only when the stored image
 // matches both checksum_sha256 of the version and the signature_hash of
-// the movement; nil is reserved for legacy signatures without a
-// verifiable image. Legacy is false until WP-749. It never holds the
+// the movement; nil stands for a legacy signature without a verifiable
+// image (Legacy, WP-749: taken over from 000047 by signature.migrate,
+// document, signer surrogate and signed_at from
+// assignment_signature_legacy, no signature_hash). It never holds the
 // image or a name.
 type SignatureVerification struct {
 	MovementID      string    `json:"movement_id"`
@@ -70,6 +72,10 @@ type signedVersion struct {
 	key        string
 	checksum   string
 	scanStatus string
+	// legacy marks a signature taken over by signature.migrate (WP-749);
+	// signedAt is then its signed_at (nil: occurred_at of the movement).
+	legacy   bool
+	signedAt *time.Time
 }
 
 // VerifySignature verifies the signature of the movement id (WP-748): it
@@ -103,13 +109,21 @@ func (s *Service) VerifySignature(ctx context.Context, orgID, id string) (*Signa
 	case document.ScanFailed:
 		return nil, errSignatureNotScanned
 	}
-	valid, err := s.matches(ctx, orgID, sv)
-	if err != nil {
-		return nil, err
-	}
 	out := &SignatureVerification{MovementID: sv.m.ID, DocumentID: sv.m.DocumentID, Version: sv.version,
 		SignatureHash: sv.m.SignatureHash, SignerUserID: sv.m.SignerUserID, SignerSurrogate: sv.m.SignerSurrogate,
-		SignedAt: sv.m.OccurredAt, ScanStatus: sv.scanStatus, Valid: &valid}
+		SignedAt: sv.m.OccurredAt, ScanStatus: sv.scanStatus, Legacy: sv.legacy}
+	if sv.legacy {
+		// No hash covers a legacy image: valid stays null.
+		if sv.signedAt != nil {
+			out.SignedAt = *sv.signedAt
+		}
+	} else {
+		valid, err := s.matches(ctx, orgID, sv)
+		if err != nil {
+			return nil, err
+		}
+		out.Valid = &valid
+	}
 	if auditErr := s.recordVerification(ctx, orgID, out); auditErr != nil {
 		return nil, auditErr
 	}
@@ -141,11 +155,47 @@ func readSignedVersion(ctx context.Context, tx pgx.Tx, orgID, id string) (*signe
 	if err != nil {
 		return nil, fmt.Errorf("read signed movement: %w", err)
 	}
+	m.OccurredAt = movement.SignatureTime(m.OccurredAt)
+	if m.SignatureHash == "" && m.DocumentID == "" {
+		return readLegacyVersion(ctx, tx, orgID, sv)
+	}
 	if m.SignatureHash == "" || m.DocumentID == "" || version == nil {
 		return nil, ErrNotSigned
 	}
-	m.OccurredAt = movement.SignatureTime(m.OccurredAt)
 	sv.version = *version
+	return sv, nil
+}
+
+// readLegacyVersion completes sv from the legacy signature of its movement
+// taken over by signature.migrate (WP-749): document, signer surrogate and
+// signed_at from the image-free payload of assignment_signature_legacy
+// (the handover signature before the return signature of the same
+// assignment) and version 1 of the document. A movement without one is
+// unsigned (ErrNotSigned).
+func readLegacyVersion(ctx context.Context, tx pgx.Tx, orgID string, sv *signedVersion) (*signedVersion, error) {
+	var version *int
+	var signedAt string
+	err := tx.QueryRow(ctx, `SELECT l.payload ->> 'document_id', COALESCE(l.payload ->> 'signer_surrogate', ''),
+			COALESCE(l.payload ->> 'signed_at', ''), v.version, COALESCE(v.storage_key, ''), COALESCE(v.checksum_sha256, ''),
+			COALESCE(v.scan_status, '')
+		FROM assignment_signature_legacy l
+		JOIN document d ON d.id = (l.payload ->> 'document_id')::uuid AND d.organization_id = l.organization_id
+		LEFT JOIN document_version v ON v.document_id = d.id AND v.version = 1
+		WHERE l.movement_id = $1 AND l.organization_id = $2 AND l.payload ? 'document_id'
+		ORDER BY l.kind = 'checkout' DESC
+		LIMIT 1`, sv.m.ID, orgID).
+		Scan(&sv.m.DocumentID, &sv.m.SignerSurrogate, &signedAt, &version, &sv.key, &sv.checksum, &sv.scanStatus)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && version == nil) {
+		return nil, ErrNotSigned
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read legacy signature: %w", err)
+	}
+	if at, parseErr := time.Parse(time.RFC3339Nano, signedAt); parseErr == nil {
+		at = at.UTC()
+		sv.signedAt = &at
+	}
+	sv.version, sv.legacy = *version, true
 	return sv, nil
 }
 
