@@ -779,6 +779,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// (WP-278), with the system guards of LCY-03 (WP-279).
 	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)).
 		WithGuards(repos.LifecycleGuards)
+	relationshipHandler := relationship.NewHandler(repos.Relationship, repos.RelationshipType)
+	exportJobHandler := export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate)
+	// The delegating actions of POST /cis/bulk reach the edges, the
+	// lifecycle transition and the export jobs through adapters (WP-780).
+	if opts.CIService != nil {
+		opts.CIService.WithBulkDelegates(CIBulkDelegates(relationshipHandler, repos.Relationship, lifecycleService,
+			repos.LifecycleResolver, exportJobHandler, opts.Entitlements))
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -790,12 +798,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ciHandler(&repos, &opts),
 		jobAPI,
 		notifyHandler(&opts),
-		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
+		relationshipHandler,
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
 		topologyHandler,
 		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
-		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
+		exportJobHandler,
 		asset.NewHandler(repos.Asset).
 			WithCIs(ciLookup{repo: repos.CI}).
 			// The active reservation in GET /assets/{id} (API-06, WP-750).

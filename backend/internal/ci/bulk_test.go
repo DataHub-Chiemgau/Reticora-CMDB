@@ -698,11 +698,25 @@ func TestBulkReportsTypeAndFields(t *testing.T) {
 // TestBulkActionRights covers the rights per action of WP-304: every field
 // operation needs ci:write, which the route middleware checks, so the
 // service admits it without a principal; a right beyond ci:write is
-// checked before any change, fail-closed without a principal.
+// checked before any change, fail-closed without a principal. The
+// delegating actions of WP-780 need the right of their single operation.
 func TestBulkActionRights(t *testing.T) {
 	want := []string{BulkAddTags, BulkArchive, BulkRemoveTags, BulkSetFields, BulkSetLocation, BulkSetOwner, BulkSetStatus}
-	if got := BulkActions(); !slices.Equal(got, want) {
-		t.Errorf("actions %v, want %v", got, want)
+	delegating := map[string]identity.Permission{
+		BulkAddRelationship: identity.PermRelationshipWrite, BulkRemoveRelationship: identity.PermRelationshipWrite,
+		BulkLifecycleTransition: identity.PermLifecycleTransition, BulkChangeTemplate: identity.PermCIWrite,
+		BulkExport: identity.PermExportRun,
+	}
+	all := slices.Clone(want)
+	for action, perm := range delegating {
+		all = append(all, action)
+		if got, ok := BulkActionPermission(action); !ok || got != perm {
+			t.Errorf("%s needs %q, want %q", action, got, perm)
+		}
+	}
+	slices.Sort(all)
+	if got := BulkActions(); !slices.Equal(got, all) {
+		t.Errorf("actions %v, want %v", got, all)
 	}
 	for _, action := range want {
 		if perm, ok := BulkActionPermission(action); !ok || perm != identity.PermCIWrite {

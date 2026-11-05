@@ -350,7 +350,7 @@ type DATEVResult struct {
 // column). orgCurrency fills an empty asset currency. Sources the policy
 // does not let the creator read stay empty (and are not checked as
 // required); a nil policy reads no field with field permissions.
-func RenderDATEV(ctx context.Context, src AssetSource, orgID string, filters JobFilters, m *DATEVMapping,
+func RenderDATEV(ctx context.Context, src AssetSource, orgID string, filters JobFilters, m *DATEVMapping, //nolint:gocritic // hugeParam: the filters of the job row, a copy since filters.ids (WP-780)
 	orgCurrency string, policy *permission.FieldPolicy, out, report io.Writer) (DATEVResult, error) {
 	proj := newDATEVProjection(m, policy)
 	res := DATEVResult{Manifest: proj.manifest}

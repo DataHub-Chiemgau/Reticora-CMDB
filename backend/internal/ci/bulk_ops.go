@@ -42,16 +42,22 @@ const (
 // bulkActionPermissions is the right each action needs (WP-304). The route
 // middleware checks ci:write for /cis/bulk; Service.Bulk checks every
 // other right of the table before any change and before a job
-// (checkBulkPermission). The field operations need ci:write alone; WP-780
-// adds the delegating actions with their rights.
+// (checkBulkPermission). The field operations need ci:write alone; the
+// delegating actions (WP-780, bulk_delegate.go) the right of their single
+// operation: change_template ci:write like PUT /cis/{id}/templates.
 var bulkActionPermissions = map[string]identity.Permission{
-	BulkSetStatus:   identity.PermCIWrite,
-	BulkSetFields:   identity.PermCIWrite,
-	BulkSetLocation: identity.PermCIWrite,
-	BulkAddTags:     identity.PermCIWrite,
-	BulkRemoveTags:  identity.PermCIWrite,
-	BulkSetOwner:    identity.PermCIWrite,
-	BulkArchive:     identity.PermCIWrite,
+	BulkSetStatus:           identity.PermCIWrite,
+	BulkSetFields:           identity.PermCIWrite,
+	BulkSetLocation:         identity.PermCIWrite,
+	BulkAddTags:             identity.PermCIWrite,
+	BulkRemoveTags:          identity.PermCIWrite,
+	BulkSetOwner:            identity.PermCIWrite,
+	BulkArchive:             identity.PermCIWrite,
+	BulkAddRelationship:     identity.PermRelationshipWrite,
+	BulkRemoveRelationship:  identity.PermRelationshipWrite,
+	BulkLifecycleTransition: identity.PermLifecycleTransition,
+	BulkChangeTemplate:      identity.PermCIWrite,
+	BulkExport:              identity.PermExportRun,
 }
 
 // BulkActions returns the actions of POST /cis/bulk, sorted.
@@ -97,6 +103,8 @@ type bulkParams struct {
 	tags []string
 	// ownerUserID and ownerTeamID are the owner of set_owner ("" clears).
 	ownerUserID, ownerTeamID *string
+	// delegate are the parameters of a delegating action (WP-780).
+	delegate *delegateParams
 }
 
 // setFieldsExcluded are the members of UpdateCIRequest set_fields does not
@@ -127,6 +135,9 @@ func validateParams(req *BulkRequest) error {
 		BulkAddTags:     {"tags"}, BulkRemoveTags: {"tags"},
 		BulkSetOwner: {"owner_user_id", "owner_team_id"},
 	}[req.Action]
+	if isDelegateAction(req.Action) {
+		allowed = delegateParamNames[req.Action]
+	}
 	names := make([]string, 0, len(members))
 	for name := range members {
 		names = append(names, name)
@@ -155,6 +166,10 @@ func validateParams(req *BulkRequest) error {
 		}
 		if p.ownerTeamID, err = optionalID(members, "owner_team_id"); err == nil && p.ownerUserID == nil && p.ownerTeamID == nil {
 			err = paramsError("owner_user_id", "owner_user_id or owner_team_id is required")
+		}
+	default:
+		if isDelegateAction(req.Action) {
+			p.delegate, err = validateDelegateParams(req.Action, members)
 		}
 	}
 	if err != nil {
@@ -306,7 +321,9 @@ func (s *Service) checkBulkTags(ctx context.Context, orgID string, req *BulkRequ
 // its changes and the reason of their overrides.
 type bulkOp struct {
 	orgID, author, reason string
-	req                   *BulkRequest
+	// jobID is the job of the run ("" for a run without job).
+	jobID string
+	req   *BulkRequest
 }
 
 // manual is the update of one id as a manual change of the run (WP-368):
@@ -322,6 +339,9 @@ func (s *Service) bulkApply(ctx context.Context, op *bulkOp, id string) BulkItem
 	p := op.req.params
 	if p == nil {
 		p = &bulkParams{}
+	}
+	if isDelegateAction(op.req.Action) && p.delegate != nil {
+		return s.bulkDelegate(ctx, op, id, p.delegate)
 	}
 	switch op.req.Action {
 	case BulkSetFields:

@@ -385,6 +385,8 @@ type Service struct {
 	// creatorPolicy resolves the policy of the creator of a queue bulk
 	// job (WP-728).
 	creatorPolicy CreatorPolicy
+	// delegates are the ports of the delegating bulk actions (WP-780).
+	delegates BulkDelegates
 	// restoreRetention is the restore window (CI-05); 0 is RestoreRetention.
 	restoreRetention time.Duration
 }

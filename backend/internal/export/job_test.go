@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -353,5 +355,104 @@ func TestJobResponseCarriesManifest(t *testing.T) {
 	}
 	if resp.Manifest.Format != "csv" || len(resp.Manifest.Fields) == 0 || len(resp.Manifest.Omitted) == 0 {
 		t.Errorf("manifest %+v", resp.Manifest)
+	}
+}
+
+// TestJobFiltersIDs covers filters.ids (WP-780) with the memory
+// repositories: POST /exports takes the selection, the job renders the
+// selected CIs in the order of the filtered export (created_at, id),
+// without deleted ids; more than 500 ids, an id that is no UUID, ids with
+// another filter, with datev or an empty selection are 400.
+func TestJobFiltersIDs(t *testing.T) {
+	cis := ci.NewMemoryRepository()
+	seedCIs(t, cis, "org-1", 4)
+	all, _, err := cis.List(context.Background(), "org-1", &ci.FilterParams{SortBy: "created_at", SortDir: "asc"}, api.PaginationParams{Limit: 10})
+	if err != nil || len(all) != 4 {
+		t.Fatalf("seeded CIs: %d %v", len(all), err)
+	}
+	if err = cis.Delete(context.Background(), "org-1", all[1].ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	jobs, worker, _, mux := newJobEnv(t, cis)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/exports", strings.NewReader(body)))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w
+	}
+	tooMany := make([]string, MaxExportIDs+1)
+	for i := range tooMany {
+		tooMany[i] = fmt.Sprintf("%08d-0000-0000-0000-%012d", i+1, i+1)
+	}
+	raw, _ := json.Marshal(tooMany)
+	for name, body := range map[string]string{
+		"more than 500 ids": `{"format":"json","filters":{"ids":` + string(raw) + `}}`,
+		"no UUID":           `{"format":"json","filters":{"ids":["not-a-uuid"]}}`,
+		"another filter":    `{"format":"json","filters":{"ids":["` + all[0].ID + `"],"status":"active"}}`,
+		"datev":             `{"format":"datev","filters":{"ids":["` + all[0].ID + `"]}}`,
+		"empty selection":   `{"format":"json","filters":{"ids":[]}}`,
+	} {
+		if w := post(body); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s, want 400", name, w.Code, w.Body.String())
+		}
+	}
+
+	// The selection names the CIs out of order, a deleted one and one in
+	// upper case.
+	w := post(fmt.Sprintf(`{"format":"json","filters":{"ids":[%q,%q,%q]}}`, all[3].ID, all[1].ID, strings.ToUpper(all[0].ID)))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("POST /exports with ids: %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID      string     `json:"id"`
+		Filters JobFilters `json:"filters"`
+	}
+	if err = json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{all[3].ID, all[1].ID, all[0].ID}; !slices.Equal(created.Filters.IDs, want) {
+		t.Fatalf("filters.ids %v, want %v", created.Filters.IDs, want)
+	}
+	if !worker.ProcessOne(context.Background()) {
+		t.Fatal("no job claimed")
+	}
+	stored, err := jobs.GetJob(context.Background(), "org-1", created.ID)
+	if err != nil || stored.Status != JobStatusCompleted {
+		t.Fatalf("job %+v %v, want completed", stored, err)
+	}
+	if stored.RowCount == nil || *stored.RowCount != 2 {
+		t.Errorf("row count %v, want 2", stored.RowCount)
+	}
+	rc, err := worker.Blobs.Get(context.Background(), ExportBucket, stored.ObjectKey)
+	if err != nil {
+		t.Fatalf("read object: %v", err)
+	}
+	defer rc.Close()
+	var file struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err = json.NewDecoder(rc).Decode(&file); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	got := make([]string, 0, len(file.Data))
+	for _, row := range file.Data {
+		got = append(got, row.ID)
+	}
+	if want := []string{all[0].ID, all[3].ID}; !slices.Equal(got, want) {
+		t.Errorf("exported %v, want %v (created_at order, no deleted id)", got, want)
+	}
+}
+
+// TestRenderSelectionNeedsBatchReader: a repository without
+// ci.BatchReader fails the export of a selection (fail-closed, WP-780).
+func TestRenderSelectionNeedsBatchReader(t *testing.T) {
+	var out strings.Builder
+	_, _, err := RenderProjected(context.Background(), failingCIRepo{}, "org-1", "json",
+		JobFilters{IDs: []string{"00000001-0000-0000-0000-000000000001"}}, nil, &out)
+	if !errors.Is(err, errNoBatchReader) {
+		t.Fatalf("render without batch reader: %v, want errNoBatchReader", err)
 	}
 }

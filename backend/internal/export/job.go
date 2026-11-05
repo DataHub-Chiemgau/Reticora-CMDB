@@ -3,8 +3,10 @@ package export
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -76,14 +78,21 @@ func (s *JobScope) TenantScope(orgID, userID string) database.TenantScope {
 }
 
 // JobFilters narrows an export job to a subset of the tenant's CIs (csv,
-// json: status, ci_type_id, client_id) or assets (datev: client_id,
-// lifecycle_state, WP-310).
+// json: status, ci_type_id, client_id, or a selection of ids) or assets
+// (datev: client_id, lifecycle_state, WP-310).
 type JobFilters struct {
 	Status         string `json:"status,omitempty"`
 	CITypeID       string `json:"ci_type_id,omitempty"`
 	ClientID       string `json:"client_id,omitempty"`
 	LifecycleState string `json:"lifecycle_state,omitempty"`
+	// IDs selects the CIs of a csv or json export by id (WP-780, at most
+	// MaxExportIDs): the visible, not deleted ones among them, sorted by
+	// created_at and id. It stands alone, without the other filters.
+	IDs []string `json:"ids,omitempty"`
 }
+
+// MaxExportIDs bounds filters.ids like a bulk request (API-08).
+const MaxExportIDs = 500
 
 // CreateJobRequest is the payload for POST /api/v1/export/jobs.
 type CreateJobRequest struct {
@@ -131,5 +140,39 @@ func (r *CreateJobRequest) Validate() error {
 	} else if r.Filters.LifecycleState != "" {
 		return fmt.Errorf("filters.lifecycle_state applies to the format datev only")
 	}
+	return r.Filters.validateIDs(r.Format)
+}
+
+// validateIDs checks filters.ids: csv and json only, 1 to MaxExportIDs
+// UUIDs, without another filter. It normalizes them to their canonical
+// lower-case form, each once.
+// validation: fixed texts.
+func (f *JobFilters) validateIDs(format string) error {
+	if f.IDs == nil {
+		return nil
+	}
+	switch {
+	case format == FormatDATEV:
+		return fmt.Errorf("filters.ids applies to the formats csv and json only")
+	case len(f.IDs) == 0:
+		return fmt.Errorf("filters.ids must name at least one id")
+	case len(f.IDs) > MaxExportIDs:
+		return fmt.Errorf("filters.ids takes at most %d ids", MaxExportIDs)
+	case f.Status != "" || f.CITypeID != "" || f.ClientID != "":
+		return fmt.Errorf("filters.ids cannot be combined with another filter")
+	}
+	seen := make(map[string]bool, len(f.IDs))
+	ids := make([]string, 0, len(f.IDs))
+	for _, id := range f.IDs {
+		if !api.IsUUID(id) {
+			return fmt.Errorf("filters.ids must hold CI ids (UUIDs)")
+		}
+		id = strings.ToLower(id)
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	f.IDs = ids
 	return nil
 }

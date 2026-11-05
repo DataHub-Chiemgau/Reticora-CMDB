@@ -554,7 +554,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk change of up to 500 CIs (API-08, BLK-01, BLK-02)
-     * @description Applies the action to every CI in ids: set_status (the default when action is absent; the target in status), set_fields, set_location, add_tags, remove_tags, set_owner or archive (their parameters in params). Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single change would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). Requires ci:write; every action of this list needs no further right. A CI outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. set_status, set_fields, set_location, set_owner and the status of archive are manual changes like a PATCH (CI-04, OVR-01, OVR-03): through the same checks (field permissions, rules, computed attributes, asset-owned fields), every changed field gets a protected override with the reason bulk (in a job bulk:<job_id>) and the requesting user (for a job its creator) as author, the owner fields excepted; the CI version rises (API-07), so a later PATCH of such a field with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the written value afterwards. set_fields takes a merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags and reserved keys are 422 for the request, an instance attribute of a CI 422 for its id, a value of a unique attribute another CI holds 409 for the id. set_location and set_owner on a CI linked to an asset are 422 for the id (DB-05). add_tags and remove_tags write the tag list like PUT /api/v1/cis/{id}/tags with the version read (no override; a tag change in between is 409 for the id); a CI with nothing to change is ok without a write. archive sets status inactive and the system tag archived in one transaction; an archived inactive CI is ok without a write.
+     * @description Applies the action to every CI in ids: set_status (the default when action is absent; the target in status), set_fields, set_location, add_tags, remove_tags, set_owner, archive, add_relationship, remove_relationship, lifecycle_transition, change_template or export (their parameters in params). Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single change would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). Requires ci:write; the field operations and change_template need no further right, add_relationship and remove_relationship need relationship:write, lifecycle_transition lifecycle:transition and export export:run (WP-780): without it the whole request is 403 before any change. A delegating action whose service this deployment lacks (no database, no blob storage for export) is 503 for the whole request. A CI outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. set_status, set_fields, set_location, set_owner and the status of archive are manual changes like a PATCH (CI-04, OVR-01, OVR-03): through the same checks (field permissions, rules, computed attributes, asset-owned fields), every changed field gets a protected override with the reason bulk (in a job bulk:<job_id>) and the requesting user (for a job its creator) as author, the owner fields excepted; the CI version rises (API-07), so a later PATCH of such a field with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the written value afterwards. set_fields takes a merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags and reserved keys are 422 for the request, an instance attribute of a CI 422 for its id, a value of a unique attribute another CI holds 409 for the id. set_location and set_owner on a CI linked to an asset are 422 for the id (DB-05). add_tags and remove_tags write the tag list like PUT /api/v1/cis/{id}/tags with the version read (no override; a tag change in between is 409 for the id); a CI with nothing to change is ok without a write. archive sets status inactive and the system tag archived in one transaction; an archived inactive CI is ok without a write. The delegating actions (WP-780) use the paths of their single operations. add_relationship and remove_relationship create or delete the manual edge CI -> target_ci_id (direction incoming: target_ci_id -> CI) like POST /api/v1/relationships and DELETE /api/v1/relationships/{id} without force: a projected or unknown rel_type is 422 on params.rel_type for the request, an existing edge 409, a target the caller cannot see 422 on target_ci_id, a discovery edge 409 and a missing edge 404 for the id. lifecycle_transition runs the transition of POST /api/v1/cis/{id}/lifecycle-transitions per CI: a failed guard is 422 with type urn:reticora:problem:lifecycle-guard and its fields, a missing edge 422 urn:reticora:problem:invalid-transition, a CI without lifecycle model 422 on to_state, another from_state 409. change_template migrates a CI that holds template_id in another version to to_version (default the current version of the template; defaults only into fields without a value, overridden fields stay, the findings of the revalidation in findings), or, with replace_template_id, puts template_id in the place of that template like PUT /api/v1/cis/{id}/templates. A CI holding neither template, a template outside the type chain of the CI (change the type with POST /api/v1/cis/{id}/type first) and a violation of the new schema are 422 for the id; an unknown template or a to_version that is not published 422 on params.template_id or params.to_version for the request. export creates exactly one export job of the visible, not deleted CIs among ids (filters.ids of POST /api/v1/exports) and answers 202 with it whatever the number of ids, Location /api/v1/exports/{id}; it needs the entitlement export_csv (403 feature-not-entitled), the format datev is 422 on params.format.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -11068,6 +11068,16 @@ export interface components {
       type?: string;
       /** @description Fields the error names: the violated fields (422), a unique attribute another CI holds or a field changed since the read (409), the fields the field permissions refuse (403). */
       fields?: string[];
+      /** @description Findings of the revalidation of a template migration by change_template (WP-780); they do not block the migration. */
+      findings?: {
+        field: string;
+        detail: string;
+        code?: string;
+        rule?: string;
+        message?: {
+          [key: string]: string;
+        };
+      }[];
     };
     /** @description Body of POST /api/v1/cis/bulk (WP-304): one variant per action. Without action the body is set_status; every other variant names its action. */
     CIBulkRequest:
@@ -11076,7 +11086,11 @@ export interface components {
       | components['schemas']['CIBulkSetLocation']
       | components['schemas']['CIBulkTags']
       | components['schemas']['CIBulkSetOwner']
-      | components['schemas']['CIBulkArchive'];
+      | components['schemas']['CIBulkArchive']
+      | components['schemas']['CIBulkRelationship']
+      | components['schemas']['CIBulkLifecycleTransition']
+      | components['schemas']['CIBulkChangeTemplate']
+      | components['schemas']['CIBulkExport'];
     CIBulkIDs: string[];
     CIBulkSetStatus: {
       /**
@@ -11150,6 +11164,70 @@ export interface components {
       action: 'archive';
       ids: components['schemas']['CIBulkIDs'];
       params?: Record<string, never>;
+    };
+    /** @description Creates or removes a manual edge per CI (WP-780). */
+    CIBulkRelationship: {
+      /** @enum {string} */
+      action: 'add_relationship' | 'remove_relationship';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** @description Relationship type of the catalogue; projected types are refused. */
+        rel_type: string;
+        /** Format: uuid */
+        target_ci_id: string;
+        /**
+         * @description outgoing is CI -> target_ci_id, incoming target_ci_id -> CI.
+         * @default outgoing
+         * @enum {string}
+         */
+        direction: 'outgoing' | 'incoming';
+      };
+    };
+    /** @description The lifecycle transition per CI (WP-724, WP-780). */
+    CIBulkLifecycleTransition: {
+      /** @enum {string} */
+      action: 'lifecycle_transition';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        to_state: string;
+        /** @description The state the caller saw; another current state is 409 for the id. */
+        from_state?: string;
+        /** @description Values the required fields and guards of the transition are checked against. */
+        context?: {
+          [key: string]: unknown;
+        };
+        reason?: string;
+      };
+    };
+    /** @description Migrates or replaces a template of every CI (WP-253, WP-710, WP-780). */
+    CIBulkChangeTemplate: {
+      /** @enum {string} */
+      action: 'change_template';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** Format: uuid */
+        template_id: string;
+        /** @description Published version; default the current version of the template. */
+        to_version?: number;
+        /**
+         * Format: uuid
+         * @description The template whose place template_id takes on the CIs that hold it (same position).
+         */
+        replace_template_id?: string;
+      };
+    };
+    /** @description One export job of the CIs in ids (filters.ids, WP-780); 202 with the export job. */
+    CIBulkExport: {
+      /** @enum {string} */
+      action: 'export';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /**
+         * @description datev is 422; DATEV exports assets through POST /api/v1/exports.
+         * @enum {string}
+         */
+        format: 'csv' | 'json';
+      };
     };
     /** @description A template assigned to a CI (ci_template, MET-16, WP-710). */
     CITemplate: {
@@ -12658,6 +12736,8 @@ export interface components {
       client_id?: string;
       /** @description Lifecycle state of the assets of a datev export (E-120); datev only. */
       lifecycle_state?: string;
+      /** @description Selection of CIs by id for csv and json (WP-780): the visible, not deleted CIs among them, sorted by created_at and id. Not combinable with the other filters; more than 500 ids, an id that is no UUID and ids with datev are 400. */
+      ids?: string[];
     };
     CreateExportJobRequest: {
       /**
@@ -18797,9 +18877,10 @@ export interface operations {
           'application/json': components['schemas']['CIBulkResult'];
         };
       };
-      /** @description The bulk change runs as a job */
+      /** @description The bulk change runs as a job ci.bulk (Location /api/v1/jobs/{id}), or the action export created its export job (kind export, Location /api/v1/exports/{id}). */
       202: {
         headers: {
+          /** @description The job ci.bulk or the export job. */
           Location?: string;
           [name: string]: unknown;
         };
@@ -18807,15 +18888,33 @@ export interface operations {
           'application/json': {
             job_id: string;
             status: string;
+            /** @description ci.bulk, or export for the action export. */
             kind: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>) or a tag the catalog lacks (params.tags). */
+      /** @description The right of the action is missing (relationship:write, lifecycle:transition, export:run), or the organization is not entitled to export_csv (type feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>), a tag the catalog lacks (params.tags), a projected or unknown rel_type (params.rel_type), an unknown template or a to_version that is not published. */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The service of a delegating action is not available in this deployment (no database; no blob storage for export). */
+      503: {
         headers: {
           [name: string]: unknown;
         };
