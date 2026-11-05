@@ -255,6 +255,8 @@ export interface CIListParams {
   search?: string;
   sort_by?: string;
   sort_dir?: string;
+  /** Allowed CI types, comma-separated (API-02 field filter; the ObjectPicker, WP-318). */
+  'filter[ci_type_id][in]'?: string;
 }
 
 export interface ListParams {
@@ -317,6 +319,11 @@ export class ApiError extends Error {
    * of one operation (e.g. stale_items of a refused metamodel publication).
    */
   readonly problem: Record<string, unknown>;
+  /**
+   * type is the problem type URI of the body (RFC 7807), e.g.
+   * PROBLEM_FEATURE_NOT_ENTITLED; undefined without a problem body.
+   */
+  readonly type?: string;
 
   constructor(
     status: number,
@@ -330,6 +337,7 @@ export class ApiError extends Error {
       conflictFields?: string[];
       field?: string;
       problem?: Record<string, unknown>;
+      type?: string;
     } = {},
   ) {
     super(message);
@@ -343,6 +351,7 @@ export class ApiError extends Error {
     this.conflictFields = options.conflictFields ?? [];
     this.field = options.field;
     this.problem = options.problem ?? {};
+    this.type = options.type;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -370,6 +379,7 @@ export class ApiError extends Error {
     }
 
     const problem = body as {
+      type?: unknown;
       title?: unknown;
       detail?: unknown;
       violations?: unknown;
@@ -380,6 +390,7 @@ export class ApiError extends Error {
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
+    const type = typeof problem.type === 'string' && problem.type !== '' ? problem.type : undefined;
     const traceId = typeof problem.trace_id === 'string' ? problem.trace_id : undefined;
     const detail = typeof problem.detail === 'string' ? problem.detail : undefined;
     const field =
@@ -417,9 +428,15 @@ export class ApiError extends Error {
       conflictFields,
       field,
       problem: body as Record<string, unknown>,
+      type,
     });
   }
 }
+
+/** The problem type of a 403 for a feature the plan does not include (ENT-06, E-44). */
+export const PROBLEM_FEATURE_NOT_ENTITLED = 'https://reticora.io/problems/feature-not-entitled';
+/** The problem type of a 403 for a reached limit of the plan (ENT-06, E-44). */
+export const PROBLEM_ENTITLEMENT_LIMIT = 'https://reticora.io/problems/entitlement-limit';
 
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the
@@ -1025,6 +1042,8 @@ export interface Asset {
   client_id?: string;
   ci_id?: string;
   asset_tag: string;
+  /** Inventory number of AST-01 (WP-739); the API name of asset_tag. */
+  inventory_no?: string;
   name: string;
   category: string;
   status: string;

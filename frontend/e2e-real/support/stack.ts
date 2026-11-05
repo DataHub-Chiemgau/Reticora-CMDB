@@ -377,9 +377,12 @@ export async function signupTenant(
   await page.getByLabel('E-Mail-Adresse').fill(account.email);
   await page.getByLabel('Ihr Name').fill(`Audit ${label}`);
   await page.getByRole('button', { name: 'Konto anlegen' }).click();
+  // The submit first solves the ALTCHA proof of work in the browser
+  // (OnboardingPage, solveAltcha); on a loaded CI runner Firefox needed more
+  // than the default 30 s for it, so the confirmation gets more time.
   await expect(
     page.getByText(`Bestätigungslink an ${account.email}`, { exact: false }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 120_000 });
   await page.goto(await verificationLink(request, account.email));
   await page.getByLabel(/Passwort festlegen/).fill(account.password);
   await page.getByRole('button', { name: 'Konto bestätigen' }).click();

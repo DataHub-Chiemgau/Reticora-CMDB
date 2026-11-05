@@ -441,8 +441,9 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
 		systemJobs = append(systemJobs, relationship.NewCleanup(pool).Schedule())
 		// Weekly CI snapshots, the base of the replay at a point in time
-		// (AUD-08, WP-312).
-		systemJobs = append(systemJobs, history.NewWeeklySnapshot(pool).Schedule())
+		// (AUD-08, WP-312); asset snapshots only with the module inventory
+		// (WP-795), like the reservation sweeper.
+		systemJobs = append(systemJobs, history.NewWeeklySnapshot(pool).WithAssets(d.modules.Enabled(server.ModuleInventory)).Schedule())
 		// Personal data of existing history entries into the vault (SEC-05).
 		systemJobs = append(systemJobs, jobs.NewPIIBackfill(pool).Schedule())
 		// Attribute indexes of searchable/unique attributes (DB-04, MET-15).

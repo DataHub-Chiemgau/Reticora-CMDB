@@ -225,6 +225,16 @@ func (r *PGRepository) Book(ctx context.Context, b *Booking) (*Booking, error) {
 			return fmt.Errorf("ends_at must be after starts_at")
 		}
 		b.Status = "active"
+		// Concurrent bookings of one desk check the exclusion constraint one
+		// after the other: without this lock, overlapping inserts wait on each
+		// other's uncommitted index entries and PostgreSQL aborts all but one
+		// with a deadlock (40P01) instead of an exclusion violation (MGT-05).
+		// FOR NO KEY UPDATE does not conflict with the KEY SHARE lock the
+		// booking's foreign key takes on the same row.
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM desk WHERE organization_id = $1 AND id = $2::uuid FOR NO KEY UPDATE`,
+			b.OrganizationID, b.DeskID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO desk_booking (organization_id, desk_id, user_id, starts_at, ends_at, status)
 			VALUES ($1, $2::uuid, $3::uuid, $4, $5, 'active')

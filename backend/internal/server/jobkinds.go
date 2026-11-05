@@ -9,6 +9,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
@@ -68,6 +69,10 @@ var (
 	// and is not repeated (a new POST /search/reindex starts over). It is
 	// not cancellable while running.
 	searchReindexJobKind = jobs.Kind{Name: search.ReindexJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute}
+	// labelBatchJobKind (WP-763, INV-03): a label batch only reads and
+	// stores its PDF under the key of the job; it is not repeated. A
+	// running batch can be cancelled; its result is dropped.
+	labelBatchJobKind = jobs.Kind{Name: labels.BatchJobKind, MaxAttempts: 1, Timeout: 10 * time.Minute, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -84,14 +89,17 @@ type jobKind struct {
 // test run of a draft runs on the draft handler (without a database its
 // handler fails, the route answers 503 before), an import run on the
 // import handler (WP-775), the rebuild of the search index on the search
-// handler (WP-786).
+// handler (WP-786), a label batch on the batch handler (WP-763; without
+// blob storage or a database its handler fails, the route answers 503
+// before).
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
-	scanner *document.Scanner, searchHandler *search.Handler) []jobKind {
+	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
-		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob}}
+		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob},
+		{kind: labelBatchJobKind, handler: labelBatch.RunJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 		// Without the change set store no bulk job is revertible and no
@@ -123,14 +131,17 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 //
 // The template migration takes progress and cancel from svc in both cases,
 // the test run of a draft the state of a running test, the import run its
-// progress, cancel and result (WP-775). The malware
+// progress, cancel and result (WP-775), the label batch reads its jobs
+// (WP-763). The malware
 // scan of documents runs on the queue only: without it no submitter is
 // wired and new versions stay pending_scan (fail-closed, E-42).
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
-	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler) {
+	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
+	labelBatch *labels.BatchHandler) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
+	labelBatch.WithJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}
@@ -139,7 +150,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler) {
+		scanner, searchHandler, labelBatch) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -150,6 +161,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		searchHandler.WithQueue(queue)
 		draftHandler.WithQueue(queue)
 		importHandler.WithQueue(queue)
+		labelBatch.WithQueue(queue)
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}

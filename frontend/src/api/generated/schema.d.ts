@@ -554,7 +554,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk change of up to 500 CIs (API-08, BLK-01, BLK-02)
-     * @description Applies the action to every CI in ids: set_status (the default when action is absent; the target in status), set_fields, set_location, add_tags, remove_tags, set_owner or archive (their parameters in params). Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single change would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). Requires ci:write; every action of this list needs no further right. A CI outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. set_status, set_fields, set_location, set_owner and the status of archive are manual changes like a PATCH (CI-04, OVR-01, OVR-03): through the same checks (field permissions, rules, computed attributes, asset-owned fields), every changed field gets a protected override with the reason bulk (in a job bulk:<job_id>) and the requesting user (for a job its creator) as author, the owner fields excepted; the CI version rises (API-07), so a later PATCH of such a field with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the written value afterwards. set_fields takes a merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags and reserved keys are 422 for the request, an instance attribute of a CI 422 for its id, a value of a unique attribute another CI holds 409 for the id. set_location and set_owner on a CI linked to an asset are 422 for the id (DB-05). add_tags and remove_tags write the tag list like PUT /api/v1/cis/{id}/tags with the version read (no override; a tag change in between is 409 for the id); a CI with nothing to change is ok without a write. archive sets status inactive and the system tag archived in one transaction; an archived inactive CI is ok without a write.
+     * @description Applies the action to every CI in ids: set_status (the default when action is absent; the target in status), set_fields, set_location, add_tags, remove_tags, set_owner, archive, add_relationship, remove_relationship, lifecycle_transition, change_template or export (their parameters in params). Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single change would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind ci.bulk (JOB-04): 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). Requires ci:write; the field operations and change_template need no further right, add_relationship and remove_relationship need relationship:write, lifecycle_transition lifecycle:transition and export export:run (WP-780): without it the whole request is 403 before any change. A delegating action whose service this deployment lacks (no database, no blob storage for export) is 503 for the whole request. A CI outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also when it is the same UUID in another letter case: the CI is changed once and the report names it once, a UUID in its canonical lower-case form. set_status, set_fields, set_location, set_owner and the status of archive are manual changes like a PATCH (CI-04, OVR-01, OVR-03): through the same checks (field permissions, rules, computed attributes, asset-owned fields), every changed field gets a protected override with the reason bulk (in a job bulk:<job_id>) and the requesting user (for a job its creator) as author, the owner fields excepted; the CI version rises (API-07), so a later PATCH of such a field with an older If-Match is 409. The bulk change names no version per id and overwrites deliberately, like If-Match "*", also where the organization requires If-Match (E-66). An id is ok only when the CI stores the written value afterwards. set_fields takes a merge patch of UpdateCIRequest without status, location_id, asset_id, owner_user_id, owner_team_id, change_reason, discovery_source and last_seen_at; the attribute tags and reserved keys are 422 for the request, an instance attribute of a CI 422 for its id, a value of a unique attribute another CI holds 409 for the id. set_location and set_owner on a CI linked to an asset are 422 for the id (DB-05). add_tags and remove_tags write the tag list like PUT /api/v1/cis/{id}/tags with the version read (no override; a tag change in between is 409 for the id); a CI with nothing to change is ok without a write. archive sets status inactive and the system tag archived in one transaction; an archived inactive CI is ok without a write. The delegating actions (WP-780) use the paths of their single operations. add_relationship and remove_relationship create or delete the manual edge CI -> target_ci_id (direction incoming: target_ci_id -> CI) like POST /api/v1/relationships and DELETE /api/v1/relationships/{id} without force: a projected or unknown rel_type is 422 on params.rel_type for the request, an existing edge 409, a target the caller cannot see 422 on target_ci_id, a discovery edge 409 and a missing edge 404 for the id. lifecycle_transition runs the transition of POST /api/v1/cis/{id}/lifecycle-transitions per CI: a failed guard is 422 with type urn:reticora:problem:lifecycle-guard and its fields, a missing edge 422 urn:reticora:problem:invalid-transition, a CI without lifecycle model 422 on to_state, another from_state 409. change_template migrates a CI that holds template_id in another version to to_version (default the current version of the template; defaults only into fields without a value, overridden fields stay, the findings of the revalidation in findings), or, with replace_template_id, puts template_id in the place of that template like PUT /api/v1/cis/{id}/templates. A CI holding neither template, a template outside the type chain of the CI (change the type with POST /api/v1/cis/{id}/type first) and a violation of the new schema are 422 for the id; an unknown template or a to_version that is not published 422 on params.template_id or params.to_version for the request. export creates exactly one export job of the visible, not deleted CIs among ids (filters.ids of POST /api/v1/exports) and answers 202 with it whatever the number of ids, Location /api/v1/exports/{id}; it needs the entitlement export_csv (403 feature-not-entitled), the format datev is 422 on params.format.
      */
     post: operations['bulkCIs'];
     delete?: never;
@@ -5984,12 +5984,16 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /**
-     * Reconstruct asset state at a point in time
-     * @description Replays the changes of the asset (creation, updates, deletion) up to at (default now). An asset the caller cannot see (unknown, deleted, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     * Reconstruct asset state at a point in time (alias of as-of)
+     * @deprecated
+     * @description Alias of GET /api/v1/assets/{id}/as-of (E-38, WP-795) with the same answer; it carries the headers Deprecation, Sunset and Link (successor-version).
      */
     get: operations['listAssetsIdState'];
     put?: never;
@@ -7275,7 +7279,7 @@ export interface paths {
     };
     /**
      * Query inventory availability projections
-     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved).
+     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved). This org-wide projection is kept as an alias and is not extended (E-38, WP-759); its successors are GET /api/v1/consumables/{id}/availability for consumables (per bin) and `active_reservation` of GET /api/v1/assets/{id} for assets. The deprecation follows once the web client no longer calls this path.
      */
     get: operations['listInventoryAvailability'];
     put?: never;
@@ -7574,7 +7578,7 @@ export interface paths {
     put?: never;
     /**
      * Reserve an asset or a quantity of a consumable
-     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. A consumable reservation needs the feature `stock` of the organization beyond `assets_basic` of the path (403 `feature-not-entitled`, E-44, WP-759). Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
      */
     post: operations['createReservations'];
     delete?: never;
@@ -7954,6 +7958,48 @@ export interface paths {
      * @description Resolves `code` in this order: (1) the URN `urn:reticora:<asset|consumable|location>:<uuid>` of a label (E-52), (2) the barcode register of the organization (the barcode of an asset, consumable or location and the inventory number of an asset, unique per organization). The object is read under the caller's client and site scope. The caller needs the read permission of the object's kind (asset:read, stock:read, location:read) and the organization the feature of the kind (assets_basic for assets, stock for consumables; locations are core). An unknown code, a malformed URN, an object outside the caller's scope and a missing permission or feature of the kind all answer 404 alike, without revealing whether the code exists. The path needs the feature barcode (403 feature-not-entitled). A missing or blank `code` is 422.
      */
     get: operations['lookupLabelCode'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/labels/batch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Label batch of objects or of an inventory area as a job (INV-03)
+     * @description Renders the labels of the objects of one kind as one PDF in a job of kind labels.batch (WP-763, E-52, E-135): either the objects named by `ids` (at most 1000) or every object of the kind in the subtree of the location `location_id` (the inventory area: assets located in it, consumables with stock in one of its bins, its locations). The template defaults to a4_24. The objects are read under the client and site scope of the caller; objects outside it are left out, and a batch without a visible object fails. Asset labels show the fields the caller may read (RBA-07). At most 2400 labels per batch. The caller needs the read permission of the kind (asset:read, stock:read, location:read; 403) and the organization its feature (assets_basic, stock; 403 feature-not-entitled); the path needs the feature barcode. 202 with the job and Location /api/v1/jobs/{id}; its result is `{labels, pages, expires_at}` (LabelBatchResult), the PDF is fetched with GET /api/v1/labels/batch/{job_id}/download. Only the creator cancels a running batch. Without blob storage or job model 503.
+     */
+    post: operations['createLabelBatch'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/labels/batch/{job_id}/download': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Signed download URL of a label batch PDF (INV-03)
+     * @description Answers the creator of a label batch job with a URL to its PDF in the bucket exports, signed anew for each request (E-135); the URL lies below <public base URL>/objects/exports/ and is valid for 15 minutes. There is no redirect. Every other caller and every job that is no label batch is 404, because the PDF was rendered with the creator's scope. A batch that is not finished, failed, cancelled or expired (expires_at) is 409. Without blob storage or job model 503.
+     */
+    get: operations['downloadLabelBatch'];
     put?: never;
     post?: never;
     delete?: never;
@@ -8423,8 +8469,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Reconstruct the state of an asset at a point in time
-     * @description Planned (E-38); WP-795 implements the operation.
+     * State of an asset at a point in time (AUD-08)
+     * @description Replays the state of the asset at `at` (RFC 3339, default now) from its last weekly `asset_snapshot` up to `at` and the `entity_change` rows of the asset after it (its value history, WP-794); without a snapshot from its whole trail. The time axis is the time of recording (`entity_change.created_at`). The values are those the history shows: a personal value whose vault entry was deleted is null (SEC-05); the fields the caller may not read are left out (RBA-07). Fields recorded under the former names (`asset_tag`, `purchase_cost`, `warranty_end`, `ci_id`) appear under their current names. The relationships of the asset are its fields `primary_ci_id` and `parent_asset_id`. An asset deleted for good answers its last state with `deleted: true` until the history retention removes its trail (`RETICORA_RETENTION_HISTORY_DAYS`); within the retention period the state is complete for every `at`: the retention keeps per asset the youngest snapshot before its cut-off and the rows after it. An asset the caller sees neither as row, nor as snapshot, nor in its history (unknown, or of another organization, client or site) and one without a recorded change up to `at` are 404.
      */
     get: operations['getAssetAsOf'];
     put?: never;
@@ -8471,8 +8517,10 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Convert a reservation into an assignment
+     * Convert a reservation into an assignment or a retrieval
      * @description Sets the active asset reservation to `consumed` and assigns its asset in the same transaction through the assignment service (WP-275, WP-277): to `assignee_id` or `team_id` of the body, else to the user of the reservation. The movement `assignment` is booked, the holder cache set, and `asset.assigned` and `reservation.converted` are written to the outbox. When the assignment fails, the reservation stays active.
+     *
+     *     A quantity reservation (item_kind consumable) becomes `consumed` and its whole quantity one movement `retrieval` from its bin through the movement service in the same transaction (WP-759): `on_hand` and `reserved` of the bin fall together, without a check against the available stock; `reservation.converted` follows. It names no `assignee_id`, `team_id` or `due_at` (422); `notes` go to the movement. It needs the feature `stock` of the organization (403 `feature-not-entitled`, E-44) and, beyond `assignment:write`, the permission `stock:write` (403, E-138). When the booking fails, the reservation stays active.
      */
     post: operations['convertReservation'];
     delete?: never;
@@ -8538,8 +8586,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the availability of a consumable
-     * @description Planned (E-38); WP-759 implements the operation.
+     * Get the availability of a consumable per bin
+     * @description The availability of the consumable per bin from its stock rows (stock_level) visible under the caller's client and site scope, ordered by bin (STK-03, E-38, WP-759): `on_hand`, `reserved` and `available` = `on_hand` − `reserved`. With `location_id` only that bin. It succeeds `GET /api/v1/inventory/availability` for consumables. An unknown consumable or one outside the caller's scope is 404.
      */
     get: operations['getConsumableAvailability'];
     put?: never;
@@ -9026,6 +9074,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description The state of an asset at a point in time (AUD-08, WP-795). */
+    AssetStateAsOf: {
+      /** @enum {string} */
+      entity_type: 'asset';
+      entity_id: string;
+      /** Format: date-time */
+      at: string;
+      /**
+       * Format: date-time
+       * @description `taken_at` of the `asset_snapshot` the replay started from; absent when it replayed the whole trail.
+       */
+      based_on_snapshot_at?: string;
+      /** @description The fields of the asset at `at` the caller may read, named as in the schema Asset (the relationships `primary_ci_id` and `parent_asset_id` included). */
+      fields: {
+        [key: string]: unknown;
+      };
+      /** @description The asset was deleted (for good) before `at`. */
+      deleted: boolean;
+      /** @description The members of an asset that its history does not hold and so are not part of its state. */
+      not_historized: string[];
+    };
     /** @description The state of a CI at a point in time (AUD-08, WP-793). */
     CIStateAsOf: {
       /** @enum {string} */
@@ -11001,6 +11070,16 @@ export interface components {
       type?: string;
       /** @description Fields the error names: the violated fields (422), a unique attribute another CI holds or a field changed since the read (409), the fields the field permissions refuse (403). */
       fields?: string[];
+      /** @description Findings of the revalidation of a template migration by change_template (WP-780); they do not block the migration. */
+      findings?: {
+        field: string;
+        detail: string;
+        code?: string;
+        rule?: string;
+        message?: {
+          [key: string]: string;
+        };
+      }[];
     };
     /** @description Body of POST /api/v1/cis/bulk (WP-304): one variant per action. Without action the body is set_status; every other variant names its action. */
     CIBulkRequest:
@@ -11009,7 +11088,11 @@ export interface components {
       | components['schemas']['CIBulkSetLocation']
       | components['schemas']['CIBulkTags']
       | components['schemas']['CIBulkSetOwner']
-      | components['schemas']['CIBulkArchive'];
+      | components['schemas']['CIBulkArchive']
+      | components['schemas']['CIBulkRelationship']
+      | components['schemas']['CIBulkLifecycleTransition']
+      | components['schemas']['CIBulkChangeTemplate']
+      | components['schemas']['CIBulkExport'];
     CIBulkIDs: string[];
     CIBulkSetStatus: {
       /**
@@ -11083,6 +11166,70 @@ export interface components {
       action: 'archive';
       ids: components['schemas']['CIBulkIDs'];
       params?: Record<string, never>;
+    };
+    /** @description Creates or removes a manual edge per CI (WP-780). */
+    CIBulkRelationship: {
+      /** @enum {string} */
+      action: 'add_relationship' | 'remove_relationship';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** @description Relationship type of the catalogue; projected types are refused. */
+        rel_type: string;
+        /** Format: uuid */
+        target_ci_id: string;
+        /**
+         * @description outgoing is CI -> target_ci_id, incoming target_ci_id -> CI.
+         * @default outgoing
+         * @enum {string}
+         */
+        direction: 'outgoing' | 'incoming';
+      };
+    };
+    /** @description The lifecycle transition per CI (WP-724, WP-780). */
+    CIBulkLifecycleTransition: {
+      /** @enum {string} */
+      action: 'lifecycle_transition';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        to_state: string;
+        /** @description The state the caller saw; another current state is 409 for the id. */
+        from_state?: string;
+        /** @description Values the required fields and guards of the transition are checked against. */
+        context?: {
+          [key: string]: unknown;
+        };
+        reason?: string;
+      };
+    };
+    /** @description Migrates or replaces a template of every CI (WP-253, WP-710, WP-780). */
+    CIBulkChangeTemplate: {
+      /** @enum {string} */
+      action: 'change_template';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /** Format: uuid */
+        template_id: string;
+        /** @description Published version; default the current version of the template. */
+        to_version?: number;
+        /**
+         * Format: uuid
+         * @description The template whose place template_id takes on the CIs that hold it (same position).
+         */
+        replace_template_id?: string;
+      };
+    };
+    /** @description One export job of the CIs in ids (filters.ids, WP-780); 202 with the export job. */
+    CIBulkExport: {
+      /** @enum {string} */
+      action: 'export';
+      ids: components['schemas']['CIBulkIDs'];
+      params: {
+        /**
+         * @description datev is 422; DATEV exports assets through POST /api/v1/exports.
+         * @enum {string}
+         */
+        format: 'csv' | 'json';
+      };
     };
     /** @description A template assigned to a CI (ci_template, MET-16, WP-710). */
     CITemplate: {
@@ -12591,6 +12738,8 @@ export interface components {
       client_id?: string;
       /** @description Lifecycle state of the assets of a datev export (E-120); datev only. */
       lifecycle_state?: string;
+      /** @description Selection of CIs by id for csv and json (WP-780): the visible, not deleted CIs among them, sorted by created_at and id. Not combinable with the other filters; more than 500 ids, an id that is no UUID and ids with datev are 400. */
+      ids?: string[];
     };
     CreateExportJobRequest: {
       /**
@@ -13737,6 +13886,22 @@ export interface components {
     ConsumableStockListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ConsumableStock'][];
     };
+    /** @description The availability of a consumable in one bin, read from its stock row (GET /api/v1/consumables/{id}/availability, WP-759). */
+    ConsumableAvailability: {
+      /**
+       * Format: uuid
+       * @description The bin.
+       */
+      location_id: string;
+      on_hand: number;
+      /** @description The sum of the active reservations of the bin; never above on_hand. */
+      reserved: number;
+      /** @description on_hand − reserved. */
+      available: number;
+    };
+    ConsumableAvailabilityListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableAvailability'][];
+    };
     /** @description A row of the ledger stock_movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (WP-756): the fields of StockMovement plus direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). */
     ConsumableMovement: components['schemas']['StockMovement'] & {
       /** @enum {string} */
@@ -13993,9 +14158,11 @@ export interface components {
       due_at?: string;
       notes?: string;
     };
+    /** @description The consumed reservation with the assignment of its asset, or for a quantity reservation the movement retrieval from its bin (WP-759). */
     ConvertReservationResponse: {
       reservation: components['schemas']['Reservation'];
-      assignment: components['schemas']['Assignment'];
+      assignment?: components['schemas']['Assignment'];
+      movement?: components['schemas']['StockMovement'];
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -14786,6 +14953,40 @@ export interface components {
        * @description The asset's node in the location tree; assets only, absent without a location.
        */
       location_id?: string;
+    };
+    /** @description A label batch (INV-03, WP-763): the objects of one kind named by ids, or those of the inventory area below location_id; exactly one of both. */
+    LabelBatchRequest: {
+      /**
+       * @default a4_24
+       * @enum {string}
+       */
+      template: 'asset_50x25' | 'bin_100x50' | 'a4_24';
+      /** @enum {string} */
+      kind: 'asset' | 'consumable' | 'location';
+      ids?: string[];
+      /**
+       * Format: uuid
+       * @description The root of the inventory area (a subtree of the location tree).
+       */
+      location_id?: string;
+    };
+    /** @description The result of a job labels.batch (GET /api/v1/jobs/{id}/result); it names neither the object key nor a URL (E-135). */
+    LabelBatchResult: {
+      labels: number;
+      pages: number;
+      /** Format: date-time */
+      expires_at: string;
+    };
+    /** @description The download of a label batch for its creator (E-135). */
+    LabelBatchDownload: {
+      /** Format: uuid */
+      job_id: string;
+      labels: number;
+      pages: number;
+      /** Format: date-time */
+      expires_at: string;
+      /** @description URL of the PDF, signed for this request (15 minutes). */
+      download_url: string;
     };
     /** @description A supplier of the organization or one of its clients (MGT-12, E-41). name is the company name and no personal data; the contact person is only referenced by contact_id (the contacts resource reveals name, phone and e-mail from the PII vault, WP-242). */
     Supplier: {
@@ -18696,9 +18897,10 @@ export interface operations {
           'application/json': components['schemas']['CIBulkResult'];
         };
       };
-      /** @description The bulk change runs as a job */
+      /** @description The bulk change runs as a job ci.bulk (Location /api/v1/jobs/{id}), or the action export created its export job (kind export, Location /api/v1/exports/{id}). */
       202: {
         headers: {
+          /** @description The job ci.bulk or the export job. */
           Location?: string;
           [name: string]: unknown;
         };
@@ -18706,15 +18908,33 @@ export interface operations {
           'application/json': {
             job_id: string;
             status: string;
+            /** @description ci.bulk, or export for the action export. */
             kind: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>) or a tag the catalog lacks (params.tags). */
+      /** @description The right of the action is missing (relationship:write, lifecycle:transition, export:run), or the organization is not entitled to export_csv (type feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>), a tag the catalog lacks (params.tags), a projected or unknown rel_type (params.rel_type), an unknown template or a to_version that is not published. */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The service of a delegating action is not available in this deployment (no database; no blob storage for export). */
+      503: {
         headers: {
           [name: string]: unknown;
         };
@@ -33164,27 +33384,31 @@ export interface operations {
   };
   listAssetsIdState: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Reconstruct asset state at a point in time */
+      /** @description The state of the asset at `at` */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['AssetStateAsOf'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -38418,6 +38642,92 @@ export interface operations {
       422: components['responses']['UnprocessableEntity'];
     };
   };
+  createLabelBatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LabelBatchRequest'];
+      };
+    };
+    responses: {
+      /** @description The batch runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description The read permission of the kind is missing, or the organization lacks the feature of the kind or barcode (feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The location of the inventory area is unknown or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Unknown template or kind, neither or both of ids and location_id, more than 1000 ids, or an id that is no UUID. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  downloadLabelBatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The download of the batch */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelBatchDownload'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
   listSuppliers: {
     parameters: {
       query?: {
@@ -39640,7 +39950,10 @@ export interface operations {
   };
   getAssetAsOf: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -39650,13 +39963,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Reconstruct the state of an asset at a point in time. The response schema comes with WP-795. */
+      /** @description The state of the asset at `at` */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AssetStateAsOf'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
@@ -39765,7 +40081,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A project reservation without `assignee_id` or `team_id`, a quantity item reservation, both or a malformed holder, or a holder of another organization; `field` names it. */
+      /** @description A project reservation without `assignee_id` or `team_id`, both or a malformed holder, a holder of another organization, or a quantity reservation with `assignee_id`, `team_id` or `due_at`; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -39869,7 +40185,20 @@ export interface operations {
   };
   getConsumableAvailability: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Only this bin. */
+        location_id?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -39879,16 +40208,28 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the availability of a consumable. The response schema comes with WP-759. */
+      /** @description The availability per bin of one page. The page follows the cursor contract (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConsumableAvailabilityListResponse'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description location_id is no UUID; `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   placeOrder: {

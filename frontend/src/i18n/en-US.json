@@ -591,26 +591,63 @@
   "assignment": {
     "title": "Assignments",
     "assign": "Assign",
-    "return": "Return",
+    "return": "Take back",
     "transfer": "Transfer",
-    "type": "Type",
+    "type": "Kind",
+    "asset": "Asset",
     "assignedTo": "Assigned to",
     "assignedAt": "Assigned at",
-    "assetId": "Asset ID",
-    "holderKind": "Holder",
-    "holderUser": "User",
-    "holderTeam": "Team",
-    "userId": "User ID",
-    "teamId": "Team ID",
-    "team": "Team",
+    "recipient": "Recipient",
+    "newRecipient": "New recipient",
     "dueAt": "Due on",
+    "teamHolder": "Team {{name}}",
+    "unknownAsset": "Asset not readable",
+    "returnOf": "Take back: {{asset}}",
+    "transferOf": "Transfer: {{asset}}",
+    "returnTitle": "Take back asset",
+    "returnDescription": "Take “{{asset}}” back from {{holder}}.",
+    "returnCondition": "Condition on return",
+    "transferTitle": "Transfer asset",
+    "transferDescription": "Transfer “{{asset}}” from {{holder}} to a new recipient.",
+    "assignPending": "“{{asset}}” is being assigned to {{holder}}",
+    "assignFailed": "Assigning “{{asset}}” failed: {{message}}",
     "conflict": "The holder of the asset changed meanwhile. The list was reloaded.",
+    "types": {
+      "assignment": "Assignment",
+      "transfer": "Transfer"
+    },
     "statuses": {
       "active": "Active",
       "returned": "Returned",
       "transferred": "Transferred",
-      "overdue": "Overdue",
-      "cancelled": "Cancelled"
+      "overdue": "Overdue"
+    }
+  },
+  "pickers": {
+    "kind": "Kind",
+    "kinds": {
+      "ci": "CI",
+      "asset": "Asset",
+      "consumable": "Consumable"
+    },
+    "holderKinds": {
+      "user": "Person",
+      "team": "Team"
+    },
+    "searchPlaceholder": "Type a name …",
+    "searching": "Searching …",
+    "noHits": "No matches",
+    "selected": "Selected",
+    "remove": "Remove {{name}}",
+    "createCI": "Create new CI",
+    "locationFilter": "Filter {{label}}",
+    "chosenLocation": "Chosen: {{path}}",
+    "errors": {
+      "notEntitled": "Your plan does not include this feature.",
+      "limit": "The limit of your plan has been reached.",
+      "forbidden": "You lack the permission for this action.",
+      "forbiddenSearch": "You lack the permission to search these objects.",
+      "forbiddenPeople": "No permission to search for people"
     }
   },
   "document": {

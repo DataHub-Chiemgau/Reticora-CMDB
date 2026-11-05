@@ -44,6 +44,29 @@ func (s *Service) RecordTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	return RecordTx(ctx, tx, m)
 }
 
+// reservedTakeKey marks the context of RecordReservedRetrievalTx.
+type reservedTakeKey struct{}
+
+// RecordReservedRetrievalTx books m, the retrieval of a converted quantity
+// reservation (POST /api/v1/reservations/{id}/convert, WP-759), in tx like
+// RecordTx: the bin is from_location_id, the quantity that of the
+// reservation, and the booking takes it out of the reservation
+// (consumable.ApplyReservedRetrieval): on_hand and reserved fall together,
+// without a check against on_hand − reserved. It is a parameter of the
+// call, not a column of the ledger; the row is an ordinary retrieval.
+func RecordReservedRetrievalTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
+	if m.ItemKind != "consumable" || m.MovementType != "retrieval" {
+		return fieldError("movement_type", "a take out of a reservation is a consumable retrieval")
+	}
+	return RecordTx(context.WithValue(ctx, reservedTakeKey{}, true), tx, m)
+}
+
+// RecordReservedRetrievalTx books m out of a reservation in tx (see the
+// function of the package).
+func (s *Service) RecordReservedRetrievalTx(ctx context.Context, tx pgx.Tx, m *Movement) error {
+	return RecordReservedRetrievalTx(ctx, tx, m)
+}
+
 // bookingOf is the booking of the consumable movement m on the stock per
 // bin.
 func bookingOf(m *Movement) *consumable.Booking {
@@ -74,9 +97,14 @@ func placeOnlyBin(m *Movement, bin string) {
 // stock row is locked, a reservation beyond on_hand − reserved is
 // ErrInsufficientStock, on_hand stays. Only the reservation path books
 // them (POST /api/v1/stock-movements refuses them, ReservedMovementTypes).
+// A retrieval of RecordReservedRetrievalTx is taken out of the reservation
+// (consumable.ApplyReservedRetrieval, WP-759).
 func bookConsumable(ctx context.Context, tx pgx.Tx, m *Movement) error {
 	if consumable.ReservationTypes[m.MovementType] {
 		return consumable.ApplyReservation(ctx, tx, bookingOf(m))
+	}
+	if taken, _ := ctx.Value(reservedTakeKey{}).(bool); taken {
+		return consumable.ApplyReservedRetrieval(ctx, tx, bookingOf(m))
 	}
 	if m.onlyBin {
 		bin, err := consumable.OnlyBin(ctx, tx, m.OrganizationID, m.ConsumableID)

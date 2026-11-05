@@ -2,6 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -13,10 +17,13 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -307,4 +314,215 @@ func (f bffForms) ResolveForm(ctx context.Context, orgID string, req citype.Form
 		policy = p
 	}
 	return citype.NewFormResolver(f.source, policy).ResolveForm(ctx, orgID, req)
+}
+
+// CIBulkDelegates wires the delegating actions of POST /api/v1/cis/bulk
+// (WP-780) with adapters onto the packages they belong to: the manual
+// edges of the relationship handler (CreateManual, DeleteWithPolicy), the
+// transactional lifecycle transition (WP-724), the export jobs (export
+// imports ci, so only this adapter reaches it) and the entitlements. A nil
+// part leaves its port nil: its action answers 503.
+func CIBulkDelegates(rels *relationship.Handler, relRepo relationship.Repository, transitions *lifecycle.Service,
+	resolver lifecycle.EntityResolver, exports *export.JobHandler, features *entitlement.Service) ci.BulkDelegates {
+	var d ci.BulkDelegates
+	if rels != nil && relRepo != nil {
+		d.Relationships = bulkRelationships{handler: rels, repo: relRepo}
+	}
+	if transitions != nil && resolver != nil {
+		d.Lifecycle = bulkLifecycle{svc: transitions, resolver: resolver}
+	}
+	if exports != nil {
+		d.Exporter = bulkExports{jobs: exports}
+	}
+	if features != nil {
+		d.Entitlements = features
+	}
+	return d
+}
+
+// bulkRelationships adapts the relationship handler to ci.BulkRelationships.
+type bulkRelationships struct {
+	handler *relationship.Handler
+	repo    relationship.Repository
+}
+
+func (b bulkRelationships) CheckRelType(ctx context.Context, orgID, relType string) error {
+	return b.handler.ManualRelType(ctx, orgID, relType)
+}
+
+// ends returns source and target of the edge.
+func ends(edge *ci.BulkEdge) (source, target string) {
+	if edge.Incoming {
+		return edge.OtherID, edge.CIID
+	}
+	return edge.CIID, edge.OtherID
+}
+
+// AddRelationship creates the edge like POST /relationships with the run's
+// author as actor. The other end the caller cannot see, or whose type the
+// relationship type does not allow, is 422 on target_ci_id; the CI itself
+// not visible is 404, its type not allowed or the cardinality 422 on
+// rel_type; an existing edge (uq_ci_relationship_edge) stays a database
+// conflict (409).
+func (b bulkRelationships) AddRelationship(ctx context.Context, orgID string, edge *ci.BulkEdge) error {
+	source, target := ends(edge)
+	actor := relationship.Actor{ID: edge.Actor, Type: "user"}
+	if actor.ID == "" {
+		actor = relationship.Actor{ID: "api", Type: "api_key"}
+	}
+	_, err := b.handler.CreateManual(ctx, orgID, actor, relationship.CreateRequest{SourceCIID: source, TargetCIID: target, RelType: edge.RelType})
+	if err == nil {
+		return nil
+	}
+	otherMissing, ownMissing := relationship.ErrTargetCINotFound, relationship.ErrSourceCINotFound
+	otherType, ownType := relationship.ErrTargetCITypeNotAllowed, relationship.ErrSourceCITypeNotAllowed
+	if edge.Incoming {
+		otherMissing, ownMissing = ownMissing, otherMissing
+		otherType, ownType = ownType, otherType
+	}
+	var refused *relationship.RequestError
+	switch {
+	case errors.Is(err, otherMissing):
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: "target CI not found", Fields: []string{"target_ci_id"}}
+	case errors.Is(err, ownMissing):
+		return ci.ErrNotFound
+	case errors.Is(err, otherType):
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: otherType.Error(), Fields: []string{"target_ci_id"}}
+	case errors.Is(err, ownType), errors.Is(err, relationship.ErrCardinalityExceeded):
+		detail := relationship.ErrCardinalityExceeded.Error()
+		if errors.Is(err, ownType) {
+			detail = ownType.Error()
+		}
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: detail, Fields: []string{"rel_type"}}
+	case errors.As(err, &refused):
+		return &ci.BulkItemError{Status: refused.Status, Detail: refused.Error(), Fields: refused.Fields()}
+	}
+	return err
+}
+
+// RemoveRelationship deletes the edge of the CI like DELETE
+// /relationships/{id} without force: a discovery edge is 409
+// (ErrForceRequired), a missing edge 404. Of several edges between the
+// two CIs with the type (interfaces), the one without interfaces goes.
+func (b bulkRelationships) RemoveRelationship(ctx context.Context, orgID string, edge *ci.BulkEdge) error {
+	source, target := ends(edge)
+	rels, _, err := b.repo.ListFiltered(ctx, orgID, relationship.ListFilter{SourceCIID: source, TargetCIID: target, RelType: edge.RelType},
+		api.PaginationParams{Limit: 100})
+	if err != nil {
+		return err
+	}
+	if len(rels) == 0 {
+		return &ci.BulkItemError{Status: http.StatusNotFound, Detail: "relationship not found"}
+	}
+	pick := slices.IndexFunc(rels, func(r relationship.Relationship) bool {
+		return r.SourceInterfaceID == "" && r.TargetInterfaceID == ""
+	})
+	pick = max(pick, 0)
+	if deleter, ok := b.repo.(relationship.PolicyDeleter); ok {
+		actor := relationship.Actor{ID: edge.Actor, Type: "user"}
+		if !api.IsUUID(actor.ID) {
+			actor.ID = ""
+		}
+		err = deleter.DeleteWithPolicy(ctx, orgID, rels[pick].ID, relationship.DeleteOptions{Actor: actor})
+	} else {
+		err = b.repo.Delete(ctx, orgID, rels[pick].ID)
+	}
+	switch {
+	case errors.Is(err, relationship.ErrForceRequired):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: err.Error()}
+	case errors.Is(err, api.ErrNotFound):
+		return &ci.BulkItemError{Status: http.StatusNotFound, Detail: "relationship not found"}
+	}
+	return err
+}
+
+// bulkLifecycle adapts the lifecycle service to ci.BulkLifecycle: the
+// effective model of the CI (EntityResolver, here without the HTTP request
+// of a route: a request carrying ctx) and the transactional transition.
+type bulkLifecycle struct {
+	svc      *lifecycle.Service
+	resolver lifecycle.EntityResolver
+}
+
+// noLifecycleModel is the outcome of a CI whose type has no model: 422 on
+// to_state like the single transition.
+func noLifecycleModel() error {
+	return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: lifecycle.ErrNoLifecycleModel.Error(), Fields: []string{"to_state"}}
+}
+
+func (b bulkLifecycle) Transition(ctx context.Context, orgID, ciID string, req *ci.BulkTransition) error {
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/cis/"+ciID+"/lifecycle-transitions", http.NoBody)
+	if err != nil {
+		return err
+	}
+	modelID, err := b.resolver.LifecycleModelFor(r, orgID, "ci", ciID)
+	switch {
+	case errors.Is(err, lifecycle.ErrNoLifecycleModel):
+		return noLifecycleModel()
+	case err != nil:
+		return ci.ErrNotFound
+	}
+	_, err = b.svc.Transition(ctx, orgID, "ci", ciID, modelID, lifecycle.TransitionRequest{ToState: req.ToState,
+		FromState: req.FromState, Context: req.Context, Reason: req.Reason})
+	return transitionOutcome(err)
+}
+
+// transitionOutcome maps a refused transition onto the outcome of the id
+// with the problem types of the single transition (WP-724): the guard with
+// the fields of its violations (and the missing references of a system
+// guard), a missing edge invalid-transition on to_state, another current
+// state 409 on from_state.
+func transitionOutcome(err error) error {
+	var guard *lifecycle.GuardError
+	var invalid *lifecycle.InvalidTransitionError
+	var conflict *lifecycle.StateConflictError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &guard):
+		fields := make([]string, 0, len(guard.Violations)+len(guard.Missing))
+		for _, v := range guard.Violations {
+			if !slices.Contains(fields, v.Field) {
+				fields = append(fields, v.Field)
+			}
+		}
+		for _, missing := range guard.Missing {
+			if !slices.Contains(fields, missing) {
+				fields = append(fields, missing)
+			}
+		}
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: guard.Error(), Problem: lifecycle.ProblemLifecycleGuard, Fields: fields}
+	case errors.As(err, &invalid):
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: invalid.Error(), Problem: lifecycle.ProblemInvalidTransition,
+			Fields: []string{"to_state"}}
+	case errors.As(err, &conflict):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: conflict.Error(), Problem: lifecycle.ProblemConflict,
+			Fields: []string{"from_state"}}
+	case errors.Is(err, lifecycle.ErrNoLifecycleModel):
+		return noLifecycleModel()
+	case err.Error() == "not found":
+		return ci.ErrNotFound
+	}
+	return err
+}
+
+// bulkExports adapts the export jobs to ci.BulkExporter: one job of the
+// ids like POST /api/v1/exports with filters.ids (export.JobHandler.Enqueue).
+type bulkExports struct {
+	jobs *export.JobHandler
+}
+
+func (b bulkExports) CreateExport(ctx context.Context, orgID, format string, ids []string) (*ci.BulkExportJob, error) {
+	req := export.CreateJobRequest{Format: format, Filters: export.JobFilters{IDs: ids}}
+	if err := req.Validate(); err != nil {
+		return nil, &api.FieldError{Field: "ids", Message: fmt.Sprintf("an export takes 1 to %d CI ids", export.MaxExportIDs)}
+	}
+	job, err := b.jobs.Enqueue(ctx, orgID, &req)
+	switch {
+	case errors.Is(err, export.ErrExportUnavailable):
+		return nil, ci.ErrBulkActionUnavailable
+	case err != nil:
+		return nil, err
+	}
+	return &ci.BulkExportJob{ID: job.ID, Status: job.Status}, nil
 }

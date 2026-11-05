@@ -87,6 +87,9 @@ type BulkItemResult struct {
 	// Fields are the fields the error names (violations, a taken unique
 	// attribute, a stale field, refused field permissions).
 	Fields []string `json:"fields,omitempty"`
+	// Findings are the findings of the revalidation of a template
+	// migration by change_template (WP-780); they do not block.
+	Findings []Violation `json:"findings,omitempty"`
 }
 
 // BulkResult is the partial failure report of a bulk operation.
@@ -246,6 +249,16 @@ func (s *Service) Bulk(ctx context.Context, orgID string, req *BulkRequest) (*Bu
 	if err := s.checkBulkTags(ctx, orgID, req); err != nil {
 		return nil, nil, err
 	}
+	// The ports, the entitlement and the parameters of a delegating action
+	// (WP-780), as well before any change.
+	if err := s.prepareDelegate(ctx, orgID, req); err != nil {
+		return nil, nil, err
+	}
+	if req.Action == BulkExport {
+		// One export job for every id, whatever their number.
+		job, err := s.bulkExport(ctx, orgID, req)
+		return nil, job, err
+	}
 	if len(req.IDs) < BulkJobFromIDs && s.bulkJobs != nil {
 		return s.runSyncJob(ctx, orgID, req)
 	}
@@ -362,6 +375,10 @@ func (s *Service) RunBulkJob(ctx context.Context, job *jobs.Job) (any, error) {
 		return nil, fmt.Errorf("%w: %w", ErrNoCreatorPolicy, err)
 	}
 	runCtx = permission.WithPolicy(runCtx, policy)
+	// A delegating action resolves its parameters again (WP-780).
+	if err = s.prepareDelegate(runCtx, job.OrganizationID, &req); err != nil {
+		return nil, fmt.Errorf("prepare bulk job: %w", err)
+	}
 	result := s.runBulk(runCtx, job.OrganizationID, job.CreatedBy, job.ID, &req,
 		s.cancelCheck(jobCtx, cancels, job.OrganizationID, job.ID))
 	if cancels != nil && keepCancelled(jobCtx, cancels, job.OrganizationID, job.ID, result) {
@@ -416,7 +433,7 @@ func (s *Service) runBulk(ctx context.Context, orgID, author, jobID string, req 
 	result := &BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]BulkItemResult, len(req.IDs))}
 	op := bulkOp{orgID: orgID, author: author, reason: bulkReason, req: req}
 	if jobID != "" {
-		op.reason = bulkReason + ":" + jobID
+		op.reason, op.jobID = bulkReason+":"+jobID, jobID
 		// The writes of the run record the change set of the job (WP-305).
 		ctx = jobs.WithChangeSet(ctx, jobID)
 	}
@@ -510,7 +527,13 @@ func bulkError(err error) bulkFailure {
 	var conflict *ConflictError
 	var reserved *ReservedKeyError
 	var legacy *LegacyTagsError
+	var item *BulkItemError
 	switch {
+	case errors.As(err, &item):
+		// The outcome a port of a delegating action names (WP-780).
+		return bulkItemFailure(item)
+	case errors.Is(err, ErrBulkActionUnavailable):
+		return unavailableFailure()
 	case errors.Is(err, ErrNotFound) || err.Error() == "not found":
 		return bulkFailure{code: http.StatusNotFound, msg: "CI not found"}
 	case errors.As(err, &forbidden):

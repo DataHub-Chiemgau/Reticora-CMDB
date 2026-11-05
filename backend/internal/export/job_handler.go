@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -77,7 +78,7 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.worker == nil || !h.worker.Enabled() {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "asynchronous export requires blob storage; use GET /api/v1/export/cis for a streaming export")
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrExportUnavailable.Error())
 		return
 	}
 
@@ -97,26 +98,14 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The job records its creator and the creator's scope; the worker
-	// exports with exactly this scope and only the creator reads the job.
-	scope, ok := database.TenantScopeFromContext(r.Context())
-	if !ok {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant scope")
+	job, err := h.Enqueue(r.Context(), t.OrganizationID, &req)
+	switch {
+	case errors.Is(err, ErrNoTenantScope):
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", ErrNoTenantScope.Error())
 		return
-	}
-	job := &Job{Format: req.Format, Filters: req.Filters, InitiatedBy: scope.UserID, Scope: SnapshotScope(&scope)}
-	if principal, ok := identity.PrincipalFromContext(r.Context()); ok {
-		job.InitiatedBy = principal.Subject
-	}
-	if err := h.jobs.CreateJob(r.Context(), t.OrganizationID, job); err != nil {
+	case err != nil:
 		api.WriteRepoError(w, err)
 		return
-	}
-	if h.worker != nil && h.worker.Tracker != nil {
-		// The generic job model lists the export too (JOB-01).
-		if err := h.worker.Tracker.Track(r.Context(), t.OrganizationID, "export", "export_job", job.ID, job.InitiatedBy); err != nil {
-			slog.Warn("track export job", "job", job.ID, "error", err)
-		}
 	}
 
 	resp, err := h.toResponse(r, job, &datevPreview{})
@@ -125,6 +114,49 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, resp)
+}
+
+// Errors of Enqueue.
+var (
+	// ErrExportUnavailable: the asynchronous export needs blob storage
+	// (503).
+	ErrExportUnavailable = errors.New("asynchronous export requires blob storage; use GET /api/v1/export/cis for a streaming export")
+	// ErrNoTenantScope: the context carries no tenant scope to snapshot
+	// (401).
+	ErrNoTenantScope = errors.New("missing tenant scope")
+)
+
+// ExportJobKind is the kind of an export job in the generic job model.
+const ExportJobKind = "export"
+
+// Enqueue creates the export job of a checked request (Validate) for the
+// caller of ctx, the path of POST /api/v1/exports and of the bulk export
+// of CIs (WP-780): the job records its creator (the principal's subject,
+// otherwise the user of the scope) and the snapshot of the creator's scope
+// (SnapshotScope), with which the worker renders it and only the creator
+// reads it; the generic job model lists it with kind export (JOB-01).
+func (h *JobHandler) Enqueue(ctx context.Context, orgID string, req *CreateJobRequest) (*Job, error) {
+	if h.worker == nil || !h.worker.Enabled() {
+		return nil, ErrExportUnavailable
+	}
+	scope, ok := database.TenantScopeFromContext(ctx)
+	if !ok {
+		return nil, ErrNoTenantScope
+	}
+	job := &Job{Format: req.Format, Filters: req.Filters, InitiatedBy: scope.UserID, Scope: SnapshotScope(&scope)}
+	if principal, found := identity.PrincipalFromContext(ctx); found {
+		job.InitiatedBy = principal.Subject
+	}
+	if err := h.jobs.CreateJob(ctx, orgID, job); err != nil {
+		return nil, err
+	}
+	if h.worker.Tracker != nil {
+		// The generic job model lists the export too (JOB-01).
+		if err := h.worker.Tracker.Track(ctx, orgID, ExportJobKind, "export_job", job.ID, job.InitiatedBy); err != nil {
+			slog.Warn("track export job", "job", job.ID, "error", err)
+		}
+	}
+	return job, nil
 }
 
 // ListJobs handles GET /api/v1/export/jobs and returns the caller's own

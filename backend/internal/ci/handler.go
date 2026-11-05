@@ -610,12 +610,21 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	}
 	result, job, err := h.svc.Bulk(r.Context(), t.OrganizationID, &req)
 	switch {
+	case errors.Is(err, ErrBulkActionUnavailable):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrBulkActionUnavailable.Error())
 	case err != nil:
-		if !api.WriteFieldError(w, err) {
+		// A missing entitlement of export is 403 feature-not-entitled
+		// (WP-780); a missing right 403 with the action.
+		switch {
+		case api.WriteFieldError(w, err):
+		case IsFeatureNotEntitled(err):
+			api.WriteTypedProblem(w, http.StatusForbidden, err)
+		default:
 			api.WriteRepoError(w, err)
 		}
 	case job != nil:
-		w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+		// The job ci.bulk, or the export job of export (WP-780).
+		w.Header().Set("Location", BulkJobLocation(job))
 		api.WriteJSON(w, http.StatusAccepted, map[string]any{"job_id": job.ID, "status": job.Status, "kind": job.Kind})
 	default:
 		api.WriteJSON(w, http.StatusOK, result)

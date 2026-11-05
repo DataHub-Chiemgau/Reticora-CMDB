@@ -1413,6 +1413,7 @@ AST-04;[P2];B;backend/internal/discovery/asset_link_integration_test.go;WP-741
 STK-04;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 BLK-02;[P2];C;backend/internal/jobs/revert_integration_test.go;WP-305
+BLK-02;[P2];C;backend/internal/ci/bulk_delegate_integration_test.go;WP-780
 JOB-03;[B];C;backend/internal/jobs/revert_integration_test.go;WP-305
 STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
@@ -1484,3 +1485,10 @@ NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/stock_notify_integrati
 STK-03;[P2];B;backend/internal/consumable/quantity_item_drop_integration_test.go;WP-758
 AST-02;[P2];B;backend/internal/assignment/signature_legacy_integration_test.go;WP-749
 AUD-08;[P2];C;backend/internal/history/replay_integration_test.go;WP-793
+IMP-IO-01;[P2];C;backend/internal/importer/entities_integration_test.go;WP-776
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/labels/render_test.go;WP-763
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/labels/batch_integration_test.go;WP-763
+AUD-08;[P2];C;backend/internal/history/asset_replay_integration_test.go;WP-795
+STK-03;[P2];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
+UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318

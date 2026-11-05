@@ -12,6 +12,7 @@ import {
   rackApi,
   assetApi,
   assignmentApi,
+  consumableApi,
   documentApi,
   stocktakeApi,
   ticketApi,
@@ -77,10 +78,19 @@ import type {
   AlertRuleCreateRequest,
 } from '../api/client';
 
-export function useCIList(params: CIListParams) {
+/**
+ * ListQueryOptions switch a list query off, e.g. a picker until the user
+ * typed a search (WP-318).
+ */
+export interface ListQueryOptions {
+  enabled?: boolean;
+}
+
+export function useCIList(params: CIListParams, { enabled = true }: ListQueryOptions = {}) {
   return useQuery({
     queryKey: ['cis', params],
     queryFn: () => ciApi.list(params),
+    enabled,
   });
 }
 
@@ -406,10 +416,22 @@ export function useAskAI() {
 
 // --- Assets ---
 
-export function useAssetList(params: AssetListParams) {
+export function useAssetList(params: AssetListParams, { enabled = true }: ListQueryOptions = {}) {
   return useQuery({
     queryKey: ['assets', params],
     queryFn: () => assetApi.list(params),
+    enabled,
+  });
+}
+
+// --- Consumables ---
+
+/** useConsumableList lists the consumables; /consumables is a scoped list (client_id). */
+export function useConsumableList(params: ListParams, { enabled = true }: ListQueryOptions = {}) {
+  return useQuery({
+    queryKey: ['consumables', params],
+    queryFn: () => consumableApi.list(params),
+    enabled,
   });
 }
 
@@ -454,7 +476,7 @@ export function useAssignmentList(params: AssignmentListParams) {
 }
 
 // The writes go through the asset (WP-746) and refresh the assignment
-// lists.
+// lists and the assets (holder and status change with them, WP-318).
 export function useCreateAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -462,6 +484,7 @@ export function useCreateAssignment() {
       assignmentApi.assign(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
     },
   });
 }
@@ -473,6 +496,7 @@ export function useReturnAssignment() {
       assignmentApi.returnAsset(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
     },
   });
 }
@@ -484,6 +508,7 @@ export function useTransferAssignment() {
       assignmentApi.transfer(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
     },
   });
 }
@@ -609,10 +634,11 @@ export function useDeleteTicket() {
 
 // --- Users / Teams / Roles ---
 
-export function useUserList(params: UserListParams) {
+export function useUserList(params: UserListParams, { enabled = true }: ListQueryOptions = {}) {
   return useQuery({
     queryKey: ['users', params],
     queryFn: () => userApi.list(params),
+    enabled,
   });
 }
 
@@ -644,10 +670,11 @@ export function useDeleteUser() {
   });
 }
 
-export function useTeamList(params: UserListParams) {
+export function useTeamList(params: UserListParams, { enabled = true }: ListQueryOptions = {}) {
   return useQuery({
     queryKey: ['teams', params],
     queryFn: () => teamApi.list(params),
+    enabled,
   });
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 )
 
 // Reservation states.
@@ -91,10 +92,12 @@ type ConvertRequest struct {
 }
 
 // ConvertResult is the answer of a conversion: the consumed reservation
-// and the assignment of its asset.
+// and the assignment of its asset, or for a quantity reservation the
+// movement retrieval that took its quantity out of the bin (WP-759).
 type ConvertResult struct {
 	Reservation *Reservation           `json:"reservation"`
-	Assignment  *assignment.Assignment `json:"assignment"`
+	Assignment  *assignment.Assignment `json:"assignment,omitempty"`
+	Movement    *movement.Movement     `json:"movement,omitempty"`
 }
 
 // Availability is the stock projection for an item (spec §10).
@@ -107,6 +110,18 @@ type Availability struct {
 	Assigned    float64 `json:"assigned"`
 	Repair      float64 `json:"repair"`
 	Unavailable float64 `json:"unavailable"`
+}
+
+// BinAvailability is the availability of a consumable in one bin, read
+// from its stock row (GET /api/v1/consumables/{id}/availability, E-38,
+// WP-759): available = on_hand − reserved.
+type BinAvailability struct {
+	LocationID string  `json:"location_id"`
+	OnHand     float64 `json:"on_hand"`
+	Reserved   float64 `json:"reserved"`
+	Available  float64 `json:"available"`
+	// stockID is the id of the stock row, the tie-breaker of the cursor.
+	stockID string
 }
 
 // AvailabilityFilter scopes the availability query.

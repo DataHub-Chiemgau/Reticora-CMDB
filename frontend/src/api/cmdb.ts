@@ -847,8 +847,13 @@ export const inventoryApi = {
   },
 };
 
+/**
+ * A row of the org-wide projection `GET /inventory/availability`; a
+ * consumable sums its stock rows per bin (WP-284). The path stays an alias
+ * (E-38); the successor per bin is `GET /consumables/{id}/availability`.
+ */
 export interface Availability {
-  item_kind: string;
+  item_kind: 'asset' | 'consumable';
   item_id: string;
   total: number;
   available: number;
@@ -862,9 +867,11 @@ export interface Availability {
 
 export interface Reservation {
   id: string;
-  item_kind: string;
+  item_kind: 'asset' | 'consumable';
   asset_id?: string;
-  quantity_item_id?: string;
+  /** The reserved consumable and its bin (item_kind consumable, WP-284). */
+  consumable_id?: string;
+  location_id?: string;
   quantity: number;
   state: string;
   reserved_from: string;
@@ -881,7 +888,9 @@ export const reservationApi = {
   },
   create(data: {
     asset_id?: string;
-    quantity_item_id?: string;
+    consumable_id?: string;
+    /** The bin; without it the only bin of the consumable (WP-284). */
+    location_id?: string;
     quantity?: number;
     reserved_until?: string;
     expires_at?: string;
@@ -1073,8 +1082,11 @@ export const historyApi = {
   ) {
     return fetchAPI<HistoryPage>(`/history/${entityType}/${id}${qs(params)}`);
   },
+  // The state at a point in time (AUD-08): GET /cis/{id}/as-of and
+  // /assets/{id}/as-of (WP-793, WP-795); the former /state paths are
+  // deprecated aliases.
   stateAt(entityType: 'assets' | 'cis', id: string, at?: string): Promise<StateSnapshot> {
-    return fetchAPI(`/${entityType}/${id}/state${qs({ at })}`);
+    return fetchAPI(`/${entityType}/${id}/as-of${qs({ at })}`);
   },
 };
 

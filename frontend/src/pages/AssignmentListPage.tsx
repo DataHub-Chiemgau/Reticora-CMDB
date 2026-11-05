@@ -1,23 +1,24 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, type Assignment } from '../api/client';
-import { useAssignmentList, useCreateAssignment, useReturnAssignment } from '../api/hooks';
+import { useQueries } from '@tanstack/react-query';
+import { assetApi, teamApi, userApi, type Assignment } from '../api/client';
+import { useAssignmentList } from '../api/hooks';
+import {
+  AssignDialog,
+  ReturnDialog,
+  TransferDialog,
+  type HeldAsset,
+} from '../components/flows/AssignDialogs';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
-import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { ScrollRegion } from '../components/ScrollRegion';
 
-// Stored assignment statuses (English keys); the labels come from the catalog.
-export const ASSIGNMENT_STATUSES = [
-  'active',
-  'returned',
-  'transferred',
-  'overdue',
-  'cancelled',
-] as const;
+// Statuses of the projection assignment_projection (000257, WP-747):
+// English keys, the labels come from the catalog.
+export const ASSIGNMENT_STATUSES = ['active', 'returned', 'transferred', 'overdue'] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -34,45 +35,75 @@ function statusVariant(status: string) {
   }
 }
 
-type HolderKind = 'user' | 'team';
-
-interface AssignForm {
-  asset_id: string;
-  holder_kind: HolderKind;
-  holder_id: string;
-  due_date: string;
-  notes: string;
-}
-
-const EMPTY_FORM: AssignForm = {
-  asset_id: '',
-  holder_kind: 'user',
-  holder_id: '',
-  due_date: '',
-  notes: '',
-};
-
 /** holderOf is the current holder of a row: its user, else its team. */
 function holderOf(item: Assignment): string | undefined {
   return item.assigned_to || item.assigned_team_id || undefined;
 }
 
-/** dueAt turns the chosen day into the end of that day in local time. */
-function dueAt(day: string): string | undefined {
-  if (!day) return undefined;
-  const end = new Date(`${day}T23:59:59`);
-  return Number.isNaN(end.getTime()) ? undefined : end.toISOString();
+const unique = (values: (string | undefined)[]) => [
+  ...new Set(values.filter((value): value is string => !!value)),
+];
+
+const NAME_STALE_MS = 5 * 60_000;
+
+/**
+ * useRowNames names the assets and holders of the rows. The projection
+ * carries only their ids (WP-747), so the page reads each asset, user and
+ * team once (cached); a name that cannot be read (no right, deleted) falls
+ * back to what the row holds.
+ */
+function useRowNames(rows: Assignment[]) {
+  const assetIds = unique(rows.map((row) => row.asset_id));
+  const userIds = unique(rows.map((row) => (row.assigned_team_id ? undefined : row.assigned_to)));
+  const teamIds = unique(rows.map((row) => row.assigned_team_id));
+  const common = { retry: false, staleTime: NAME_STALE_MS } as const;
+  const assets = useQueries({
+    queries: assetIds.map((id) => ({
+      ...common,
+      queryKey: ['asset', id],
+      queryFn: () => assetApi.get(id),
+    })),
+  });
+  const users = useQueries({
+    queries: userIds.map((id) => ({
+      ...common,
+      queryKey: ['user', id],
+      queryFn: () => userApi.get(id),
+    })),
+  });
+  const teams = useQueries({
+    queries: teamIds.map((id) => ({
+      ...common,
+      queryKey: ['team', id],
+      queryFn: () => teamApi.get(id),
+    })),
+  });
+
+  const assetNames = new Map<string, string>();
+  assets.forEach((query, index) => {
+    const asset = query.data;
+    if (typeof asset?.name !== 'string') return;
+    const code = asset.inventory_no ?? asset.asset_tag;
+    assetNames.set(assetIds[index]!, code ? `${asset.name} (${code})` : asset.name);
+  });
+  const holderNames = new Map<string, string>();
+  users.forEach((query, index) => {
+    if (typeof query.data?.display_name === 'string') {
+      holderNames.set(userIds[index]!, query.data.display_name);
+    }
+  });
+  teams.forEach((query, index) => {
+    if (typeof query.data?.name === 'string') holderNames.set(teamIds[index]!, query.data.name);
+  });
+  return { assetNames, holderNames };
 }
 
-/** isConflict tells the 409 of a holder that changed meanwhile. */
-function isConflict(error: unknown): error is ApiError {
-  return error instanceof ApiError && error.status === 409;
-}
+type OpenDialog = { kind: 'return' | 'transfer'; target: HeldAsset } | null;
 
 export function AssignmentListPage() {
   const { t } = useTranslation();
   const statusOptions = [
-    { value: '', label: t('common.all', 'Alle') },
+    { value: '', label: t('common.all') },
     ...ASSIGNMENT_STATUSES.map((value) => ({
       value,
       label: t(`assignment.statuses.${value}`, value),
@@ -80,91 +111,52 @@ export function AssignmentListPage() {
   ];
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [dialog, setDialog] = useState<OpenDialog>(null);
 
-  const { data, isLoading, refetch } = useAssignmentList({ status, search });
-  const createMutation = useCreateAssignment();
-  const returnMutation = useReturnAssignment();
+  const { data, isLoading } = useAssignmentList({ status, search });
+  const rows = data?.data ?? [];
+  const { assetNames, holderNames } = useRowNames(rows);
 
-  const [form, setForm] = useState<AssignForm>(EMPTY_FORM);
-  // conflict is the message of a 409 (the holder changed meanwhile); the
-  // list is loaded again so the rows show the current holder.
-  const [conflict, setConflict] = useState('');
-  const onConflict = (error: unknown) => {
-    if (!isConflict(error)) return;
-    setConflict(t('assignment.conflict', 'Der Halter hat sich zwischenzeitlich geändert.'));
-    void refetch();
-  };
-
-  const handleCreate = () => {
-    if (!form.asset_id || !form.holder_id) return;
-    setConflict('');
-    const holder =
-      form.holder_kind === 'team'
-        ? { assigned_team_id: form.holder_id }
-        : { assigned_user_id: form.holder_id };
-    createMutation.mutate(
-      {
-        assetId: form.asset_id,
-        data: { ...holder, due_at: dueAt(form.due_date), notes: form.notes || undefined },
-      },
-      {
-        onSuccess: () => {
-          setShowCreate(false);
-          setForm(EMPTY_FORM);
-        },
-        onError: (error) => {
-          if (isConflict(error)) setShowCreate(false);
-          onConflict(error);
-        },
-      },
-    );
-  };
-
-  const handleReturn = (item: Assignment) => {
+  const assetLabel = (item: Assignment) =>
+    item.asset_id ? (assetNames.get(item.asset_id) ?? t('assignment.unknownAsset')) : '';
+  const holderLabel = (item: Assignment) => {
     const holder = holderOf(item);
-    if (!item.asset_id || !holder) return;
-    setConflict('');
-    returnMutation.mutate(
-      { assetId: item.asset_id, data: { expected_holder: holder } },
-      { onError: onConflict },
-    );
+    if (!holder) return '';
+    const name = holderNames.get(holder) ?? holder;
+    return item.assigned_team_id ? t('assignment.teamHolder', { name }) : name;
   };
 
-  const writeError = [createMutation.error, returnMutation.error].find(
-    (error) => error && !isConflict(error),
-  );
+  /** heldAsset is the target of return and transfer of an open row. */
+  const heldAsset = (item: Assignment): HeldAsset | null => {
+    const holder = holderOf(item);
+    if (!item.asset_id || !holder) return null;
+    if (item.status !== 'active' && item.status !== 'overdue') return null;
+    return {
+      assetId: item.asset_id,
+      assetLabel: assetLabel(item),
+      holder,
+      holderLabel: holderLabel(item),
+    };
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('assignment.title', 'Zuweisungen')}
+          {t('assignment.title')}
         </h1>
-        <Button onClick={() => setShowCreate(true)}>{t('assignment.assign', 'Zuweisen')}</Button>
+        <Button onClick={() => setAssigning(true)}>{t('assignment.assign')}</Button>
       </div>
-
-      {conflict ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {conflict}
-        </p>
-      ) : null}
-      {writeError ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {writeError instanceof ApiError
-            ? (writeError.detail ?? writeError.message)
-            : writeError.message}
-        </p>
-      ) : null}
 
       <div className="flex gap-4 flex-wrap">
         <Input
-          label={t('common.search', 'Suche')}
+          label={t('common.search')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
         <Select
-          label={t('ci.status', 'Status')}
+          label={t('ci.status')}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           options={statusOptions}
@@ -172,61 +164,72 @@ export function AssignmentListPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
+        <p className="text-gray-500 dark:text-gray-400">{t('app.loading')}</p>
       ) : (
-        <Card title={`${t('assignment.title', 'Zuweisungen')} (${data?.total ?? 0})`}>
-          <ScrollRegion label={t('assignment.title', 'Zuweisungen')}>
+        <Card title={`${t('assignment.title')} (${data?.total ?? 0})`}>
+          <ScrollRegion label={t('assignment.title')}>
             <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
               <thead>
                 <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('assignment.type', 'Typ')}</th>
-                  <th className="pb-2">{t('assignment.assignedTo', 'Zugewiesen an')}</th>
-                  <th className="pb-2">{t('ci.status', 'Status')}</th>
-                  <th className="pb-2">{t('assignment.assignedAt', 'Datum')}</th>
-                  <th className="pb-2">{t('assignment.dueAt', 'Fällig am')}</th>
-                  <th className="pb-2">{t('common.actions', 'Aktionen')}</th>
+                  <th className="pb-2">{t('assignment.asset')}</th>
+                  <th className="pb-2">{t('assignment.assignedTo')}</th>
+                  <th className="pb-2">{t('assignment.type')}</th>
+                  <th className="pb-2">{t('ci.status')}</th>
+                  <th className="pb-2">{t('assignment.assignedAt')}</th>
+                  <th className="pb-2">{t('assignment.dueAt')}</th>
+                  <th className="pb-2">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {data?.data.map((item) => (
-                  <tr key={item.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2">{item.assignment_type}</td>
-                    <td className="py-2">
-                      {item.assigned_team_id
-                        ? `${t('assignment.team', 'Team')} ${item.assigned_team_id}`
-                        : item.assigned_to}
-                    </td>
-                    <td className="py-2">
-                      <Badge variant={statusVariant(item.status)}>
-                        {t(`assignment.statuses.${item.status}`, item.status)}
-                      </Badge>
-                    </td>
-                    <td className="py-2">
-                      {new Date(item.assigned_at).toLocaleDateString('de-DE')}
-                    </td>
-                    <td className="py-2">
-                      {item.due_at ? new Date(item.due_at).toLocaleDateString('de-DE') : ''}
-                    </td>
-                    <td className="py-2">
-                      {(item.status === 'active' || item.status === 'overdue') &&
-                      item.asset_id &&
-                      holderOf(item) ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={returnMutation.isPending}
-                          onClick={() => handleReturn(item)}
-                        >
-                          {t('assignment.return', 'Rückgabe')}
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-                {(!data?.data || data.data.length === 0) && (
+                {rows.map((item) => {
+                  const target = heldAsset(item);
+                  return (
+                    <tr key={item.id} className="text-sm text-gray-700 dark:text-gray-300">
+                      <td className="py-2">{assetLabel(item)}</td>
+                      <td className="py-2">{holderLabel(item)}</td>
+                      <td className="py-2">
+                        {t(`assignment.types.${item.assignment_type}`, item.assignment_type)}
+                      </td>
+                      <td className="py-2">
+                        <Badge variant={statusVariant(item.status)}>
+                          {t(`assignment.statuses.${item.status}`, item.status)}
+                        </Badge>
+                      </td>
+                      <td className="py-2">
+                        {new Date(item.assigned_at).toLocaleDateString('de-DE')}
+                      </td>
+                      <td className="py-2">
+                        {item.due_at ? new Date(item.due_at).toLocaleDateString('de-DE') : ''}
+                      </td>
+                      <td className="py-2">
+                        {target ? (
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('assignment.returnOf', { asset: target.assetLabel })}
+                              onClick={() => setDialog({ kind: 'return', target })}
+                            >
+                              {t('assignment.return')}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('assignment.transferOf', { asset: target.assetLabel })}
+                              onClick={() => setDialog({ kind: 'transfer', target })}
+                            >
+                              {t('assignment.transfer')}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-4 text-center text-gray-600 dark:text-gray-300">
-                      {t('common.noData', 'Keine Daten')}
+                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
+                      {t('common.noData')}
                     </td>
                   </tr>
                 )}
@@ -236,58 +239,17 @@ export function AssignmentListPage() {
         </Card>
       )}
 
-      <Modal
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        title={t('assignment.assign', 'Zuweisen')}
-      >
-        <div className="space-y-4">
-          <Input
-            label={t('assignment.assetId', 'Asset-ID')}
-            value={form.asset_id}
-            onChange={(e) => setForm({ ...form, asset_id: e.target.value })}
-            required
-          />
-          <Select
-            label={t('assignment.holderKind', 'Halter')}
-            value={form.holder_kind}
-            onChange={(e) => setForm({ ...form, holder_kind: e.target.value as HolderKind })}
-            options={[
-              { value: 'user', label: t('assignment.holderUser', 'Nutzer') },
-              { value: 'team', label: t('assignment.holderTeam', 'Team') },
-            ]}
-          />
-          <Input
-            label={
-              form.holder_kind === 'team'
-                ? t('assignment.teamId', 'Team-ID')
-                : t('assignment.userId', 'Nutzer-ID')
-            }
-            value={form.holder_id}
-            onChange={(e) => setForm({ ...form, holder_id: e.target.value })}
-            required
-          />
-          <Input
-            type="date"
-            label={t('assignment.dueAt', 'Fällig am')}
-            value={form.due_date}
-            onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-          />
-          <Input
-            label={t('common.notes', 'Notizen')}
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-          />
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowCreate(false)}>
-              {t('common.cancel', 'Abbrechen')}
-            </Button>
-            <Button onClick={handleCreate} disabled={createMutation.isPending}>
-              {t('common.save', 'Speichern')}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <AssignDialog open={assigning} onOpenChange={setAssigning} />
+      <ReturnDialog
+        open={dialog?.kind === 'return'}
+        onOpenChange={(open) => !open && setDialog(null)}
+        target={dialog?.kind === 'return' ? dialog.target : null}
+      />
+      <TransferDialog
+        open={dialog?.kind === 'transfer'}
+        onOpenChange={(open) => !open && setDialog(null)}
+        target={dialog?.kind === 'transfer' ? dialog.target : null}
+      />
     </div>
   );
 }

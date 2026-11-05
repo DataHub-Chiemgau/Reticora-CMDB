@@ -471,6 +471,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// wired in registerJobKinds; without the job model it runs in the
 	// request.
 	searchHandler := search.NewHandler(repos.Search, repos.Permission)
+	// The label batches of inventory areas (WP-763) are the job
+	// labels.batch, wired in registerJobKinds; they read through the
+	// PostgreSQL resolver (the memory one reads no batch: 503) and store
+	// the PDF in the bucket exports. A queued batch renders asset labels
+	// with the field policy of its creator.
+	labelSource, _ := repos.Labels.(labels.BatchSource)
+	labelBatch := labels.NewBatchHandler(labelSource, opts.Blobs).WithFeatures(opts.Entitlements).
+		WithCreatorPolicy(labels.CreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver)))
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -609,7 +617,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler)
+			importHandler, documentScanner, searchHandler, labelBatch)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -686,11 +694,39 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// implementation under its identity locks, decide every field with
 	// source import (rank 95) and open the ingest's reviews; the policy of
 	// the starter is resolved like a request's.
+	// Assets, contracts, consumables and relationships (WP-776) are
+	// written through their repositories in the row's transaction; the
+	// identity lookups and the audit entry of a row go through the
+	// profile store (PostgreSQL only). Relation columns of CI rows use the
+	// relationship writer.
+	var relWriter *importer.RelationshipWriter
+	if store, ok := repos.Import.(importer.EntityStore); ok {
+		if repos.Asset != nil {
+			assetWriter := importer.NewAssetWriter(repos.Asset, store, fieldResolver)
+			if opts.CIService != nil {
+				assetWriter.WithCILinks(opts.CIService)
+			}
+			importHandler.WithWriter(assetWriter)
+		}
+		if repos.Contract != nil {
+			importHandler.WithWriter(importer.NewContractWriter(repos.Contract, store, fieldResolver))
+		}
+		if repos.Consumable != nil {
+			importHandler.WithWriter(importer.NewConsumableWriter(repos.Consumable, store))
+		}
+		if repos.Relationship != nil {
+			relWriter = importer.NewRelationshipWriter(repos.Relationship, store, fieldResolver).WithIdentities(discoveryHandler)
+			importHandler.WithWriter(relWriter)
+		}
+	}
 	if opts.CIService != nil && repos.Override != nil {
 		ciWriter := importer.NewCIWriter(opts.CIService, discoveryHandler, repos.Override, fieldResolver).
 			WithInstanceFields(repos.CIType).WithFields(repos.CIType).WithLocations(repos.LocationTree)
 		if analyzer, ok := repos.Discovery.(discovery.BulkAnalyzer); ok {
 			ciWriter.WithAnalyzer(analyzer)
+		}
+		if relWriter != nil {
+			ciWriter.WithRelations(relWriter)
 		}
 		importHandler.WithWriter(ciWriter)
 	}
@@ -743,6 +779,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// (WP-278), with the system guards of LCY-03 (WP-279).
 	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)).
 		WithGuards(repos.LifecycleGuards)
+	relationshipHandler := relationship.NewHandler(repos.Relationship, repos.RelationshipType)
+	exportJobHandler := export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate)
+	// The delegating actions of POST /cis/bulk reach the edges, the
+	// lifecycle transition and the export jobs through adapters (WP-780).
+	if opts.CIService != nil {
+		opts.CIService.WithBulkDelegates(CIBulkDelegates(relationshipHandler, repos.Relationship, lifecycleService,
+			repos.LifecycleResolver, exportJobHandler, opts.Entitlements))
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -754,12 +798,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ciHandler(&repos, &opts),
 		jobAPI,
 		notifyHandler(&opts),
-		relationship.NewHandler(repos.Relationship, repos.RelationshipType),
+		relationshipHandler,
 		webhook.NewHandler(repos.Webhook, opts.Dispatcher).WithEgress(opts.Egress),
 		discoveryHandler,
 		topologyHandler,
 		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
-		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
+		exportJobHandler,
 		asset.NewHandler(repos.Asset).
 			WithCIs(ciLookup{repo: repos.CI}).
 			// The active reservation in GET /assets/{id} (API-06, WP-750).
@@ -826,6 +870,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// the object's kind; the path itself is gated with barcode
 		// (WP-762, E-44).
 		labels.NewHandler(repos.Labels).WithFeatures(opts.Entitlements),
+		// The label batches check the read permission and the feature of
+		// the kind like the lookup (WP-763).
+		labelBatch,
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservationHandler(&repos, &opts),
 		// The overrides follow the field permissions of the CI (WP-265).
@@ -1210,7 +1257,13 @@ func reservationHandler(repos *Repositories, opts *Options) *reservation.Handler
 	} else {
 		h = reservation.NewHandler(repos.Reservation, opts.Dispatcher)
 	}
-	return h.WithAvailability(repos.Availability)
+	h.WithAvailability(repos.Availability)
+	// Quantity reservations and their conversion need the feature stock
+	// beyond the route gate assets_basic (E-44, WP-759).
+	if opts.Entitlements != nil {
+		h.WithEntitlements(opts.Entitlements)
+	}
+	return h
 }
 
 // ciHandler builds the CI handler; without the event outbox it hands CI

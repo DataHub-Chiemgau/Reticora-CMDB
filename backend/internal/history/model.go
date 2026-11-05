@@ -154,8 +154,9 @@ type StateSnapshot struct {
 	// MergedIntoID is the survivor a merged CI was merged into (CI-12);
 	// empty for a CI that was not merged.
 	MergedIntoID string `json:"merged_into_id,omitempty"`
-	// BasedOnSnapshotAt is taken_at of the ci_snapshot the replay of a CI
-	// started from (WP-793); nil when it replayed the whole trail.
+	// BasedOnSnapshotAt is taken_at of the ci_snapshot or asset_snapshot
+	// the replay started from (WP-793, WP-795); nil when it replayed the
+	// whole trail.
 	BasedOnSnapshotAt *time.Time `json:"based_on_snapshot_at,omitempty"`
 	// Relationships are the edges of the CI at the point in time (WP-793):
 	// nil (left out) without relationship:read or for the snapshot job,
@@ -201,7 +202,7 @@ var ChangeKinds = map[string]bool{
 // NoRecordedStateError is the answer of a state snapshot whose entity has
 // no recorded change up to the snapshot time: before its creation or
 // before the first recorded change (JOB-04, F-164). The snapshot job fails
-// with it; GET /cis/{id}/state and /assets/{id}/state answer 404.
+// with it; GET /cis/{id}/as-of and /assets/{id}/as-of answer 404.
 type NoRecordedStateError struct {
 	At time.Time
 }
@@ -212,13 +213,22 @@ func (e *NoRecordedStateError) Error() string {
 
 // SourceCISnapshot is the trail element of a ci_snapshot (WP-312): the
 // replay of a CI starts with the last snapshot before the point in time.
-const SourceCISnapshot = "ci_snapshot"
+// SourceAssetSnapshot is that of an asset_snapshot (WP-795).
+const (
+	SourceCISnapshot    = "ci_snapshot"
+	SourceAssetSnapshot = "asset_snapshot"
+)
+
+// isSnapshot reports whether the trail element is a stored snapshot.
+func isSnapshot(c *Change) bool {
+	return c.Source == SourceCISnapshot || c.Source == SourceAssetSnapshot
+}
 
 // Replay reconstructs the field state from an ordered change trail (oldest
 // first), as the writers of the CI changed the row (AUD-08, WP-312):
 //
-//   - an element of the source ci_snapshot sets the whole state (its new
-//     value is the stored document, snapshotDocument);
+//   - an element of the source ci_snapshot or asset_snapshot sets the
+//     whole state (its new value is the stored document, snapshotDocument);
 //   - "create" seeds the state with its new_value object;
 //   - "delete" marks the entity as deleted; the deletion of a CI
 //     (ci.PGRepository.Delete) takes the status of its new_value and
@@ -236,7 +246,7 @@ func Replay(changes []Change) StateSnapshot {
 	snapshot := StateSnapshot{Fields: map[string]any{}}
 	for i := range changes {
 		change := &changes[i]
-		if change.Source == SourceCISnapshot {
+		if isSnapshot(change) {
 			snapshot.setDocument(change.NewValue)
 			continue
 		}
@@ -356,6 +366,13 @@ func (s *StateSnapshot) setDocument(value any) {
 // historize: the last sighting, heartbeats, interface counters and metric
 // values. Its state at a point in time does not hold them (WP-793).
 var NotHistorizedCIFields = []string{"last_seen_at", "heartbeats", "interface_counters", "metrics"}
+
+// NotHistorizedAssetFields are the members of an asset that its trail
+// (asset_history, WP-794) does not hold: the times of the creation and
+// of the last write and the version, the expanded primary CI (its id primary_ci_id is part of
+// the state) and the active reservation (reservations keep a history of
+// their own). Its state at a point in time does not hold them (WP-795).
+var NotHistorizedAssetFields = []string{"created_at", "updated_at", "version", "primary_ci", "active_reservation"}
 
 // EdgeState is an edge of a CI at a point in time (WP-793): the edge as
 // its last relationship_change row up to then recorded it (id, rel_type,

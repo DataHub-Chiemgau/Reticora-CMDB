@@ -1016,14 +1016,16 @@ func (h *Handler) listFilter(w http.ResponseWriter, r *http.Request, orgID strin
 	}
 	// The catalogue holds the projected types (contains, mounted_in,
 	// located_in) as well, so every listed type can be filtered.
-	if filter.RelType != "" && (api.RejectNUL("rel_type", filter.RelType) != nil || !h.validRelType(r, orgID, filter.RelType)) {
+	if filter.RelType != "" && (api.RejectNUL("rel_type", filter.RelType) != nil || !h.validRelType(r.Context(), orgID, filter.RelType)) {
 		api.WriteFieldError(w, &api.FieldError{Field: "rel_type", Message: "must be a relationship type of the catalogue"})
 		return ListFilter{}, false
 	}
 	return filter, true
 }
 
-// Create handles POST /api/v1/relationships
+// Create handles POST /api/v1/relationships: the edge of the request as a
+// manual write of the caller (CreateManual), answered with the fields the
+// caller may read.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -1036,40 +1038,136 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Actor and time of the edge (REL-08).
+	actor := Actor{ID: t.UserID, Type: "user"}
+	if actor.ID == "" {
+		actor = Actor{ID: "api", Type: "api_key"}
+	}
+	rel, rights, err := h.createManual(r.Context(), t.OrganizationID, actor, &req)
+	var refused *RequestError
+	switch {
+	case err == nil:
+	case errors.As(err, &refused):
+		if len(refused.violations) > 0 {
+			writeViolations(w, refused.violations...)
+		} else {
+			api.WriteError(w, refused.Status, http.StatusText(refused.Status), refused.Detail)
+		}
+		return
+	case writeSchemaError(w, err), writeEndpointError(w, err):
+		return
+	default:
+		api.WriteRepoError(w, err)
+		return
+	}
 
+	out := *rel
+	if rights != nil {
+		if err = rights.project(r.Context(), &out); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusCreated, &out)
+}
+
+// RequestError refuses a create request before the write (CreateManual):
+// the status with its detail (400, 422 for a projected type), or a 422 with
+// the rejected fields.
+type RequestError struct {
+	Status     int
+	Detail     string
+	violations []violation
+}
+
+// validation: the fixed texts of the checks of CreateManual.
+func (e *RequestError) Error() string {
+	if len(e.violations) == 0 {
+		return e.Detail
+	}
+	details := make([]string, 0, len(e.violations))
+	for _, v := range e.violations {
+		details = append(details, v.Field+": "+v.Detail)
+	}
+	return strings.Join(details, "; ")
+}
+
+// Fields are the rejected fields of a 422 with violations.
+func (e *RequestError) Fields() []string {
+	fields := make([]string, 0, len(e.violations))
+	for _, v := range e.violations {
+		fields = append(fields, v.Field)
+	}
+	return fields
+}
+
+// refuse is a RequestError with status and detail.
+func refuse(status int, detail string) *RequestError {
+	return &RequestError{Status: status, Detail: detail}
+}
+
+// refuseFields is a 422 RequestError with the rejected fields.
+func refuseFields(violations ...violation) *RequestError {
+	return &RequestError{Status: http.StatusUnprocessableEntity, violations: violations}
+}
+
+// errStructuralRelType names the projected types, which no edge stores.
+const errStructuralRelType = " is projected and cannot be stored: containment is the CI's parent_ci_id, " +
+	"mounted_in follows from the rack mount, located_in from the CI's location"
+
+// ManualRelType checks a rel_type for a manual edge: a projected type
+// (StructuralRelTypes) is a 422, a type the catalogue lacks (validRelType)
+// a 400, both as *RequestError.
+func (h *Handler) ManualRelType(ctx context.Context, orgID, relType string) error {
+	if StructuralRelTypes[relType] {
+		return refuse(http.StatusUnprocessableEntity, "rel_type "+relType+errStructuralRelType)
+	}
+	if !h.validRelType(ctx, orgID, relType) {
+		return refuse(http.StatusBadRequest, "invalid rel_type")
+	}
+	return nil
+}
+
+// CreateManual creates the edge of req as a manual write of actor in orgID
+// (POST /api/v1/relationships and the bulk add_relationship of the CIs,
+// WP-780): the checks of the request form (*RequestError: 400, a projected
+// type 422, reserved attributes 422 with the fields), the catalogue of the
+// type, the provenance with the actor, source manual and verification
+// state verified for a manual edge, the field permissions of the principal
+// in ctx (RBA-07) and the schema of the type (REL-07). Errors of the
+// repository (an endpoint the caller cannot see, a type the relationship
+// type does not allow, the cardinality, an existing edge) pass unchanged.
+// It returns the stored edge, not projected.
+func (h *Handler) CreateManual(ctx context.Context, orgID string, actor Actor, req CreateRequest) (*Relationship, error) { //nolint:gocritic // a request value like the handler decodes
+	rel, _, err := h.createManual(ctx, orgID, actor, &req)
+	return rel, err
+}
+
+// createManual is CreateManual; it also returns the field permissions of
+// the edge (nil without), with which Create projects its answer.
+func (h *Handler) createManual(ctx context.Context, orgID string, actor Actor, req *CreateRequest) (*Relationship, *edgeRights, error) {
 	if req.SourceCIID == "" || req.TargetCIID == "" || req.RelType == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "source_ci_id, target_ci_id, and rel_type are required")
-		return
+		return nil, nil, refuse(http.StatusBadRequest, "source_ci_id, target_ci_id, and rel_type are required")
 	}
-	if StructuralRelTypes[req.RelType] {
-		api.WriteError(w, http.StatusUnprocessableEntity, "Unprocessable Entity",
-			"rel_type "+req.RelType+" is projected and cannot be stored: containment is the CI's parent_ci_id, "+
-				"mounted_in follows from the rack mount, located_in from the CI's location")
-		return
-	}
-	if !h.validRelType(r, t.OrganizationID, req.RelType) {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid rel_type")
-		return
+	if err := h.ManualRelType(ctx, orgID, req.RelType); err != nil {
+		return nil, nil, err
 	}
 	// The seven sources of REL-08; rule is accepted as workflow (E-01).
 	source, validSource := CanonicalSource(req.Source)
 	if !validSource {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid source")
-		return
+		return nil, nil, refuse(http.StatusBadRequest, "invalid source")
 	}
 	if SystemSources[source] {
 		// Discovery and agent edges come only from their paths (F-271).
-		writeViolations(w, violation{Field: "source", Detail: ErrSystemSource.Error()})
-		return
+		return nil, nil, refuseFields(violation{Field: "source", Detail: ErrSystemSource.Error()})
 	}
 	req.Source = source
 	if req.Confidence != nil && (*req.Confidence < 0 || *req.Confidence > 1) {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "confidence must be between 0 and 1")
-		return
+		return nil, nil, refuse(http.StatusBadRequest, "confidence must be between 0 and 1")
 	}
 
 	rel := &Relationship{
-		OrganizationID: t.OrganizationID,
+		OrganizationID: orgID,
 		SourceCIID:     req.SourceCIID,
 		TargetCIID:     req.TargetCIID,
 		RelType:        req.RelType,
@@ -1092,11 +1190,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		rel.Source = "manual"
 	}
 	// Actor and time of the edge (REL-08).
-	actor, actorType := t.UserID, "user"
-	if actor == "" {
-		actor, actorType = "api", "api_key"
-	}
-	rel.Attributes["provenance"] = Provenance(actor, actorType, rel.Source, time.Now())
+	rel.Attributes["provenance"] = Provenance(actor.ID, actor.Type, rel.Source, time.Now())
 	if rel.Source == "manual" {
 		// Manual relationships are born verified; they must never be removed
 		// silently because discovery does not detect them (spec §12).
@@ -1110,58 +1204,37 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		rel.VerificationState = "unverified"
 	}
 	if !ValidVerificationStates[rel.VerificationState] {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid verification_state")
-		return
+		return nil, nil, refuse(http.StatusBadRequest, "invalid verification_state")
 	}
-	if rel.VerificationState == "verified" {
-		rel.VerifiedBy = t.UserID
+	if rel.VerificationState == "verified" && actor.Type == "user" {
+		rel.VerifiedBy = actor.ID
 	}
 	// Reserved attribute keys (422, REL-07): provenance is recorded by the
 	// server, a field name of the edge is no attribute.
 	if violations := reservedViolations(req.Attributes); len(violations) > 0 {
-		writeViolations(w, violations...)
-		return
+		return nil, nil, refuseFields(violations...)
 	}
 
 	// The fields of the request against the field permissions (RBA-07):
 	// after the checks of the request form (400), before the write.
-	rights, err := newEdgeRights(r.Context(), t.OrganizationID, h.types)
+	rights, err := newEdgeRights(ctx, orgID, h.types)
 	if err != nil {
-		api.WriteRepoError(w, err)
-		return
+		return nil, nil, err
 	}
 	if rights != nil {
-		if err = h.checkCreate(r.Context(), rights, &req, rel); err != nil {
-			api.WriteRepoError(w, err)
-			return
+		if checkErr := h.checkCreate(ctx, rights, req, rel); checkErr != nil {
+			return nil, nil, checkErr
 		}
 	}
 	// The attributes against the schema of the type (422, REL-07), after
 	// the field permissions; a schema that cannot be read is 500.
-	if err = h.checkMetadata(r.Context(), t.OrganizationID, rel.RelType, req.Attributes, req.Attributes, nil); err != nil {
-		if writeSchemaError(w, err) {
-			return
-		}
-		api.WriteRepoError(w, err)
-		return
+	if schemaErr := h.checkMetadata(ctx, orgID, rel.RelType, req.Attributes, req.Attributes, nil); schemaErr != nil {
+		return nil, nil, schemaErr
 	}
-
-	if err = h.repo.Create(r.Context(), rel); err != nil {
-		if writeEndpointError(w, err) {
-			return
-		}
-		api.WriteRepoError(w, err)
-		return
+	if createErr := h.repo.Create(ctx, rel); createErr != nil {
+		return nil, nil, createErr
 	}
-
-	out := *rel
-	if rights != nil {
-		if err = rights.project(r.Context(), &out); err != nil {
-			api.WriteRepoError(w, err)
-			return
-		}
-	}
-	api.WriteJSON(w, http.StatusCreated, &out)
+	return rel, rights, nil
 }
 
 // checkCreate checks the fields of a POST /relationships against the field
@@ -1257,9 +1330,9 @@ func writeViolations(w http.ResponseWriter, violations ...violation) {
 
 // validRelType resolves the rel_type against the metadata catalogue when
 // available, falling back to the built-in list.
-func (h *Handler) validRelType(r *http.Request, orgID, relType string) bool {
+func (h *Handler) validRelType(ctx context.Context, orgID, relType string) bool {
 	if h.types != nil {
-		ok, err := h.types.Exists(r.Context(), orgID, relType)
+		ok, err := h.types.Exists(ctx, orgID, relType)
 		if err == nil {
 			return ok
 		}

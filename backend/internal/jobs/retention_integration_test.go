@@ -118,11 +118,15 @@ func TestRetentionRunsAgainstPostgres(t *testing.T) {
 			t.Fatalf("%s: %v", sql, err)
 		}
 	}
+	historyAsset := f.ID()
 	for _, age := range []time.Duration{4 * 365 * 24 * time.Hour, 365 * 24 * time.Hour} {
 		exec(`INSERT INTO ci_change (organization_id, ci_id, change_type, created_at) VALUES ($1, $2, 'update', $3)`, f.OrgA, ci, now.Add(-age))
 		exec(`INSERT INTO entity_change (organization_id, entity_type, entity_id, change_type, created_at) VALUES ($1, 'asset', $2, 'updated', $3)`,
-			f.OrgA, f.ID(), now.Add(-age))
+			f.OrgA, historyAsset, now.Add(-age))
 	}
+	// The anchor of the asset before the cut-off (WP-795): its old row goes.
+	exec(`INSERT INTO asset_snapshot (organization_id, asset_id, taken_at, reason, state, schema_version)
+		VALUES ($1, $2, $3, 'weekly', '{"fields":{}}', 1)`, f.OrgA, historyAsset, now.Add(-3*365*24*time.Hour-24*time.Hour))
 	// The anchor of the CI before the cut-off (WP-793): its old row goes.
 	exec(`INSERT INTO ci_snapshot (organization_id, ci_id, taken_at, reason, state, schema_version)
 		VALUES ($1, $2, $3, 'weekly', '{"fields":{}}', 1)`, f.OrgA, ci, now.Add(-3*365*24*time.Hour-24*time.Hour))

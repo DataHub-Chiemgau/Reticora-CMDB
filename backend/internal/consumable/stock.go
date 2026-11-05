@@ -130,14 +130,19 @@ type lockedConsumable struct {
 	below                       bool
 }
 
-// lockConsumable locks the consumable (SELECT … FOR UPDATE, which applies
+// lockConsumable locks the consumable (SELECT … FOR NO KEY UPDATE, which applies
 // its select and update policies, like lockObject of the movement service)
 // and returns it. A consumable that is unknown, of another organization or
 // outside the caller's scope is ErrNotFound; so is an article without
 // client for a client-scoped principal (E-128 (b)). on_hand_total and the
 // stock per bin change only under this lock, so the edge of the minimum
 // level is seen exactly once, also by parallel bookings on different bins
-// (WP-285).
+// (WP-285). The lock is FOR NO KEY UPDATE (WP-759): it serializes the
+// bookings like FOR UPDATE but does not block the key share lock of the
+// foreign keys on consumable, so a reservation that holds the stock row of
+// its bin and inserts its ledger row (stock_movement.consumable_id) does
+// not wait in a cycle with a booking that holds the consumable and waits
+// for that stock row.
 func lockConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) (*lockedConsumable, error) {
 	if !api.IsUUID(id) {
 		return nil, ErrNotFound
@@ -145,7 +150,7 @@ func lockConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) (*lockedCo
 	c := &lockedConsumable{id: id}
 	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(sku, ''), name, unit,
 		on_hand_total::float8, min_level::float8, on_hand_total < min_level
-		FROM consumable WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).
+		FROM consumable WHERE id = $1 AND organization_id = $2 FOR NO KEY UPDATE`, id, orgID).
 		Scan(&c.client, &c.sku, &c.name, &c.unit, &c.total, &c.minLevel, &c.below)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -210,6 +215,36 @@ func checkBin(ctx context.Context, tx pgx.Tx, orgID, field, id, client string) e
 // before the booking locks the consumable row first, one booking several
 // consumables in ascending id.
 func ApplyBooking(ctx context.Context, tx pgx.Tx, b *Booking) error {
+	return applyBooking(ctx, tx, b, false)
+}
+
+// ApplyReservedRetrieval books b, the retrieval of the whole quantity of a
+// converted quantity reservation (POST /api/v1/reservations/{id}/convert,
+// WP-759), on the stock of its bin in tx like ApplyBooking, with one
+// difference: on_hand and reserved fall together by the quantity, so the
+// take is not checked against on_hand − reserved but against reserved (the
+// reservation's own quantity is part of it). It is a parameter of the
+// call, not a column of the ledger. The caller has locked the consumable
+// (LockConsumable), the stock row and the reservation in this order; a
+// reserved quantity that does not cover the take is ErrInsufficientStock.
+func ApplyReservedRetrieval(ctx context.Context, tx pgx.Tx, b *Booking) error {
+	if b.MovementType != "retrieval" {
+		return fieldError("movement_type", "a take out of a reservation is a retrieval")
+	}
+	return applyBooking(ctx, tx, b, true)
+}
+
+// LockConsumable locks the consumable id in tx (FOR UPDATE under the
+// caller's scope), the first lock of ApplyBooking: a caller that locks
+// stock or reservation rows before a booking takes it first (WP-759). An
+// unknown or invisible consumable is ErrNotFound.
+func LockConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) error {
+	_, err := lockConsumable(ctx, tx, orgID, id)
+	return err
+}
+
+// applyBooking is ApplyBooking; fromReservation is ApplyReservedRetrieval.
+func applyBooking(ctx context.Context, tx pgx.Tx, b *Booking, fromReservation bool) error {
 	deltas, err := bookingDeltas(b)
 	if err != nil {
 		return err
@@ -251,15 +286,25 @@ func ApplyBooking(ctx context.Context, tx pgx.Tx, b *Booking) error {
 			continue
 		}
 		l, ok := locked[d.locationID]
-		if !ok || l.onHand-l.reserved < -d.delta {
+		switch {
+		case !ok:
+			return ErrInsufficientStock
+		case fromReservation && (l.reserved < -d.delta || l.onHand < -d.delta):
+			return ErrInsufficientStock
+		case !fromReservation && l.onHand-l.reserved < -d.delta:
 			return ErrInsufficientStock
 		}
 	}
+	// A take out of a reservation lowers reserved with on_hand.
+	reservedFactor := 0.0
+	if fromReservation {
+		reservedFactor = 1
+	}
 	for _, d := range deltas {
 		if d.delta < 0 {
-			if _, err = tx.Exec(ctx, `UPDATE stock_level SET on_hand = on_hand + $4, updated_at = now()
+			if _, err = tx.Exec(ctx, `UPDATE stock_level SET on_hand = on_hand + $4, reserved = reserved + $5, updated_at = now()
 				WHERE consumable_id = $1 AND location_id = $2 AND organization_id = $3`,
-				b.ConsumableID, d.locationID, b.OrganizationID, d.delta); err != nil {
+				b.ConsumableID, d.locationID, b.OrganizationID, d.delta, reservedFactor*d.delta); err != nil {
 				return fmt.Errorf("book stock: %w", err)
 			}
 			continue

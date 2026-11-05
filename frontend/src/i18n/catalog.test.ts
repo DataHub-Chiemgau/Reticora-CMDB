@@ -37,6 +37,17 @@ const pageSources = import.meta.glob('../pages/*.tsx', {
 }) as Record<string, string>;
 
 // WP-314: the components of the metamodel administration, without tests.
+// WP-318: the pickers and the flow dialogs.
+const flowSources = import.meta.glob(
+  [
+    '../components/pickers/**/*.tsx',
+    '../components/flows/**/*.tsx',
+    '!../components/pickers/**/*.test.tsx',
+    '!../components/flows/**/*.test.tsx',
+  ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
 const metamodelSources = import.meta.glob(
   ['../components/metamodel/**/*.tsx', '!../components/metamodel/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
@@ -79,8 +90,11 @@ const BACKEND_ENUMS = {
   assetStatuses: ['in_stock', 'assigned', 'maintenance', 'retired', 'disposed', 'lost'],
   // backend/migrations/000009_phase2_assets.up.sql asset_category_check.
   assetCategories: ['hardware', 'software', 'license', 'cloud_resource', 'accessory', 'other'],
-  // backend/migrations/000010_phase2_assignments.up.sql assignment_status_check.
-  assignmentStatuses: ['active', 'returned', 'transferred', 'overdue', 'cancelled'],
+  // backend/migrations/000257_assignment_projection.up.sql: the status of
+  // the view assignment_projection over the ledger (WP-747); the table
+  // assignment with its status check is gone (000266), cancelled no longer
+  // occurs (WP-318).
+  assignmentStatuses: ['active', 'returned', 'transferred', 'overdue'],
   // backend/migrations/000011_phase2_documents.up.sql document_category_check.
   documentCategories: [
     'general',
@@ -124,6 +138,8 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['asset.statuses', BACKEND_ENUMS.assetStatuses],
   ['asset.categories', BACKEND_ENUMS.assetCategories],
   ['assignment.statuses', BACKEND_ENUMS.assignmentStatuses],
+  // assignment_type of the projection (000257): assignment or transfer.
+  ['assignment.types', ['assignment', 'transfer']],
   ['document.categories', BACKEND_ENUMS.documentCategories],
   ['ticket.statuses', BACKEND_ENUMS.ticketStatuses],
   ['ticket.categories', BACKEND_ENUMS.ticketCategories],
@@ -268,6 +284,18 @@ describe('i18n catalog', () => {
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
   });
 
+  it('lists the pickers and the flow dialogs (WP-318)', () => {
+    expect(Object.keys(flowSources)).toEqual(
+      expect.arrayContaining([
+        '../components/pickers/ObjectPicker.tsx',
+        '../components/pickers/LocationPicker.tsx',
+        '../components/pickers/UserTeamPicker.tsx',
+        '../components/flows/AssignDialogs.tsx',
+      ]),
+    );
+    expect(Object.keys(flowSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
   it('offers exactly the template version states of the OpenAPI types (WP-314)', () => {
     expect([...TEMPLATE_VERSION_STATUSES]).toEqual(specEnum('TemplateVersion', 'status'));
     expect(Object.keys(metamodelSources)).toContain('../components/metamodel/MetamodelDiff.tsx');
@@ -306,9 +334,12 @@ describe('i18n catalog', () => {
     '../pages/TemplatesPage.tsx',
     // WP-799: the work area of the metamodel drafts.
     '../pages/MetamodelDraftsPage.tsx',
+    // WP-318: the assignment page, the pickers and the flow dialogs.
+    '../pages/AssignmentListPage.tsx',
     ...Object.keys(metamodelSources),
+    ...Object.keys(flowSources),
   ])('%s has no literal option labels', (file) => {
-    const source = pageSources[file] ?? metamodelSources[file];
+    const source = pageSources[file] ?? metamodelSources[file] ?? flowSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);
