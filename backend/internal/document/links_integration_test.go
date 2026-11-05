@@ -22,8 +22,9 @@ import (
 
 // linkWorld seeds the targets of the link tests in organization A: two
 // sites of client 1 and one of client 2 (each with a room), assets at
-// those rooms with their disposal records, an assignment of a client-2
-// asset, two teams with one ticket each and an org-wide document author.
+// those rooms with their disposal records, an assignment movement of a
+// client-2 asset (the table assignment is gone, WP-843), two teams with
+// one ticket each and an org-wide document author.
 type linkWorld struct {
 	f                        *scopetest.Fixture
 	repo                     *document.PGRepository
@@ -32,7 +33,7 @@ type linkWorld struct {
 	room1, room1b, room2     string
 	asset1, asset2           string
 	disposal1, disposal2     string
-	assignment2              string
+	movement2                string
 	teamA, teamB             string
 	ticketA, ticketA2        string
 	ticketB                  string
@@ -58,8 +59,8 @@ func newLinkWorld(t *testing.T) *linkWorld {
 			f.OrgA, asset)
 	}
 	w.disposal1, w.disposal2 = disposal(w.asset1), disposal(w.asset2)
-	w.assignment2 = w.scalar(t, `INSERT INTO assignment (organization_id, assigned_to, assigned_by, asset_id) VALUES ($1, $2, $2, $3) RETURNING id::text`,
-		f.OrgA, w.user, w.asset2)
+	w.movement2 = w.scalar(t, `INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, assignee_user_id)
+		VALUES ($1, 'asset', $3, 'assignment', $2) RETURNING id::text`, f.OrgA, w.user, w.asset2)
 	team := func(name string) string {
 		return w.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, $2) RETURNING id::text`, f.OrgA, name)
 	}
@@ -213,9 +214,9 @@ func TestDocumentLinkTargetsIsolation(t *testing.T) {
 	foreign := map[string]string{
 		"location":        w.doc(t, "lk-foreign-location", "location", w.room2),
 		"disposal_record": w.doc(t, "lk-foreign-disposal", "disposal_record", w.disposal2),
-		"assignment":      w.doc(t, "lk-foreign-assignment", "assignment", w.assignment2),
+		"stock_movement":  w.doc(t, "lk-foreign-movement", "stock_movement", w.movement2),
 	}
-	targets := map[string]string{"location": w.room2, "disposal_record": w.disposal2, "assignment": w.assignment2}
+	targets := map[string]string{"location": w.room2, "disposal_record": w.disposal2, "stock_movement": w.movement2}
 	for entityType, target := range targets {
 		if _, err := w.link(w.client1Ctx, own, entityType, target); !errors.Is(err, api.ErrNotFound) {
 			t.Errorf("client 1 links a %s of client 2: %v, want not found", entityType, err)
@@ -228,7 +229,7 @@ func TestDocumentLinkTargetsIsolation(t *testing.T) {
 		t.Errorf("own document after the refused links: link_count/links %s, want 1/1", got)
 	}
 	// A missing target is not found, also for an org-wide principal.
-	for _, entityType := range []string{"assignment", "stocktake", "location", "disposal_record"} {
+	for _, entityType := range []string{"stock_movement", "stocktake", "location", "disposal_record"} {
 		if _, err := w.link(w.orgCtx, own, entityType, f.ID()); !errors.Is(err, api.ErrNotFound) {
 			t.Errorf("link to a missing %s: %v, want not found", entityType, err)
 		}

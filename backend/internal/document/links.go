@@ -28,18 +28,18 @@ const (
 // to (WP-267). Each entry returns the EXISTS predicate that a target with
 // the id expression id is visible under the transaction's tenant scope: the
 // policies of the target tables filter the subqueries. Every value must also
-// stand in doc_link_entity_type_check (migrations 000217, 000238), and
-// derive_document_link_scope derives client, site and team from the target:
+// stand in doc_link_entity_type_check (migrations 000217, 000238, 000266),
+// and derive_document_link_scope derives client, site and team from the
+// target:
 //
 //   - ci, asset, ticket and location are checked directly;
-//   - assignment through its asset and CI, like assignmentVisible in
-//     assignment/pg_repository.go (assignment has no scope columns);
 //   - disposal_record directly (its own client and site since 000145);
 //   - contract directly (its own client; org-wide with client_id NULL,
 //     WP-737);
 //   - stocktake on existence only (org-wide);
 //   - stock_movement directly (its own client and site, WP-744; the
-//     signature images of WP-276).
+//     signature images of WP-276; the links of the former assignment rows
+//     since the drop of assignment, WP-843, by the id of their movement).
 var linkTargets = map[string]func(id string) string{
 	"stock_movement": func(id string) string {
 		return "EXISTS (SELECT 1 FROM stock_movement WHERE stock_movement.id = " + id + ")"
@@ -55,11 +55,6 @@ var linkTargets = map[string]func(id string) string{
 	},
 	"location": func(id string) string {
 		return "EXISTS (SELECT 1 FROM location WHERE location.id = " + id + ")"
-	},
-	"assignment": func(id string) string {
-		return "EXISTS (SELECT 1 FROM assignment WHERE assignment.id = " + id +
-			" AND (assignment.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = assignment.asset_id))" +
-			" AND (assignment.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = assignment.ci_id)))"
 	},
 	"disposal_record": func(id string) string {
 		return "EXISTS (SELECT 1 FROM disposal_record WHERE disposal_record.id = " + id + ")"

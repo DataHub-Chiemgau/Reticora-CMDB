@@ -4417,7 +4417,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276; also the former links of assignments, WP-843); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -16784,7 +16784,7 @@ export interface components {
       id: string;
       organization_id: string;
       document_id: string;
-      /** @description ci, asset, assignment, ticket, location, disposal_record, stocktake or contract. A link to a contract takes the client of the contract and goes when the contract is deleted (WP-737). */
+      /** @description ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement. A link to a contract takes the client of the contract and goes when the contract is deleted (WP-737). */
       entity_type: string;
       entity_id: string;
       /** Format: date-time */
@@ -16834,7 +16834,7 @@ export interface components {
       limit_mb: number | null;
     };
     CreateDocumentLinkRequest: {
-      /** @description ci, asset, assignment, ticket, location, disposal_record, stocktake or contract. */
+      /** @description ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement. */
       entity_type: string;
       entity_id: string;
     };
@@ -20558,7 +20558,7 @@ export interface operations {
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
         category?: string;
-        /** @description Only documents linked to this target (WP-811); requires entity_id. One of ci, asset, assignment, ticket, location, disposal_record, stocktake and contract; any other value answers 422. */
+        /** @description Only documents linked to this target (WP-811); requires entity_id. One of ci, asset, ticket, location, disposal_record, stocktake, contract and stock_movement; any other value answers 422. */
         entity_type?: string;
         /** @description Id of the target named by entity_type; requires entity_type. A target that does not exist or lies outside the caller's scope answers 404, only links visible in the scope count. */
         entity_id?: string;

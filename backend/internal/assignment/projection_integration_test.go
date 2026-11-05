@@ -2,6 +2,8 @@ package assignment_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"os"
@@ -37,6 +39,24 @@ func readProjectionMigration(t *testing.T) (up, down string) {
 	return string(rawUp), string(rawDown)
 }
 
+// dropMigration drops the table assignment (WP-843); the replays of older
+// migrations rebuild it with its down part first.
+const dropMigration = "../../migrations/000266_assignment_drop"
+
+// readDropMigration returns the up and the down part of 000266.
+func readDropMigration(t *testing.T) (up, down string) {
+	t.Helper()
+	rawUp, err := os.ReadFile(dropMigration + ".up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawDown, err := os.ReadFile(dropMigration + ".down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(rawUp), string(rawDown)
+}
+
 // projectedAssignment is a row of assignment_projection.
 type projectedAssignment struct {
 	id, status, kind, user, condition, due string
@@ -52,7 +72,8 @@ type ledgerMovement struct {
 
 // TestAssignmentProjectionMigration covers the takeover of the history in
 // 000257 (AST-02, AST-07, WP-747) in a rolled-back transaction: after the
-// down part, rows of assignment from before WP-275 (returned, transferred,
+// down parts of 000266 (which rebuilds assignment, WP-843) and 000257, rows
+// of assignment from before WP-275 (returned, transferred,
 // cancelled, two open rows of one asset, rows with only a ci_id with and
 // without asset, a user of another organization) and best-effort movements
 // (holderless movements of asset_movement, the copies of 000242, a return
@@ -69,6 +90,7 @@ func TestAssignmentProjectionMigration(t *testing.T) {
 	f := scopetest.Seed(t, "a6")
 	bg := context.Background()
 	up, down := readProjectionMigration(t)
+	_, dropDown := readDropMigration(t)
 	alice := f.AppUser(t, f.OrgA, "wp747alice")
 	bob := f.AppUser(t, f.OrgA, "wp747bob")
 	stranger := f.AppUser(t, f.OrgB, "wp747stranger")
@@ -97,6 +119,7 @@ func TestAssignmentProjectionMigration(t *testing.T) {
 		}
 		return n
 	}
+	exec(dropDown)
 	exec(down)
 	exec(`UPDATE organization SET timezone = 'Europe/Berlin' WHERE id = $1`, f.OrgA)
 	exec(`UPDATE ci SET asset_id = $2 WHERE id = $1`, ciWithAsset, aViaCI)
@@ -356,6 +379,248 @@ func TestAssignmentProjectionMigration(t *testing.T) {
 	}
 	if p := projected(aTwo); len(p) != 2 || p[1].status != "overdue" {
 		t.Fatalf("projection after down and up = %+v", p)
+	}
+}
+
+// TestAssignmentDropMigration covers the drop of assignment in 000266
+// (AST-07, WP-843) in a rolled-back transaction: after its down part, a row
+// whose movement 000257 booked under the same id (asset of client 1,
+// handover and return signature, a document link) and a row without
+// movement (only a ci_id, a handover signature, a document link) get the
+// up part. Expected: the table is gone; both signatures stand unchanged in
+// assignment_signature_legacy with payload_sha256, DELETE and any UPDATE
+// but payload := NULL fail there; the link of the booked row hangs at its
+// movement with the client of the booking, the other is quarantined; both
+// rows are quarantined (the one without movement with its signature). The
+// client change of the asset succeeds after the drop, the link and the
+// signatures stay visible to client 1 and hidden from client 2 and from
+// organization B. Down brings rows, signatures and links back exactly, up
+// again the same state.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAssignmentDropMigration(t *testing.T) {
+	f := scopetest.Seed(t, "a6")
+	bg := context.Background()
+	up, down := readDropMigration(t)
+	alice := f.AppUser(t, f.OrgA, "wp843alice")
+	bob := f.AppUser(t, f.OrgA, "wp843bob")
+	asset := f.Asset(t, f.OrgA, f.Client1, "wp843-hist")
+	ciAlone := f.CI(t, f.OrgA, f.Client1, "wp843-ci-alone")
+
+	tx, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(bg) }()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(bg, query, args...); execErr != nil {
+			t.Fatalf("%.70s...: %v", strings.TrimSpace(query), execErr)
+		}
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if scanErr := tx.QueryRow(bg, query, args...).Scan(&n); scanErr != nil {
+			t.Fatalf("%s: %v", query, scanErr)
+		}
+		return n
+	}
+	text := func(query string, args ...any) string {
+		t.Helper()
+		var v string
+		if scanErr := tx.QueryRow(bg, query, args...).Scan(&v); scanErr != nil {
+			t.Fatalf("%s: %v", query, scanErr)
+		}
+		return v
+	}
+	// refused runs query in a savepoint and returns its error.
+	refused := func(query string, args ...any) error {
+		t.Helper()
+		sp, spErr := tx.Begin(bg)
+		if spErr != nil {
+			t.Fatal(spErr)
+		}
+		defer func() { _ = sp.Rollback(bg) }()
+		_, execErr := sp.Exec(bg, query, args...)
+		return execErr
+	}
+	// visible counts the rows of query as reticora_app in organization org,
+	// restricted to the clients (empty: org-wide), in a savepoint.
+	visible := func(org, clients, query string, args ...any) int {
+		t.Helper()
+		sp, spErr := tx.Begin(bg)
+		if spErr != nil {
+			t.Fatal(spErr)
+		}
+		defer func() { _ = sp.Rollback(bg) }()
+		if _, setErr := sp.Exec(bg, `SELECT set_config('app.org_id', $1, true), set_config('app.client_scope', $2, true)`, org, clients); setErr != nil {
+			t.Fatal(setErr)
+		}
+		if _, setErr := sp.Exec(bg, `SET LOCAL ROLE reticora_app`); setErr != nil {
+			t.Fatal(setErr)
+		}
+		var n int
+		if scanErr := sp.QueryRow(bg, query, args...).Scan(&n); scanErr != nil {
+			t.Fatalf("%s: %v", query, scanErr)
+		}
+		return n
+	}
+
+	exec(down)
+	base := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	const (
+		checkout = `{"method": "drawn", "signed_at": "2026-03-01T10:00:00Z", "signer_name": {"$pii": "c0de0843-0000-4000-8000-000000000001"}, "image_base64": "aGVsbG8="}`
+		giveBack = `{"method": "drawn", "object_key": "org/wp843/return.png", "signed_at": "2026-03-01T11:00:00Z", "signer_name": "Rita Rueckgabe"}`
+		alone    = `{"method": "typed", "signer_name": {"$pii": "c0de0843-0000-4000-8000-000000000002"}}`
+	)
+	booked, rowAlone := f.ID(), f.ID()
+	exec(`INSERT INTO assignment (id, organization_id, asset_id, assigned_to, assigned_by, status, assigned_at, returned_at,
+			checkout_signature, return_signature, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'returned', $6, $7, $8::jsonb, $9::jsonb, $6, $7)`,
+		booked, f.OrgA, asset, alice, bob, base, base.Add(time.Hour), checkout, giveBack)
+	exec(`INSERT INTO assignment (id, organization_id, ci_id, assigned_to, assigned_by, status, assigned_at, checkout_signature, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, 'active', $6, $7::jsonb, $6, $6)`, rowAlone, f.OrgA, ciAlone, alice, bob, base, alone)
+	// The movements 000257 booked for the first row.
+	exec(`INSERT INTO stock_movement (id, organization_id, item_kind, asset_id, movement_type, actor_id, assignee_user_id, occurred_at, created_at)
+		VALUES ($1, $2, 'asset', $3, 'assignment', $5, $4, $6, $6), (gen_random_uuid(), $2, 'asset', $3, 'return', NULL, $4, $7, $7)`,
+		booked, f.OrgA, asset, alice, bob, base, base.Add(time.Hour))
+	doc := text(`INSERT INTO document (organization_id, title, file_name, uploaded_by, storage_key)
+		VALUES ($1, 'wp843', 'wp843.pdf', $2, '') RETURNING id::text`, f.OrgA, bob)
+	link := func(entityID string) string {
+		return text(`INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($1, $2, 'assignment', $3)
+			RETURNING id::text`, f.OrgA, doc, entityID)
+	}
+	linkBooked, linkAlone := link(booked), link(rowAlone)
+	snapshot := func(id string) string {
+		return text(`SELECT to_jsonb(s)::text FROM assignment s WHERE id = $1`, id)
+	}
+	linkRow := func(id string) string {
+		return text(`SELECT to_jsonb(l)::text FROM document_link l WHERE id = $1`, id)
+	}
+	beforeBooked, beforeAlone, beforeLinkAlone := snapshot(booked), snapshot(rowAlone), linkRow(linkAlone)
+
+	exec(up)
+
+	if n := count(`SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.assignment')`); n != 0 {
+		t.Fatal("assignment still exists after 000266")
+	}
+	// The signatures of the booked row, unchanged with their hash.
+	type archived struct{ kind, payload, sha string }
+	rows, err := tx.Query(bg, `SELECT kind, payload::text, payload_sha256 FROM assignment_signature_legacy
+		WHERE movement_id = $1 ORDER BY kind`, booked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (archived, error) {
+		var a archived
+		return a, row.Scan(&a.kind, &a.payload, &a.sha)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sigs) != 2 || sigs[0].kind != "checkout" || sigs[1].kind != "return" {
+		t.Fatalf("archived signatures = %+v, want checkout and return", sigs)
+	}
+	for i, want := range []string{checkout, giveBack} {
+		if n := count(`SELECT count(*) FROM assignment_signature_legacy WHERE movement_id = $1 AND kind = $2 AND payload = $3::jsonb`,
+			booked, sigs[i].kind, want); n != 1 {
+			t.Errorf("archived %s signature %s, want %s", sigs[i].kind, sigs[i].payload, want)
+		}
+		sum := sha256.Sum256([]byte(sigs[i].payload))
+		if sigs[i].sha != hex.EncodeToString(sum[:]) {
+			t.Errorf("payload_sha256 of the %s signature = %s, want the SHA-256 of its payload", sigs[i].kind, sigs[i].sha)
+		}
+	}
+	if n := count(`SELECT count(*) FROM assignment_signature_legacy WHERE movement_id = $1`, rowAlone); n != 0 {
+		t.Fatalf("signatures of the row without movement in the archive: %d", n)
+	}
+	if n := count(`SELECT count(*) FROM stock_movement WHERE id = $1 AND signature_hash IS NULL AND document_id IS NULL`, booked); n != 1 {
+		t.Fatal("the movement of the legacy signature got a signature hash")
+	}
+	// Rows are kept: only payload := NULL passes the trigger.
+	for name, query := range map[string]string{
+		"DELETE":         `DELETE FROM assignment_signature_legacy WHERE movement_id = $1`,
+		"UPDATE kind":    `UPDATE assignment_signature_legacy SET kind = 'return' WHERE movement_id = $1 AND kind = 'checkout'`,
+		"UPDATE payload": `UPDATE assignment_signature_legacy SET payload = '{}'::jsonb WHERE movement_id = $1`,
+		"UPDATE hash":    `UPDATE assignment_signature_legacy SET payload = NULL, payload_sha256 = repeat('0', 64) WHERE movement_id = $1`,
+	} {
+		if execErr := refused(query, booked); execErr == nil {
+			t.Errorf("%s on assignment_signature_legacy succeeded", name)
+		}
+	}
+	if execErr := refused(`UPDATE assignment_signature_legacy SET payload = NULL WHERE movement_id = $1`, booked); execErr != nil {
+		t.Errorf("clearing the payload: %v", execErr)
+	}
+
+	// Links: the booked row's at its movement, the other quarantined.
+	if got := text(`SELECT entity_type || ' ' || entity_id || ' ' || COALESCE(client_id::text, '') FROM document_link WHERE id = $1`, linkBooked); got != "stock_movement "+booked+" "+f.Client1 {
+		t.Fatalf("link of the booked row = %q", got)
+	}
+	if n := count(`SELECT count(*) FROM document_link WHERE id = $1`, linkAlone); n != 0 {
+		t.Fatal("the link without movement stayed")
+	}
+	if n := count(`SELECT count(*) FROM document_link WHERE entity_type = 'assignment'`); n != 0 {
+		t.Fatalf("%d links on assignment left", n)
+	}
+	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000266' AND source_table = 'document_link'
+			AND reason = 'dropped: assignment without movement' AND row_data = $1::jsonb`, beforeLinkAlone); n != 1 {
+		t.Fatal("the link without movement is not quarantined")
+	}
+	// Rows: quarantined, the booked one without its signatures.
+	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000266' AND source_table = 'assignment'
+			AND reason = 'dropped: projection' AND row_data = ($1::jsonb - 'checkout_signature' - 'return_signature')
+			    || jsonb_build_object('document_link_ids', jsonb_build_array($2::uuid))`, beforeBooked, linkBooked); n != 1 {
+		t.Fatal("the booked row is not quarantined without its signatures")
+	}
+	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000266' AND source_table = 'assignment'
+			AND row_data = $1::jsonb || '{"document_link_ids": []}'::jsonb`, beforeAlone); n != 1 {
+		t.Fatal("the row without movement is not quarantined with its signature")
+	}
+
+	// The client change of the asset needs no assignment any more.
+	exec(`UPDATE asset SET client_id = $2 WHERE id = $1`, asset, f.Client2)
+	linkVisible := `SELECT count(*) FROM document_link WHERE id = $1`
+	signaturesVisible := `SELECT count(*) FROM assignment_signature_legacy WHERE movement_id = $1`
+	if visible(f.OrgA, f.Client1, linkVisible, linkBooked) != 1 || visible(f.OrgA, f.Client1, signaturesVisible, booked) != 2 {
+		t.Error("client 1 does not see the link or the signatures of its booking")
+	}
+	if visible(f.OrgA, f.Client2, linkVisible, linkBooked) != 0 || visible(f.OrgA, f.Client2, signaturesVisible, booked) != 0 {
+		t.Error("client 2 sees the link or the signatures of a booking of client 1")
+	}
+	if visible(f.OrgA, "", signaturesVisible, booked) != 2 || visible(f.OrgB, "", signaturesVisible, booked) != 0 {
+		t.Error("the signatures are not visible org-wide in A only")
+	}
+
+	// Down: rows with signatures, links and the former CHECK come back.
+	exec(down)
+	if got := snapshot(booked); got != beforeBooked {
+		t.Errorf("booked row after down = %s, want %s", got, beforeBooked)
+	}
+	if got := snapshot(rowAlone); got != beforeAlone {
+		t.Errorf("row without movement after down = %s, want %s", got, beforeAlone)
+	}
+	if got := text(`SELECT entity_type || ' ' || entity_id FROM document_link WHERE id = $1`, linkBooked); got != "assignment "+booked {
+		t.Errorf("link of the booked row after down = %q", got)
+	}
+	if got := text(`SELECT entity_type || ' ' || entity_id FROM document_link WHERE id = $1`, linkAlone); got != "assignment "+rowAlone {
+		t.Errorf("link without movement after down = %q", got)
+	}
+	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000266'`) +
+		count(`SELECT count(*) FROM pg_class WHERE oid = to_regclass('public.assignment_signature_legacy')`); n != 0 {
+		t.Errorf("quarantine entries or archive left after down: %d", n)
+	}
+
+	// Up again.
+	exec(up)
+	if n := count(`SELECT count(*) FROM assignment_signature_legacy WHERE movement_id = $1`, booked); n != 2 {
+		t.Errorf("archived signatures after down and up: %d, want 2", n)
+	}
+	if n := count(`SELECT count(*) FROM migration_quarantine WHERE migration = '000266'`); n != 3 {
+		t.Errorf("quarantine entries after down and up: %d, want 3", n)
+	}
+	if got := text(`SELECT entity_type FROM document_link WHERE id = $1`, linkBooked); got != "stock_movement" {
+		t.Errorf("link of the booked row after down and up: %s", got)
 	}
 }
 

@@ -21,13 +21,16 @@ import (
 const PIIBackfillKind = "pii.backfill"
 
 // PIIBackfill replaces plaintext personal values in existing audit
-// entries, CI changes and events, and the personal data of contacts and of
-// assignment signers, with vault surrogates, per organization
-// in the organization's transaction. An audit entry is sealed in place by
-// audit_seal_pii (migration 000188): it keeps the hash it was chained with,
-// the database records the digest of the original and accepts nothing but
-// personal values replaced by references, so audit-verify stays intact and
-// the runtime role rewrites no entry (AUD-04, WP-680). Entries written since
+// entries, CI changes and events, and the personal data of contacts, with
+// vault surrogates, per organization in the organization's transaction.
+// The signers of the legacy assignment signatures are no longer sealed
+// here: since the drop of assignment (WP-843) they lie in
+// assignment_signature_legacy, whose plaintext names WP-749 seals. An
+// audit entry is sealed in place by audit_seal_pii (migration 000188): it
+// keeps the hash it was chained with, the database records the digest of
+// the original and accepts nothing but personal values replaced by
+// references, so audit-verify stays intact and the runtime role rewrites
+// no entry (AUD-04, WP-680). Entries written since
 // migration 000125 are sealed already, so later runs find nothing.
 type PIIBackfill struct {
 	pool *pgxpool.Pool
@@ -50,12 +53,12 @@ func (b *PIIBackfill) Schedule() Schedule {
 
 // BackfillResult counts the rows a backfill sealed.
 type BackfillResult struct {
-	Audit, CIChanges, Events, Contacts, Assignments int
+	Audit, CIChanges, Events, Contacts int
 }
 
 // Total is the number of rows sealed.
 func (r BackfillResult) Total() int {
-	return r.Audit + r.CIChanges + r.Events + r.Contacts + r.Assignments
+	return r.Audit + r.CIChanges + r.Events + r.Contacts
 }
 
 // Run seals every organization and returns how many rows it changed.
@@ -98,15 +101,12 @@ func (b *PIIBackfill) RunOrg(ctx context.Context, orgID string) (BackfillResult,
 		if res.Events, err = sealEvents(ctx, tx, orgID); err != nil {
 			return err
 		}
-		if res.Contacts, err = sealContacts(ctx, tx, orgID); err != nil {
-			return err
-		}
-		res.Assignments, err = sealAssignmentSigners(ctx, tx, orgID)
+		res.Contacts, err = sealContacts(ctx, tx, orgID)
 		if err == nil && res.Total() > 0 {
 			_, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{OrganizationID: orgID, ActorType: "system",
 				Action: PIIBackfillKind, ResourceType: "organization", ResourceID: orgID,
 				Changes: map[string]interface{}{"audit_entries": res.Audit, "ci_changes": res.CIChanges, "events": res.Events,
-					"contacts": res.Contacts, "assignments": res.Assignments}})
+					"contacts": res.Contacts}})
 		}
 		return err
 	})
@@ -269,77 +269,6 @@ func sealContacts(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
 		}
 	}
 	return len(found), nil
-}
-
-// sealAssignmentSigners moves the signer names of assignment signatures
-// (checkout_signature, return_signature) into the vault (SEC-05, WP-656):
-// signer_name becomes a surrogate reference; it needs the vault.
-func sealAssignmentSigners(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
-	if pii.Default() == nil {
-		return 0, nil
-	}
-	rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(checkout_signature, 'null'::jsonb)::text,
-			COALESCE(return_signature, 'null'::jsonb)::text
-		FROM assignment WHERE organization_id = $1
-		  AND (jsonb_typeof(checkout_signature -> 'signer_name') = 'string'
-		       OR jsonb_typeof(return_signature -> 'signer_name') = 'string')
-		FOR UPDATE`, orgID)
-	if err != nil {
-		return 0, fmt.Errorf("find assignment signatures: %w", err)
-	}
-	found, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (jsonRow, error) {
-		var j jsonRow
-		scanErr := r.Scan(&j.id, &j.a, &j.b)
-		return j, scanErr
-	})
-	if err != nil {
-		return 0, err
-	}
-	for _, j := range found {
-		checkout, cerr := sealSigner(ctx, tx, orgID, j.a)
-		if cerr != nil {
-			return 0, fmt.Errorf("assignment %s: %w", j.id, cerr)
-		}
-		ret, rerr := sealSigner(ctx, tx, orgID, j.b)
-		if rerr != nil {
-			return 0, fmt.Errorf("assignment %s: %w", j.id, rerr)
-		}
-		if _, err = tx.Exec(ctx, `UPDATE assignment SET checkout_signature = $2::jsonb, return_signature = $3::jsonb
-			WHERE id = $1`, j.id, checkout, ret); err != nil {
-			return 0, fmt.Errorf("assignment %s: %w", j.id, err)
-		}
-	}
-	return len(found), nil
-}
-
-// sealSigner replaces a plaintext signer_name of a stored signature with
-// a surrogate reference; other values stay as they are (null stays SQL
-// NULL).
-func sealSigner(ctx context.Context, tx pgx.Tx, orgID string, raw []byte) (any, error) {
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return nil, err
-	}
-	if v == nil {
-		return nil, nil
-	}
-	sig, ok := v.(map[string]any)
-	if !ok {
-		return string(raw), nil
-	}
-	if name, ok := sig["signer_name"].(string); ok {
-		if name == "" {
-			delete(sig, "signer_name")
-		} else {
-			ref, err := pii.SealValueTx(ctx, tx, orgID, name)
-			if err != nil {
-				return nil, err
-			}
-			sig["signer_name"] = ref
-		}
-	}
-	b, err := json.Marshal(sig)
-	return string(b), err
 }
 
 // sealJSON seals a stored JSON value (of a field, when field is set).

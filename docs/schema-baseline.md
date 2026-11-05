@@ -284,15 +284,17 @@ bleiben unverändert.
 
 ### Linkziele von Dokumenten (WP-267)
 
-`document_link.entity_type` ist eines von `ci`, `asset`, `assignment`,
-`ticket`, `location`, `disposal_record`, `stocktake`, `contract` und
-`stock_movement` (`doc_link_entity_type_check`, Migrationen 000217, 000238
-und 000242); die Registry in `backend/internal/document/links.go` hält
+`document_link.entity_type` ist eines von `ci`, `asset`, `ticket`,
+`location`, `disposal_record`, `stocktake`, `contract` und
+`stock_movement` (`doc_link_entity_type_check`, Migrationen 000217, 000238,
+000242 und 000266); die Registry in `backend/internal/document/links.go` hält
 dieselben Werte (`stock_movement` seit WP-276). Für
 `stock_movement` übernimmt `derive_document_link_scope` Client und Standort
-der Bewegung (eingefroren, keine Propagation).
+der Bewegung (eingefroren, keine Propagation). `assignment` entfiel mit dem
+Drop der Tabelle (000266, WP-843): Die Links der Zuweisungen hängen an der
+Bewegung gleicher ID, Links ohne Bewegung liegen in `migration_quarantine`.
 `derive_document_link_scope` leitet `client_id`/`site_id` auch aus
-Location, Entsorgung und dem Standort von Asset und Zuweisung ab und
+Location, Entsorgung und dem Standort des Assets ab und
 `team_id` (Teilindex `idx_document_link_team`) aus dem Ticket. Neue
 AFTER-UPDATE-Trigger auf `location` und `disposal_record`
 (`propagate_document_link_scope`) sowie `asset_module_scope_propagation`
@@ -407,8 +409,8 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`assignment` und `form_submission` (Sichtbarkeit über das referenzierte
-Asset, CI, Formular bzw. Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+`form_submission` (Sichtbarkeit über das referenzierte Formular, CI und
+Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
 `metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
@@ -604,10 +606,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `ai_message.conversation_id` | `ai_message_conversation_id_fkey` | `ai_conversation` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `assignment.asset_id` | `assignment_asset_id_fkey` | `asset` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
-| `assignment.assigned_by` | `assignment_assigned_by_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
-| `assignment.assigned_to` | `assignment_assigned_to_fkey` | `app_user` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
-| `assignment.ci_id` | `assignment_ci_id_fkey` | `ci` | assignment is replaced by the assignment service over stock_movement (WP-275, K19); the successor references with the organization |
 | `building.id` | `building_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
 | `building.site_id` | `building_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `cable.source_interface_id` | `cable_source_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
@@ -1617,6 +1615,31 @@ Assets `id`, `organization_id`, `asset_id`, `assigned_to`,
 desselben Assets und Halters danach), `notes`, `created_at`, `updated_at`.
 Die Tabelle `assignment` bleibt unverändert bis WP-843; Down entfernt View,
 Index und Quarantäne-Einträge, die Bewegungen bleiben.
+Drop der Tabelle `assignment` (AST-07, WP-843, E-26, E-51, Migration 000266):
+`assignment_signature_legacy` (`id`, `organization_id` → `organization` ON
+DELETE CASCADE, `movement_id`, `kind` `checkout|return`, `payload` JSONB,
+`payload_sha256` (Hex-SHA-256 von `payload::text`), `created_at`) mit
+`assignment_signature_legacy_movement_id_fkey` (`movement_id`,
+`organization_id`) → `stock_movement` ON DELETE RESTRICT,
+`assignment_signature_legacy_movement_kind_key` (`movement_id`, `kind`) und
+Index `idx_assignment_signature_legacy_org` hält `checkout_signature` und
+`return_signature` unverändert (Unterzeichner als Vault-Surrogat, WP-656) an
+der `assignment`-Bewegung gleicher ID; `stock_movement.signature_hash` bleibt
+NULL. ENABLE + FORCE RLS, TRUNCATE-Guard, Policy
+`assignment_signature_legacy_isolation` (Organisation; bei gesetztem
+`app.client_scope` oder `app.site_scope` `EXISTS` auf die sichtbare
+Bewegung, USING und WITH CHECK); Trigger `assignment_signature_legacy_guard`
+(`guard_assignment_signature_legacy()`) verbietet DELETE und jedes UPDATE
+außer `payload := NULL`; `reticora_app` hat kein DELETE-Recht. `document_link`-Zeilen mit `entity_type`
+`assignment` hängen an `stock_movement` (gleiche `entity_id`), Links ohne
+Bewegung stehen in `migration_quarantine` (`document_link`, `dropped:
+assignment without movement`). `derive_document_link_scope()` und
+`propagate_asset_module_scope()` haben keinen `assignment`-Zweig mehr. Alle
+Zeilen von `assignment` stehen in `migration_quarantine` (`dropped:
+projection`, Migration `000266`; ohne Signaturen, wenn das Archiv sie hält,
+mit `document_link_ids`), danach DROP TABLE `assignment`. Down baut
+`assignment` exakt wieder auf und stellt Zeilen, Signaturen, Links, CHECK und
+Funktionen wieder her.
 Gesamtbestand von Mengenartikeln (STK-01, NTF-05, WP-285, E-128, Migration
 000259): `consumable` erhält `on_hand_total` (`numeric(12,2)` NOT NULL
 DEFAULT 0) mit `consumable_on_hand_total_check` (`on_hand_total >= 0`),
@@ -1759,7 +1782,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
 | `asset_tag_link` | ja | ja | asset_tag_link_isolation (ALL), asset_tag_link_scoped_delete (DELETE), asset_tag_link_scoped_update (UPDATE) |
-| `assignment` | ja | ja | assignment_tenant_isolation (ALL) |
+| `assignment_signature_legacy` | ja | ja | assignment_signature_legacy_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |

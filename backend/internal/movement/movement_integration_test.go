@@ -31,6 +31,9 @@ const (
 	// projectionMigration puts the view assignment_projection on the
 	// ledger (WP-747); the replay of 000242 drops it first.
 	projectionMigration = "../../migrations/000257_assignment_projection"
+	// assignmentDropMigration drops the table assignment (WP-843); the
+	// replay of 000242 rebuilds it first.
+	assignmentDropMigration = "../../migrations/000266_assignment_drop"
 )
 
 // readMigration returns the up and the down part of the migration path.
@@ -87,7 +90,8 @@ func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 
 // TestStockMovementCanonicalMigration covers the data migration of 000242
 // (STK-04, AST-07, WP-744) in a rolled-back transaction: after the down
-// parts of 000257 (the view on the ledger, WP-747), of 000256 (which
+// parts of 000266 (which rebuilds assignment, WP-843), of 000257 (the view
+// on the ledger, WP-747), of 000256 (which
 // restores quantity_item_id, WP-757), of 000246
 // (which restores asset_movement, WP-842) and of 000242 the legacy
 // ledgers asset_movement, the former stock_movement and
@@ -106,6 +110,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	_, dropDown := readMigration(t, dropMigration)
 	_, mergeDown := readMigration(t, mergeMigration)
 	_, projectionDown := readMigration(t, projectionMigration)
+	_, assignmentDropDown := readMigration(t, assignmentDropMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig242-a1")
 	asset2 := f.Asset(t, f.OrgA, f.Client1, "mig242-a2")
 	foreign := f.Asset(t, f.OrgB, "", "mig242-foreign")
@@ -124,6 +129,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
+	exec(assignmentDropDown)
 	exec(projectionDown)
 	exec(mergeDown)
 	exec(dropDown)

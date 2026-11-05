@@ -3509,8 +3509,8 @@ paths:
           in: query
           description: >-
             Only documents linked to this target (WP-811); requires entity_id.
-            One of ci, asset, assignment, ticket, location, disposal_record,
-            stocktake and contract; any other value answers 422.
+            One of ci, asset, ticket, location, disposal_record, stocktake,
+            contract and stock_movement; any other value answers 422.
           schema:
             type: string
         - name: entity_id
@@ -10375,9 +10375,9 @@ paths:
       tags: [Documents]
       summary: Link a document to another entity
       description: >-
-        entity_type is one of ci, asset, assignment, ticket, location,
+        entity_type is one of ci, asset, ticket, location,
         disposal_record, stocktake, contract (WP-737) and stock_movement
-        (WP-276); any other value
+        (WP-276; also the former links of assignments, WP-843); any other value
         answers 422. A target
         that does not exist or lies outside the caller's scope answers 404.
         The link takes client, site and team of its target (MGT-01). A
@@ -34181,8 +34181,8 @@ components:
         entity_type:
           type: string
           description: >-
-            ci, asset, assignment, ticket, location, disposal_record, stocktake
-            or contract. A link to a contract takes the client of the contract
+            ci, asset, ticket, location, disposal_record, stocktake, contract
+            or stock_movement. A link to a contract takes the client of the contract
             and goes when the contract is deleted (WP-737).
         entity_id:
           type: string
@@ -34268,7 +34268,7 @@ components:
       properties:
         entity_type:
           type: string
-          description: ci, asset, assignment, ticket, location, disposal_record, stocktake or contract.
+          description: ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement.
         entity_id:
           type: string
 
