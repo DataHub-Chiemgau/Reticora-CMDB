@@ -268,6 +268,7 @@ func TestRequiredFeatureMapping(t *testing.T) {
 		"/api/v1/suppliers":                    FeatureAssetsBasic,
 		"/api/v1/contracts/c1":                 FeatureAssetsBasic,
 		"/api/v1/labels/batch":                 FeatureBarcode,
+		"/api/v1/labels/lookup":                FeatureBarcode,
 		"/api/v1/imports":                      FeatureImport,
 		"/api/v1/import-profiles/p1":           FeatureImport,
 		"/api/v1/stock-movements":              FeatureAssetsBasic,

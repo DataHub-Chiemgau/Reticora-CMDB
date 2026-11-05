@@ -490,6 +490,12 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 		// The notification center serves the signed-in user's own inbox
 		// and preferences (NTF-04).
 		return "", routeProtected
+	case "labels":
+		// The code lookup (WP-762, INV-03) names assets, consumables and
+		// locations: the handler checks the read permission of the
+		// object's kind (asset:read, stock:read, location:read) and
+		// answers 404 without it; the route needs a principal only.
+		return "", routeProtected
 	}
 
 	if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {

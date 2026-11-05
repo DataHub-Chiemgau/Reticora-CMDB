@@ -136,6 +136,8 @@ tags:
     description: Lifecycle models, forms, templates and indexing of the metamodel
   - name: Tags
     description: Tag catalog and the tags of CIs and assets
+  - name: Labels
+    description: Code lookup of scanned barcodes and labels (INV-03)
   - name: Suppliers
     description: Supplier master data of the organization and its clients (MGT-12)
   - name: Contracts
@@ -18000,6 +18002,53 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ViolationProblem' }
 
+  /api/v1/labels/lookup:
+    x-phase: P2
+    x-feature: barcode
+    get:
+      operationId: lookupLabelCode
+      tags: [Labels]
+      summary: Resolve a scanned code to its object (INV-03)
+      description: >-
+        Resolves `code` in this order: (1) the URN
+        `urn:reticora:<asset|consumable|location>:<uuid>` of a label (E-52),
+        (2) the barcode register of the organization (the barcode of an
+        asset, consumable or location and the inventory number of an
+        asset, unique per organization). The object is read under the
+        caller's client and site scope. The caller needs the read
+        permission of the object's kind (asset:read, stock:read,
+        location:read) and the organization the feature of the kind
+        (assets_basic for assets, stock for consumables; locations are
+        core). An unknown code, a malformed URN, an object outside the
+        caller's scope and a missing permission or feature of the kind all
+        answer 404 alike, without revealing whether the code exists. The
+        path needs the feature barcode (403 feature-not-entitled). A
+        missing or blank `code` is 422.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          description: >-
+            The scanned code: an object URN, a barcode or an inventory
+            number. Required; without it the answer is 422 with field
+            `code`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The object the code names
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelLookupResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/suppliers:
     x-phase: P2
     x-feature: assets_basic
@@ -29125,6 +29174,23 @@ components:
         download_url:
           type: string
 
+    LabelLookupResult:
+      type: object
+      description: The object a scanned code names (INV-03, WP-762).
+      required: [kind, id, name]
+      properties:
+        kind:
+          type: string
+          enum: [asset, consumable, location]
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        location_id:
+          type: string
+          format: uuid
+          description: The asset's node in the location tree; assets only, absent without a location.
     Supplier:
       type: object
       description: >-

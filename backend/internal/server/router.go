@@ -46,6 +46,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -155,6 +156,7 @@ type Repositories struct {
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
+	Labels            labels.Repository // code lookup (WP-762, INV-03); nil: the route answers 503
 	Movement          movement.Repository
 	Reservation       reservation.Repository
 	Override          override.Repository
@@ -811,6 +813,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle, lifecycleService, repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
+		// The code lookup checks the read permission and the feature of
+		// the object's kind; the path itself is gated with barcode
+		// (WP-762, E-44).
+		labels.NewHandler(repos.Labels).WithFeatures(opts.Entitlements),
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
 		// The overrides follow the field permissions of the CI (WP-265).

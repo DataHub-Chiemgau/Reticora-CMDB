@@ -7876,6 +7876,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/labels/lookup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Resolve a scanned code to its object (INV-03)
+     * @description Resolves `code` in this order: (1) the URN `urn:reticora:<asset|consumable|location>:<uuid>` of a label (E-52), (2) the barcode register of the organization (the barcode of an asset, consumable or location and the inventory number of an asset, unique per organization). The object is read under the caller's client and site scope. The caller needs the read permission of the object's kind (asset:read, stock:read, location:read) and the organization the feature of the kind (assets_basic for assets, stock for consumables; locations are core). An unknown code, a malformed URN, an object outside the caller's scope and a missing permission or feature of the kind all answer 404 alike, without revealing whether the code exists. The path needs the feature barcode (403 feature-not-entitled). A missing or blank `code` is 422.
+     */
+    get: operations['lookupLabelCode'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/suppliers': {
     parameters: {
       query?: never;
@@ -14175,6 +14195,19 @@ export interface components {
     };
     ImportReportLink: {
       download_url: string;
+    };
+    /** @description The object a scanned code names (INV-03, WP-762). */
+    LabelLookupResult: {
+      /** @enum {string} */
+      kind: 'asset' | 'consumable' | 'location';
+      /** Format: uuid */
+      id: string;
+      name: string;
+      /**
+       * Format: uuid
+       * @description The asset's node in the location tree; assets only, absent without a location.
+       */
+      location_id?: string;
     };
     /** @description A supplier of the organization or one of its clients (MGT-12, E-41). name is the company name and no personal data; the contact person is only referenced by contact_id (the contacts resource reveals name, phone and e-mail from the PII vault, WP-242). */
     Supplier: {
@@ -37522,6 +37555,33 @@ export interface operations {
           'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
+    };
+  };
+  lookupLabelCode: {
+    parameters: {
+      query?: {
+        /** @description The scanned code: an object URN, a barcode or an inventory number. Required; without it the answer is 422 with field `code`. */
+        code?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The object the code names */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelLookupResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSuppliers: {

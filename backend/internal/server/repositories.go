@@ -5,6 +5,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -30,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -81,6 +83,11 @@ func MemoryRepositories() Repositories {
 	// Consumable movements book on the stock per bin of the same store
 	// (WP-756).
 	consumables := consumable.NewMemoryRepository()
+	locationTree := locations.NewMemoryRepository()
+	// The label lookup reads the codes of the memory repositories (WP-762,
+	// API-01).
+	labelLookup := labels.NewMemoryRepository(assetLabels{repo: assets}, consumableLabels{repo: consumables},
+		locationLabels{repo: locationTree})
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -95,7 +102,8 @@ func MemoryRepositories() Repositories {
 		Contract:          contract.NewMemoryContracts(),
 		RelationshipType:  relationshiptype.NewMemoryRepository(),
 		Lifecycle:         lifecycle.NewMemoryRepository(),
-		LocationTree:      locations.NewMemoryRepository(),
+		LocationTree:      locationTree,
+		Labels:            labelLookup,
 		Movement:          movement.NewMemoryRepository().WithConsumables(consumables),
 		Reservation:       reservation.NewMemoryRepository(),
 		// The provenance names override authors as PostgreSQL does from
@@ -219,6 +227,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		RelationshipType:  relationshiptype.NewPGRepository(pool),
 		Lifecycle:         lifecycle.NewPGRepository(pool),
 		LocationTree:      locations.NewPGRepository(pool),
+		Labels:            labels.NewPGRepository(pool),
 		Movement:          movement.NewPGRepository(pool),
 		Reservation:       reservation.NewPGRepository(pool),
 		Override:          override.NewPGRepository(pool).WithRecompute(cis),
@@ -229,4 +238,60 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LifecycleResolver: lifecycle.NewResolver(pool),
 		Availability:      reservation.NewPGAvailability(pool),
 	}
+}
+
+// memoryLabelPage is the page the memory label sources list with: every
+// object of the organization.
+var memoryLabelPage = api.PaginationParams{Limit: 1 << 30}
+
+// assetLabels lists the assets with their barcode and inventory number
+// for the memory label lookup (WP-762).
+type assetLabels struct{ repo asset.Repository }
+
+func (a assetLabels) Entries(ctx context.Context, orgID string) ([]labels.Entry, error) {
+	items, _, err := a.repo.List(ctx, orgID, &asset.FilterParams{}, memoryLabelPage)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]labels.Entry, 0, len(items))
+	for i := range items {
+		it := &items[i]
+		out = append(out, labels.Entry{Object: labels.Object{ID: it.ID, Name: it.Name, LocationID: it.LocationID},
+			Codes: []string{it.AssetTag, it.Barcode}})
+	}
+	return out, nil
+}
+
+// consumableLabels lists the consumables with their barcode for the memory
+// label lookup (WP-762).
+type consumableLabels struct{ repo consumable.Repository }
+
+func (c consumableLabels) Entries(ctx context.Context, orgID string) ([]labels.Entry, error) {
+	items, _, err := c.repo.List(ctx, orgID, consumable.FilterParams{}, memoryLabelPage)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]labels.Entry, 0, len(items))
+	for i := range items {
+		it := &items[i]
+		out = append(out, labels.Entry{Object: labels.Object{ID: it.ID, Name: it.Name}, Codes: []string{it.Barcode}})
+	}
+	return out, nil
+}
+
+// locationLabels lists the nodes of the location tree with their barcode
+// for the memory label lookup (WP-762).
+type locationLabels struct{ repo locations.Repository }
+
+func (l locationLabels) Entries(ctx context.Context, orgID string) ([]labels.Entry, error) {
+	items, err := l.repo.List(ctx, orgID, locations.Filter{})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]labels.Entry, 0, len(items))
+	for i := range items {
+		it := &items[i]
+		out = append(out, labels.Entry{Object: labels.Object{ID: it.ID, Name: it.Name}, Codes: []string{it.Barcode}})
+	}
+	return out, nil
 }
