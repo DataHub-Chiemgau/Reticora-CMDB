@@ -342,7 +342,7 @@ export function WebhooksPage() {
                       {events.map((event) => (
                         <label
                           key={event}
-                          className="flex items-center gap-2 font-mono text-xs text-fg"
+                          className="flex min-h-6 items-center gap-2 py-1 font-mono text-xs text-fg"
                         >
                           <input
                             type="checkbox"

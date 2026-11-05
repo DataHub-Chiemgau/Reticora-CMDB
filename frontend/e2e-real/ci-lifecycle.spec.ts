@@ -385,9 +385,9 @@ async function openSession(
 
 async function openCreateForm(page: Page) {
   await page.goto('/cmdb');
-  await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', { name: 'CI erstellen' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
   return dialog;
 }
 
@@ -516,9 +516,9 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
 
     // No reload, no release: the dialog offers the type, renders its attribute
     // and posts the type id (CI-03) with the attribute value.
-    await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
     dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('heading', { name: 'CI erstellen' })).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
     const name = `lc-runtime-ci-${w.s}`;
     await dialog.getByLabel('Name', { exact: true }).fill(name);
     typeSelect = dialog.getByLabel('CI-Typ');
@@ -1178,7 +1178,7 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(page.getByRole('heading', { name: 'Export', exact: true })).toBeVisible();
     await page.getByLabel('Format').selectOption('csv');
     const created = waitForPath(page, '/exports', 'POST');
-    await page.getByRole('button', { name: 'Auftrag erstellen' }).click();
+    await page.getByRole('button', { name: 'Export starten' }).click();
     const res = await created;
     expect(res.status(), `POST /exports: ${await res.text()}`).toBe(202);
     const job = (await res.json()) as ExportJob;

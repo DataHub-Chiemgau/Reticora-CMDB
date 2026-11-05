@@ -1,4 +1,15 @@
-import { Check, Copy, Plug, Plus, Radar, TriangleAlert } from 'lucide-react';
+import {
+  Check,
+  Copy,
+  Pencil,
+  Plug,
+  Plus,
+  Power,
+  PowerOff,
+  Radar,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -30,7 +41,7 @@ import {
 import { ScrollRegion } from '../components/ScrollRegion';
 import { Panel } from '../components/spatial/Panel';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Button, IconButton } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
@@ -713,36 +724,30 @@ function ScopeRows({
         </td>
         {canManage ? (
           <td className={cn(tdClasses, cell)}>
-            <span className="flex items-center justify-end gap-1">
-              <Button
+            <span className="flex items-center justify-end gap-0.5">
+              <IconButton
                 size="sm"
-                variant="ghost"
-                aria-label={t('discovery.scopes.editNamed', { name: scope.name })}
+                label={t('discovery.scopes.editNamed', { name: scope.name })}
+                icon={<Pencil />}
                 onClick={onEdit}
-              >
-                {t('discovery.scopes.edit')}
-              </Button>
-              <Button
+              />
+              <IconButton
                 size="sm"
-                variant="ghost"
-                aria-label={t(
+                label={t(
                   scope.enabled ? 'discovery.scopes.disableNamed' : 'discovery.scopes.enableNamed',
                   { name: scope.name },
                 )}
+                icon={scope.enabled ? <PowerOff /> : <Power />}
                 disabled={switching}
                 onClick={onSwitch}
-              >
-                {scope.enabled ? t('discovery.scopes.disable') : t('discovery.scopes.enable')}
-              </Button>
-              <Button
+              />
+              <IconButton
                 size="sm"
-                variant="ghost"
+                label={t('discovery.scopes.deleteNamed', { name: scope.name })}
+                icon={<Trash2 />}
                 className="text-danger hover:text-danger"
-                aria-label={t('discovery.scopes.deleteNamed', { name: scope.name })}
                 onClick={onDelete}
-              >
-                {t('discovery.scopes.delete')}
-              </Button>
+              />
             </span>
           </td>
         ) : null}
@@ -822,7 +827,7 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
       ) : null}
       {scopes.length ? (
         <ScrollRegion label={`${t('discovery.scopes.title')} ${collector.name}`}>
-          <table className={cn(tableClasses, 'min-w-[44rem]')}>
+          <table className={cn(tableClasses, 'min-w-[40rem]')}>
             <thead className={cn(theadClasses, 'border-t border-line')}>
               <tr>
                 <th scope="col" className={cn(thClasses, 'text-fg-muted')}>

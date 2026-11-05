@@ -273,7 +273,7 @@ function suppressionRow(page: Page, otherId: string) {
 
 async function openCI(page: Page, ci: CI) {
   await page.goto(`/cmdb/${ci.id}`);
-  await expect(page.getByRole('heading', { level: 2, name: ci.name })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: ci.name })).toBeVisible();
 }
 
 test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-04)', () => {

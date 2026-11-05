@@ -479,13 +479,14 @@ async function setOverrideApi(ciId: string, field: string, value: string, reason
 function collectorBadge(page: Page, name: string) {
   return page
     .getByRole('heading', { level: 3, name, exact: true })
-    .locator('xpath=../..')
-    .locator('.shrink-0');
+    .locator('xpath=ancestor::section[1]')
+    .locator('.shrink-0')
+    .first();
 }
 
 async function openCI(page: Page, ci: CI) {
   await page.goto(`/cmdb/${ci.id}`);
-  await expect(page.getByRole('heading', { level: 2, name: ci.name })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: ci.name })).toBeVisible();
 }
 
 /** detailValue is the value of a row of the overview card ("Modell", "Hersteller", …). */
@@ -568,12 +569,16 @@ async function selectReview(page: Page, item: ReviewItem, ciName: string, status
   const shown = (await reviewItems(status)).filter((i) => i.payload?.field === field);
   const index = shown.findIndex((i) => i.id === item.id);
   expect(index, `item ${item.id} in GET /review-items?status=${status}`).toBeGreaterThanOrEqual(0);
-  const buttons = page.locator('main ul li button', { hasText: field });
+  const buttons = page.locator('main tbody tr button', { hasText: field });
   // The list is loaded and up to date with the API.
   await expect(buttons).toHaveCount(shown.length);
   await buttons.nth(index).click();
-  await expect(page.locator('main table thead th').nth(2)).toHaveText(ciName);
-  return page.locator('main table').locator('..');
+  // The inbox has two tables: the queue and, beside it, the comparison of the opened item.
+  const diff = page.locator('main table', {
+    has: page.getByRole('columnheader', { name: 'Beobachtet' }),
+  });
+  await expect(diff.locator('thead th').nth(2)).toHaveText(ciName);
+  return diff.locator('xpath=ancestor::section[1]');
 }
 
 async function openSession(browser: Browser, account: Account, ip: string) {
@@ -1246,7 +1251,7 @@ test.describe('Discovery → reconciliation → override protection → review',
     await expect(page).toHaveURL(/\/reviews\?escalated=true$/);
     await expect(page.getByLabel('Nur eskalierte')).toBeChecked();
     const shown = (after.data ?? []).filter((i) => i.payload?.field === 'model');
-    const buttons = page.locator('main ul li button', { hasText: 'model' });
+    const buttons = page.locator('main tbody tr button', { hasText: 'model' });
     await expect(buttons, 'the inbox lists the escalated items of the API').toHaveCount(
       shown.length,
     );
@@ -1255,7 +1260,12 @@ test.describe('Discovery → reconciliation → override protection → review',
       'the 13-day item is not in the filtered inbox',
     ).not.toContain(recentItem.id);
     await buttons.nth(shown.findIndex((i) => i.id === oldItem.id)).click();
-    await expect(page.locator('main table thead th').nth(2)).toHaveText(old.name);
+    await expect(
+      page
+        .locator('main table', { has: page.getByRole('columnheader', { name: 'Beobachtet' }) })
+        .locator('thead th')
+        .nth(2),
+    ).toHaveText(old.name);
   });
 
   test('D08 a disabled collector can no longer deliver: cut off within 10 s without a restart, refused after a restart, nothing new is persisted', async () => {

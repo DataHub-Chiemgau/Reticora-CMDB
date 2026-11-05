@@ -1208,7 +1208,7 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     const page = w.a.page;
     const name = `iso-a-form-${w.s}`;
     await page.goto('/cmdb');
-    await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Name', { exact: true }).fill(name);
     await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });

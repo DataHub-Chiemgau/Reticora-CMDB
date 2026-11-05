@@ -361,7 +361,7 @@ export function DashboardPage() {
           return null;
         }
         return (
-          <section key={section.id} aria-labelledby={`dashboard-section-${section.id}`}>
+          <div key={section.id} role="group" aria-labelledby={`dashboard-section-${section.id}`}>
             <h2
               id={`dashboard-section-${section.id}`}
               className="mb-3 text-sm font-semibold text-fg"
@@ -374,7 +374,7 @@ export function DashboardPage() {
                 return <Widget key={widget} />;
               })}
             </div>
-          </section>
+          </div>
         );
       })}
 

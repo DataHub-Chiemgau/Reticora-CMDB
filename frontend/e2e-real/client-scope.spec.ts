@@ -484,7 +484,7 @@ test.describe('client- and site-scoped users (TEN-04, TEN-06, TEN-09, EXP-01)', 
     await expect(main.getByRole('heading', { name: 'Export', exact: true })).toBeVisible();
     await main.getByLabel('Format').selectOption('csv');
     const created = waitForPath(page, '/exports', 'POST');
-    await main.getByRole('button', { name: 'Auftrag erstellen' }).click();
+    await main.getByRole('button', { name: 'Export starten' }).click();
     const createdRes = await created;
     expect(createdRes.status(), 'POST /exports answers 202 (job)').toBe(202);
     const job = (await createdRes.json()) as ExportJob;

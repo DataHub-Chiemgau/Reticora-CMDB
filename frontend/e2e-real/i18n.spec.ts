@@ -144,13 +144,20 @@ test.describe('UI language of the CI detail against real API data', () => {
     await page.goto(`/cmdb/${w.ciId}`);
     await expectTypeAndStatus(page, 'CI-Typ', LABEL_DE(w.s), 'Wartung');
 
-    const header = page.getByRole('banner');
-    const german = header.getByRole('combobox', { name: 'Sprache' });
-    await expect(german).toHaveValue('de-DE');
-    await german.selectOption('en-US');
+    // The language lives in the account menu of the header.
+    const accountMenu = (name: RegExp) => page.getByRole('banner').getByRole('button', { name });
+    const checked = async (language: string) => {
+      await expect(page.getByRole('menuitemradio', { name: language })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+      await page.keyboard.press('Escape');
+    };
+
+    await accountMenu(/Kontomenü/).click();
+    await page.getByRole('menuitemradio', { name: 'English' }).click();
 
     // The same page switches without a reload.
-    await expect(header.getByRole('combobox', { name: 'Language' })).toHaveValue('en-US');
     await expectTypeAndStatus(page, 'CI Type', LABEL_EN(w.s), 'Maintenance');
     await expect(page.locator('#main-content')).not.toContainText(LABEL_DE(w.s));
     await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
@@ -161,13 +168,16 @@ test.describe('UI language of the CI detail against real API data', () => {
     );
     await page.reload();
     await expectTypeAndStatus(page, 'CI Type', LABEL_EN(w.s), 'Maintenance');
-    await expect(header.getByRole('combobox', { name: 'Language' })).toHaveValue('en-US');
+    await accountMenu(/Account menu/).click();
+    await checked('English');
 
     // Switching back by keyboard restores German.
-    const english = header.getByRole('combobox', { name: 'Language' });
+    const english = accountMenu(/Account menu/);
     await english.focus();
-    await english.press('ArrowUp');
-    await expect(header.getByRole('combobox', { name: 'Sprache' })).toHaveValue('de-DE');
+    await english.press('Enter');
+    await page.getByRole('menuitemradio', { name: 'Deutsch' }).focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de-DE');
     await expectTypeAndStatus(page, 'CI-Typ', LABEL_DE(w.s), 'Wartung');
   });
 

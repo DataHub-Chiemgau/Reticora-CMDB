@@ -379,8 +379,9 @@ test.describe('master key rotation on the installed stack (SEC-06)', () => {
     await expect(
       w.page
         .getByRole('heading', { level: 3, name: w.collectorName, exact: true })
-        .locator('xpath=../..')
-        .locator('.shrink-0'),
+        .locator('xpath=ancestor::section[1]')
+        .locator('.shrink-0')
+        .first(),
     ).toHaveText('Aktiv');
 
     // 4. The cursor of before the rotation returns the same page; an altered one is refused.

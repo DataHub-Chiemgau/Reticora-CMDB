@@ -28,7 +28,7 @@ import {
 import { ApiError } from '../../api/client';
 import { useHasPermission } from '../../api/hooks';
 import { useModules } from '../../hooks/useEntitlements';
-import { Badge } from '../ui/Badge';
+import { CollapsibleSection } from '../cmdb/CIDetailSections';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Select';
 import { SkeletonList } from '../ui/Skeleton';
@@ -126,16 +126,8 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
   };
 
   return (
-    <details className="rounded-xl border border-line bg-panel">
-      <summary className="cursor-pointer select-none rounded-xl px-4 py-3 text-sm font-semibold text-fg transition-colors hover:bg-fg/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-        {t('templates.ciSection.title')}
-        {assigned.data ? (
-          <Badge variant="neutral" className="ml-2">
-            {assigned.data.data.length}
-          </Badge>
-        ) : null}
-      </summary>
-      <div className="space-y-3 border-t border-line px-4 py-4">
+    <CollapsibleSection title={t('templates.ciSection.title')} count={assigned.data?.data.length}>
+      <div className="space-y-3">
         <p className="text-xs text-fg-muted">{t('templates.ciSection.hint')}</p>
         {assigned.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
         {assigned.error ? (
@@ -249,7 +241,7 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
           onClose={() => setMigrate(null)}
         />
       ) : null}
-    </details>
+    </CollapsibleSection>
   );
 }
 

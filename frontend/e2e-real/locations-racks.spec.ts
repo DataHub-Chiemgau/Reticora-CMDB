@@ -299,12 +299,12 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
       name: string,
       offered: string[],
     ): Promise<Location> => {
-      await treeRow(page, parent).getByRole('button', { name: '+ Unterpunkt' }).click();
+      await treeRow(page, parent).getByRole('button', { name: 'Unterpunkt hinzufügen' }).click();
       dialog = page.getByRole('dialog', { name: `Unterpunkt in ${parent}` });
       await expect(dialog).toBeVisible();
       const typ = dialog.getByLabel('Typ');
       const options = (await typ.locator('option').allTextContents()).map((o) =>
-        o.trim().split(' ').slice(1).join(' '),
+        o.trim().replace(/^\p{Extended_Pictographic}\s*/u, ''),
       );
       expect(options, `kinds offered below ${parent}`).toEqual(offered);
       await typ.selectOption(kind);
@@ -326,9 +326,9 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     if (await roomToggle.isVisible()) await roomToggle.click();
     await expect(childRow(page, n.room, n.rack)).toBeVisible();
     // A rack is a leaf of the matrix: no "add child".
-    await expect(treeRow(page, n.rack).getByRole('button', { name: '+ Unterpunkt' })).toHaveCount(
-      0,
-    );
+    await expect(
+      treeRow(page, n.rack).getByRole('button', { name: 'Unterpunkt hinzufügen' }),
+    ).toHaveCount(0);
 
     // UI → API: parents, derived client/site and ltree path (LOC-10, TEN-02).
     const expected: [Location, string | undefined, string, string][] = [

@@ -194,9 +194,9 @@ test.describe('CI type admin: index flags of attributes with visible refusals an
       attributes: { [key]: `INV-${w.s}` },
     });
     await page.goto('/cmdb');
-    await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
     const form = page.getByRole('dialog');
-    await expect(form.getByRole('heading', { name: 'CI erstellen' })).toBeVisible();
+    await expect(form.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
     await form.getByLabel('Name', { exact: true }).fill(`flags-b-${w.s}`);
     await form.getByLabel('CI-Typ').selectOption({ label: w.typeName });
     const input = form.getByLabel(key, { exact: true });

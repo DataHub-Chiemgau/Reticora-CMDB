@@ -365,7 +365,7 @@ test('01 admin invites a viewer; the invitee accepts and signs in with exactly t
     email: address,
     password: password('viewer'),
   });
-  await expect(page.getByRole('button', { name: 'Abmelden' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Kontomenü/ })).toBeVisible();
   const me = await api<{ sub: string; org: string }>(request, token, 'GET', '/me');
   expect(me.body.sub).toBe(accepted.body.user_id);
   expect(me.body.org).toBe(state().orgId);
@@ -633,7 +633,7 @@ test('05b the admin invites in the UI; the mailed link opens the accept page, cr
 
   // The admin list shows the invitation as accepted, without actions.
   await admin.page.reload();
-  await main.getByRole('button', { name: 'Einladungen', exact: true }).click();
+  await main.getByRole('tab', { name: 'Einladungen', exact: true }).click();
   await expect(pendingRow).toContainText('Angenommen');
   await expect(pendingRow.getByRole('button')).toHaveCount(0);
   await admin.context.close();
@@ -778,7 +778,7 @@ test('06 the viewer reads CIs, but every write, delete and administrative call i
     .filter({ has: page.getByText(locBuilding.body.name, { exact: true }) });
   await expect(row).toBeVisible();
   // Add a child.
-  await row.getByRole('button', { name: '+ Unterpunkt' }).click();
+  await row.getByRole('button', { name: 'Unterpunkt hinzufügen' }).click();
   let dialog = page.getByRole('dialog', { name: `Unterpunkt in ${locBuilding.body.name}` });
   await dialog.getByLabel('Name', { exact: true }).fill(`viewer-room-${run}`);
   let sent = page.waitForResponse(
@@ -1010,7 +1010,7 @@ test('08 viewer UI: CIs are visible; creating or editing a CI is not offered or 
 
   // Create: either no enabled control, or the attempt shows an error.
   const uiName = `viewer-ui-ci-${run}`;
-  const create = page.getByRole('button', { name: 'CI erstellen' }).first();
+  const create = page.getByRole('button', { name: 'CI anlegen' }).first();
   if ((await create.isVisible()) && (await create.isEnabled())) {
     await create.click();
     const dialog = page.getByRole('dialog');
@@ -1066,7 +1066,7 @@ test('09 viewer UI: user, role and invitation management is not offered; refused
   await expect(page.getByRole('heading', { name: 'Benutzer & Teams' })).toBeVisible();
   const main = page.locator('#main-content');
   for (const tab of ['Benutzer', 'Teams', 'Rollen']) {
-    await main.getByRole('button', { name: tab, exact: true }).click();
+    await main.getByRole('tab', { name: tab, exact: true }).click();
     await expect(main.getByRole('heading', { name: new RegExp(`^${tab} \\(`) })).toBeVisible();
     await expect(
       main.getByRole('button', {
@@ -1091,7 +1091,7 @@ test('09b the roles tab presents the four RBA-02 roles as system roles, not as c
   const { context, page } = await signIn(browser, viewer);
   await page.goto('/users');
   const main = page.locator('#main-content');
-  await main.getByRole('button', { name: 'Rollen', exact: true }).click();
+  await main.getByRole('tab', { name: 'Rollen', exact: true }).click();
   await expect(main.getByRole('heading', { name: /^Rollen \(/ })).toBeVisible();
   for (const role of ['org_admin', 'engineer', 'viewer', 'client_technician']) {
     await expect
@@ -1447,7 +1447,7 @@ test('12 after the upgrade the user creates a CI through the UI form (UI → API
   const { context, page } = await signIn(browser, viewer);
   const uiName = `engineer-ui-ci-${run}`;
   await page.goto('/cmdb');
-  await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name').fill(uiName);
   await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
