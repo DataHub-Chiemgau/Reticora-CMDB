@@ -243,8 +243,14 @@ func evaluate(r *Rule, value any) []Violation {
 	if Empty(value) {
 		return nil
 	}
+	// A pattern is compiled once for all elements of the value.
+	var re *regexp.Regexp
+	var reErr error
+	if r.Op == OpPattern {
+		re, reErr = regexp.Compile(r.Pattern)
+	}
 	for _, item := range elements(value) {
-		if v := check(r, item); v != nil {
+		if v := check(r, re, reErr, item); v != nil {
 			return []Violation{*v}
 		}
 	}
@@ -266,15 +272,16 @@ func elements(value any) []any {
 	return []any{value}
 }
 
-func check(r *Rule, value any) *Violation {
+// check checks one element; re and reErr are the compiled pattern of an
+// OpPattern rule.
+func check(r *Rule, re *regexp.Regexp, reErr error, value any) *Violation {
 	switch r.Op {
 	case OpPattern:
 		s, ok := value.(string)
 		if !ok {
 			return &Violation{CodePatternType, "a text value is expected"}
 		}
-		re, err := regexp.Compile(r.Pattern)
-		if err != nil || !re.MatchString(s) {
+		if reErr != nil || !re.MatchString(s) {
 			return &Violation{CodePattern, fmt.Sprintf("value does not match pattern %q", r.Pattern)}
 		}
 	case OpRange:
