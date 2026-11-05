@@ -97,7 +97,11 @@ tags:
   - name: Documents
     description: Document metadata management
   - name: Stocktake
-    description: Inventory stocktake operations
+    description: >-
+      Inventory stocktake operations (stocktake_standard, INV-02): a
+      stocktake counts the subtree of one node of the location tree. Pro
+      stocktake and delegated stocktake are P4 functions outside the
+      phase-2 API; they have no operation here (WP-288).
   - name: Tickets
     description: Ticket and comment management
   - name: Users
@@ -28506,7 +28510,15 @@ components:
         location_id:
           type: string
           format: uuid
-          description: The area, a node of the location tree (WP-848).
+          description: >-
+            The area, a node of the location tree of any kind (site,
+            building, room, rack, warehouse, zone, shelf or bin). The
+            snapshot at the start covers the subtree of the node
+            (location.path <@): a bin only its own assets and stock, a zone
+            every shelf and bin below it, a room the assets of its racks as
+            well (WP-848, WP-288). A node that is unknown, of another
+            organization or outside the scope of the principal is 422 on
+            location_id.
         due_date:
           type: string
           format: date-time

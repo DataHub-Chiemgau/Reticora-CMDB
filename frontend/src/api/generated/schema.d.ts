@@ -13241,7 +13241,7 @@ export interface components {
       scope?: string;
       /**
        * Format: uuid
-       * @description The area, a node of the location tree (WP-848).
+       * @description The area, a node of the location tree of any kind (site, building, room, rack, warehouse, zone, shelf or bin). The snapshot at the start covers the subtree of the node (location.path <@): a bin only its own assets and stock, a zone every shelf and bin below it, a room the assets of its racks as well (WP-848, WP-288). A node that is unknown, of another organization or outside the scope of the principal is 422 on location_id.
        */
       location_id?: string;
       /** Format: date-time */

@@ -502,7 +502,7 @@ discovery license stops only `IsIngest` requests. The phase-2 mapping:
 | signature | GET `/api/v1/stock-movements/{id}/signature` |
 | gps_standard | `/api/v1/asset-locations*`, `/api/v1/assets/{id}/locations` |
 | stock | `/api/v1/consumables*`, `/api/v1/inventory/*`, POST (and every method but GET) `/api/v1/stock-movements*` |
-| stocktake_standard | `/api/v1/stocktakes*`, `/api/v1/stocktake*` |
+| stocktake_standard | `/api/v1/stocktakes*` |
 | internal_orders | `/api/v1/orders*` |
 | documents | `/api/v1/documents*` |
 | import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
