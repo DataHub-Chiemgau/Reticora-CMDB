@@ -954,6 +954,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/relationships", h.Create)
 	r.Patch("/api/v1/relationships/{id}", h.Update)
 	r.Delete("/api/v1/relationships/{id}", h.Delete)
+	r.Get("/api/v1/relationships/{id}/changes", h.ListChanges)
 	r.Get("/api/v1/relationship-suppressions", h.ListSuppressions)
 	r.Delete("/api/v1/relationship-suppressions/{id}", h.LiftSuppression)
 }

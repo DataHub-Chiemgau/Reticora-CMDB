@@ -1461,3 +1461,6 @@ INV-01;[P2];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-848
 TEN-02;[B];B;backend/internal/reservation/reservation_scope_integration_test.go;WP-750
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/asset/handler_reservation_test.go;WP-750
+REL-09;[P2];B;backend/internal/relationship/history_integration_test.go;WP-296
+EVT-03;[P2–P3];B;backend/internal/relationship/history_integration_test.go;WP-296
+AUD-07;[B];B;backend/internal/relationship/history_integration_test.go;WP-296

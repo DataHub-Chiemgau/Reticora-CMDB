@@ -11,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -269,6 +270,13 @@ func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID str
 	if entityType == "location" {
 		return r.listLocation(ctx, orgID, entityID, page)
 	}
+	if entityType == "relationship" {
+		changes, total, err := r.RelationshipChanges(ctx, orgID, entityID, page)
+		if err != nil {
+			return nil, 0, err
+		}
+		return RelationshipEntries(changes), total, nil
+	}
 	var out []Change
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -297,6 +305,61 @@ func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID str
 		return reveal(ctx, tx, orgID, out)
 	})
 	return out, total, err
+}
+
+// SourceRelationshipChange is the trail of the history of a relationship
+// (relationship_change, WP-296).
+const SourceRelationshipChange = "relationship_change"
+
+// RelationshipChanger reads the history of a relationship as rows of
+// relationship_change, for the field permissions of the relationship
+// grant (WP-296); PGRepository implements it.
+type RelationshipChanger interface {
+	RelationshipChanges(ctx context.Context, orgID, relationshipID string, page api.PaginationParams) ([]relationship.Change, int, error)
+}
+
+// RelationshipChanges returns the rows of relationship_change of a
+// relationship under the caller's tenant scope, newest first, with the
+// personal values revealed: the rows of GET
+// /api/v1/relationships/{id}/changes (relationship.ListChangesTx). A
+// relationship the caller sees neither as edge nor in its history has an
+// empty history here.
+func (r *PGRepository) RelationshipChanges(ctx context.Context, orgID, relationshipID string, page api.PaginationParams) ([]relationship.Change, int, error) {
+	out := []relationship.Change{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		changes, n, err := relationship.ListChangesTx(ctx, tx, orgID, relationshipID, page)
+		if errors.Is(err, api.ErrNotFound) {
+			return nil
+		}
+		out, total = changes, n
+		return err
+	})
+	return out, total, err
+}
+
+// RelationshipEntries maps rows of relationship_change to history entries:
+// change_kind is change_type, before and after are old_value and
+// new_value, observed_at is created_at and observed_at, the source of the
+// change is change_source; change_kind and change_set_id (AUD-03) stay
+// empty.
+func RelationshipEntries(changes []relationship.Change) []Change {
+	out := make([]Change, 0, len(changes))
+	for i := range changes {
+		c := &changes[i]
+		observed := c.ObservedAt
+		e := Change{ID: c.ID, EntityType: "relationship", EntityID: c.RelationshipID, ActorID: c.ActorID,
+			ChangeType: c.ChangeKind, CreatedAt: observed, ObservedAt: &observed, Source: SourceRelationshipChange,
+			ChangeSource: c.Source, RequestID: c.RequestID, CorrelationID: c.CorrelationID}
+		if c.Before != nil {
+			e.OldValue = c.Before
+		}
+		if c.After != nil {
+			e.NewValue = c.After
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // Visible reports whether the entity of a state snapshot (ci or asset)

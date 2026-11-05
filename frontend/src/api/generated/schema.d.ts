@@ -807,6 +807,45 @@ export interface paths {
     patch: operations['updateRelationship'];
     trace?: never;
   };
+  '/api/v1/relationships/{id}/changes': {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the change history of a relationship
+     * @description The history of a stored relationship (REL-09, AUD-07, WP-296), newest first (observed_at, then id): one row per creation (POST, a new discovery edge), change (PATCH with a changed value: updated, or verification_changed when verification_state changed), removal and suppression (DELETE with force of a discovery edge), written in the transaction of the mutation. before and after hold the whole edge (before null for created, after null for removed and suppressed); personal values are resolved, a deleted vault entry is null (SEC-05). The fields of before, after and changed_fields follow the field permissions of the relationship type and both endpoints (RBA-07): an unreadable attribute key, notes or confidence is left out. The rows stay after the edge is deleted and are visible like the edge was: both endpoints in the caller's client and site scope or org-wide (IMP-07).
+     */
+    get: operations['listRelationshipChanges'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/relationship-suppressions': {
     parameters: {
       query?: never;
@@ -8186,29 +8225,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/relationships/{id}/changes': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /**
-     * List the change history of a relationship
-     * @description Planned (E-38); WP-296 implements the operation.
-     */
-    get: operations['listRelationshipChanges'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/assets/bulk': {
     parameters: {
       query?: never;
@@ -11065,10 +11081,10 @@ export interface components {
       /** Format: date-time */
       created_at: string;
       /**
-       * @description The trail of the entry (CI and location history only).
+       * @description The trail of the entry (CI, location and relationship history only): relationship_change for an entry of the history of a relationship (WP-296).
        * @enum {string}
        */
-      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
+      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change' | 'relationship_change';
       /**
        * Format: uuid
        * @description The site of the CI when the change was made (ci_change), or the site of the moved location (location_change).
@@ -11883,6 +11899,67 @@ export interface components {
       comment?: string;
       /** Format: date-time */
       created_at: string;
+    };
+    /** @description One row of the history of a relationship (WP-296). */
+    RelationshipChange: {
+      /** Format: uuid */
+      id: string;
+      /**
+       * Format: uuid
+       * @description The relationship; it may be deleted.
+       */
+      relationship_id: string;
+      /** Format: uuid */
+      source_ci_id: string;
+      /** Format: uuid */
+      target_ci_id: string;
+      rel_type: string;
+      /** @enum {string} */
+      change_kind:
+        | 'created'
+        | 'updated'
+        | 'verification_changed'
+        | 'refreshed'
+        | 'removed'
+        | 'suppressed'
+        | 'rewired'
+        | 'restored';
+      /** @description The fields whose values the change changed (empty for created, removed and suppressed). */
+      changed_fields: (
+        'attributes' | 'confidence' | 'verification_state' | 'source_system' | 'notes'
+      )[];
+      /** @description The relationship before the change; null for created. */
+      before: components['schemas']['RelationshipChangeEdge'] | null;
+      /** @description The relationship after the change; null for removed and suppressed. */
+      after: components['schemas']['RelationshipChangeEdge'] | null;
+      /**
+       * Format: uuid
+       * @description The user who made the change; absent without one.
+       */
+      actor_id?: string;
+      /** @enum {string} */
+      actor_type: 'user' | 'api_key' | 'system';
+      /**
+       * @description The source of the change as in the audit log; without a request (the discovery ingest) collector for a discovery or agent edge, system otherwise.
+       * @enum {string}
+       */
+      source: 'ui' | 'api' | 'collector' | 'import' | 'system';
+      /**
+       * @description Why the system changed the relationship; absent for a change through the API.
+       * @enum {string}
+       */
+      reason?: 'stale' | 'suppressed' | 'merge' | 'unmerge' | 'interface_removed';
+      request_id?: string;
+      correlation_id?: string;
+      /** Format: date-time */
+      observed_at: string;
+    };
+    /** @description A relationship as stored at the change, in the form of Relationship (endpoints, interfaces, rel_type, attributes with provenance, confidence, verification_state, verified_by/verified_at, source, source_system, notes, first_seen_at, last_seen_at, last_confirmed_at), without the fields the caller may not read. */
+    RelationshipChangeEdge: {
+      [key: string]: unknown;
+    };
+    RelationshipChangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RelationshipChange'][];
     };
     CIChangeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['CIChange'][];
@@ -18837,6 +18914,57 @@ export interface operations {
         };
         content: {
           'application/problem+json': components['schemas']['ViolationProblem'];
+        };
+      };
+    };
+  };
+  listRelationshipChanges: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipChangeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The caller sees neither the relationship nor a row of its history: an unknown or malformed id, a projected structural relationship (contains, mounted_in, located_in), or an endpoint outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
     };
@@ -35864,7 +35992,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). For a relationship it is the history of the edge (relationship_change, WP-296), the rows of GET /api/v1/relationships/{id}/changes: change_type is the change kind (created, updated, verification_changed, removed, suppressed), old_value/new_value the edge before and after the change with the fields the caller may read (relationship grant of the type, RBA-07), created_at and observed_at the time of the change, change_source its source, request_id and correlation_id those of its request, source relationship_change. A relationship the caller sees neither as edge nor in its history has an empty history. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -38708,42 +38836,6 @@ export interface operations {
     responses: {
       /** @description Released. */
       204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-    };
-  };
-  listRelationshipChanges: {
-    parameters: {
-      query?: {
-        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
-        limit?: components['parameters']['Limit'];
-        /**
-         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
-         *     are HMAC-signed by the server (API-02); a forged or altered cursor
-         *     yields 400. Keyset cursors are bound to the sort order they were
-         *     issued for; sending one with a different `sort_by`/`sort_dir`
-         *     combination yields 400.
-         */
-        cursor?: components['parameters']['Cursor'];
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description List the change history of a relationship. The page follows the cursor contract (API-02); the item schema comes with WP-296. */
-      200: {
         headers: {
           [name: string]: unknown;
         };

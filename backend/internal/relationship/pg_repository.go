@@ -56,8 +56,8 @@ type PGRepository struct {
 	// bulkFrontier is the frontier size beyond which a traversal reads every
 	// edge of the organization at once instead of the next level.
 	bulkFrontier int
-	// outbox receives relationship.created and relationship.removed
-	// (WithEvents).
+	// outbox receives relationship.created, relationship.changed and
+	// relationship.removed (WithEvents).
 	outbox *events.Outbox
 }
 
@@ -79,10 +79,10 @@ func (r *PGRepository) WithBulkFrontier(n int) *PGRepository {
 	return r
 }
 
-// WithEvents makes Create, Delete and DeleteWithPolicy write
-// relationship.created and relationship.removed into the outbox of their
-// transaction (EVT-01, EVT-02): a refused or rolled back mutation leaves no
-// event.
+// WithEvents makes Create, Update, Delete and DeleteWithPolicy write
+// relationship.created, relationship.changed and relationship.removed into
+// the outbox of their transaction (EVT-01, EVT-02, EVT-03): a refused or
+// rolled back mutation leaves no event.
 func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
 	r.outbox = outbox
 	return r
@@ -321,7 +321,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 				FROM ends WHERE ends.source_visible AND ends.target_visible AND ends.source_allowed AND ends.target_allowed
 					AND ends.within_cardinality
 				RETURNING id::text AS id, created_at, updated_at, last_confirmed_at,
-					COALESCE(verified_by::text, '') AS verified_by, verified_at
+					COALESCE(verified_by::text, '') AS verified_by, verified_at, first_seen_at, last_seen_at
 			)
 			SELECT ends.source_visible, ends.target_visible, ends.source_allowed, ends.target_allowed,
 				ends.within_cardinality, created.*
@@ -329,7 +329,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		`
 		var sourceVisible, targetVisible, sourceAllowed, targetAllowed, withinCardinality bool
 		var id, verifiedBy *string
-		var createdAt, updatedAt, confirmedAt, verifiedAt *time.Time
+		var createdAt, updatedAt, confirmedAt, verifiedAt, firstSeenAt, lastSeenAt *time.Time
 		firstSeen := any(nil)
 		if rel.Source != "manual" {
 			firstSeen = time.Now().UTC()
@@ -356,7 +356,7 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 			rel.VerifiedBy,
 			rel.checkTypeLists,
 		).Scan(&sourceVisible, &targetVisible, &sourceAllowed, &targetAllowed, &withinCardinality,
-			&id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt); err != nil {
+			&id, &createdAt, &updatedAt, &confirmedAt, &verifiedBy, &verifiedAt, &firstSeenAt, &lastSeenAt); err != nil {
 			return fmt.Errorf("create relationship: %w", err)
 		}
 		var refused []error
@@ -386,6 +386,13 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		rel.UpdatedAt = formatTime(updatedAt)
 		rel.LastConfirmedAt = formatTime(confirmedAt)
 		rel.VerifiedAt = formatTime(verifiedAt)
+		// The history holds the edge as stored (REL-09, WP-296); the
+		// answer and the event keep the edge as before.
+		stored := *rel
+		stored.VerificationState, stored.FirstSeenAt, stored.LastSeenAt = verification, formatTime(firstSeenAt), formatTime(lastSeenAt)
+		if err := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeCreated, After: &stored}); err != nil {
+			return err
+		}
 		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})
 }
@@ -426,25 +433,28 @@ func lockCardinalityEnds(ctx context.Context, tx pgx.Tx, rel *Relationship) erro
 }
 
 // Update edits the provenance and verification metadata of a relationship.
-// The edge endpoints and rel_type are intentionally immutable. With
-// req.Check it first reads and locks the edge (SELECT … FOR UPDATE, the
-// visible edges of DeleteWithPolicy) and writes only when the check passes
-// (field permissions, RBA-07, WP-770).
+// The edge endpoints and rel_type are intentionally immutable. It first
+// reads and locks the edge (SELECT … FOR UPDATE, the visible edges of
+// DeleteWithPolicy) and, with req.Check, writes only when the check passes
+// (field permissions, RBA-07, WP-770). A changed value writes a history row
+// (updated, or verification_changed with a changed verification state) and
+// relationship.changed (WP-296).
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateRequest) (*Relationship, error) {
 	var out *Relationship
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The edge as stored, locked until the write: the check sees it
+		// (RBA-07, WP-770: type, attributes, notes, confidence and the
+		// scope of both ends), and the history row holds it as before
+		// (REL-09, WP-296).
+		current, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
+			WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if err != nil {
+			return fmt.Errorf("read relationship: %w", err)
+		}
 		if req.Check != nil {
-			// The check sees the edge as stored, locked until the write
-			// (RBA-07, WP-770): type, attributes, notes, confidence and the
-			// scope of both ends.
-			current, err := scanRelationship(tx.QueryRow(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
-				WHERE id = $1 AND organization_id = $2 AND `+visibleEndpoints+` FOR UPDATE`, id, orgID))
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("not found")
-			}
-			if err != nil {
-				return fmt.Errorf("read relationship: %w", err)
-			}
 			if checkErr := req.Check(database.ContextWithTx(ctx, tx), current); checkErr != nil {
 				return checkErr
 			}
@@ -495,7 +505,17 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return fmt.Errorf("update relationship: %w", err)
 		}
 		out = scanned
-		return nil
+		// A PATCH without a changed value writes no history row and no
+		// event (REL-09, WP-296).
+		fields := changedFields(current, scanned)
+		if len(fields) == 0 {
+			return nil
+		}
+		kind := updateKind(fields)
+		if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: kind, Before: current, After: scanned, ChangedFields: fields}); recErr != nil {
+			return recErr
+		}
+		return r.recordChangedEvent(ctx, tx, scanned, kind, fields)
 	})
 	if err != nil {
 		return nil, err
@@ -537,6 +557,9 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 		if err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
+		if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeRemoved, Before: deleted}); recErr != nil {
+			return recErr
+		}
 		return r.recordEvent(ctx, tx, events.RelationshipRemoved, deleted)
 	})
 }
@@ -565,6 +588,9 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, o
 			return fmt.Errorf("delete relationship: %w", err)
 		}
 		if source != "discovery" {
+			if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeRemoved, Before: edge}); recErr != nil {
+				return recErr
+			}
 			return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 		}
 		// created_by is the acting user of the organization (none for a
@@ -606,6 +632,9 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, o
 			if auditErr := recordSuppressionAudit(ctx, tx, orgID, ActionSuppressionCreated, suppressionID, opts.Actor, changes); auditErr != nil {
 				return auditErr
 			}
+		}
+		if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeSuppressed, Before: edge}); recErr != nil {
+			return recErr
 		}
 		return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 	})

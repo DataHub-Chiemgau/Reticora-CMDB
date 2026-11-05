@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -289,6 +290,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	page := api.ParsePagination(r)
 	id := chi.URLParam(r, "id")
+	if changer, isChanger := h.repo.(RelationshipChanger); isChanger && entityType == "relationship" {
+		h.listRelationship(w, r, changer, id, page)
+		return
+	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, entityType, id, page, opts)
 	if err != nil {
 		api.WriteRepoError(w, err)
@@ -311,6 +316,29 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Data: api.NonNilSlice(items), Total: total, Limit: page.Limit, Offset: page.Offset,
 		HasMore: page.Offset+page.Limit < total, AuditIncluded: opts.IncludeAudit,
 	}
+	if resp.HasMore && len(items) > 0 {
+		resp.NextCursor = api.EncodeOffsetCursor(page.Offset + len(items))
+	}
+	api.WriteJSON(w, http.StatusOK, resp)
+}
+
+// listRelationship answers the history of a relationship from
+// relationship_change (WP-296): the rows of GET
+// /api/v1/relationships/{id}/changes as history entries, with old_value
+// and new_value projected by the relationship grant of the type and the
+// scope of both endpoints (RBA-07, relationship.ProjectChanges).
+func (h *Handler) listRelationship(w http.ResponseWriter, r *http.Request, changer RelationshipChanger, id string, page api.PaginationParams) {
+	orgID := tenant.FromContext(r.Context()).OrganizationID
+	changes, total, err := changer.RelationshipChanges(r.Context(), orgID, id, page)
+	if err == nil {
+		changes, err = relationship.ProjectChanges(r.Context(), orgID, changes, nil)
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	items := RelationshipEntries(changes)
+	resp := ListResponse{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total}
 	if resp.HasMore && len(items) > 0 {
 		resp.NextCursor = api.EncodeOffsetCursor(page.Offset + len(items))
 	}

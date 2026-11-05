@@ -264,6 +264,7 @@ GET /api/v1/relationship-suppressions relationship:read
 GET /api/v1/relationship-types relationship:read
 GET /api/v1/relationship-types/{key} relationship:read
 GET /api/v1/relationships relationship:read
+GET /api/v1/relationships/{id}/changes relationship:read
 GET /api/v1/reservations reservation:read
 GET /api/v1/reservations/{id} reservation:read
 GET /api/v1/review-items discovery:read

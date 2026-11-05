@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000260_stocktake_snapshot
+Stand: Migration 000261_relationship_change
 
 ## Prüfung
 
@@ -1654,6 +1654,34 @@ ihrer Änderung. `stock_scan.location_id` (Fundort) mit
 Site-Prädikat, NULL lesbar) mit den restriktiven `stocktake_scoped_update`
 und `stocktake_scoped_delete`; `stocktake_item` mit ENABLE/FORCE,
 TRUNCATE-Schutz `reticora_truncate_guard` und `stocktake_item_isolation`.
+Kantenhistorie (REL-09, EVT-03, AUD-07, WP-296, Migration 000261):
+`relationship_change` (`id`, `organization_id` → `organization` ON DELETE
+CASCADE, `relationship_id` UUID NOT NULL ohne Fremdschlüssel, `source_ci_id`,
+`target_ci_id`, `rel_type` TEXT NOT NULL, `change_kind` TEXT NOT NULL,
+`changed_fields` TEXT[] NOT NULL DEFAULT `'{}'`, `before` und `after` JSONB,
+`actor_id` UUID ohne Fremdschlüssel, `actor_type` und `source` TEXT NOT
+NULL, `reason`, `request_id`, `correlation_id` TEXT, `observed_at`
+TIMESTAMPTZ NOT NULL, `created_at` DEFAULT now() sowie die Scope-Spalten
+`source_client_id`, `source_site_id`, `target_client_id`, `target_site_id`)
+mit `relationship_change_source_tenant_fkey` und
+`relationship_change_target_tenant_fkey` (je (`…_ci_id`,
+`organization_id`) → `ci` (`id`, `organization_id`) ON DELETE CASCADE, K19),
+CHECK `chk_relationship_change_kind` (`created`, `updated`,
+`verification_changed`, `refreshed`, `removed`, `suppressed`, `rewired`,
+`restored`), `chk_relationship_change_source` (`ui`, `api`, `collector`,
+`import`, `system`) und `chk_relationship_change_reason` (NULL, `stale`,
+`suppressed`, `merge`, `unmerge`, `interface_removed`) sowie den Indizes
+`idx_relationship_change_relationship`, `idx_relationship_change_source`
+und `idx_relationship_change_target` (`organization_id`, `relationship_id`
+bzw. `source_ci_id` bzw. `target_ci_id`, `observed_at` DESC). Trigger
+`relationship_change_scope` (BEFORE INSERT OR UPDATE, `derive_edge_scope()`)
+setzt den Scope beider Endpunkte; `relationship_change_scope_propagation`
+(AFTER UPDATE ON `ci` bei geändertem `client_id` oder `site_id`, Funktion
+`propagate_relationship_change_scope()` mit erweitertem Scope) leitet nach.
+RLS mit ENABLE/FORCE, TRUNCATE-Schutz `reticora_truncate_guard`,
+`relationship_change_isolation` (USING wie `ci_relationship_isolation`,
+WITH CHECK mit dem Schreibprädikat aus 000142) und die restriktiven
+`relationship_change_scoped_update` und `relationship_change_scoped_delete`.
 
 ## Tabellen, RLS und Policies
 
@@ -1777,6 +1805,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
+| `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |
 | `relationship_suppression` | ja | ja | relationship_suppression_scoped_delete (DELETE), relationship_suppression_scoped_update (UPDATE), suppression_isolation (ALL) |
 | `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
 | `reservation` | ja | ja | reservation_isolation (ALL), reservation_scoped_delete (DELETE), reservation_scoped_update (UPDATE) |

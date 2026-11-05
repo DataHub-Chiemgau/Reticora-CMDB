@@ -2115,6 +2115,55 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/relationships/{id}/changes:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Cursor'
+      - $ref: '#/components/parameters/Offset'
+    get:
+      operationId: listRelationshipChanges
+      tags: [Relationships]
+      summary: List the change history of a relationship
+      description: >-
+        The history of a stored relationship (REL-09, AUD-07, WP-296), newest
+        first (observed_at, then id): one row per creation (POST, a new
+        discovery edge), change (PATCH with a changed value: updated, or
+        verification_changed when verification_state changed), removal and
+        suppression (DELETE with force of a discovery edge), written in the
+        transaction of the mutation. before and after hold the whole edge
+        (before null for created, after null for removed and suppressed);
+        personal values are resolved, a deleted vault entry is null
+        (SEC-05). The fields of before, after and changed_fields follow the
+        field permissions of the relationship type and both endpoints
+        (RBA-07): an unreadable attribute key, notes or confidence is left
+        out. The rows stay after the edge is deleted and are visible like
+        the edge was: both endpoints in the caller's client and site scope
+        or org-wide (IMP-07).
+      responses:
+        '200':
+          description: Paginated change history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RelationshipChangeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            The caller sees neither the relationship nor a row of its
+            history: an unknown or malformed id, a projected structural
+            relationship (contains, mounted_in, located_in), or an endpoint
+            outside the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
   /api/v1/relationship-suppressions:
     get:
       operationId: listRelationshipSuppressions
@@ -16428,7 +16477,17 @@ paths:
             location_change entry has change_type location_change, field_name
             parent_id, and old_value/new_value objects with location_id,
             location_name, parent_id and path. Without audit:read the audit
-            entries are left out (audit_included false).
+            entries are left out (audit_included false). For a relationship
+            it is the history of the edge (relationship_change, WP-296), the
+            rows of GET /api/v1/relationships/{id}/changes: change_type is
+            the change kind (created, updated, verification_changed, removed,
+            suppressed), old_value/new_value the edge before and after the
+            change with the fields the caller may read (relationship grant
+            of the type, RBA-07), created_at and observed_at the time of the
+            change, change_source its source, request_id and correlation_id
+            those of its request, source relationship_change. A relationship
+            the caller sees neither as edge nor in its history has an empty
+            history.
           content:
             application/json:
               schema:
@@ -19008,30 +19067,6 @@ paths:
       responses:
         '204':
           description: Released.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /api/v1/relationships/{id}/changes:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    get:
-      operationId: listRelationshipChanges
-      tags: [Relationships]
-      summary: List the change history of a relationship
-      description: Planned (E-38); WP-296 implements the operation.
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
-      responses:
-        '200':
-          description: List the change history of a relationship. The page follows the cursor contract (API-02); the item schema comes with WP-296.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24208,8 +24243,11 @@ components:
         created_at: { type: string, format: date-time }
         source:
           type: string
-          enum: [ci_change, entity_change, audit, location_change]
-          description: The trail of the entry (CI and location history only).
+          enum: [ci_change, entity_change, audit, location_change, relationship_change]
+          description: >-
+            The trail of the entry (CI, location and relationship history
+            only): relationship_change for an entry of the history of a
+            relationship (WP-296).
         site_id:
           type: string
           format: uuid
@@ -25641,6 +25679,81 @@ components:
         created_at:
           type: string
           format: date-time
+
+    RelationshipChange:
+      type: object
+      description: One row of the history of a relationship (WP-296).
+      required: [id, relationship_id, source_ci_id, target_ci_id, rel_type, change_kind, changed_fields, before, after, actor_type, source, observed_at]
+      properties:
+        id: { type: string, format: uuid }
+        relationship_id:
+          type: string
+          format: uuid
+          description: The relationship; it may be deleted.
+        source_ci_id: { type: string, format: uuid }
+        target_ci_id: { type: string, format: uuid }
+        rel_type: { type: string }
+        change_kind:
+          type: string
+          enum: [created, updated, verification_changed, refreshed, removed, suppressed, rewired, restored]
+        changed_fields:
+          type: array
+          description: The fields whose values the change changed (empty for created, removed and suppressed).
+          items:
+            type: string
+            enum: [attributes, confidence, verification_state, source_system, notes]
+        before:
+          description: The relationship before the change; null for created.
+          oneOf:
+            - $ref: '#/components/schemas/RelationshipChangeEdge'
+            - type: 'null'
+        after:
+          description: The relationship after the change; null for removed and suppressed.
+          oneOf:
+            - $ref: '#/components/schemas/RelationshipChangeEdge'
+            - type: 'null'
+        actor_id:
+          type: string
+          format: uuid
+          description: The user who made the change; absent without one.
+        actor_type:
+          type: string
+          enum: [user, api_key, system]
+        source:
+          type: string
+          enum: [ui, api, collector, import, system]
+          description: >-
+            The source of the change as in the audit log; without a request
+            (the discovery ingest) collector for a discovery or agent edge,
+            system otherwise.
+        reason:
+          type: string
+          enum: [stale, suppressed, merge, unmerge, interface_removed]
+          description: Why the system changed the relationship; absent for a change through the API.
+        request_id: { type: string }
+        correlation_id: { type: string }
+        observed_at: { type: string, format: date-time }
+
+    RelationshipChangeEdge:
+      type: object
+      additionalProperties: true
+      description: >-
+        A relationship as stored at the change, in the form of Relationship
+        (endpoints, interfaces, rel_type, attributes with provenance,
+        confidence, verification_state, verified_by/verified_at, source,
+        source_system, notes, first_seen_at, last_seen_at,
+        last_confirmed_at), without the fields the caller may not read.
+
+    RelationshipChangeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/RelationshipChange'
 
     CIChangeListResponse:
       allOf:
