@@ -2,14 +2,19 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -197,6 +202,11 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, m
 				return fmt.Errorf("record lifecycle history: %w", histErr)
 			}
 		}
+		// The change set of a bulk and the marks of its revert (WP-783),
+		// before audit and event.
+		if bulkErr := recordBulkTransition(ctx, orgID, entityType, entityID, current, req.ToState); bulkErr != nil {
+			return bulkErr
+		}
 		if recErr := s.states.RecordTransition(ctx, orgID, &TransitionRecord{EntityType: entityType, EntityID: entityID,
 			ModelID: def.ID, ModelKey: def.Key, From: current, To: req.ToState, Reason: req.Reason}); recErr != nil {
 			return recErr
@@ -208,6 +218,72 @@ func (s *Service) Transition(ctx context.Context, orgID, entityType, entityID, m
 		return nil, err
 	}
 	return result, nil
+}
+
+// The change set of a lifecycle transition of a bulk (BLK-02, WP-783):
+// under a bulk job (jobs.WithChangeSet) the transition records in its
+// transaction one row op set, field lifecycle_state, with the state before
+// (NULL without one) and after; the revert of the bulk passes the rows it
+// reverts (WithRevertMarks), which the transaction back marks reverted.
+// Only a transaction of the database (PGStateStore) records; the memory
+// store keeps no change set.
+
+// ChangeFieldLifecycleState is the field name of the change set row of a
+// transition.
+const ChangeFieldLifecycleState = "lifecycle_state"
+
+type revertMarksKey struct{}
+
+// WithRevertMarks returns ctx whose transition records marks (a revert of
+// a bulk transition) in its transaction.
+func WithRevertMarks(ctx context.Context, marks []jobs.ChangeMark) context.Context {
+	return context.WithValue(ctx, revertMarksKey{}, marks)
+}
+
+func revertMarksFrom(ctx context.Context) []jobs.ChangeMark {
+	marks, _ := ctx.Value(revertMarksKey{}).([]jobs.ChangeMark)
+	return marks
+}
+
+// recordBulkTransition writes the change set row of a transition from
+// current to to of a bulk and the marks of a revert in the transaction of
+// ctx; nothing outside a bulk, a revert or a database transaction.
+func recordBulkTransition(ctx context.Context, orgID, entityType, entityID, current, to string) error {
+	jobID, capture := jobs.ChangeSetFrom(ctx)
+	marks := revertMarksFrom(ctx)
+	if (!capture && len(marks) == 0) || !database.InTx(ctx) {
+		return nil
+	}
+	table := map[string]string{"ci": "ci", "asset": "asset"}[entityType]
+	if table == "" {
+		return nil
+	}
+	// The transaction of the transition is joined (RunInTx); no pool is
+	// needed.
+	return database.WithRequestTenant(ctx, nil, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := jobs.MarkChangeTx(ctx, tx, orgID, marks); err != nil {
+			return err
+		}
+		if !capture {
+			return nil
+		}
+		change := jobs.Change{JobID: jobID, EntityType: entityType, EntityID: entityID, Op: jobs.OpSet,
+			FieldName: ChangeFieldLifecycleState}
+		var err error
+		if current != "" {
+			if change.OldValue, err = json.Marshal(current); err != nil {
+				return fmt.Errorf("encode bulk change set: %w", err)
+			}
+		}
+		if change.NewValue, err = json.Marshal(to); err != nil {
+			return fmt.Errorf("encode bulk change set: %w", err)
+		}
+		if err = tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM "+table+
+			" WHERE id = $1 AND organization_id = $2", entityID, orgID).Scan(&change.ClientID, &change.SiteID); err != nil {
+			return fmt.Errorf("read the entity of the bulk change set: %w", err)
+		}
+		return jobs.RecordChangeTx(ctx, tx, orgID, []jobs.Change{change})
+	})
 }
 
 // checkSystemGuard evaluates the system guard of the target state of an

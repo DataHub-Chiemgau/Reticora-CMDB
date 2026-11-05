@@ -233,8 +233,8 @@ func problemType(body []byte) string {
 //	(f) the creator without ci:write is refused (403);
 //	(g) a second POST while the revert job runs answers the same job, the
 //	    bulk job then records the revert and a further POST is 409; the
-//	    revert of bulk.revert, a bulk without change set rows and a bulk of
-//	    another action are 409.
+//	    revert of bulk.revert and a bulk without change set rows are 409;
+//	    a bulk of set_owner is reverted since WP-783.
 //
 // The case with the job queue (h) is TestBulkRevertOnTheQueue.
 func TestBulkRevertAgainstPostgres(t *testing.T) {
@@ -470,11 +470,12 @@ func TestBulkRevertAgainstPostgres(t *testing.T) {
 		if code, body, _ = e.revert(e.ctx, same.BulkJobID); code != http.StatusConflict || !bytes.Contains(body, []byte(ci.ErrBulkNothingToRevert.Error())) {
 			t.Errorf("revert of a bulk without change set: %d %s, want 409", code, body)
 		}
-		// A bulk of an action without revert in this work package.
+		// set_owner had no revert in this work package; WP-783 reverts it
+		// like the field operations.
 		owner := e.syncBulk(e.ctx, map[string]any{"action": "set_owner", "ids": e.cis("wp305-go-", f.Client1, 1),
 			"params": map[string]any{"owner_user_id": e.creator}})
-		if code, body, _ = e.revert(e.ctx, owner.BulkJobID); code != http.StatusConflict || !bytes.Contains(body, []byte(ci.ErrBulkActionNotRevertible.Error())) {
-			t.Errorf("revert of set_owner: %d %s, want 409", code, body)
+		if _, ownerRes := e.revertJob(e.ctx, owner.BulkJobID); ownerRes.Reverted != 1 {
+			t.Errorf("revert of set_owner: %+v, want the CI reverted", ownerRes)
 		}
 	})
 }

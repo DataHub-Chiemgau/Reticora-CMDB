@@ -1272,7 +1272,11 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 func (r *PGRepository) recordUpdate(ctx context.Context, tx pgx.Tx, orgID, id string, w *rowUpdate) error {
 	item := w.after
 	if len(w.changes) == 0 {
-		// A replaced template list alone (PUT /cis/{id}/templates).
+		// A replaced template list alone (PUT /cis/{id}/templates), under
+		// a bulk job with its change set row (WP-783).
+		if err := w.bulk.record(ctx, tx, orgID, item); err != nil {
+			return err
+		}
 		return r.recordTemplatesChange(ctx, tx, item, w.templates)
 	}
 	set := newChangeSet(w.kind())
@@ -1494,7 +1498,9 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 	}
 	// A bulk revert leaves every field whose value changed since the bulk
 	// (WP-305), decided on the locked row.
-	applyRevertExpectation(ctx, before, &req)
+	if revertErr := applyRevertExpectation(ctx, tx, orgID, before, &req); revertErr != nil {
+		return nil, revertErr
+	}
 	if reviveErr := reviveSighted(before, &req); reviveErr != nil {
 		return nil, reviveErr
 	}

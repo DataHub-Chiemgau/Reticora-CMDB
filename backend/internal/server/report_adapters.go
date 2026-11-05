@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
@@ -366,17 +369,30 @@ func ends(edge *ci.BulkEdge) (source, target string) {
 // conflict (409).
 func (b bulkRelationships) AddRelationship(ctx context.Context, orgID string, edge *ci.BulkEdge) error {
 	source, target := ends(edge)
-	actor := relationship.Actor{ID: edge.Actor, Type: "user"}
-	if actor.ID == "" {
-		actor = relationship.Actor{ID: "api", Type: "api_key"}
+	// Under a bulk job the edge is a change set row of the CI (WP-783).
+	ctx = relationship.WithBulkEdge(ctx, &relationship.BulkEdgeContext{EntityID: edge.CIID})
+	_, err := b.handler.CreateManual(ctx, orgID, bulkActor(edge.Actor), relationship.CreateRequest{SourceCIID: source, TargetCIID: target,
+		RelType: edge.RelType})
+	return addOutcome(err, edge.Incoming)
+}
+
+// bulkActor is the actor of an edge write of a bulk run by author.
+func bulkActor(author string) relationship.Actor {
+	if author == "" {
+		return relationship.Actor{ID: "api", Type: "api_key"}
 	}
-	_, err := b.handler.CreateManual(ctx, orgID, actor, relationship.CreateRequest{SourceCIID: source, TargetCIID: target, RelType: edge.RelType})
+	return relationship.Actor{ID: author, Type: "user"}
+}
+
+// addOutcome maps the error of an edge creation onto the outcome of the
+// CI; incoming: the CI is the target of the edge.
+func addOutcome(err error, incoming bool) error {
 	if err == nil {
 		return nil
 	}
 	otherMissing, ownMissing := relationship.ErrTargetCINotFound, relationship.ErrSourceCINotFound
 	otherType, ownType := relationship.ErrTargetCITypeNotAllowed, relationship.ErrSourceCITypeNotAllowed
-	if edge.Incoming {
+	if incoming {
 		otherMissing, ownMissing = ownMissing, otherMissing
 		otherType, ownType = ownType, otherType
 	}
@@ -406,6 +422,9 @@ func (b bulkRelationships) AddRelationship(ctx context.Context, orgID string, ed
 // two CIs with the type (interfaces), the one without interfaces goes.
 func (b bulkRelationships) RemoveRelationship(ctx context.Context, orgID string, edge *ci.BulkEdge) error {
 	source, target := ends(edge)
+	// Under a bulk job the deleted edge is a change set row of the CI
+	// (WP-783).
+	ctx = relationship.WithBulkEdge(ctx, &relationship.BulkEdgeContext{EntityID: edge.CIID})
 	rels, _, err := b.repo.ListFiltered(ctx, orgID, relationship.ListFilter{SourceCIID: source, TargetCIID: target, RelType: edge.RelType},
 		api.PaginationParams{Limit: 100})
 	if err != nil {
@@ -430,6 +449,48 @@ func (b bulkRelationships) RemoveRelationship(ctx context.Context, orgID string,
 	switch {
 	case errors.Is(err, relationship.ErrForceRequired):
 		return &ci.BulkItemError{Status: http.StatusConflict, Detail: err.Error()}
+	case errors.Is(err, api.ErrNotFound):
+		return &ci.BulkItemError{Status: http.StatusNotFound, Detail: "relationship not found"}
+	}
+	return err
+}
+
+// RevertRelationship implements ci.BulkRelationshipReverter (WP-783): the
+// edge of add_relationship is deleted like DELETE /relationships/{id}
+// without force, only as the bulk created it (409 otherwise, 404 when it
+// is gone); the edge of remove_relationship is created again like POST
+// /relationships with its type, ends, origin, verification, notes and
+// attributes (the provenance is the revert's); an equal edge that exists
+// meanwhile (uq_ci_relationship_edge) is a database conflict (409). The
+// write marks rev.Marks reverted in its transaction.
+func (b bulkRelationships) RevertRelationship(ctx context.Context, orgID string, rev *ci.BulkEdgeRevert) error {
+	var edge relationship.Relationship
+	if err := json.Unmarshal(rev.Edge, &edge); err != nil || edge.SourceCIID == "" || edge.TargetCIID == "" {
+		return &ci.BulkItemError{Status: http.StatusUnprocessableEntity, Detail: "the change set holds no relationship"}
+	}
+	if rev.Op == jobs.OpRemove {
+		attributes := maps.Clone(edge.Attributes)
+		delete(attributes, "provenance")
+		recreate := relationship.WithBulkEdge(ctx, &relationship.BulkEdgeContext{Marks: rev.Marks})
+		_, err := b.handler.CreateManual(recreate, orgID, bulkActor(rev.Actor), relationship.CreateRequest{SourceCIID: edge.SourceCIID,
+			TargetCIID: edge.TargetCIID, RelType: edge.RelType, Attributes: attributes, Source: edge.Source, Confidence: edge.Confidence,
+			VerificationState: edge.VerificationState, SourceSystem: edge.SourceSystem, Notes: edge.Notes,
+			SourceInterfaceID: edge.SourceInterfaceID, TargetInterfaceID: edge.TargetInterfaceID})
+		return addOutcome(err, edge.TargetCIID == rev.CIID && edge.SourceCIID != rev.CIID)
+	}
+	deleter, ok := b.repo.(relationship.PolicyDeleter)
+	if !ok || edge.ID == "" {
+		return ci.ErrBulkActionUnavailable
+	}
+	actor := bulkActor(rev.Actor)
+	if !api.IsUUID(actor.ID) {
+		actor.ID = ""
+	}
+	remove := relationship.WithBulkEdge(ctx, &relationship.BulkEdgeContext{Expect: &edge, Marks: rev.Marks})
+	err := deleter.DeleteWithPolicy(remove, orgID, edge.ID, relationship.DeleteOptions{Actor: actor})
+	switch {
+	case errors.Is(err, relationship.ErrEdgeChanged), errors.Is(err, relationship.ErrForceRequired):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: relationship.ErrEdgeChanged.Error()}
 	case errors.Is(err, api.ErrNotFound):
 		return &ci.BulkItemError{Status: http.StatusNotFound, Detail: "relationship not found"}
 	}
@@ -465,6 +526,13 @@ func (b bulkLifecycle) Transition(ctx context.Context, orgID, ciID string, req *
 	_, err = b.svc.Transition(ctx, orgID, "ci", ciID, modelID, lifecycle.TransitionRequest{ToState: req.ToState,
 		FromState: req.FromState, Context: req.Context, Reason: req.Reason})
 	return transitionOutcome(err)
+}
+
+// RevertTransition implements ci.BulkLifecycleReverter (WP-783): the
+// transition back runs like Transition, with the guards of the model, and
+// marks the change set rows in its transaction.
+func (b bulkLifecycle) RevertTransition(ctx context.Context, orgID, ciID string, req *ci.BulkTransition, marks []jobs.ChangeMark) error {
+	return b.Transition(lifecycle.WithRevertMarks(ctx, marks), orgID, ciID, req)
 }
 
 // transitionOutcome maps a refused transition onto the outcome of the id
