@@ -219,6 +219,7 @@ GET /api/v1/jobs/{id}/result job:read
 GET /api/v1/keys key:read
 GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
+GET /api/v1/labels/batch/{job_id}/download authenticated
 GET /api/v1/labels/lookup authenticated
 GET /api/v1/layouts ci:read
 GET /api/v1/layouts/{id} ci:read
@@ -519,6 +520,7 @@ POST /api/v1/jobs/{id}/revert job:read
 POST /api/v1/keys key:write
 POST /api/v1/keys/{id}/issue key:write
 POST /api/v1/keys/{id}/return key:write
+POST /api/v1/labels/batch authenticated
 POST /api/v1/layouts citype:manage
 POST /api/v1/lifecycle-definitions lifecycle:manage
 POST /api/v1/lifecycle-models lifecycle:manage

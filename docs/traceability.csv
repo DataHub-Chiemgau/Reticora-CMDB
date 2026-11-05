@@ -1485,3 +1485,5 @@ STK-03;[P2];B;backend/internal/consumable/quantity_item_drop_integration_test.go
 AST-02;[P2];B;backend/internal/assignment/signature_legacy_integration_test.go;WP-749
 AUD-08;[P2];C;backend/internal/history/replay_integration_test.go;WP-793
 IMP-IO-01;[P2];C;backend/internal/importer/entities_integration_test.go;WP-776
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/labels/render_test.go;WP-763
+INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/labels/batch_integration_test.go;WP-763

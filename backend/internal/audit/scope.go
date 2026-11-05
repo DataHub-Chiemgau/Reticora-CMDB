@@ -113,6 +113,7 @@ var resourceTables = map[string][]string{
 	"jobs":                      {"job"},
 	"layouts":                   {"form_layout"},
 	"keys":                      {"key_item"},
+	"labels":                    {"job"},
 	"lifecycle-definitions":     {"lifecycle_definition"},
 	"lifecycle-models":          {"lifecycle_definition"},
 	"locations":                 {"location"},

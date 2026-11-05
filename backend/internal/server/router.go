@@ -471,6 +471,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// wired in registerJobKinds; without the job model it runs in the
 	// request.
 	searchHandler := search.NewHandler(repos.Search, repos.Permission)
+	// The label batches of inventory areas (WP-763) are the job
+	// labels.batch, wired in registerJobKinds; they read through the
+	// PostgreSQL resolver (the memory one reads no batch: 503) and store
+	// the PDF in the bucket exports. A queued batch renders asset labels
+	// with the field policy of its creator.
+	labelSource, _ := repos.Labels.(labels.BatchSource)
+	labelBatch := labels.NewBatchHandler(labelSource, opts.Blobs).WithFeatures(opts.Entitlements).
+		WithCreatorPolicy(labels.CreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver)))
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -609,7 +617,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			}
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler)
+			importHandler, documentScanner, searchHandler, labelBatch)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -854,6 +862,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// the object's kind; the path itself is gated with barcode
 		// (WP-762, E-44).
 		labels.NewHandler(repos.Labels).WithFeatures(opts.Entitlements),
+		// The label batches check the read permission and the feature of
+		// the kind like the lookup (WP-763).
+		labelBatch,
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
 		reservationHandler(&repos, &opts),
 		// The overrides follow the field permissions of the CI (WP-265).

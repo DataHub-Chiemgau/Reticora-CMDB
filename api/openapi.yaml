@@ -18590,6 +18590,117 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /api/v1/labels/batch:
+    x-phase: P2
+    x-feature: barcode
+    post:
+      operationId: createLabelBatch
+      tags: [Labels]
+      summary: Label batch of objects or of an inventory area as a job (INV-03)
+      description: >-
+        Renders the labels of the objects of one kind as one PDF in a job of
+        kind labels.batch (WP-763, E-52, E-135): either the objects named by
+        `ids` (at most 1000) or every object of the kind in the subtree of
+        the location `location_id` (the inventory area: assets located in
+        it, consumables with stock in one of its bins, its locations). The
+        template defaults to a4_24. The objects are read under the client
+        and site scope of the caller; objects outside it are left out, and
+        a batch without a visible object fails. Asset labels show the
+        fields the caller may read (RBA-07). At most 2400 labels per batch.
+        The caller needs the read permission of the kind (asset:read,
+        stock:read, location:read; 403) and the organization its feature
+        (assets_basic, stock; 403 feature-not-entitled); the path needs the
+        feature barcode. 202 with the job and Location /api/v1/jobs/{id};
+        its result is `{labels, pages, expires_at}` (LabelBatchResult), the
+        PDF is fetched with GET /api/v1/labels/batch/{job_id}/download.
+        Only the creator cancels a running batch. Without blob storage or
+        job model 503.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LabelBatchRequest'
+      responses:
+        '202':
+          description: The batch runs as a job
+          headers:
+            Location:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            The read permission of the kind is missing, or the organization
+            lacks the feature of the kind or barcode (feature-not-entitled).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '404':
+          description: The location of the inventory area is unknown or outside the caller's scope.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '422':
+          description: >-
+            Unknown template or kind, neither or both of ids and location_id,
+            more than 1000 ids, or an id that is no UUID.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+  /api/v1/labels/batch/{job_id}/download:
+    x-phase: P2
+    x-feature: barcode
+    parameters:
+      - name: job_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: downloadLabelBatch
+      tags: [Labels]
+      summary: Signed download URL of a label batch PDF (INV-03)
+      description: >-
+        Answers the creator of a label batch job with a URL to its PDF in
+        the bucket exports, signed anew for each request (E-135); the URL
+        lies below <public base URL>/objects/exports/ and is valid for 15
+        minutes. There is no redirect. Every other caller and every job
+        that is no label batch is 404, because the PDF was rendered with
+        the creator's scope. A batch that is not finished, failed,
+        cancelled or expired (expires_at) is 409. Without blob storage or
+        job model 503.
+      responses:
+        '200':
+          description: The download of the batch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelBatchDownload'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/FeatureNotEntitled'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /api/v1/suppliers:
     x-phase: P2
     x-feature: assets_basic
@@ -30732,6 +30843,64 @@ components:
           type: string
           format: uuid
           description: The asset's node in the location tree; assets only, absent without a location.
+    LabelBatchRequest:
+      type: object
+      description: >-
+        A label batch (INV-03, WP-763): the objects of one kind named by
+        ids, or those of the inventory area below location_id; exactly one
+        of both.
+      required: [kind]
+      additionalProperties: false
+      properties:
+        template:
+          type: string
+          enum: [asset_50x25, bin_100x50, a4_24]
+          default: a4_24
+        kind:
+          type: string
+          enum: [asset, consumable, location]
+        ids:
+          type: array
+          maxItems: 1000
+          items:
+            type: string
+            format: uuid
+        location_id:
+          type: string
+          format: uuid
+          description: The root of the inventory area (a subtree of the location tree).
+    LabelBatchResult:
+      type: object
+      description: >-
+        The result of a job labels.batch (GET /api/v1/jobs/{id}/result); it
+        names neither the object key nor a URL (E-135).
+      required: [labels, pages, expires_at]
+      properties:
+        labels:
+          type: integer
+        pages:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+    LabelBatchDownload:
+      type: object
+      description: The download of a label batch for its creator (E-135).
+      required: [job_id, labels, pages, expires_at, download_url]
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        labels:
+          type: integer
+        pages:
+          type: integer
+        expires_at:
+          type: string
+          format: date-time
+        download_url:
+          type: string
+          description: URL of the PDF, signed for this request (15 minutes).
     Supplier:
       type: object
       description: >-

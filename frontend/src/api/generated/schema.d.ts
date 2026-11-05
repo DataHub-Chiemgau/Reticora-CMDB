@@ -7962,6 +7962,48 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/labels/batch': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Label batch of objects or of an inventory area as a job (INV-03)
+     * @description Renders the labels of the objects of one kind as one PDF in a job of kind labels.batch (WP-763, E-52, E-135): either the objects named by `ids` (at most 1000) or every object of the kind in the subtree of the location `location_id` (the inventory area: assets located in it, consumables with stock in one of its bins, its locations). The template defaults to a4_24. The objects are read under the client and site scope of the caller; objects outside it are left out, and a batch without a visible object fails. Asset labels show the fields the caller may read (RBA-07). At most 2400 labels per batch. The caller needs the read permission of the kind (asset:read, stock:read, location:read; 403) and the organization its feature (assets_basic, stock; 403 feature-not-entitled); the path needs the feature barcode. 202 with the job and Location /api/v1/jobs/{id}; its result is `{labels, pages, expires_at}` (LabelBatchResult), the PDF is fetched with GET /api/v1/labels/batch/{job_id}/download. Only the creator cancels a running batch. Without blob storage or job model 503.
+     */
+    post: operations['createLabelBatch'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/labels/batch/{job_id}/download': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    /**
+     * Signed download URL of a label batch PDF (INV-03)
+     * @description Answers the creator of a label batch job with a URL to its PDF in the bucket exports, signed anew for each request (E-135); the URL lies below <public base URL>/objects/exports/ and is valid for 15 minutes. There is no redirect. Every other caller and every job that is no label batch is 404, because the PDF was rendered with the creator's scope. A batch that is not finished, failed, cancelled or expired (expires_at) is 409. Without blob storage or job model 503.
+     */
+    get: operations['downloadLabelBatch'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/suppliers': {
     parameters: {
       query?: never;
@@ -14786,6 +14828,40 @@ export interface components {
        * @description The asset's node in the location tree; assets only, absent without a location.
        */
       location_id?: string;
+    };
+    /** @description A label batch (INV-03, WP-763): the objects of one kind named by ids, or those of the inventory area below location_id; exactly one of both. */
+    LabelBatchRequest: {
+      /**
+       * @default a4_24
+       * @enum {string}
+       */
+      template: 'asset_50x25' | 'bin_100x50' | 'a4_24';
+      /** @enum {string} */
+      kind: 'asset' | 'consumable' | 'location';
+      ids?: string[];
+      /**
+       * Format: uuid
+       * @description The root of the inventory area (a subtree of the location tree).
+       */
+      location_id?: string;
+    };
+    /** @description The result of a job labels.batch (GET /api/v1/jobs/{id}/result); it names neither the object key nor a URL (E-135). */
+    LabelBatchResult: {
+      labels: number;
+      pages: number;
+      /** Format: date-time */
+      expires_at: string;
+    };
+    /** @description The download of a label batch for its creator (E-135). */
+    LabelBatchDownload: {
+      /** Format: uuid */
+      job_id: string;
+      labels: number;
+      pages: number;
+      /** Format: date-time */
+      expires_at: string;
+      /** @description URL of the PDF, signed for this request (15 minutes). */
+      download_url: string;
     };
     /** @description A supplier of the organization or one of its clients (MGT-12, E-41). name is the company name and no personal data; the contact person is only referenced by contact_id (the contacts resource reveals name, phone and e-mail from the PII vault, WP-242). */
     Supplier: {
@@ -38416,6 +38492,92 @@ export interface operations {
       403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  createLabelBatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LabelBatchRequest'];
+      };
+    };
+    responses: {
+      /** @description The batch runs as a job */
+      202: {
+        headers: {
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      /** @description The read permission of the kind is missing, or the organization lacks the feature of the kind or barcode (feature-not-entitled). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The location of the inventory area is unknown or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Unknown template or kind, neither or both of ids and location_id, more than 1000 ids, or an id that is no UUID. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  downloadLabelBatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        job_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The download of the batch */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelBatchDownload'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listSuppliers: {
