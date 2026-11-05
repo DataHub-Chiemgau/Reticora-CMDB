@@ -165,7 +165,10 @@ type Repositories struct {
 	FilterQuery       savedview.QueryEngine
 	LifecycleStates   lifecycle.StateStore
 	LifecycleResolver lifecycle.EntityResolver
-	Availability      reservation.AvailabilityProvider
+	// LifecycleGuards checks the system guards of LCY-03 (WP-279); nil
+	// (--no-db) refuses guarded transitions of assets (fail-closed).
+	LifecycleGuards lifecycle.GuardChecker
+	Availability    reservation.AvailabilityProvider
 }
 
 // Options carries everything the router needs beyond the repositories.
@@ -737,8 +740,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// repos.AssignmentService (WP-275).
 	movements := movement.NewService(repos.Movement)
 	// One lifecycle service for the transition routes and the disposal
-	// (WP-278).
-	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History))
+	// (WP-278), with the system guards of LCY-03 (WP-279).
+	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)).
+		WithGuards(repos.LifecycleGuards)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),

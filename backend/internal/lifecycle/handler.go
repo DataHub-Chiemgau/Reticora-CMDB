@@ -623,8 +623,8 @@ var validAppliesTo = map[string]bool{"": true, "asset": true, "ci": true}
 
 // writeTransitionError reports a failed transition (WP-724): failed
 // required fields or guard rules are 422 lifecycle-guard with the
-// violations, a missing edge or an unknown target state 422
-// invalid-transition, a from_state that is not the current state 409 with
+// violations, a failed system guard (WP-279) also with guard and missing;
+// a missing edge or an unknown target state 422 invalid-transition, a from_state that is not the current state 409 with
 // current_state, a refused field 422 with the field, a model that cannot
 // be resolved 422, an entity that vanished 404; state store errors go
 // through api.WriteRepoError (F-047).
@@ -636,11 +636,13 @@ func writeTransitionError(w http.ResponseWriter, err error) {
 	case errors.As(err, &guard):
 		api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {
 			api.ProblemDetail
+			Guard      string           `json:"guard,omitempty"`
+			Missing    []string         `json:"missing,omitempty"`
 			Violations []GuardViolation `json:"violations"`
 		}{
 			ProblemDetail: api.ProblemDetail{Type: ProblemLifecycleGuard, Title: "Unprocessable Entity",
 				Status: http.StatusUnprocessableEntity, Detail: guard.Error()},
-			Violations: guard.Violations,
+			Guard: guard.Guard, Missing: guard.Missing, Violations: guard.Violations,
 		})
 	case errors.As(err, &invalid):
 		api.WriteProblemBody(w, http.StatusUnprocessableEntity, struct {

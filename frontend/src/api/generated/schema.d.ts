@@ -11313,16 +11313,27 @@ export interface components {
       from_state?: string;
       to_state: string;
     };
-    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
+    /** @description A refused lifecycle transition (422). Type urn:reticora:problem:lifecycle-guard: the transition context fails required fields or guard rules, each failed rule is a violation; an asset that fails a system guard of LCY-03 (WP-279) names the guard and the missing references. Without a guard checker the transition fails closed with the same type. Type urn:reticora:problem:invalid-transition: the model has no edge from the current state to to_state, or no such state (field to_state, from_state, to_state). Type urn:reticora:problem:invalid-field with field to_state: to_state is missing, or the entity's type has no lifecycle model. */
     LifecycleGuardProblem: components['schemas']['ProblemDetail'] & {
       /** @description Current state of an invalid transition. */
       from_state?: string;
       /** @description Requested state of an invalid transition. */
       to_state?: string;
+      /**
+       * @description guard_key of the failed system guard of an asset (WP-279): storage_location (in_stock: location of kind warehouse, zone, shelf or bin), operations_location_or_holder (deployed: location of kind site, building, room or rack, or a holder), disposal_record (disposed) or active_reservation (reserved). Objects outside the caller's scope count as missing.
+       * @enum {string}
+       */
+      guard?:
+        | 'storage_location'
+        | 'operations_location_or_holder'
+        | 'disposal_record'
+        | 'active_reservation';
+      /** @description References the failed system guard misses. */
+      missing?: ('location_id' | 'assignee' | 'disposal_record' | 'reservation')[];
       violations?: {
         /** @description Field of the transition context. */
         field: string;
-        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json). */
+        /** @description Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json), guard.<guard> for a system guard. */
         code: string;
         message: string;
       }[];

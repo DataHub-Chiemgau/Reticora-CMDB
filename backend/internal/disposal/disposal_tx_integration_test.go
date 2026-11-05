@@ -108,7 +108,7 @@ func TestDisposalTransaction(t *testing.T) {
 	}
 	lcRepo := lifecycle.NewPGRepository(f.App)
 	lcService := lifecycle.NewService(lcRepo, lifecycle.NewPGStateStore(f.App),
-		lifecycle.NewHistoryRecorder(history.NewPGRepository(f.App)))
+		lifecycle.NewHistoryRecorder(history.NewPGRepository(f.App))).WithGuards(lifecycle.NewPGGuards(f.App))
 	movements := movement.NewService(movement.NewPGRepository(f.App))
 	newRouter := func(recorder disposal.MovementRecorder) http.Handler {
 		r := chi.NewRouter()

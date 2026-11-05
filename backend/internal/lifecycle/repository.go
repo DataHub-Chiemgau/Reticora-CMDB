@@ -313,18 +313,21 @@ func DefaultSoftwareLifecycle() Definition {
 
 // DefaultPhysicalAssetLifecycle returns the default physical asset lifecycle
 // (spec §8): Ordered → Received → In Stock → Reserved → Preparing → Deployed
-// → Repair → In Stock → Retired → Disposed.
+// → Repair → In Stock → Retired → Disposed. In stock, deployed, reserved
+// and disposed carry no required context fields: the system guards of
+// LCY-03 check location, holder, reservation and disposal record
+// (guards.go, WP-279).
 func DefaultPhysicalAssetLifecycle() Definition {
 	states := []State{
 		{Key: "ordered", Label: "Ordered", IsInitial: true, SortOrder: 10},
 		{Key: "received", Label: "Received", SortOrder: 20},
-		{Key: "in_stock", Label: "In Stock", SortOrder: 30, RequiredFields: []string{"storage_location"}},
+		{Key: "in_stock", Label: "In Stock", SortOrder: 30},
 		{Key: "reserved", Label: "Reserved", SortOrder: 40},
 		{Key: "preparing", Label: "Preparing", SortOrder: 50},
-		{Key: "deployed", Label: "Deployed", SortOrder: 60, RequiredFields: []string{"deployment_location"}},
+		{Key: "deployed", Label: "Deployed", SortOrder: 60},
 		{Key: "repair", Label: "Repair", SortOrder: 70},
 		{Key: "retired", Label: "Retired", SortOrder: 80},
-		{Key: "disposed", Label: "Disposed", IsTerminal: true, SortOrder: 90, RequiredFields: []string{"disposal_date", "disposal_record"}},
+		{Key: "disposed", Label: "Disposed", IsTerminal: true, SortOrder: 90},
 	}
 	pairs := [][2]string{
 		{"ordered", "received"}, {"received", "in_stock"}, {"in_stock", "reserved"},

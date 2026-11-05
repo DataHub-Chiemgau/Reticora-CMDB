@@ -1465,3 +1465,4 @@ REL-09;[P2];B;backend/internal/relationship/history_integration_test.go;WP-296
 EVT-03;[P2–P3];B;backend/internal/relationship/history_integration_test.go;WP-296
 AUD-07;[B];B;backend/internal/relationship/history_integration_test.go;WP-296
 AST-02;[P2];B;backend/internal/assignment/signature_integration_test.go;WP-276
+LCY-03;[P2];B;backend/internal/lifecycle/guards_integration_test.go;WP-279

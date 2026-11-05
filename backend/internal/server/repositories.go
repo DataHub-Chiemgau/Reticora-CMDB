@@ -241,6 +241,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		FilterQuery:       savedview.NewPGQueryEngine(pool),
 		LifecycleStates:   lifecycle.NewPGStateStore(pool),
 		LifecycleResolver: lifecycle.NewResolver(pool),
+		LifecycleGuards:   lifecycle.NewPGGuards(pool),
 		Availability:      reservation.NewPGAvailability(pool),
 	}
 }

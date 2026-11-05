@@ -383,7 +383,7 @@ func TestLifecycleTransition(t *testing.T) {
 		m := root.with(t)
 		own := &lifecycle.Definition{OrganizationID: f.OrgA, Key: "physical_asset", Name: "Own assets", AppliesTo: "asset"}
 		for i, key := range []string{"in_stock", "reserved", "deployed", "repair", "retired", "disposed"} {
-			own.States = append(own.States, lifecycle.State{Key: key, Label: key, IsInitial: i == 0, SortOrder: i})
+			own.States = append(own.States, lifecycle.State{Key: key, Label: key, IsInitial: key == "repair", SortOrder: i})
 		}
 		if err := repo.Create(orgA, own); err != nil {
 			t.Fatal(err)
@@ -392,9 +392,10 @@ func TestLifecycleTransition(t *testing.T) {
 			VALUES ($1, 'wp724-asset', 'WP-724 asset', $2) RETURNING id::text`, f.OrgA, own.ID)
 		typed := f.Asset(t, f.OrgA, f.Client1, "wp724-typed")
 		admin(`UPDATE asset SET asset_type_id = $2 WHERE id = $1 RETURNING id::text`, typed, assetType)
-		// in_stock is the initial state of the organization model; the
-		// system model starts at ordered and requires a storage location.
-		m.want(m.call(orgA, http.MethodPost, "/api/v1/assets/"+typed+"/lifecycle-transitions", `{"to_state":"in_stock"}`),
+		// repair is the initial state of the organization model; the
+		// system model starts at ordered. repair has no system guard of
+		// LCY-03 (WP-279).
+		m.want(m.call(orgA, http.MethodPost, "/api/v1/assets/"+typed+"/lifecycle-transitions", `{"to_state":"repair"}`),
 			http.StatusOK, nil)
 		if got := admin(`SELECT data->>'model_id' || '|' || (data->>'entity_type') FROM event_outbox
 			WHERE entity_id = $1 AND type = 'lifecycle.changed'`, typed); got != own.ID+"|asset" {
@@ -404,9 +405,9 @@ func TestLifecycleTransition(t *testing.T) {
 			t.Errorf("audit action %s", got)
 		}
 		untyped := f.Asset(t, f.OrgA, f.Client1, "wp724-untyped")
-		code, p := post(m, orgA, "assets", untyped, `{"to_state":"in_stock"}`)
+		code, p := post(m, orgA, "assets", untyped, `{"to_state":"repair"}`)
 		if code != http.StatusUnprocessableEntity || p.Type != lifecycle.ProblemInvalidTransition {
-			t.Errorf("untyped asset into in_stock: %d %+v, want the system model's initial state rule", code, p)
+			t.Errorf("untyped asset into repair: %d %+v, want the system model's initial state rule", code, p)
 		}
 	})
 }

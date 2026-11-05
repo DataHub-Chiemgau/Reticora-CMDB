@@ -24674,7 +24674,10 @@ components:
       description: >-
         A refused lifecycle transition (422). Type
         urn:reticora:problem:lifecycle-guard: the transition context fails
-        required fields or guard rules, each failed rule is a violation.
+        required fields or guard rules, each failed rule is a violation; an
+        asset that fails a system guard of LCY-03 (WP-279) names the guard
+        and the missing references. Without a guard checker the transition
+        fails closed with the same type.
         Type urn:reticora:problem:invalid-transition: the model has no edge
         from the current state to to_state, or no such state (field
         to_state, from_state, to_state). Type
@@ -24690,6 +24693,23 @@ components:
             to_state:
               type: string
               description: Requested state of an invalid transition.
+            guard:
+              type: string
+              enum: [storage_location, operations_location_or_holder, disposal_record, active_reservation]
+              description: >-
+                guard_key of the failed system guard of an asset (WP-279):
+                storage_location (in_stock: location of kind warehouse,
+                zone, shelf or bin), operations_location_or_holder
+                (deployed: location of kind site, building, room or rack,
+                or a holder), disposal_record (disposed) or
+                active_reservation (reserved). Objects outside the
+                caller's scope count as missing.
+            missing:
+              type: array
+              items:
+                type: string
+                enum: [location_id, assignee, disposal_record, reservation]
+              description: References the failed system guard misses.
             violations:
               type: array
               items:
@@ -24701,7 +24721,7 @@ components:
                     description: Field of the transition context.
                   code:
                     type: string
-                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json).
+                    description: Code of the failed rule (required, pattern, range.min, range.max, enum …; api/rules.schema.json), guard.<guard> for a system guard.
                   message: { type: string }
     DisposalTransitionProblem:
       description: >-
