@@ -5,13 +5,16 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
@@ -254,14 +257,54 @@ func (l ciParentAssetLookup) GetByID(ctx context.Context, orgID, id string) (*ci
 }
 
 // bffSources hands the read models of topology, rack layout, search, the
-// review inbox and jobs (GQL-02) and those of the asset detail (asset,
-// movement ledger, documents; GQL-03) to the GraphQL BFF. Without the job
-// model (no database) the jobs query is unavailable.
-func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbff.JobSource) *graphqlbff.Sources {
+// review inbox and jobs (GQL-02), those of the asset detail (asset,
+// movement ledger, documents; GQL-03) and those of the CI aggregates
+// (WP-792: the history timeline, the metric store, the resolved forms with
+// the field policy of formPolicy) to the GraphQL BFF. Without the job
+// model (no database) the jobs query is unavailable, without a form source
+// (in-memory CI types) the form.
+func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbff.JobSource,
+	formPolicy citype.FormPolicyFactory) *graphqlbff.Sources {
 	sources := &graphqlbff.Sources{Topology: topo, Racks: repos.Rack, Search: repos.Search, Jobs: jobSource,
 		Assets: repos.Asset, Movements: repos.Movement, Documents: repos.Document}
 	if reviewSource, ok := repos.Discovery.(graphqlbff.ReviewSource); ok {
 		sources.Reviews = reviewSource
 	}
+	if timeline, ok := repos.History.(history.CITimeline); ok {
+		sources.History = timeline
+	}
+	if repos.Metrics != nil {
+		sources.Metrics = repos.Metrics
+	}
+	if formSource, ok := repos.CIType.(citype.FormSource); ok {
+		sources.Forms = bffForms{source: formSource, policy: formPolicy}
+	}
 	return sources
+}
+
+// bffForms resolves the form of ciForm (WP-792) as GET
+// /api/v1/cis/{id}/form does: per request a citype.FormResolver over the
+// repository with the field policy of the FormPolicyFactory (WP-727), the
+// policy of the preview role in a preview. A CI or role that is no UUID
+// gets NoopFieldPolicy: the resolution answers not found before it
+// arranges a field.
+type bffForms struct {
+	source citype.FormSource
+	policy citype.FormPolicyFactory
+}
+
+func (f bffForms) ResolveForm(ctx context.Context, orgID string, req citype.FormRequest) (*citype.ResolvedForm, error) {
+	var policy citype.FieldPolicy = citype.NoopFieldPolicy{}
+	if f.policy != nil && api.IsUUID(req.CIID) && (!req.Preview || req.RoleID == "" || api.IsUUID(req.RoleID)) {
+		subject := citype.FormPolicySubject{CIID: req.CIID}
+		if req.Preview {
+			subject.PreviewRoleID = req.RoleID
+		}
+		p, err := f.policy(ctx, orgID, subject)
+		if err != nil {
+			return nil, err
+		}
+		policy = p
+	}
+	return citype.NewFormResolver(f.source, policy).ResolveForm(ctx, orgID, req)
 }

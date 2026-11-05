@@ -28,6 +28,135 @@ type Query {
   jobs(kind: String, status: String, first: Int): [Job!]!
   "One asset with its CIs, child CIs, movements and documents (GQL-03); null when it is not visible."
   asset(id: ID!): Asset
+  """
+  The resolved form of a CI (GQL-03, WP-719): sections, field states, rules and
+  required fields. With role or template it is a preview; a template or a role
+  that is not one of the caller's needs citype:manage. Null when the CI is not
+  visible.
+  """
+  ciForm(id: ID!, template: ID, role: ID): CIForm
+  """
+  A page of the unified history of a CI (CI-06, GQL-03), newest first by the
+  time of recording, within from and to (both inclusive): its change sets, the
+  entity and location changes, the audit entries (audit:read) and the changes
+  of its relationships (relationship:read); at most 100 per page. Null when the
+  CI is not visible.
+  """
+  ciHistory(id: ID!, from: Time, to: Time, first: Int, after: String): HistoryConnection
+  """
+  The metric series of a CI (MON-02, GQL-03): the named one or all of them, at
+  most 100; without from the last 24 hours, step a duration such as 5m. Empty
+  when the CI is not visible.
+  """
+  ciMetrics(id: ID!, name: String, from: Time, to: Time, step: String): [CISeries!]!
+}
+
+"A JSON value: an object, a list, a string, a number, a boolean or null."
+scalar Any
+
+"The resolved form of a CI (citype.ResolvedForm, WP-719)."
+type CIForm {
+  ciTypeId: ID!
+  "The template, role and layout of the chosen layout; null with the standard layout."
+  templateId: ID
+  roleId: ID
+  layoutId: ID
+  "layout or default."
+  source: String!
+  sections: [FormSection!]!
+  "The catalog rules of the CI, to recompute the states while the form is edited."
+  rules: [FormRule!]!
+  "The names of the fields required in the current state, in the order of the form."
+  requiredFields: [String!]!
+}
+
+type FormSection {
+  key: String!
+  "The title per language."
+  title: Map!
+  visible: Boolean!
+  fields: [FormField!]!
+}
+
+type FormField {
+  name: String!
+  "The width of 1 to 12 columns."
+  width: Int!
+  "The composed field definition (fieldmeta.FieldDefinition as JSON)."
+  definition: Map!
+  state: FieldState!
+}
+
+type FieldState {
+  visible: Boolean!
+  required: Boolean!
+  readOnly: Boolean!
+  allowedValues: [String!]
+}
+
+type FormRule {
+  key: String!
+  attributeKey: String!
+  kind: String!
+  "The condition and the value rule in the form of api/rules.schema.json."
+  condition: Map
+  ast: Map
+  message: Map
+}
+
+type HistoryConnection {
+  nodes: [HistoryEntry!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"""
+An entry of the history of a CI (history.Change). Without read access to its
+field (RBA-07) the old and new value are null and the field is left out of
+fieldChanges.
+"""
+type HistoryEntry {
+  id: ID!
+  "ci, or relationship for a relationship change."
+  entityType: String!
+  entityId: ID!
+  "ci_change, entity_change, location_change, audit or relationship_change."
+  source: String!
+  "The site of the CI at the time (ci_change) or of the moved location."
+  siteId: ID
+  actorId: ID
+  actorUserId: ID
+  changeType: String!
+  "The kind of a CI change set (AUD-03)."
+  changeKind: String
+  changeSetId: ID
+  fieldName: String
+  oldValue: Any
+  newValue: Any
+  fieldChanges: [HistoryFieldChange!]!
+  comment: String
+  "ui, api, collector, import or system."
+  changeSource: String
+  requestId: String
+  correlationId: String
+  createdAt: Time!
+  observedAt: Time
+}
+
+type HistoryFieldChange {
+  field: String!
+  old: Any
+  new: Any
+}
+
+type CISeries {
+  name: String!
+  points: [MetricPoint!]!
+}
+
+type MetricPoint {
+  timestamp: Time!
+  value: Float!
 }
 
 input CIFilter {

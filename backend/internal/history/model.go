@@ -5,7 +5,11 @@
 // at a historical point in time is reconstructed by replaying the trail.
 package history
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+)
 
 // Change is one recorded entity mutation.
 type Change struct {
@@ -73,13 +77,69 @@ type ListOptions struct {
 	ChangeKind   string
 }
 
-// Sources of the unified CI and location history.
+// Sources of the unified CI and location history. SourceRelationshipChange
+// is the trail of the history of a relationship (relationship_change,
+// WP-296) and of the edges of a CI in its timeline (CITimeline, WP-792).
 const (
-	SourceCIChange       = "ci_change"
-	SourceEntityChange   = "entity_change"
-	SourceAudit          = "audit"
-	SourceLocationChange = "location_change"
+	SourceCIChange           = "ci_change"
+	SourceEntityChange       = "entity_change"
+	SourceAudit              = "audit"
+	SourceLocationChange     = "location_change"
+	SourceRelationshipChange = "relationship_change"
 )
+
+// TimelineOptions narrow the timeline of a CI (CITimeline, WP-792). From
+// and To bound the time of recording, both inclusive (zero: open):
+// created_at, timestamp of an audit entry, changed_at of a location move,
+// observed_at of a relationship change. IncludeAudit adds the audit entries
+// (audit:read, E-78), IncludeRelationships the entries of relationship_change
+// of the edges whose source or target is the CI, removed edges included
+// (relationship:read).
+type TimelineOptions struct {
+	From, To             time.Time
+	IncludeAudit         bool
+	IncludeRelationships bool
+}
+
+// ProjectCITimeline projects the timeline entries of the CI ciID with the
+// field permissions of policy (RBA-07, E-43) for the GraphQL BFF (WP-792):
+// like the REST history (projectList), except that an entry of a field the
+// principal may not read stays, without old and new value; in its field
+// changes the unreadable fields are left out. facts are the type, scope
+// and instance keys of the CI (nil: only the structural fields). The
+// entries of relationship_change are projected by the relationship grant
+// already (CITimeline) and stay as they are.
+func ProjectCITimeline(policy *permission.FieldPolicy, ciID string, facts *CIFacts, items []Change) []Change {
+	if !permission.NeedsProjection(policy, permission.KindCI) {
+		return items
+	}
+	p := &ciProjection{ref: permission.ObjectRef{ID: ciID}}
+	if facts != nil {
+		p.typeID, p.keys = facts.TypeID, facts.InstanceKeys
+		p.ref.ClientID, p.ref.SiteID = facts.ClientID, facts.SiteID
+		if policy.Level(permission.KindCI, facts.TypeID, "", p.ref).Readable() {
+			p.policy = policy
+		}
+	}
+	out := make([]Change, 0, len(items))
+	for i := range items {
+		c := items[i]
+		switch {
+		case c.Source == SourceRelationshipChange:
+		case c.FieldName != "" && c.FieldName != memberAttributes && c.Source != SourceAudit &&
+			c.Source != SourceLocationChange && !p.field(c.FieldName):
+			c.OldValue, c.NewValue = nil, nil
+			c.FieldChanges = p.fieldChanges(c.FieldChanges)
+		default:
+			projected := p.changes(ciID, []Change{c})
+			if len(projected) == 1 {
+				c = projected[0]
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
 
 // StateSnapshot is the reconstructed state of an entity at a point in time.
 type StateSnapshot struct {

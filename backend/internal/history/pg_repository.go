@@ -222,37 +222,160 @@ func (r *PGRepository) listUnified(ctx context.Context, orgID, id string, page a
 		if err != nil {
 			return fmt.Errorf("list history: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			c := Change{}
-			var oldRaw, newRaw, fieldsRaw []byte
-			var kind, set, source, collector, request, correlation, actorUser *string
-			if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
-				&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.Source, &c.SiteID,
-				&kind, &set, &fieldsRaw, &source, &collector, &request, &correlation, &c.ObservedAt, &actorUser); err != nil {
-				return err
-			}
-			if len(oldRaw) > 0 {
-				_ = json.Unmarshal(oldRaw, &c.OldValue)
-			}
-			if len(newRaw) > 0 {
-				_ = json.Unmarshal(newRaw, &c.NewValue)
-			}
-			if len(fieldsRaw) > 0 {
-				if err := json.Unmarshal(fieldsRaw, &c.FieldChanges); err != nil {
-					return fmt.Errorf("decode field changes: %w", err)
-				}
-			}
-			c.ChangeKind, c.ChangeSetID, c.ChangeSource = deref(kind), deref(set), deref(source)
-			c.CollectorID, c.RequestID, c.CorrelationID, c.ActorUserID = deref(collector), deref(request), deref(correlation), deref(actorUser)
-			out = append(out, c)
-		}
-		if err := rows.Err(); err != nil {
+		if out, err = scanUnified(rows); err != nil {
 			return err
 		}
 		return reveal(ctx, tx, orgID, out)
 	})
 	return out, total, err
+}
+
+// scanUnified reads the entries of a unified history (the columns of
+// ciChangeSets); it closes rows.
+func scanUnified(rows pgx.Rows) ([]Change, error) {
+	defer rows.Close()
+	out := []Change{}
+	for rows.Next() {
+		c := Change{}
+		var oldRaw, newRaw, fieldsRaw []byte
+		var kind, set, source, collector, request, correlation, actorUser *string
+		if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
+			&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.Source, &c.SiteID,
+			&kind, &set, &fieldsRaw, &source, &collector, &request, &correlation, &c.ObservedAt, &actorUser); err != nil {
+			return nil, err
+		}
+		if len(oldRaw) > 0 {
+			_ = json.Unmarshal(oldRaw, &c.OldValue)
+		}
+		if len(newRaw) > 0 {
+			_ = json.Unmarshal(newRaw, &c.NewValue)
+		}
+		if len(fieldsRaw) > 0 {
+			if err := json.Unmarshal(fieldsRaw, &c.FieldChanges); err != nil {
+				return nil, fmt.Errorf("decode field changes: %w", err)
+			}
+		}
+		c.ChangeKind, c.ChangeSetID, c.ChangeSource = deref(kind), deref(set), deref(source)
+		c.CollectorID, c.RequestID, c.CorrelationID, c.ActorUserID = deref(collector), deref(request), deref(correlation), deref(actorUser)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ciEdgeChanges is the relationship part of the timeline of a CI (WP-792):
+// the rows of relationship_change whose source_ci_id or target_ci_id is
+// the CI (indexes idx_relationship_change_source and _target), also of
+// edges removed since, at their observed_at; the row level security of
+// relationship_change hides a row with an endpoint outside the caller's
+// scope. The values are read with relationship.ChangesTx afterwards.
+const ciEdgeChanges = `
+	UNION ALL
+	SELECT c.id::text, c.organization_id::text, 'relationship', c.relationship_id::text, COALESCE(c.actor_id::text, ''),
+	       c.change_kind, '', NULL::jsonb, NULL::jsonb, '', c.observed_at, '` + SourceRelationshipChange + `', ''` + noChangeSet + `
+	FROM relationship_change c WHERE c.organization_id = $1 AND (c.source_ci_id = $2::uuid OR c.target_ci_id = $2::uuid)` + noChangeKind
+
+// timelineColumns name the columns of a unified history for the window of
+// the timeline; recorded_at is the time of recording of every part.
+const timelineColumns = `id, organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value,
+	comment, recorded_at, source, site_id, change_kind, change_set_id, field_changes, change_source, collector_id,
+	request_id, correlation_id, observed_at, actor_user_id`
+
+// timelineWindow keeps the entries recorded within [$4, $5] (NULL: open).
+const timelineWindow = ` WHERE ($4::timestamptz IS NULL OR h.recorded_at >= $4::timestamptz)
+	AND ($5::timestamptz IS NULL OR h.recorded_at <= $5::timestamptz)`
+
+// CITimeline implements CITimeline under the caller's tenant scope.
+func (r *PGRepository) CITimeline(ctx context.Context, orgID, ciID string, page api.PaginationParams, opts TimelineOptions) ([]Change, int, error) {
+	if !api.IsUUID(ciID) {
+		return nil, 0, api.ErrNotFound
+	}
+	unified := unifiedCIChanges
+	if opts.IncludeAudit {
+		unified += unifiedCIAudit(audit.VisibleEntries(ctx))
+	}
+	if opts.IncludeRelationships {
+		unified += ciEdgeChanges
+	}
+	windowed := "SELECT * FROM (" + unified + ") AS h(" + timelineColumns + ")" + timelineWindow
+	from, to := timeOrNil(opts.From), timeOrNil(opts.To)
+	out := []Change{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(txCtx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(txCtx, visibleSQL["ci"], ciID).Scan(&visible); err != nil {
+			return fmt.Errorf("check ci visibility: %w", err)
+		}
+		if !visible {
+			return api.ErrNotFound
+		}
+		if err := tx.QueryRow(txCtx, "SELECT count(*) FROM ("+windowed+") w", orgID, ciID, "", from, to).Scan(&total); err != nil {
+			return fmt.Errorf("count timeline: %w", err)
+		}
+		rows, err := tx.Query(txCtx, windowed+" ORDER BY h.recorded_at DESC, h.id LIMIT $6 OFFSET $7",
+			orgID, ciID, "", from, to, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list timeline: %w", err)
+		}
+		if out, err = scanUnified(rows); err != nil {
+			return err
+		}
+		if revealErr := reveal(txCtx, tx, orgID, out); revealErr != nil {
+			return revealErr
+		}
+		return edgeEntries(txCtx, tx, orgID, out)
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// edgeEntries replaces the relationship entries of a timeline page with
+// their rows of relationship_change (relationship.ChangesTx), projected by
+// the relationship grant of the principal of ctx (relationship.ProjectChanges)
+// and mapped as RelationshipEntries.
+func edgeEntries(ctx context.Context, tx pgx.Tx, orgID string, entries []Change) error {
+	var ids []string
+	for i := range entries {
+		if entries[i].Source == SourceRelationshipChange {
+			ids = append(ids, entries[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := relationship.ChangesTx(ctx, tx, orgID, ids)
+	if err != nil {
+		return err
+	}
+	if rows, err = relationship.ProjectChanges(ctx, orgID, rows, nil); err != nil {
+		return err
+	}
+	mapped := RelationshipEntries(rows)
+	byID := make(map[string]*Change, len(mapped))
+	for i := range mapped {
+		mapped[i].OrganizationID = orgID
+		byID[mapped[i].ID] = &mapped[i]
+	}
+	for i := range entries {
+		if entries[i].Source != SourceRelationshipChange {
+			continue
+		}
+		e, ok := byID[entries[i].ID]
+		if !ok {
+			return fmt.Errorf("relationship change %s vanished", entries[i].ID)
+		}
+		entries[i] = *e
+	}
+	return nil
+}
+
+// timeOrNil is t, nil for the zero time.
+func timeOrNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
 }
 
 // List returns the changes of one entity, newest first; for a CI the
@@ -306,10 +429,6 @@ func (r *PGRepository) List(ctx context.Context, orgID, entityType, entityID str
 	})
 	return out, total, err
 }
-
-// SourceRelationshipChange is the trail of the history of a relationship
-// (relationship_change, WP-296).
-const SourceRelationshipChange = "relationship_change"
 
 // RelationshipChanger reads the history of a relationship as rows of
 // relationship_change, for the field permissions of the relationship

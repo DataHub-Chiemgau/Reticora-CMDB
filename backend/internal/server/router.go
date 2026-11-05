@@ -804,7 +804,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
-			WithSources(bffSources(&repos, topologyHandler, bffJobs)).WithModules(opts.Modules),
+			WithSources(bffSources(&repos, topologyHandler, bffJobs, FormPolicyFactory(&repos, fieldResolver))).WithModules(opts.Modules),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).

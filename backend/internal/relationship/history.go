@@ -362,43 +362,72 @@ func ListChangesTx(ctx context.Context, tx pgx.Tx, orgID, relationshipID string,
 	if err != nil {
 		return nil, 0, fmt.Errorf("list relationship changes: %w", err)
 	}
+	if out, err = scanChanges(ctx, tx, orgID, rows); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// ChangesTx reads the rows of relationship_change with the ids in tx (a
+// tenant transaction) like ListChangesTx, in no particular order, with the
+// personal values revealed; a row the caller does not see is missing. The
+// history package reads the entries of the edges of a CI through it
+// (history.CITimeline, WP-792), so they keep the type and the scope their
+// field permissions need (ProjectChanges).
+func ChangesTx(ctx context.Context, tx pgx.Tx, orgID string, ids []string) ([]Change, error) {
+	if len(ids) == 0 {
+		return []Change{}, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT `+changeColumns+` FROM relationship_change c
+		WHERE c.organization_id = $1 AND c.id = ANY ($2::uuid[])`, orgID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read relationship changes: %w", err)
+	}
+	return scanChanges(ctx, tx, orgID, rows)
+}
+
+// scanChanges reads the history rows of changeColumns and reveals their
+// personal values (deleted ones are null); it closes rows.
+func scanChanges(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows) ([]Change, error) {
 	defer rows.Close()
+	out := []Change{}
 	values := []any{}
 	for rows.Next() {
 		var c Change
 		var beforeRaw, afterRaw []byte
-		if err = rows.Scan(&c.ID, &c.RelationshipID, &c.SourceCIID, &c.TargetCIID, &c.RelType,
+		if err := rows.Scan(&c.ID, &c.RelationshipID, &c.SourceCIID, &c.TargetCIID, &c.RelType,
 			&c.ChangeKind, &c.ChangedFields, &beforeRaw, &afterRaw, &c.ActorID, &c.ActorType, &c.Source,
 			&c.Reason, &c.RequestID, &c.CorrelationID, &c.ObservedAt,
 			&c.sourceClientID, &c.sourceSiteID, &c.targetClientID, &c.targetSiteID, &c.relTypeID); err != nil {
-			return nil, 0, fmt.Errorf("scan relationship change: %w", err)
+			return nil, fmt.Errorf("scan relationship change: %w", err)
 		}
-		var before, after any
-		if before, err = decodeEdge(beforeRaw); err != nil {
-			return nil, 0, err
+		before, err := decodeEdge(beforeRaw)
+		if err != nil {
+			return nil, err
 		}
-		if after, err = decodeEdge(afterRaw); err != nil {
-			return nil, 0, err
+		after, err := decodeEdge(afterRaw)
+		if err != nil {
+			return nil, err
 		}
 		values = append(values, before, after)
 		out = append(out, c)
 	}
-	if rowsErr := rows.Err(); rowsErr != nil {
-		return nil, 0, rowsErr
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	revealed, err := pii.RevealTx(ctx, tx, orgID, values)
 	if err != nil {
-		return nil, 0, fmt.Errorf("resolve personal values: %w", err)
+		return nil, fmt.Errorf("resolve personal values: %w", err)
 	}
 	resolved, ok := revealed.([]any)
 	if !ok || len(resolved) != 2*len(out) {
-		return nil, 0, fmt.Errorf("resolve personal values: %d of %d values", len(resolved), 2*len(out))
+		return nil, fmt.Errorf("resolve personal values: %d of %d values", len(resolved), 2*len(out))
 	}
 	for i := range out {
 		out[i].Before, _ = resolved[2*i].(map[string]any)
 		out[i].After, _ = resolved[2*i+1].(map[string]any)
 	}
-	return out, total, nil
+	return out, nil
 }
 
 // decodeEdge decodes a stored edge; nil for NULL.
