@@ -7179,16 +7179,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/cis/{id}/as-of': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * State of a CI at a point in time with its edges (AUD-08)
+     * @description Replays the state of the CI at `at` (RFC 3339, default now) from its last weekly `ci_snapshot` up to `at` and the `ci_change` and `entity_change` rows after it; without a snapshot from its whole trail. The time axis is the time of recording (`ci_change.created_at`, `relationship_change.observed_at`); `at` is not evaluated against the source time of a change (`ci_change.observed_at`). The values are those the history shows: a personal value whose vault entry was deleted is null (SEC-05); the fields the caller may not read are left out (RBA-07). `relationships` holds the edges of the CI at `at` (the edges of the snapshot and the replay of `relationship_change`, also of edges the cleanup or a merge removed later) whose endpoints both lie in the caller's client and site scope; it is present only with `relationship:read`. A deleted CI answers with `deleted: true`, the victim of a merge after the merge also with `merged_into_id`; there is no redirect to the survivor. A CI deleted for good (CI-05) answers from its last snapshot until the history retention removes it (`RETICORA_RETENTION_HISTORY_DAYS`); its state after that snapshot is not known. Within the retention period the state is complete for every `at`: the retention keeps per CI the youngest snapshot before its cut-off and the rows after it. A CI the caller sees neither as row nor as snapshot (unknown, or of another organization, client or site) and one without a recorded change up to `at` are 404.
+     */
+    get: operations['getCIAsOf'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/cis/{id}/state': {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /**
-     * Reconstruct CI state at a point in time
-     * @description Replays the change trail of the CI (its ci_change field rows from the creation on and its entity_change rows) up to at (default now), with the values its history shows. A CI the caller cannot see (unknown, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     * Reconstruct CI state at a point in time (alias of as-of)
+     * @deprecated
+     * @description Alias of GET /api/v1/cis/{id}/as-of (E-38, WP-793) with the same answer; it carries the headers Deprecation, Sunset and Link (successor-version).
      */
     get: operations['listCisIdState'];
     put?: never;
@@ -7210,7 +7237,7 @@ export interface paths {
     put?: never;
     /**
      * State snapshot of a CI or asset as a job (JOB-04)
-     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/state stays the direct read. An entity the caller cannot see (unknown, or of another organization, client or site) is 404 and no job is created; without a recorded change up to at (before the creation) the job fails with "no recorded state before <at>" (404 without the job model).
+     * @description Replays the history of the entity up to at (default now) as a job of kind history.snapshot; 202 with the job, whose result is the state (GET /api/v1/jobs/{id}/result). Without the job model (no database) the state is answered at once (200). GET /cis/{id}/as-of stays the direct read. The result keeps personal values as vault surrogates (`{"$pii": "<id>"}`, SEC-05) and carries no edges (WP-793). An entity the caller cannot see (unknown, or of another organization, client or site) is 404 and no job is created; without a recorded change up to at (before the creation) the job fails with "no recorded state before <at>" (404 without the job model).
      */
     post: operations['createStateSnapshot'];
     delete?: never;
@@ -7788,29 +7815,6 @@ export interface paths {
      * @description Changes name, description, states and transitions of an organization model. States are matched by `key` and keep their id; new keys are added, missing ones removed. `transitions` replaces all transitions; without it the transitions between kept states stay. `key` and `applies_to` cannot change (422). The checks of POST apply. The version rises with every change. If-Match is optional (API-07); an older version is 412. A system model is 403, a model of another organization 404. Removing a state in which CIs or assets of the model stand is 409 with the number per state.
      */
     patch: operations['updateLifecycleModel'];
-    trace?: never;
-  };
-  '/api/v1/cis/{id}/as-of': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /**
-     * Reconstruct the state of a CI at a point in time
-     * @description Planned (E-38); WP-793 implements the operation.
-     */
-    get: operations['getCIAsOf'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   '/api/v1/cis/{id}/form': {
@@ -9022,6 +9026,37 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description The state of a CI at a point in time (AUD-08, WP-793). */
+    CIStateAsOf: {
+      /** @enum {string} */
+      entity_type: 'ci';
+      entity_id: string;
+      /** Format: date-time */
+      at: string;
+      /**
+       * Format: date-time
+       * @description `taken_at` of the `ci_snapshot` the replay started from; absent when it replayed the whole trail.
+       */
+      based_on_snapshot_at?: string;
+      /** @description The fields of the CI at `at` the caller may read. */
+      fields: {
+        [key: string]: unknown;
+      };
+      /** @description The edges of the CI at `at` (only with `relationship:read`): the edge as its last `relationship_change` row up to then recorded it, or id, type and endpoints for an edge of the snapshot without one. */
+      relationships?: ({
+        id: string;
+        rel_type: string;
+        source_ci_id: string;
+        target_ci_id: string;
+      } & {
+        [key: string]: unknown;
+      })[];
+      deleted: boolean;
+      /** @description The survivor of a merged CI (CI-12); absent otherwise. */
+      merged_into_id?: string;
+      /** @description The members of a CI that are not historized (AUD-03) and so not part of its state. */
+      not_historized: string[];
+    };
     AttributeDefinition: {
       id: string;
       /** @description Empty for system definitions. */
@@ -36172,29 +36207,63 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  listCisIdState: {
+  getCIAsOf: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Reconstruct CI state at a point in time */
+      /** @description The state of the CI at `at` */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIStateAsOf'];
+        };
       };
-      /** @description Unauthorized */
-      401: {
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listCisIdState: {
+    parameters: {
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The state of the CI at `at` */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIStateAsOf'];
+        };
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -37953,30 +38022,6 @@ export interface operations {
         };
       };
       422: components['responses']['UnprocessableEntity'];
-    };
-  };
-  getCIAsOf: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Reconstruct the state of a CI at a point in time. The response schema comes with WP-793. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
     };
   };
   getCIForm: {

@@ -16464,21 +16464,92 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/cis/{id}/state:
+  /api/v1/cis/{id}/as-of:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
-      operationId: listCisIdState
-      summary: Reconstruct CI state at a point in time
+      operationId: getCIAsOf
+      tags: [History]
+      summary: State of a CI at a point in time with its edges (AUD-08)
       description: >-
-        Replays the change trail of the CI (its ci_change field rows from the
-        creation on and its entity_change rows) up to at (default now), with
-        the values its history shows. A CI the caller cannot see (unknown, or
-        of another organization, client or site) and one without a recorded
-        change up to at are 404 (JOB-04, F-164).
+        Replays the state of the CI at `at` (RFC 3339, default now) from its
+        last weekly `ci_snapshot` up to `at` and the `ci_change` and
+        `entity_change` rows after it; without a snapshot from its whole
+        trail. The time axis is the time of recording (`ci_change.created_at`,
+        `relationship_change.observed_at`); `at` is not evaluated against the
+        source time of a change (`ci_change.observed_at`). The values are those
+        the history shows: a personal value whose vault entry was deleted is
+        null (SEC-05); the fields the caller may not read are left out
+        (RBA-07). `relationships` holds the edges of the CI at `at` (the edges
+        of the snapshot and the replay of `relationship_change`, also of edges
+        the cleanup or a merge removed later) whose endpoints both lie in the
+        caller's client and site scope; it is present only with
+        `relationship:read`. A deleted CI answers with `deleted: true`, the
+        victim of a merge after the merge also with `merged_into_id`; there is
+        no redirect to the survivor. A CI deleted for good (CI-05) answers from
+        its last snapshot until the history retention removes it
+        (`RETICORA_RETENTION_HISTORY_DAYS`); its state after that snapshot is
+        not known. Within the retention period the state is complete for every
+        `at`: the retention keeps per CI the youngest snapshot before its
+        cut-off and the rows after it. A CI the caller sees neither as row nor
+        as snapshot (unknown, or of another organization, client or site) and
+        one without a recorded change up to `at` are 404.
+      parameters:
+        - name: at
+          in: query
+          required: false
+          description: The point in time (RFC 3339); default now.
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Reconstruct CI state at a point in time
+          description: The state of the CI at `at`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIStateAsOf'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/cis/{id}/state:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCisIdState
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/cis/{id}/as-of'
+      tags: [History]
+      summary: Reconstruct CI state at a point in time (alias of as-of)
+      description: >-
+        Alias of GET /api/v1/cis/{id}/as-of (E-38, WP-793) with the same
+        answer; it carries the headers Deprecation, Sunset and Link
+        (successor-version).
+      parameters:
+        - name: at
+          in: query
+          required: false
+          description: The point in time (RFC 3339); default now.
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: The state of the CI at `at`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIStateAsOf'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -16491,8 +16562,9 @@ paths:
         Replays the history of the entity up to at (default now) as a job of
         kind history.snapshot; 202 with the job, whose result is the state
         (GET /api/v1/jobs/{id}/result). Without the job model (no database)
-        the state is answered at once (200). GET /cis/{id}/state stays the
-        direct read. An entity the caller cannot see (unknown, or of another
+        the state is answered at once (200). GET /cis/{id}/as-of stays the
+        direct read. The result keeps personal values as vault surrogates
+        (`{"$pii": "<id>"}`, SEC-05) and carries no edges (WP-793). An entity the caller cannot see (unknown, or of another
         organization, client or site) is 404 and no job is created; without
         a recorded change up to at (before the creation) the job fails with
         "no recorded state before <at>" (404 without the job model).
@@ -18060,25 +18132,6 @@ paths:
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/LifecycleModelInUseProblem' }
-
-  /api/v1/cis/{id}/as-of:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    get:
-      operationId: getCIAsOf
-      tags: [CIs]
-      summary: Reconstruct the state of a CI at a point in time
-      description: Planned (E-38); WP-793 implements the operation.
-      responses:
-        '200':
-          description: Reconstruct the state of a CI at a point in time. The response schema comes with WP-793.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
 
   /api/v1/cis/{id}/form:
     parameters:
@@ -21505,6 +21558,50 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    CIStateAsOf:
+      type: object
+      description: >-
+        The state of a CI at a point in time (AUD-08, WP-793).
+      required: [entity_type, entity_id, at, fields, deleted, not_historized]
+      properties:
+        entity_type: { type: string, enum: [ci] }
+        entity_id: { type: string }
+        at: { type: string, format: date-time }
+        based_on_snapshot_at:
+          type: string
+          format: date-time
+          description: >-
+            `taken_at` of the `ci_snapshot` the replay started from; absent
+            when it replayed the whole trail.
+        fields:
+          type: object
+          additionalProperties: true
+          description: The fields of the CI at `at` the caller may read.
+        relationships:
+          type: array
+          description: >-
+            The edges of the CI at `at` (only with `relationship:read`): the
+            edge as its last `relationship_change` row up to then recorded it,
+            or id, type and endpoints for an edge of the snapshot without one.
+          items:
+            type: object
+            required: [id, rel_type, source_ci_id, target_ci_id]
+            additionalProperties: true
+            properties:
+              id: { type: string }
+              rel_type: { type: string }
+              source_ci_id: { type: string }
+              target_ci_id: { type: string }
+        deleted: { type: boolean }
+        merged_into_id:
+          type: string
+          description: The survivor of a merged CI (CI-12); absent otherwise.
+        not_historized:
+          type: array
+          description: >-
+            The members of a CI that are not historized (AUD-03) and so not
+            part of its state.
+          items: { type: string }
     AttributeDefinition:
       type: object
       required: [id, scope, key, display_name, data_type, required, multi_value, searchable, unique, unique_scope, inheritable, order, is_system, applies_to, applies_to_categories, applies_to_type_ids, created_at, updated_at]

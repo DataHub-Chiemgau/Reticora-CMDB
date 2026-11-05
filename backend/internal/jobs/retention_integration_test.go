@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 )
 
@@ -122,6 +123,9 @@ func TestRetentionRunsAgainstPostgres(t *testing.T) {
 		exec(`INSERT INTO entity_change (organization_id, entity_type, entity_id, change_type, created_at) VALUES ($1, 'asset', $2, 'updated', $3)`,
 			f.OrgA, f.ID(), now.Add(-age))
 	}
+	// The anchor of the CI before the cut-off (WP-793): its old row goes.
+	exec(`INSERT INTO ci_snapshot (organization_id, ci_id, taken_at, reason, state, schema_version)
+		VALUES ($1, $2, $3, 'weekly', '{"fields":{}}', 1)`, f.OrgA, ci, now.Add(-3*365*24*time.Hour-24*time.Hour))
 	expired := f.CI(t, f.OrgA, f.Client1, "retention-expired")
 	young := f.CI(t, f.OrgA, f.Client1, "retention-young")
 	referenced := f.CI(t, f.OrgA, f.Client1, "retention-referenced")
@@ -561,6 +565,13 @@ func TestRetentionDeletesOldRelationshipChanges(t *testing.T) {
 		return id
 	}
 	expired := insert(f.OrgA, 1100*day)
+	// Both endpoints of A have an anchor after the expired row (WP-793).
+	for _, ciID := range endpoints[f.OrgA] {
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_snapshot (organization_id, ci_id, taken_at, reason, state, schema_version)
+			VALUES ($1, $2, $3, 'weekly', '{"fields":{}}', 1)`, f.OrgA, ciID, now.Add(-1098*day)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	youngA := insert(f.OrgA, 1000*day)
 	youngB := insert(f.OrgB, 10*day)
 
@@ -581,5 +592,122 @@ func TestRetentionDeletesOldRelationshipChanges(t *testing.T) {
 	}
 	if got := left(f.OrgB); !slices.Equal(got, []string{youngB}) {
 		t.Errorf("relationship_change of B after the run: %v, want %s", got, youngB)
+	}
+}
+
+// TestRetentionKeepsTheHistoryAnchor covers AUD-08 and NFR-06 (WP-793):
+// retention.history with the clock moved on (WithClock) keeps per CI its
+// youngest ci_snapshot before the cut-off (the anchor) and deletes the
+// older ones; it deletes the ci_change rows up to the anchor and keeps
+// those after it, also the rows of a merged victim (found by origin_ci_id
+// with the anchor of the victim); a CI without an anchor keeps its rows,
+// and so does an edge row whose endpoint has none. The state of the CI
+// shortly after the cut-off is complete: the anchor and the row after it.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionKeepsTheHistoryAnchor(t *testing.T) {
+	f := scopetest.Seed(t, "79")
+	bg := context.Background()
+	day := 24 * time.Hour
+	// The clock of the run: 30 days ahead; the cut-off 1095 days before it.
+	runAt := time.Now().UTC().Add(30 * day).Truncate(time.Second)
+	cutoff := runAt.Add(-1095 * day)
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 1095, 90, 365)).WithClock(func() time.Time { return runAt })
+	before := func(d time.Duration) time.Time { return cutoff.Add(-d) }
+
+	anchored := f.CI(t, f.OrgA, f.Client1, "wp793-anchored")
+	survivor := f.CI(t, f.OrgA, f.Client1, "wp793-survivor")
+	victim := f.CI(t, f.OrgA, f.Client1, "wp793-victim")
+	unanchored := f.CI(t, f.OrgA, f.Client1, "wp793-unanchored")
+	// change writes a ci_change row of ciID (origin: the victim it came
+	// from, empty for none) setting name at at and returns its id.
+	change := func(ciID, origin, kind, name string, at time.Time) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_change (organization_id, ci_id, origin_ci_id, change_type, field_name, new_value, created_at)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, CASE WHEN $4 = 'update' THEN 'name' END, $5::jsonb, $6) RETURNING id::text`,
+			f.OrgA, ciID, origin, kind, name, at).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	snapshot := func(ciID, name string, at time.Time) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci_snapshot (organization_id, ci_id, taken_at, reason, state, schema_version)
+			VALUES ($1, $2, $3, 'weekly', jsonb_build_object('fields', jsonb_build_object('name', $4::text), 'deleted', false), 1)
+			RETURNING id::text`, f.OrgA, ciID, at, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	// The anchored CI: created and renamed before its anchor, renamed again
+	// between the anchor and the cut-off, a snapshot older than the anchor
+	// and one after the cut-off.
+	created := change(anchored, "", "create", `{"name": "wp793-a0"}`, before(60*day))
+	renamed := change(anchored, "", "update", `"wp793-a1"`, before(40*day))
+	oldSnapshot := snapshot(anchored, "wp793-a0", before(50*day))
+	anchor := snapshot(anchored, "wp793-a1", before(20*day))
+	late := change(anchored, "", "update", `"wp793-a2"`, before(10*day))
+	young := snapshot(anchored, "wp793-a2", cutoff.Add(5*day))
+	// The victim's rows hang on the survivor (origin_ci_id); the victim
+	// has an anchor between them, the survivor none.
+	victimOld := change(survivor, victim, "update", `"wp793-v1"`, before(40*day))
+	victimLate := change(survivor, victim, "update", `"wp793-v2"`, before(10*day))
+	victimAnchor := snapshot(victim, "wp793-v1", before(20*day))
+	survivorOwn := change(survivor, "", "update", `"wp793-s1"`, before(40*day))
+	// Without an anchor.
+	unanchoredOld := change(unanchored, "", "update", `"wp793-u1"`, before(40*day))
+	// Edge rows: both endpoints anchored (goes), one endpoint without an
+	// anchor (stays).
+	edge := func(source, target string, at time.Time) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO relationship_change (organization_id, relationship_id, source_ci_id, target_ci_id,
+				rel_type, change_kind, actor_type, source, observed_at, created_at)
+			VALUES ($1, gen_random_uuid(), $2, $3, 'connected_to', 'created', 'system', 'collector', $4, $4) RETURNING id::text`,
+			f.OrgA, source, target, at).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	edgeAnchored := edge(anchored, victim, before(40*day))
+	edgeOpen := edge(anchored, unanchored, before(40*day))
+	edgeLate := edge(anchored, victim, before(10*day))
+
+	if err := r.RunHistory(bg); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(sql string, args ...any) []string {
+		t.Helper()
+		var out []string
+		if err := f.Admin.QueryRow(bg, `SELECT COALESCE(array_agg(id::text ORDER BY id), '{}') FROM (`+sql+`) q`, args...).Scan(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	sorted := func(v ...string) []string {
+		slices.Sort(v)
+		return v
+	}
+	if got, want := ids(`SELECT id FROM ci_change WHERE organization_id = $1`, f.OrgA),
+		sorted(late, victimLate, survivorOwn, unanchoredOld); !slices.Equal(got, want) {
+		t.Errorf("ci_change after the run: %v, want %v (deleted: %s %s %s)", got, want, created, renamed, victimOld)
+	}
+	if got, want := ids(`SELECT id FROM ci_snapshot WHERE organization_id = $1`, f.OrgA), sorted(anchor, young, victimAnchor); !slices.Equal(got, want) {
+		t.Errorf("ci_snapshot after the run: %v, want %v (deleted: %s)", got, want, oldSnapshot)
+	}
+	if got, want := ids(`SELECT id FROM relationship_change WHERE organization_id = $1`, f.OrgA), sorted(edgeOpen, edgeLate); !slices.Equal(got, want) {
+		t.Errorf("relationship_change after the run: %v, want %v (deleted: %s)", got, want, edgeAnchored)
+	}
+
+	// The state shortly after the cut-off: the anchor and the row after it.
+	state, err := history.NewPGRepository(f.App).StateAt(f.OrgCtx(f.OrgA), f.OrgA,
+		&history.StateRequest{EntityType: "ci", EntityID: anchored, At: cutoff.Add(time.Hour), Reveal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Fields["name"] != "wp793-a2" || state.BasedOnSnapshotAt == nil || !state.BasedOnSnapshotAt.Equal(before(20*day)) {
+		t.Errorf("state after the cut-off: %v based on %v, want wp793-a2 based on the anchor %s", state.Fields, state.BasedOnSnapshotAt, before(20*day))
 	}
 }

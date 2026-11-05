@@ -88,7 +88,7 @@ audit entry (`retention.*`).
 | Run | Data | Kept for | Setting (minimum) |
 |---|---|---|---|
 | `retention.audit_log` (03:17) | `audit_log` | 10 years | `RETICORA_RETENTION_AUDIT_YEARS` (10) |
-| `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change`, `relationship_change` | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
+| `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change`, `relationship_change`, `ci_snapshot` (anchor rule, see "Weekly CI snapshots") | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
 | `retention.soft_deleted` (03:37) | soft-deleted CIs | 90 days | `RETICORA_RETENTION_SOFT_DELETE_DAYS` (90) |
 | `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
 | `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |
@@ -216,10 +216,12 @@ the former backfill did.
 
 ## Weekly CI snapshots (AUD-08, WP-312)
 
-The state of a CI at a point in time T (`GET /api/v1/cis/{id}/state`, the
-job `history.snapshot`) is replayed from its last `ci_snapshot` with
-`taken_at` up to T and the `ci_change` rows after it; without a snapshot from
-its whole trail. A merge moves the history rows of the victim to the
+The state of a CI at a point in time T (`GET /api/v1/cis/{id}/as-of`, its
+deprecated alias `/state`, the job `history.snapshot`) is replayed from its
+last `ci_snapshot` with `taken_at` up to T and the `ci_change` rows after it;
+without a snapshot from its whole trail. Its edges are those of the snapshot
+and the replay of the `relationship_change` rows after it (WP-793). The job
+keeps the vault surrogates in `job.result`; the direct read resolves them. A merge moves the history rows of the victim to the
 survivor and marks them with `ci_change.origin_ci_id`: each CI replays its
 own rows.
 
@@ -236,9 +238,21 @@ a repeated run without changes writes nothing. A CI created within that hour
 waits for the next run; a CI without a recorded creation is snapshotted from
 its row (reason `initial`). The merge and the unmerge also write a snapshot
 of both CIs from their rows (reasons `merge` and `unmerge`). `relationships`
-keeps the edges of the CI when the snapshot was written. No run deletes
-snapshots yet: they outlive the hard delete and the merge; their retention
-follows with the point-in-time API (WP-793).
+keeps the edges of the CI when the snapshot was written. Snapshots outlive
+the hard delete and the merge until the retention.
+
+`retention.history` keeps the replay complete for every T within the
+retention period (anchor rule, WP-793). The anchor of a CI is its youngest
+`ci_snapshot` before the cut-off (`RETICORA_RETENTION_HISTORY_DAYS`); older
+snapshots of the CI go. Rows before the cut-off go only up to the anchor's
+`taken_at`: `ci_change` per `COALESCE(origin_ci_id, ci_id)` (the rows of a
+merged victim with the anchor of the victim), the `entity_change` rows of a
+CI, and `relationship_change` (at `observed_at`) up to the anchor of every
+CI whose edges it replays: both endpoints and, for an edge rewired by a
+merge, its endpoints before. Without an anchor the rows stay. Rows between
+the anchor and the cut-off stay, at most one weekly interval longer.
+`location_change` and the `entity_change` rows of other types go at the
+cut-off.
 
 ## Container logs (NFR-06)
 

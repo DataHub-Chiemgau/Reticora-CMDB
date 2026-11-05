@@ -6,6 +6,7 @@
 package history
 
 import (
+	"sort"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -151,8 +152,18 @@ type StateSnapshot struct {
 	// Deleted is true when a delete change precedes the snapshot time.
 	Deleted bool `json:"deleted"`
 	// MergedIntoID is the survivor a merged CI was merged into (CI-12);
-	// the answer shows it from WP-793 on.
-	MergedIntoID string `json:"-"`
+	// empty for a CI that was not merged.
+	MergedIntoID string `json:"merged_into_id,omitempty"`
+	// BasedOnSnapshotAt is taken_at of the ci_snapshot the replay of a CI
+	// started from (WP-793); nil when it replayed the whole trail.
+	BasedOnSnapshotAt *time.Time `json:"based_on_snapshot_at,omitempty"`
+	// Relationships are the edges of the CI at the point in time (WP-793):
+	// nil (left out) without relationship:read or for the snapshot job,
+	// an empty list for a CI without edges.
+	Relationships *[]EdgeState `json:"relationships,omitempty"`
+	// NotHistorized names the fields of a CI that are not historized
+	// (AUD-03) and so are not part of its state at a point in time.
+	NotHistorized []string `json:"not_historized,omitempty"`
 	// restore is what a restore of the deleted CI brings back (CI-05):
 	// the status before the deletion and the released asset link.
 	restore restoreState
@@ -339,4 +350,74 @@ func (s *StateSnapshot) setDocument(value any) {
 		s.restore.Status, _ = r["status"].(string)
 		s.restore.AssetID, _ = r["asset_id"].(string)
 	}
+}
+
+// NotHistorizedCIFields are the members of a CI that AUD-03 does not
+// historize: the last sighting, heartbeats, interface counters and metric
+// values. Its state at a point in time does not hold them (WP-793).
+var NotHistorizedCIFields = []string{"last_seen_at", "heartbeats", "interface_counters", "metrics"}
+
+// EdgeState is an edge of a CI at a point in time (WP-793): the edge as
+// its last relationship_change row up to then recorded it (id, rel_type,
+// source_ci_id, target_ci_id and its other members), or, for an edge of
+// the base snapshot without such a row, its id, type and endpoints.
+type EdgeState map[string]any
+
+// Members of an edge state.
+const (
+	edgeID       = "id"
+	edgeRelType  = "rel_type"
+	edgeSourceCI = "source_ci_id"
+	edgeTargetCI = "target_ci_id"
+)
+
+// EdgeChange is one row of relationship_change in the edge replay of a CI
+// (ReplayEdges): the edge, its kind, its endpoints after the change and
+// the edge after it (nil for removed and suppressed).
+type EdgeChange struct {
+	RelationshipID string
+	Kind           string
+	RelType        string
+	SourceCIID     string
+	TargetCIID     string
+	After          map[string]any
+}
+
+// ReplayEdges reconstructs the edges of the CI ciID (WP-793): base are the
+// edges of its snapshot, changes the rows of relationship_change after it,
+// oldest first. removed and suppressed drop an edge; every other kind
+// (created, updated, verification_changed, refreshed, rewired, restored)
+// sets it to the edge after the change. An edge whose endpoints no longer
+// include the CI (rewired away by an unmerge or a merge) drops out. The
+// result is ordered by edge id.
+func ReplayEdges(ciID string, base []EdgeState, changes []EdgeChange) []EdgeState {
+	edges := make(map[string]EdgeState, len(base))
+	for _, e := range base {
+		if id, _ := e[edgeID].(string); id != "" {
+			edges[id] = e
+		}
+	}
+	for i := range changes {
+		c := &changes[i]
+		if c.Kind == "removed" || c.Kind == "suppressed" || (c.SourceCIID != ciID && c.TargetCIID != ciID) {
+			delete(edges, c.RelationshipID)
+			continue
+		}
+		e := EdgeState{}
+		for k, v := range c.After {
+			e[k] = v
+		}
+		e[edgeID], e[edgeRelType], e[edgeSourceCI], e[edgeTargetCI] = c.RelationshipID, c.RelType, c.SourceCIID, c.TargetCIID
+		edges[c.RelationshipID] = e
+	}
+	out := make([]EdgeState, 0, len(edges))
+	for _, e := range edges {
+		out = append(out, e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, _ := out[i][edgeID].(string)
+		b, _ := out[j][edgeID].(string)
+		return a < b
+	})
+	return out
 }

@@ -1483,3 +1483,4 @@ STK-01;[P2];B;backend/internal/notify/stock_notify_integration_test.go;WP-845
 NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/stock_notify_integration_test.go;WP-845
 STK-03;[P2];B;backend/internal/consumable/quantity_item_drop_integration_test.go;WP-758
 AST-02;[P2];B;backend/internal/assignment/signature_legacy_integration_test.go;WP-749
+AUD-08;[P2];C;backend/internal/history/replay_integration_test.go;WP-793

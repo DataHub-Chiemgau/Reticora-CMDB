@@ -111,18 +111,49 @@ func (r *Retention) RunAuditLog(ctx context.Context) error {
 	})
 }
 
+// historyAnchor is the anchor of the CI of the expression col (AUD-08,
+// WP-793): taken_at of its youngest ci_snapshot before the cut-off $2;
+// NULL without one.
+func historyAnchor(col string) string {
+	return `(SELECT max(s.taken_at) FROM ci_snapshot s WHERE s.organization_id = $1 AND s.ci_id = ` + col + ` AND s.taken_at < $2)`
+}
+
+// historyRetention are the deletions of retention.history ($1: the
+// organization, $2: the cut-off). The point-in-time state of a CI
+// (GET /cis/{id}/as-of) replays its last ci_snapshot and the rows after
+// it, so the rows of a CI go only up to its anchor (historyAnchor): the
+// ci_change rows of the CI they replay for (COALESCE(origin_ci_id, ci_id),
+// a merged victim included) and its entity_change rows up to taken_at, the
+// relationship_change rows up to the anchor of each CI whose edges they
+// replay (both endpoints and, for an edge rewired by a merge, the
+// endpoints before) at their observed_at; without an anchor they stay. The
+// snapshots before the cut-off go except the anchor. A row between the
+// anchor and the cut-off stays, at most a week longer (the weekly
+// snapshot). Entity changes of other types and location moves go at the
+// cut-off.
+var historyRetention = []string{
+	`DELETE FROM ci_change c WHERE c.organization_id = $1 AND c.created_at < $2
+		AND c.created_at <= ` + historyAnchor("COALESCE(c.origin_ci_id, c.ci_id)"),
+	`DELETE FROM entity_change e WHERE e.organization_id = $1 AND e.created_at < $2
+		AND (e.entity_type <> 'ci' OR e.created_at <= ` + historyAnchor("e.entity_id") + `)`,
+	`DELETE FROM location_change WHERE organization_id = $1 AND changed_at < $2`,
+	`DELETE FROM relationship_change c WHERE c.organization_id = $1 AND c.created_at < $2
+		AND NOT EXISTS (SELECT 1 FROM (VALUES (c.source_ci_id), (c.target_ci_id),
+				(CASE WHEN c.change_kind = 'rewired' THEN (c.before->>'source_ci_id')::uuid END),
+				(CASE WHEN c.change_kind = 'rewired' THEN (c.before->>'target_ci_id')::uuid END)) AS e(ci_id)
+			WHERE e.ci_id IS NOT NULL AND c.observed_at > COALESCE(` + historyAnchor("e.ci_id") + `, '-infinity'))`,
+	`DELETE FROM ci_snapshot s WHERE s.organization_id = $1 AND s.taken_at < ` + historyAnchor("s.ci_id"),
+}
+
 // RunHistory removes CI, entity, location and relationship history
-// (relationship_change, WP-771) older than the history period.
+// (relationship_change, WP-771) and CI snapshots older than the history
+// period, keeping per CI its anchor snapshot and the rows after it
+// (historyRetention, WP-793).
 func (r *Retention) RunHistory(ctx context.Context) error {
 	cutoff := r.now().Add(-r.policy.History)
 	return r.eachOrganization(ctx, RetentionHistory, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
 		total := 0
-		for _, q := range []string{
-			`DELETE FROM ci_change WHERE organization_id = $1 AND created_at < $2`,
-			`DELETE FROM entity_change WHERE organization_id = $1 AND created_at < $2`,
-			`DELETE FROM location_change WHERE organization_id = $1 AND changed_at < $2`,
-			`DELETE FROM relationship_change WHERE organization_id = $1 AND created_at < $2`,
-		} {
+		for _, q := range historyRetention {
 			tag, err := tx.Exec(ctx, q, orgID, cutoff)
 			if err != nil {
 				return total, fmt.Errorf("delete history: %w", err)
