@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000269_quantity_item_drop
+Stand: Migration 000270_asset_snapshot
 
 ## Prüfung
 
@@ -783,6 +783,25 @@ TRUNCATE-Schutz `reticora_truncate_guard` und der Index
 umgehängte Zeile gehörte (Teilindex `idx_ci_change_origin
 (organization_id, origin_ci_id) WHERE origin_ci_id IS NOT NULL`); der
 Unmerge schreibt die Spalte aus dem Merge-Snapshot zurück.
+
+## Asset-Snapshots `asset_snapshot` (AUD-08, WP-795)
+
+Migration 000270 legt `asset_snapshot` an: der Zustand eines Assets zu
+`taken_at` (`state` mit `fields` und `deleted`; Formatversion
+`schema_version`; Personendaten nur als Surrogat) und der Anlass `reason`
+(CHECK `asset_snapshot_reason_check`: `weekly`, `initial`). `asset_id` hat
+keinen Fremdschlüssel (wie `entity_change.entity_id`), weil Assets hart
+gelöscht werden; K19 gilt daher nicht. `client_id` und `site_id` setzt der
+Trigger `asset_snapshot_scope` (BEFORE INSERT, Funktion
+`asset_snapshot_derive_scope()`, mit erweitertem Scope aus `asset` gelesen;
+ein Snapshot eines gelöschten Assets behält den geschriebenen Scope).
+`propagate_entity_change_scope()` (Fassung 000250) zieht bei einem Client-
+oder Standortwechsel eines Assets auch `asset_snapshot` nach. `ENABLE` +
+`FORCE ROW LEVEL SECURITY`, die Policy `asset_snapshot_isolation` mit Org-,
+Client- und Site-Prädikat wie `entity_change_isolation`, die restriktiven
+Policies `asset_snapshot_scoped_update` und `asset_snapshot_scoped_delete`,
+der TRUNCATE-Schutz `reticora_truncate_guard` und der Index
+`idx_asset_snapshot_asset_taken (organization_id, asset_id, taken_at DESC)`.
 
 ## Schemaversion und Laufzeitschicht der Attribute (MET-16, WP-590)
 
@@ -1804,6 +1823,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `app_user` | ja | ja | user_isolation (ALL) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
+| `asset_snapshot` | ja | ja | asset_snapshot_isolation (ALL), asset_snapshot_scoped_delete (DELETE), asset_snapshot_scoped_update (UPDATE) |
 | `asset_tag_link` | ja | ja | asset_tag_link_isolation (ALL), asset_tag_link_scoped_delete (DELETE), asset_tag_link_scoped_update (UPDATE) |
 | `assignment_signature_legacy` | ja | ja | assignment_signature_legacy_isolation (ALL) |
 | `attribute_definition` | ja | ja | attribute_definition_isolation_delete (DELETE), attribute_definition_isolation_insert (INSERT), attribute_definition_isolation_select (SELECT), attribute_definition_isolation_update (UPDATE) |

@@ -21,6 +21,12 @@ import (
 // snapshot; the merge and the unmerge write one for both CIs from their
 // live rows, because they do not historize the rows they change field by
 // field.
+//
+// Asset snapshots (AUD-08, WP-795): asset_snapshot holds the state of an
+// asset at taken_at, the base of its replay (assetTrail). The weekly job
+// writes them under the same rules as for CIs, for every asset whose
+// entity_change rows changed since its last snapshot, but only while the
+// module inventory is enabled (WithAssets).
 
 // WeeklySnapshotKind is the scheduler kind of the weekly CI snapshot.
 const WeeklySnapshotKind = "history.weekly_snapshot"
@@ -113,6 +119,9 @@ func lastDeletion(ctx context.Context, tx pgx.Tx, orgID, ciID string) (*restoreS
 type WeeklySnapshot struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
+	// assets: the module inventory is enabled, the run snapshots the
+	// assets too (WithAssets).
+	assets bool
 }
 
 // NewWeeklySnapshot creates the weekly CI snapshot job.
@@ -123,6 +132,14 @@ func NewWeeklySnapshot(pool *pgxpool.Pool) *WeeklySnapshot {
 // WithClock replaces the clock (tests).
 func (w *WeeklySnapshot) WithClock(now func() time.Time) *WeeklySnapshot {
 	w.now = now
+	return w
+}
+
+// WithAssets makes the run snapshot the assets as well (asset_snapshot,
+// WP-795): systemJobs passes whether the module inventory is enabled, to
+// which /api/v1/assets belongs.
+func (w *WeeklySnapshot) WithAssets(enabled bool) *WeeklySnapshot {
+	w.assets = enabled
 	return w
 }
 
@@ -181,7 +198,20 @@ type snapshotCandidate struct {
 	first   *time.Time
 }
 
-// RunOrg snapshots the CIs of one organization in batches of at most
+// RunOrg snapshots the CIs of one organization (runCIs) and, with
+// WithAssets, its assets (runAssets) and returns the number of snapshots
+// written.
+func (w *WeeklySnapshot) RunOrg(ctx context.Context, orgID string) (int, error) {
+	cutoff := w.now().Add(-weeklySnapshotLag)
+	written, err := w.runCIs(ctx, orgID, cutoff)
+	if err != nil || !w.assets {
+		return written, err
+	}
+	assets, err := w.runAssets(ctx, orgID, cutoff)
+	return written + assets, err
+}
+
+// runCIs snapshots the CIs of one organization in batches of at most
 // weeklySnapshotBatch CIs, each batch in its own transaction with the
 // organization-wide scope. The snapshots are taken an hour before the start
 // of the run (weeklySnapshotLag); their state is the replay of the sealed
@@ -190,8 +220,7 @@ type snapshotCandidate struct {
 // row lies after the cut-off is left to the next run; one without a
 // snapshot and without a creation row is snapshotted from its live row
 // (reason initial, taken at now()).
-func (w *WeeklySnapshot) RunOrg(ctx context.Context, orgID string) (int, error) {
-	cutoff := w.now().Add(-weeklySnapshotLag)
+func (w *WeeklySnapshot) runCIs(ctx context.Context, orgID string, cutoff time.Time) (int, error) {
 	written := 0
 	after := "00000000-0000-0000-0000-000000000000"
 	for {
@@ -326,4 +355,150 @@ func initialSnapshot(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
 		return fmt.Errorf("decode ci: %w", err)
 	}
 	return WriteLiveSnapshotTx(ctx, tx, orgID, ciID, SnapshotReasonInitial, row, version, deleted, mergedInto)
+}
+
+// insertAssetSnapshot writes an asset_snapshot of the asset assetID at
+// takenAt (nil: now() of tx); the scope trigger sets client and site.
+func insertAssetSnapshot(ctx context.Context, tx pgx.Tx, orgID, assetID, reason string, takenAt *time.Time, doc *snapshotDocument) error {
+	state, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("encode asset snapshot: %w", err)
+	}
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO asset_snapshot (organization_id, asset_id, taken_at, reason, state, schema_version)
+		VALUES ($1, $2::uuid, COALESCE($3::timestamptz, now()), $4, $5::jsonb, $6)`,
+		orgID, assetID, takenAt, reason, state, SnapshotSchemaVersion); err != nil {
+		return fmt.Errorf("write asset snapshot: %w", err)
+	}
+	return nil
+}
+
+// runAssets snapshots the assets of one organization like runCIs: in
+// batches of at most weeklySnapshotBatch assets, each in its own
+// transaction with the organization-wide scope, taken at the cut-off from
+// the replay of the sealed trail (the last asset_snapshot and the
+// entity_change rows after it). An asset without a snapshot and without a
+// creation row is snapshotted from its live row (reason initial).
+func (w *WeeklySnapshot) runAssets(ctx context.Context, orgID string, cutoff time.Time) (int, error) {
+	written := 0
+	after := "00000000-0000-0000-0000-000000000000"
+	for {
+		var batch int
+		scope := database.OrgWideScope(orgID, "")
+		err := database.WithTenant(ctx, w.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+			candidates, err := assetSnapshotCandidates(ctx, tx, orgID, after, cutoff)
+			if err != nil {
+				return err
+			}
+			batch = len(candidates)
+			for i := range candidates {
+				c := &candidates[i]
+				after = c.id
+				wrote, serr := snapshotAsset(ctx, tx, orgID, c, cutoff)
+				if serr != nil {
+					return fmt.Errorf("asset %s: %w", c.id, serr)
+				}
+				if wrote {
+					written++
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return written, err
+		}
+		if batch < weeklySnapshotBatch {
+			return written, nil
+		}
+	}
+}
+
+// assetSnapshotCandidates reads the next batch of assets after the id
+// after, with their last snapshot and whether their trail ($3: the
+// cut-off) changed since.
+func assetSnapshotCandidates(ctx context.Context, tx pgx.Tx, orgID, after string, cutoff time.Time) ([]snapshotCandidate, error) {
+	rows, err := tx.Query(ctx, `
+		WITH batch AS (
+			SELECT a.id FROM asset a WHERE a.organization_id = $1 AND a.id > $2::uuid ORDER BY a.id LIMIT $4)
+		SELECT b.id::text, s.taken_at,
+		       EXISTS (SELECT 1 FROM entity_change e WHERE e.organization_id = $1 AND e.entity_type = 'asset' AND e.entity_id = b.id
+		                  AND e.created_at > COALESCE(s.taken_at, '-infinity') AND e.created_at <= $3),
+		       EXISTS (SELECT 1 FROM entity_change e WHERE e.organization_id = $1 AND e.entity_type = 'asset' AND e.entity_id = b.id
+		                  AND e.change_type = 'create'),
+		       (SELECT min(e.created_at) FROM entity_change e WHERE e.organization_id = $1 AND e.entity_type = 'asset' AND e.entity_id = b.id)
+		FROM batch b
+		LEFT JOIN LATERAL (SELECT taken_at FROM asset_snapshot
+			WHERE organization_id = $1 AND asset_id = b.id ORDER BY taken_at DESC LIMIT 1) s ON true
+		ORDER BY b.id`, orgID, after, cutoff, weeklySnapshotBatch)
+	if err != nil {
+		return nil, fmt.Errorf("read asset snapshot candidates: %w", err)
+	}
+	defer rows.Close()
+	var out []snapshotCandidate
+	for rows.Next() {
+		var c snapshotCandidate
+		if err := rows.Scan(&c.id, &c.last, &c.changed, &c.created, &c.first); err != nil {
+			return nil, fmt.Errorf("read asset snapshot candidates: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// snapshotAsset writes the weekly snapshot of one asset candidate, if it
+// needs one, and reports whether it did; the rules are those of
+// snapshotCI.
+func snapshotAsset(ctx context.Context, tx pgx.Tx, orgID string, c *snapshotCandidate, cutoff time.Time) (bool, error) {
+	if c.last == nil && !c.created {
+		return true, initialAssetSnapshot(ctx, tx, orgID, c.id)
+	}
+	if c.last == nil && (c.first == nil || c.first.After(cutoff)) {
+		return false, nil
+	}
+	if c.last != nil && !c.changed {
+		return false, nil
+	}
+	at := cutoff
+	if c.last != nil && c.last.After(at) {
+		at = *c.last
+	}
+	trail, err := assetTrailTx(ctx, tx, orgID, c.id, at)
+	if err != nil {
+		return false, err
+	}
+	if len(trail) == 0 {
+		return false, nil
+	}
+	state := Replay(trail)
+	doc := state.document()
+	return true, insertAssetSnapshot(ctx, tx, orgID, c.id, SnapshotReasonWeekly, &at, &doc)
+}
+
+// initialAssetSnapshot writes the first snapshot of an asset without a
+// recorded creation from its live row (reason initial), taken at now():
+// its typed columns in the form of the trail (asset_history_form, WP-794),
+// its custom fields and its tags, the personal values sealed with
+// pii.SealTx (SEC-05).
+func initialAssetSnapshot(ctx context.Context, tx pgx.Tx, orgID, assetID string) error {
+	var raw []byte
+	if err := tx.QueryRow(ctx, `SELECT jsonb_strip_nulls(asset_history_form(a)
+			|| jsonb_build_object('custom_fields', COALESCE(a.custom_fields, '{}'::jsonb),
+				'tags', COALESCE((SELECT jsonb_agg(t.key ORDER BY t.key) FROM asset_tag_link l JOIN tag t ON t.id = l.tag_id
+					WHERE l.asset_id = a.id), '[]'::jsonb)))
+		FROM asset a WHERE a.organization_id = $1 AND a.id = $2::uuid`, orgID, assetID).Scan(&raw); err != nil {
+		return fmt.Errorf("read asset: %w", err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return fmt.Errorf("decode asset: %w", err)
+	}
+	sealed, _, err := pii.SealTx(ctx, tx, orgID, row)
+	if err != nil {
+		return fmt.Errorf("seal asset snapshot: %w", err)
+	}
+	fields, _ := sealed.(map[string]any)
+	if fields == nil {
+		return fmt.Errorf("asset snapshot of %s: the live row is no object", assetID)
+	}
+	return insertAssetSnapshot(ctx, tx, orgID, assetID, SnapshotReasonInitial, nil, &snapshotDocument{Fields: fields})
 }

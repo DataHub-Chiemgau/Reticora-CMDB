@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -33,15 +34,14 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// visibleEntity hides the changes of a CI or an asset that is not visible
-// under the transaction's tenant scope: the ci and asset policies filter the
-// subqueries by client and site scope; the asset rows of entity_change
-// carry the scope of their asset since WP-794, the rows of the other types
-// none (WP-025). An asset is deleted for good, so the changes
-// of a deleted asset are hidden too (WP-516). Other entity types follow
-// with their packages' WithTenant migration.
-const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))
-	AND (entity_type <> 'asset' OR EXISTS (SELECT 1 FROM asset WHERE asset.id = entity_change.entity_id))`
+// visibleEntity hides the changes of a CI that is not visible under the
+// transaction's tenant scope: the ci policy filters the subquery by client
+// and site scope. The asset rows of entity_change carry the scope of their
+// asset since WP-794 and its policy filters them, also the rows of an asset
+// deleted for good (WP-795: the delete row stays, so its history does);
+// the rows of the other types carry none (WP-025). Other entity types
+// follow with their packages' WithTenant migration.
+const visibleEntity = `(entity_type <> 'ci' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = entity_change.entity_id))`
 
 // visibleSQL is the visibility check ($1: the entity id) of the entity
 // types with a state snapshot (JOB-04): the row under the caller's tenant
@@ -537,7 +537,7 @@ const ciTrail = `
 		ORDER BY taken_at DESC LIMIT 1)
 	SELECT id::text AS id, organization_id::text AS organization_id, 'ci' AS entity_type, $2::uuid::text AS entity_id,
 	       '' AS actor_id, 'snapshot' AS change_type, '' AS field_name, NULL::jsonb AS old_value, state AS new_value,
-	       '' AS comment, taken_at AS created_at, '' AS change_kind, ci_version, '` + SourceCISnapshot + `' AS source, 0 AS rank
+	       '' AS comment, taken_at AS created_at, '' AS change_kind, ci_version AS version, '` + SourceCISnapshot + `' AS source, 0 AS rank
 	FROM base
 	UNION ALL
 	SELECT id::text, organization_id::text, 'ci', $2::uuid::text,
@@ -552,14 +552,40 @@ const ciTrail = `
 	FROM entity_change WHERE organization_id = $1 AND entity_type = 'ci' AND entity_id = $2::uuid
 	  AND created_at <= $3 AND created_at > COALESCE((SELECT taken_at FROM base), '-infinity')`
 
+// assetTrail is the change trail of an asset for its replay at $3
+// (AUD-08, WP-795): the last asset_snapshot with taken_at <= $3 as its
+// base, then the entity_change rows of the asset (the trail of the trigger
+// asset_history and of the asset repository, WP-794, the lifecycle
+// transitions, WP-724) with taken_at < created_at <= $3; without a
+// snapshot the whole trail up to $3. All under the caller's tenant scope:
+// the client and site policies of asset_snapshot and entity_change
+// (WP-794) apply, also to an asset deleted for good. rank orders the rows
+// of one time as in ciTrail, the asset version (entity_version, WP-740)
+// the rows of one write.
+const assetTrail = `
+	WITH base AS (
+		SELECT id, organization_id, taken_at, state FROM asset_snapshot
+		WHERE organization_id = $1 AND asset_id = $2::uuid AND taken_at <= $3
+		ORDER BY taken_at DESC LIMIT 1)
+	SELECT id::text AS id, organization_id::text AS organization_id, 'asset' AS entity_type, $2::uuid::text AS entity_id,
+	       '' AS actor_id, 'snapshot' AS change_type, '' AS field_name, NULL::jsonb AS old_value, state AS new_value,
+	       '' AS comment, taken_at AS created_at, '' AS change_kind, NULL::bigint AS version, '` + SourceAssetSnapshot + `' AS source, 0 AS rank
+	FROM base
+	UNION ALL
+	SELECT id::text, organization_id::text, entity_type, entity_id::text, COALESCE(actor_id::text, ''), change_type,
+	       COALESCE(field_name, ''), old_value, new_value, COALESCE(comment, ''), created_at, '', entity_version,
+	       '` + SourceEntityChange + `', CASE WHEN change_type = 'create' THEN 1 ELSE 2 END
+	FROM entity_change WHERE organization_id = $1 AND entity_type = 'asset' AND entity_id = $2::uuid
+	  AND created_at <= $3 AND created_at > COALESCE((SELECT taken_at FROM base), '-infinity')`
+
 // TrailUpTo returns the changes of an entity up to at, oldest first, for
 // point-in-time replay, with the personal values the surrogates stand for,
 // as its history shows them (SEC-05). For a CI it is its last ci_snapshot
 // up to at and the ci_change and entity_change rows after it (ciTrail),
-// for another type its entity_change rows (an asset writes them since
-// WP-516). The rows of one write share their time: the creation goes
-// first, then the CI version orders them. An entity the caller cannot see
-// has none.
+// for an asset its last asset_snapshot and the entity_change rows after it
+// (assetTrail, WP-795), for another type its entity_change rows. The rows
+// of one write share their time: the creation goes first, then the CI or
+// asset version orders them. An entity the caller cannot see has none.
 func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
 	out := []Change{}
 	if !api.IsUUID(entityID) {
@@ -583,40 +609,23 @@ func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityI
 }
 
 // trailTx reads the trail of an entity up to at in tx, oldest first: for a
-// CI ciTrail, for another type its entity_change rows under visibleEntity.
-// revealValues resolves the surrogates of the values (deleted ones are null).
+// CI ciTrail, for an asset assetTrail (the former names of the trail since
+// WP-516 mapped to those of the asset DTO), for another type its
+// entity_change rows under visibleEntity. revealValues resolves the
+// surrogates of the values (deleted ones are null).
 func trailTx(ctx context.Context, tx pgx.Tx, orgID, entityType, entityID string, at time.Time, revealValues bool) ([]Change, error) {
 	var out []Change
-	if entityType == "ci" {
-		trail, err := ciTrailTx(ctx, tx, orgID, entityID, at)
-		if err != nil {
-			return nil, err
-		}
-		out = trail
-	} else {
-		rows, err := tx.Query(ctx, fmt.Sprintf(
-			"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
-			selectColumns, visibleEntity), orgID, entityType, entityID, at)
-		if err != nil {
-			return nil, fmt.Errorf("list entity trail: %w", err)
-		}
-		defer rows.Close()
-		out = []Change{}
-		for rows.Next() {
-			c := Change{}
-			var oldRaw, newRaw []byte
-			if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
-				&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.ChangeKind); err != nil {
-				return nil, err
-			}
-			if err := decodeValues(&c, oldRaw, newRaw); err != nil {
-				return nil, err
-			}
-			out = append(out, c)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
+	var err error
+	switch entityType {
+	case "ci":
+		out, err = ciTrailTx(ctx, tx, orgID, entityID, at)
+	case "asset":
+		out, err = assetTrailTx(ctx, tx, orgID, entityID, at)
+	default:
+		out, err = entityTrailTx(ctx, tx, orgID, entityType, entityID, at)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if !revealValues {
 		return out, nil
@@ -624,18 +633,48 @@ func trailTx(ctx context.Context, tx pgx.Tx, orgID, entityType, entityID string,
 	return out, reveal(ctx, tx, orgID, out)
 }
 
+// entityTrailTx reads the entity_change rows of an entity of another type
+// up to at in tx under visibleEntity, oldest first.
+func entityTrailTx(ctx context.Context, tx pgx.Tx, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
+	rows, err := tx.Query(ctx, fmt.Sprintf(
+		"SELECT %s, '' FROM entity_change WHERE organization_id = $1 AND entity_type = $2 AND entity_id = $3 AND created_at <= $4 AND %s ORDER BY created_at, change_type <> 'create', id",
+		selectColumns, visibleEntity), orgID, entityType, entityID, at)
+	if err != nil {
+		return nil, fmt.Errorf("list entity trail: %w", err)
+	}
+	defer rows.Close()
+	out := []Change{}
+	for rows.Next() {
+		c := Change{}
+		var oldRaw, newRaw []byte
+		if err := rows.Scan(&c.ID, &c.OrganizationID, &c.EntityType, &c.EntityID, &c.ActorID, &c.ChangeType, &c.FieldName,
+			&oldRaw, &newRaw, &c.Comment, &c.CreatedAt, &c.ChangeKind); err != nil {
+			return nil, err
+		}
+		if err := decodeValues(&c, oldRaw, newRaw); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // stateVisibleSQL is the visibility check of StateAt ($1: the entity id):
 // the row under the caller's tenant scope, for a CI also a ci_snapshot, so
-// a CI deleted for good (CI-05) stays readable until the retention.
+// a CI deleted for good (CI-05) stays readable until the retention; for an
+// asset also an asset_snapshot or a row of its trail (WP-795): an asset is
+// deleted for good, its snapshots and its delete row keep its scope.
 var stateVisibleSQL = map[string]string{
-	"ci":    "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid) OR EXISTS (SELECT 1 FROM ci_snapshot WHERE ci_id = $1::uuid)",
-	"asset": visibleSQL["asset"],
+	"ci": "SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid) OR EXISTS (SELECT 1 FROM ci_snapshot WHERE ci_id = $1::uuid)",
+	"asset": `SELECT EXISTS (SELECT 1 FROM asset WHERE id = $1::uuid)
+		OR EXISTS (SELECT 1 FROM asset_snapshot WHERE asset_id = $1::uuid)
+		OR EXISTS (SELECT 1 FROM entity_change WHERE entity_type = 'asset' AND entity_id = $1::uuid)`,
 }
 
 // StateAt implements Repository: the state of the entity at req.At from
-// its trail (trailTx) in one tenant transaction, for a CI with the
-// ci_snapshot it started from and, with req.Relationships, its edges
-// (edgesAt).
+// its trail (trailTx) in one tenant transaction, with the ci_snapshot or
+// asset_snapshot it started from and, for a CI with req.Relationships, its
+// edges (edgesAt).
 func (r *PGRepository) StateAt(ctx context.Context, orgID string, req *StateRequest) (*StateSnapshot, error) {
 	check, ok := stateVisibleSQL[req.EntityType]
 	if !ok || !api.IsUUID(req.EntityID) {
@@ -659,7 +698,7 @@ func (r *PGRepository) StateAt(ctx context.Context, orgID string, req *StateRequ
 		}
 		s := Replay(trail)
 		var base *Change
-		if trail[0].Source == SourceCISnapshot {
+		if isSnapshot(&trail[0]) {
 			base = &trail[0]
 			takenAt := base.CreatedAt
 			s.BasedOnSnapshotAt = &takenAt
@@ -823,13 +862,35 @@ func projectedEdgeChanges(ctx context.Context, tx pgx.Tx, orgID string, ids []st
 // ciTrailTx reads the trail of a CI up to at in tx (ciTrail), oldest first,
 // with the stored values: the personal values stay surrogates.
 func ciTrailTx(ctx context.Context, tx pgx.Tx, orgID, ciID string, at time.Time) ([]Change, error) {
+	return snapshotTrailTx(ctx, tx, ciTrail, orgID, ciID, at)
+}
+
+// assetTrailTx reads the trail of an asset up to at in tx (assetTrail),
+// oldest first, with the stored values (the personal values stay
+// surrogates) under the names of the asset DTO (assetCurrentNames).
+func assetTrailTx(ctx context.Context, tx pgx.Tx, orgID, assetID string, at time.Time) ([]Change, error) {
+	out, err := snapshotTrailTx(ctx, tx, assetTrail, orgID, assetID, at)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if !isSnapshot(&out[i]) {
+			assetCurrentNames(&out[i])
+		}
+	}
+	return out, nil
+}
+
+// snapshotTrailTx reads a trail of the form of ciTrail ($1 the
+// organization, $2 the entity, $3 the point in time) in tx, oldest first.
+func snapshotTrailTx(ctx context.Context, tx pgx.Tx, trail, orgID, id string, at time.Time) ([]Change, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id, organization_id, entity_type, entity_id, actor_id, change_type, field_name, old_value, new_value,
-		       comment, created_at, change_kind, ci_version, source
-		FROM (`+ciTrail+`) t
-		ORDER BY created_at, rank, ci_version NULLS LAST, id`, orgID, ciID, at)
+		       comment, created_at, change_kind, version, source
+		FROM (`+trail+`) t
+		ORDER BY created_at, rank, version NULLS LAST, id`, orgID, id, at)
 	if err != nil {
-		return nil, fmt.Errorf("list ci trail: %w", err)
+		return nil, fmt.Errorf("list trail: %w", err)
 	}
 	defer rows.Close()
 	out := []Change{}
@@ -846,6 +907,78 @@ func ciTrailTx(ctx context.Context, tx pgx.Tx, orgID, ciID string, at time.Time)
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// assetLegacyNames are the former names of asset fields (WP-738, WP-739,
+// E-122) under which the trail written since WP-516 recorded them, with
+// their names in the asset DTO.
+var assetLegacyNames = map[string]string{
+	"asset_tag":     "inventory_no",
+	"purchase_cost": "purchase_price",
+	"warranty_end":  "warranty_until",
+	"ci_id":         "primary_ci_id",
+}
+
+// assetCurrentNames maps a row of an asset trail recorded under the former
+// field names (assetLegacyNames) to the names of the asset DTO: the field
+// of an update, the members of a create or delete value (a member under
+// its new name wins). purchase_cost was a number; purchase_price is its
+// decimal string.
+func assetCurrentNames(c *Change) {
+	if name, ok := assetLegacyNames[c.FieldName]; ok {
+		if c.FieldName == "purchase_cost" {
+			c.OldValue, c.NewValue = decimalString(c.OldValue), decimalString(c.NewValue)
+		}
+		c.FieldName = name
+		return
+	}
+	if c.FieldName != "" {
+		return
+	}
+	c.OldValue, c.NewValue = assetCurrentMembers(c.OldValue), assetCurrentMembers(c.NewValue)
+}
+
+// assetCurrentMembers renames the former members of an asset value; a
+// value that is no object or holds none stays as it is.
+func assetCurrentMembers(value any) any {
+	obj, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	var out map[string]any
+	for old, name := range assetLegacyNames {
+		v, has := obj[old]
+		if !has {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(obj))
+			for k, kv := range obj {
+				out[k] = kv
+			}
+		}
+		delete(out, old)
+		if _, taken := obj[name]; taken {
+			continue
+		}
+		if old == "purchase_cost" {
+			v = decimalString(v)
+		}
+		out[name] = v
+	}
+	if out == nil {
+		return value
+	}
+	return out
+}
+
+// decimalString is a former purchase_cost number as the decimal string of
+// purchase_price with two places; any other value stays as it is.
+func decimalString(v any) any {
+	if f, ok := v.(float64); ok {
+		return strconv.FormatFloat(f, 'f', 2, 64)
+	}
+	return v
 }
 
 // decodeValues decodes the stored old and new value of a trail row.

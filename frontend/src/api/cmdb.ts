@@ -1073,8 +1073,11 @@ export const historyApi = {
   ) {
     return fetchAPI<HistoryPage>(`/history/${entityType}/${id}${qs(params)}`);
   },
+  // The state at a point in time (AUD-08): GET /cis/{id}/as-of and
+  // /assets/{id}/as-of (WP-793, WP-795); the former /state paths are
+  // deprecated aliases.
   stateAt(entityType: 'assets' | 'cis', id: string, at?: string): Promise<StateSnapshot> {
-    return fetchAPI(`/${entityType}/${id}/state${qs({ at })}`);
+    return fetchAPI(`/${entityType}/${id}/as-of${qs({ at })}`);
   },
 };
 

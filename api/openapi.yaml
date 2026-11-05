@@ -13313,19 +13313,39 @@ paths:
   /api/v1/assets/{id}/state:
     x-phase: P2
     x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listAssetsIdState
-      summary: Reconstruct asset state at a point in time
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/assets/{id}/as-of'
+      tags: [Assets]
+      summary: Reconstruct asset state at a point in time (alias of as-of)
       description: >-
-        Replays the changes of the asset (creation, updates, deletion) up to
-        at (default now). An asset the caller cannot see (unknown, deleted,
-        or of another organization, client or site) and one without a
-        recorded change up to at are 404 (JOB-04, F-164).
+        Alias of GET /api/v1/assets/{id}/as-of (E-38, WP-795) with the same
+        answer; it carries the headers Deprecation, Sunset and Link
+        (successor-version).
+      parameters:
+        - name: at
+          in: query
+          required: false
+          description: The point in time (RFC 3339); default now.
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Reconstruct asset state at a point in time
+          description: The state of the asset at `at`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetStateAsOf'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -19944,17 +19964,46 @@ paths:
   /api/v1/assets/{id}/as-of:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAssetAsOf
       tags: [Assets]
-      summary: Reconstruct the state of an asset at a point in time
-      description: Planned (E-38); WP-795 implements the operation.
+      summary: State of an asset at a point in time (AUD-08)
+      description: >-
+        Replays the state of the asset at `at` (RFC 3339, default now) from
+        its last weekly `asset_snapshot` up to `at` and the `entity_change`
+        rows of the asset after it (its value history, WP-794); without a
+        snapshot from its whole trail. The time axis is the time of recording
+        (`entity_change.created_at`). The values are those the history shows:
+        a personal value whose vault entry was deleted is null (SEC-05); the
+        fields the caller may not read are left out (RBA-07). Fields recorded
+        under the former names (`asset_tag`, `purchase_cost`, `warranty_end`,
+        `ci_id`) appear under their current names. The relationships of the
+        asset are its fields `primary_ci_id` and `parent_asset_id`. An asset
+        deleted for good answers its last state with `deleted: true` until
+        the history retention removes its trail
+        (`RETICORA_RETENTION_HISTORY_DAYS`); within the retention period the
+        state is complete for every `at`: the retention keeps per asset the
+        youngest snapshot before its cut-off and the rows after it. An asset
+        the caller sees neither as row, nor as snapshot, nor in its history
+        (unknown, or of another organization, client or site) and one without
+        a recorded change up to `at` are 404.
+      parameters:
+        - name: at
+          in: query
+          required: false
+          description: The point in time (RFC 3339); default now.
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Reconstruct the state of an asset at a point in time. The response schema comes with WP-795.
+          description: The state of the asset at `at`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetStateAsOf'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -21669,6 +21718,37 @@ components:
             $ref: '#/components/schemas/ProblemDetail'
 
   schemas:
+    AssetStateAsOf:
+      type: object
+      description: >-
+        The state of an asset at a point in time (AUD-08, WP-795).
+      required: [entity_type, entity_id, at, fields, deleted, not_historized]
+      properties:
+        entity_type: { type: string, enum: [asset] }
+        entity_id: { type: string }
+        at: { type: string, format: date-time }
+        based_on_snapshot_at:
+          type: string
+          format: date-time
+          description: >-
+            `taken_at` of the `asset_snapshot` the replay started from; absent
+            when it replayed the whole trail.
+        fields:
+          type: object
+          additionalProperties: true
+          description: >-
+            The fields of the asset at `at` the caller may read, named as in
+            the schema Asset (the relationships `primary_ci_id` and
+            `parent_asset_id` included).
+        deleted:
+          type: boolean
+          description: The asset was deleted (for good) before `at`.
+        not_historized:
+          type: array
+          description: >-
+            The members of an asset that its history does not hold and so are
+            not part of its state.
+          items: { type: string }
     CIStateAsOf:
       type: object
       description: >-

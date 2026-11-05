@@ -64,10 +64,11 @@ func NewHandler(repo Repository) *Handler {
 // RegisterRoutes registers history routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/history/{entityType}/{id}", h.List)
-	r.Get("/api/v1/assets/{id}/state", h.AssetState)
+	r.Get("/api/v1/assets/{id}/as-of", h.AssetAsOf)
 	r.Get("/api/v1/cis/{id}/as-of", h.CIAsOf)
-	// The former path of the CI state stays an alias of as-of (E-38,
-	// WP-793), deprecated in api/openapi.yaml.
+	// The former paths of the CI and asset state stay aliases of as-of
+	// (E-38, WP-793, WP-795), deprecated in api/openapi.yaml.
+	r.Get("/api/v1/assets/{id}/state", h.AssetAsOf)
 	r.Get("/api/v1/cis/{id}/state", h.CIAsOf)
 	r.Post("/api/v1/history/snapshots", h.CreateSnapshot)
 }
@@ -168,12 +169,12 @@ type stateOptions struct {
 }
 
 // snapshot replays the state of the entity of req at req.At
-// (Repository.StateAt: the last ci_snapshot of a CI and its trail after
-// it). An entity the caller cannot see is api.ErrNotFound; one without a
+// (Repository.StateAt: the last ci_snapshot of a CI or asset_snapshot of
+// an asset and its trail after it). An entity the caller cannot see is api.ErrNotFound; one without a
 // recorded change up to req.At (before its creation or before the first
 // recorded change) is a *NoRecordedStateError, not an empty state
-// (F-164). The state of a CI names the fields it does not hold
-// (not_historized, AUD-03).
+// (F-164). The state names the fields it does not hold (not_historized,
+// AUD-03).
 func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest, opts stateOptions) (*StateSnapshot, error) {
 	snapshot, err := h.repo.StateAt(ctx, orgID, &StateRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: *req.At,
 		Reveal: opts.reveal, Relationships: opts.relationships && req.EntityType == "ci"})
@@ -181,8 +182,9 @@ func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotReque
 		return nil, err
 	}
 	snapshot.EntityType, snapshot.EntityID, snapshot.At = req.EntityType, req.EntityID, *req.At
-	if req.EntityType == "ci" {
-		snapshot.NotHistorized = NotHistorizedCIFields
+	snapshot.NotHistorized = NotHistorizedCIFields
+	if req.EntityType == "asset" {
+		snapshot.NotHistorized = NotHistorizedAssetFields
 	}
 	return snapshot, nil
 }
@@ -355,8 +357,14 @@ func (h *Handler) listRelationship(w http.ResponseWriter, r *http.Request, chang
 	api.WriteJSON(w, http.StatusOK, resp)
 }
 
-// AssetState handles GET /api/v1/assets/{id}/state?at=...
-func (h *Handler) AssetState(w http.ResponseWriter, r *http.Request) {
+// AssetAsOf handles GET /api/v1/assets/{id}/as-of?at=... and its
+// deprecated alias GET /api/v1/assets/{id}/state (AUD-08, E-38, WP-795):
+// the state of the asset at the time of recording at, from its last
+// asset_snapshot up to at and the entity_change rows after it. Its
+// relationships are its fields primary_ci_id and parent_asset_id. An asset
+// deleted for good answers its last state with deleted; it stays readable
+// while the caller sees its snapshot or its trail.
+func (h *Handler) AssetAsOf(w http.ResponseWriter, r *http.Request) {
 	h.state(w, r, "asset")
 }
 

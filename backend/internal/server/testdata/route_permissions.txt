@@ -89,6 +89,7 @@ GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
+GET /api/v1/assets/{id}/as-of asset:read
 GET /api/v1/assets/{id}/children asset:read
 GET /api/v1/assets/{id}/label asset:read
 GET /api/v1/assets/{id}/lifecycle-transitions asset:read

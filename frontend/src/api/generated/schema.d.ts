@@ -5984,12 +5984,16 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /**
-     * Reconstruct asset state at a point in time
-     * @description Replays the changes of the asset (creation, updates, deletion) up to at (default now). An asset the caller cannot see (unknown, deleted, or of another organization, client or site) and one without a recorded change up to at are 404 (JOB-04, F-164).
+     * Reconstruct asset state at a point in time (alias of as-of)
+     * @deprecated
+     * @description Alias of GET /api/v1/assets/{id}/as-of (E-38, WP-795) with the same answer; it carries the headers Deprecation, Sunset and Link (successor-version).
      */
     get: operations['listAssetsIdState'];
     put?: never;
@@ -8465,8 +8469,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Reconstruct the state of an asset at a point in time
-     * @description Planned (E-38); WP-795 implements the operation.
+     * State of an asset at a point in time (AUD-08)
+     * @description Replays the state of the asset at `at` (RFC 3339, default now) from its last weekly `asset_snapshot` up to `at` and the `entity_change` rows of the asset after it (its value history, WP-794); without a snapshot from its whole trail. The time axis is the time of recording (`entity_change.created_at`). The values are those the history shows: a personal value whose vault entry was deleted is null (SEC-05); the fields the caller may not read are left out (RBA-07). Fields recorded under the former names (`asset_tag`, `purchase_cost`, `warranty_end`, `ci_id`) appear under their current names. The relationships of the asset are its fields `primary_ci_id` and `parent_asset_id`. An asset deleted for good answers its last state with `deleted: true` until the history retention removes its trail (`RETICORA_RETENTION_HISTORY_DAYS`); within the retention period the state is complete for every `at`: the retention keeps per asset the youngest snapshot before its cut-off and the rows after it. An asset the caller sees neither as row, nor as snapshot, nor in its history (unknown, or of another organization, client or site) and one without a recorded change up to `at` are 404.
      */
     get: operations['getAssetAsOf'];
     put?: never;
@@ -9068,6 +9072,27 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @description The state of an asset at a point in time (AUD-08, WP-795). */
+    AssetStateAsOf: {
+      /** @enum {string} */
+      entity_type: 'asset';
+      entity_id: string;
+      /** Format: date-time */
+      at: string;
+      /**
+       * Format: date-time
+       * @description `taken_at` of the `asset_snapshot` the replay started from; absent when it replayed the whole trail.
+       */
+      based_on_snapshot_at?: string;
+      /** @description The fields of the asset at `at` the caller may read, named as in the schema Asset (the relationships `primary_ci_id` and `parent_asset_id` included). */
+      fields: {
+        [key: string]: unknown;
+      };
+      /** @description The asset was deleted (for good) before `at`. */
+      deleted: boolean;
+      /** @description The members of an asset that its history does not hold and so are not part of its state. */
+      not_historized: string[];
+    };
     /** @description The state of a CI at a point in time (AUD-08, WP-793). */
     CIStateAsOf: {
       /** @enum {string} */
@@ -33240,27 +33265,31 @@ export interface operations {
   };
   listAssetsIdState: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Reconstruct asset state at a point in time */
+      /** @description The state of the asset at `at` */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['AssetStateAsOf'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
     };
   };
@@ -39802,7 +39831,10 @@ export interface operations {
   };
   getAssetAsOf: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description The point in time (RFC 3339); default now. */
+        at?: string;
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -39812,13 +39844,16 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Reconstruct the state of an asset at a point in time. The response schema comes with WP-795. */
+      /** @description The state of the asset at `at` */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AssetStateAsOf'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
