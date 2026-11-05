@@ -70,6 +70,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 			"the asset is assigned already; return or transfer it")
 	case errors.Is(err, ErrNotAssigned):
 		api.WriteProblem(w, http.StatusConflict, ProblemAssetNotAssigned, "Conflict", "the asset is not assigned")
+	case errors.Is(err, ErrAssetReserved):
+		api.WriteProblem(w, http.StatusConflict, ProblemAssetReserved, "Conflict", ErrAssetReserved.Error())
 	default:
 		api.WriteRepoError(w, err)
 	}

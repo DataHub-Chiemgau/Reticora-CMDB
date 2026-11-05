@@ -309,6 +309,9 @@ var routeRules = []routeRule{
 	{http.MethodPost, "assets/*/return", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/transfer", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/reserve", identity.PermReservationWrite},
+	// Converting a reservation assigns its asset (WP-277), like POST
+	// /assignments; without a rule it would derive reservation:write.
+	{http.MethodPost, "reservations/*/convert", identity.PermAssignmentWrite},
 	// Linking a CI to an asset writes ci.asset_id like PATCH /cis/{id}
 	// (WP-272); the handler also requires asset:write.
 	{http.MethodPost, "assets/*/cis", identity.PermCIWrite},

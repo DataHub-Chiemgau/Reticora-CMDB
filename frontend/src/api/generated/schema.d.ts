@@ -7501,10 +7501,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage inventory reservations */
+    /**
+     * List reservations
+     * @description The reservations of assets and quantity items visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
+     */
     get: operations['listReservations'];
     put?: never;
-    /** Manage inventory reservations */
+    /**
+     * Reserve an asset or a quantity of an item
+     * @description Reserves the asset `asset_id` or a quantity of `quantity_item_id`. An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     */
     post: operations['createReservations'];
     delete?: never;
     options?: never;
@@ -7516,7 +7522,10 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /** Read a reservation */
@@ -7533,12 +7542,18 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     get?: never;
     put?: never;
-    /** Release a reservation */
+    /**
+     * Release a reservation
+     * @description Sets the active reservation to `released` after locking its asset and itself (WP-277); the movement `release` and `reservation.released` are written in the same transaction.
+     */
     post: operations['createReservationsIdRelease'];
     delete?: never;
     options?: never;
@@ -8216,7 +8231,7 @@ export interface paths {
     put?: never;
     /**
      * Assign an asset
-     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
+     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`) or an active reservation of another user or of a project (`https://reticora.io/problems/asset-reserved`; the holder's own reservation is consumed, WP-277); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
      */
     post: operations['assignAsset'];
     delete?: never;
@@ -8285,7 +8300,7 @@ export interface paths {
     put?: never;
     /**
      * Reserve an asset
-     * @description Planned (E-38); WP-277 implements the operation.
+     * @description Reserves the asset for a user (`assignee_id`) or a project (`project_ref`) until `reserved_until` (AST-06, WP-277). In one transaction the asset is locked in the caller's scope (`SELECT … FOR UPDATE`, update policy of the asset: a principal restricted to clients cannot reserve an organization-wide asset), an active reservation is refused, the movement `reservation` is booked and `reservation.created` is written to the outbox. Without `expires_at` the reservation expires at `reserved_until` (system job `reservation.expire`).
      */
     post: operations['reserveAsset'];
     delete?: never;
@@ -8429,7 +8444,7 @@ export interface paths {
     put?: never;
     /**
      * Convert a reservation into an assignment
-     * @description Planned (E-38); WP-277 implements the operation.
+     * @description Sets the active asset reservation to `consumed` and assigns its asset in the same transaction through the assignment service (WP-275, WP-277): to `assignee_id` or `team_id` of the body, else to the user of the reservation. The movement `assignment` is booked, the holder cache set, and `asset.assigned` and `reservation.converted` are written to the outbox. When the assignment fails, the reservation stays active.
      */
     post: operations['convertReservation'];
     delete?: never;
@@ -13451,6 +13466,103 @@ export interface components {
       workflow_run_id?: string;
       /** Format: uuid */
       document_id?: string;
+    };
+    /** @enum {string} */
+    ReservationState: 'active' | 'released' | 'expired' | 'consumed';
+    /** @description A reservation of an asset or of a quantity of an item (AST-06). It expires at `expires_at`; without it, it does not expire. */
+    Reservation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      quantity: number;
+      state: components['schemas']['ReservationState'];
+      /** Format: date-time */
+      reserved_from: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /**
+       * Format: uuid
+       * @description The user the item is reserved for.
+       */
+      assignee_id?: string;
+      /** @description The project the item is reserved for. */
+      project_ref?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      reason?: string;
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ReservationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Reservation'][];
+    };
+    ReservationCreateRequest: {
+      /** @enum {string} */
+      item_kind?: 'asset' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      quantity?: number;
+      /** Format: date-time */
+      reserved_from?: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /** Format: uuid */
+      assignee_id?: string;
+      project_ref?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /**
+       * Format: date-time
+       * @description Defaults to `reserved_until`.
+       */
+      expires_at?: string;
+      reason?: string;
+    };
+    /** @description Exactly one of `assignee_id` (a user) and `project_ref` (a project). */
+    ReserveAssetRequest: {
+      /** Format: date-time */
+      reserved_until: string;
+      /** Format: uuid */
+      assignee_id?: string;
+      project_ref?: string;
+      reason?: string;
+      /**
+       * Format: date-time
+       * @description Defaults to `reserved_until`.
+       */
+      expires_at?: string;
+    };
+    /** @description The holder of the assignment, at most one of a user (`assignee_id`) and a team (`team_id`); without both the user of the reservation. */
+    ConvertReservationRequest: {
+      /** Format: uuid */
+      assignee_id?: string;
+      /** Format: uuid */
+      team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
+    };
+    ConvertReservationResponse: {
+      reservation: components['schemas']['Reservation'];
+      assignment: components['schemas']['Assignment'];
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -36385,27 +36497,42 @@ export interface operations {
   };
   listReservations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        state?: components['schemas']['ReservationState'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage inventory reservations */
+      /** @description The reservations of one page. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['ReservationListResponse'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   createReservations: {
@@ -36415,49 +36542,58 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReservationCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Manage inventory reservations */
+      /** @description Reserved. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Reservation'];
+        };
       };
       /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
       400: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
-        content?: never;
       };
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
-      /** @description The asset has an active reservation already. */
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
       409: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
-      /** @description An id field is no UUID; `field` names it. */
+      /** @description An id field is no UUID or a time no RFC 3339 date-time; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -36465,31 +36601,33 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read a reservation */
+      /** @description The reservation. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Reservation'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       /** @description The reservation is unknown, of another organization or outside the caller's scope. */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -36497,38 +36635,42 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Release a reservation */
+      /** @description Released. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Reservation'];
         };
-        content?: never;
       };
-      /** @description The reservation is unknown, of another organization or reserves an item outside the caller's scope (all alike, TEN-04). */
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The reservation is unknown, of another organization, reserves an item outside the caller's scope or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
       /** @description The reservation is no longer active. */
       409: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -38559,19 +38701,34 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReserveAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-277. */
-      200: {
+      /** @description Reserved. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Reservation'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38852,20 +39009,43 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['ConvertReservationRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-277. */
+      /** @description Converted. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConvertReservationResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The reservation is no longer active, or the asset has a holder already (`https://reticora.io/problems/asset-assigned`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A project reservation without `assignee_id` or `team_id`, a quantity item reservation, both or a malformed holder, or a holder of another organization; `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   verifyStockMovementSignature: {

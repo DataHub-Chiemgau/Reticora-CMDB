@@ -16943,62 +16943,150 @@ paths:
     x-feature: assets_basic
     get:
       operationId: listReservations
-      summary: Manage inventory reservations
+      tags: [Assets]
+      summary: List reservations
+      description: >-
+        The reservations of assets and quantity items visible under the
+        caller's scope, newest first, optionally of one state. Pages by
+        offset; `next_cursor` continues the list.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: state
+          in: query
+          schema: { $ref: '#/components/schemas/ReservationState' }
       responses:
         '200':
-          description: Manage inventory reservations
+          description: The reservations of one page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservationListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: createReservations
-      summary: Manage inventory reservations
+      tags: [Assets]
+      summary: Reserve an asset or a quantity of an item
+      description: >-
+        Reserves the asset `asset_id` or a quantity of `quantity_item_id`.
+        An asset reservation runs like POST /api/v1/assets/{id}/reserve
+        (WP-277): the asset is locked in the caller's scope, the movement
+        `reservation` is booked and `reservation.created` is written to the
+        outbox in one transaction. Without `expires_at` the reservation
+        expires at `reserved_until`; one without both does not expire.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservationCreateRequest'
       responses:
         '201':
-          description: Manage inventory reservations
+          description: Reserved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
         '400':
           description: Neither asset_id nor quantity_item_id is set, or a value is invalid.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: >-
             The asset or quantity item is unknown, of another organization or
-            outside the caller's scope (all alike, TEN-04).
+            outside the caller's scope, or an asset the caller may not change
+            (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '409':
-          description: The asset has an active reservation already.
+          description: >-
+            The asset has an active reservation already
+            (`https://reticora.io/problems/asset-reserved`) or a holder
+            (`https://reticora.io/problems/asset-assigned`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: An id field is no UUID; `field` names it.
+          description: An id field is no UUID or a time no RFC 3339 date-time; `field` names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/reservations/{id}:
     x-phase: P2
     x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getReservationsId
+      tags: [Assets]
       summary: Read a reservation
       responses:
         '200':
-          description: Read a reservation
+          description: The reservation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: The reservation is unknown, of another organization or outside the caller's scope.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/reservations/{id}/release:
     x-phase: P2
     x-feature: assets_basic
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: createReservationsIdRelease
+      tags: [Assets]
       summary: Release a reservation
+      description: >-
+        Sets the active reservation to `released` after locking its asset
+        and itself (WP-277); the movement `release` and
+        `reservation.released` are written in the same transaction.
       responses:
         '200':
-          description: Release a reservation
+          description: Released.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
         '401':
-          description: Unauthorized
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: >-
-            The reservation is unknown, of another organization or reserves an
-            item outside the caller's scope (all alike, TEN-04).
+            The reservation is unknown, of another organization, reserves an
+            item outside the caller's scope or an asset the caller may not
+            change (all alike, TEN-04).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '409':
           description: The reservation is no longer active.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/saved-views:
     get:
@@ -18881,8 +18969,10 @@ paths:
         movement `assignment` is booked in the ledger, the holder cache of the
         asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is
         set and `asset.assigned` is written to the outbox. 409 when the asset
-        has a holder already (`https://reticora.io/problems/asset-assigned`);
-        422 for no or two holders and for a user or team of another
+        has a holder already (`https://reticora.io/problems/asset-assigned`)
+        or an active reservation of another user or of a project
+        (`https://reticora.io/problems/asset-reserved`; the holder's own
+        reservation is consumed, WP-277); 422 for no or two holders and for a user or team of another
         organization; 404 for an asset outside the caller's scope.
       requestBody:
         required: true
@@ -18999,17 +19089,35 @@ paths:
   /api/v1/assets/{id}/reserve:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: reserveAsset
       tags: [Assets]
       summary: Reserve an asset
-      description: Planned (E-38); WP-277 implements the operation.
+      description: >-
+        Reserves the asset for a user (`assignee_id`) or a project
+        (`project_ref`) until `reserved_until` (AST-06, WP-277). In one
+        transaction the asset is locked in the caller's scope
+        (`SELECT … FOR UPDATE`, update policy of the asset: a principal
+        restricted to clients cannot reserve an organization-wide asset), an
+        active reservation is refused, the movement `reservation` is booked
+        and `reservation.created` is written to the outbox. Without
+        `expires_at` the reservation expires at `reserved_until` (system job
+        `reservation.expire`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveAssetRequest'
       responses:
-        '200':
-          description: Done. The request and response schemas come with WP-277.
+        '201':
+          description: Reserved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19018,6 +19126,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The asset has an active reservation already
+            (`https://reticora.io/problems/asset-reserved`) or a holder
+            (`https://reticora.io/problems/asset-assigned`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
@@ -19286,17 +19402,32 @@ paths:
   /api/v1/reservations/{id}/convert:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
       operationId: convertReservation
       tags: [Assets]
       summary: Convert a reservation into an assignment
-      description: Planned (E-38); WP-277 implements the operation.
+      description: >-
+        Sets the active asset reservation to `consumed` and assigns its asset
+        in the same transaction through the assignment service (WP-275,
+        WP-277): to `assignee_id` or `team_id` of the body, else to the user
+        of the reservation. The movement `assignment` is booked, the holder
+        cache set, and `asset.assigned` and `reservation.converted` are
+        written to the outbox. When the assignment fails, the reservation
+        stays active.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertReservationRequest'
       responses:
         '200':
-          description: Done. The request and response schemas come with WP-277.
+          description: Converted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConvertReservationResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19305,8 +19436,21 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            The reservation is no longer active, or the asset has a holder
+            already (`https://reticora.io/problems/asset-assigned`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A project reservation without `assignee_id` or `team_id`, a
+            quantity item reservation, both or a malformed holder, or a holder
+            of another organization; `field` names it.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/stock-movements/{id}/signature:
     x-phase: P2
@@ -28195,6 +28339,102 @@ components:
         order_id: { type: string, format: uuid }
         workflow_run_id: { type: string, format: uuid }
         document_id: { type: string, format: uuid }
+    ReservationState:
+      type: string
+      enum: [active, released, expired, consumed]
+
+    Reservation:
+      type: object
+      description: >-
+        A reservation of an asset or of a quantity of an item (AST-06). It
+        expires at `expires_at`; without it, it does not expire.
+      required: [id, organization_id, item_kind, quantity, state, reserved_from, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        item_kind: { type: string, enum: [asset, quantity_item] }
+        asset_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid }
+        quantity: { type: number }
+        state: { $ref: '#/components/schemas/ReservationState' }
+        reserved_from: { type: string, format: date-time }
+        reserved_until: { type: string, format: date-time }
+        assignee_id:
+          type: string
+          format: uuid
+          description: The user the item is reserved for.
+        project_ref:
+          type: string
+          description: The project the item is reserved for.
+        order_id: { type: string, format: uuid }
+        ticket_id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        reason: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ReservationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Reservation' }
+
+    ReservationCreateRequest:
+      type: object
+      properties:
+        item_kind: { type: string, enum: [asset, quantity_item] }
+        asset_id: { type: string, format: uuid }
+        quantity_item_id: { type: string, format: uuid }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        reserved_from: { type: string, format: date-time }
+        reserved_until: { type: string, format: date-time }
+        assignee_id: { type: string, format: uuid }
+        project_ref: { type: string }
+        order_id: { type: string, format: uuid }
+        ticket_id: { type: string, format: uuid }
+        expires_at:
+          type: string
+          format: date-time
+          description: Defaults to `reserved_until`.
+        reason: { type: string }
+
+    ReserveAssetRequest:
+      type: object
+      description: Exactly one of `assignee_id` (a user) and `project_ref` (a project).
+      required: [reserved_until]
+      properties:
+        reserved_until: { type: string, format: date-time }
+        assignee_id: { type: string, format: uuid }
+        project_ref: { type: string }
+        reason: { type: string }
+        expires_at:
+          type: string
+          format: date-time
+          description: Defaults to `reserved_until`.
+
+    ConvertReservationRequest:
+      type: object
+      description: >-
+        The holder of the assignment, at most one of a user (`assignee_id`)
+        and a team (`team_id`); without both the user of the reservation.
+      properties:
+        assignee_id: { type: string, format: uuid }
+        team_id: { type: string, format: uuid }
+        due_at: { type: string, format: date-time }
+        notes: { type: string }
+
+    ConvertReservationResponse:
+      type: object
+      required: [reservation, assignment]
+      properties:
+        reservation: { $ref: '#/components/schemas/Reservation' }
+        assignment: { $ref: '#/components/schemas/Assignment' }
+
     StockMovementListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

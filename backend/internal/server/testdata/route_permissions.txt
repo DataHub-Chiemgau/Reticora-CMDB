@@ -427,6 +427,7 @@ POST /api/v1/assets asset:write
 POST /api/v1/assets/{id}/assign assignment:write
 POST /api/v1/assets/{id}/cis ci:write
 POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition
+POST /api/v1/assets/{id}/reserve reservation:write
 POST /api/v1/assets/{id}/return assignment:write
 POST /api/v1/assets/{id}/transfer assignment:write
 POST /api/v1/attribute-definitions ci_attribute:manage
@@ -544,6 +545,7 @@ POST /api/v1/racks/{id}/mounts rack:write
 POST /api/v1/relationship-types relationship_type:manage
 POST /api/v1/relationships relationship:write
 POST /api/v1/reservations reservation:write
+POST /api/v1/reservations/{id}/convert assignment:write
 POST /api/v1/reservations/{id}/release reservation:write
 POST /api/v1/review-items/{id}/resolve review:resolve
 POST /api/v1/review-items/{id}/ticket ticket:write

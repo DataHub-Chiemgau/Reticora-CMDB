@@ -172,6 +172,8 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 	// override recomputes them in its own (WP-717).
 	types := citype.NewPGRepository(pool)
 	cis := ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()).WithComputed(types)
+	movements := movement.NewService(movement.NewPGRepository(pool))
+	assignments := assignment.NewService(pool, movements, events.NewOutbox())
 	return Repositories{
 		CI:                cis,
 		EventOutbox:       true,
@@ -182,7 +184,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
 		// The assignment service books over the movement service (WP-275).
-		AssignmentService: assignment.NewService(pool, movement.NewService(movement.NewPGRepository(pool)), events.NewOutbox()),
+		AssignmentService: assignments,
 		Document:          document.NewPGRepository(pool),
 		Stocktake:         stocktake.NewPGRepository(pool),
 		Consumable:        consumable.NewPGRepository(pool),
@@ -229,7 +231,10 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LocationTree:      locations.NewPGRepository(pool),
 		Labels:            labels.NewPGRepository(pool),
 		Movement:          movement.NewPGRepository(pool),
-		Reservation:       reservation.NewPGRepository(pool),
+		// Reservations lock, book, convert, audit their expiry and write
+		// their events in one transaction (WP-277).
+		Reservation: reservation.NewPGRepository(pool).WithAudit(recorder).WithEvents(events.NewOutbox()).
+			WithMovements(movements).WithAssigner(assignments),
 		Override:          override.NewPGRepository(pool).WithRecompute(cis),
 		History:           history.NewPGRepository(pool),
 		SavedView:         savedview.NewPGRepository(pool),

@@ -5,7 +5,11 @@
 // release automatically via the sweeper.
 package reservation
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+)
 
 // Reservation states.
 var States = map[string]bool{
@@ -48,6 +52,36 @@ type CreateRequest struct {
 	TicketID       string   `json:"ticket_id,omitempty"`
 	ExpiresAt      string   `json:"expires_at,omitempty"`
 	Reason         string   `json:"reason,omitempty"`
+}
+
+// ReserveRequest is the payload of POST /api/v1/assets/{id}/reserve: the
+// asset comes from the path; a reservation is for a user (assignee_id) or
+// a project (project_ref). Without expires_at the reservation expires at
+// reserved_until.
+type ReserveRequest struct {
+	ReservedUntil string `json:"reserved_until"`
+	AssigneeID    string `json:"assignee_id,omitempty"`
+	ProjectRef    string `json:"project_ref,omitempty"`
+	Reason        string `json:"reason,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
+}
+
+// ConvertRequest is the payload of POST /api/v1/reservations/{id}/convert:
+// the holder of the assignment, a user (assignee_id) or a team (team_id);
+// without both the user of the reservation. A project reservation needs
+// one of them (422).
+type ConvertRequest struct {
+	AssigneeID string     `json:"assignee_id,omitempty"`
+	TeamID     string     `json:"team_id,omitempty"`
+	DueAt      *time.Time `json:"due_at,omitempty"`
+	Notes      string     `json:"notes,omitempty"`
+}
+
+// ConvertResult is the answer of a conversion: the consumed reservation
+// and the assignment of its asset.
+type ConvertResult struct {
+	Reservation *Reservation           `json:"reservation"`
+	Assignment  *assignment.Assignment `json:"assignment"`
 }
 
 // Availability is the stock projection for an item (spec §10).

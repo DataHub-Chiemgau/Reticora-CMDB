@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 )
 
 var (
@@ -28,7 +30,28 @@ var (
 	// ErrNotActive: the reservation was released, expired or consumed
 	// already (409).
 	ErrNotActive = errors.New("reservation is not active")
+	// ErrConvertUnavailable: the repository has no assignment service, as
+	// in the in-memory profile (--no-db); a conversion needs it (501).
+	ErrConvertUnavailable = errors.New("converting a reservation needs the assignment service")
 )
+
+// errProjectNeedsHolder: a project reservation names no user; its
+// conversion needs assignee_id or team_id (422).
+var errProjectNeedsHolder = &api.FieldError{Field: "assignee_id",
+	Message: "the reservation names no user; assignee_id or team_id is required", Status: http.StatusUnprocessableEntity}
+
+// errNotAssetReservation: only the reservation of a serial asset becomes
+// an assignment; quantity items follow with WP-284 (422).
+var errNotAssetReservation = &api.FieldError{Field: "item_kind",
+	Message: "only the reservation of an asset can be converted into an assignment", Status: http.StatusUnprocessableEntity}
+
+// ConvertInput is the holder and the details of the assignment a
+// conversion makes; an empty holder is the user of the reservation.
+type ConvertInput struct {
+	Holder assignment.Holder
+	DueAt  *time.Time
+	Notes  string
+}
 
 // Repository defines persistence for reservations.
 type Repository interface {
@@ -38,17 +61,15 @@ type Repository interface {
 	// assets admit exactly one active reservation; quantity items are checked
 	// against available stock by the service layer.
 	Create(ctx context.Context, res *Reservation) error
-	// Transition moves a reservation to a new state (release/expire/consume).
+	// Transition moves a reservation to a new state (release/expire).
 	Transition(ctx context.Context, orgID, id, state string) (*Reservation, error)
+	// Convert consumes an active asset reservation and assigns the asset
+	// in the same transaction (WP-277).
+	Convert(ctx context.Context, orgID, id string, in *ConvertInput) (*ConvertResult, error)
 	// ActiveForItem returns the active reservations of one item.
 	ActiveForItem(ctx context.Context, orgID, itemKind, itemID string) ([]Reservation, error)
 	// ExpireDue marks active reservations past their expires_at as expired.
 	ExpireDue(ctx context.Context, now time.Time) (int, error)
-}
-
-// MovementRecorder records reservation-related movements into the ledger.
-type MovementRecorder interface {
-	Record(ctx context.Context, orgID, itemKind, itemID, movementType string, quantity *float64, reason string) error
 }
 
 // MemoryRepository is an in-memory implementation (tests, --no-db).
@@ -118,6 +139,10 @@ func (r *MemoryRepository) Create(_ context.Context, res *Reservation) error {
 	}
 	res.ID = r.nextID()
 	res.State = "active"
+	if res.ExpiresAt == nil && res.ReservedUntil != nil {
+		until := *res.ReservedUntil
+		res.ExpiresAt = &until
+	}
 	if res.ReservedFrom.IsZero() {
 		res.ReservedFrom = time.Now().UTC()
 	}
@@ -146,6 +171,15 @@ func (r *MemoryRepository) Transition(_ context.Context, orgID, id, state string
 	res.UpdatedAt = time.Now().UTC()
 	out := *res
 	return &out, nil
+}
+
+// Convert needs the assignment service, which the in-memory profile has
+// not (ErrConvertUnavailable).
+func (r *MemoryRepository) Convert(_ context.Context, orgID, id string, _ *ConvertInput) (*ConvertResult, error) {
+	if _, err := r.GetByID(context.Background(), orgID, id); err != nil {
+		return nil, err
+	}
+	return nil, ErrConvertUnavailable
 }
 
 func (r *MemoryRepository) ActiveForItem(_ context.Context, orgID, itemKind, itemID string) ([]Reservation, error) {

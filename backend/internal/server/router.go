@@ -818,7 +818,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// (WP-762, E-44).
 		labels.NewHandler(repos.Labels).WithFeatures(opts.Entitlements),
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
-		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
+		reservationHandler(&repos, &opts),
 		// The overrides follow the field permissions of the CI (WP-265).
 		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
@@ -1189,6 +1189,19 @@ func (l overrideCILookup) FieldScope(ctx context.Context, orgID, ciID string) (*
 		}
 	}
 	return &override.CIScope{TypeID: item.CITypeID, ClientID: item.ClientID, SiteID: item.SiteID, InstanceKeys: keys}, nil
+}
+
+// reservationHandler builds the reservation handler; the PostgreSQL
+// repository writes reservation.* to the outbox (WP-277), only without it
+// (--no-db) the handler hands them to the webhook dispatcher directly.
+func reservationHandler(repos *Repositories, opts *Options) *reservation.Handler {
+	var h *reservation.Handler
+	if repos.EventOutbox || opts.Dispatcher == nil {
+		h = reservation.NewHandler(repos.Reservation)
+	} else {
+		h = reservation.NewHandler(repos.Reservation, opts.Dispatcher)
+	}
+	return h.WithAvailability(repos.Availability)
 }
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
