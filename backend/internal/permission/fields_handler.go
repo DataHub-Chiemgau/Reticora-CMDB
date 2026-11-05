@@ -155,7 +155,7 @@ func (h *FieldGrantHandler) authorize(w http.ResponseWriter, r *http.Request) (t
 
 // creator is the acting user as created_by, nil when it is no user id.
 func creator(t *tenant.TenantInfo) *string {
-	if !isUUID(t.UserID) {
+	if !api.IsUUID(t.UserID) {
 		return nil
 	}
 	id := t.UserID

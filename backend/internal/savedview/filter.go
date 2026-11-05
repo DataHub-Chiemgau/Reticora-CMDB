@@ -272,7 +272,7 @@ func (f *FilterSpec) validate(entityKind string, cat *catalog) error {
 		{"client_id", f.ClientID}, {"location_id", f.LocationID},
 		{"upstream_of", f.UpstreamOf}, {"downstream_of", f.DownstreamOf},
 	} {
-		if id.value != "" && !isUUID(id.value) {
+		if id.value != "" && !api.IsUUID(id.value) {
 			return &api.FieldError{Field: id.field, Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
 		}
 	}
@@ -1074,7 +1074,7 @@ func valueError(kind string, v any, typed bool) string {
 		return "must not contain NUL characters"
 	case kind == kindTag && s == "":
 		return "must be a tag key"
-	case kind == kindUUID && !isUUID(s):
+	case kind == kindUUID && !api.IsUUID(s):
 		return "must be a UUID"
 	case kind == kindTime && !validTime(s):
 		return "must be an RFC 3339 time or a date (YYYY-MM-DD)"

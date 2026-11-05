@@ -417,9 +417,8 @@ func (h *BatchHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	const notFound = "label batch not found"
-	id := chi.URLParam(r, "job_id")
-	if !api.IsUUID(id) {
-		api.WriteError(w, http.StatusNotFound, "Not Found", notFound)
+	id, ok := api.ParseUUIDParam(w, r, "job_id", notFound)
+	if !ok {
 		return
 	}
 	job, err := h.jobs.Get(r.Context(), t.OrganizationID, id)

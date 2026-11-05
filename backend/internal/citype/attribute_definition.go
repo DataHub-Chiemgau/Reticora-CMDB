@@ -592,8 +592,8 @@ func storedComputed(raw []byte) *rules.Expr {
 // than null and a missing mode as all.
 func (d *AttributeDefinition) normalizeAppliesTo() {
 	d.AppliesTo = appliesToMode(d.AppliesTo)
-	d.AppliesToCategories = nonNil(d.AppliesToCategories)
-	d.AppliesToTypeIDs = nonNil(d.AppliesToTypeIDs)
+	d.AppliesToCategories = api.NonNilSlice(d.AppliesToCategories)
+	d.AppliesToTypeIDs = api.NonNilSlice(d.AppliesToTypeIDs)
 }
 
 // appliesToMode is the stored mode; "" is all.
@@ -605,13 +605,6 @@ func appliesToMode(mode string) string {
 }
 
 // nonNil is a missing list as the empty array of the column default.
-func nonNil(list []string) []string {
-	if list == nil {
-		return []string{}
-	}
-	return list
-}
-
 // attributeArgs are the stored values of a definition in the column order
 // of writeAttributeTx.
 func attributeArgs(d *AttributeDefinition) []any {
@@ -638,7 +631,7 @@ func attributeArgs(d *AttributeDefinition) []any {
 	return []any{d.DisplayName, nilIfEmpty(d.Description), d.DataType, d.Required, def, enum, d.MultiValue,
 		d.Searchable, d.Unique, d.UniqueScope, d.Inheritable, validation, conditional,
 		nilIfEmpty(d.ReferenceTarget), nilIfEmpty(d.Group), d.Order, nilIfEmpty(d.Unit),
-		appliesToMode(d.AppliesTo), nonNil(d.AppliesToCategories), nonNil(d.AppliesToTypeIDs), computed}
+		appliesToMode(d.AppliesTo), api.NonNilSlice(d.AppliesToCategories), api.NonNilSlice(d.AppliesToTypeIDs), computed}
 }
 
 // insertAttributeTx inserts a definition; a type-scoped definition takes

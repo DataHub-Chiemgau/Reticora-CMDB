@@ -31,7 +31,7 @@ func enrollmentBinding(ctx context.Context, clientID, siteID string) (client, si
 	pick := func(set identity.ScopeSet, id, field, plural string) (string, error) {
 		id = strings.TrimSpace(id)
 		if id != "" {
-			if !isUUID(id) {
+			if !api.IsUUID(id) {
 				return "", &api.FieldError{Field: field, Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
 			}
 			if !set.All && !slices.ContainsFunc(set.IDs, func(s string) bool { return strings.EqualFold(s, id) }) {

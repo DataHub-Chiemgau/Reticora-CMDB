@@ -16,7 +16,6 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -363,13 +362,11 @@ type ScopeResultReport struct {
 // collector.<org>.<id><suffix>.
 func subjectCollector(subject, suffix string) (orgID, collectorID string, ok bool) {
 	parts := strings.Split(strings.TrimSuffix(subject, suffix), ".")
-	if len(parts) != 3 || parts[0] != "collector" || !isUUIDText(parts[1]) || !isUUIDText(parts[2]) {
+	if len(parts) != 3 || parts[0] != "collector" || !api.IsUUID(parts[1]) || !api.IsUUID(parts[2]) {
 		return "", "", false
 	}
 	return parts[1], parts[2], true
 }
-
-func isUUIDText(s string) bool { return audit.IsUUID(s) }
 
 // systemContext is the organization-wide tenant scope of a system worker.
 func systemContext(ctx context.Context, orgID string) context.Context {

@@ -53,7 +53,7 @@ func ValidateView(entityKind string, req *UpsertRequest) error {
 		return err
 	}
 	for i, role := range req.SharedWithRoles {
-		if !isUUID(role) {
+		if !api.IsUUID(role) {
 			return &api.FieldError{Field: fmt.Sprintf("shared_with_roles[%d]", i), Message: "must be a role id", Status: http.StatusUnprocessableEntity}
 		}
 	}
@@ -105,21 +105,4 @@ func viewField(entityKind, field string) bool {
 	}
 	_, known := astFields[entityKind][field]
 	return known
-}
-
-func isUUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, c := range s {
-		switch {
-		case i == 8 || i == 13 || i == 18 || i == 23:
-			if c != '-' {
-				return false
-			}
-		case (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F'):
-			return false
-		}
-	}
-	return true
 }

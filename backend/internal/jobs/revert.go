@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
 // The generic part of the bulk undo (BLK-02, JOB-03; WP-305): the change
@@ -181,7 +183,7 @@ func MarkChangeTx(ctx context.Context, tx pgx.Tx, orgID string, marks []ChangeMa
 // the order they were written. On request paths row level security shows
 // the rows in the caller's scope only.
 func (r *PGRepository) ChangeSet(ctx context.Context, orgID, jobID string) ([]Change, error) {
-	if !isUUID(jobID) {
+	if !api.IsUUID(jobID) {
 		return nil, ErrNotFound
 	}
 	var out []Change

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -154,7 +155,7 @@ func (r *MemoryRepository) ClaimNext(_ context.Context, orgID string, kinds []st
 	defer r.mu.Unlock()
 	var next *Job
 	for _, j := range r.jobs {
-		if j.OrganizationID != orgID || j.Status != StatusQueued || j.RunAfter.After(now) || !contains(kinds, j.Kind) {
+		if j.OrganizationID != orgID || j.Status != StatusQueued || j.RunAfter.After(now) || !slices.Contains(kinds, j.Kind) {
 			continue
 		}
 		if next == nil || j.RunAfter.Before(next.RunAfter) {
@@ -294,15 +295,6 @@ func applyUpdate(j *Job, u *Update) {
 	} else {
 		j.FinishedAt = nil
 	}
-}
-
-func contains(list []string, v string) bool {
-	for _, s := range list {
-		if s == v {
-			return true
-		}
-	}
-	return false
 }
 
 func containsStatus(list []Status, v Status) bool {

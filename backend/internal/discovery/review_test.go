@@ -222,7 +222,7 @@ func TestResolveReviewItemCreate(t *testing.T) {
 	if resp.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
 	}
-	if c := created("brand-new"); c == nil || c.CITypeID != serverType || !isUUID(c.CITypeID) {
+	if c := created("brand-new"); c == nil || c.CITypeID != serverType || !api.IsUUID(c.CITypeID) {
 		t.Fatalf("expected new CI of type %s (a UUID, not the type name), got %+v", serverType, c)
 	}
 

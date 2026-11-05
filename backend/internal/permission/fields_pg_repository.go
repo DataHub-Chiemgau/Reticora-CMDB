@@ -98,7 +98,7 @@ func checkVisible(ctx context.Context, tx pgx.Tx, query string, args ...any) err
 }
 
 func checkUUIDRef(id *string) error {
-	if id != nil && !isUUID(*id) {
+	if id != nil && !api.IsUUID(*id) {
 		return ErrUnknownReference
 	}
 	return nil
@@ -197,7 +197,7 @@ func (r *PGFieldGrants) CreateFieldGrant(ctx context.Context, orgID string, g *F
 }
 
 func (r *PGFieldGrants) GetFieldGrant(ctx context.Context, orgID, id string) (FieldGrant, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return FieldGrant{}, api.ErrNotFound
 	}
 	var out FieldGrant
@@ -214,7 +214,7 @@ func (r *PGFieldGrants) UpdateFieldGrantLevel(ctx context.Context, orgID, id str
 	if !level.Valid() {
 		return FieldGrant{}, fieldError("level", "level must be none, read or write")
 	}
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return FieldGrant{}, api.ErrNotFound
 	}
 	var out FieldGrant
@@ -239,7 +239,7 @@ func (r *PGFieldGrants) UpdateFieldGrantLevel(ctx context.Context, orgID, id str
 
 // deleteRow deletes a row of table by id; no row is api.ErrNotFound.
 func (r *PGFieldGrants) deleteRow(ctx context.Context, table, orgID, id string) error {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return api.ErrNotFound
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -269,7 +269,7 @@ func (q *listQuery) add(column, value string) error {
 	if value == "" {
 		return nil
 	}
-	if strings.HasSuffix(column, "_id") && !isUUID(value) {
+	if strings.HasSuffix(column, "_id") && !api.IsUUID(value) {
 		return fieldError(strings.TrimPrefix(column, "fg."), "must be a UUID")
 	}
 	q.args = append(q.args, value)
@@ -282,7 +282,7 @@ func (q *listQuery) page(prefix string, page api.PaginationParams) string {
 	where := strings.Join(q.where, " AND ")
 	if page.Cursor != nil {
 		created, err := time.Parse(cursorTime, page.Cursor.Value)
-		if err == nil && isUUID(page.Cursor.ID) {
+		if err == nil && api.IsUUID(page.Cursor.ID) {
 			q.args = append(q.args, created, page.Cursor.ID)
 			n := len(q.args)
 			where += fmt.Sprintf(" AND (%[1]screated_at, %[1]sid) > ($%[2]d::timestamptz, $%[3]d::uuid)", prefix, n-1, n)
@@ -379,7 +379,7 @@ func (r *PGFieldGrants) CreateObjectGrant(ctx context.Context, orgID string, g *
 }
 
 func (r *PGFieldGrants) GetObjectGrant(ctx context.Context, orgID, id string) (ObjectGrant, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return ObjectGrant{}, api.ErrNotFound
 	}
 	var out ObjectGrant
@@ -458,7 +458,7 @@ func (r *PGFieldGrants) CreateSensitiveField(ctx context.Context, orgID string, 
 }
 
 func (r *PGFieldGrants) GetSensitiveField(ctx context.Context, orgID, id string) (SensitiveField, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return SensitiveField{}, api.ErrNotFound
 	}
 	var out SensitiveField
@@ -538,7 +538,7 @@ func (r *PGFieldGrants) Snapshot(ctx context.Context, orgID string) (Snapshot, e
 // TeamIDs reads team_member org-wide: its policy otherwise filters by the
 // caller's team scope.
 func (r *PGFieldGrants) TeamIDs(ctx context.Context, orgID, userID string) ([]string, error) {
-	if !isUUID(userID) {
+	if !api.IsUUID(userID) {
 		return []string{}, nil
 	}
 	var teams []string

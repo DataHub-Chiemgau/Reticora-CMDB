@@ -262,7 +262,7 @@ func (h *Handler) bindRecord(ctx context.Context, orgID string, col *Collector, 
 	case col.SiteID == "" && item.SiteID != "":
 		client, ok := siteClient[item.SiteID]
 		if !ok {
-			if sites == nil || !isUUID(item.SiteID) {
+			if sites == nil || !api.IsUUID(item.SiteID) {
 				return &collectorScopeError{field: "site_id"}
 			}
 			var err error

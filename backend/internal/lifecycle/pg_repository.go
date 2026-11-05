@@ -191,7 +191,7 @@ func (r *PGRepository) Create(ctx context.Context, def *Definition) error {
 }
 
 func insertStateTx(ctx context.Context, tx pgx.Tx, orgID, definitionID string, st *State) (string, error) {
-	required, _ := json.Marshal(nonNil(st.RequiredFields))
+	required, _ := json.Marshal(api.NonNilSlice(st.RequiredFields))
 	var id string
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO lifecycle_state (organization_id, definition_id, key, label, is_initial, is_terminal, sort_order, required_fields)
@@ -209,7 +209,7 @@ func insertStateTx(ctx context.Context, tx pgx.Tx, orgID, definitionID string, s
 func insertTransitionsTx(ctx context.Context, tx pgx.Tx, orgID, definitionID string, stateIDs map[string]string, transitions []Transition) error {
 	for i := range transitions {
 		tr := &transitions[i]
-		required, _ := json.Marshal(nonNil(tr.RequiredFields))
+		required, _ := json.Marshal(api.NonNilSlice(tr.RequiredFields))
 		validation := []byte("{}")
 		if tr.Guard != nil {
 			raw, err := json.Marshal(tr.Guard)
@@ -231,13 +231,6 @@ func insertTransitionsTx(ctx context.Context, tx pgx.Tx, orgID, definitionID str
 		}
 	}
 	return nil
-}
-
-func nonNil(values []string) []string {
-	if values == nil {
-		return []string{}
-	}
-	return values
 }
 
 // Update implements Repository in one transaction: the definition row is
@@ -303,7 +296,7 @@ func (r *PGRepository) Update(ctx context.Context, def *Definition, expectedVers
 		for i := range def.States {
 			st := &def.States[i]
 			if id, ok := existing[st.Key]; ok {
-				required, _ := json.Marshal(nonNil(st.RequiredFields))
+				required, _ := json.Marshal(api.NonNilSlice(st.RequiredFields))
 				if _, err = tx.Exec(ctx, `
 					UPDATE lifecycle_state SET label = $2, is_initial = $3, is_terminal = $4,
 						sort_order = $5, required_fields = $6

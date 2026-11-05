@@ -744,7 +744,7 @@ func (h *Handler) resolveUnknownRelationship(ctx context.Context, item *ReviewIt
 	}
 	d := DerivedRelationship{SourceCIID: payloadString(item.Payload, "source_ci_id"), TargetCIID: payloadString(item.Payload, "target_ci_id"),
 		RelType: "connected_to", Confidence: defaultConfidence}
-	if !isUUID(d.SourceCIID) || !isUUID(d.TargetCIID) {
+	if !api.IsUUID(d.SourceCIID) || !api.IsUUID(d.TargetCIID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CIs")
 	}
 	// A CI deleted meanwhile is gone also when the edge exists already, which

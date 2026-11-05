@@ -391,7 +391,7 @@ var errNoDeviceRecord = &reviews.Error{Status: http.StatusUnprocessableEntity,
 func (h *Handler) adoptHeld(ctx context.Context, orgID, actorID string, item *ReviewItem) (string, error) {
 	typeID := payloadString(item.Payload, "ci_type_id")
 	record, ok := item.Payload["device"].(map[string]any)
-	if !ok || !isUUID(typeID) {
+	if !ok || !api.IsUUID(typeID) {
 		return "", errNoDeviceRecord
 	}
 	if err := h.allowActiveCI(ctx, orgID); err != nil {

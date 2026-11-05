@@ -866,26 +866,6 @@ func (h *Handler) QueueOverrideConflict(ctx context.Context, orgID string, devic
 	return opened
 }
 
-// isUUID reports whether value looks like a canonical UUID.
-func isUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	for i, c := range value {
-		switch i {
-		case 8, 13, 18, 23:
-			if c != '-' {
-				return false
-			}
-		default:
-			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // resolveCITypeIDs maps each item's ci_type_name, a name, key or UUID, to
 // the canonical ci_type UUID and its active flag with the types of the
 // batch (lookupTypes); a UUID is resolved like a name (MET-05). Items whose

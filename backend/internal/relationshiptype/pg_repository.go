@@ -128,8 +128,8 @@ func (r *PGRepository) Create(ctx context.Context, typ *Type) error {
 		if err := checkCITypeKeys(ctx, tx, ciTypeLists(typ.AllowedSourceTypes, typ.AllowedTargetTypes)); err != nil {
 			return err
 		}
-		source, _ := json.Marshal(nonNil(typ.AllowedSourceTypes))
-		target, _ := json.Marshal(nonNil(typ.AllowedTargetTypes))
+		source, _ := json.Marshal(api.NonNilSlice(typ.AllowedSourceTypes))
+		target, _ := json.Marshal(api.NonNilSlice(typ.AllowedTargetTypes))
 		schema, err := marshalSchema(typ.MetadataSchema)
 		if err != nil {
 			return err
@@ -174,8 +174,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, key string, req *Upser
 		if cerr := checkCITypeKeys(ctx, tx, ciTypeLists(req.AllowedSourceTypes, req.AllowedTargetTypes)); cerr != nil {
 			return cerr
 		}
-		source, _ := json.Marshal(nonNil(current.AllowedSourceTypes))
-		target, _ := json.Marshal(nonNil(current.AllowedTargetTypes))
+		source, _ := json.Marshal(api.NonNilSlice(current.AllowedSourceTypes))
+		target, _ := json.Marshal(api.NonNilSlice(current.AllowedTargetTypes))
 		schema, err := marshalSchema(current.MetadataSchema)
 		if err != nil {
 			return err
@@ -301,13 +301,6 @@ func marshalSchema(schema []AttributeDefinition) (string, error) {
 		return "", fmt.Errorf("encode metadata_schema: %w", err)
 	}
 	return string(raw), nil
-}
-
-func nonNil(list []string) []string {
-	if list == nil {
-		return []string{}
-	}
-	return list
 }
 
 func nilIfEmpty(value string) any {

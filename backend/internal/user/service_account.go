@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -220,10 +219,6 @@ func (a ServiceAccountAccess) ServiceAccountState(ctx context.Context, orgID, id
 	return true, sa.IsActive, nil
 }
 
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
-func isUUID(s string) bool { return uuidPattern.MatchString(s) }
-
 func newUUID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -294,7 +289,7 @@ func loadServiceAccountRoles(ctx context.Context, tx pgx.Tx, sa *ServiceAccount)
 }
 
 func getServiceAccountTx(ctx context.Context, tx pgx.Tx, orgID, id string, lock bool) (*ServiceAccount, error) {
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return nil, ErrServiceAccountNotFound
 	}
 	q := `SELECT ` + serviceAccountColumns + ` FROM service_account WHERE organization_id = $1 AND id = $2`
@@ -550,7 +545,7 @@ func assignmentGrant(ctx context.Context, tx pgx.Tx, orgID string, role ServiceA
 // names its role (Grant.RoleID, RBA-07).
 func (r *PGServiceAccounts) ServiceAccountGrants(ctx context.Context, orgID, id string) ([]identity.Grant, error) {
 	grants := []identity.Grant{}
-	if !isUUID(id) {
+	if !api.IsUUID(id) {
 		return grants, nil
 	}
 	scope := database.OrgWideScope(orgID, "")

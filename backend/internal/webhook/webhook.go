@@ -770,7 +770,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.ServiceAccountID != "" && !uuidPattern.MatchString(req.ServiceAccountID) {
+	if req.ServiceAccountID != "" && !api.IsUUID(req.ServiceAccountID) {
 		api.WriteFieldError(w, errServiceAccountNotFound)
 		return
 	}

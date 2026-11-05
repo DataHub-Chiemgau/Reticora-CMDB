@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -352,7 +353,7 @@ func (h *Handler) resolveCIReview(ctx context.Context, item *ReviewItem, res *Re
 		if res.CIID == "" {
 			return false, refused(http.StatusBadRequest, "ci_id is required to merge")
 		}
-		if !containsString(item.CandidateCIIDs, res.CIID) {
+		if !slices.Contains(item.CandidateCIIDs, res.CIID) {
 			return false, refused(http.StatusBadRequest, "ci_id is not one of the candidate CIs")
 		}
 		switch item.Kind {
@@ -516,7 +517,7 @@ var errChooseType = &reviews.Error{Status: http.StatusUnprocessableEntity, Field
 // open.
 func (h *Handler) reviewedDeviceType(ctx context.Context, orgID, typeName, chosen string) (string, error) {
 	if chosen = strings.TrimSpace(chosen); chosen != "" {
-		if !isUUID(chosen) {
+		if !api.IsUUID(chosen) {
 			return "", &reviews.Error{Status: http.StatusUnprocessableEntity, Field: "ci_type_id",
 				Message: "ci_type_id must be the UUID of a CI type"}
 		}
@@ -634,7 +635,7 @@ func (h *Handler) resolveDuplicateIP(ctx context.Context, item *ReviewItem, res 
 		return false, refused(http.StatusNotImplemented, "this server cannot release reservations")
 	}
 	reservationID, subnetID := payloadString(item.Payload, "reservation_ip_id"), payloadString(item.Payload, "subnet_id")
-	if !isUUID(reservationID) || !isUUID(subnetID) {
+	if !api.IsUUID(reservationID) || !api.IsUUID(subnetID) {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no reservation")
 	}
 	if err := releaser.DeleteReservation(ctx, item.OrganizationID, subnetID, reservationID); err != nil {
@@ -667,11 +668,11 @@ func (h *Handler) resolveDuplicateSide(ctx context.Context, item *ReviewItem, re
 	switch {
 	case res.CIID == "":
 		return refused(http.StatusBadRequest, "ci_id is required to accept a duplicate address of several CIs")
-	case !containsString(item.CandidateCIIDs, res.CIID):
+	case !slices.Contains(item.CandidateCIIDs, res.CIID):
 		return refused(http.StatusBadRequest, "ci_id is not one of the candidate CIs")
 	}
 	vrfID, address := payloadString(item.Payload, "vrf_id"), payloadString(item.Payload, "address")
-	if !isUUID(vrfID) || address == "" {
+	if !api.IsUUID(vrfID) || address == "" {
 		return refused(http.StatusUnprocessableEntity, "the item names no address")
 	}
 	dups, err := remover.FindDuplicates(ctx, item.OrganizationID, ipam.DuplicateSource{
@@ -729,7 +730,7 @@ func (h *Handler) resolveOverrideConflict(ctx context.Context, item *ReviewItem,
 		return false, refused(http.StatusNotImplemented, "overrides cannot be cleared here")
 	}
 	ciID, field := payloadString(item.Payload, "ci_id"), payloadString(item.Payload, "field")
-	if !isUUID(ciID) || field == "" {
+	if !api.IsUUID(ciID) || field == "" {
 		return false, refused(http.StatusUnprocessableEntity, "the item names no CI field")
 	}
 	if err := clearer.ClearOverride(ctx, item.OrganizationID, ciID, field); err != nil {
@@ -891,15 +892,6 @@ func reviewedDevice(payload map[string]any) IngestItem {
 		RawData:      rawData,
 		Source:       payloadString(payload, "source"),
 	}
-}
-
-func containsString(values []string, target string) bool {
-	for _, v := range values {
-		if v == target {
-			return true
-		}
-	}
-	return false
 }
 
 func payloadString(payload map[string]any, key string) string {

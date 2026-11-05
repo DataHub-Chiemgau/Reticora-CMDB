@@ -711,7 +711,7 @@ func (h *Handler) lookupTypes(ctx context.Context, orgID string, names []string)
 	}
 	types := map[string]ResolvedType{}
 	for _, name := range names {
-		if isUUID(name) {
+		if api.IsUUID(name) {
 			types[name] = ResolvedType{ID: name, Active: true}
 			continue
 		}

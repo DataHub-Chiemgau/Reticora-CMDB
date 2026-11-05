@@ -516,7 +516,7 @@ func transitionOptions(def *Definition, current string) TransitionOptions {
 		if label == "" {
 			label = tr.Key
 		}
-		required := append(slices.Clone(nonNil(stateByKey[tr.ToStateKey].RequiredFields)), tr.RequiredFields...)
+		required := append(slices.Clone(api.NonNilSlice(stateByKey[tr.ToStateKey].RequiredFields)), tr.RequiredFields...)
 		out.Transitions = append(out.Transitions, TransitionOption{
 			ToState: tr.ToStateKey, Key: tr.Key, Label: label,
 			RequiredFields: required, Guard: tr.Guard,
@@ -531,7 +531,7 @@ func transitionOptions(def *Definition, current string) TransitionOptions {
 		}
 		out.Transitions = append(out.Transitions, TransitionOption{
 			ToState: initial, Key: "initial", Label: label,
-			RequiredFields: slices.Clone(nonNil(st.RequiredFields)),
+			RequiredFields: slices.Clone(api.NonNilSlice(st.RequiredFields)),
 		})
 	}
 	return out

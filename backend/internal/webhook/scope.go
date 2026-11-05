@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -285,8 +285,6 @@ func optionalString(fields map[string]json.RawMessage, name string) (string, boo
 	return s, true
 }
 
-var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-
 // objectQueries read id, client and site of the rows of a kind, deleted_at
 // ignored: a deleted CI keeps the scope its events were about. Assets carry
 // the site of their location (WP-392). A consumable has no location of its
@@ -328,7 +326,7 @@ func NewPGObjectResolver(pool *pgxpool.Pool) *PGObjectResolver {
 func (r *PGObjectResolver) ResolveObjects(ctx context.Context, orgID string, refs []ObjectRef) ([]ObjectScope, error) {
 	ids := map[ObjectKind][]string{}
 	for _, ref := range refs {
-		if _, ok := objectQueries[ref.Kind]; !ok || !uuidPattern.MatchString(ref.ID) {
+		if _, ok := objectQueries[ref.Kind]; !ok || !api.IsUUID(ref.ID) {
 			return nil, fmt.Errorf("%w: %s %q", ErrObjectUnresolved, ref.Kind, ref.ID)
 		}
 		ids[ref.Kind] = append(ids[ref.Kind], strings.ToLower(ref.ID))
