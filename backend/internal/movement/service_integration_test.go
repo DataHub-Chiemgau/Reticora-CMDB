@@ -379,9 +379,11 @@ func TestStockMovementAPI(t *testing.T) {
 	})
 
 	t.Run("filters and cursor", func(t *testing.T) {
-		if _, err := consumable.NewPGRepository(f.App).AddMovement(f.OrgCtx(f.OrgA), &consumable.Movement{OrganizationID: f.OrgA,
-			ConsumableID: cons, Direction: "out", Quantity: 1, Reference: "api"}); err != nil {
-			t.Fatal(err)
+		// The retrieval from the only bin through the deprecated path of the
+		// consumable (WP-756).
+		if code, body := a.do(http.MethodPost, "/api/v1/consumables/"+cons+"/movements",
+			map[string]any{"direction": "out", "quantity": 1, "reference": "api"}); code != http.StatusCreated {
+			t.Fatalf("retrieval of the consumable: %d %v", code, body)
 		}
 		code, body := a.do(http.MethodGet, "/api/v1/stock-movements?consumable_id="+cons, nil)
 		data, _ := body["data"].([]any)

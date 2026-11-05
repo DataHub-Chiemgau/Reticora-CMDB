@@ -366,7 +366,6 @@ const (
 		"rest of SR-03, fixed before GA (E-137, WP-329)"
 	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
 		"the successor references with the organization"
-	refWP758 = "quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization"
 )
 
 // ReferencesWithoutOrganization are the foreign keys between two tenant
@@ -455,7 +454,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"notification_inbox.user_id":                     {Constraint: "notification_inbox_user_id_fkey", Target: "app_user", Reason: refG1},
 	"notification_preference.user_id":                {Constraint: "notification_preference_user_id_fkey", Target: "app_user", Reason: refG1},
 	"pii_subject.parent_id":                          {Constraint: "pii_subject_parent_id_fkey", Target: "pii_subject", Reason: refG1},
-	"quantity_item.location_id":                      {Constraint: "quantity_item_location_id_fkey", Target: "location", Reason: refWP758},
 	"rack.id":                                        {Constraint: "rack_location_fkey", Target: "location", Reason: refLocationNode},
 	"rack.room_id":                                   {Constraint: "rack_room_id_fkey", Target: "room", Reason: refG1},
 	"rack_mount.ci_id":                               {Constraint: "rack_mount_ci_id_fkey", Target: "ci", Reason: refG1},

@@ -1684,7 +1684,7 @@
       "location": "child locations",
       "ci": "CIs",
       "asset": "assets",
-      "quantity_item": "stock items",
+      "stock_level": "stock items",
       "stock_movement": "movements",
       "rack_mount": "rack mounts",
       "role_assignment": "role assignments",

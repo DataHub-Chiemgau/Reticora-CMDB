@@ -212,43 +212,6 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// AddMovement books the movement on the stock of a bin and appends it to
-// the ledger in one transaction (transitional path until WP-756): in is a
-// receipt into the bin m.LocationID, out a retrieval from it, both through
-// ApplyBooking. Without a bin the consumable must have exactly one
-// stock_level row (visible to the caller), else a 422 on location_id. The
-// ledger row (item_kind consumable) names the bin; its trigger derives the
-// client of the consumable and the site of the bin.
-func (r *PGRepository) AddMovement(ctx context.Context, m *Movement) (*Consumable, error) {
-	var c *Consumable
-	err := database.WithRequestTenant(ctx, r.pool, m.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if m.LocationID == "" {
-			bin, binErr := onlyBin(ctx, tx, m.OrganizationID, m.ConsumableID)
-			if binErr != nil {
-				return binErr
-			}
-			m.LocationID = bin
-		}
-		b := bookingOf(m)
-		if err := ApplyBooking(ctx, tx, &b); err != nil {
-			return err
-		}
-		if insertErr := tx.QueryRow(ctx, `
-			INSERT INTO stock_movement (organization_id, item_kind, consumable_id, movement_type, from_location_id, to_location_id,
-				quantity, reason, notes, actor_id)
-			VALUES ($1, 'consumable', $2, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, $6, $7, NULLIF($8, ''), NULLIF($9,'')::uuid)
-			RETURNING id::text, created_at
-		`, m.OrganizationID, m.ConsumableID, b.MovementType, b.FromLocationID, b.ToLocationID, m.Quantity, m.Reason, m.Reference, m.ActorID).
-			Scan(&m.ID, &m.CreatedAt); insertErr != nil {
-			return insertErr
-		}
-		var err error
-		c, err = scanConsumable(tx.QueryRow(ctx, "SELECT "+consumableCols+" FROM consumable WHERE organization_id = $1 AND id = $2", m.OrganizationID, m.ConsumableID))
-		return err
-	})
-	return c, err
-}
-
 // onlyBin returns the bin of the only stock_level row of the consumable the
 // caller sees; none or several are a 422 on location_id, an invisible
 // consumable ErrNotFound.
@@ -269,43 +232,6 @@ func onlyBin(ctx context.Context, tx pgx.Tx, orgID, consumableID string) (string
 		return "", ErrBinRequired
 	}
 	return ids[0], nil
-}
-
-func (r *PGRepository) ListMovements(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Movement, int, error) {
-	out := []Movement{}
-	var total int
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// The consumable movements of the ledger; the policy of
-		// stock_movement applies the caller's client and site scope.
-		where := "organization_id = $1 AND item_kind = 'consumable'"
-		args := []any{orgID}
-		if consumableID != "" {
-			where += " AND consumable_id = $2"
-			args = append(args, consumableID)
-		}
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_movement WHERE "+where, args...).Scan(&total); err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, `SELECT id::text, organization_id::text, consumable_id::text,
-			CASE movement_type WHEN 'receipt' THEN 'in' ELSE 'out' END,
-			COALESCE(CASE movement_type WHEN 'receipt' THEN to_location_id ELSE from_location_id END::text, ''),
-			quantity, COALESCE(reason,''), COALESCE(notes,''),
-			COALESCE(actor_id::text,''), created_at FROM stock_movement WHERE `+where+
-			fmt.Sprintf(" ORDER BY occurred_at DESC, created_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2), append(args, page.Limit, page.Offset)...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			m := Movement{}
-			if err := rows.Scan(&m.ID, &m.OrganizationID, &m.ConsumableID, &m.Direction, &m.LocationID, &m.Quantity, &m.Reason, &m.Reference, &m.ActorID, &m.CreatedAt); err != nil {
-				return err
-			}
-			out = append(out, m)
-		}
-		return rows.Err()
-	})
-	return out, total, err
 }
 
 func nilIfEmpty(v string) any {

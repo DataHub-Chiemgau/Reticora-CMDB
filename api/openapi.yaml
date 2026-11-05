@@ -31347,10 +31347,12 @@ components:
                 internal order whose target bin is the location (STK-05).
                 stocktake, stocktake_item and stock_scan mean a stocktake
                 whose area, an item of whose frozen expected stock or a scan
-                whose place found is the location (INV-01).
+                whose place found is the location (INV-01). stock_level
+                means stock of a consumable in the bin (STK-03; the kind
+                quantity_item is gone with WP-758).
               items:
                 type: string
-                enum: [location, ci, asset, quantity_item, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
+                enum: [location, ci, asset, stock_level, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]

@@ -472,7 +472,7 @@ describe('LocationTreePage', () => {
         location: true,
         ci: true,
         asset: true,
-        quantity_item: true,
+        stock_level: true,
         stock_movement: true,
         rack_mount: true,
         role_assignment: true,

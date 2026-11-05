@@ -15176,12 +15176,12 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). stock_level means stock of a consumable in the bin (STK-03; the kind quantity_item is gone with WP-758). */
       dependencies: (
         | 'location'
         | 'ci'
         | 'asset'
-        | 'quantity_item'
+        | 'stock_level'
         | 'stock_movement'
         | 'rack_mount'
         | 'role_assignment'

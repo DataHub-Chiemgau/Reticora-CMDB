@@ -45,6 +45,9 @@ import (
 const (
 	problemInsufficientStock = "https://reticora.io/problems/insufficient-stock"
 	reservationMigration     = "../../migrations/000264_reservation_consumable_bin"
+	// quantityItemDropMigration drops quantity_item (WP-758); the replay
+	// of 000264 rebuilds it first with its down part.
+	quantityItemDropMigration = "../../migrations/000269_quantity_item_drop"
 )
 
 // branch is a storage branch site > warehouse > zone > shelf > bin.
@@ -555,14 +558,10 @@ func TestConsumableReservationScope(t *testing.T) {
 		t.Fatal("client 1 still sees the reservation of the bin moved to client 2")
 	}
 
-	// A site change of a location with a former quantity_item row runs
-	// without error (location_refresh_asset_site, 000151).
-	if _, err := f.Admin.Exec(bg, `INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, 'wp284-legacy', $3)`,
-		f.OrgA, f.Client1, otherSite.shelf); err != nil {
-		t.Fatalf("legacy quantity item: %v", err)
-	}
+	// A site change of a location runs without error
+	// (location_refresh_asset_site without quantity_item since 000269).
 	if _, err := locs.Move(f.OrgCtx(f.OrgA), f.OrgA, otherSite.shelf, own.zone); err != nil {
-		t.Fatalf("site change of a location with a quantity_item row: %v", err)
+		t.Fatalf("site change of a location: %v", err)
 	}
 	x.requireInvariant()
 }
@@ -575,6 +574,10 @@ func TestConsumableReservationMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	down, err := os.ReadFile(reservationMigration + ".down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropDown, err := os.ReadFile(quantityItemDropMigration + ".down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,6 +603,7 @@ func TestConsumableReservationMigration(t *testing.T) {
 		}
 		return s
 	}
+	exec(string(dropDown))
 	exec(string(down))
 
 	// Articles merged with the same id (000256): one bin, two bins, none.

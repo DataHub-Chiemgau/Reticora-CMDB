@@ -33,21 +33,6 @@ type Consumable struct {
 // minimum is not below it, and with min_level 0 nothing ever is.
 func (c *Consumable) LowStock() bool { return c.StockLevel < c.MinLevel }
 
-// Movement is one stock in/out event.
-type Movement struct {
-	ID             string `json:"id"`
-	OrganizationID string `json:"organization_id"`
-	ConsumableID   string `json:"consumable_id"`
-	Direction      string `json:"direction"` // in | out
-	// LocationID is the bin: the target of in, the source of out.
-	LocationID string    `json:"location_id,omitempty"`
-	Quantity   float64   `json:"quantity"`
-	Reason     string    `json:"reason,omitempty"`
-	Reference  string    `json:"reference,omitempty"`
-	ActorID    string    `json:"actor_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-}
-
 // CreateConsumableRequest is the payload for creating a consumable.
 type CreateConsumableRequest struct {
 	ClientID   string  `json:"client_id,omitempty"`

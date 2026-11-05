@@ -1684,7 +1684,7 @@
       "location": "Unterstandorte",
       "ci": "CIs",
       "asset": "Assets",
-      "quantity_item": "Mengenartikel",
+      "stock_level": "Mengenartikel",
       "stock_movement": "Bewegungen",
       "rack_mount": "Rack-Montagen",
       "role_assignment": "Rollenzuweisungen",

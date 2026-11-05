@@ -195,9 +195,16 @@ func TestLocationDeleteRefusedWithDependencies(t *testing.T) {
 	expect("/api/v1/sites/"+tr.site.ID, http.StatusConflict, "location")
 
 	// Stock, movements and role assignments hold their location as well.
-	stock := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindZone, ParentID: tr.warehouse.ID, Name: "del-stock"})
-	exec(`INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, 'del', $3)`, f.OrgA, f.Client1, stock.ID)
-	expect("/api/v1/locations/"+stock.ID, http.StatusConflict, "quantity_item")
+	// A bin with stock of a consumable (stock_level, WP-283; the kind
+	// stock_level since WP-758).
+	stock := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindBin, ParentID: tr.shelf.ID, Name: "del-stock"})
+	var consumableID string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, $2, 'del') RETURNING id::text`,
+		f.OrgA, f.Client1).Scan(&consumableID); err != nil {
+		t.Fatal(err)
+	}
+	exec(`INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 3)`, f.OrgA, consumableID, stock.ID)
+	expect("/api/v1/locations/"+stock.ID, http.StatusConflict, "stock_level")
 	moved := mustCreate(t, repo, ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindZone, ParentID: tr.warehouse.ID, Name: "del-moved"})
 	exec(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, to_location_id) VALUES ($1, 'asset', $2, 'transfer', $3)`,
 		f.OrgA, assetID, moved.ID)
@@ -693,7 +700,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		}
 	}
 	kinds := []string{
-		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyQuantityItem,
+		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyStockLevel,
 		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
 		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
@@ -730,8 +737,8 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		// The target bin of an internal order (000247, WP-847).
 		"internal_order_target_location_fkey": true,
 		// The stock of a consumable in a bin (000252, WP-283): a bin with
-		// stock is not deleted, DeleteError reports quantity_item until
-		// WP-758 renames the kind.
+		// stock is not deleted, DeleteError reports the table (kind
+		// stock_level since WP-758).
 		"stock_level_location_fkey": true,
 		// The area of a stocktake, a location of its frozen expected stock
 		// and the place found of a scan (000260, WP-848): a node an

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000267_stocktake_immutable
+Stand: Migration 000269_quantity_item_drop
 
 ## Prüfung
 
@@ -352,7 +352,7 @@ Policies sind unverändert. Abrufbar ist nur eine Version mit `clean`.
 ### Standort von Assets und Mengenartikeln (WP-392)
 
 `asset` und `quantity_item` tragen `site_id`, den Standort ihrer Location
-(Migration 000151, F-141). Der Trigger `derive_location_site` setzt ihn bei
+(Migration 000151, F-141; `quantity_item` entfällt mit 000269, WP-758). Der Trigger `derive_location_site` setzt ihn bei
 jedem INSERT und jeder Änderung von `location_id` oder `site_id` und
 überschreibt geschriebene Werte; er liest die Location mit erweitertem
 Client- und Site-Scope (`app_scope_widen`), eine Location einer anderen
@@ -672,7 +672,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `notification_inbox.user_id` | `notification_inbox_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `notification_preference.user_id` | `notification_preference_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `pii_subject.parent_id` | `pii_subject_parent_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `quantity_item.location_id` | `quantity_item_location_id_fkey` | `location` | quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization |
 | `rack.id` | `rack_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
 | `rack.room_id` | `rack_room_id_fkey` | `room` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `rack_mount.ci_id` | `rack_mount_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
@@ -1377,8 +1376,8 @@ Kanonisches Bestandsledger (STK-04, AST-07, WP-744, Migration 000242):
 mit Organisation (K19), alle ON DELETE RESTRICT:
 `stock_movement_asset_id_fkey` → `asset`,
 `stock_movement_consumable_id_fkey` → `consumable` (der neue Schlüssel
-`quantity_item_id_organization_key` von 000242 bleibt bis WP-758 an
-`quantity_item`),
+`quantity_item_id_organization_key` von 000242 fällt mit `quantity_item`
+in 000269),
 `stock_movement_from_location_id_fkey` und
 `stock_movement_to_location_id_fkey` → `location`,
 `stock_movement_assignee_user_id_fkey` → `app_user`,
@@ -1584,7 +1583,7 @@ bei ausgesetztem `stock_movement_append_only` auf `consumable_id` und
 `item_kind` `consumable` umgeschrieben; `stock_movement.quantity_item_id`
 mit Fremdschlüssel und Index ist entfernt, `derive_stock_movement_scope()`
 kennt nur noch `asset` und `consumable`. `quantity_item` selbst bleibt
-unverändert bis WP-758.
+unverändert bis WP-758 (000269).
 
 Zuweisungen als Projektion des Ledgers (AST-02, AST-07, WP-747, E-26,
 Migration 000257): Index `idx_stock_movement_holder` auf `stock_movement`
@@ -1762,6 +1761,21 @@ Inventur, ohne Bereich die des Assets, Consumables bzw. CIs;
 `location_id` ON `stocktake`) leitet nach. RLS: `stock_scan_isolation`
 (Org-, Client- und Site-Prädikat, NULL lesbar) mit den restriktiven
 `stock_scan_scoped_update` und `stock_scan_scoped_delete`.
+Drop von `quantity_item` (STK-03, E-40, E-26, WP-758, Migration 000269):
+Das Up bricht ab, solange ein Fremdschlüssel auf `quantity_item` zeigt
+(Meldung mit den Constraints), sichert jede Zeile als `row_data` in
+`migration_quarantine` (`source_table` `quantity_item`, Migration
+`000269`; `quantity_item_archived` mit ID-gleicher `consumable`-Zeile,
+sonst `quantity_item_not_merged`) und löscht die Tabelle ohne CASCADE samt
+Policies, Triggern (`trg_quantity_item_updated_at`,
+`trg_quantity_item_derive_site`, `quantity_item_search_scope_propagation`,
+`reticora_truncate_guard`), Index `idx_quantity_item_site` und
+Fremdschlüsseln. `location_refresh_asset_site()` aktualisiert nur noch
+`asset`. Die Abhängigkeitsart der Standortlöschung heißt `stock_level`
+(Bestand eines Artikels im Bin). Down baut die Tabelle im Stand vor 000269
+wieder auf, stellt die gesicherten Zeilen unverändert her (ein seither
+gelöschter Client, Standort oder Ort wird NULL) und entfernt deren
+Einträge.
 
 ## Tabellen, RLS und Policies
 
@@ -1882,7 +1896,6 @@ SECURITY`), Policies mit ihrem Kommando.
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
-| `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |

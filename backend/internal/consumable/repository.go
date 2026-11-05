@@ -31,30 +31,14 @@ func isStockReference(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.TableName == "stock_level"
 }
 
-// bookingOf is the booking of a transitional movement: in is a receipt into
-// the bin, out a retrieval from it.
-func bookingOf(m *Movement) Booking {
-	b := Booking{OrganizationID: m.OrganizationID, ConsumableID: m.ConsumableID, MovementType: "receipt",
-		ToLocationID: m.LocationID, Quantity: m.Quantity}
-	if m.Direction == "out" {
-		b.MovementType, b.FromLocationID, b.ToLocationID = "retrieval", m.LocationID, ""
-	}
-	return b
-}
-
-// Repository stores consumables, their stock per bin and their stock
-// movements.
+// Repository stores consumables and their stock per bin. Stock movements
+// are booked by the movement service (internal/movement, WP-756).
 type Repository interface {
 	List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Consumable, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Consumable, error)
 	Create(ctx context.Context, c *Consumable) error
 	Update(ctx context.Context, orgID, id string, req UpdateConsumableRequest) (*Consumable, error)
 	Delete(ctx context.Context, orgID, id string) error
-	// AddMovement records an in/out movement on a bin and adjusts its
-	// stock atomically. It fails with ErrInsufficientStock when an out
-	// movement takes more than the bin holds.
-	AddMovement(ctx context.Context, m *Movement) (*Consumable, error)
-	ListMovements(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Movement, int, error)
 	// ListStock returns the stock rows per bin, ordered by bin, at most
 	// page.Limit+1 of them (StockPage), and their number.
 	ListStock(ctx context.Context, orgID, consumableID string, page api.PaginationParams) ([]Stock, int, error)
@@ -66,15 +50,13 @@ type Repository interface {
 type MemoryRepository struct {
 	mu          sync.RWMutex
 	consumables map[string]*Consumable
-	movements   map[string][]*Movement
 	stock       map[string]map[string]*Stock // consumable → bin → stock
 	seq         int
 }
 
 // NewMemoryRepository creates an empty in-memory store.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{consumables: map[string]*Consumable{}, movements: map[string][]*Movement{},
-		stock: map[string]map[string]*Stock{}}
+	return &MemoryRepository{consumables: map[string]*Consumable{}, stock: map[string]map[string]*Stock{}}
 }
 
 // withTotal returns a copy of c with StockLevel, the sum of on_hand over
@@ -275,59 +257,6 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 		}
 	}
 	delete(r.consumables, id)
-	delete(r.movements, id)
 	delete(r.stock, id)
 	return nil
-}
-
-// AddMovement books in as a receipt into the bin m.LocationID and out as a
-// retrieval from it (Book); without a bin the consumable must have exactly
-// one.
-func (r *MemoryRepository) AddMovement(_ context.Context, m *Movement) (*Consumable, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	c, ok := r.consumables[m.ConsumableID]
-	if !ok || c.OrganizationID != m.OrganizationID {
-		return nil, ErrNotFound
-	}
-	if m.LocationID == "" {
-		if len(r.stock[c.ID]) != 1 {
-			return nil, ErrBinRequired
-		}
-		for bin := range r.stock[c.ID] {
-			m.LocationID = bin
-		}
-	}
-	b := bookingOf(m)
-	if err := r.book(&b); err != nil {
-		return nil, err
-	}
-	m.ID = r.nextID("mov")
-	m.CreatedAt = time.Now().UTC()
-	c.UpdatedAt = m.CreatedAt
-	r.movements[c.ID] = append(r.movements[c.ID], m)
-	cp := r.withTotal(c)
-	return &cp, nil
-}
-
-func (r *MemoryRepository) ListMovements(_ context.Context, orgID, consumableID string, page api.PaginationParams) ([]Movement, int, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var out []Movement
-	for _, m := range r.movements[consumableID] {
-		if m.OrganizationID == orgID {
-			out = append(out, *m)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	total := len(out)
-	start := page.Offset
-	if start > total {
-		start = total
-	}
-	end := start + page.Limit
-	if end > total {
-		end = total
-	}
-	return out[start:end], total, nil
 }

@@ -398,8 +398,8 @@ func TestConsumableStockPerBin(t *testing.T) {
 			t.Fatal(err)
 		}
 		var de *locations.DependencyError
-		if err := locations.NewPGRepository(f.App).Delete(orgCtx, f.OrgA, branch.bin); !errors.As(err, &de) || !slices.Equal(de.Kinds, []string{locations.DependencyQuantityItem}) {
-			t.Errorf("delete of a bin with stock: %v, want dependencies [quantity_item]", err)
+		if err := locations.NewPGRepository(f.App).Delete(orgCtx, f.OrgA, branch.bin); !errors.As(err, &de) || !slices.Equal(de.Kinds, []string{locations.DependencyStockLevel}) {
+			t.Errorf("delete of a bin with stock: %v, want dependencies [stock_level]", err)
 		}
 		if code, body := a.do(http.MethodDelete, "/api/v1/consumables/"+item, ""); code != http.StatusConflict {
 			t.Errorf("delete of a stocked consumable: %d %v, want 409", code, body)
@@ -510,8 +510,9 @@ func TestConsumableStockMigration(t *testing.T) {
 	}
 	// The register trigger of 000255 (WP-289) reads consumable.barcode,
 	// which the down part of 000252 drops, and the reservations of 000264
-	// (WP-284) reference stock_level, which it drops: revert both first.
-	for _, later := range []string{"000264_reservation_consumable_bin", "000255_barcode_registry"} {
+	// (WP-284) reference stock_level, which it drops: revert both first,
+	// the latter after 000269 (WP-758) rebuilt the quantity_item it needs.
+	for _, later := range []string{"000269_quantity_item_drop", "000264_reservation_consumable_bin", "000255_barcode_registry"} {
 		laterDown, readErr := os.ReadFile("../../migrations/" + later + ".down.sql")
 		if readErr != nil {
 			t.Fatal(readErr)
