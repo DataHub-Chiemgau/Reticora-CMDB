@@ -1479,3 +1479,5 @@ GQL-03;[P2];C;backend/internal/graphqlbff/ci_aggregates_test.go;WP-792
 INV-01;[P2];B;backend/internal/stocktake/complete_integration_test.go;WP-761
 AST-07;[P2];B;backend/internal/assignment/projection_integration_test.go;WP-843
 INV-02;[P2];B;backend/internal/stocktake/area_integration_test.go;WP-288
+STK-01;[P2];B;backend/internal/notify/stock_notify_integration_test.go;WP-845
+NTF-05;[B], Zusätze [P2], [P3];B;backend/internal/notify/stock_notify_integration_test.go;WP-845
