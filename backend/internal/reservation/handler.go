@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
@@ -108,9 +109,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 // writeReservationError answers a failed reservation request: a reservation,
-// asset or quantity item that is unknown, of another organization or outside
+// asset, consumable or bin that is unknown, of another organization or outside
 // the caller's scope, or an asset the caller may not lock, is 404 with a
-// fixed text (TEN-04); an asset reserved already is 409 asset-reserved, a
+// fixed text (TEN-04); a quantity beyond the available stock of the bin is
+// 409 insufficient-stock (api.WriteTypedProblem, WP-284), a location that is
+// no bin or a missing bin 422; an asset reserved already is 409 asset-reserved, a
 // reservation no longer active 409 with its domain message. The conversion
 // adds the refusals of the assignment service (WP-275): an asset with a
 // holder 409 asset-assigned, a holder of another organization 422. Database
@@ -122,8 +125,12 @@ func writeReservationError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrAssetNotFound), errors.Is(err, assignment.ErrAssetNotFound), errors.Is(err, movement.ErrAssetNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrAssetNotFound.Error())
-	case errors.Is(err, ErrItemNotFound):
+	case errors.Is(err, ErrItemNotFound), errors.Is(err, consumable.ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrItemNotFound.Error())
+	case errors.Is(err, ErrBinNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrBinNotFound.Error())
+	case consumable.IsInsufficientStock(err):
+		api.WriteTypedProblem(w, http.StatusConflict, consumable.ErrInsufficientStock)
 	case errors.Is(err, ErrConflict):
 		api.WriteProblem(w, http.StatusConflict, assignment.ProblemAssetReserved, "Conflict", ErrConflict.Error())
 	case errors.Is(err, assignment.ErrAssetReserved):
@@ -142,9 +149,11 @@ func writeReservationError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // Create handles POST /api/v1/reservations: the existing path with
-// asset_id or quantity_item_id in the body (frontend/src/api/cmdb.ts). An
+// asset_id, or consumable_id (deprecated alias quantity_item_id) with
+// location_id and quantity, in the body (frontend/src/api/cmdb.ts). An
 // asset reservation runs through the same repository path as POST
-// /api/v1/assets/{id}/reserve (lock, movement, event).
+// /api/v1/assets/{id}/reserve (lock, movement, event); a consumable
+// reservation locks the stock row of its bin (WP-284).
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -156,11 +165,63 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.AssetID == "" && req.QuantityItemID == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "asset_id or quantity_item_id is required")
+	if req.AssetID == "" && req.ConsumableID == "" && req.QuantityItemID == "" {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "asset_id or consumable_id is required")
+		return
+	}
+	if err := normalizeCreate(&req); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	h.create(w, r, t.OrganizationID, &req)
+}
+
+// normalizeCreate resolves the deprecated aliases of a reservation request
+// (E-38, WP-284): quantity_item_id is consumable_id, item_kind
+// quantity_item is consumable. Without item_kind a request with asset_id
+// reserves the asset, otherwise the consumable. A request naming both
+// objects, an asset reservation with consumable or bin, a consumable
+// reservation with asset or an unknown item_kind is a 422 field error.
+//
+// validation: the texts name the field and the rule.
+func normalizeCreate(req *CreateRequest) error {
+	unprocessable := func(field, message string) error {
+		return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
+	}
+	if req.QuantityItemID != "" {
+		if req.ConsumableID != "" && req.ConsumableID != req.QuantityItemID {
+			return unprocessable("quantity_item_id", "quantity_item_id is the deprecated alias of consumable_id and must not differ from it")
+		}
+		req.ConsumableID, req.QuantityItemID = req.QuantityItemID, ""
+	}
+	switch req.ItemKind {
+	case "quantity_item":
+		req.ItemKind = "consumable"
+	case "":
+		req.ItemKind = "consumable"
+		if req.AssetID != "" {
+			req.ItemKind = "asset"
+		}
+	}
+	switch req.ItemKind {
+	case "asset":
+		if req.AssetID == "" {
+			return unprocessable("asset_id", "asset_id is required for an asset reservation")
+		}
+		if req.ConsumableID != "" || req.LocationID != "" {
+			return unprocessable("consumable_id", "an asset reservation names no consumable_id and no location_id")
+		}
+	case "consumable":
+		if req.ConsumableID == "" {
+			return unprocessable("consumable_id", "consumable_id is required for a consumable reservation")
+		}
+		if req.AssetID != "" {
+			return unprocessable("asset_id", "a consumable reservation names no asset_id")
+		}
+	default:
+		return unprocessable("item_kind", "item_kind must be asset or consumable (quantity_item is the alias of consumable)")
+	}
+	return nil
 }
 
 // ReserveAsset handles POST /api/v1/assets/{id}/reserve (AST-06, WP-277):
@@ -212,7 +273,7 @@ func parseTime(field, value string) (*time.Time, error) {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, req *CreateRequest) {
 	// Ids reach SQL only as UUIDs: a malformed one is a 422 field error,
 	// not a driver message (API-03).
-	for _, f := range [][2]string{{"asset_id", req.AssetID}, {"quantity_item_id", req.QuantityItemID},
+	for _, f := range [][2]string{{"asset_id", req.AssetID}, {"consumable_id", req.ConsumableID}, {"location_id", req.LocationID},
 		{"assignee_id", req.AssigneeID}, {"order_id", req.OrderID}, {"ticket_id", req.TicketID}} {
 		if f[1] == "" {
 			continue
@@ -226,20 +287,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, r
 		OrganizationID: orgID,
 		ItemKind:       req.ItemKind,
 		AssetID:        req.AssetID,
-		QuantityItemID: req.QuantityItemID,
+		ConsumableID:   req.ConsumableID,
+		LocationID:     req.LocationID,
 		Quantity:       1,
 		AssigneeID:     req.AssigneeID,
 		ProjectRef:     req.ProjectRef,
 		OrderID:        req.OrderID,
 		TicketID:       req.TicketID,
 		Reason:         req.Reason,
-	}
-	if res.ItemKind == "" {
-		if req.AssetID != "" {
-			res.ItemKind = "asset"
-		} else {
-			res.ItemKind = "quantity_item"
-		}
 	}
 	if req.Quantity != nil {
 		if *req.Quantity <= 0 {

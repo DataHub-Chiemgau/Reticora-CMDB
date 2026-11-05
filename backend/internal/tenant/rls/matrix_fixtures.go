@@ -68,6 +68,11 @@ var Channels = []Channel{
 	{Name: "graphql-jobs", Read: "POST /bff/graphql { jobs }", GraphQL: "jobs"},
 	// The asset aggregate (WP-311, module inventory).
 	{Name: "graphql-asset", Read: "POST /bff/graphql { asset(id) }", GraphQL: "asset"},
+	// The CI aggregates (WP-792): form, history with relationship changes,
+	// metrics.
+	{Name: "graphql-ci-form", Read: "POST /bff/graphql { ciForm(id) }", GraphQL: "ciForm"},
+	{Name: "graphql-ci-history", Read: "POST /bff/graphql { ciHistory(id) }", GraphQL: "ciHistory"},
+	{Name: "graphql-ci-metrics", Read: "POST /bff/graphql { ciMetrics(id) }", GraphQL: "ciMetrics"},
 }
 
 // ScopeKinds are the principal scopes of the matrix (TEN-04): the whole

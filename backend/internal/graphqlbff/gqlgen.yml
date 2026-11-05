@@ -117,3 +117,70 @@ models:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement.Movement
   Document:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document.Document
+  # The CI aggregates (GQL-03, WP-792): the resolved form of WP-719, the
+  # unified history of the CI with its relationship changes, its metric
+  # series. The optional strings of a history entry and the JSON members of
+  # the form resolve in resolvers_form.go and resolvers_history.go.
+  CIForm:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype.ResolvedForm
+    fields:
+      templateId:
+        resolver: true
+      roleId:
+        resolver: true
+      layoutId:
+        resolver: true
+      requiredFields:
+        resolver: true
+  FormSection:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype.FormSection
+    fields:
+      title:
+        resolver: true
+  FormField:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype.FormField
+    fields:
+      definition:
+        resolver: true
+  FieldState:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta.FieldState
+  FormRule:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype.FormRule
+    fields:
+      condition:
+        resolver: true
+      ast:
+        resolver: true
+      message:
+        resolver: true
+  HistoryEntry:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history.Change
+    fields:
+      siteId:
+        resolver: true
+      actorId:
+        resolver: true
+      actorUserId:
+        resolver: true
+      changeKind:
+        resolver: true
+      changeSetId:
+        resolver: true
+      fieldName:
+        resolver: true
+      fieldChanges:
+        resolver: true
+      comment:
+        resolver: true
+      changeSource:
+        resolver: true
+      requestId:
+        resolver: true
+      correlationId:
+        resolver: true
+  HistoryFieldChange:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history.FieldChange
+  CISeries:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring.CISeries
+  MetricPoint:
+    model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring.MetricPoint

@@ -21,10 +21,13 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff/generated"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -83,6 +86,28 @@ type Sources struct {
 	Assets    AssetSource
 	Movements MovementSource
 	Documents DocumentSource
+	// The CI aggregates (GQL-03, WP-792).
+	History HistorySource
+	Metrics MetricSource
+	Forms   FormSource
+}
+
+// HistorySource reads the timeline of a CI with its relationship changes
+// in a time window (history.CITimeline).
+type HistorySource = history.CITimeline
+
+// MetricSource reads the series of a metric (monitoring.MetricStore); a
+// source that also implements monitoring.MetricNamer lists the metrics of
+// a CI for a query without name.
+type MetricSource interface {
+	Query(ctx context.Context, q *monitoring.MetricQuery) ([]monitoring.MetricPoint, error)
+}
+
+// FormSource resolves the form of a CI (citype.FormResolver, WP-719) with
+// the field policy of the request (WP-727): the server resolves through
+// the FormPolicyFactory of GET /api/v1/cis/{id}/form.
+type FormSource interface {
+	ResolveForm(ctx context.Context, orgID string, req citype.FormRequest) (*citype.ResolvedForm, error)
 }
 
 // AssetSource reads one asset in the caller's scope (asset.Repository).
@@ -171,6 +196,15 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	cfg.Complexity.Asset.Children = listCost
 	cfg.Complexity.Asset.Documents = listCost
 	cfg.Complexity.Asset.Movements = func(child int, first *int, _ *string) int { return listCost(child, first) }
+	// The CI aggregates (WP-792): the form costs its selection, the history
+	// its selection per entry of the page, the metrics per series.
+	cfg.Complexity.Query.CiForm = func(child int, _ string, _ *string, _ *string) int { return child }
+	cfg.Complexity.Query.CiHistory = func(child int, _ string, _ *time.Time, _ *time.Time, first *int, _ *string) int {
+		return listCost(child, first)
+	}
+	cfg.Complexity.Query.CiMetrics = func(child int, _ string, _ *string, _ *time.Time, _ *time.Time, _ *string) int {
+		return saturatingMul(child, maxPage)
+	}
 	srv := handler.New(generated.NewExecutableSchema(cfg))
 	// POST only: no GET queries (no CSRF-able reads), no subscriptions.
 	srv.AddTransport(transport.POST{})
@@ -224,7 +258,8 @@ func saturatingMul(a, b int) int {
 }
 
 // WithSources attaches the read models of topology, rack layout, search,
-// review inbox and jobs (GQL-02).
+// review inbox and jobs (GQL-02), of the asset detail and of the CI
+// aggregates (GQL-03).
 func (h *Handler) WithSources(sources *Sources) *Handler {
 	h.resolver.sources = *sources
 	return h

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant/rls"
 )
 
@@ -650,6 +651,65 @@ func inheritedModels(ids matrixIDs) map[string]*inheritedModel {
 		"search_document_field": searchFieldModel(ids),
 		"review_item":           reviewItemModel(ids),
 		"training_assignment":   trainingAssignmentModel(ids),
+		// The legacy signatures follow their movement (WP-843).
+		"assignment_signature_legacy": legacySignatureModel(ids),
+	}
+}
+
+// legacySignatureModel: a legacy signature of migration 000266 is visible
+// when its movement is (EXISTS on stock_movement with client or site scope,
+// org-wide otherwise; the movement carries client and site of its asset);
+// it is added only for a visible movement. The rows are kept: no principal
+// changes or deletes one (trigger and missing DELETE privilege, 42501).
+// Each row books an asset with the client and site of its CI parent and its
+// movement as the maintenance role (stock_movement is append-only, so the
+// movements cannot be committed parents), then the signature.
+func legacySignatureModel(ids matrixIDs) *inheritedModel {
+	visible := func(w *matrixWorld, p *matrixPrincipal, r inheritedRow) bool {
+		return r.org == p.org && (p.orgWideCS() || w.parentVisible(p, r.parents[0]))
+	}
+	return &inheritedModel{
+		rows: []inheritedRow{
+			{name: "A/c1s1", org: ids.orgA, parents: []string{"ci c1/s1"}},
+			{name: "A/c1s3", org: ids.orgA, parents: []string{"ci c1/s3"}},
+			{name: "A/c2s2", org: ids.orgA, parents: []string{"ci c2/s2"}},
+			{name: "A/org-wide", org: ids.orgA, parents: []string{"org-wide ci"}},
+			{name: "B/cBsB", org: ids.orgB, parents: []string{"ci cB/sB"}},
+		},
+		insert: func(ctx context.Context, q matrixQuerier, w *matrixWorld, r inheritedRow, attempt bool) (string, error) {
+			if attempt {
+				if _, err := q.Exec(ctx, `RESET ROLE`); err != nil {
+					return "", err
+				}
+			}
+			dims := w.parents[r.parents[0]].dims
+			asset, movement := matrixUUID(), matrixUUID()
+			if _, err := q.Exec(ctx, `INSERT INTO asset (id, organization_id, client_id, location_id, asset_tag, name)
+				VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $5)`, asset, r.org, dims["client"], dims["site"], "matrix-"+asset[:8]); err != nil {
+				return "", err
+			}
+			if _, err := q.Exec(ctx, `INSERT INTO stock_movement (id, organization_id, item_kind, asset_id, movement_type)
+				VALUES ($1, $2, 'asset', $3, 'assignment')`, movement, r.org, asset); err != nil {
+				return "", err
+			}
+			if attempt {
+				if _, err := q.Exec(ctx, "SET LOCAL ROLE "+database.DefaultAppRole); err != nil {
+					return "", err
+				}
+				// No RETURNING: it would check the new row against the
+				// read policy.
+				_, err := q.Exec(ctx, `INSERT INTO assignment_signature_legacy (organization_id, movement_id, kind, payload, payload_sha256)
+					VALUES ($1, $2, 'checkout', '{}'::jsonb, repeat('0', 64))`, r.org, movement)
+				return "", err
+			}
+			var id string
+			err := q.QueryRow(ctx, `INSERT INTO assignment_signature_legacy (organization_id, movement_id, kind, payload, payload_sha256)
+				VALUES ($1, $2, 'checkout', '{}'::jsonb, repeat('0', 64)) RETURNING id::text`, r.org, movement).Scan(&id)
+			return id, err
+		},
+		read:     visible,
+		write:    func(*matrixWorld, *matrixPrincipal, inheritedRow) bool { return false },
+		insertOK: visible,
 	}
 }
 

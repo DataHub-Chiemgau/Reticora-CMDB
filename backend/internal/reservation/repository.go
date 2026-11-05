@@ -21,9 +21,13 @@ var (
 	// ErrAssetNotFound: the asset to reserve is unknown, of another
 	// organization or outside the caller's scope (404, TEN-04).
 	ErrAssetNotFound = errors.New("asset not found")
-	// ErrItemNotFound: the quantity item to reserve is unknown, of another
+	// ErrItemNotFound: the consumable to reserve is unknown, of another
 	// organization or outside the caller's scope (404, TEN-04).
 	ErrItemNotFound = errors.New("inventory item not found")
+	// ErrBinNotFound: the bin location_id of a quantity reservation is
+	// unknown, of another organization or outside the caller's scope (404,
+	// TEN-04, WP-284).
+	ErrBinNotFound = errors.New("bin not found")
 	// ErrConflict: the serialized asset has an active reservation already
 	// (409; PostgreSQL enforces it with a partial unique index).
 	ErrConflict = errors.New("asset already has an active reservation")
@@ -40,8 +44,13 @@ var (
 var errProjectNeedsHolder = &api.FieldError{Field: "assignee_id",
 	Message: "the reservation names no user; assignee_id or team_id is required", Status: http.StatusUnprocessableEntity}
 
+// errNotABin: the location of a quantity reservation is no bin (422,
+// WP-284).
+var errNotABin = &api.FieldError{Field: "location_id", Message: "location is not a bin", Status: http.StatusUnprocessableEntity}
+
 // errNotAssetReservation: only the reservation of a serial asset becomes
-// an assignment; quantity items follow with WP-284 (422).
+// an assignment; the conversion of quantity reservations follows with
+// WP-759 (422).
 var errNotAssetReservation = &api.FieldError{Field: "item_kind",
 	Message: "only the reservation of an asset can be converted into an assignment", Status: http.StatusUnprocessableEntity}
 
@@ -58,8 +67,9 @@ type Repository interface {
 	List(ctx context.Context, orgID, state string, page api.PaginationParams) ([]Reservation, int, error)
 	GetByID(ctx context.Context, orgID, id string) (*Reservation, error)
 	// Create inserts a reservation after checking for conflicts. Serialized
-	// assets admit exactly one active reservation; quantity items are checked
-	// against available stock by the service layer.
+	// assets admit exactly one active reservation; a consumable is reserved
+	// on the stock row of its bin, never beyond on_hand − reserved
+	// (WP-284; the in-memory profile checks no stock).
 	Create(ctx context.Context, res *Reservation) error
 	// Transition moves a reservation to a new state (release/expire).
 	Transition(ctx context.Context, orgID, id, state string) (*Reservation, error)
@@ -72,7 +82,10 @@ type Repository interface {
 	ExpireDue(ctx context.Context, now time.Time) (int, error)
 }
 
-// MemoryRepository is an in-memory implementation (tests, --no-db).
+// MemoryRepository is an in-memory implementation (tests, --no-db). It
+// keeps consumable_id and location_id and applies the state rules of the
+// PostgreSQL repository (one active reservation per asset, release and
+// expiry of active reservations only), without stock per bin.
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string]*Reservation
@@ -193,7 +206,7 @@ func (r *MemoryRepository) ActiveForItem(_ context.Context, orgID, itemKind, ite
 		if itemKind == "asset" && res.AssetID == itemID {
 			out = append(out, *res)
 		}
-		if itemKind == "quantity_item" && res.QuantityItemID == itemID {
+		if (itemKind == "consumable" || itemKind == "quantity_item") && res.ConsumableID == itemID {
 			out = append(out, *res)
 		}
 	}

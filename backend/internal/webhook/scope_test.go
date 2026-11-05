@@ -78,7 +78,12 @@ func TestEventScopeResolution(t *testing.T) {
 		{"asset.movement", `{"id":"m"}`, unknown},
 		{"inventory.movement", `{"id":"m","item_kind":"asset","asset_id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
 		{"inventory.movement", `{"id":"m","item_kind":"quantity_item","quantity_item_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
+		// consumable_id (WP-284, WP-844) beside the alias quantity_item_id (WP-757).
+		{"inventory.movement", `{"id":"m","item_kind":"consumable","consumable_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectConsumable, item1)}}},
 		{"inventory.movement", `{"id":"m"}`, unknown},
+		{"reservation.created", `{"id":"r","item_kind":"consumable","consumable_id":"` + item1 + `","location_id":"` + ci2 + `"}`, result{refs: []ObjectRef{ref(ObjectConsumable, item1)}}},
+		{"reservation.created", `{"id":"r","consumable_id":"` + item1 + `","location_id":"` + ci2 + `","client_id":"c1","site_id":"s2"}`, result{objects: []ObjectScope{{ClientID: "c1", SiteID: "s2"}}}},
+		{"reservation.created", `{"id":"r","consumable_id":""}`, unknown},
 		{"reservation.created", `{"id":"r","asset_id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
 		{"reservation.released", `{"id":"r","quantity_item_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
 		{"composition.created", `{"id":"c","parent_asset_id":"` + asset1 + `","child_ci_id":"` + ci1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1), ref(ObjectCI, ci1)}}},
@@ -108,6 +113,8 @@ func TestEventScopeResolution(t *testing.T) {
 		{"stock.below_minimum", `{"id":"` + item1 + `","site_id":"s1"}`, result{objects: []ObjectScope{{SiteID: "s1"}}}},
 		{"reservation.expired", `{"id":"r","item_kind":"asset","asset_id":"` + asset1 + `"}`, result{refs: []ObjectRef{ref(ObjectAsset, asset1)}}},
 		{"reservation.converted", `{"id":"r","item_kind":"quantity_item","quantity_item_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectQuantityItem, item1)}}},
+		{"reservation.expired", `{"id":"r","item_kind":"consumable","consumable_id":"` + item1 + `"}`, result{refs: []ObjectRef{ref(ObjectConsumable, item1)}}},
+		{"stock.movement", `{"id":"m","item_kind":"consumable","consumable_id":"` + item1 + `","movement_type":"issue"}`, result{refs: []ObjectRef{ref(ObjectConsumable, item1)}}},
 		{"ticket.updated", `{"id":"t","client_id":"c1","site_id":"s1"}`, result{objects: []ObjectScope{{ClientID: "c1", SiteID: "s1"}}}},
 		{"ticket.updated", `{"id":"t"}`, unknown},
 		{"ticket.sla_breached", `{"id":"t","client_id":"c2"}`, result{objects: []ObjectScope{{ClientID: "c2"}}}},
@@ -369,7 +376,7 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 			ci, asset, item = ci2, asset2, item2
 		}
 		frame := map[string]any{"id": "x", "client_id": client}
-		reservation := map[string]any{"id": "r", "item_kind": "quantity_item", "quantity_item_id": item}
+		reservation := map[string]any{"id": "r", "item_kind": "consumable", "consumable_id": item}
 		return map[string]map[string]any{
 			"ci.status_changed":       {"id": ci, "changed_fields": []string{"status"}, "from": "a", "to": "b"},
 			"lifecycle.changed":       {"entity_type": "asset", "entity_id": asset, "to": "in_use"},

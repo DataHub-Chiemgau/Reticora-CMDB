@@ -1,5 +1,6 @@
 // Package reservation implements inventory reservations and availability
-// (spec §10) for serialized assets and quantity-based items. Conflicting
+// (spec §10) for serialized assets and quantities of consumables in a bin
+// (WP-284; the stock row is locked and reserved never exceeds on_hand). Conflicting
 // reservations are prevented (serialized assets admit at most one active
 // reservation — enforced by a partial unique index), and expired reservations
 // release automatically via the sweeper.
@@ -20,9 +21,10 @@ var States = map[string]bool{
 type Reservation struct {
 	ID             string     `json:"id"`
 	OrganizationID string     `json:"organization_id"`
-	ItemKind       string     `json:"item_kind"` // asset | quantity_item
+	ItemKind       string     `json:"item_kind"` // asset | consumable
 	AssetID        string     `json:"asset_id,omitempty"`
-	QuantityItemID string     `json:"quantity_item_id,omitempty"`
+	ConsumableID   string     `json:"consumable_id,omitempty"`
+	LocationID     string     `json:"location_id,omitempty"`
 	Quantity       float64    `json:"quantity"`
 	State          string     `json:"state"`
 	ReservedFrom   time.Time  `json:"reserved_from"`
@@ -36,17 +38,23 @@ type Reservation struct {
 	CreatedBy      string     `json:"created_by,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
-	// ClientID and SiteID are the client and site of the asset or quantity
-	// item, derived by the trigger reservation_scope (000258, WP-750); a
-	// writer cannot choose them.
+	// ClientID and SiteID are the client and site of the asset or of the
+	// bin (stock_level), derived by the trigger reservation_scope (000258,
+	// WP-750; bin: 000264, WP-284); a writer cannot choose them.
 	ClientID string `json:"client_id,omitempty"`
 	SiteID   string `json:"site_id,omitempty"`
 }
 
-// CreateRequest is the payload for creating a reservation.
+// CreateRequest is the payload for creating a reservation: an asset, or a
+// quantity of a consumable in a bin (location_id; without it the only bin
+// with a stock row of the consumable, WP-284). quantity_item_id is the
+// deprecated alias of consumable_id and item_kind quantity_item that of
+// consumable until the sunset of inventory/items (E-38).
 type CreateRequest struct {
 	ItemKind       string   `json:"item_kind,omitempty"`
 	AssetID        string   `json:"asset_id,omitempty"`
+	ConsumableID   string   `json:"consumable_id,omitempty"`
+	LocationID     string   `json:"location_id,omitempty"`
 	QuantityItemID string   `json:"quantity_item_id,omitempty"`
 	Quantity       *float64 `json:"quantity,omitempty"`
 	ReservedFrom   string   `json:"reserved_from,omitempty"`

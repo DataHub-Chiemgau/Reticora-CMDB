@@ -216,30 +216,150 @@ func TestCompileSQLReconciliationConflict(t *testing.T) {
 	}
 }
 
-// The shipped "Available laptops in Berlin" preset filters by location name,
-// but FilterSpec only understood location IDs, so the preset was rejected with
-// "unknown field location_search" every time a user ran it.
+// TestPresetsCompile runs over every system view (VIE-02, WP-307): the
+// filter decodes with DisallowUnknownFields as the query handler decodes
+// it (the shipped location_search once was an unknown field), compiles for
+// its entity kind, sort and columns pass validatePresentation, the keys are
+// unique and every preset has both display names and system true.
 func TestPresetsCompile(t *testing.T) {
+	keys := map[string]bool{}
+	names := map[string]bool{}
 	for _, p := range Presets() {
+		if p.Key == "" || keys[p.Key] || names[p.Name] {
+			t.Errorf("preset %q: key %q missing or not unique, or name not unique", p.Name, p.Key)
+		}
+		keys[p.Key], names[p.Name] = true, true
+		if p.DisplayName.DE == "" || p.DisplayName.EN == "" || !p.System || p.Name == "" {
+			t.Errorf("preset %s: display_name %+v, system %v, name %q", p.Key, p.DisplayName, p.System, p.Name)
+		}
 		raw, err := json.Marshal(p.FilterSpec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Decode exactly as the Query handler does: unknown fields are
-		// rejected, which is how the broken preset produced a 400.
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		var spec FilterSpec
 		if err := dec.Decode(&spec); err != nil {
-			t.Fatalf("preset %q has a filter_spec the DSL cannot decode: %v", p.Name, err)
+			t.Fatalf("preset %s has a filter_spec the DSL cannot decode: %v", p.Key, err)
 		}
-		table := "ci"
-		if spec.EntityKind == "asset" || p.EntityKind == "asset" {
-			table = "asset"
+		if p.EntityKind != "ci" && p.EntityKind != "asset" {
+			t.Fatalf("preset %s: entity_kind %q", p.Key, p.EntityKind)
 		}
-		if _, _, err := spec.CompileSQL(table, []any{"org"}, 2); err != nil {
-			t.Fatalf("preset %q does not compile: %v", p.Name, err)
+		if _, _, err := spec.CompileSQL(p.EntityKind, []any{"org"}, 2); err != nil {
+			t.Fatalf("preset %s does not compile: %v", p.Key, err)
 		}
+		if err := validatePresentation(p.EntityKind, p.Sort, p.Columns); err != nil {
+			t.Errorf("preset %s: sort or columns refused: %v", p.Key, err)
+		}
+		if err := ValidateView(p.EntityKind, &UpsertRequest{FilterSpec: p.FilterSpec, Sort: p.Sort, Columns: p.Columns}); err != nil {
+			t.Errorf("preset %s is no valid view: %v", p.Key, err)
+		}
+	}
+	for _, key := range []string{"my_devices_asset", "my_devices_ci", "warranty_expiring", "servers_without_monitoring"} {
+		if _, ok := PresetByKey(key); !ok {
+			t.Errorf("system view %s missing", key)
+		}
+	}
+	if _, ok := PresetByKey("nope"); ok {
+		t.Error("unknown preset key found")
+	}
+}
+
+// TestCompileSQLSystemViewPredicates covers the predicates of VIE-02
+// (WP-307): values are parameters, never part of the SQL text; owned_by_me
+// reads the calling user from app.user_id; the directed relationship
+// filters read exactly one end; no_metric_within_hours reads
+// metric_sample_v; ci_type_subtree walks ci_type_subtree.
+func TestCompileSQLSystemViewPredicates(t *testing.T) {
+	const marker = "wp307'; DROP TABLE ci; --"
+	spec := FilterSpec{
+		CITypeSubtree: marker, LacksOutgoingRelationship: marker + "o", LacksIncomingRelationship: marker + "i",
+		NoMetricWithinHours: 24, OwnedByMe: true,
+	}
+	where, args, err := spec.CompileSQL("ci", []any{"org"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(where, "wp307") || strings.Contains(where, "24") {
+		t.Errorf("a value in the SQL text: %s", where)
+	}
+	if want := []any{"org", marker, marker + "o", marker + "i", 24}; len(args) != len(want) {
+		t.Fatalf("args %v, want %v", args, want)
+	} else {
+		for i := range want {
+			if args[i] != want[i] {
+				t.Errorf("args[%d] = %v, want %v", i, args[i], want[i])
+			}
+		}
+	}
+	sql := squash(where)
+	for _, part := range []string{
+		"ci.ci_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $2 OR t.name = $2)",
+		"ci.owner_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
+		"ci.owner_team_id IN (SELECT tm.team_id FROM team_member tm WHERE tm.user_id = NULLIF(current_setting('app.user_id', true), '')::uuid)",
+		"NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $3 AND r.source_ci_id = ci.id)",
+		"NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $4 AND r.target_ci_id = ci.id)",
+		"NOT EXISTS (SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id AND ms.time >= now() - make_interval(hours => $5::int))",
+	} {
+		if !strings.Contains(sql, part) {
+			t.Errorf("missing %s in %s", part, sql)
+		}
+	}
+	// Each directed filter reads exactly one end.
+	for _, c := range []struct {
+		spec       FilterSpec
+		end, other string
+	}{
+		{FilterSpec{LacksOutgoingRelationship: "monitored_by"}, "r.source_ci_id = ci.id", "r.target_ci_id"},
+		{FilterSpec{LacksIncomingRelationship: "monitors"}, "r.target_ci_id = ci.id", "r.source_ci_id"},
+	} {
+		w, _, cerr := c.spec.CompileSQL("ci", nil, 1)
+		if cerr != nil || !strings.Contains(w, c.end) || strings.Contains(w, c.other) {
+			t.Errorf("%+v: %s %v, want only %s", c.spec, w, cerr, c.end)
+		}
+	}
+	// The flat relationship filter stays undirected.
+	if w, _, _ := (&FilterSpec{LacksRelationship: "backed_up_by"}).CompileSQL("ci", nil, 1); !strings.Contains(w, "r.source_ci_id = ci.id OR r.target_ci_id = ci.id") {
+		t.Errorf("lacks_relationship: %s", w)
+	}
+
+	// Assets: the holder counts, the CI-only predicates do not apply.
+	where, args, err = spec.CompileSQL("asset", nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql = squash(where)
+	for _, part := range []string{
+		"asset.asset_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $1 OR t.name = $1)",
+		"asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s",
+		"asset.owner_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
+		"asset.assigned_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
+		"asset.assigned_team_id IN (SELECT tm.team_id FROM team_member tm",
+	} {
+		if !strings.Contains(sql, part) {
+			t.Errorf("asset: missing %s in %s", part, sql)
+		}
+	}
+	if strings.Contains(sql, "ci_relationship") || strings.Contains(sql, "metric_sample_v") || len(args) != 1 {
+		t.Errorf("asset: CI-only predicates or args %v in %s", args, sql)
+	}
+
+	for _, bad := range []FilterSpec{{NoMetricWithinHours: -1}, {NoMetricWithinHours: MaxMetricWindowHours + 1}} {
+		var fe *api.FieldError
+		if _, _, err := bad.CompileSQL("ci", nil, 1); !errors.As(err, &fe) || fe.Field != "no_metric_within_hours" {
+			t.Errorf("%+v: %v, want 422 on no_metric_within_hours", bad, err)
+		}
+	}
+	refs := (&FilterSpec{OwnedByMe: true, CITypeSubtree: "server"}).ReferencedFields("ci")
+	var paths []string
+	for _, r := range refs {
+		paths = append(paths, r.Path+"="+r.Name)
+	}
+	if got := strings.Join(paths, ","); got != "ci_type_id=ci_type_subtree,owner_user_id=owned_by_me,owner_team_id=owned_by_me" {
+		t.Errorf("referenced fields: %s", got)
+	}
+	if !usesRelationships(&FilterSpec{LacksOutgoingRelationship: "x"}) || !usesRelationships(&FilterSpec{LacksIncomingRelationship: "x"}) {
+		t.Error("the directed relationship filters need relationship:read")
 	}
 }
 

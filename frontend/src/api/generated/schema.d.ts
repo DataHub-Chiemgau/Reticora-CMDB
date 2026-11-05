@@ -2473,7 +2473,10 @@ export interface paths {
     get: operations['getStocktake'];
     put?: never;
     post?: never;
-    /** Delete a stocktake */
+    /**
+     * Delete a stocktake
+     * @description Deletes a planned or in-progress stocktake with its scans and items. A completed or cancelled stocktake is immutable (409, WP-761).
+     */
     delete: operations['deleteStocktake'];
     options?: never;
     head?: never;
@@ -2494,10 +2497,16 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List recorded scans for a stocktake */
+    /**
+     * List recorded scans for a stocktake
+     * @description The scans the caller sees, newest first (keyset cursor over scanned_at and id, WP-287). A scan carries the client and site of its stocktake (of the scanned object for a stocktake of an earlier release without area); a principal restricted in the client or site scope sees only the scans of its scope.
+     */
     get: operations['listStocktakeScans'];
     put?: never;
-    /** Record a stocktake scan */
+    /**
+     * Record a stocktake scan
+     * @description Records an asset or the counted quantity of a consumable at the place found (INV-01, WP-287). The server classifies the scan: found when the object is in the frozen expected stock (a consumable with an item of that bin), else unexpected. A code read by the scanner is stored, not resolved; the client resolves it through GET /api/v1/labels/lookup. Scans need an in-progress stocktake with snapshot. scan_result, ci_id and location_found are no input (400).
+     */
     post: operations['createStocktakeScan'];
     delete?: never;
     options?: never;
@@ -2516,8 +2525,9 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Difference list of a stocktake
-     * @description Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+     * Difference list of a stocktake (deprecated, use …/differences)
+     * @deprecated
+     * @description Deprecated alias of GET /api/v1/stocktakes/{id}/differences (E-25, E-38, WP-287): the same operation with the same rows and pages. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     get: operations['getStocktakeDifference'];
     put?: never;
@@ -2541,8 +2551,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Complete a stocktake with inventory correction
-     * @description Completes the stocktake and applies the recorded differences to the inventory: assets scanned as missing are marked lost, surplus assets are put back in stock, wrong_location moves the asset to the found location and damaged assets are sent to maintenance. Completion is atomic and only possible once; the request is rejected with 409 when the stocktake is already completed or cancelled.
+     * Complete a stocktake
+     * @description Moves an in-progress stocktake with frozen expected stock to completed in one transaction (INV-01, WP-287, WP-761): it fixes the result (counted_quantity and classification of every item, an item with expected_quantity 0 per unexpected object, total_scanned, total_missing and total_surplus) and books the corrections as stock movements with reason `stocktake:<id>`, each with its event stock.movement. An asset whose last scan shows another place than its location_id (found elsewhere or unexpected) gets a transfer to the place found; a missing asset gets no movement and keeps status and lifecycle state. Per consumable and bin a correction books the counted quantity minus the book stock of the bin at completion (to_location_id raises, from_location_id lowers; none for a difference of 0). A failed booking rolls the whole completion back, the stocktake stays in progress. apply_corrections is deprecated and ignored: every completion books its corrections. Afterwards the stocktake, its scans and items are immutable. A stocktake without snapshot (an earlier release without area included) can only be cancelled.
      */
     post: operations['completeStocktake'];
     delete?: never;
@@ -4407,7 +4417,7 @@ export interface paths {
     put?: never;
     /**
      * Link a document to another entity
-     * @description entity_type is one of ci, asset, assignment, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
+     * @description entity_type is one of ci, asset, ticket, location, disposal_record, stocktake, contract (WP-737) and stock_movement (WP-276; also the former links of assignments, WP-843); any other value answers 422. A target that does not exist or lies outside the caller's scope answers 404. The link takes client, site and team of its target (MGT-01). A principal restricted to some clients, sites or teams may link only documents that already have links; linking an unlinked (org-wide) document answers 403 (E-09), and so does a link whose target lies outside its write scope, e.g. an org-wide object or, for a team-restricted principal, a target without a team of its scope (E-11). A document whose current version is infected (quarantine, SEC-09) takes no new link: 409 with type https://reticora.io/problems/document-quarantined; its existing links stay. The audit log records document.linked with link_id, entity_type and entity_id.
      */
     post: operations['linkDocument'];
     delete?: never;
@@ -7236,7 +7246,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Query inventory availability projections */
+    /**
+     * Query inventory availability projections
+     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved).
+     */
     get: operations['listInventoryAvailability'];
     put?: never;
     post?: never;
@@ -7528,13 +7541,13 @@ export interface paths {
     };
     /**
      * List reservations
-     * @description The reservations of assets and quantity items visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
+     * @description The reservations of assets and consumables visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
      */
     get: operations['listReservations'];
     put?: never;
     /**
-     * Reserve an asset or a quantity of an item
-     * @description Reserves the asset `asset_id` or a quantity of `quantity_item_id`. An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     * Reserve an asset or a quantity of a consumable
+     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
      */
     post: operations['createReservations'];
     delete?: never;
@@ -7577,7 +7590,7 @@ export interface paths {
     put?: never;
     /**
      * Release a reservation
-     * @description Sets the active reservation to `released` after locking its asset and itself (WP-277); the movement `release` and `reservation.released` are written in the same transaction.
+     * @description Sets the active reservation to `released` after locking its asset, or the stock row of its bin, and itself (WP-277, WP-284); the movement `release` (which lowers `reserved` of the bin for a consumable, on_hand stays) and `reservation.released` are written in the same transaction.
      */
     post: operations['createReservationsIdRelease'];
     delete?: never;
@@ -7595,11 +7608,14 @@ export interface paths {
     };
     /**
      * Saved views the caller may read (VIE-01)
-     * @description Own views, views shared org-wide and views shared with a role of the caller.
+     * @description Own views, views shared org-wide and views shared with a role of the caller. A role counts when the caller holds it through a stored role or custom role assignment or, for a standard role (org_admin, engineer, viewer), only through an IdP group or role of the session (E-110, VIE-02).
      */
     get: operations['listSavedViews'];
     put?: never;
-    /** Create a saved view (VIE-01) */
+    /**
+     * Create a saved view (VIE-01)
+     * @description A missing shared is false. With from_preset the view is a clone of a system view (GET /api/v1/saved-views/presets, VIE-02): the server takes entity_kind, filter_spec, sort and columns of the preset, name stays required and the sharing comes from the request. An unknown key and from_preset together with filter_spec are 422 on from_preset.
+     */
     post: operations['createSavedViews'];
     delete?: never;
     options?: never;
@@ -7614,7 +7630,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the standard saved view presets */
+    /**
+     * List the system views (VIE-02)
+     * @description The system views are code presets with a stable key, a display name per language (de, en) and system true; name is the English name. They have no row in saved_view and cannot be changed; POST /api/v1/saved-views with from_preset clones one. The list is always complete, next_cursor is never set.
+     */
     get: operations['listSavedViewsPresets'];
     put?: never;
     post?: never;
@@ -7633,21 +7652,21 @@ export interface paths {
     };
     /**
      * Read a saved view
-     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+     * @description A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01). A standard role (org_admin, engineer, viewer) also counts when the caller holds it only through an IdP group or role of the session (E-110, VIE-02).
      */
     get: operations['getSavedViewsId'];
     put?: never;
     post?: never;
     /**
      * Delete a saved view
-     * @description Only the owner deletes the view (E-86, option 1). A view shared with the caller, org-wide or with a role, answers 404 and stays.
+     * @description Only the owner or a holder of saved_view:manage (effective permissions, also through an IdP group) deletes the view (E-86, option 1, VIE-02); saved_view:manage applies only to views the caller may read. For everybody else a view shared with the caller, org-wide or with a role, answers 404 and stays; a private view of somebody else is 404 as well.
      */
     delete: operations['deleteSavedViewsId'];
     options?: never;
     head?: never;
     /**
      * Update a saved view
-     * @description Only the owner changes the view (E-86, option 1). For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing. Every id in shared_with_roles must be a role or custom role of the organization.
+     * @description Only the owner or a holder of saved_view:manage (effective permissions, also through an IdP group) changes the view (E-86, option 1, VIE-02); saved_view:manage applies only to views the caller may read, a private view of somebody else stays 404. For everybody else a view shared org-wide or with a role is read-only, and its PATCH answers 404 like a view the caller cannot see; the view stays unchanged. Only the fields sent change: a request without shared keeps the sharing and shared_with_roles. Every id in shared_with_roles must be a role or custom role of the organization. from_preset is 422 (field from_preset): a clone is created with POST.
      */
     patch: operations['updateSavedViewsId'];
     trace?: never;
@@ -7707,7 +7726,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. The node related (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs that reach, over at most max_depth (1 to 5, default 1) relationships of rel_types (keys of relationship_type; unknown 422, none: every type) in direction out (the CI is the source, e.g. a VM runs_on a host), in (the target) or both, a CI that matches its where; the walk passes only through visible CIs that are not deleted. At most 10 levels and 100 nodes, the nodes of the where of related included. The filter AST is $defs/filter of api/rules.schema.json. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value, where.value[0] or where.and[1].related.max_depth, or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query (also in the where of related) need asset:read as well, related and the flat has_relationship, lacks_relationship, upstream_of and downstream_of relationship:read. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. The node related (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs that reach, over at most max_depth (1 to 5, default 1) relationships of rel_types (keys of relationship_type; unknown 422, none: every type) in direction out (the CI is the source, e.g. a VM runs_on a host), in (the target) or both, a CI that matches its where; the walk passes only through visible CIs that are not deleted. At most 10 levels and 100 nodes, the nodes of the where of related included. The filter AST is $defs/filter of api/rules.schema.json. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value, where.value[0] or where.and[1].related.max_depth, or the flat field). The flat fields of the system views (VIE-02): owned_by_me selects what the calling user owns, the owner user or a team of the user as owner team and, for assets, also the current holder (user or team); the user is the one of the request, never a value of the body. ci_type_subtree is a type key or name with all its subtypes (for assets through the asset type or the linked CI). For CIs only: lacks_outgoing_relationship requires that the CI is the source of no relationship of the type, lacks_incoming_relationship that it is the target of none (lacks_relationship stays undirected), and no_metric_within_hours (1 to 8760, else 422) that no metric sample of the CI lies in the last n hours. Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query (also in the where of related) need asset:read as well, related and the flat has_relationship, lacks_relationship, lacks_outgoing_relationship, lacks_incoming_relationship, upstream_of and downstream_of relationship:read. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -8677,7 +8696,7 @@ export interface paths {
     };
     /**
      * List the differences of a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description The difference list computed from the frozen expected stock and the scans the caller sees (INV-01, E-38, WP-287), one entry per object, ordered by object: missing (in the snapshot, not scanned; counted quantity 0), unexpected (not in the snapshot; for a consumable a bin without item) and found with a deviation (an asset whose last scan shows another location than the snapshot, a consumable whose scanned quantities do not add up to the expected quantity). The embedded asset carries only the fields the caller may read (field permissions of the object kind asset, RBA-07); the embedded consumable carries its identity. After the completion the scans no longer change, so the list stays as fixed.
      */
     get: operations['listStocktakeDifferences'];
     put?: never;
@@ -10712,6 +10731,29 @@ export interface components {
       shared?: boolean;
       /** @description Role or custom role ids of the organization whose holders may read the view. */
       shared_with_roles?: string[];
+      /** @description POST only: the key of a system view to clone (VIE-02); its entity_kind, filter_spec, sort and columns are taken over. Not together with filter_spec; 422 on from_preset for an unknown key and in a PATCH. */
+      from_preset?: string;
+    };
+    /** @description A system view (VIE-02), a code preset without a row in saved_view. */
+    SavedViewPreset: {
+      /** @description Stable key, e.g. my_devices_ci, warranty_expiring, servers_without_monitoring. */
+      key: string;
+      /** @description English name. */
+      name: string;
+      display_name: {
+        de: string;
+        en: string;
+      };
+      /** @enum {string} */
+      entity_kind: 'ci' | 'asset';
+      /** @description The filter spec of the view (as for POST /api/v1/search/query). */
+      filter_spec: {
+        [key: string]: unknown;
+      };
+      sort: components['schemas']['SavedViewSortKey'][];
+      columns: string[];
+      /** @description Always true. */
+      system: boolean;
     };
     ImpactAnalysis: {
       /** @description The failed CI (single-CI short form only). */
@@ -13176,9 +13218,13 @@ export interface components {
       completed_at?: string;
       /** Format: date-time */
       due_date?: string;
+      /** @description Number of items frozen by the start. */
       total_expected: number;
+      /** @description Number of counted objects (WP-287); computed when read while the stocktake with snapshot is in progress, fixed by the completion. */
       total_scanned: number;
+      /** @description Number of missing objects, computed and fixed like total_scanned. */
       total_missing: number;
+      /** @description Number of unexpected objects, computed and fixed like total_scanned. */
       total_surplus: number;
       /** Format: date-time */
       created_at: string;
@@ -13254,54 +13300,159 @@ export interface components {
       organization_id: string;
       stocktake_id: string;
       asset_id?: string;
+      consumable_id?: string;
+      /** @description The counted quantity of the consumable. */
+      quantity?: number;
+      /**
+       * Format: uuid
+       * @description The place found, a location of the area; absent in scans of earlier releases.
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the stocktake (of the scanned object for a stocktake without area).
+       */
+      client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the stocktake (of the scanned object for a stocktake without area).
+       */
+      site_id?: string;
+      /**
+       * @deprecated
+       * @description Read field of scans of earlier releases.
+       */
       ci_id?: string;
       scanned_by: string;
-      scan_method: string;
-      scan_result: string;
+      /** @enum {string} */
+      scan_method: 'manual' | 'barcode' | 'rfid' | 'qrcode';
+      /**
+       * @description Set by the server: found when the object is in the frozen expected stock, else unexpected; missing occurs in scans of earlier releases only.
+       * @enum {string}
+       */
+      scan_result: 'found' | 'missing' | 'unexpected';
+      /** @description The result of a scan of an earlier release before WP-287 (surplus, wrong_location, damaged, found, missing). */
+      legacy_scan_result?: string;
+      /** @description The code read by the scanner, stored and not resolved. */
+      code?: string;
+      /**
+       * @deprecated
+       * @description Free-text place found of scans of earlier releases.
+       */
       location_found?: string;
       notes?: string;
       /** Format: date-time */
       scanned_at: string;
     };
+    /** @description Exactly one of asset_id and consumable_id; quantity with a consumable only. */
     CreateStockScanRequest: {
+      /** Format: uuid */
       asset_id?: string;
-      ci_id?: string;
-      scan_method?: string;
-      scan_result: string;
-      location_found?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** @description The counted quantity of the consumable, required with consumable_id. */
+      quantity?: number;
+      /**
+       * Format: uuid
+       * @description The place found, a location in the subtree of the area; a bin for a consumable.
+       */
+      location_id: string;
+      /**
+       * @default manual
+       * @enum {string}
+       */
+      scan_method: 'manual' | 'barcode' | 'rfid' | 'qrcode';
+      /** @description The code read by the scanner, stored and not resolved (GET /api/v1/labels/lookup resolves it). */
+      code?: string;
       notes?: string;
     };
     StockScanListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockScan'][];
     };
-    StocktakeDifferenceEntry: {
-      scan: components['schemas']['StockScan'];
-      asset?: components['schemas']['Asset'];
+    StocktakeDifference: {
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable';
+      /**
+       * Format: uuid
+       * @description Set for item_kind asset.
+       */
+      asset_id?: string;
+      /**
+       * Format: uuid
+       * @description Set for item_kind consumable.
+       */
+      consumable_id?: string;
+      /**
+       * @description found entries deviate in location (asset) or quantity (consumable).
+       * @enum {string}
+       */
+      classification: 'found' | 'missing' | 'unexpected';
+      /**
+       * Format: uuid
+       * @description The location of the item of the snapshot; absent for unexpected.
+       */
+      expected_location_id?: string;
+      /**
+       * Format: uuid
+       * @description The place found of the last scan (asset) or the scanned bin (consumable); absent for missing.
+       */
+      found_location_id?: string;
+      /** @description 1 for an asset of the snapshot, the frozen on_hand for a consumable, 0 for unexpected. */
+      expected_quantity: number;
+      /** @description 1 for a scanned asset, the sum of the scanned quantities for a consumable, 0 for missing. */
+      counted_quantity: number;
+      /** @description The asset when the caller sees it, without the fields it may not read (field permissions of the object kind asset). */
+      asset?: {
+        id?: string;
+        client_id?: string;
+        name?: string;
+        inventory_no?: string;
+        serial_number?: string;
+        lifecycle_state?: string;
+        location_id?: string;
+      };
+      /** @description The consumable when the caller sees it. */
+      consumable?: {
+        id: string;
+        name: string;
+        sku?: string;
+        unit?: string;
+      };
     };
     StocktakeDifferenceListResponse: components['schemas']['PaginationEnvelope'] & {
-      data: components['schemas']['StocktakeDifferenceEntry'][];
+      data: components['schemas']['StocktakeDifference'][];
     };
     CompleteStocktakeRequest: {
       /**
-       * @description Whether the recorded differences are applied to the inventory. Defaults to true.
-       * @default true
+       * @deprecated
+       * @description Ignored (WP-761); every completion books its corrections.
        */
-      apply_corrections: boolean;
+      apply_corrections?: boolean;
     };
+    /** @description A stock movement booked by the completion (WP-761): a transfer of an asset to the place found, or a correction of a consumable in a bin, raising (to_location_id) or lowering (from_location_id) its stock by quantity. */
     StocktakeCorrection: {
-      asset_id: string;
-      asset_tag?: string;
-      scan_result: string;
-      previous_status?: string;
-      new_status?: string;
-      previous_location?: string;
-      new_location?: string;
-      applied: boolean;
-      detail?: string;
+      /** Format: uuid */
+      movement_id: string;
+      /** @enum {string} */
+      movement_type: 'transfer' | 'correction';
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      consumable_id?: string;
+      /** Format: uuid */
+      from_location_id?: string;
+      /** Format: uuid */
+      to_location_id?: string;
+      /** @description The booked quantity of a consumable correction; absent for an asset. */
+      quantity?: number;
     };
     StocktakeCompletion: {
       stocktake: components['schemas']['Stocktake'];
+      /** @description The number of booked corrections (WP-761). */
       corrections_applied: number;
+      /** @description The movements booked as corrections (WP-761); the result per object is in the items and the difference list. */
       corrections: components['schemas']['StocktakeCorrection'][];
     };
     /** @description A ticket (TKT-01). The fields id, organization_id, ticket_number, title, resolved_at, closed_at and the timestamps are present (the optional ones when set); the others are left out when the field permissions do not let the caller read them (object kind ticket, field keys core.<field>, RBA-07, WP-765). */
@@ -13684,26 +13835,34 @@ export interface components {
     };
     /** @enum {string} */
     ReservationState: 'active' | 'released' | 'expired' | 'consumed';
-    /** @description A reservation of an asset or of a quantity of an item (AST-06). It expires at `expires_at`; without it, it does not expire. */
+    /** @description A reservation of an asset or of a quantity of a consumable in a bin (AST-06, STK-03). It expires at `expires_at`; without it, it does not expire. */
     Reservation: {
       /** Format: uuid */
       id: string;
       /** Format: uuid */
       organization_id: string;
       /** @enum {string} */
-      item_kind: 'asset' | 'quantity_item';
+      item_kind: 'asset' | 'consumable';
       /** Format: uuid */
       asset_id?: string;
-      /** Format: uuid */
-      quantity_item_id?: string;
       /**
        * Format: uuid
-       * @description Client of the asset or quantity item, derived by the database (WP-750); absent for an org-wide item.
+       * @description The reserved consumable (item_kind consumable, WP-284).
+       */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The bin of the reserved quantity (item_kind consumable, WP-284).
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the asset or of the bin, derived by the database (WP-750, WP-284); absent for an org-wide asset.
        */
       readonly client_id?: string;
       /**
        * Format: uuid
-       * @description Site of the asset or quantity item, derived by the database (WP-750); absent without a location.
+       * @description Site of the asset or of the bin, derived by the database (WP-750, WP-284); absent for an asset without location.
        */
       readonly site_id?: string;
       quantity: number;
@@ -13736,11 +13895,25 @@ export interface components {
       data: components['schemas']['Reservation'][];
     };
     ReservationCreateRequest: {
-      /** @enum {string} */
-      item_kind?: 'asset' | 'quantity_item';
+      /**
+       * @description Without it, asset when asset_id is set, else consumable; quantity_item is the deprecated alias of consumable (E-38).
+       * @enum {string}
+       */
+      item_kind?: 'asset' | 'consumable' | 'quantity_item';
       /** Format: uuid */
       asset_id?: string;
       /** Format: uuid */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The bin (location of kind bin) of a consumable reservation; without it the only bin with a stock row of the consumable.
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @deprecated
+       * @description Deprecated alias of consumable_id until the sunset of inventory/items (E-38, WP-284).
+       */
       quantity_item_id?: string;
       quantity?: number;
       /** Format: date-time */
@@ -16611,7 +16784,7 @@ export interface components {
       id: string;
       organization_id: string;
       document_id: string;
-      /** @description ci, asset, assignment, ticket, location, disposal_record, stocktake or contract. A link to a contract takes the client of the contract and goes when the contract is deleted (WP-737). */
+      /** @description ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement. A link to a contract takes the client of the contract and goes when the contract is deleted (WP-737). */
       entity_type: string;
       entity_id: string;
       /** Format: date-time */
@@ -16661,7 +16834,7 @@ export interface components {
       limit_mb: number | null;
     };
     CreateDocumentLinkRequest: {
-      /** @description ci, asset, assignment, ticket, location, disposal_record, stocktake or contract. */
+      /** @description ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement. */
       entity_type: string;
       entity_id: string;
     };
@@ -20385,7 +20558,7 @@ export interface operations {
         /** @description Sort direction. */
         sort_dir?: components['parameters']['SortDir'];
         category?: string;
-        /** @description Only documents linked to this target (WP-811); requires entity_id. One of ci, asset, assignment, ticket, location, disposal_record, stocktake and contract; any other value answers 422. */
+        /** @description Only documents linked to this target (WP-811); requires entity_id. One of ci, asset, ticket, location, disposal_record, stocktake, contract and stock_movement; any other value answers 422. */
         entity_type?: string;
         /** @description Id of the target named by entity_type; requires entity_type. A target that does not exist or lies outside the caller's scope answers 404, only links visible in the scope count. */
         entity_id?: string;
@@ -22644,6 +22817,15 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description The stocktake is completed or cancelled; its result is immutable (WP-761). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   updateStocktake: {
@@ -22683,7 +22865,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description location_id changes while the stocktake is not planned. */
+      /** @description location_id changes while the stocktake is not planned, or the stocktake is completed or cancelled (its result is immutable, WP-761). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -22731,7 +22913,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Paginated list of stocktake scans */
+      /** @description A page of the scans (cursor contract, API-02). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -22740,6 +22922,7 @@ export interface operations {
           'application/json': components['schemas']['StockScanListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };
@@ -22771,7 +22954,33 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
+      /** @description The stocktake, the asset or the consumable is unknown or outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The stocktake is not in progress or has no frozen expected stock (a stocktake of an earlier release without area included). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Not exactly one of asset_id and consumable_id, a quantity for an asset or none greater than 0 for a consumable, an unknown scan_method, or a place found (`field` location_id) that is unknown, outside the scope or outside the area, or no bin for a consumable. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getStocktakeDifference: {
@@ -22802,7 +23011,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Paginated difference list */
+      /** @description A page of the difference list (cursor contract, API-02). */
       200: {
         headers: {
           [name: string]: unknown;
@@ -22811,8 +23020,18 @@ export interface operations {
           'application/json': components['schemas']['StocktakeDifferenceListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description Profile --no-db, as for …/differences. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   completeStocktake: {
@@ -22831,7 +23050,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Stocktake completed, including the applied corrections */
+      /** @description Stocktake completed, including the booked corrections */
       200: {
         headers: {
           [name: string]: unknown;
@@ -22851,8 +23070,26 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description Stocktake is already completed or cancelled */
+      /** @description The stocktake is not in progress (planned, completed or cancelled) or has no frozen expected stock, or a correction would lower the stock of a bin below on_hand − reserved (type insufficient-stock); nothing was booked. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A correction was refused by the movement service, e.g. a place found of another client than the asset; `field` names the location of the movement. Nothing was booked. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Without PostgreSQL (profile --no-db) the completion is not available, like start. */
+      501: {
         headers: {
           [name: string]: unknown;
         };
@@ -36898,7 +37135,7 @@ export interface operations {
           'application/json': components['schemas']['Reservation'];
         };
       };
-      /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
+      /** @description Neither asset_id nor consumable_id (quantity_item_id) is set, or a value is invalid. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -36909,7 +37146,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
+      /** @description The asset, consumable or bin is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
@@ -36918,7 +37155,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`), or the available stock of the bin (on_hand − reserved) does not cover the quantity (`https://reticora.io/problems/insufficient-stock`). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -36927,7 +37164,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description An id field is no UUID or a time no RFC 3339 date-time; `field` names it. */
+      /** @description An id field is no UUID or a time no RFC 3339 date-time, the request names both or the wrong object for item_kind, location_id is no bin, or location_id is missing while the consumable has none or several bins; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37098,7 +37335,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or an unknown from_preset or from_preset with filter_spec (field from_preset). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37118,12 +37355,18 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the standard saved view presets */
+      /** @description The system views */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            /** @description Opaque signed cursor for the next page (API-02); never set, the list is complete. */
+            next_cursor?: string;
+            data: components['schemas']['SavedViewPreset'][];
+          };
+        };
       };
       /** @description Unauthorized */
       401: {
@@ -37238,7 +37481,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]). */
+      /** @description Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or from_preset (field from_preset). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37470,6 +37713,16 @@ export interface operations {
           /** @enum {string} */
           entity_kind?: 'ci' | 'asset';
           where?: components['schemas']['FilterExpr'];
+          /** @description What the calling user owns (owner user, owner team of the user; for assets also the holder). */
+          owned_by_me?: boolean;
+          /** @description A CI type key or name including all its subtypes. */
+          ci_type_subtree?: string;
+          /** @description CIs only; the CI is the source of no relationship of this type. */
+          lacks_outgoing_relationship?: string;
+          /** @description CIs only; the CI is the target of no relationship of this type. */
+          lacks_incoming_relationship?: string;
+          /** @description CIs only; no metric sample of the CI within the last n hours. */
+          no_metric_within_hours?: number;
           sort?: components['schemas']['SavedViewSortKey'][];
           columns?: string[];
         } & {
@@ -39837,17 +40090,28 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the differences of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287. */
+      /** @description A page of the difference list (cursor contract, API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StocktakeDifferenceListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description Profile --no-db: the in-memory repository freezes no expected stock. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   cancelStocktake: {

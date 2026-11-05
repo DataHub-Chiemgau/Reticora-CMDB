@@ -98,7 +98,6 @@ var handlerErrorAllowlist = []errorEchoAllowance{
 	{"savedview/view_rules.go", "ValidateView", "err", 2, "", "validation: the JSON round trip of the request's filter_spec, like api.ReadJSON"},
 	{"signup/handler.go", "writeError", "err", 3, "", "validation: ErrUnavailable, ErrInvalidToken, ErrExpired, returned unwrapped"},
 	{"signup/protect.go", "writeProtectionError", "err", 3, "", "validation: ErrSignupRateLimit, ErrCaptchaInvalid, ErrDomainBlocked, returned unwrapped"},
-	{"stocktake/handler.go", "Handler.Complete", "err", 1, "", "validation: ErrAlreadyCompleted, returned unwrapped"},
 	{"stocktake/handler.go", "Handler.List", "err", 1, "", "validation: api.ErrInvalidCursor \"sort order changed\" of the keyset check"},
 	{"ticket/handler.go", "Handler.List", "err", 1, "", "validation: api.ErrInvalidCursor \"sort order changed\" of the keyset check"},
 	{"user/handler.go", "Handler.DeleteUser", "err", 1, "", "validation: ErrUserOwnsOpenObjects with the count, ErrUserReferenced"},

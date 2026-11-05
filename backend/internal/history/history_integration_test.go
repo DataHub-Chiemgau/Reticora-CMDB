@@ -5,20 +5,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -507,4 +511,194 @@ func (phase1Resolver) Resolve(_ context.Context, p identity.Principal) (*permiss
 // source is answered 500 (fail-closed, WP-265).
 func fieldPolicySource() func(http.Handler) http.Handler {
 	return permission.FieldPolicyMiddleware(phase1Resolver{})
+}
+
+// TestCITimeline covers GQL-03 and CI-06 (WP-792) against PostgreSQL: the
+// timeline of a CI (history.CITimeline, the source of the BFF field
+// ciHistory) holds its unified history and the relationship_change entries
+// of its edges, also of a deleted edge, at the source and at the target
+// CI; the window bounds the time of recording; the relationship entries of
+// an edge to a CI outside the client or site scope are invisible, as is
+// the timeline of a CI outside it; List stays without relationship entries.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestCITimeline(t *testing.T) {
+	f := scopetest.Seed(t, "b1")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	locs := locations.NewPGRepository(f.App)
+	site := func(name string) string {
+		t.Helper()
+		loc, err := locs.Create(ctx, f.OrgA, locations.CreateRequest{Kind: locations.KindSite, ClientID: f.Client1, Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loc.ID
+	}
+	site1, site2 := site("timeline-site-1"), site("timeline-site-2")
+	var typeID string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1`).Scan(&typeID); err != nil {
+		t.Fatal(err)
+	}
+	cis := ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder())
+	mk := func(name, clientID, locationID string) string {
+		t.Helper()
+		item := &ci.Item{OrganizationID: f.OrgA, ClientID: clientID, LocationID: locationID, CITypeID: typeID, Name: name, Status: "active"}
+		if err := cis.Create(ctx, item); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		return item.ID
+	}
+	src, dst := mk("timeline-src", f.Client1, site1), mk("timeline-dst", f.Client1, site1)
+	foreign, otherSite := mk("timeline-client-2", f.Client2, ""), mk("timeline-site-2", f.Client1, site2)
+	rels := relationship.NewPGRepository(f.App)
+	edge := func(target string) string {
+		t.Helper()
+		rel := &relationship.Relationship{OrganizationID: f.OrgA, SourceCIID: src, TargetCIID: target, RelType: "depends_on"}
+		if err := rels.Create(ctx, rel); err != nil {
+			t.Fatalf("create edge to %s: %v", target, err)
+		}
+		return rel.ID
+	}
+	removed := edge(dst)
+	if err := rels.Delete(ctx, f.OrgA, removed); err != nil {
+		t.Fatal(err)
+	}
+	toForeign, toOtherSite := edge(foreign), edge(otherSite)
+	// An entity change of ten days ago, before the window.
+	if _, err := f.Admin.Exec(bg, `INSERT INTO entity_change (organization_id, entity_type, entity_id, change_type, comment, created_at)
+		VALUES ($1, 'ci', $2, 'lifecycle_transition', 'timeline-old', now() - interval '10 days')`, f.OrgA, src); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := history.NewPGRepository(f.App)
+	page := api.PaginationParams{Limit: 100}
+	all := history.TimelineOptions{IncludeAudit: true, IncludeRelationships: true}
+	timeline := func(ctx context.Context, id string, opts history.TimelineOptions) []history.Change {
+		t.Helper()
+		entries, total, err := repo.CITimeline(ctx, f.OrgA, id, page, opts)
+		if err != nil {
+			t.Fatalf("timeline of %s: %v", id, err)
+		}
+		if total != len(entries) {
+			t.Fatalf("timeline of %s: total %d, %d entries", id, total, len(entries))
+		}
+		for i := 1; i < len(entries); i++ {
+			if entries[i].CreatedAt.After(entries[i-1].CreatedAt) {
+				t.Errorf("timeline of %s not newest first at %d", id, i)
+			}
+		}
+		return entries
+	}
+	// edgeKinds are the change kinds of the relationship entries per edge.
+	edgeKinds := func(entries []history.Change) map[string][]string {
+		out := map[string][]string{}
+		for _, e := range entries {
+			if e.Source != history.SourceRelationshipChange {
+				continue
+			}
+			if e.EntityType != "relationship" || e.ObservedAt == nil || !e.ObservedAt.Equal(e.CreatedAt) {
+				t.Errorf("relationship entry %s: %+v", e.ID, e)
+			}
+			out[e.EntityID] = append(out[e.EntityID], e.ChangeType)
+		}
+		for id := range out {
+			slices.Sort(out[id])
+		}
+		return out
+	}
+	sources := func(entries []history.Change) map[string]int {
+		out := map[string]int{}
+		for _, e := range entries {
+			out[e.Source]++
+		}
+		return out
+	}
+
+	window := all
+	window.From = time.Now().Add(-24 * time.Hour)
+	entries := timeline(ctx, src, window)
+	kinds := edgeKinds(entries)
+	want := map[string][]string{removed: {relationship.ChangeCreated, relationship.ChangeRemoved},
+		toForeign: {relationship.ChangeCreated}, toOtherSite: {relationship.ChangeCreated}}
+	if !maps.EqualFunc(kinds, want, slices.Equal[[]string]) {
+		t.Errorf("relationship entries of the source: %v, want %v", kinds, want)
+	}
+	for _, e := range entries {
+		if e.EntityID == removed && e.ChangeType == relationship.ChangeRemoved && e.OldValue == nil {
+			t.Errorf("the removal carries no edge before it: %+v", e)
+		}
+	}
+	got := sources(entries)
+	if got[history.SourceCIChange] < 1 || got[history.SourceAudit] < 1 || got[history.SourceEntityChange] != 0 {
+		t.Errorf("sources in the window: %v", got)
+	}
+	whole := timeline(ctx, src, all)
+	if len(whole) != len(entries)+1 || sources(whole)[history.SourceEntityChange] != 1 {
+		t.Errorf("without a window: %d entries, %v", len(whole), sources(whole))
+	}
+	before := all
+	before.To = time.Now().Add(-5 * 24 * time.Hour)
+	if old := timeline(ctx, src, before); len(old) != 1 || old[0].Comment != "timeline-old" {
+		t.Errorf("before five days: %+v", old)
+	}
+	if kinds = edgeKinds(timeline(ctx, dst, all)); !maps.EqualFunc(kinds, map[string][]string{removed: want[removed]}, slices.Equal[[]string]) {
+		t.Errorf("relationship entries of the target: %v", kinds)
+	}
+	if got = sources(timeline(ctx, src, history.TimelineOptions{})); got[history.SourceRelationshipChange] != 0 || got[history.SourceAudit] != 0 {
+		t.Errorf("without audit and relationship entries: %v", got)
+	}
+
+	// Pages of two over the whole timeline.
+	first, total, err := repo.CITimeline(ctx, f.OrgA, src, api.PaginationParams{Limit: 2}, all)
+	if err != nil || total != len(whole) || len(first) != 2 || first[0].ID != whole[0].ID {
+		t.Errorf("first page: %d/%d %v", len(first), total, err)
+	}
+	second, _, err := repo.CITimeline(ctx, f.OrgA, src, api.PaginationParams{Limit: 2, Offset: 2}, all)
+	if err != nil || len(second) != 2 || second[0].ID != whole[2].ID {
+		t.Errorf("second page: %d %v", len(second), err)
+	}
+
+	// The scope: an edge to a CI outside it is invisible, a CI outside it
+	// has no timeline.
+	siteCtx := func(siteID string) context.Context {
+		scope := database.OrgWideScope(f.OrgA, f.User)
+		scope.Sites = database.ScopeIDs(siteID)
+		return database.ContextWithTenantScope(bg, &scope)
+	}
+	if kinds = edgeKinds(timeline(f.ClientCtx(f.Client1), src, all)); len(kinds) != 2 || kinds[toForeign] != nil {
+		t.Errorf("client 1 sees the edges %v, want the ones without client 2", kinds)
+	}
+	if kinds = edgeKinds(timeline(siteCtx(site1), src, all)); len(kinds) != 2 || kinds[toOtherSite] != nil {
+		t.Errorf("site 1 sees the edges %v, want the ones without site 2", kinds)
+	}
+	for name, scoped := range map[string]context.Context{"client 2": f.ClientCtx(f.Client2), "site 2": siteCtx(site2),
+		"organization B": f.OrgCtx(f.OrgB)} {
+		orgID := f.OrgA
+		if name == "organization B" {
+			orgID = f.OrgB
+		}
+		if out, n, terr := repo.CITimeline(scoped, orgID, src, page, all); !errors.Is(terr, api.ErrNotFound) || n != 0 || len(out) != 0 {
+			t.Errorf("%s reads the timeline: %d entries (%v), want api.ErrNotFound", name, n, terr)
+		}
+	}
+
+	// List is unchanged: ci_change, entity_change, location_change and
+	// audit, no relationship entries.
+	listed, listedTotal, err := repo.List(ctx, f.OrgA, "ci", src, page, history.ListOptions{IncludeAudit: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutEdges := all
+	withoutEdges.IncludeRelationships = false
+	if n := len(timeline(ctx, src, withoutEdges)); listedTotal != n || len(listed) != n {
+		t.Errorf("List: %d/%d entries, the timeline without edges %d", len(listed), listedTotal, n)
+	}
+	for _, e := range listed {
+		switch e.Source {
+		case history.SourceCIChange, history.SourceEntityChange, history.SourceLocationChange, history.SourceAudit:
+		default:
+			t.Errorf("List holds an entry of %s", e.Source)
+		}
+	}
 }

@@ -1470,3 +1470,11 @@ LCY-03;[P2];B;backend/internal/lifecycle/guards_integration_test.go;WP-279
 STK-05;[P2];B;backend/internal/order/order_receive_integration_test.go;WP-760
 AST-02;[P2];B;backend/internal/assignment/signature_verify_integration_test.go;WP-748
 REL-09;[P2];B;backend/internal/relationship/history_system_integration_test.go;WP-771
+STK-03;[P2];B;backend/internal/reservation/consumable_reservation_integration_test.go;WP-284
+INV-01;[P2];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-287
+API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/stocktake/stocktake_scope_integration_test.go;WP-287
+VIE-02;[P2];C;backend/internal/savedview/presets_integration_test.go;WP-307
+STK-03;[P2];B;backend/internal/tenant/rls/site_policies_integration_test.go;WP-844
+GQL-03;[P2];C;backend/internal/graphqlbff/ci_aggregates_test.go;WP-792
+INV-01;[P2];B;backend/internal/stocktake/complete_integration_test.go;WP-761
+AST-07;[P2];B;backend/internal/assignment/projection_integration_test.go;WP-843

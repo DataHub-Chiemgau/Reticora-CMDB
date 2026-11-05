@@ -18,7 +18,8 @@ type View struct {
 	Columns []string  `json:"columns"`
 	Shared  bool      `json:"shared"`
 	// SharedWithRoles shares the view with the holders of these roles
-	// (role or custom role ids); they may read it, only the owner edits it.
+	// (role or custom role ids); they may read it. Only the owner or a
+	// holder of saved_view:manage changes or deletes it (VIE-02).
 	SharedWithRoles []string  `json:"shared_with_roles"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -42,6 +43,10 @@ type UpsertRequest struct {
 	Columns         []string       `json:"columns,omitempty"`
 	Shared          *bool          `json:"shared,omitempty"`
 	SharedWithRoles []string       `json:"shared_with_roles,omitempty"`
+	// FromPreset clones a system view (POST only, VIE-02): the server takes
+	// entity_kind, filter_spec, sort and columns of the preset of this key
+	// (Presets); name and sharing come from the request.
+	FromPreset string `json:"from_preset,omitempty"`
 }
 
 // FilterSpec is the structured filter DSL (spec §17). Every field is
@@ -67,8 +72,27 @@ type FilterSpec struct {
 	HasOwner           *bool  `json:"has_owner,omitempty"`
 	// HasRelationship requires at least one relationship of the given type.
 	HasRelationship string `json:"has_relationship,omitempty"`
-	// LacksRelationship requires the absence of the given relationship type.
+	// LacksRelationship requires the absence of the given relationship type,
+	// in either direction.
 	LacksRelationship string `json:"lacks_relationship,omitempty"`
+	// LacksOutgoingRelationship requires that the CI is the source of no
+	// relationship of the type, LacksIncomingRelationship that it is the
+	// target of none (VIE-02, CIs only).
+	LacksOutgoingRelationship string `json:"lacks_outgoing_relationship,omitempty"`
+	LacksIncomingRelationship string `json:"lacks_incoming_relationship,omitempty"`
+	// NoMetricWithinHours requires that no metric sample of the CI lies in
+	// the last n hours (metric_sample_v; VIE-02, CIs only), 1 to
+	// MaxMetricWindowHours.
+	NoMetricWithinHours int `json:"no_metric_within_hours,omitempty"`
+	// OwnedByMe selects what the calling user owns (VIE-02): the owner user
+	// or a team of the user as owner team; for an asset also the current
+	// holder (holder cache, user or team). The user is app.user_id of the
+	// request transaction, never a value of the request.
+	OwnedByMe bool `json:"owned_by_me,omitempty"`
+	// CITypeSubtree is a type key or name including all its subtypes
+	// (ci_type.parent_type_id, ci_type_subtree; VIE-02); for an asset
+	// through asset_type_id or the linked CI like ci_type.
+	CITypeSubtree string `json:"ci_type_subtree,omitempty"`
 	// UpstreamOf / DownstreamOf scope to graph dependencies of a CI.
 	UpstreamOf             string   `json:"upstream_of,omitempty"`
 	DownstreamOf           string   `json:"downstream_of,omitempty"`
@@ -89,37 +113,4 @@ type FilterSpec struct {
 	// them in its own sort and columns, never in its filter_spec.
 	Sort    []SortKey `json:"sort,omitempty"`
 	Columns []string  `json:"columns,omitempty"`
-}
-
-// Presets returns the standard saved views (spec §17 examples). They are
-// starting points; users clone and adjust them.
-func Presets() []View {
-	return []View{
-		{
-			Name: "Available laptops in Berlin", EntityKind: "asset", Shared: true,
-			FilterSpec: map[string]any{
-				"ci_type": "client_laptop", "available_only": true, "location_search": "Berlin",
-			},
-		},
-		{
-			// No attribute: no migration or seed defines environment, and
-			// an undefined attribute is refused (API-02, WP-309).
-			Name: "Servers without backup relationship", EntityKind: "ci", Shared: true,
-			FilterSpec: map[string]any{
-				"ci_type": "physical_server", "lacks_relationship": "backed_up_by",
-			},
-		},
-		{
-			Name: "Assets with warranty expiring within 90 days", EntityKind: "asset", Shared: true,
-			FilterSpec: map[string]any{"warranty_within_days": 90},
-		},
-		{
-			Name: "Deployed devices without assigned owner", EntityKind: "asset", Shared: true,
-			FilterSpec: map[string]any{"lifecycle": "deployed", "has_owner": false},
-		},
-		{
-			Name: "CIs with unresolved discovery conflicts", EntityKind: "ci", Shared: true,
-			FilterSpec: map[string]any{"reconciliation_conflict": true},
-		},
-	}
 }

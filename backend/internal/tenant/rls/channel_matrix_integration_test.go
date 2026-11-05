@@ -1553,6 +1553,50 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		}
 		return out
 	}}
+	// The CI aggregates (WP-792): a CI outside the scope has no form and
+	// no history (null) and no series (empty); no answer names a CI the
+	// principal does not see (the values of the relationship changes
+	// included).
+	rows["graphql-ci-form"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
+		var out []matrixProbe
+		for _, c := range append(slices.Clone(cis), object{unknownID, seen{}}) {
+			q := fmt.Sprintf(`{ ciForm(id: %q) { ciTypeId source sections { key fields { name } } requiredFields } }`, c.id)
+			if c.seen[p.kind] {
+				out = append(out, gql("ciForm", q, []string{`"ciForm":{"ciTypeId"`}, append(hiddenCIs(p), `"errors"`)))
+			} else {
+				out = append(out, gql("ciForm", q, []string{`"ciForm":null`}, append(nameOf(c.id), `"errors"`)))
+			}
+		}
+		return out
+	}}
+	rows["graphql-ci-history"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
+		var out []matrixProbe
+		for _, c := range append(slices.Clone(cis), object{unknownID, seen{}}) {
+			q := fmt.Sprintf(`{ ciHistory(id: %q, first: 100) { totalCount nodes { entityType entityId source oldValue newValue } } }`, c.id)
+			if c.seen[p.kind] {
+				out = append(out, gql("ciHistory", q, []string{`"ciHistory":{"totalCount"`}, append(hiddenCIs(p), `"errors"`)))
+			} else {
+				out = append(out, gql("ciHistory", q, []string{`"ciHistory":null`}, append(nameOf(c.id), `"errors"`)))
+			}
+		}
+		return out
+	}}
+	rows["graphql-ci-metrics"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
+		var out []matrixProbe
+		for _, c := range []object{m.ci1, m.ci2, m.ciB, {unknownID, seen{}}} {
+			q := fmt.Sprintf(`{ ciMetrics(id: %q) { name points { value } } }`, c.id)
+			if c.seen[p.kind] {
+				out = append(out, gql("ciMetrics", q, []string{m.metric[c.id]}, []string{`"errors"`}))
+			} else {
+				hide := []string{`"errors"`}
+				if name := m.metric[c.id]; name != "" {
+					hide = append(hide, name)
+				}
+				out = append(out, gql("ciMetrics", q, []string{`"ciMetrics":[]`}, hide))
+			}
+		}
+		return out
+	}}
 	return rows
 }
 

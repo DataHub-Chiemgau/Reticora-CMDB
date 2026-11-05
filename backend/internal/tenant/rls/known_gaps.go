@@ -92,11 +92,6 @@ type DerivedScope struct {
 // (for example after the table got client_id and site_id), so the list
 // only shrinks.
 var DerivedScopeTables = map[string]DerivedScope{
-	"assignment": {
-		Path:     "asset_id -> asset, ci_id -> ci (assignment.assignmentVisible)",
-		Reason:   "an assignment is visible only when its asset and CI are; it has no location of its own",
-		TestFile: "internal/assignment/assignment_scope_integration_test.go", TestName: "TestAssignmentRepositoryClientScope",
-	},
 	"building": {
 		Path:     "site_id -> site (site predicate in building_isolation, client via tenantapi.buildingVisible)",
 		Reason:   "a building carries its site; the site determines the client",
@@ -117,11 +112,6 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",
 		Reason:   "TimescaleDB hypertable without row level security (ViewProtectedTables)",
 		TestFile: "internal/monitoring/audit_t1_metric_scope_integration_test.go", TestName: "TestMetricViewsHonourScope",
-	},
-	"stock_scan": {
-		Path:     "asset_id -> asset, ci_id -> ci (stocktake.scanVisible)",
-		Reason:   "a scan is visible only when the scanned asset and CI are",
-		TestFile: "internal/stocktake/stocktake_scope_integration_test.go", TestName: "TestStocktakeRepositoryClientScope",
 	},
 }
 
@@ -374,8 +364,6 @@ const (
 	refG1           = "G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329)"
 	refLocationNode = "the specialist row shares its id with its node of the location tree (000157); " +
 		"rest of SR-03, fixed before GA (E-137, WP-329)"
-	refWP275 = "assignment is replaced by the assignment service over stock_movement (WP-275, K19); " +
-		"the successor references with the organization"
 	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
 		"the successor references with the organization"
 	refWP758 = "quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization"
@@ -401,10 +389,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"ai_message.conversation_id":                     {Constraint: "ai_message_conversation_id_fkey", Target: "ai_conversation", Reason: refG1},
 	"api_key.rotated_from":                           {Constraint: "api_key_rotated_from_fkey", Target: "api_key", Reason: refG1},
 	"asset_location.asset_id":                        {Constraint: "asset_location_asset_id_fkey", Target: "asset", Reason: refG1},
-	"assignment.asset_id":                            {Constraint: "assignment_asset_id_fkey", Target: "asset", Reason: refWP275},
-	"assignment.assigned_by":                         {Constraint: "assignment_assigned_by_fkey", Target: "app_user", Reason: refWP275},
-	"assignment.assigned_to":                         {Constraint: "assignment_assigned_to_fkey", Target: "app_user", Reason: refWP275},
-	"assignment.ci_id":                               {Constraint: "assignment_ci_id_fkey", Target: "ci", Reason: refWP275},
 	"building.id":                                    {Constraint: "building_location_fkey", Target: "location", Reason: refLocationNode},
 	"building.site_id":                               {Constraint: "building_site_id_fkey", Target: "site", Reason: refG1},
 	"cable.source_interface_id":                      {Constraint: "cable_source_interface_id_fkey", Target: "network_interface", Reason: refG1},
@@ -478,7 +462,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"rack_mount.rack_id":                             {Constraint: "rack_mount_rack_id_fkey", Target: "rack", Reason: refG1},
 	"relationship_suppression.source_ci_id":          {Constraint: "relationship_suppression_source_ci_id_fkey", Target: "ci", Reason: refG1},
 	"relationship_suppression.target_ci_id":          {Constraint: "relationship_suppression_target_ci_id_fkey", Target: "ci", Reason: refG1},
-	"reservation.quantity_item_id":                   {Constraint: "reservation_quantity_item_id_fkey", Target: "quantity_item", Reason: refWP758},
 	"role_assignment.role_id":                        {Constraint: "role_assignment_role_id_fkey", Target: "role", Reason: refG1},
 	"role_assignment.scope_site_id":                  {Constraint: "role_assignment_scope_site_id_fkey", Target: "site", Reason: refG1},
 	"role_assignment.user_id":                        {Constraint: "role_assignment_user_id_fkey", Target: "app_user", Reason: refG1},

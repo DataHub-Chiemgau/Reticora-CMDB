@@ -768,7 +768,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithCILinks(opts.CIService),
 		assignment.NewHandler(repos.Assignment).WithService(signingAssignments(&repos, &opts)),
 		documentHandler,
-		stocktake.NewHandler(repos.Stocktake),
+		// The completion books its corrections through the movement
+		// service (WP-761); without PostgreSQL it answers 501.
+		stocktake.NewHandler(repos.Stocktake).WithService(stocktake.NewService(repos.Stocktake, movements)),
 		consumable.NewHandler(repos.Consumable),
 		// The goods receipt books through the movement service (WP-760).
 		order.NewHandler(repos.Order).WithBookings(movements),
@@ -804,7 +806,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
-			WithSources(bffSources(&repos, topologyHandler, bffJobs)).WithModules(opts.Modules),
+			WithSources(bffSources(&repos, topologyHandler, bffJobs, FormPolicyFactory(&repos, fieldResolver))).WithModules(opts.Modules),
 		relationshiptype.NewHandler(repos.RelationshipType),
 		citype.NewHandler(repos.CIType, opts.Dispatcher).
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).

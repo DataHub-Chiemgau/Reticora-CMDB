@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // The package consumable does not import the movement service: the
@@ -299,6 +301,170 @@ func bookTotal(ctx context.Context, tx pgx.Tx, b *Booking, deltas []binDelta, lo
 		return nil
 	}
 	return appendBelowMinimum(ctx, tx, b.OrganizationID, locked)
+}
+
+// ReservationTypes are the movement types of a reservation on the stock
+// of a bin (WP-284): reservation raises reserved, release lowers it;
+// on_hand stays. Only the reservation path books them (ApplyReservation).
+var ReservationTypes = map[string]bool{"reservation": true, "release": true}
+
+// StockKey names the stock row of a consumable in a bin.
+type StockKey struct {
+	ConsumableID, LocationID string
+}
+
+// stockReservedCheck is the check reserved <= on_hand of stock_level.
+const stockReservedCheck = "stock_level_reserved_check"
+
+// LockStock locks the stock rows keys in tx, ordered by (consumable_id,
+// location_id), the lock order of the reservation paths (WP-284: the stock
+// rows first, then the reservations). Rows outside the caller's scope are
+// not locked; the number of locked rows is returned.
+func LockStock(ctx context.Context, tx pgx.Tx, orgID string, keys []StockKey) (int, error) {
+	sorted := slices.Clone(keys)
+	slices.SortFunc(sorted, func(x, y StockKey) int {
+		if c := strings.Compare(x.ConsumableID, y.ConsumableID); c != 0 {
+			return c
+		}
+		return strings.Compare(x.LocationID, y.LocationID)
+	})
+	sorted = slices.Compact(sorted)
+	locked := 0
+	for _, k := range sorted {
+		if !api.IsUUID(k.ConsumableID) || !api.IsUUID(k.LocationID) {
+			continue
+		}
+		tag, err := tx.Exec(ctx, `SELECT 1 FROM stock_level WHERE consumable_id = $1 AND location_id = $2
+			AND organization_id = $3 FOR UPDATE`, k.ConsumableID, k.LocationID, orgID)
+		if err != nil {
+			return locked, fmt.Errorf("lock stock: %w", err)
+		}
+		locked += int(tag.RowsAffected())
+	}
+	return locked, nil
+}
+
+// ReservationBin returns, in tx, the bin of the only stock_level row of the
+// consumable the caller sees: the bin of a reservation without location_id
+// (WP-284). Unlike OnlyBin it does not lock the consumable, so a
+// client-scoped principal reserves an org-wide article in its own bin. No
+// row of an invisible consumable is ErrNotFound, none or several rows of a
+// visible one ErrBinRequired (422 on location_id).
+func ReservationBin(ctx context.Context, tx pgx.Tx, orgID, consumableID string) (string, error) {
+	if !api.IsUUID(consumableID) {
+		return "", ErrNotFound
+	}
+	rows, err := tx.Query(ctx, `SELECT location_id::text FROM stock_level WHERE consumable_id = $1 AND organization_id = $2
+		ORDER BY location_id LIMIT 2`, consumableID, orgID)
+	if err != nil {
+		return "", fmt.Errorf("find bin: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return "", fmt.Errorf("find bin: %w", err)
+	}
+	if len(ids) == 1 {
+		return ids[0], nil
+	}
+	if len(ids) == 0 {
+		visible, visErr := consumableVisible(ctx, tx, orgID, consumableID)
+		if visErr != nil {
+			return "", visErr
+		}
+		if !visible {
+			return "", ErrNotFound
+		}
+	}
+	return "", ErrBinRequired
+}
+
+// consumableVisible reports whether the consumable is visible under the
+// caller's scope.
+func consumableVisible(ctx context.Context, tx pgx.Tx, orgID, id string) (bool, error) {
+	var visible bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM consumable WHERE id = $1 AND organization_id = $2)`,
+		id, orgID).Scan(&visible); err != nil {
+		return false, fmt.Errorf("check consumable: %w", err)
+	}
+	return visible, nil
+}
+
+// reservationBin checks b against the rules of the reservation types and
+// returns its bin and the change of reserved: a reservation names its bin
+// in FromLocationID and raises reserved, a release names it in
+// ToLocationID and lowers it.
+func reservationBin(b *Booking) (bin string, delta float64, err error) {
+	switch {
+	case !ReservationTypes[b.MovementType]:
+		return "", 0, fieldError("movement_type", "movement_type must be reservation or release")
+	case b.Quantity <= 0:
+		return "", 0, fieldError("quantity", "quantity must be greater than 0")
+	case b.MovementType == "reservation" && (b.FromLocationID == "" || b.ToLocationID != ""):
+		return "", 0, fieldError("from_location_id", "a reservation names its bin in from_location_id only")
+	case b.MovementType == "release" && (b.ToLocationID == "" || b.FromLocationID != ""):
+		return "", 0, fieldError("to_location_id", "a release names its bin in to_location_id only")
+	case b.MovementType == "release":
+		return b.ToLocationID, -b.Quantity, nil
+	}
+	return b.FromLocationID, b.Quantity, nil
+}
+
+// ApplyReservation books the reservation movement b on the stock row of
+// its bin in tx, the transaction of the caller (WP-284, convention 14):
+// reservation raises reserved, release lowers it (reservationBin); on_hand
+// and on_hand_total stay. The row is locked (SELECT … FOR UPDATE under the
+// caller's scope) before it changes; the consumable row is not locked, so
+// ApplyBooking (consumable, then stock rows) and the reservation paths
+// (stock rows, then reservations) never wait on each other in a cycle, and
+// a client-scoped principal reserves an org-wide article in its own bin. A
+// reservation beyond on_hand − reserved is ErrInsufficientStock (409), so
+// is a violation of the check reserved <= on_hand and a bin without stock
+// row of a visible consumable; a bin without stock row of an invisible
+// consumable is ErrNotFound.
+func ApplyReservation(ctx context.Context, tx pgx.Tx, b *Booking) error {
+	bin, delta, err := reservationBin(b)
+	if err != nil {
+		return err
+	}
+	if !api.IsUUID(b.ConsumableID) {
+		return ErrNotFound
+	}
+	if !api.IsUUID(bin) {
+		return ErrInsufficientStock
+	}
+	var onHand, reserved float64
+	err = tx.QueryRow(ctx, `SELECT on_hand::float8, reserved::float8 FROM stock_level
+		WHERE consumable_id = $1 AND location_id = $2 AND organization_id = $3 FOR UPDATE`,
+		b.ConsumableID, bin, b.OrganizationID).Scan(&onHand, &reserved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if delta < 0 {
+			return fmt.Errorf("release stock: no stock row of consumable %s in bin %s", b.ConsumableID, bin)
+		}
+		visible, visErr := consumableVisible(ctx, tx, b.OrganizationID, b.ConsumableID)
+		if visErr != nil {
+			return visErr
+		}
+		if !visible {
+			return ErrNotFound
+		}
+		return ErrInsufficientStock
+	}
+	if err != nil {
+		return fmt.Errorf("lock stock: %w", err)
+	}
+	if delta > 0 && onHand-reserved < delta {
+		return ErrInsufficientStock
+	}
+	if _, err = tx.Exec(ctx, `UPDATE stock_level SET reserved = reserved + $4, updated_at = now()
+		WHERE consumable_id = $1 AND location_id = $2 AND organization_id = $3`,
+		b.ConsumableID, bin, b.OrganizationID, delta); err != nil {
+		var pgErr *pgconn.PgError
+		if delta > 0 && errors.As(err, &pgErr) && pgErr.ConstraintName == stockReservedCheck {
+			return ErrInsufficientStock
+		}
+		return fmt.Errorf("book reservation: %w", err)
+	}
+	return nil
 }
 
 // OnlyBin returns, in tx, the bin of the only stock_level row of the

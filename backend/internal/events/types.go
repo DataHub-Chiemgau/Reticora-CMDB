@@ -270,12 +270,19 @@ type StockBelowMinimumData struct {
 }
 
 // ReservationData is the data of the reservation types (WP-277, WP-284):
-// the reservation and its asset or quantity item.
+// the reservation and its asset, or its consumable, bin and quantity, with
+// the client and site of the reservation. QuantityItemID appears only in
+// events before WP-284.
 type ReservationData struct {
-	ID             string `json:"id"`
-	ItemKind       string `json:"item_kind"`
-	AssetID        string `json:"asset_id,omitempty"`
-	QuantityItemID string `json:"quantity_item_id,omitempty"`
+	ID             string   `json:"id"`
+	ItemKind       string   `json:"item_kind"`
+	AssetID        string   `json:"asset_id,omitempty"`
+	QuantityItemID string   `json:"quantity_item_id,omitempty"`
+	ConsumableID   string   `json:"consumable_id,omitempty"`
+	LocationID     string   `json:"location_id,omitempty"`
+	Quantity       *float64 `json:"quantity,omitempty"`
+	ClientID       string   `json:"client_id,omitempty"`
+	SiteID         string   `json:"site_id,omitempty"`
 }
 
 // TicketData is the data of ticket.updated (WP-290).

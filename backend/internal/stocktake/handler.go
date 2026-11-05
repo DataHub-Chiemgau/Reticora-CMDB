@@ -3,22 +3,33 @@ package stocktake
 import (
 	"errors"
 	"net/http"
-	"time"
+	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP handlers for stocktake endpoints.
 type Handler struct {
-	repo Repository
+	repo    Repository
+	service *Service
 }
 
 // NewHandler creates a new stocktake handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithService sets the completion service with the movement service
+// (WP-761); without one (profile --no-db, NewService returns nil) POST
+// …/complete answers 501 like start.
+func (h *Handler) WithService(svc *Service) *Handler {
+	h.service = svc
+	return h
 }
 
 // RegisterRoutes registers stocktake routes on the given mux.
@@ -30,7 +41,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/stocktakes/{id}", h.Delete)
 	r.Post("/api/v1/stocktakes/{id}/scans", h.AddScan)
 	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
-	r.Get("/api/v1/stocktakes/{id}/difference", h.Difference)
+	// The alias of the earlier release answers until its x-sunset (E-38).
+	r.Get("/api/v1/stocktakes/{id}/difference", h.Differences)
+	r.Get("/api/v1/stocktakes/{id}/differences", h.Differences)
 	r.Post("/api/v1/stocktakes/{id}/complete", h.Complete)
 	r.Post("/api/v1/stocktakes/{id}/start", h.Start)
 	r.Get("/api/v1/stocktakes/{id}/items", h.ListItems)
@@ -81,10 +94,21 @@ func writeStocktakeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrNoArea):
 		api.WriteFieldError(w, &api.FieldError{Field: "location_id", Message: "the stocktake has no area to start",
 			Status: http.StatusUnprocessableEntity})
+	case errors.Is(err, ErrNoSnapshot):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the stocktake has no frozen expected stock")
+	case errors.Is(err, ErrObjectNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "scanned object not found")
+	case errors.Is(err, ErrPlaceFound):
+		api.WriteFieldError(w, &api.FieldError{Field: "location_id", Message: "the place found is no location of the area (a bin for a consumable)",
+			Status: http.StatusUnprocessableEntity})
 	case errors.Is(err, ErrSnapshotUnavailable):
 		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the expected stock is not available without PostgreSQL")
 	case errors.Is(err, api.ErrInvalidCursor):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+	case errors.Is(err, consumable.ErrInsufficientStock):
+		// A correction would lower the stock of a bin below on_hand −
+		// reserved (WP-761); the completion rolled back.
+		api.WriteTypedProblem(w, http.StatusConflict, err)
 	default:
 		api.WriteRepoError(w, err)
 	}
@@ -258,18 +282,17 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
-		api.WriteRepoError(w, err)
+		writeStocktakeError(w, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// AddScan handles POST /api/v1/stocktakes/{id}/scans
+// AddScan handles POST /api/v1/stocktakes/{id}/scans (WP-287): exactly one
+// of asset_id and consumable_id (then with quantity > 0) at the place found
+// location_id; the server classifies the scan. Scans need an in-progress
+// stocktake with snapshot (409).
 func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -283,43 +306,75 @@ func (h *Handler) AddScan(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-
-	if req.ScanResult == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "scan_result is required")
+	if err := validateScan(&req); err != nil {
+		api.WriteFieldError(w, err)
 		return
-	}
-
-	scanMethod := req.ScanMethod
-	if scanMethod == "" {
-		scanMethod = "manual"
 	}
 
 	scan := &StockScan{
 		OrganizationID: t.OrganizationID,
 		StocktakeID:    stocktakeID,
 		AssetID:        req.AssetID,
-		CIID:           req.CIID,
+		ConsumableID:   req.ConsumableID,
+		Quantity:       req.Quantity,
+		LocationID:     req.LocationID,
 		ScannedBy:      t.UserID,
-		ScanMethod:     scanMethod,
-		ScanResult:     req.ScanResult,
-		LocationFound:  req.LocationFound,
+		ScanMethod:     req.ScanMethod,
+		Code:           req.Code,
 		Notes:          req.Notes,
-		ScannedAt:      time.Now().UTC(),
 	}
-
 	if err := h.repo.AddScan(r.Context(), scan); err != nil {
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
-		api.WriteRepoError(w, err)
+		writeStocktakeError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusCreated, scan)
 }
 
-// ListScans handles GET /api/v1/stocktakes/{id}/scans
+// validateScan checks the input of a scan and defaults scan_method to
+// manual; a violation is a 422 *api.FieldError, a NUL character a 400 one.
+func validateScan(req *ScanRequest) error {
+	unprocessable := func(field, message string) error {
+		return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
+	}
+	switch {
+	case (req.AssetID == "") == (req.ConsumableID == ""):
+		return unprocessable("asset_id", "exactly one of asset_id and consumable_id is required")
+	case req.AssetID != "":
+		if err := api.RequireUUID("asset_id", req.AssetID); err != nil {
+			return err
+		}
+		if req.Quantity != nil {
+			return unprocessable("quantity", "a scan of an asset takes no quantity")
+		}
+	default:
+		if err := api.RequireUUID("consumable_id", req.ConsumableID); err != nil {
+			return err
+		}
+		if req.Quantity == nil || *req.Quantity <= 0 || *req.Quantity >= 1e10 {
+			return unprocessable("quantity", "a scan of a consumable needs a quantity greater than 0")
+		}
+	}
+	if req.LocationID == "" {
+		return unprocessable("location_id", "the place found is required")
+	}
+	if err := api.RequireUUID("location_id", req.LocationID); err != nil {
+		return err
+	}
+	if req.ScanMethod == "" {
+		req.ScanMethod = "manual"
+	}
+	if !slices.Contains(scanMethods, req.ScanMethod) {
+		return unprocessable("scan_method", "must be one of manual, barcode, rfid, qrcode")
+	}
+	if err := api.RejectNUL("code", req.Code); err != nil {
+		return err
+	}
+	return api.RejectNUL("notes", req.Notes)
+}
+
+// ListScans handles GET /api/v1/stocktakes/{id}/scans, newest first with a
+// keyset cursor over scanned_at and id (WP-287).
 func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -327,60 +382,85 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stocktakeID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
-
-	scans, total, err := h.repo.ListScans(r.Context(), t.OrganizationID, stocktakeID, page)
-	if err != nil {
-		api.WriteRepoError(w, err)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
 		return
 	}
-
+	scans, total, err := h.repo.ListScans(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return
+	}
+	next := ScansNextCursor(scans, page.Limit)
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[StockScan]{
-		Data:    scans,
-		Total:   total,
-		Limit:   page.Limit,
-		Offset:  page.Offset,
-		HasMore: page.Offset+page.Limit < total,
+		Data:       scans,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    next != "",
+		NextCursor: next,
 	})
 }
 
-// Difference handles GET /api/v1/stocktakes/{id}/difference and returns the
-// scans that deviate from the expected inventory, enriched with the affected
-// asset where the scan resolved to one.
-func (h *Handler) Difference(w http.ResponseWriter, r *http.Request) {
+// Differences handles GET /api/v1/stocktakes/{id}/differences and its
+// deprecated alias …/difference (E-38, WP-287): the difference list from
+// the snapshot and the scans, cursor-paginated. The embedded asset carries
+// only the fields the caller may read (permission.Project, Konvention 11).
+func (h *Handler) Differences(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
 
-	stocktakeID := chi.URLParam(r, "id")
 	page := api.ParsePagination(r)
-
-	entries, total, err := h.repo.Difference(r.Context(), t.OrganizationID, stocktakeID, page)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	}
+	policy, err := permission.PolicyFrom(r.Context())
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
 		api.WriteRepoError(w, err)
 		return
 	}
-
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[DifferenceEntry]{
-		Data:    entries,
-		Total:   total,
-		Limit:   page.Limit,
-		Offset:  page.Offset,
-		HasMore: page.Offset+page.Limit < total,
+	entries, total, err := h.repo.Differences(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return
+	}
+	for i := range entries {
+		a, ok := entries[i].Asset.(*DifferenceAsset)
+		if !ok || a == nil {
+			continue
+		}
+		projected, perr := permission.ProjectValue(policy, permission.KindAsset, a.AssetTypeID,
+			permission.ObjectRef{ID: a.ID, ClientID: a.ClientID, SiteID: a.SiteID}, a)
+		if perr != nil {
+			api.WriteRepoError(w, perr)
+			return
+		}
+		entries[i].Asset = projected
+	}
+	next := DifferencesNextCursor(entries, page.Limit)
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Difference]{
+		Data:       entries,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    next != "",
+		NextCursor: next,
 	})
 }
 
-// Complete handles POST /api/v1/stocktakes/{id}/complete. It finalizes the
-// stocktake and, unless apply_corrections is false, applies the recorded
-// differences to the inventory (missing → lost, surplus → in_stock,
-// damaged → maintenance, wrong_location → location update).
+// Complete handles POST /api/v1/stocktakes/{id}/complete (in_progress →
+// completed, WP-761): in one transaction it fixes the result in the
+// snapshot and the totals and books the corrections through the movement
+// service (Service.Complete); apply_corrections is deprecated and ignored.
+// A stocktake without snapshot (an earlier release without area included)
+// answers 409, it can only be cancelled; a refused booking answers 409
+// insufficient-stock or 422 and rolls the completion back. Without a
+// service (profile --no-db) it follows the status rules and answers 501.
 func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -392,33 +472,39 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	if !h.writable(w, r, t.OrganizationID, stocktakeID) {
 		return
 	}
-	applyCorrections := true
 	if r.Body != nil && r.ContentLength != 0 {
 		var req CompleteRequest
 		if err := api.ReadJSON(r, &req); err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
-		if req.ApplyCorrections != nil {
-			applyCorrections = *req.ApplyCorrections
-		}
+	}
+	if h.service == nil {
+		writeStocktakeError(w, h.completeUnavailable(r, t.OrganizationID, stocktakeID))
+		return
 	}
 
-	completion, err := h.repo.Complete(r.Context(), t.OrganizationID, stocktakeID, applyCorrections)
+	completion, err := h.service.Complete(r.Context(), t.OrganizationID, stocktakeID, t.UserID)
 	if err != nil {
-		if errors.Is(err, ErrAlreadyCompleted) {
-			api.WriteError(w, http.StatusConflict, "Conflict", err.Error())
-			return
-		}
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
-		api.WriteRepoError(w, err)
+		writeStocktakeError(w, err)
 		return
 	}
 
 	api.WriteJSON(w, http.StatusOK, completion)
+}
+
+// completeUnavailable is the answer of a completion without service: the
+// status rule (ErrAlreadyCompleted, ErrInvalidTransition) and then
+// ErrSnapshotUnavailable (501), since only PostgreSQL freezes and books.
+func (h *Handler) completeUnavailable(r *http.Request, orgID, id string) error {
+	st, err := h.repo.GetByID(r.Context(), orgID, id)
+	if err != nil {
+		return err
+	}
+	if ruleErr := completeRule(st); ruleErr != nil && !errors.Is(ruleErr, ErrNoSnapshot) {
+		return ruleErr
+	}
+	return ErrSnapshotUnavailable
 }
 
 // Start handles POST /api/v1/stocktakes/{id}/start (planned → in_progress,

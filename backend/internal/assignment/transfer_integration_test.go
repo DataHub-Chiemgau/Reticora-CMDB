@@ -506,55 +506,31 @@ func memoryRouter(t *testing.T) http.Handler {
 	return mux
 }
 
-// TestAssignmentCIOnlyRowAndBackfill covers the rows of assignment from
-// before WP-275 and the backfill 000254 (WP-275, WP-746, WP-747): POST
-// /api/v1/assets/{id}/return leaves an open row with only a ci_id whose CI
-// belongs to the asset unchanged (the service writes no transition rows
-// since WP-747, migration 000257 took the history over); the backfill
-// takes the newest open row per asset, a
-// row with only a ci_id through ci.asset_id, the due date as the end of the
-// day in the time zone of the organization, and no user of another
-// organization.
+// TestAssignmentCIOnlyRowAndBackfill covers the backfill 000254 over the
+// rows of assignment from before WP-275 (WP-275, WP-746, WP-747): it takes
+// the newest open row per asset, a row with only a ci_id through
+// ci.asset_id, the due date as the end of the day in the time zone of the
+// organization, and no user of another organization. The table assignment
+// is gone since WP-843 (000266); the rolled-back transaction rebuilds it
+// with the down part of 000266 first. That the service leaves the rows
+// alone follows from the drop: no path reaches the table any more.
 func TestAssignmentCIOnlyRowAndBackfill(t *testing.T) {
 	f := scopetest.Seed(t, "a6")
 	bg := context.Background()
-	actor := f.AppUser(t, f.OrgA, "wp275actor")
-	a := newAssignFixture(t, f, actor, movement.NewService(movement.NewPGRepository(f.App)))
 	alice := f.AppUser(t, f.OrgA, "wp275alice")
 	bob := f.AppUser(t, f.OrgA, "wp275bob")
-	ctx := a.org()
-
-	asset := f.Asset(t, f.OrgA, f.Client1, "wp275-legacy")
-	server1 := f.CI(t, f.OrgA, f.Client1, "wp275-ci")
-	if _, err := f.Admin.Exec(bg, `UPDATE ci SET asset_id = $2 WHERE id = $1`, server1, asset); err != nil {
-		t.Fatal(err)
-	}
-
-	// An open row with only a ci_id (before WP-275) stays as it is when the
-	// asset is returned.
-	ciOnly := f.ID()
-	if _, err := f.Admin.Exec(bg, `INSERT INTO assignment (id, organization_id, ci_id, assigned_to, assigned_by, status)
-		VALUES ($1, $2, $3, $4, $4, 'active')`, ciOnly, f.OrgA, server1, bob); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Admin.Exec(bg, `UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, asset, bob); err != nil {
-		t.Fatal(err)
-	}
-	if w := a.call(ctx, http.MethodPost, "/api/v1/assets/"+asset+"/return", `{"expected_holder":"`+bob+`"}`); w.Code != http.StatusOK {
-		t.Fatalf("return: %d %s", w.Code, w.Body.String())
-	}
-	var status string
-	var returned bool
-	if err := f.Admin.QueryRow(bg, `SELECT status, returned_at IS NOT NULL FROM assignment WHERE id = $1`, ciOnly).Scan(&status, &returned); err != nil ||
-		status != "active" || returned {
-		t.Fatalf("ci-only row after the return: %s returned=%v err=%v, want active", status, returned, err)
-	}
+	// The fixtures come before the transaction: the down part of 000266
+	// locks asset, ci and app_user (references of assignment).
+	newest, viaCI, foreignHeld := f.Asset(t, f.OrgA, f.Client1, "wp275-bf1"), f.Asset(t, f.OrgA, f.Client1, "wp275-bf2"), f.Asset(t, f.OrgA, f.Client1, "wp275-bf3")
+	backfillCI := f.CI(t, f.OrgA, f.Client1, "wp275-bf-ci")
+	foreignUser := f.AppUser(t, f.OrgB, "wp275foreign")
 
 	// Backfill 000254 in a transaction that is rolled back.
 	raw, err := os.ReadFile("../../migrations/000254_assignment_holder_backfill.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, dropDown := readDropMigration(t)
 	tx, err := f.Admin.Begin(bg)
 	if err != nil {
 		t.Fatal(err)
@@ -563,14 +539,12 @@ func TestAssignmentCIOnlyRowAndBackfill(t *testing.T) {
 	exec := func(query string, args ...any) {
 		t.Helper()
 		if _, execErr := tx.Exec(bg, query, args...); execErr != nil {
-			t.Fatalf("%s: %v", query, execErr)
+			t.Fatalf("%.70s...: %v", strings.TrimSpace(query), execErr)
 		}
 	}
+	exec(dropDown)
 	exec(`UPDATE organization SET timezone = 'Europe/Berlin' WHERE id = $1`, f.OrgA)
-	newest, viaCI, foreignHeld := f.Asset(t, f.OrgA, f.Client1, "wp275-bf1"), f.Asset(t, f.OrgA, f.Client1, "wp275-bf2"), f.Asset(t, f.OrgA, f.Client1, "wp275-bf3")
-	backfillCI := f.CI(t, f.OrgA, f.Client1, "wp275-bf-ci")
 	exec(`UPDATE ci SET asset_id = $2 WHERE id = $1`, backfillCI, viaCI)
-	foreignUser := f.AppUser(t, f.OrgB, "wp275foreign")
 	exec(`INSERT INTO assignment (organization_id, asset_id, assigned_to, assigned_by, status, assigned_at) VALUES
 		($1, $2, $3, $3, 'active', now() - interval '2 days'),
 		($1, $2, $4, $3, 'overdue', now() - interval '1 day'),

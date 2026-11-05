@@ -19,7 +19,38 @@ var ErrNotFound = errors.New("saved view not found")
 // reports the unique violation, 23505).
 var ErrConflict = errors.New("a saved view with this name already exists")
 
-// Repository defines persistence for saved views.
+// Access is what the handler knows of the caller beyond the user id
+// (VIE-02): the standard roles the caller holds only through IdP groups
+// (identity.StandardRolesForGroups of Principal.Groups, E-110) and whether
+// the effective permissions hold saved_view:manage. The handler puts it in
+// the context of the repository calls (WithAccess); without it only stored
+// role assignments count and nobody manages.
+type Access struct {
+	// IdPRoles are standard role names (org_admin, engineer, viewer).
+	IdPRoles []string
+	// Manage lets the caller change and delete every view they may read.
+	Manage bool
+}
+
+type accessKey struct{}
+
+// WithAccess stores the access of the caller for the repository calls.
+func WithAccess(ctx context.Context, access Access) context.Context {
+	access.IdPRoles = append([]string(nil), access.IdPRoles...)
+	return context.WithValue(ctx, accessKey{}, access)
+}
+
+// AccessFrom returns the access WithAccess stored, the zero Access without.
+func AccessFrom(ctx context.Context) Access {
+	access, _ := ctx.Value(accessKey{}).(Access)
+	return access
+}
+
+// Repository defines persistence for saved views. Reading follows VIE-01
+// (own, shared org-wide, shared with a role of the user, also one held
+// through an IdP group, AccessFrom); changing and deleting is for the owner
+// or, on a view the caller may read, for a holder of saved_view:manage
+// (Access.Manage, VIE-02); every other view is ErrNotFound.
 type Repository interface {
 	List(ctx context.Context, orgID, ownerID string, page api.PaginationParams) ([]View, int, error)
 	// GetByID returns a view the user may read; a private view of
@@ -56,7 +87,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID, ownerID string, page a
 		if v.OrganizationID != orgID {
 			continue
 		}
-		if !v.Shared && v.OwnerID != ownerID {
+		if !memoryVisible(v, ownerID) {
 			continue
 		}
 		out = append(out, *v)
@@ -78,7 +109,7 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id, userID string) 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v, ok := r.views[id]
-	if !ok || v.OrganizationID != orgID || (!v.Shared && v.OwnerID != userID) {
+	if !ok || v.OrganizationID != orgID || !memoryVisible(v, userID) {
 		return nil, ErrNotFound
 	}
 	out := *v
@@ -104,17 +135,30 @@ func (r *MemoryRepository) Create(_ context.Context, view *View) error {
 	return nil
 }
 
-// Update modifies a view of its owner; shared views are read-only for
-// everybody else (E-86, option 1). Role ids are not checked against roles
-// here: the memory repository keeps none.
-func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error) {
+// memoryVisible reports whether the user reads the view: own or shared
+// org-wide; the sharing with roles is not modelled in memory.
+func memoryVisible(v *View, userID string) bool {
+	return v.Shared || (v.OwnerID != "" && v.OwnerID == userID)
+}
+
+// memoryWritable reports whether the user changes the view: the owner, or
+// a holder of saved_view:manage on a view they read (VIE-02).
+func memoryWritable(ctx context.Context, v *View, userID string) bool {
+	if v.OwnerID != "" && v.OwnerID == userID {
+		return true
+	}
+	return AccessFrom(ctx).Manage && memoryVisible(v, userID)
+}
+
+// Update modifies a view of its owner or, with saved_view:manage, one the
+// caller reads; for everybody else shared views are read-only (E-86,
+// option 1, VIE-02). Role ids are not checked against roles here: the
+// memory repository keeps none.
+func (r *MemoryRepository) Update(ctx context.Context, orgID, id, ownerID string, req *UpsertRequest) (*View, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.views[id]
-	if !ok || v.OrganizationID != orgID {
-		return nil, ErrNotFound
-	}
-	if v.OwnerID == "" || v.OwnerID != ownerID {
+	if !ok || v.OrganizationID != orgID || !memoryWritable(ctx, v, ownerID) {
 		return nil, ErrNotFound
 	}
 	if req.Name != "" && req.Name != v.Name {
@@ -150,11 +194,13 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id, ownerID string, 
 	return &out, nil
 }
 
-func (r *MemoryRepository) Delete(_ context.Context, orgID, id, ownerID string) error {
+// Delete removes a view of its owner or, with saved_view:manage, one the
+// caller reads (VIE-02).
+func (r *MemoryRepository) Delete(ctx context.Context, orgID, id, ownerID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	v, ok := r.views[id]
-	if !ok || v.OrganizationID != orgID || v.OwnerID == "" || v.OwnerID != ownerID {
+	if !ok || v.OrganizationID != orgID || !memoryWritable(ctx, v, ownerID) {
 		return ErrNotFound
 	}
 	delete(r.views, id)

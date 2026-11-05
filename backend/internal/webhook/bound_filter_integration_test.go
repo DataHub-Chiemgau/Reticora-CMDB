@@ -31,10 +31,13 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -117,23 +120,65 @@ func (b *boundFixture) ciIn(t *testing.T, clientID, siteID, name string) string 
 	return id
 }
 
-// inventoryIn inserts an asset or quantity item of client 1 in siteID (""
-// none); the site is derived from the location (migration 000151).
-func (b *boundFixture) inventoryIn(t *testing.T, table, siteID, name string) string {
+// assetIn inserts an asset of client 1 in siteID ("" none); the site is
+// derived from the location (migration 000151).
+func (b *boundFixture) assetIn(t *testing.T, siteID, name string) string {
 	t.Helper()
 	var location any
 	if siteID != "" {
 		location = siteID
 	}
-	sql := `INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, $3, $4) RETURNING id::text`
-	if table == "asset" {
-		sql = `INSERT INTO asset (organization_id, client_id, asset_tag, name, location_id) VALUES ($1, $2, $3, $3, $4) RETURNING id::text`
-	}
 	var id string
-	if err := b.Admin.QueryRow(context.Background(), sql, b.OrgA, b.Client1, name, location).Scan(&id); err != nil {
-		t.Fatalf("insert %s %s: %v", table, name, err)
+	if err := b.Admin.QueryRow(context.Background(), `INSERT INTO asset (organization_id, client_id, asset_tag, name, location_id)
+		VALUES ($1, $2, $3, $3, $4) RETURNING id::text`, b.OrgA, b.Client1, name, location).Scan(&id); err != nil {
+		t.Fatalf("insert asset %s: %v", name, err)
 	}
 	return id
+}
+
+// stockedBin creates the branch warehouse > zone > shelf > bin below siteID
+// and a consumable of client 1 (consumable.PGRepository) with 5 units in
+// the bin; stock_level takes client and site of the bin (WP-283, E-40).
+// It returns the consumable and the bin.
+func (b *boundFixture) stockedBin(t *testing.T, siteID, name string) (consumableID, binID string) {
+	t.Helper()
+	ctx := b.OrgCtx(b.OrgA)
+	repo := locations.NewPGRepository(b.App)
+	parent := siteID
+	for _, kind := range []locations.Kind{locations.KindWarehouse, locations.KindZone, locations.KindShelf, locations.KindBin} {
+		l, err := repo.Create(ctx, b.OrgA, locations.CreateRequest{Kind: kind, ParentID: parent, Name: name + "-" + string(kind)})
+		if err != nil {
+			t.Fatalf("create %s %s: %v", kind, name, err)
+		}
+		parent = l.ID
+	}
+	c := &consumable.Consumable{OrganizationID: b.OrgA, ClientID: b.Client1, Name: name}
+	if err := consumable.NewPGRepository(b.App).Create(ctx, c); err != nil {
+		t.Fatalf("create consumable %s: %v", name, err)
+	}
+	if _, err := b.Admin.Exec(context.Background(), `INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand)
+		VALUES ($1, $2, $3, 5)`, b.OrgA, c.ID, parent); err != nil {
+		t.Fatalf("stock of %s: %v", name, err)
+	}
+	return c.ID, parent
+}
+
+// reservedPayload reserves one unit of the consumable in the bin through
+// reservation.PGRepository with the outbox (WP-284) and returns the
+// reservation.created payload of the outbox row.
+func (b *boundFixture) reservedPayload(t *testing.T, consumableID, binID string) []byte {
+	t.Helper()
+	res := &reservation.Reservation{OrganizationID: b.OrgA, ItemKind: "consumable", ConsumableID: consumableID,
+		LocationID: binID, Quantity: 1, ProjectRef: "wp-844"}
+	if err := reservation.NewPGRepository(b.App).WithEvents(events.NewOutbox()).Create(b.OrgCtx(b.OrgA), res); err != nil {
+		t.Fatalf("reserve %s in %s: %v", consumableID, binID, err)
+	}
+	var created []byte
+	if err := b.Admin.QueryRow(context.Background(), `SELECT data FROM event_outbox WHERE organization_id = $1 AND type = 'reservation.created' AND entity_id = $2`,
+		b.OrgA, res.ID).Scan(&created); err != nil {
+		t.Fatalf("read reservation.created from the outbox: %v", err)
+	}
+	return created
 }
 
 // deliver hands one event to Dispatcher.Consume with a subscription of the
@@ -239,8 +284,9 @@ func TestAuditT2BoundSubscriptionGetsOnlyReadableClientEvents(t *testing.T) {
 // TestBoundSubscriptionScopeResolution covers the scope sources of the
 // filter: the payload's client_id/site_id, the referenced CIs (several
 // objects, CIs without client or site, merged and hard-deleted victims),
-// assets and quantity items with the site of their location (WP-392) and
-// events whose scope cannot be resolved. The site-1 account is confined to
+// assets with the site of their location (WP-392), quantity reservations
+// with the client and site of their bin and consumables by ID without a site
+// (WP-284, WP-844, E-40) and events whose scope cannot be resolved. The site-1 account is confined to
 // client 1, the client of its site (WP-390, F-014): no object of client 2
 // reaches it.
 func TestBoundSubscriptionScopeResolution(t *testing.T) {
@@ -253,10 +299,11 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 	inSite1 := f.ciIn(t, f.Client1, f.site1, "scope-site1")
 	inSite2 := f.ciIn(t, f.Client1, f.site2, "scope-site2")
 	deleted := f.ciIn(t, f.Client2, "", "scope-c2-deleted")
-	assetSite1 := f.inventoryIn(t, "asset", f.site1, "scope-asset-site1")
-	assetSite2 := f.inventoryIn(t, "asset", f.site2, "scope-asset-site2")
-	assetUnplaced := f.inventoryIn(t, "asset", "", "scope-asset-unplaced")
-	itemSite2 := f.inventoryIn(t, "quantity_item", f.site2, "scope-item-site2")
+	assetSite1 := f.assetIn(t, f.site1, "scope-asset-site1")
+	assetSite2 := f.assetIn(t, f.site2, "scope-asset-site2")
+	assetUnplaced := f.assetIn(t, "", "scope-asset-unplaced")
+	itemSite2, binSite2 := f.stockedBin(t, f.site2, "scope-item-site2")
+	itemSite1, binSite1 := f.stockedBin(t, f.site1, "scope-item-site1")
 	if _, err := f.Admin.Exec(bg, `UPDATE ci SET deleted_at = now() WHERE id = $1`, deleted); err != nil {
 		t.Fatal(err)
 	}
@@ -298,11 +345,20 @@ func TestBoundSubscriptionScopeResolution(t *testing.T) {
 		{"instance field of a client-2 CI", "ci_attribute.changed", func() any { return map[string]any{"ci_id": c2, "name": "rack"} }, want{1, 0, 0, 1}},
 		{"attribute definition (organization)", "ci_attribute.changed", func() any { return map[string]any{"id": f.ID(), "key": "rack"} }, want{1, 1, 1, 1}},
 		{"override of a client-2 CI", "override.changed", func() any { return map[string]any{"id": f.ID(), "ci_id": c2, "field_name": "name"} }, want{1, 0, 0, 1}},
-		// Assets and quantity items carry the site of their location (WP-392).
+		// Assets carry the site of their location (WP-392).
 		{"movement of an asset in site 1", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetSite1} }, want{1, 1, 1, 1}},
 		{"movement of an asset in site 2", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetSite2} }, want{1, 1, 0, 1}},
 		{"movement of an unplaced asset", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "item_kind": "asset", "asset_id": assetUnplaced} }, want{1, 1, 1, 1}},
-		{"reservation of a quantity item in site 2", "reservation.created", func() any { return map[string]any{"id": f.ID(), "quantity_item_id": itemSite2} }, want{1, 1, 0, 1}},
+		// A quantity reservation carries client and site of its bin (WP-284);
+		// a payload with consumable_id or the alias quantity_item_id only
+		// resolves the consumable: its client, no site (WP-844, E-40).
+		{"reservation of a consumable in a bin of site 2", events.ReservationCreated, func() any { return f.reservedPayload(t, itemSite2, binSite2) }, want{1, 1, 0, 1}},
+		{"reservation of a consumable in a bin of site 1", events.ReservationCreated, func() any { return f.reservedPayload(t, itemSite1, binSite1) }, want{1, 1, 1, 1}},
+		{"reservation by consumable_id without scope", events.ReservationCreated, func() any {
+			return map[string]any{"id": f.ID(), "item_kind": "consumable", "consumable_id": itemSite2, "location_id": binSite2}
+		}, want{1, 1, 1, 1}},
+		{"movement by the alias quantity_item_id", "inventory.movement", func() any { return map[string]any{"id": f.ID(), "quantity_item_id": itemSite2} }, want{1, 1, 1, 1}},
+		{"reservation of an unknown consumable", events.ReservationCreated, func() any { return map[string]any{"id": f.ID(), "consumable_id": f.ID()} }, want{1, 0, 0, 1}},
 		// Not resolvable: unbound and org-wide subscriptions only.
 		{"unknown CI", events.CIChanged, func() any { return map[string]any{"id": f.ID()} }, want{1, 0, 0, 1}},
 		{"CI id not a UUID", events.CIChanged, func() any { return map[string]any{"id": "not-a-uuid"} }, want{1, 0, 0, 1}},

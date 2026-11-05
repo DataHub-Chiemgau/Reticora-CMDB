@@ -75,7 +75,7 @@ var resourceTables = map[string][]string{
 	"api-keys":                  {"api_key"},
 	"asset-locations":           {"asset_location"},
 	"assets":                    {"asset"},
-	"assignments":               {"assignment"},
+	"assignments":               {"stock_movement"}, // the id of an assignment is that of its movement (WP-747, WP-843)
 	"attribute-definitions":     {"attribute_definition"},
 	"attribute-sets":            {"attribute_set"},
 	"buildings":                 {"building"},
@@ -195,10 +195,9 @@ var orgResources = map[string]bool{
 // visible only when every row it names is.
 var scopeParents = map[string]map[string]string{
 	"asset_location":  {"asset_id": "asset"},
-	"assignment":      {"asset_id": "asset", "ci_id": "ci"},
 	"building":        {"site_id": "site"},
 	"cable":           {"source_interface_id": "network_interface", "target_interface_id": "network_interface"},
-	"reservation":     {"asset_id": "asset", "quantity_item_id": "quantity_item", "ticket_id": "ticket", "order_id": "internal_order"},
+	"reservation":     {"asset_id": "asset", "consumable_id": "consumable", "location_id": "location", "ticket_id": "ticket", "order_id": "internal_order"},
 	"role_assignment": {"scope_client_id": "client", "scope_site_id": "site"},
 	// The policy of the ledger filters client and site of the booking
 	// (WP-744); the referenced objects must be visible as well.

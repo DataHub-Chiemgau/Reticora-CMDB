@@ -51,20 +51,23 @@ var (
 )
 
 // ReservationEventData is the data of the reservation events (WP-277):
-// the reservation, its asset or quantity item, its state and times and
-// the client and site of the locked asset. The reservation package writes
-// it as well; it lives here because reservation imports this package for
-// the conversion, not the other way round.
+// the reservation, its asset or its consumable, bin and quantity (WP-284),
+// its state and times and the client and site of the reservation (of the
+// asset or the bin). The reservation package writes it as well; it lives
+// here because reservation imports this package for the conversion, not
+// the other way round.
 type ReservationEventData struct {
-	ID             string     `json:"id"`
-	ItemKind       string     `json:"item_kind"`
-	AssetID        string     `json:"asset_id,omitempty"`
-	QuantityItemID string     `json:"quantity_item_id,omitempty"`
-	State          string     `json:"state"`
-	ReservedUntil  *time.Time `json:"reserved_until,omitempty"`
-	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
-	ClientID       string     `json:"client_id,omitempty"`
-	SiteID         string     `json:"site_id,omitempty"`
+	ID            string     `json:"id"`
+	ItemKind      string     `json:"item_kind"`
+	AssetID       string     `json:"asset_id,omitempty"`
+	ConsumableID  string     `json:"consumable_id,omitempty"`
+	LocationID    string     `json:"location_id,omitempty"`
+	Quantity      *float64   `json:"quantity,omitempty"`
+	State         string     `json:"state"`
+	ReservedUntil *time.Time `json:"reserved_until,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	ClientID      string     `json:"client_id,omitempty"`
+	SiteID        string     `json:"site_id,omitempty"`
 }
 
 // MovementBooker books a movement in the transaction of the caller.

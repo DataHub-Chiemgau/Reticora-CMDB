@@ -3509,8 +3509,8 @@ paths:
           in: query
           description: >-
             Only documents linked to this target (WP-811); requires entity_id.
-            One of ci, asset, assignment, ticket, location, disposal_record,
-            stocktake and contract; any other value answers 422.
+            One of ci, asset, ticket, location, disposal_record, stocktake,
+            contract and stock_movement; any other value answers 422.
           schema:
             type: string
         - name: entity_id
@@ -5325,7 +5325,10 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: location_id changes while the stocktake is not planned.
+          description: >-
+            location_id changes while the stocktake is not planned, or the
+            stocktake is completed or cancelled (its result is immutable,
+            WP-761).
           content:
             application/problem+json:
               schema:
@@ -5342,6 +5345,9 @@ paths:
       operationId: deleteStocktake
       tags: [Stocktake]
       summary: Delete a stocktake
+      description: >-
+        Deletes a planned or in-progress stocktake with its scans and items.
+        A completed or cancelled stocktake is immutable (409, WP-761).
       responses:
         '204':
           description: Stocktake deleted
@@ -5359,6 +5365,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The stocktake is completed or cancelled; its result is immutable (WP-761).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/scans:
     x-phase: P2
@@ -5369,17 +5381,25 @@ paths:
       operationId: listStocktakeScans
       tags: [Stocktake]
       summary: List recorded scans for a stocktake
+      description: >-
+        The scans the caller sees, newest first (keyset cursor over
+        scanned_at and id, WP-287). A scan carries the client and site of
+        its stocktake (of the scanned object for a stocktake of an earlier
+        release without area); a principal restricted in the client or site
+        scope sees only the scans of its scope.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Paginated list of stocktake scans
+          description: A page of the scans (cursor contract, API-02).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StockScanListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -5388,6 +5408,14 @@ paths:
       operationId: createStocktakeScan
       tags: [Stocktake]
       summary: Record a stocktake scan
+      description: >-
+        Records an asset or the counted quantity of a consumable at the
+        place found (INV-01, WP-287). The server classifies the scan:
+        found when the object is in the frozen expected stock (a consumable
+        with an item of that bin), else unexpected. A code read by the
+        scanner is stored, not resolved; the client resolves it through GET
+        /api/v1/labels/lookup. Scans need an in-progress stocktake with
+        snapshot. scan_result, ci_id and location_found are no input (400).
       requestBody:
         required: true
         content:
@@ -5406,7 +5434,30 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: The stocktake, the asset or the consumable is unknown or outside the caller's scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '409':
+          description: >-
+            The stocktake is not in progress or has no frozen expected stock
+            (a stocktake of an earlier release without area included).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            Not exactly one of asset_id and consumable_id, a quantity for an
+            asset or none greater than 0 for a consumable, an unknown
+            scan_method, or a place found (`field` location_id) that is
+            unknown, outside the scope or outside the area, or no bin for a
+            consumable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/difference:
     x-phase: P2
@@ -5416,23 +5467,39 @@ paths:
     get:
       operationId: getStocktakeDifference
       tags: [Stocktake]
-      summary: Difference list of a stocktake
-      description: Returns every scan whose result deviates from the expected inventory (missing, surplus, damaged, wrong_location), enriched with the asset details of the affected assets.
+      deprecated: true
+      x-deprecated-at: '2026-11-05'
+      x-sunset: '2027-11-06'
+      x-successor: '/api/v1/stocktakes/{id}/differences'
+      summary: Difference list of a stocktake (deprecated, use …/differences)
+      description: >-
+        Deprecated alias of GET /api/v1/stocktakes/{id}/differences (E-25,
+        E-38, WP-287): the same operation with the same rows and pages. The
+        path answers until x-sunset with the Deprecation, Sunset and
+        successor-version Link headers.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: Paginated difference list
+          description: A page of the difference list (cursor contract, API-02).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/StocktakeDifferenceListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: Profile --no-db, as for …/differences.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/complete:
     x-phase: P2
@@ -5442,14 +5509,26 @@ paths:
     post:
       operationId: completeStocktake
       tags: [Stocktake]
-      summary: Complete a stocktake with inventory correction
-      description: >
-        Completes the stocktake and applies the recorded differences to the
-        inventory: assets scanned as missing are marked lost, surplus assets
-        are put back in stock, wrong_location moves the asset to the found
-        location and damaged assets are sent to maintenance. Completion is
-        atomic and only possible once; the request is rejected with 409 when
-        the stocktake is already completed or cancelled.
+      summary: Complete a stocktake
+      description: >-
+        Moves an in-progress stocktake with frozen expected stock to
+        completed in one transaction (INV-01, WP-287, WP-761): it fixes the
+        result (counted_quantity and classification of every item, an item
+        with expected_quantity 0 per unexpected object, total_scanned,
+        total_missing and total_surplus) and books the corrections as stock
+        movements with reason `stocktake:<id>`, each with its event
+        stock.movement. An asset whose last scan shows another place than
+        its location_id (found elsewhere or unexpected) gets a transfer to
+        the place found; a missing asset gets no movement and keeps status
+        and lifecycle state. Per consumable and bin a correction books the
+        counted quantity minus the book stock of the bin at completion
+        (to_location_id raises, from_location_id lowers; none for a
+        difference of 0). A failed booking rolls the whole completion back,
+        the stocktake stays in progress. apply_corrections is deprecated and
+        ignored: every completion books its corrections. Afterwards the
+        stocktake, its scans and items are immutable. A stocktake without
+        snapshot (an earlier release without area included) can only be
+        cancelled.
       requestBody:
         required: false
         content:
@@ -5458,7 +5537,7 @@ paths:
               $ref: '#/components/schemas/CompleteStocktakeRequest'
       responses:
         '200':
-          description: Stocktake completed, including the applied corrections
+          description: Stocktake completed, including the booked corrections
           content:
             application/json:
               schema:
@@ -5478,7 +5557,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: Stocktake is already completed or cancelled
+          description: >-
+            The stocktake is not in progress (planned, completed or
+            cancelled) or has no frozen expected stock, or a correction would
+            lower the stock of a bin below on_hand − reserved (type
+            insufficient-stock); nothing was booked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '422':
+          description: >-
+            A correction was refused by the movement service, e.g. a place
+            found of another client than the asset; `field` names the
+            location of the movement. Nothing was booked.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '501':
+          description: >-
+            Without PostgreSQL (profile --no-db) the completion is not
+            available, like start.
           content:
             application/problem+json:
               schema:
@@ -10275,9 +10375,9 @@ paths:
       tags: [Documents]
       summary: Link a document to another entity
       description: >-
-        entity_type is one of ci, asset, assignment, ticket, location,
+        entity_type is one of ci, asset, ticket, location,
         disposal_record, stocktake, contract (WP-737) and stock_movement
-        (WP-276); any other value
+        (WP-276; also the former links of assignments, WP-843); any other value
         answers 422. A target
         that does not exist or lies outside the caller's scope answers 404.
         The link takes client, site and team of its target (MGT-01). A
@@ -16548,6 +16648,11 @@ paths:
     get:
       operationId: listInventoryAvailability
       summary: Query inventory availability projections
+      description: >-
+        Availability of assets and consumables under the caller's scope.
+        A consumable (item_kind consumable; the filter item_kind=quantity_item
+        is its alias) counts its stock rows per bin (WP-284): total = Σ
+        on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved).
       responses:
         '200':
           description: Query inventory availability projections
@@ -17095,7 +17200,7 @@ paths:
       tags: [Assets]
       summary: List reservations
       description: >-
-        The reservations of assets and quantity items visible under the
+        The reservations of assets and consumables visible under the
         caller's scope, newest first, optionally of one state. Pages by
         offset; `next_cursor` continues the list.
       parameters:
@@ -17121,14 +17226,23 @@ paths:
     post:
       operationId: createReservations
       tags: [Assets]
-      summary: Reserve an asset or a quantity of an item
+      summary: Reserve an asset or a quantity of a consumable
       description: >-
-        Reserves the asset `asset_id` or a quantity of `quantity_item_id`.
-        An asset reservation runs like POST /api/v1/assets/{id}/reserve
-        (WP-277): the asset is locked in the caller's scope, the movement
-        `reservation` is booked and `reservation.created` is written to the
-        outbox in one transaction. Without `expires_at` the reservation
-        expires at `reserved_until`; one without both does not expire.
+        Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the
+        consumable `consumable_id` in the bin `location_id` (WP-284; without
+        `location_id` the only bin with a stock row of the consumable).
+        `quantity_item_id` is the deprecated alias of `consumable_id` and
+        `item_kind: quantity_item` that of `consumable` until the sunset of
+        inventory/items (E-38). An asset reservation runs like POST
+        /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the
+        caller's scope, the movement `reservation` is booked and
+        `reservation.created` is written to the outbox in one transaction. A
+        consumable reservation locks the stock row of the bin, checks
+        on_hand − reserved, raises `reserved` by the movement `reservation`
+        (on_hand stays) and writes `reservation.created` in the same
+        transaction; client and site are those of the bin. Without
+        `expires_at` the reservation expires at `reserved_until`; one without
+        both does not expire.
       requestBody:
         required: true
         content:
@@ -17143,7 +17257,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Reservation'
         '400':
-          description: Neither asset_id nor quantity_item_id is set, or a value is invalid.
+          description: Neither asset_id nor consumable_id (quantity_item_id) is set, or a value is invalid.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17153,9 +17267,9 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           description: >-
-            The asset or quantity item is unknown, of another organization or
-            outside the caller's scope, or an asset the caller may not change
-            (all alike, TEN-04).
+            The asset, consumable or bin is unknown, of another organization
+            or outside the caller's scope, or an asset the caller may not
+            change (all alike, TEN-04).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17163,12 +17277,18 @@ paths:
           description: >-
             The asset has an active reservation already
             (`https://reticora.io/problems/asset-reserved`) or a holder
-            (`https://reticora.io/problems/asset-assigned`).
+            (`https://reticora.io/problems/asset-assigned`), or the available
+            stock of the bin (on_hand − reserved) does not cover the quantity
+            (`https://reticora.io/problems/insufficient-stock`).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: An id field is no UUID or a time no RFC 3339 date-time; `field` names it.
+          description: >-
+            An id field is no UUID or a time no RFC 3339 date-time, the
+            request names both or the wrong object for item_kind,
+            location_id is no bin, or location_id is missing while the
+            consumable has none or several bins; `field` names it.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17209,9 +17329,11 @@ paths:
       tags: [Assets]
       summary: Release a reservation
       description: >-
-        Sets the active reservation to `released` after locking its asset
-        and itself (WP-277); the movement `release` and
-        `reservation.released` are written in the same transaction.
+        Sets the active reservation to `released` after locking its asset,
+        or the stock row of its bin, and itself (WP-277, WP-284); the
+        movement `release` (which lowers `reserved` of the bin for a
+        consumable, on_hand stays) and `reservation.released` are written in
+        the same transaction.
       responses:
         '200':
           description: Released.
@@ -17241,7 +17363,12 @@ paths:
     get:
       operationId: listSavedViews
       summary: Saved views the caller may read (VIE-01)
-      description: Own views, views shared org-wide and views shared with a role of the caller.
+      description: >-
+        Own views, views shared org-wide and views shared with a role of the
+        caller. A role counts when the caller holds it through a stored role
+        or custom role assignment or, for a standard role (org_admin,
+        engineer, viewer), only through an IdP group or role of the session
+        (E-110, VIE-02).
       responses:
         '200':
           description: Saved views
@@ -17263,6 +17390,13 @@ paths:
     post:
       operationId: createSavedViews
       summary: Create a saved view (VIE-01)
+      description: >-
+        A missing shared is false. With from_preset the view is a clone of a
+        system view (GET /api/v1/saved-views/presets, VIE-02): the server
+        takes entity_kind, filter_spec, sort and columns of the preset, name
+        stays required and the sharing comes from the request. An unknown
+        key and from_preset together with filter_spec are 422 on
+        from_preset.
       requestBody:
         required: true
         content:
@@ -17297,7 +17431,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or an unknown from_preset or from_preset with filter_spec (field from_preset).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17305,10 +17439,28 @@ paths:
   /api/v1/saved-views/presets:
     get:
       operationId: listSavedViewsPresets
-      summary: List the standard saved view presets
+      summary: List the system views (VIE-02)
+      description: >-
+        The system views are code presets with a stable key, a display name
+        per language (de, en) and system true; name is the English name.
+        They have no row in saved_view and cannot be changed; POST
+        /api/v1/saved-views with from_preset clones one. The list is always
+        complete, next_cursor is never set.
       responses:
         '200':
-          description: List the standard saved view presets
+          description: The system views
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  next_cursor:
+                    type: string
+                    description: Opaque signed cursor for the next page (API-02); never set, the list is complete.
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SavedViewPreset' }
         '401':
           description: Unauthorized
 
@@ -17316,7 +17468,11 @@ paths:
     get:
       operationId: getSavedViewsId
       summary: Read a saved view
-      description: A private view of somebody else, or a view shared with roles the caller does not hold, is 404 (VIE-01).
+      description: >-
+        A private view of somebody else, or a view shared with roles the
+        caller does not hold, is 404 (VIE-01). A standard role (org_admin,
+        engineer, viewer) also counts when the caller holds it only through
+        an IdP group or role of the session (E-110, VIE-02).
       responses:
         '200':
           description: The view
@@ -17331,12 +17487,17 @@ paths:
       operationId: updateSavedViewsId
       summary: Update a saved view
       description: >-
-        Only the owner changes the view (E-86, option 1). For everybody else a
-        view shared org-wide or with a role is read-only, and its PATCH answers
-        404 like a view the caller cannot see; the view stays unchanged. Only
-        the fields sent change: a request without shared keeps the sharing.
-        Every id in shared_with_roles must be a role or custom role of the
-        organization.
+        Only the owner or a holder of saved_view:manage (effective
+        permissions, also through an IdP group) changes the view (E-86,
+        option 1, VIE-02); saved_view:manage applies only to views the caller
+        may read, a private view of somebody else stays 404. For everybody
+        else a view shared org-wide or with a role is read-only, and its
+        PATCH answers 404 like a view the caller cannot see; the view stays
+        unchanged. Only the fields sent change: a request without shared
+        keeps the sharing and shared_with_roles. Every id in
+        shared_with_roles must be a role or custom role of the organization.
+        from_preset is 422 (field from_preset): a clone is created with
+        POST.
       requestBody:
         required: true
         content:
@@ -17373,7 +17534,7 @@ paths:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, or a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]).
+          description: Invalid filter AST or filter value (field filter_spec.where.<path> or filter_spec.<field>), an unknown attribute or tag key of the filter, sort key, column, a role id that is not a role or custom role of the organization (field shared_with_roles[<i>]), or from_preset (field from_preset).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -17381,8 +17542,12 @@ paths:
       operationId: deleteSavedViewsId
       summary: Delete a saved view
       description: >-
-        Only the owner deletes the view (E-86, option 1). A view shared with
-        the caller, org-wide or with a role, answers 404 and stays.
+        Only the owner or a holder of saved_view:manage (effective
+        permissions, also through an IdP group) deletes the view (E-86,
+        option 1, VIE-02); saved_view:manage applies only to views the caller
+        may read. For everybody else a view shared with the caller, org-wide
+        or with a role, answers 404 and stays; a private view of somebody
+        else is 404 as well.
       responses:
         '204':
           description: Deleted
@@ -17592,11 +17757,23 @@ paths:
         client_id, location_id, upstream_of and downstream_of are UUIDs. A
         violation is 422 with field naming it (where.<path>, e.g.
         where.and[1].value, where.value[0] or
-        where.and[1].related.max_depth, or the flat field). Requires
+        where.and[1].related.max_depth, or the flat field). The flat
+        fields of the system views (VIE-02): owned_by_me selects what the
+        calling user owns, the owner user or a team of the user as owner
+        team and, for assets, also the current holder (user or team); the
+        user is the one of the request, never a value of the body.
+        ci_type_subtree is a type key or name with all its subtypes (for
+        assets through the asset type or the linked CI). For CIs only:
+        lacks_outgoing_relationship requires that the CI is the source of
+        no relationship of the type, lacks_incoming_relationship that it is
+        the target of none (lacks_relationship stays undirected), and
+        no_metric_within_hours (1 to 8760, else 422) that no metric sample
+        of the CI lies in the last n hours. Requires
         search:read and the read permission of the entity kind (ci:read for
         ci, asset:read for asset); asset.<field> and asset.attributes.<key>
         of a CI query (also in the where of related) need asset:read as
         well, related and the flat has_relationship, lacks_relationship,
+        lacks_outgoing_relationship, lacks_incoming_relationship,
         upstream_of and downstream_of relationship:read. An asset query and the asset
         fields of a CI query need the module inventory and the entitlement
         assets_basic (403 feature-not-entitled); the route itself is not
@@ -17622,6 +17799,23 @@ paths:
               properties:
                 entity_kind: { type: string, enum: [ci, asset] }
                 where: { $ref: '#/components/schemas/FilterExpr' }
+                owned_by_me:
+                  type: boolean
+                  description: What the calling user owns (owner user, owner team of the user; for assets also the holder).
+                ci_type_subtree:
+                  type: string
+                  description: A CI type key or name including all its subtypes.
+                lacks_outgoing_relationship:
+                  type: string
+                  description: CIs only; the CI is the source of no relationship of this type.
+                lacks_incoming_relationship:
+                  type: string
+                  description: CIs only; the CI is the target of no relationship of this type.
+                no_metric_within_hours:
+                  type: integer
+                  minimum: 1
+                  maximum: 8760
+                  description: CIs only; no metric sample of the CI within the last n hours.
                 sort:
                   type: array
                   maxItems: 50
@@ -20064,20 +20258,34 @@ paths:
   /api/v1/stocktakes/{id}/differences:
     x-phase: P2
     x-feature: stocktake_standard
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listStocktakeDifferences
       tags: [Stocktake]
       summary: List the differences of a stocktake
-      description: Planned (E-38); WP-287 implements the operation.
+      description: >-
+        The difference list computed from the frozen expected stock and the
+        scans the caller sees (INV-01, E-38, WP-287), one entry per object,
+        ordered by object: missing (in the snapshot, not scanned; counted
+        quantity 0), unexpected (not in the snapshot; for a consumable a bin
+        without item) and found with a deviation (an asset whose last scan
+        shows another location than the snapshot, a consumable whose
+        scanned quantities do not add up to the expected quantity). The
+        embedded asset carries only the fields the caller may read (field
+        permissions of the object kind asset, RBA-07); the embedded
+        consumable carries its identity. After the completion the scans no
+        longer change, so the list stays as fixed.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the differences of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287.
+          description: A page of the difference list (cursor contract, API-02).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StocktakeDifferenceListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -20086,6 +20294,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '501':
+          description: >-
+            Profile --no-db: the in-memory repository freezes no expected
+            stock.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/stocktakes/{id}/cancel:
     x-phase: P2
@@ -23810,6 +24026,44 @@ components:
           type: array
           description: Role or custom role ids of the organization whose holders may read the view.
           items: { type: string }
+        from_preset:
+          type: string
+          description: >-
+            POST only: the key of a system view to clone (VIE-02); its
+            entity_kind, filter_spec, sort and columns are taken over. Not
+            together with filter_spec; 422 on from_preset for an unknown
+            key and in a PATCH.
+    SavedViewPreset:
+      type: object
+      description: A system view (VIE-02), a code preset without a row in saved_view.
+      required: [key, name, display_name, entity_kind, filter_spec, sort, columns, system]
+      properties:
+        key:
+          type: string
+          description: Stable key, e.g. my_devices_ci, warranty_expiring, servers_without_monitoring.
+        name:
+          type: string
+          description: English name.
+        display_name:
+          type: object
+          required: [de, en]
+          properties:
+            de: { type: string }
+            en: { type: string }
+        entity_kind: { type: string, enum: [ci, asset] }
+        filter_spec:
+          type: object
+          additionalProperties: true
+          description: The filter spec of the view (as for POST /api/v1/search/query).
+        sort:
+          type: array
+          items: { $ref: '#/components/schemas/SavedViewSortKey' }
+        columns:
+          type: array
+          items: { type: string }
+        system:
+          type: boolean
+          description: Always true.
     ImpactAnalysis:
       type: object
       required: [failed_cis, impacted, count, summary]
@@ -28217,12 +28471,18 @@ components:
           format: date-time
         total_expected:
           type: integer
+          description: Number of items frozen by the start.
         total_scanned:
           type: integer
+          description: >-
+            Number of counted objects (WP-287); computed when read while the
+            stocktake with snapshot is in progress, fixed by the completion.
         total_missing:
           type: integer
+          description: Number of missing objects, computed and fixed like total_scanned.
         total_surplus:
           type: integer
+          description: Number of unexpected objects, computed and fixed like total_scanned.
         created_at:
           type: string
           format: date-time
@@ -28341,16 +28601,49 @@ components:
           type: string
         asset_id:
           type: string
+        consumable_id:
+          type: string
+        quantity:
+          type: number
+          description: The counted quantity of the consumable.
+        location_id:
+          type: string
+          format: uuid
+          description: The place found, a location of the area; absent in scans of earlier releases.
+        client_id:
+          type: string
+          format: uuid
+          description: Client of the stocktake (of the scanned object for a stocktake without area).
+        site_id:
+          type: string
+          format: uuid
+          description: Site of the stocktake (of the scanned object for a stocktake without area).
         ci_id:
           type: string
+          deprecated: true
+          description: Read field of scans of earlier releases.
         scanned_by:
           type: string
         scan_method:
           type: string
+          enum: [manual, barcode, rfid, qrcode]
         scan_result:
           type: string
+          enum: [found, missing, unexpected]
+          description: >-
+            Set by the server: found when the object is in the frozen
+            expected stock, else unexpected; missing occurs in scans of
+            earlier releases only.
+        legacy_scan_result:
+          type: string
+          description: The result of a scan of an earlier release before WP-287 (surplus, wrong_location, damaged, found, missing).
+        code:
+          type: string
+          description: The code read by the scanner, stored and not resolved.
         location_found:
           type: string
+          deprecated: true
+          description: Free-text place found of scans of earlier releases.
         notes:
           type: string
         scanned_at:
@@ -28359,18 +28652,31 @@ components:
 
     CreateStockScanRequest:
       type: object
-      required: [scan_result]
+      additionalProperties: false
+      required: [location_id]
+      description: Exactly one of asset_id and consumable_id; quantity with a consumable only.
       properties:
         asset_id:
           type: string
-        ci_id:
+          format: uuid
+        consumable_id:
           type: string
+          format: uuid
+        quantity:
+          type: number
+          exclusiveMinimum: 0
+          description: The counted quantity of the consumable, required with consumable_id.
+        location_id:
+          type: string
+          format: uuid
+          description: The place found, a location in the subtree of the area; a bin for a consumable.
         scan_method:
           type: string
-        scan_result:
+          enum: [manual, barcode, rfid, qrcode]
+          default: manual
+        code:
           type: string
-        location_found:
-          type: string
+          description: The code read by the scanner, stored and not resolved (GET /api/v1/labels/lookup resolves it).
         notes:
           type: string
 
@@ -28385,14 +28691,72 @@ components:
               items:
                 $ref: '#/components/schemas/StockScan'
 
-    StocktakeDifferenceEntry:
+    StocktakeDifference:
       type: object
-      required: [scan]
+      required: [item_kind, classification, expected_quantity, counted_quantity]
       properties:
-        scan:
-          $ref: '#/components/schemas/StockScan'
+        item_kind:
+          type: string
+          enum: [asset, consumable]
+        asset_id:
+          type: string
+          format: uuid
+          description: Set for item_kind asset.
+        consumable_id:
+          type: string
+          format: uuid
+          description: Set for item_kind consumable.
+        classification:
+          type: string
+          enum: [found, missing, unexpected]
+          description: found entries deviate in location (asset) or quantity (consumable).
+        expected_location_id:
+          type: string
+          format: uuid
+          description: The location of the item of the snapshot; absent for unexpected.
+        found_location_id:
+          type: string
+          format: uuid
+          description: The place found of the last scan (asset) or the scanned bin (consumable); absent for missing.
+        expected_quantity:
+          type: number
+          description: 1 for an asset of the snapshot, the frozen on_hand for a consumable, 0 for unexpected.
+        counted_quantity:
+          type: number
+          description: 1 for a scanned asset, the sum of the scanned quantities for a consumable, 0 for missing.
         asset:
-          $ref: '#/components/schemas/Asset'
+          type: object
+          description: >-
+            The asset when the caller sees it, without the fields it may not
+            read (field permissions of the object kind asset).
+          properties:
+            id:
+              type: string
+            client_id:
+              type: string
+            name:
+              type: string
+            inventory_no:
+              type: string
+            serial_number:
+              type: string
+            lifecycle_state:
+              type: string
+            location_id:
+              type: string
+        consumable:
+          type: object
+          description: The consumable when the caller sees it.
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            sku:
+              type: string
+            unit:
+              type: string
 
     StocktakeDifferenceListResponse:
       allOf:
@@ -28403,38 +28767,49 @@ components:
             data:
               type: array
               items:
-                $ref: '#/components/schemas/StocktakeDifferenceEntry'
+                $ref: '#/components/schemas/StocktakeDifference'
 
     CompleteStocktakeRequest:
       type: object
       properties:
         apply_corrections:
           type: boolean
-          description: Whether the recorded differences are applied to the inventory. Defaults to true.
-          default: true
+          deprecated: true
+          description: Ignored (WP-761); every completion books its corrections.
 
     StocktakeCorrection:
       type: object
-      required: [asset_id, scan_result, applied]
+      description: >-
+        A stock movement booked by the completion (WP-761): a transfer of an
+        asset to the place found, or a correction of a consumable in a bin,
+        raising (to_location_id) or lowering (from_location_id) its stock by
+        quantity.
+      required: [movement_id, movement_type, item_kind]
       properties:
+        movement_id:
+          type: string
+          format: uuid
+        movement_type:
+          type: string
+          enum: [transfer, correction]
+        item_kind:
+          type: string
+          enum: [asset, consumable]
         asset_id:
           type: string
-        asset_tag:
+          format: uuid
+        consumable_id:
           type: string
-        scan_result:
+          format: uuid
+        from_location_id:
           type: string
-        previous_status:
+          format: uuid
+        to_location_id:
           type: string
-        new_status:
-          type: string
-        previous_location:
-          type: string
-        new_location:
-          type: string
-        applied:
-          type: boolean
-        detail:
-          type: string
+          format: uuid
+        quantity:
+          type: number
+          description: The booked quantity of a consumable correction; absent for an asset.
 
     StocktakeCompletion:
       type: object
@@ -28444,8 +28819,12 @@ components:
           $ref: '#/components/schemas/Stocktake'
         corrections_applied:
           type: integer
+          description: The number of booked corrections (WP-761).
         corrections:
           type: array
+          description: >-
+            The movements booked as corrections (WP-761); the result per
+            object is in the items and the difference list.
           items:
             $ref: '#/components/schemas/StocktakeCorrection'
 
@@ -29051,29 +29430,37 @@ components:
     Reservation:
       type: object
       description: >-
-        A reservation of an asset or of a quantity of an item (AST-06). It
-        expires at `expires_at`; without it, it does not expire.
+        A reservation of an asset or of a quantity of a consumable in a bin
+        (AST-06, STK-03). It expires at `expires_at`; without it, it does
+        not expire.
       required: [id, organization_id, item_kind, quantity, state, reserved_from, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         organization_id: { type: string, format: uuid }
-        item_kind: { type: string, enum: [asset, quantity_item] }
+        item_kind: { type: string, enum: [asset, consumable] }
         asset_id: { type: string, format: uuid }
-        quantity_item_id: { type: string, format: uuid }
+        consumable_id:
+          type: string
+          format: uuid
+          description: The reserved consumable (item_kind consumable, WP-284).
+        location_id:
+          type: string
+          format: uuid
+          description: The bin of the reserved quantity (item_kind consumable, WP-284).
         client_id:
           type: string
           format: uuid
           readOnly: true
           description: >-
-            Client of the asset or quantity item, derived by the database
-            (WP-750); absent for an org-wide item.
+            Client of the asset or of the bin, derived by the database
+            (WP-750, WP-284); absent for an org-wide asset.
         site_id:
           type: string
           format: uuid
           readOnly: true
           description: >-
-            Site of the asset or quantity item, derived by the database
-            (WP-750); absent without a location.
+            Site of the asset or of the bin, derived by the database (WP-750,
+            WP-284); absent for an asset without location.
         quantity: { type: number }
         state: { $ref: '#/components/schemas/ReservationState' }
         reserved_from: { type: string, format: date-time }
@@ -29106,9 +29493,25 @@ components:
     ReservationCreateRequest:
       type: object
       properties:
-        item_kind: { type: string, enum: [asset, quantity_item] }
+        item_kind:
+          type: string
+          enum: [asset, consumable, quantity_item]
+          description: >-
+            Without it, asset when asset_id is set, else consumable;
+            quantity_item is the deprecated alias of consumable (E-38).
         asset_id: { type: string, format: uuid }
-        quantity_item_id: { type: string, format: uuid }
+        consumable_id: { type: string, format: uuid }
+        location_id:
+          type: string
+          format: uuid
+          description: >-
+            The bin (location of kind bin) of a consumable reservation;
+            without it the only bin with a stock row of the consumable.
+        quantity_item_id:
+          type: string
+          format: uuid
+          deprecated: true
+          description: Deprecated alias of consumable_id until the sunset of inventory/items (E-38, WP-284).
         quantity: { type: number, exclusiveMinimum: 0 }
         reserved_from: { type: string, format: date-time }
         reserved_until: { type: string, format: date-time }
@@ -33778,8 +34181,8 @@ components:
         entity_type:
           type: string
           description: >-
-            ci, asset, assignment, ticket, location, disposal_record, stocktake
-            or contract. A link to a contract takes the client of the contract
+            ci, asset, ticket, location, disposal_record, stocktake, contract
+            or stock_movement. A link to a contract takes the client of the contract
             and goes when the contract is deleted (WP-737).
         entity_id:
           type: string
@@ -33865,7 +34268,7 @@ components:
       properties:
         entity_type:
           type: string
-          description: ci, asset, assignment, ticket, location, disposal_record, stocktake or contract.
+          description: ci, asset, ticket, location, disposal_record, stocktake, contract or stock_movement.
         entity_id:
           type: string
 

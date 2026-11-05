@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -44,10 +43,17 @@ const stockScanSelectColumns = `
 	organization_id::text,
 	stocktake_id::text,
 	COALESCE(asset_id::text, ''),
+	COALESCE(consumable_id::text, ''),
+	quantity::float8,
+	COALESCE(location_id::text, ''),
+	COALESCE(client_id::text, ''),
+	COALESCE(site_id::text, ''),
 	COALESCE(ci_id::text, ''),
 	scanned_by::text,
 	scan_method,
 	scan_result,
+	COALESCE(legacy_scan_result, ''),
+	COALESCE(code, ''),
 	COALESCE(location_found, ''),
 	COALESCE(notes, ''),
 	scanned_at
@@ -63,19 +69,13 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
 }
 
-// scanVisible restricts stocktake scans to those whose asset or CI is visible
-// under the transaction's tenant scope: their policies filter the
-// subqueries, while stock_scan carries no client column yet (WP-025).
-const scanVisible = `(stock_scan.asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = stock_scan.asset_id))
-	AND (stock_scan.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = stock_scan.ci_id))`
-
 // stocktakeWritable admits a stocktake for UPDATE and DELETE, its
 // transitions and its completion (F-365, WP-848): a stocktake without area
 // (location_id NULL, client_id and site_id NULL) is a row of the whole
 // organization (migration 000012), so only an org-wide principal changes,
-// starts, cancels, completes or deletes it (E-09). A principal restricted in
-// the client or site scope records scans of its own assets (AddScan) but
-// gets ErrNotFound for such a stocktake. A stocktake with area carries the
+// starts, cancels, completes or deletes it (E-09); a principal restricted in
+// the client or site scope gets ErrNotFound for such a stocktake. It takes
+// no scans (no snapshot, WP-287). A stocktake with area carries the
 // client and site of its node; the restrictive policies
 // stocktake_scoped_update and stocktake_scoped_delete (000260) admit the
 // principals whose scope covers both.
@@ -83,6 +83,72 @@ const stocktakeWritable = "(location_id IS NOT NULL OR " + database.OrgWideScope
 
 // itemSort is the sort of the keyset cursor of the snapshot items.
 const itemSort = "id"
+
+// scanSort and differenceSort are the sorts of the keyset cursors of the
+// scans (newest first) and of the difference list (by object key).
+const (
+	scanSort       = "scanned_at"
+	differenceSort = "object"
+)
+
+// objectsCTE derives one row per object of the stocktakes $1 (uuid[]) from
+// the snapshot and the scans the caller sees (WP-287): an asset of the
+// snapshot or scanned (its last scan counts), a consumable per bin of the
+// snapshot or scanned (the scanned quantities add up). Items of unexpected
+// objects written by the completion are no part of the snapshot. An object
+// outside the snapshot keeps the result of its last scan (unexpected, or
+// the found and missing of an earlier release). key orders the difference
+// list.
+const objectsCTE = `
+WITH snap AS (
+    SELECT i.stocktake_id, i.item_kind, i.asset_id, i.consumable_id, i.location_id, i.expected_quantity
+      FROM stocktake_item i
+     WHERE i.stocktake_id = ANY ($1::uuid[]) AND i.classification IS DISTINCT FROM 'unexpected'
+), last_asset_scan AS (
+    SELECT DISTINCT ON (s.stocktake_id, s.asset_id) s.stocktake_id, s.asset_id, s.location_id, s.scan_result
+      FROM stock_scan s
+     WHERE s.stocktake_id = ANY ($1::uuid[]) AND s.asset_id IS NOT NULL
+     ORDER BY s.stocktake_id, s.asset_id, s.scanned_at DESC, s.id DESC
+), consumable_count AS (
+    SELECT s.stocktake_id, s.consumable_id, s.location_id, sum(s.quantity) AS counted
+      FROM stock_scan s
+     WHERE s.stocktake_id = ANY ($1::uuid[]) AND s.consumable_id IS NOT NULL
+     GROUP BY s.stocktake_id, s.consumable_id, s.location_id
+), objects AS (
+    SELECT COALESCE(n.stocktake_id, c.stocktake_id) AS stocktake_id, 'asset'::text AS item_kind,
+           COALESCE(n.asset_id, c.asset_id) AS object_id,
+           CASE WHEN n.asset_id IS NULL THEN c.scan_result
+                WHEN c.asset_id IS NULL THEN 'missing' ELSE 'found' END AS classification,
+           n.location_id AS expected_location_id, c.location_id AS found_location_id,
+           COALESCE(n.expected_quantity, 0) AS expected_quantity,
+           (CASE WHEN c.asset_id IS NULL OR c.scan_result = 'missing' THEN 0 ELSE 1 END)::numeric AS counted_quantity
+      FROM (SELECT * FROM snap WHERE item_kind = 'asset') n
+      FULL JOIN last_asset_scan c ON c.stocktake_id = n.stocktake_id AND c.asset_id = n.asset_id
+    UNION ALL
+    SELECT COALESCE(n.stocktake_id, c.stocktake_id), 'consumable'::text,
+           COALESCE(n.consumable_id, c.consumable_id),
+           CASE WHEN n.consumable_id IS NULL THEN 'unexpected'
+                WHEN c.consumable_id IS NULL THEN 'missing' ELSE 'found' END,
+           n.location_id, c.location_id,
+           COALESCE(n.expected_quantity, 0), COALESCE(c.counted, 0)
+      FROM (SELECT * FROM snap WHERE item_kind = 'consumable') n
+      FULL JOIN consumable_count c
+        ON c.stocktake_id = n.stocktake_id AND c.consumable_id = n.consumable_id AND c.location_id = n.location_id
+), keyed AS (
+    SELECT o.*, (o.item_kind || ':' || o.object_id::text
+                 || CASE WHEN o.item_kind = 'consumable'
+                         THEN ':' || COALESCE(o.expected_location_id, o.found_location_id)::text ELSE '' END) COLLATE "C" AS key
+      FROM objects o
+)
+`
+
+// deviates selects the objects of the difference list: missing, unexpected
+// and found with another location (asset) or quantity (consumable) than
+// the snapshot.
+const deviates = `(k.classification IN ('missing', 'unexpected')
+    OR (k.classification = 'found' AND k.expected_location_id IS NOT NULL
+        AND ((k.item_kind = 'asset' AND k.found_location_id IS DISTINCT FROM k.expected_location_id)
+             OR (k.item_kind = 'consumable' AND k.counted_quantity <> k.expected_quantity))))`
 
 // areaFields maps the constraint of the area onto its request field.
 var areaFields = map[string]string{"stocktake_location_fkey": "location_id"}
@@ -98,20 +164,6 @@ func areaError(err error) error {
 		return fe
 	}
 	return err
-}
-
-// requireVisible fails with ErrNotFound when the written row of table does not
-// satisfy visible, i.e. when a write pointed it at an object outside the
-// tenant scope; the transaction is then rolled back.
-func requireVisible(ctx context.Context, tx pgx.Tx, table, visible, id string) error {
-	var ok bool
-	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE id = $1 AND "+visible+")", id).Scan(&ok); err != nil {
-		return fmt.Errorf("check %s visibility: %w", table, err)
-	}
-	if !ok {
-		return ErrNotFound
-	}
-	return nil
 }
 
 // List returns paginated stocktakes filtered by the given parameters.
@@ -192,7 +244,12 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate stocktakes: %w", err)
 		}
-		return nil
+		rows.Close()
+		live := make([]*Stocktake, len(stocktakes))
+		for i := range stocktakes {
+			live[i] = &stocktakes[i]
+		}
+		return liveTotals(ctx, tx, live)
 	})
 
 	return stocktakes, total, err
@@ -212,7 +269,7 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Stocktak
 			}
 			return fmt.Errorf("get stocktake by id: %w", err)
 		}
-		return nil
+		return liveTotals(ctx, tx, []*Stocktake{stocktake})
 	})
 	if err != nil {
 		return nil, err
@@ -273,6 +330,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		if err != nil {
 			return err
 		}
+		if current.terminal() {
+			return ErrAlreadyCompleted
+		}
 		setClauses := make([]string, 0, 5)
 		args := []any{id}
 		argPos := 2
@@ -301,7 +361,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 		}
 		if len(setClauses) == 0 {
 			stocktake = current
-			return nil
+			return liveTotals(ctx, tx, []*Stocktake{stocktake})
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
@@ -314,9 +374,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			if mapped := areaError(err); mapped != err {
 				return mapped
 			}
-			return fmt.Errorf("update stocktake: %w", err)
+			return immutableError(fmt.Errorf("update stocktake: %w", err))
 		}
-		return nil
+		return liveTotals(ctx, tx, []*Stocktake{stocktake})
 	})
 
 	return stocktake, err
@@ -418,8 +478,8 @@ func (r *PGRepository) Cancel(ctx context.Context, orgID, id string) (*Stocktake
 		if err != nil {
 			return err
 		}
-		if current.Status != StatusPlanned && current.Status != StatusInProgress {
-			return ErrInvalidTransition
+		if current.terminal() {
+			return ErrAlreadyCompleted
 		}
 		stocktake, err = scanStocktake(tx.QueryRow(ctx,
 			"UPDATE stocktake SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND "+stocktakeWritable+" RETURNING "+stocktakeSelectColumns, id))
@@ -427,7 +487,7 @@ func (r *PGRepository) Cancel(ctx context.Context, orgID, id string) (*Stocktake
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
-			return fmt.Errorf("cancel stocktake: %w", err)
+			return immutableError(fmt.Errorf("cancel stocktake: %w", err))
 		}
 		return nil
 	})
@@ -504,13 +564,23 @@ func ItemsNextCursor(items []Item, limit int) string {
 	return api.EncodeCursor(api.Cursor{Sort: itemSort, Dir: "asc", Value: last, ID: last})
 }
 
-// Delete deletes a stocktake. The stocktake table has no deleted_at column, so this is a hard delete
-// that cascades to the scans of all clients; only an org-wide principal may (stocktakeWritable).
+// Delete deletes a planned or in-progress stocktake. The stocktake table
+// has no deleted_at column, so this is a hard delete that cascades to the
+// scans and items of all clients; only an org-wide principal may
+// (stocktakeWritable). A completed or cancelled stocktake is immutable
+// (ErrAlreadyCompleted, WP-761).
 func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		current, err := lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if current.terminal() {
+			return ErrAlreadyCompleted
+		}
 		cmdTag, err := tx.Exec(ctx, "DELETE FROM stocktake WHERE id = $1 AND "+stocktakeWritable, id)
 		if err != nil {
-			return fmt.Errorf("delete stocktake: %w", err)
+			return immutableError(fmt.Errorf("delete stocktake: %w", err))
 		}
 		if cmdTag.RowsAffected() == 0 {
 			return ErrNotFound
@@ -519,288 +589,458 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 	})
 }
 
-// AddScan records a stocktake scan and updates stocktake counters.
-func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
-	return database.WithRequestTenant(ctx, r.pool, scan.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", scan.StocktakeID).Scan(&exists); err != nil {
-			return fmt.Errorf("check stocktake: %w", err)
+// liveTotals sets total_scanned, total_missing and total_surplus (the
+// unexpected objects) of the in-progress stocktakes with snapshot among
+// items from the snapshot and the scans the caller sees (WP-287); the
+// stored totals of the others stay.
+func liveTotals(ctx context.Context, tx pgx.Tx, items []*Stocktake) error {
+	ids := make([]string, 0, len(items))
+	byID := make(map[string]*Stocktake, len(items))
+	for _, st := range items {
+		if st.Status == StatusInProgress && st.hasSnapshot() {
+			ids = append(ids, st.ID)
+			byID[st.ID] = st
+			st.TotalScanned, st.TotalMissing, st.TotalSurplus = 0, 0, 0
 		}
-		if !exists {
-			return ErrNotFound
-		}
-
-		query := `
-			INSERT INTO stock_scan (
-				organization_id, stocktake_id, asset_id, ci_id, scanned_by,
-				scan_method, scan_result, location_found, notes, scanned_at
-			) VALUES (
-				$1, $2, $3, $4, $5,
-				$6, $7, $8, $9, COALESCE($10::timestamptz, NOW())
-			)
-			RETURNING ` + stockScanSelectColumns
-		created, err := scanStockScan(tx.QueryRow(ctx, query,
-			scan.OrganizationID,
-			scan.StocktakeID,
-			nilIfEmpty(scan.AssetID),
-			nilIfEmpty(scan.CIID),
-			scan.ScannedBy,
-			scan.ScanMethod,
-			scan.ScanResult,
-			nilIfEmpty(scan.LocationFound),
-			nilIfEmpty(scan.Notes),
-			nilIfZeroTime(scan.ScannedAt),
-		))
-		if err != nil {
-			return fmt.Errorf("add stock scan: %w", err)
-		}
-		if err := requireVisible(ctx, tx, "stock_scan", scanVisible, created.ID); err != nil {
-			return err
-		}
-		*scan = *created
-
-		setClauses := []string{"total_scanned = total_scanned + 1", "updated_at = NOW()"}
-		switch scan.ScanResult {
-		case "missing":
-			setClauses = append(setClauses, "total_missing = total_missing + 1")
-		case "surplus":
-			setClauses = append(setClauses, "total_surplus = total_surplus + 1")
-		}
-		if _, err := tx.Exec(ctx, "UPDATE stocktake SET "+strings.Join(setClauses, ", ")+" WHERE id = $1", scan.StocktakeID); err != nil {
-			return fmt.Errorf("update stocktake counters: %w", err)
-		}
-		return nil
-	})
-}
-
-// ListScans returns paginated scans for a stocktake.
-func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
-	var scans []StockScan
-	var total int
-
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_scan WHERE "+scanVisible+" AND stocktake_id = $1", stocktakeID).Scan(&total); err != nil {
-			return fmt.Errorf("count stock scans: %w", err)
-		}
-		query := fmt.Sprintf("SELECT %s FROM stock_scan WHERE "+scanVisible+" AND stocktake_id = $1 ORDER BY scanned_at DESC LIMIT $2 OFFSET $3", stockScanSelectColumns)
-		rows, err := tx.Query(ctx, query, stocktakeID, page.Limit, page.Offset)
-		if err != nil {
-			return fmt.Errorf("list stock scans: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			scan, err := scanStockScan(rows)
-			if err != nil {
-				return fmt.Errorf("scan stock scan: %w", err)
-			}
-			scans = append(scans, *scan)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate stock scans: %w", err)
-		}
-		return nil
-	})
-
-	return scans, total, err
-}
-
-// Difference returns the deviating scans of a stocktake joined with the
-// referenced asset (when present), oldest scan first. The asset carries
-// its inventory number (inventory_no), lifecycle_state and location_id
-// (E-120 (b), WP-738); status and the free text location stay as
-// deprecated fields.
-func (r *PGRepository) Difference(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]DifferenceEntry, int, error) {
-	entries := []DifferenceEntry{}
-	var total int
-
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", stocktakeID).Scan(&exists); err != nil {
-			return fmt.Errorf("check stocktake: %w", err)
-		}
-		if !exists {
-			return ErrNotFound
-		}
-
-		if err := tx.QueryRow(ctx,
-			`SELECT COUNT(*) FROM stock_scan
-			 WHERE stocktake_id = $1 AND scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
-			   AND `+scanVisible,
-			stocktakeID).Scan(&total); err != nil {
-			return fmt.Errorf("count stocktake difference: %w", err)
-		}
-
-		rows, err := tx.Query(ctx, `
-			SELECT s.id::text, s.organization_id::text, s.stocktake_id::text,
-			       COALESCE(s.asset_id::text, ''), COALESCE(s.ci_id::text, ''),
-			       s.scanned_by::text, s.scan_method, s.scan_result,
-			       COALESCE(s.location_found, ''), COALESCE(s.notes, ''), s.scanned_at,
-			       a.id::text, a.inventory_no, a.name, a.lifecycle_state, a.location_id::text, a.status, a.location
-			FROM stock_scan s
-			LEFT JOIN asset a ON a.id = s.asset_id
-			WHERE s.stocktake_id = $1
-			  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
-			  AND EXISTS (SELECT 1 FROM stock_scan WHERE stock_scan.id = s.id AND `+scanVisible+`)
-			ORDER BY s.scanned_at ASC
-			LIMIT $2 OFFSET $3`, stocktakeID, page.Limit, page.Offset)
-		if err != nil {
-			return fmt.Errorf("list stocktake difference: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var entry DifferenceEntry
-			var assetID, assetTag, assetName, assetState, assetLocationID, assetStatus, assetLocation sql.NullString
-			if err := rows.Scan(
-				&entry.Scan.ID, &entry.Scan.OrganizationID, &entry.Scan.StocktakeID,
-				&entry.Scan.AssetID, &entry.Scan.CIID, &entry.Scan.ScannedBy,
-				&entry.Scan.ScanMethod, &entry.Scan.ScanResult,
-				&entry.Scan.LocationFound, &entry.Scan.Notes, &entry.Scan.ScannedAt,
-				&assetID, &assetTag, &assetName, &assetState, &assetLocationID, &assetStatus, &assetLocation,
-			); err != nil {
-				return fmt.Errorf("scan difference row: %w", err)
-			}
-			if assetID.Valid {
-				entry.Asset = &asset.Asset{
-					ID:             assetID.String,
-					AssetTag:       assetTag.String,
-					Name:           assetName.String,
-					LifecycleState: assetState.String,
-					LocationID:     assetLocationID.String,
-					Status:         assetStatus.String,
-					Location:       assetLocation.String,
-				}
-			}
-			entries = append(entries, entry)
-		}
-		return rows.Err()
-	})
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, 0, ErrNotFound
-		}
-		return nil, 0, err
 	}
-	return entries, total, nil
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, objectsCTE+`
+		SELECT k.stocktake_id::text, count(*) FILTER (WHERE k.counted_quantity > 0),
+		       count(*) FILTER (WHERE k.classification = 'missing'),
+		       count(*) FILTER (WHERE k.classification = 'unexpected')
+		  FROM keyed k GROUP BY k.stocktake_id`, ids)
+	if err != nil {
+		return fmt.Errorf("stocktake totals: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var scanned, missing, surplus int
+		if err = rows.Scan(&id, &scanned, &missing, &surplus); err != nil {
+			return fmt.Errorf("scan stocktake totals: %w", err)
+		}
+		if st := byID[id]; st != nil {
+			st.TotalScanned, st.TotalMissing, st.TotalSurplus = scanned, missing, surplus
+		}
+	}
+	return rows.Err()
 }
 
-// Complete finalizes a stocktake and applies the recorded inventory
-// corrections atomically: the stocktake transition and all asset updates run
-// in a single transaction, so a failure rolls everything back. Only an
-// org-wide principal completes a stocktake (stocktakeWritable): a scoped one
-// would close it for the differences of other clients too.
-func (r *PGRepository) Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error) {
-	completion := &Completion{Corrections: []Correction{}}
-
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var status string
-		err := tx.QueryRow(ctx, "SELECT status FROM stocktake WHERE id = $1 AND "+stocktakeWritable+" FOR UPDATE", id).Scan(&status)
-		if err == pgx.ErrNoRows {
+// AddScan records a scan of an in-progress stocktake with snapshot
+// (WP-287). The stocktake is read with FOR SHARE, so complete and cancel
+// (FOR UPDATE) wait for the scan; the scanned asset or consumable must be
+// visible (ErrObjectNotFound), the place found a location of the area and,
+// for a consumable, a bin (ErrPlaceFound). scan_result is found when the
+// object is in the snapshot (a consumable with a snapshot row of that
+// bin), else unexpected. client_id and site_id come from the stocktake
+// (stock_scan_derive_scope); AddScan writes no stocktake row.
+func (r *PGRepository) AddScan(ctx context.Context, scan *StockScan) error {
+	if !api.IsUUID(scan.StocktakeID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, scan.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		st, err := scanStocktake(tx.QueryRow(ctx,
+			"SELECT "+stocktakeSelectColumns+" FROM stocktake WHERE id = $1 FOR SHARE", scan.StocktakeID))
+		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
 			return fmt.Errorf("lock stocktake: %w", err)
 		}
-		if status == "completed" || status == "cancelled" {
+		if st.terminal() {
 			return ErrAlreadyCompleted
 		}
-
-		if applyCorrections {
-			// The corrections report the status and free text location
-			// they overwrite; WP-287 moves them onto movements.
-			rows, queryErr := tx.Query(ctx, `
-				SELECT s.id::text, s.scan_result, COALESCE(s.location_found, ''),
-				       a.id::text, a.inventory_no, a.status, COALESCE(a.location, '')
-				FROM stock_scan s
-				JOIN asset a ON a.id = s.asset_id
-				WHERE s.stocktake_id = $1
-				  AND s.scan_result IN ('missing', 'surplus', 'damaged', 'wrong_location')
-				ORDER BY s.scanned_at ASC`, id)
-			if queryErr != nil {
-				return fmt.Errorf("list deviating scans: %w", queryErr)
-			}
-			type correctionRow struct {
-				scan                      StockScan
-				assetID, tag, status, loc string
-			}
-			var pending []correctionRow
-			for rows.Next() {
-				var cr correctionRow
-				if rowErr := rows.Scan(&cr.scan.ID, &cr.scan.ScanResult, &cr.scan.LocationFound, &cr.assetID, &cr.tag, &cr.status, &cr.loc); rowErr != nil {
-					rows.Close()
-					return fmt.Errorf("scan deviating row: %w", rowErr)
-				}
-				pending = append(pending, cr)
-			}
-			rows.Close()
-			if iterErr := rows.Err(); iterErr != nil {
-				return fmt.Errorf("iterate deviating scans: %w", iterErr)
-			}
-
-			for i := range pending {
-				p := &pending[i]
-				c := Correction{
-					AssetID:          p.assetID,
-					AssetTag:         p.tag,
-					ScanResult:       p.scan.ScanResult,
-					PreviousStatus:   p.status,
-					PreviousLocation: p.loc,
-				}
-				var query string
-				switch p.scan.ScanResult {
-				case "missing":
-					c.NewStatus = "lost"
-					query = "UPDATE asset SET status = 'lost', updated_at = NOW() WHERE id = $1"
-				case "surplus":
-					c.NewStatus = "in_stock"
-					query = "UPDATE asset SET status = 'in_stock', updated_at = NOW() WHERE id = $1"
-				case "damaged":
-					c.NewStatus = "maintenance"
-					query = "UPDATE asset SET status = 'maintenance', updated_at = NOW() WHERE id = $1"
-				case "wrong_location":
-					if p.scan.LocationFound == "" {
-						c.Detail = "scan did not record a found location"
-						completion.Corrections = append(completion.Corrections, c)
-						continue
-					}
-					c.NewLocation = p.scan.LocationFound
-					query = "UPDATE asset SET location = $2, updated_at = NOW() WHERE id = $1"
-				default:
-					continue
-				}
-				var cmdTag pgconn.CommandTag
-				var execErr error
-				if c.NewLocation != "" {
-					cmdTag, execErr = tx.Exec(ctx, query, p.assetID, p.scan.LocationFound)
-				} else {
-					cmdTag, execErr = tx.Exec(ctx, query, p.assetID)
-				}
-				if execErr != nil {
-					return fmt.Errorf("apply correction for asset %s: %w", p.assetID, execErr)
-				}
-				c.Applied = cmdTag.RowsAffected() > 0
-				completion.Corrections = append(completion.Corrections, c)
-				if c.Applied {
-					completion.CorrectionsApplied++
-				}
-			}
+		if st.Status != StatusInProgress {
+			return ErrInvalidTransition
+		}
+		if !st.hasSnapshot() {
+			return ErrNoSnapshot
 		}
 
-		st, err := scanStocktake(tx.QueryRow(ctx,
-			"UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 AND "+stocktakeWritable+" RETURNING "+stocktakeSelectColumns, id))
+		var visible bool
+		if scan.AssetID != "" {
+			err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asset WHERE id = $1)`, scan.AssetID).Scan(&visible)
+		} else {
+			err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM consumable WHERE id = $1)`, scan.ConsumableID).Scan(&visible)
+		}
+		if err != nil {
+			return fmt.Errorf("check scanned object: %w", err)
+		}
+		if !visible {
+			return ErrObjectNotFound
+		}
+
+		var inArea bool
+		var kind string
+		err = tx.QueryRow(ctx, `
+			SELECT l.kind, l.path <@ area.path FROM location l, location area
+			 WHERE l.id = $1 AND area.id = $2`, scan.LocationID, st.LocationID).Scan(&kind, &inArea)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (!inArea || (scan.ConsumableID != "" && kind != "bin"))) {
+			return ErrPlaceFound
+		}
+		if err != nil {
+			return fmt.Errorf("check place found: %w", err)
+		}
+
+		var inSnapshot bool
+		if scan.AssetID != "" {
+			err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stocktake_item WHERE stocktake_id = $1 AND asset_id = $2
+				AND classification IS DISTINCT FROM 'unexpected')`, st.ID, scan.AssetID).Scan(&inSnapshot)
+		} else {
+			err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stocktake_item WHERE stocktake_id = $1 AND consumable_id = $2
+				AND location_id = $3 AND classification IS DISTINCT FROM 'unexpected')`, st.ID, scan.ConsumableID, scan.LocationID).Scan(&inSnapshot)
+		}
+		if err != nil {
+			return fmt.Errorf("check snapshot: %w", err)
+		}
+		scan.ScanResult = ScanUnexpected
+		if inSnapshot {
+			scan.ScanResult = ScanFound
+		}
+
+		created, err := scanStockScan(tx.QueryRow(ctx, `
+			INSERT INTO stock_scan (
+				organization_id, stocktake_id, asset_id, consumable_id, quantity, location_id,
+				scanned_by, scan_method, scan_result, code, notes
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			RETURNING `+stockScanSelectColumns,
+			scan.OrganizationID, scan.StocktakeID, nilIfEmpty(scan.AssetID), nilIfEmpty(scan.ConsumableID), scan.Quantity,
+			scan.LocationID, scan.ScannedBy, scan.ScanMethod, scan.ScanResult, nilIfEmpty(scan.Code), nilIfEmpty(scan.Notes)))
+		if err != nil {
+			return immutableError(fmt.Errorf("add stock scan: %w", err))
+		}
+		*scan = *created
+		return nil
+	})
+}
+
+// requireStocktake fails with ErrNotFound when the caller does not see the
+// stocktake id.
+func requireStocktake(ctx context.Context, tx pgx.Tx, id string) error {
+	var exists bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM stocktake WHERE id = $1)", id).Scan(&exists); err != nil {
+		return fmt.Errorf("check stocktake: %w", err)
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListScans returns a page of the scans of a stocktake the caller sees,
+// newest first: after the keyset cursor (scanned_at, id) when given, else
+// from the offset. The policies of stock_scan apply the client and site of
+// each scan (WP-287).
+func (r *PGRepository) ListScans(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]StockScan, int, error) {
+	scans := []StockScan{}
+	var total int
+
+	if !api.IsUUID(stocktakeID) {
+		return nil, 0, ErrNotFound
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireStocktake(ctx, tx, stocktakeID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_scan WHERE stocktake_id = $1", stocktakeID).Scan(&total); err != nil {
+			return fmt.Errorf("count stock scans: %w", err)
+		}
+		query := "SELECT " + stockScanSelectColumns + " FROM stock_scan WHERE stocktake_id = $1"
+		args := []any{stocktakeID}
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(scanSort, "desc") || !api.IsUUID(page.Cursor.ID) {
+				return fmt.Errorf("%w: not issued for the stocktake scans", api.ErrInvalidCursor)
+			}
+			if _, perr := time.Parse(time.RFC3339Nano, page.Cursor.Value); perr != nil {
+				return fmt.Errorf("%w: not issued for the stocktake scans", api.ErrInvalidCursor)
+			}
+			query += " AND " + api.KeysetClause("scanned_at", "timestamptz", "desc", 2) + " ORDER BY scanned_at DESC, id DESC LIMIT $4"
+			args = append(args, page.Cursor.Value, page.Cursor.ID, page.Limit)
+		} else {
+			query += " ORDER BY scanned_at DESC, id DESC LIMIT $2 OFFSET $3"
+			args = append(args, page.Limit, page.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list stock scans: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			scan, serr := scanStockScan(rows)
+			if serr != nil {
+				return fmt.Errorf("scan stock scan: %w", serr)
+			}
+			scans = append(scans, *scan)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return scans, total, nil
+}
+
+// ScansNextCursor returns the keyset cursor after the last scan of a full
+// page, or an empty string when the page was not full.
+func ScansNextCursor(scans []StockScan, limit int) string {
+	if len(scans) == 0 || len(scans) < limit {
+		return ""
+	}
+	last := &scans[len(scans)-1]
+	return api.EncodeCursor(api.Cursor{Sort: scanSort, Dir: "desc", Value: last.ScannedAt.UTC().Format(time.RFC3339Nano), ID: last.ID})
+}
+
+// Differences returns a page of the difference list of a stocktake
+// (WP-287), ordered by object: after the keyset cursor when given, else
+// from the offset. An asset or consumable the caller sees is embedded.
+func (r *PGRepository) Differences(ctx context.Context, orgID, stocktakeID string, page api.PaginationParams) ([]Difference, int, error) {
+	entries := []Difference{}
+	var total int
+
+	if !api.IsUUID(stocktakeID) {
+		return nil, 0, ErrNotFound
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := requireStocktake(ctx, tx, stocktakeID); err != nil {
+			return err
+		}
+		ids := []string{stocktakeID}
+		if err := tx.QueryRow(ctx, objectsCTE+"SELECT count(*) FROM keyed k WHERE "+deviates, ids).Scan(&total); err != nil {
+			return fmt.Errorf("count stocktake differences: %w", err)
+		}
+		query := objectsCTE + `
+			SELECT k.key, k.item_kind, k.object_id::text, k.classification,
+			       COALESCE(k.expected_location_id::text, ''), COALESCE(k.found_location_id::text, ''),
+			       k.expected_quantity::float8, k.counted_quantity::float8,
+			       a.id::text, COALESCE(a.client_id::text, ''), COALESCE(a.site_id::text, ''), COALESCE(a.asset_type_id::text, ''),
+			       COALESCE(a.name, ''), COALESCE(a.inventory_no, ''), COALESCE(a.serial_number, ''),
+			       COALESCE(a.lifecycle_state, ''), COALESCE(a.location_id::text, ''),
+			       c.id::text, COALESCE(c.name, ''), COALESCE(c.sku, ''), COALESCE(c.unit, '')
+			  FROM keyed k
+			  LEFT JOIN asset a ON k.item_kind = 'asset' AND a.id = k.object_id
+			  LEFT JOIN consumable c ON k.item_kind = 'consumable' AND c.id = k.object_id
+			 WHERE ` + deviates
+		args := []any{ids}
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(differenceSort, "asc") || page.Cursor.Value == "" {
+				return fmt.Errorf("%w: not issued for the stocktake differences", api.ErrInvalidCursor)
+			}
+			query += ` AND k.key > $2 COLLATE "C" ORDER BY k.key LIMIT $3`
+			args = append(args, page.Cursor.Value, page.Limit)
+		} else {
+			query += " ORDER BY k.key LIMIT $2 OFFSET $3"
+			args = append(args, page.Limit, page.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list stocktake differences: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d Difference
+			var objectID string
+			var assetID, consumableID sql.NullString
+			var a DifferenceAsset
+			var c Supply
+			if err = rows.Scan(&d.key, &d.ItemKind, &objectID, &d.Classification, &d.ExpectedLocationID, &d.FoundLocationID,
+				&d.ExpectedQuantity, &d.CountedQuantity,
+				&assetID, &a.ClientID, &a.SiteID, &a.AssetTypeID, &a.Name, &a.InventoryNo, &a.SerialNumber, &a.LifecycleState, &a.LocationID,
+				&consumableID, &c.Name, &c.SKU, &c.Unit); err != nil {
+				return fmt.Errorf("scan stocktake difference: %w", err)
+			}
+			if d.ItemKind == ItemKindAsset {
+				d.AssetID = objectID
+			} else {
+				d.ConsumableID = objectID
+			}
+			if assetID.Valid {
+				a.ID = assetID.String
+				d.Asset = &a
+			}
+			if consumableID.Valid {
+				c.ID = consumableID.String
+				d.Consumable = &c
+			}
+			entries = append(entries, d)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return entries, total, nil
+}
+
+// DifferencesNextCursor returns the keyset cursor after the last entry of a
+// full page, or an empty string when the page was not full.
+func DifferencesNextCursor(entries []Difference, limit int) string {
+	if len(entries) == 0 || len(entries) < limit {
+		return ""
+	}
+	last := entries[len(entries)-1].key
+	return api.EncodeCursor(api.Cursor{Sort: differenceSort, Dir: "asc", Value: last, ID: last})
+}
+
+// RunInTx runs fn in one transaction of the context's tenant scope, which
+// the repository calls and the movement service join through fn's context
+// (database.WithRequestTenantTx, WP-332).
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
+
+// fixResult locks the stocktake id for its completion (FOR UPDATE, only
+// principals that may write it: stocktakeWritable and the restrictive
+// policies of 000260), checks completeRule, computes the totals and fixes
+// the result (WP-287): every snapshot item gets counted_quantity and
+// classification, every unexpected object an item with expected_quantity 0
+// at the place found. It returns the stocktake with its totals and the
+// corrections of the result (plannedCorrections, WP-761).
+func (r *PGRepository) fixResult(ctx context.Context, orgID, id string) (*Stocktake, []plannedCorrection, error) {
+	var current *Stocktake
+	var planned []plannedCorrection
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		current, err = lockStocktake(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if ruleErr := completeRule(current); ruleErr != nil {
+			return ruleErr
+		}
+		if totalsErr := liveTotals(ctx, tx, []*Stocktake{current}); totalsErr != nil {
+			return totalsErr
+		}
+		ids := []string{id}
+		if _, err = tx.Exec(ctx, objectsCTE+`
+			UPDATE stocktake_item i SET counted_quantity = k.counted_quantity, classification = k.classification
+			  FROM keyed k
+			 WHERE i.stocktake_id = k.stocktake_id AND k.expected_location_id IS NOT NULL AND i.item_kind = k.item_kind
+			   AND ((k.item_kind = 'asset' AND i.asset_id = k.object_id)
+			        OR (k.item_kind = 'consumable' AND i.consumable_id = k.object_id AND i.location_id = k.expected_location_id))`,
+			ids); err != nil {
+			return fmt.Errorf("fix the counted items: %w", err)
+		}
+		if _, err = tx.Exec(ctx, objectsCTE+`
+			INSERT INTO stocktake_item (organization_id, stocktake_id, item_kind, asset_id, consumable_id, location_id,
+			                            expected_quantity, counted_quantity, classification)
+			SELECT $2, k.stocktake_id, k.item_kind,
+			       CASE WHEN k.item_kind = 'asset' THEN k.object_id END,
+			       CASE WHEN k.item_kind = 'consumable' THEN k.object_id END,
+			       k.found_location_id, 0, k.counted_quantity, 'unexpected'
+			  FROM keyed k
+			 WHERE k.expected_location_id IS NULL AND k.classification = 'unexpected' AND k.found_location_id IS NOT NULL`,
+			ids, orgID); err != nil {
+			return fmt.Errorf("fix the unexpected items: %w", err)
+		}
+		planned, err = plannedCorrections(ctx, tx, id)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return current, planned, nil
+}
+
+// plannedCorrections derives the corrections of the fixed result of the
+// stocktake id (WP-761): a transfer per asset whose last scan shows another
+// place than its current location_id (found elsewhere or unexpected; a
+// missing asset gets none, and its status stays), and per consumable and
+// bin of the result a correction by the counted quantity minus the book
+// stock of the bin now (stock_level.on_hand, the snapshot plus the
+// movements since the start), none for a difference of 0. Assets and
+// consumables come in id order, the bins of a consumable in location
+// order, so concurrent completions lock in one order.
+func plannedCorrections(ctx context.Context, tx pgx.Tx, id string) ([]plannedCorrection, error) {
+	var planned []plannedCorrection
+	rows, err := tx.Query(ctx, `
+		SELECT l.asset_id::text, COALESCE(a.location_id::text, ''), l.location_id::text
+		  FROM (SELECT DISTINCT ON (s.asset_id) s.asset_id, s.location_id
+		          FROM stock_scan s
+		         WHERE s.stocktake_id = $1 AND s.asset_id IS NOT NULL AND s.location_id IS NOT NULL
+		         ORDER BY s.asset_id, s.scanned_at DESC, s.id DESC) l
+		  JOIN asset a ON a.id = l.asset_id
+		 WHERE a.location_id IS DISTINCT FROM l.location_id
+		 ORDER BY l.asset_id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("derive the asset corrections: %w", err)
+	}
+	for rows.Next() {
+		c := plannedCorrection{itemKind: ItemKindAsset}
+		if err = rows.Scan(&c.assetID, &c.from, &c.to); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan asset correction: %w", err)
+		}
+		planned = append(planned, c)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate asset corrections: %w", err)
+	}
+	rows, err = tx.Query(ctx, `
+		SELECT i.consumable_id::text, i.location_id::text,
+		       (COALESCE(i.counted_quantity, 0) - COALESCE(sl.on_hand, 0))::float8
+		  FROM stocktake_item i
+		  LEFT JOIN stock_level sl ON sl.organization_id = i.organization_id
+		       AND sl.consumable_id = i.consumable_id AND sl.location_id = i.location_id
+		 WHERE i.stocktake_id = $1 AND i.item_kind = 'consumable'
+		   AND COALESCE(i.counted_quantity, 0) <> COALESCE(sl.on_hand, 0)
+		 ORDER BY i.consumable_id, i.location_id`, id)
+	if err != nil {
+		return nil, fmt.Errorf("derive the consumable corrections: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var bin string
+		var diff float64
+		c := plannedCorrection{itemKind: ItemKindConsumable}
+		if err = rows.Scan(&c.consumableID, &bin, &diff); err != nil {
+			return nil, fmt.Errorf("scan consumable correction: %w", err)
+		}
+		c.quantity, c.to = diff, bin
+		if diff < 0 {
+			c.quantity, c.to, c.from = -diff, "", bin
+		}
+		planned = append(planned, c)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate consumable corrections: %w", err)
+	}
+	return planned, nil
+}
+
+// closeCompleted sets the totals of current and the status completed in
+// one UPDATE; fixResult locked the stocktake in the same transaction.
+func (r *PGRepository) closeCompleted(ctx context.Context, orgID string, current *Stocktake) (*Stocktake, error) {
+	var st *Stocktake
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		st, err = scanStocktake(tx.QueryRow(ctx, `
+			UPDATE stocktake SET status = 'completed', completed_at = NOW(), updated_at = NOW(),
+			       total_scanned = $2, total_missing = $3, total_surplus = $4
+			 WHERE id = $1 AND `+stocktakeWritable+` RETURNING `+stocktakeSelectColumns,
+			current.ID, current.TotalScanned, current.TotalMissing, current.TotalSurplus))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
 		if err != nil {
 			return fmt.Errorf("complete stocktake: %w", err)
 		}
-		completion.Stocktake = *st
 		return nil
 	})
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, ErrNotFound
-		}
-		return nil, err
+	return st, err
+}
+
+// immutableError maps the refusal of reject_completed_stocktake_mutation
+// (23514 on stocktake_immutable, 000267) to ErrAlreadyCompleted; other
+// errors are returned unchanged.
+func immutableError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "stocktake_immutable" {
+		return ErrAlreadyCompleted
 	}
-	return completion, nil
+	return err
 }
 
 type stockScanner interface {
@@ -856,10 +1096,17 @@ func scanStockScan(scanner stockScanner) (*StockScan, error) {
 		&item.OrganizationID,
 		&item.StocktakeID,
 		&item.AssetID,
+		&item.ConsumableID,
+		&item.Quantity,
+		&item.LocationID,
+		&item.ClientID,
+		&item.SiteID,
 		&item.CIID,
 		&item.ScannedBy,
 		&item.ScanMethod,
 		&item.ScanResult,
+		&item.LegacyScanResult,
+		&item.Code,
 		&item.LocationFound,
 		&item.Notes,
 		&item.ScannedAt,
@@ -872,13 +1119,6 @@ func scanStockScan(scanner stockScanner) (*StockScan, error) {
 
 func nilIfEmpty(value string) any {
 	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
-}
-
-func nilIfZeroTime(value time.Time) any {
-	if value.IsZero() {
 		return nil
 	}
 	return value

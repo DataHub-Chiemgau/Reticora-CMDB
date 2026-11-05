@@ -26,6 +26,25 @@ type Repository interface {
 	Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error)
 }
 
+// CITimeline reads the timeline of a CI for the GraphQL BFF (ciHistory,
+// WP-792): the unified history of List (one entry per ci_change change set,
+// entity_change, location_change, the audit entries with
+// opts.IncludeAudit) and, with opts.IncludeRelationships, the entries of
+// relationship_change of its edges (source SourceRelationshipChange),
+// within the time window of opts, newest first by the time of recording.
+// The relationship entries carry the fields the principal of ctx may read
+// (relationship.ProjectChanges, as GET /api/v1/relationships/{id}/changes).
+// A CI the caller cannot see is api.ErrNotFound. List and REST GET
+// /api/v1/history/{entityType}/{id} stay as they are.
+type CITimeline interface {
+	CITimeline(ctx context.Context, orgID, ciID string, page api.PaginationParams, opts TimelineOptions) ([]Change, int, error)
+}
+
+// within reports whether at lies in the window of opts.
+func (opts *TimelineOptions) within(at time.Time) bool {
+	return (opts.From.IsZero() || !at.Before(opts.From)) && (opts.To.IsZero() || !at.After(opts.To))
+}
+
 // MemoryRepository is an in-memory implementation (tests, --no-db).
 type MemoryRepository struct {
 	mu      sync.RWMutex
@@ -74,6 +93,26 @@ func (r *MemoryRepository) List(_ context.Context, orgID, entityType, entityID s
 	if end > total {
 		end = total
 	}
+	return out[start:end], total, nil
+}
+
+// CITimeline implements CITimeline: the in-memory trail holds neither
+// audit entries nor relationship changes, so it is the changes of the CI
+// within the window, newest first.
+func (r *MemoryRepository) CITimeline(_ context.Context, orgID, ciID string, page api.PaginationParams, opts TimelineOptions) ([]Change, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []Change{}
+	for i := range r.changes {
+		c := &r.changes[i]
+		if c.OrganizationID == orgID && c.EntityType == "ci" && c.EntityID == ciID && opts.within(c.CreatedAt) {
+			out = append(out, *c)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	total := len(out)
+	start := min(page.Offset, total)
+	end := min(start+page.Limit, total)
 	return out[start:end], total, nil
 }
 

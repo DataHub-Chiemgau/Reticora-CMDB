@@ -16,8 +16,12 @@ import (
 	"github.com/99designs/gqlgen/graphql/introspection"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
@@ -40,6 +44,11 @@ type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 type ResolverRoot interface {
 	Asset() AssetResolver
 	CI() CIResolver
+	CIForm() CIFormResolver
+	FormField() FormFieldResolver
+	FormRule() FormRuleResolver
+	FormSection() FormSectionResolver
+	HistoryEntry() HistoryEntryResolver
 	Job() JobResolver
 	Query() QueryResolver
 	RackMount() RackMountResolver
@@ -127,6 +136,22 @@ type ComplexityRoot struct {
 		Node   func(childComplexity int) int
 	}
 
+	CIForm struct {
+		CITypeID       func(childComplexity int) int
+		LayoutID       func(childComplexity int) int
+		RequiredFields func(childComplexity int) int
+		RoleID         func(childComplexity int) int
+		Rules          func(childComplexity int) int
+		Sections       func(childComplexity int) int
+		Source         func(childComplexity int) int
+		TemplateID     func(childComplexity int) int
+	}
+
+	CISeries struct {
+		Name   func(childComplexity int) int
+		Points func(childComplexity int) int
+	}
+
 	Document struct {
 		Category    func(childComplexity int) int
 		CreatedAt   func(childComplexity int) int
@@ -143,6 +168,71 @@ type ComplexityRoot struct {
 		Version     func(childComplexity int) int
 	}
 
+	FieldState struct {
+		AllowedValues func(childComplexity int) int
+		ReadOnly      func(childComplexity int) int
+		Required      func(childComplexity int) int
+		Visible       func(childComplexity int) int
+	}
+
+	FormField struct {
+		Definition func(childComplexity int) int
+		Name       func(childComplexity int) int
+		State      func(childComplexity int) int
+		Width      func(childComplexity int) int
+	}
+
+	FormRule struct {
+		Ast          func(childComplexity int) int
+		AttributeKey func(childComplexity int) int
+		Condition    func(childComplexity int) int
+		Key          func(childComplexity int) int
+		Kind         func(childComplexity int) int
+		Message      func(childComplexity int) int
+	}
+
+	FormSection struct {
+		Fields  func(childComplexity int) int
+		Key     func(childComplexity int) int
+		Title   func(childComplexity int) int
+		Visible func(childComplexity int) int
+	}
+
+	HistoryConnection struct {
+		Nodes      func(childComplexity int) int
+		PageInfo   func(childComplexity int) int
+		TotalCount func(childComplexity int) int
+	}
+
+	HistoryEntry struct {
+		ActorID       func(childComplexity int) int
+		ActorUserID   func(childComplexity int) int
+		ChangeKind    func(childComplexity int) int
+		ChangeSetID   func(childComplexity int) int
+		ChangeSource  func(childComplexity int) int
+		ChangeType    func(childComplexity int) int
+		Comment       func(childComplexity int) int
+		CorrelationID func(childComplexity int) int
+		CreatedAt     func(childComplexity int) int
+		EntityID      func(childComplexity int) int
+		EntityType    func(childComplexity int) int
+		FieldChanges  func(childComplexity int) int
+		FieldName     func(childComplexity int) int
+		ID            func(childComplexity int) int
+		NewValue      func(childComplexity int) int
+		ObservedAt    func(childComplexity int) int
+		OldValue      func(childComplexity int) int
+		RequestID     func(childComplexity int) int
+		SiteID        func(childComplexity int) int
+		Source        func(childComplexity int) int
+	}
+
+	HistoryFieldChange struct {
+		Field func(childComplexity int) int
+		New   func(childComplexity int) int
+		Old   func(childComplexity int) int
+	}
+
 	Job struct {
 		CreatedAt  func(childComplexity int) int
 		Error      func(childComplexity int) int
@@ -151,6 +241,11 @@ type ComplexityRoot struct {
 		Kind       func(childComplexity int) int
 		Progress   func(childComplexity int) int
 		Status     func(childComplexity int) int
+	}
+
+	MetricPoint struct {
+		Timestamp func(childComplexity int) int
+		Value     func(childComplexity int) int
 	}
 
 	Movement struct {
@@ -187,6 +282,9 @@ type ComplexityRoot struct {
 	Query struct {
 		Asset            func(childComplexity int, id string) int
 		Ci               func(childComplexity int, id string) int
+		CiForm           func(childComplexity int, id string, template *string, role *string) int
+		CiHistory        func(childComplexity int, id string, from *time.Time, to *time.Time, first *int, after *string) int
+		CiMetrics        func(childComplexity int, id string, name *string, from *time.Time, to *time.Time, step *string) int
 		Cis              func(childComplexity int, first *int, after *string, filter *CIFilter) int
 		CurrentUser      func(childComplexity int) int
 		Jobs             func(childComplexity int, kind *string, status *string, first *int) int
@@ -329,6 +427,39 @@ type CIResolver interface {
 
 	Attributes(ctx context.Context, obj *ci.Item) (map[string]any, error)
 }
+type CIFormResolver interface {
+	TemplateID(ctx context.Context, obj *citype.ResolvedForm) (*string, error)
+	RoleID(ctx context.Context, obj *citype.ResolvedForm) (*string, error)
+	LayoutID(ctx context.Context, obj *citype.ResolvedForm) (*string, error)
+
+	RequiredFields(ctx context.Context, obj *citype.ResolvedForm) ([]string, error)
+}
+type FormFieldResolver interface {
+	Definition(ctx context.Context, obj *citype.FormField) (map[string]any, error)
+}
+type FormRuleResolver interface {
+	Condition(ctx context.Context, obj *citype.FormRule) (map[string]any, error)
+	Ast(ctx context.Context, obj *citype.FormRule) (map[string]any, error)
+	Message(ctx context.Context, obj *citype.FormRule) (map[string]any, error)
+}
+type FormSectionResolver interface {
+	Title(ctx context.Context, obj *citype.FormSection) (map[string]any, error)
+}
+type HistoryEntryResolver interface {
+	SiteID(ctx context.Context, obj *history.Change) (*string, error)
+	ActorID(ctx context.Context, obj *history.Change) (*string, error)
+	ActorUserID(ctx context.Context, obj *history.Change) (*string, error)
+
+	ChangeKind(ctx context.Context, obj *history.Change) (*string, error)
+	ChangeSetID(ctx context.Context, obj *history.Change) (*string, error)
+	FieldName(ctx context.Context, obj *history.Change) (*string, error)
+
+	FieldChanges(ctx context.Context, obj *history.Change) ([]*history.FieldChange, error)
+	Comment(ctx context.Context, obj *history.Change) (*string, error)
+	ChangeSource(ctx context.Context, obj *history.Change) (*string, error)
+	RequestID(ctx context.Context, obj *history.Change) (*string, error)
+	CorrelationID(ctx context.Context, obj *history.Change) (*string, error)
+}
 type JobResolver interface {
 	Status(ctx context.Context, obj *jobs.Job) (string, error)
 }
@@ -343,6 +474,9 @@ type QueryResolver interface {
 	ReviewInbox(ctx context.Context, status *string, kind *string, first *int) ([]*reviews.Item, error)
 	Jobs(ctx context.Context, kind *string, status *string, first *int) ([]*jobs.Job, error)
 	Asset(ctx context.Context, id string) (*asset.Asset, error)
+	CiForm(ctx context.Context, id string, template *string, role *string) (*citype.ResolvedForm, error)
+	CiHistory(ctx context.Context, id string, from *time.Time, to *time.Time, first *int, after *string) (*HistoryConnection, error)
+	CiMetrics(ctx context.Context, id string, name *string, from *time.Time, to *time.Time, step *string) ([]*monitoring.CISeries, error)
 }
 type RackMountResolver interface {
 	Ci(ctx context.Context, obj *rack.RackMount) (*ci.Item, error)
@@ -778,6 +912,68 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.CIEdge.Node(childComplexity), true
 
+	case "CIForm.ciTypeId":
+		if e.ComplexityRoot.CIForm.CITypeID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.CITypeID(childComplexity), true
+	case "CIForm.layoutId":
+		if e.ComplexityRoot.CIForm.LayoutID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.LayoutID(childComplexity), true
+	case "CIForm.requiredFields":
+		if e.ComplexityRoot.CIForm.RequiredFields == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.RequiredFields(childComplexity), true
+	case "CIForm.roleId":
+		if e.ComplexityRoot.CIForm.RoleID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.RoleID(childComplexity), true
+	case "CIForm.rules":
+		if e.ComplexityRoot.CIForm.Rules == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.Rules(childComplexity), true
+	case "CIForm.sections":
+		if e.ComplexityRoot.CIForm.Sections == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.Sections(childComplexity), true
+	case "CIForm.source":
+		if e.ComplexityRoot.CIForm.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.Source(childComplexity), true
+	case "CIForm.templateId":
+		if e.ComplexityRoot.CIForm.TemplateID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CIForm.TemplateID(childComplexity), true
+
+	case "CISeries.name":
+		if e.ComplexityRoot.CISeries.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CISeries.Name(childComplexity), true
+	case "CISeries.points":
+		if e.ComplexityRoot.CISeries.Points == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CISeries.Points(childComplexity), true
+
 	case "Document.category":
 		if e.ComplexityRoot.Document.Category == nil {
 			break
@@ -857,6 +1053,277 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Document.Version(childComplexity), true
 
+	case "FieldState.allowedValues":
+		if e.ComplexityRoot.FieldState.AllowedValues == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FieldState.AllowedValues(childComplexity), true
+	case "FieldState.readOnly":
+		if e.ComplexityRoot.FieldState.ReadOnly == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FieldState.ReadOnly(childComplexity), true
+	case "FieldState.required":
+		if e.ComplexityRoot.FieldState.Required == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FieldState.Required(childComplexity), true
+	case "FieldState.visible":
+		if e.ComplexityRoot.FieldState.Visible == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FieldState.Visible(childComplexity), true
+
+	case "FormField.definition":
+		if e.ComplexityRoot.FormField.Definition == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormField.Definition(childComplexity), true
+	case "FormField.name":
+		if e.ComplexityRoot.FormField.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormField.Name(childComplexity), true
+	case "FormField.state":
+		if e.ComplexityRoot.FormField.State == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormField.State(childComplexity), true
+	case "FormField.width":
+		if e.ComplexityRoot.FormField.Width == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormField.Width(childComplexity), true
+
+	case "FormRule.ast":
+		if e.ComplexityRoot.FormRule.Ast == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.Ast(childComplexity), true
+	case "FormRule.attributeKey":
+		if e.ComplexityRoot.FormRule.AttributeKey == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.AttributeKey(childComplexity), true
+	case "FormRule.condition":
+		if e.ComplexityRoot.FormRule.Condition == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.Condition(childComplexity), true
+	case "FormRule.key":
+		if e.ComplexityRoot.FormRule.Key == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.Key(childComplexity), true
+	case "FormRule.kind":
+		if e.ComplexityRoot.FormRule.Kind == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.Kind(childComplexity), true
+	case "FormRule.message":
+		if e.ComplexityRoot.FormRule.Message == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormRule.Message(childComplexity), true
+
+	case "FormSection.fields":
+		if e.ComplexityRoot.FormSection.Fields == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormSection.Fields(childComplexity), true
+	case "FormSection.key":
+		if e.ComplexityRoot.FormSection.Key == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormSection.Key(childComplexity), true
+	case "FormSection.title":
+		if e.ComplexityRoot.FormSection.Title == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormSection.Title(childComplexity), true
+	case "FormSection.visible":
+		if e.ComplexityRoot.FormSection.Visible == nil {
+			break
+		}
+
+		return e.ComplexityRoot.FormSection.Visible(childComplexity), true
+
+	case "HistoryConnection.nodes":
+		if e.ComplexityRoot.HistoryConnection.Nodes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryConnection.Nodes(childComplexity), true
+	case "HistoryConnection.pageInfo":
+		if e.ComplexityRoot.HistoryConnection.PageInfo == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryConnection.PageInfo(childComplexity), true
+	case "HistoryConnection.totalCount":
+		if e.ComplexityRoot.HistoryConnection.TotalCount == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryConnection.TotalCount(childComplexity), true
+
+	case "HistoryEntry.actorId":
+		if e.ComplexityRoot.HistoryEntry.ActorID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ActorID(childComplexity), true
+	case "HistoryEntry.actorUserId":
+		if e.ComplexityRoot.HistoryEntry.ActorUserID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ActorUserID(childComplexity), true
+	case "HistoryEntry.changeKind":
+		if e.ComplexityRoot.HistoryEntry.ChangeKind == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ChangeKind(childComplexity), true
+	case "HistoryEntry.changeSetId":
+		if e.ComplexityRoot.HistoryEntry.ChangeSetID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ChangeSetID(childComplexity), true
+	case "HistoryEntry.changeSource":
+		if e.ComplexityRoot.HistoryEntry.ChangeSource == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ChangeSource(childComplexity), true
+	case "HistoryEntry.changeType":
+		if e.ComplexityRoot.HistoryEntry.ChangeType == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ChangeType(childComplexity), true
+	case "HistoryEntry.comment":
+		if e.ComplexityRoot.HistoryEntry.Comment == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.Comment(childComplexity), true
+	case "HistoryEntry.correlationId":
+		if e.ComplexityRoot.HistoryEntry.CorrelationID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.CorrelationID(childComplexity), true
+	case "HistoryEntry.createdAt":
+		if e.ComplexityRoot.HistoryEntry.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.CreatedAt(childComplexity), true
+	case "HistoryEntry.entityId":
+		if e.ComplexityRoot.HistoryEntry.EntityID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.EntityID(childComplexity), true
+	case "HistoryEntry.entityType":
+		if e.ComplexityRoot.HistoryEntry.EntityType == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.EntityType(childComplexity), true
+	case "HistoryEntry.fieldChanges":
+		if e.ComplexityRoot.HistoryEntry.FieldChanges == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.FieldChanges(childComplexity), true
+	case "HistoryEntry.fieldName":
+		if e.ComplexityRoot.HistoryEntry.FieldName == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.FieldName(childComplexity), true
+	case "HistoryEntry.id":
+		if e.ComplexityRoot.HistoryEntry.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ID(childComplexity), true
+	case "HistoryEntry.newValue":
+		if e.ComplexityRoot.HistoryEntry.NewValue == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.NewValue(childComplexity), true
+	case "HistoryEntry.observedAt":
+		if e.ComplexityRoot.HistoryEntry.ObservedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.ObservedAt(childComplexity), true
+	case "HistoryEntry.oldValue":
+		if e.ComplexityRoot.HistoryEntry.OldValue == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.OldValue(childComplexity), true
+	case "HistoryEntry.requestId":
+		if e.ComplexityRoot.HistoryEntry.RequestID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.RequestID(childComplexity), true
+	case "HistoryEntry.siteId":
+		if e.ComplexityRoot.HistoryEntry.SiteID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.SiteID(childComplexity), true
+	case "HistoryEntry.source":
+		if e.ComplexityRoot.HistoryEntry.Source == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryEntry.Source(childComplexity), true
+
+	case "HistoryFieldChange.field":
+		if e.ComplexityRoot.HistoryFieldChange.Field == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryFieldChange.Field(childComplexity), true
+	case "HistoryFieldChange.new":
+		if e.ComplexityRoot.HistoryFieldChange.New == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryFieldChange.New(childComplexity), true
+	case "HistoryFieldChange.old":
+		if e.ComplexityRoot.HistoryFieldChange.Old == nil {
+			break
+		}
+
+		return e.ComplexityRoot.HistoryFieldChange.Old(childComplexity), true
+
 	case "Job.createdAt":
 		if e.ComplexityRoot.Job.CreatedAt == nil {
 			break
@@ -899,6 +1366,19 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Job.Status(childComplexity), true
+
+	case "MetricPoint.timestamp":
+		if e.ComplexityRoot.MetricPoint.Timestamp == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MetricPoint.Timestamp(childComplexity), true
+	case "MetricPoint.value":
+		if e.ComplexityRoot.MetricPoint.Value == nil {
+			break
+		}
+
+		return e.ComplexityRoot.MetricPoint.Value(childComplexity), true
 
 	case "Movement.actorId":
 		if e.ComplexityRoot.Movement.ActorID == nil {
@@ -1057,6 +1537,39 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Query.Ci(childComplexity, args["id"].(string)), true
+	case "Query.ciForm":
+		if e.ComplexityRoot.Query.CiForm == nil {
+			break
+		}
+
+		args, err := ec.field_Query_ciForm_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.CiForm(childComplexity, args["id"].(string), args["template"].(*string), args["role"].(*string)), true
+	case "Query.ciHistory":
+		if e.ComplexityRoot.Query.CiHistory == nil {
+			break
+		}
+
+		args, err := ec.field_Query_ciHistory_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.CiHistory(childComplexity, args["id"].(string), args["from"].(*time.Time), args["to"].(*time.Time), args["first"].(*int), args["after"].(*string)), true
+	case "Query.ciMetrics":
+		if e.ComplexityRoot.Query.CiMetrics == nil {
+			break
+		}
+
+		args, err := ec.field_Query_ciMetrics_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.CiMetrics(childComplexity, args["id"].(string), args["name"].(*string), args["from"].(*time.Time), args["to"].(*time.Time), args["step"].(*string)), true
 	case "Query.cis":
 		if e.ComplexityRoot.Query.Cis == nil {
 			break
@@ -1576,6 +2089,135 @@ type Query {
   jobs(kind: String, status: String, first: Int): [Job!]!
   "One asset with its CIs, child CIs, movements and documents (GQL-03); null when it is not visible."
   asset(id: ID!): Asset
+  """
+  The resolved form of a CI (GQL-03, WP-719): sections, field states, rules and
+  required fields. With role or template it is a preview; a template or a role
+  that is not one of the caller's needs citype:manage. Null when the CI is not
+  visible.
+  """
+  ciForm(id: ID!, template: ID, role: ID): CIForm
+  """
+  A page of the unified history of a CI (CI-06, GQL-03), newest first by the
+  time of recording, within from and to (both inclusive): its change sets, the
+  entity and location changes, the audit entries (audit:read) and the changes
+  of its relationships (relationship:read); at most 100 per page. Null when the
+  CI is not visible.
+  """
+  ciHistory(id: ID!, from: Time, to: Time, first: Int, after: String): HistoryConnection
+  """
+  The metric series of a CI (MON-02, GQL-03): the named one or all of them, at
+  most 100; without from the last 24 hours, step a duration such as 5m. Empty
+  when the CI is not visible.
+  """
+  ciMetrics(id: ID!, name: String, from: Time, to: Time, step: String): [CISeries!]!
+}
+
+"A JSON value: an object, a list, a string, a number, a boolean or null."
+scalar Any
+
+"The resolved form of a CI (citype.ResolvedForm, WP-719)."
+type CIForm {
+  ciTypeId: ID!
+  "The template, role and layout of the chosen layout; null with the standard layout."
+  templateId: ID
+  roleId: ID
+  layoutId: ID
+  "layout or default."
+  source: String!
+  sections: [FormSection!]!
+  "The catalog rules of the CI, to recompute the states while the form is edited."
+  rules: [FormRule!]!
+  "The names of the fields required in the current state, in the order of the form."
+  requiredFields: [String!]!
+}
+
+type FormSection {
+  key: String!
+  "The title per language."
+  title: Map!
+  visible: Boolean!
+  fields: [FormField!]!
+}
+
+type FormField {
+  name: String!
+  "The width of 1 to 12 columns."
+  width: Int!
+  "The composed field definition (fieldmeta.FieldDefinition as JSON)."
+  definition: Map!
+  state: FieldState!
+}
+
+type FieldState {
+  visible: Boolean!
+  required: Boolean!
+  readOnly: Boolean!
+  allowedValues: [String!]
+}
+
+type FormRule {
+  key: String!
+  attributeKey: String!
+  kind: String!
+  "The condition and the value rule in the form of api/rules.schema.json."
+  condition: Map
+  ast: Map
+  message: Map
+}
+
+type HistoryConnection {
+  nodes: [HistoryEntry!]!
+  pageInfo: PageInfo!
+  totalCount: Int!
+}
+
+"""
+An entry of the history of a CI (history.Change). Without read access to its
+field (RBA-07) the old and new value are null and the field is left out of
+fieldChanges.
+"""
+type HistoryEntry {
+  id: ID!
+  "ci, or relationship for a relationship change."
+  entityType: String!
+  entityId: ID!
+  "ci_change, entity_change, location_change, audit or relationship_change."
+  source: String!
+  "The site of the CI at the time (ci_change) or of the moved location."
+  siteId: ID
+  actorId: ID
+  actorUserId: ID
+  changeType: String!
+  "The kind of a CI change set (AUD-03)."
+  changeKind: String
+  changeSetId: ID
+  fieldName: String
+  oldValue: Any
+  newValue: Any
+  fieldChanges: [HistoryFieldChange!]!
+  comment: String
+  "ui, api, collector, import or system."
+  changeSource: String
+  requestId: String
+  correlationId: String
+  createdAt: Time!
+  observedAt: Time
+}
+
+type HistoryFieldChange {
+  field: String!
+  old: Any
+  new: Any
+}
+
+type CISeries {
+  name: String!
+  points: [MetricPoint!]!
+}
+
+type MetricPoint {
+  timestamp: Time!
+  value: Float!
 }
 
 input CIFilter {
@@ -1983,6 +2625,38 @@ func (ec *executionContext) childFields_CIEdge(ctx context.Context, field graphq
 	return nil, fmt.Errorf("no field named %q was found under type CIEdge", field.Name)
 }
 
+func (ec *executionContext) childFields_CIForm(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "ciTypeId":
+		return ec.fieldContext_CIForm_ciTypeId(ctx, field)
+	case "templateId":
+		return ec.fieldContext_CIForm_templateId(ctx, field)
+	case "roleId":
+		return ec.fieldContext_CIForm_roleId(ctx, field)
+	case "layoutId":
+		return ec.fieldContext_CIForm_layoutId(ctx, field)
+	case "source":
+		return ec.fieldContext_CIForm_source(ctx, field)
+	case "sections":
+		return ec.fieldContext_CIForm_sections(ctx, field)
+	case "rules":
+		return ec.fieldContext_CIForm_rules(ctx, field)
+	case "requiredFields":
+		return ec.fieldContext_CIForm_requiredFields(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type CIForm", field.Name)
+}
+
+func (ec *executionContext) childFields_CISeries(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "name":
+		return ec.fieldContext_CISeries_name(ctx, field)
+	case "points":
+		return ec.fieldContext_CISeries_points(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type CISeries", field.Name)
+}
+
 func (ec *executionContext) childFields_Document(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "id":
@@ -2015,6 +2689,136 @@ func (ec *executionContext) childFields_Document(ctx context.Context, field grap
 	return nil, fmt.Errorf("no field named %q was found under type Document", field.Name)
 }
 
+func (ec *executionContext) childFields_FieldState(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "visible":
+		return ec.fieldContext_FieldState_visible(ctx, field)
+	case "required":
+		return ec.fieldContext_FieldState_required(ctx, field)
+	case "readOnly":
+		return ec.fieldContext_FieldState_readOnly(ctx, field)
+	case "allowedValues":
+		return ec.fieldContext_FieldState_allowedValues(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type FieldState", field.Name)
+}
+
+func (ec *executionContext) childFields_FormField(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "name":
+		return ec.fieldContext_FormField_name(ctx, field)
+	case "width":
+		return ec.fieldContext_FormField_width(ctx, field)
+	case "definition":
+		return ec.fieldContext_FormField_definition(ctx, field)
+	case "state":
+		return ec.fieldContext_FormField_state(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type FormField", field.Name)
+}
+
+func (ec *executionContext) childFields_FormRule(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "key":
+		return ec.fieldContext_FormRule_key(ctx, field)
+	case "attributeKey":
+		return ec.fieldContext_FormRule_attributeKey(ctx, field)
+	case "kind":
+		return ec.fieldContext_FormRule_kind(ctx, field)
+	case "condition":
+		return ec.fieldContext_FormRule_condition(ctx, field)
+	case "ast":
+		return ec.fieldContext_FormRule_ast(ctx, field)
+	case "message":
+		return ec.fieldContext_FormRule_message(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type FormRule", field.Name)
+}
+
+func (ec *executionContext) childFields_FormSection(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "key":
+		return ec.fieldContext_FormSection_key(ctx, field)
+	case "title":
+		return ec.fieldContext_FormSection_title(ctx, field)
+	case "visible":
+		return ec.fieldContext_FormSection_visible(ctx, field)
+	case "fields":
+		return ec.fieldContext_FormSection_fields(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type FormSection", field.Name)
+}
+
+func (ec *executionContext) childFields_HistoryConnection(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "nodes":
+		return ec.fieldContext_HistoryConnection_nodes(ctx, field)
+	case "pageInfo":
+		return ec.fieldContext_HistoryConnection_pageInfo(ctx, field)
+	case "totalCount":
+		return ec.fieldContext_HistoryConnection_totalCount(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type HistoryConnection", field.Name)
+}
+
+func (ec *executionContext) childFields_HistoryEntry(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_HistoryEntry_id(ctx, field)
+	case "entityType":
+		return ec.fieldContext_HistoryEntry_entityType(ctx, field)
+	case "entityId":
+		return ec.fieldContext_HistoryEntry_entityId(ctx, field)
+	case "source":
+		return ec.fieldContext_HistoryEntry_source(ctx, field)
+	case "siteId":
+		return ec.fieldContext_HistoryEntry_siteId(ctx, field)
+	case "actorId":
+		return ec.fieldContext_HistoryEntry_actorId(ctx, field)
+	case "actorUserId":
+		return ec.fieldContext_HistoryEntry_actorUserId(ctx, field)
+	case "changeType":
+		return ec.fieldContext_HistoryEntry_changeType(ctx, field)
+	case "changeKind":
+		return ec.fieldContext_HistoryEntry_changeKind(ctx, field)
+	case "changeSetId":
+		return ec.fieldContext_HistoryEntry_changeSetId(ctx, field)
+	case "fieldName":
+		return ec.fieldContext_HistoryEntry_fieldName(ctx, field)
+	case "oldValue":
+		return ec.fieldContext_HistoryEntry_oldValue(ctx, field)
+	case "newValue":
+		return ec.fieldContext_HistoryEntry_newValue(ctx, field)
+	case "fieldChanges":
+		return ec.fieldContext_HistoryEntry_fieldChanges(ctx, field)
+	case "comment":
+		return ec.fieldContext_HistoryEntry_comment(ctx, field)
+	case "changeSource":
+		return ec.fieldContext_HistoryEntry_changeSource(ctx, field)
+	case "requestId":
+		return ec.fieldContext_HistoryEntry_requestId(ctx, field)
+	case "correlationId":
+		return ec.fieldContext_HistoryEntry_correlationId(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_HistoryEntry_createdAt(ctx, field)
+	case "observedAt":
+		return ec.fieldContext_HistoryEntry_observedAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type HistoryEntry", field.Name)
+}
+
+func (ec *executionContext) childFields_HistoryFieldChange(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "field":
+		return ec.fieldContext_HistoryFieldChange_field(ctx, field)
+	case "old":
+		return ec.fieldContext_HistoryFieldChange_old(ctx, field)
+	case "new":
+		return ec.fieldContext_HistoryFieldChange_new(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type HistoryFieldChange", field.Name)
+}
+
 func (ec *executionContext) childFields_Job(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "id":
@@ -2033,6 +2837,16 @@ func (ec *executionContext) childFields_Job(ctx context.Context, field graphql.C
 		return ec.fieldContext_Job_finishedAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Job", field.Name)
+}
+
+func (ec *executionContext) childFields_MetricPoint(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "timestamp":
+		return ec.fieldContext_MetricPoint_timestamp(ctx, field)
+	case "value":
+		return ec.fieldContext_MetricPoint_value(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type MetricPoint", field.Name)
 }
 
 func (ec *executionContext) childFields_Movement(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
@@ -2476,6 +3290,128 @@ func (ec *executionContext) field_Query_asset_args(ctx context.Context, rawArgs 
 		return nil, err
 	}
 	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_ciForm_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "template",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOID2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["template"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "role",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOID2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["role"] = arg2
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_ciHistory_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "from",
+		func(ctx context.Context, v any) (*time.Time, error) {
+			return ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["from"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "to",
+		func(ctx context.Context, v any) (*time.Time, error) {
+			return ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["to"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "first",
+		func(ctx context.Context, v any) (*int, error) {
+			return ec.unmarshalOInt2ᚖint(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["first"] = arg3
+	arg4, err := graphql.ProcessArgField(ctx, rawArgs, "after",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["after"] = arg4
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_ciMetrics_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "id",
+		func(ctx context.Context, v any) (string, error) {
+			return ec.unmarshalNID2string(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["id"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "name",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["name"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "from",
+		func(ctx context.Context, v any) (*time.Time, error) {
+			return ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["from"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "to",
+		func(ctx context.Context, v any) (*time.Time, error) {
+			return ec.unmarshalOTime2ᚖtimeᚐTime(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["to"] = arg3
+	arg4, err := graphql.ProcessArgField(ctx, rawArgs, "step",
+		func(ctx context.Context, v any) (*string, error) {
+			return ec.unmarshalOString2ᚖstring(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["step"] = arg4
 	return args, nil
 }
 
@@ -4316,6 +5252,263 @@ func (ec *executionContext) fieldContext_CIEdge_node(_ context.Context, field gr
 	return fc, nil
 }
 
+func (ec *executionContext) _CIForm_ciTypeId(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_ciTypeId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CITypeID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_ciTypeId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CIForm_templateId(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_templateId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.CIForm().TemplateID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_templateId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CIForm_roleId(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_roleId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.CIForm().RoleID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_roleId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CIForm_layoutId(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_layoutId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.CIForm().LayoutID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_layoutId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _CIForm_source(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _CIForm_sections(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_sections(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Sections, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []citype.FormSection) graphql.Marshaler {
+			return ec.marshalNFormSection2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormSectionᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_sections(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CIForm",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_FormSection(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CIForm_rules(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_rules(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Rules, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []citype.FormRule) graphql.Marshaler {
+			return ec.marshalNFormRule2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormRuleᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_rules(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CIForm",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_FormRule(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _CIForm_requiredFields(ctx context.Context, field graphql.CollectedField, obj *citype.ResolvedForm) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CIForm_requiredFields(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.CIForm().RequiredFields(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalNString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CIForm_requiredFields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CIForm", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _CISeries_name(ctx context.Context, field graphql.CollectedField, obj *monitoring.CISeries) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CISeries_name(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CISeries_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("CISeries", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _CISeries_points(ctx context.Context, field graphql.CollectedField, obj *monitoring.CISeries) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_CISeries_points(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Points, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []monitoring.MetricPoint) graphql.Marshaler {
+			return ec.marshalNMetricPoint2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐMetricPointᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_CISeries_points(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "CISeries",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_MetricPoint(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Document_id(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4615,6 +5808,1063 @@ func (ec *executionContext) fieldContext_Document_updatedAt(_ context.Context, f
 	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Time does not have child fields"))
 }
 
+func (ec *executionContext) _FieldState_visible(ctx context.Context, field graphql.CollectedField, obj *fieldmeta.FieldState) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FieldState_visible(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Visible, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FieldState_visible(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FieldState", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _FieldState_required(ctx context.Context, field graphql.CollectedField, obj *fieldmeta.FieldState) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FieldState_required(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Required, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FieldState_required(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FieldState", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _FieldState_readOnly(ctx context.Context, field graphql.CollectedField, obj *fieldmeta.FieldState) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FieldState_readOnly(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ReadOnly, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FieldState_readOnly(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FieldState", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _FieldState_allowedValues(ctx context.Context, field graphql.CollectedField, obj *fieldmeta.FieldState) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FieldState_allowedValues(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AllowedValues, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
+			return ec.marshalOString2ᚕstringᚄ(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_FieldState_allowedValues(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FieldState", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormField_name(ctx context.Context, field graphql.CollectedField, obj *citype.FormField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormField_name(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Name, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormField_name(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormField", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormField_width(ctx context.Context, field graphql.CollectedField, obj *citype.FormField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormField_width(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Width, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormField_width(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormField", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _FormField_definition(ctx context.Context, field graphql.CollectedField, obj *citype.FormField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormField_definition(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.FormField().Definition(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalNMap2map(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormField_definition(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormField", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _FormField_state(ctx context.Context, field graphql.CollectedField, obj *citype.FormField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormField_state(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.State, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v fieldmeta.FieldState) graphql.Marshaler {
+			return ec.marshalNFieldState2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋfieldmetaᚐFieldState(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormField_state(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "FormField",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_FieldState(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _FormRule_key(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_key(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Key, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_key(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormRule_attributeKey(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_attributeKey(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.AttributeKey, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_attributeKey(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormRule_kind(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_kind(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Kind, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_kind(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormRule_condition(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_condition(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.FormRule().Condition(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalOMap2map(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_condition(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _FormRule_ast(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_ast(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.FormRule().Ast(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalOMap2map(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_ast(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _FormRule_message(ctx context.Context, field graphql.CollectedField, obj *citype.FormRule) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormRule_message(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.FormRule().Message(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalOMap2map(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_FormRule_message(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormRule", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _FormSection_key(ctx context.Context, field graphql.CollectedField, obj *citype.FormSection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormSection_key(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Key, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormSection_key(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormSection", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _FormSection_title(ctx context.Context, field graphql.CollectedField, obj *citype.FormSection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormSection_title(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.FormSection().Title(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v map[string]any) graphql.Marshaler {
+			return ec.marshalNMap2map(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormSection_title(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormSection", field, true, true, errors.New("field of type Map does not have child fields"))
+}
+
+func (ec *executionContext) _FormSection_visible(ctx context.Context, field graphql.CollectedField, obj *citype.FormSection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormSection_visible(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Visible, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v bool) graphql.Marshaler {
+			return ec.marshalNBoolean2bool(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormSection_visible(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("FormSection", field, false, false, errors.New("field of type Boolean does not have child fields"))
+}
+
+func (ec *executionContext) _FormSection_fields(ctx context.Context, field graphql.CollectedField, obj *citype.FormSection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_FormSection_fields(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Fields, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []citype.FormField) graphql.Marshaler {
+			return ec.marshalNFormField2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormFieldᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_FormSection_fields(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "FormSection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_FormField(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _HistoryConnection_nodes(ctx context.Context, field graphql.CollectedField, obj *HistoryConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryConnection_nodes(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Nodes, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*history.Change) graphql.Marshaler {
+			return ec.marshalNHistoryEntry2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐChangeᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryConnection_nodes(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "HistoryConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_HistoryEntry(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _HistoryConnection_pageInfo(ctx context.Context, field graphql.CollectedField, obj *HistoryConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryConnection_pageInfo(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.PageInfo, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *PageInfo) graphql.Marshaler {
+			return ec.marshalNPageInfo2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐPageInfo(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryConnection_pageInfo(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "HistoryConnection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_PageInfo(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _HistoryConnection_totalCount(ctx context.Context, field graphql.CollectedField, obj *HistoryConnection) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryConnection_totalCount(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.TotalCount, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v int) graphql.Marshaler {
+			return ec.marshalNInt2int(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryConnection_totalCount(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryConnection", field, false, false, errors.New("field of type Int does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_id(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_id(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_id(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_entityType(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_entityType(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.EntityType, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_entityType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_entityId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_entityId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.EntityID, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNID2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_entityId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_source(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_source(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Source, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_source(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_siteId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_siteId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().SiteID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_siteId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_actorId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_actorId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().ActorID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_actorId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_actorUserId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_actorUserId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().ActorUserID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_actorUserId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_changeType(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_changeType(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ChangeType, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_changeType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_changeKind(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_changeKind(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().ChangeKind(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_changeKind(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_changeSetId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_changeSetId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().ChangeSetID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_changeSetId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type ID does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_fieldName(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_fieldName(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().FieldName(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_fieldName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_oldValue(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_oldValue(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.OldValue, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v any) graphql.Marshaler {
+			return ec.marshalOAny2interface(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_oldValue(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type Any does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_newValue(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_newValue(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.NewValue, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v any) graphql.Marshaler {
+			return ec.marshalOAny2interface(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_newValue(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type Any does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_fieldChanges(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_fieldChanges(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().FieldChanges(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*history.FieldChange) graphql.Marshaler {
+			return ec.marshalNHistoryFieldChange2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐFieldChangeᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_fieldChanges(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "HistoryEntry",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_HistoryFieldChange(ctx, field)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _HistoryEntry_comment(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_comment(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().Comment(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_comment(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_changeSource(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_changeSource(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().ChangeSource(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_changeSource(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_requestId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_requestId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().RequestID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_requestId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_correlationId(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_correlationId(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return ec.Resolvers.HistoryEntry().CorrelationID(ctx, obj)
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_correlationId(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, true, true, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_createdAt(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_createdAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.CreatedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_createdAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryEntry_observedAt(ctx context.Context, field graphql.CollectedField, obj *history.Change) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryEntry_observedAt(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.ObservedAt, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *time.Time) graphql.Marshaler {
+			return ec.marshalOTime2ᚖtimeᚐTime(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryEntry_observedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryEntry", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryFieldChange_field(ctx context.Context, field graphql.CollectedField, obj *history.FieldChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryFieldChange_field(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Field, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
+			return ec.marshalNString2string(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryFieldChange_field(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryFieldChange", field, false, false, errors.New("field of type String does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryFieldChange_old(ctx context.Context, field graphql.CollectedField, obj *history.FieldChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryFieldChange_old(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Old, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v any) graphql.Marshaler {
+			return ec.marshalOAny2interface(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryFieldChange_old(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryFieldChange", field, false, false, errors.New("field of type Any does not have child fields"))
+}
+
+func (ec *executionContext) _HistoryFieldChange_new(ctx context.Context, field graphql.CollectedField, obj *history.FieldChange) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_HistoryFieldChange_new(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.New, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v any) graphql.Marshaler {
+			return ec.marshalOAny2interface(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_HistoryFieldChange_new(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("HistoryFieldChange", field, false, false, errors.New("field of type Any does not have child fields"))
+}
+
 func (ec *executionContext) _Job_id(ctx context.Context, field graphql.CollectedField, obj *jobs.Job) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -4774,6 +7024,52 @@ func (ec *executionContext) _Job_finishedAt(ctx context.Context, field graphql.C
 }
 func (ec *executionContext) fieldContext_Job_finishedAt(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	return graphql.NewScalarFieldContext("Job", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _MetricPoint_timestamp(ctx context.Context, field graphql.CollectedField, obj *monitoring.MetricPoint) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MetricPoint_timestamp(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Timestamp, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v time.Time) graphql.Marshaler {
+			return ec.marshalNTime2timeᚐTime(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MetricPoint_timestamp(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MetricPoint", field, false, false, errors.New("field of type Time does not have child fields"))
+}
+
+func (ec *executionContext) _MetricPoint_value(ctx context.Context, field graphql.CollectedField, obj *monitoring.MetricPoint) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_MetricPoint_value(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			return obj.Value, nil
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v float64) graphql.Marshaler {
+			return ec.marshalNFloat2float64(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_MetricPoint_value(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	return graphql.NewScalarFieldContext("MetricPoint", field, false, false, errors.New("field of type Float does not have child fields"))
 }
 
 func (ec *executionContext) _Movement_id(ctx context.Context, field graphql.CollectedField, obj *movement.Movement) (ret graphql.Marshaler) {
@@ -5722,6 +8018,138 @@ func (ec *executionContext) fieldContext_Query_asset(ctx context.Context, field 
 	}()
 	ctx = graphql.WithFieldContext(ctx, fc)
 	if fc.Args, err = ec.field_Query_asset_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_ciForm(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_ciForm(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().CiForm(ctx, fc.Args["id"].(string), fc.Args["template"].(*string), fc.Args["role"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *citype.ResolvedForm) graphql.Marshaler {
+			return ec.marshalOCIForm2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐResolvedForm(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Query_ciForm(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_CIForm(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_ciForm_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_ciHistory(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_ciHistory(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().CiHistory(ctx, fc.Args["id"].(string), fc.Args["from"].(*time.Time), fc.Args["to"].(*time.Time), fc.Args["first"].(*int), fc.Args["after"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v *HistoryConnection) graphql.Marshaler {
+			return ec.marshalOHistoryConnection2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐHistoryConnection(ctx, selections, v)
+		},
+		true,
+		false,
+	)
+}
+func (ec *executionContext) fieldContext_Query_ciHistory(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_HistoryConnection(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_ciHistory_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Query_ciMetrics(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.fieldContext_Query_ciMetrics(ctx, field)
+		},
+		func(ctx context.Context) (any, error) {
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().CiMetrics(ctx, fc.Args["id"].(string), fc.Args["name"].(*string), fc.Args["from"].(*time.Time), fc.Args["to"].(*time.Time), fc.Args["step"].(*string))
+		},
+		nil,
+		func(ctx context.Context, selections ast.SelectionSet, v []*monitoring.CISeries) graphql.Marshaler {
+			return ec.marshalNCISeries2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐCISeriesᚄ(ctx, selections, v)
+		},
+		true,
+		true,
+	)
+}
+func (ec *executionContext) fieldContext_Query_ciMetrics(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Query",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return ec.childFields_CISeries(ctx, field)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_ciMetrics_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
 		ec.Error(ctx, err)
 		return fc, err
 	}
@@ -9863,6 +12291,254 @@ func (ec *executionContext) _CIEdge(ctx context.Context, sel ast.SelectionSet, o
 	return out
 }
 
+var cIFormImplementors = []string{"CIForm"}
+
+func (ec *executionContext) _CIForm(ctx context.Context, sel ast.SelectionSet, obj *citype.ResolvedForm) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, cIFormImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("CIForm")
+		case "ciTypeId":
+			out.Values[i] = ec._CIForm_ciTypeId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "templateId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CIForm_templateId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "roleId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CIForm_roleId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "layoutId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CIForm_layoutId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "source":
+			out.Values[i] = ec._CIForm_source(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "sections":
+			out.Values[i] = ec._CIForm_sections(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "rules":
+			out.Values[i] = ec._CIForm_rules(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "requiredFields":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._CIForm_requiredFields(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var cISeriesImplementors = []string{"CISeries"}
+
+func (ec *executionContext) _CISeries(ctx context.Context, sel ast.SelectionSet, obj *monitoring.CISeries) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, cISeriesImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("CISeries")
+		case "name":
+			out.Values[i] = ec._CISeries_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "points":
+			out.Values[i] = ec._CISeries_points(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
 var documentImplementors = []string{"Document"}
 
 func (ec *executionContext) _Document(ctx context.Context, sel ast.SelectionSet, obj *document.Document) graphql.Marshaler {
@@ -9938,6 +12614,985 @@ func (ec *executionContext) _Document(ctx context.Context, sel ast.SelectionSet,
 		case "updatedAt":
 			out.Values[i] = ec._Document_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var fieldStateImplementors = []string{"FieldState"}
+
+func (ec *executionContext) _FieldState(ctx context.Context, sel ast.SelectionSet, obj *fieldmeta.FieldState) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, fieldStateImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("FieldState")
+		case "visible":
+			out.Values[i] = ec._FieldState_visible(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "required":
+			out.Values[i] = ec._FieldState_required(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "readOnly":
+			out.Values[i] = ec._FieldState_readOnly(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "allowedValues":
+			out.Values[i] = ec._FieldState_allowedValues(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var formFieldImplementors = []string{"FormField"}
+
+func (ec *executionContext) _FormField(ctx context.Context, sel ast.SelectionSet, obj *citype.FormField) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, formFieldImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("FormField")
+		case "name":
+			out.Values[i] = ec._FormField_name(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "width":
+			out.Values[i] = ec._FormField_width(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "definition":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._FormField_definition(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "state":
+			out.Values[i] = ec._FormField_state(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var formRuleImplementors = []string{"FormRule"}
+
+func (ec *executionContext) _FormRule(ctx context.Context, sel ast.SelectionSet, obj *citype.FormRule) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, formRuleImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("FormRule")
+		case "key":
+			out.Values[i] = ec._FormRule_key(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "attributeKey":
+			out.Values[i] = ec._FormRule_attributeKey(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "kind":
+			out.Values[i] = ec._FormRule_kind(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "condition":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._FormRule_condition(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "ast":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._FormRule_ast(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "message":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._FormRule_message(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var formSectionImplementors = []string{"FormSection"}
+
+func (ec *executionContext) _FormSection(ctx context.Context, sel ast.SelectionSet, obj *citype.FormSection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, formSectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("FormSection")
+		case "key":
+			out.Values[i] = ec._FormSection_key(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "title":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._FormSection_title(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "visible":
+			out.Values[i] = ec._FormSection_visible(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "fields":
+			out.Values[i] = ec._FormSection_fields(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var historyConnectionImplementors = []string{"HistoryConnection"}
+
+func (ec *executionContext) _HistoryConnection(ctx context.Context, sel ast.SelectionSet, obj *HistoryConnection) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, historyConnectionImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("HistoryConnection")
+		case "nodes":
+			out.Values[i] = ec._HistoryConnection_nodes(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "pageInfo":
+			out.Values[i] = ec._HistoryConnection_pageInfo(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "totalCount":
+			out.Values[i] = ec._HistoryConnection_totalCount(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var historyEntryImplementors = []string{"HistoryEntry"}
+
+func (ec *executionContext) _HistoryEntry(ctx context.Context, sel ast.SelectionSet, obj *history.Change) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, historyEntryImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("HistoryEntry")
+		case "id":
+			out.Values[i] = ec._HistoryEntry_id(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "entityType":
+			out.Values[i] = ec._HistoryEntry_entityType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "entityId":
+			out.Values[i] = ec._HistoryEntry_entityId(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "source":
+			out.Values[i] = ec._HistoryEntry_source(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "siteId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_siteId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "actorId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_actorId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "actorUserId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_actorUserId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "changeType":
+			out.Values[i] = ec._HistoryEntry_changeType(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "changeKind":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_changeKind(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "changeSetId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_changeSetId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "fieldName":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_fieldName(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "oldValue":
+			out.Values[i] = ec._HistoryEntry_oldValue(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "newValue":
+			out.Values[i] = ec._HistoryEntry_newValue(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "fieldChanges":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_fieldChanges(ctx, field, obj)
+				if res == graphql.Null {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "comment":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_comment(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "changeSource":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_changeSource(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "requestId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_requestId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "correlationId":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._HistoryEntry_correlationId(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+		case "createdAt":
+			out.Values[i] = ec._HistoryEntry_createdAt(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		case "observedAt":
+			out.Values[i] = ec._HistoryEntry_observedAt(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var historyFieldChangeImplementors = []string{"HistoryFieldChange"}
+
+func (ec *executionContext) _HistoryFieldChange(ctx context.Context, sel ast.SelectionSet, obj *history.FieldChange) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, historyFieldChangeImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("HistoryFieldChange")
+		case "field":
+			out.Values[i] = ec._HistoryFieldChange_field(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "old":
+			out.Values[i] = ec._HistoryFieldChange_old(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
+				out.Invalids++
+			}
+		case "new":
+			out.Values[i] = ec._HistoryFieldChange_new(ctx, field, obj)
+			if out.Values[i] == graphql.RequiredNull {
 				out.Invalids++
 			}
 		default:
@@ -10040,6 +13695,49 @@ func (ec *executionContext) _Job(ctx context.Context, sel ast.SelectionSet, obj 
 			out.Values[i] = ec._Job_finishedAt(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
 				atomic.AddUint32(&out.Invalids, 1)
+			}
+		default:
+			panic("unknown field " + strconv.Quote(field.Name))
+		}
+	}
+	out.Dispatch(ctx)
+	if out.Invalids > 0 {
+		return graphql.Null
+	}
+
+	atomic.AddInt32(&ec.Deferred, int32(min(len(deferLabelToView), math.MaxInt32)))
+
+	ec.ProcessDeferredGroup(graphql.DeferredGroup{
+		Defers:   deferLabelToView,
+		Path:     graphql.GetPath(ctx),
+		FieldSet: deferredFieldSet,
+		Context:  ctx,
+	})
+
+	return out
+}
+
+var metricPointImplementors = []string{"MetricPoint"}
+
+func (ec *executionContext) _MetricPoint(ctx context.Context, sel ast.SelectionSet, obj *monitoring.MetricPoint) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, metricPointImplementors)
+
+	out := graphql.NewFieldSet(fields)
+	deferredFieldSet := graphql.NewFieldSet(nil)
+	deferLabelToView := make(map[string]*graphql.FieldSetView)
+	for i, field := range fields {
+		switch field.Name {
+		case "__typename":
+			out.Values[i] = graphql.MarshalString("MetricPoint")
+		case "timestamp":
+			out.Values[i] = ec._MetricPoint_timestamp(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
+			}
+		case "value":
+			out.Values[i] = ec._MetricPoint_value(ctx, field, obj)
+			if out.Values[i] == graphql.Null {
+				out.Invalids++
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
@@ -10500,6 +14198,72 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 				}()
 				res = ec._Query_asset(ctx, field)
 				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "ciForm":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_ciForm(ctx, field)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "ciHistory":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_ciHistory(ctx, field)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
+			}
+
+			rrm := func(ctx context.Context) graphql.Marshaler {
+				return ec.OperationContext.RootResolverMiddleware(ctx,
+					func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return rrm(innerCtx) })
+		case "ciMetrics":
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Query_ciMetrics(ctx, field)
+				if res == graphql.Null {
 					atomic.AddUint32(&fs.Invalids, 1)
 				}
 				return res
@@ -11818,6 +15582,32 @@ func (ec *executionContext) marshalNCIEdge2ᚖgithubᚗcomᚋDataHubᚑChiemgau�
 	return ec._CIEdge(ctx, sel, v)
 }
 
+func (ec *executionContext) marshalNCISeries2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐCISeriesᚄ(ctx context.Context, sel ast.SelectionSet, v []*monitoring.CISeries) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNCISeries2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐCISeries(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNCISeries2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐCISeries(ctx context.Context, sel ast.SelectionSet, v *monitoring.CISeries) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._CISeries(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalNDocument2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocument(ctx context.Context, sel ast.SelectionSet, v *document.Document) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
@@ -11826,6 +15616,10 @@ func (ec *executionContext) marshalNDocument2ᚖgithubᚗcomᚋDataHubᚑChiemga
 		return graphql.Null
 	}
 	return ec._Document(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNFieldState2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋfieldmetaᚐFieldState(ctx context.Context, sel ast.SelectionSet, v fieldmeta.FieldState) graphql.Marshaler {
+	return ec._FieldState(ctx, sel, &v)
 }
 
 func (ec *executionContext) unmarshalNFloat2float64(ctx context.Context, v any) (float64, error) {
@@ -11842,6 +15636,118 @@ func (ec *executionContext) marshalNFloat2float64(ctx context.Context, sel ast.S
 		}
 	}
 	return graphql.WrapContextMarshaler(ctx, res)
+}
+
+func (ec *executionContext) marshalNFormField2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormField(ctx context.Context, sel ast.SelectionSet, v citype.FormField) graphql.Marshaler {
+	return ec._FormField(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNFormField2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormFieldᚄ(ctx context.Context, sel ast.SelectionSet, v []citype.FormField) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNFormField2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormField(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNFormRule2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormRule(ctx context.Context, sel ast.SelectionSet, v citype.FormRule) graphql.Marshaler {
+	return ec._FormRule(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNFormRule2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormRuleᚄ(ctx context.Context, sel ast.SelectionSet, v []citype.FormRule) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNFormRule2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormRule(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNFormSection2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormSection(ctx context.Context, sel ast.SelectionSet, v citype.FormSection) graphql.Marshaler {
+	return ec._FormSection(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNFormSection2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormSectionᚄ(ctx context.Context, sel ast.SelectionSet, v []citype.FormSection) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNFormSection2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐFormSection(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNHistoryEntry2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐChangeᚄ(ctx context.Context, sel ast.SelectionSet, v []*history.Change) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNHistoryEntry2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐChange(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNHistoryEntry2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐChange(ctx context.Context, sel ast.SelectionSet, v *history.Change) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._HistoryEntry(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNHistoryFieldChange2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐFieldChangeᚄ(ctx context.Context, sel ast.SelectionSet, v []*history.FieldChange) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNHistoryFieldChange2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐFieldChange(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
+}
+
+func (ec *executionContext) marshalNHistoryFieldChange2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋhistoryᚐFieldChange(ctx context.Context, sel ast.SelectionSet, v *history.FieldChange) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	return ec._HistoryFieldChange(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalNID2string(ctx context.Context, v any) (string, error) {
@@ -11946,6 +15852,48 @@ func (ec *executionContext) marshalNJob2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋR
 		return graphql.Null
 	}
 	return ec._Job(ctx, sel, v)
+}
+
+func (ec *executionContext) unmarshalNMap2map(ctx context.Context, v any) (map[string]any, error) {
+	res, err := graphql.UnmarshalMap(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNMap2map(ctx context.Context, sel ast.SelectionSet, v map[string]any) graphql.Marshaler {
+	if v == nil {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+		return graphql.Null
+	}
+	_ = sel
+	res := graphql.MarshalMap(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) marshalNMetricPoint2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐMetricPoint(ctx context.Context, sel ast.SelectionSet, v monitoring.MetricPoint) graphql.Marshaler {
+	return ec._MetricPoint(ctx, sel, &v)
+}
+
+func (ec *executionContext) marshalNMetricPoint2ᚕgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐMetricPointᚄ(ctx context.Context, sel ast.SelectionSet, v []monitoring.MetricPoint) graphql.Marshaler {
+	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
+		fc := graphql.GetFieldContext(ctx)
+		fc.Result = &v[i]
+		return ec.marshalNMetricPoint2githubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmonitoringᚐMetricPoint(ctx, sel, v[i])
+	})
+
+	for _, e := range ret {
+		if e == graphql.Null {
+			return graphql.Null
+		}
+	}
+
+	return ret
 }
 
 func (ec *executionContext) marshalNMovement2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋmovementᚐMovementᚄ(ctx context.Context, sel ast.SelectionSet, v []*movement.Movement) graphql.Marshaler {
@@ -12383,6 +16331,24 @@ func (ec *executionContext) marshalN__TypeKind2string(ctx context.Context, sel a
 	return res
 }
 
+func (ec *executionContext) unmarshalOAny2interface(ctx context.Context, v any) (any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalAny(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOAny2interface(ctx context.Context, sel ast.SelectionSet, v any) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalAny(v)
+	return res
+}
+
 func (ec *executionContext) marshalOAsset2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋassetᚐAsset(ctx context.Context, sel ast.SelectionSet, v *asset.Asset) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -12454,6 +16420,13 @@ func (ec *executionContext) unmarshalOCIFilter2ᚖgithubᚗcomᚋDataHubᚑChiem
 	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
+func (ec *executionContext) marshalOCIForm2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋcitypeᚐResolvedForm(ctx context.Context, sel ast.SelectionSet, v *citype.ResolvedForm) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._CIForm(ctx, sel, v)
+}
+
 func (ec *executionContext) marshalODocument2ᚕᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋdocumentᚐDocumentᚄ(ctx context.Context, sel ast.SelectionSet, v []*document.Document) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
@@ -12488,6 +16461,13 @@ func (ec *executionContext) marshalOFloat2ᚖfloat64(ctx context.Context, sel as
 	_ = sel
 	res := graphql.MarshalFloatContext(*v)
 	return graphql.WrapContextMarshaler(ctx, res)
+}
+
+func (ec *executionContext) marshalOHistoryConnection2ᚖgithubᚗcomᚋDataHubᚑChiemgauᚋReticoraᚑCMDBᚋbackendᚋinternalᚋgraphqlbffᚋgeneratedᚐHistoryConnection(ctx context.Context, sel ast.SelectionSet, v *HistoryConnection) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	return ec._HistoryConnection(ctx, sel, v)
 }
 
 func (ec *executionContext) unmarshalOID2string(ctx context.Context, v any) (string, error) {
