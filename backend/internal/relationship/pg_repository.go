@@ -1532,13 +1532,12 @@ func nilIfEmptyStr(value string) any {
 
 // Confirm records that discovery saw an edge again (TOP-02): last_seen_at
 // and last_confirmed_at become now, the confidence the reported one. Only
-// discovery edges are confirmed this way (source policy, REL-08).
+// discovery edges are confirmed this way (source policy, REL-08). A changed
+// confidence writes a history row refreshed (REL-09, WP-771), without event.
 func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence *float64) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE ci_relationship
-			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE($3::numeric, confidence)
-			WHERE id = $1 AND organization_id = $2 AND source = 'discovery'`, id, orgID, confidence)
-		if err == nil && tag.RowsAffected() == 0 {
+		n, err := confirmTx(ctx, tx, orgID, []string{id}, []*float64{confidence}, []*string{nil})
+		if err == nil && n == 0 {
 			return fmt.Errorf("not found")
 		}
 		return err
@@ -1551,7 +1550,8 @@ func (r *PGRepository) Confirm(ctx context.Context, orgID, id string, confidence
 // edge that is gone or no discovery edge is not changed, as Confirm does
 // not change it. The attributes of a confirmation are merged into the
 // stored ones, a null removes one (WP-498); several confirmations of an
-// edge merge in their order.
+// edge merge in their order. Every edge whose confidence or attributes
+// change gets a history row refreshed (WP-771), all with one INSERT.
 func (r *PGRepository) ConfirmMany(ctx context.Context, orgID string, confirmations []Confirmation) error {
 	type confirmation struct {
 		confidence *float64
@@ -1591,15 +1591,154 @@ func (r *PGRepository) ConfirmMany(ctx context.Context, orgID string, confirmati
 		}
 	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE ci_relationship r
-			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.confidence, r.confidence),
-			    attributes = CASE WHEN c.patch IS NULL THEN r.attributes
-			        ELSE (COALESCE(r.attributes, '{}'::jsonb) - ARRAY(SELECT key FROM jsonb_each(c.patch::jsonb) WHERE value = 'null'::jsonb))
-			             || jsonb_strip_nulls(c.patch::jsonb) END
-			FROM unnest($2::uuid[], $3::numeric[], $4::text[]) AS c(id, confidence, patch)
-			WHERE r.id = c.id AND r.organization_id = $1 AND r.source = 'discovery'`, orgID, ids, values, patches)
+		_, err := confirmTx(ctx, tx, orgID, ids, values, patches)
 		return err
 	})
+}
+
+// confirmTx re-confirms the discovery edges ids (sorted) with one statement:
+// the CTE prev locks the rows in the order of their ids and keeps their
+// values before (PostgreSQL 16 has no RETURNING OLD), the UPDATE computes
+// the new ones from them. The edges whose confidence or attributes changed
+// get a history row refreshed with the edge before and after, source
+// collector without a request context and no event (the audit and outbox
+// section stays the last limit of NFR-03, E-56); a confirmation that only
+// moves last_seen_at and last_confirmed_at writes none. It returns the
+// number of edges confirmed.
+func confirmTx(ctx context.Context, tx pgx.Tx, orgID string, ids []string, confidences []*float64, patches []*string) (int, error) {
+	rows, err := tx.Query(ctx, `WITH c AS (
+			SELECT * FROM unnest($2::uuid[], $3::numeric[], $4::text[]) AS c(cid, cconfidence, patch)
+		), prev AS (
+			SELECT r.id AS prev_id, r.confidence AS prev_confidence, r.attributes AS prev_attributes,
+				r.last_seen_at AS prev_seen, r.last_confirmed_at AS prev_confirmed, r.updated_at AS prev_updated
+			FROM ci_relationship r JOIN c ON c.cid = r.id
+			WHERE r.organization_id = $1 AND r.source = 'discovery'
+			ORDER BY r.id FOR UPDATE OF r
+		)
+		UPDATE ci_relationship r
+			SET last_seen_at = now(), last_confirmed_at = now(), confidence = COALESCE(c.cconfidence, p.prev_confidence),
+			    attributes = CASE WHEN c.patch IS NULL THEN p.prev_attributes
+			        ELSE (COALESCE(p.prev_attributes, '{}'::jsonb) - ARRAY(SELECT key FROM jsonb_each(c.patch::jsonb) WHERE value = 'null'::jsonb))
+			             || jsonb_strip_nulls(c.patch::jsonb) END
+			FROM prev p JOIN c ON c.cid = p.prev_id
+			WHERE r.id = p.prev_id AND r.organization_id = $1
+			RETURNING `+relationshipSelectColumns+`, p.prev_confidence, p.prev_attributes, p.prev_seen, p.prev_confirmed, p.prev_updated,
+				COALESCE(p.prev_attributes, '{}'::jsonb) IS DISTINCT FROM COALESCE(r.attributes, '{}'::jsonb),
+				p.prev_confidence IS DISTINCT FROM r.confidence`, orgID, ids, confidences, patches)
+	if err != nil {
+		return 0, fmt.Errorf("confirm relationships: %w", err)
+	}
+	defer rows.Close()
+	n := 0
+	var recs []*ChangeRecord
+	for rows.Next() {
+		n++
+		var prevConfidence *float64
+		var prevAttributes map[string]any
+		var prevSeen, prevConfirmed *time.Time
+		var prevUpdated time.Time
+		var attrsChanged, confidenceChanged bool
+		after, scanErr := scanRelationship(withExtra(rows, &prevConfidence, &prevAttributes, &prevSeen, &prevConfirmed, &prevUpdated,
+			&attrsChanged, &confidenceChanged))
+		if scanErr != nil {
+			return 0, fmt.Errorf("confirm relationships: %w", scanErr)
+		}
+		if !attrsChanged && !confidenceChanged {
+			continue
+		}
+		before := *after
+		before.Confidence = prevConfidence
+		before.Attributes = nonNilAttributes(prevAttributes)
+		before.LastSeenAt = formatTime(prevSeen)
+		before.LastConfirmedAt = formatTime(prevConfirmed)
+		before.UpdatedAt = prevUpdated.UTC().Format(time.RFC3339Nano)
+		var fields []string
+		if attrsChanged {
+			fields = append(fields, fieldAttributes)
+		}
+		if confidenceChanged {
+			fields = append(fields, fieldConfidenceMember)
+		}
+		recs = append(recs, &ChangeRecord{Kind: ChangeRefreshed, Before: &before, After: after, ChangedFields: fields})
+	}
+	if err = rows.Err(); err != nil {
+		return 0, fmt.Errorf("confirm relationships: %w", err)
+	}
+	rows.Close()
+	return n, RecordChangesTx(ctx, tx, recs)
+}
+
+// withExtra is the scanner of a row that holds an edge (scanRelationship)
+// followed by the columns extra.
+func withExtra(scanner relationshipScanner, extra ...any) relationshipScanner {
+	return extraScanner{scanner: scanner, extra: extra}
+}
+
+type extraScanner struct {
+	scanner relationshipScanner
+	extra   []any
+}
+
+func (s extraScanner) Scan(dest ...any) error {
+	return s.scanner.Scan(append(dest, s.extra...)...)
+}
+
+// EdgeColumns are the columns of an edge of ci_relationship (unqualified) in
+// the order ScanEdges reads them: a DELETE … RETURNING of the edges (the
+// interface removal of ipam) reads them for their history rows.
+const EdgeColumns = relationshipSelectColumns
+
+// ScanEdges collects the edges of rows selected with EdgeColumns.
+func ScanEdges(rows pgx.Rows) ([]*Relationship, error) {
+	defer rows.Close()
+	var out []*Relationship
+	for rows.Next() {
+		rel, err := scanRelationship(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan relationship: %w", err)
+		}
+		out = append(out, rel)
+	}
+	return out, rows.Err()
+}
+
+// EdgesTx reads the edges ids in tx (those the caller sees), by id.
+func EdgesTx(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (map[string]*Relationship, error) {
+	out := make(map[string]*Relationship, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT `+relationshipSelectColumns+` FROM ci_relationship
+		WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read relationships: %w", err)
+	}
+	edges, err := ScanEdges(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range edges {
+		out[e.ID] = e
+	}
+	return out, nil
+}
+
+// EdgesFromRowsTx decodes stored rows of ci_relationship (to_jsonb, the
+// snapshot of a CI merge) into edges with one statement, in their order.
+func EdgesFromRowsTx(ctx context.Context, tx pgx.Tx, stored []json.RawMessage) ([]*Relationship, error) {
+	if len(stored) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, fmt.Errorf("decode relationships: %w", err)
+	}
+	rows, err := tx.Query(ctx, `SELECT `+relationshipSelectColumns+`
+		FROM jsonb_populate_recordset(NULL::ci_relationship, $1::jsonb) WITH ORDINALITY AS r ORDER BY r.ordinality`, raw)
+	if err != nil {
+		return nil, fmt.Errorf("decode relationships: %w", err)
+	}
+	return ScanEdges(rows)
 }
 
 // mergePatch merges the attribute patch b over a, keeping the nulls of b

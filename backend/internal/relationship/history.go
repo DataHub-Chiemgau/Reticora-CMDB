@@ -84,12 +84,15 @@ type Change struct {
 // ChangeRecord is a mutation of an edge for RecordChangeTx: Before is the
 // edge before it (nil for created), After the edge after it (nil for
 // removed and suppressed). Reason is one of the reasons of
-// chk_relationship_change_reason, empty for none.
+// chk_relationship_change_reason, empty for none. DefaultSource is the
+// source without a request context (audit.SourceSystem for the system
+// runs: cleanup, merge, unmerge); empty follows the edge (changeSource).
 type ChangeRecord struct {
 	Kind          string
 	Before, After *Relationship
 	ChangedFields []string
 	Reason        string
+	DefaultSource string
 }
 
 // ChangeLister lists the history of an edge (the PostgreSQL repository).
@@ -105,39 +108,97 @@ type ChangeLister interface {
 // (none without one) with the type of the principal (user, api_key, system
 // without principal), source, request and correlation id come from the
 // request context. Without one (the discovery ingest) the source is
-// collector for an edge of discovery or an agent, otherwise system. The
-// client and site scope is derived by the trigger relationship_change_scope.
+// DefaultSource, or collector for an edge of discovery or an agent and
+// system otherwise. The client and site scope is derived by the trigger
+// relationship_change_scope.
 func RecordChangeTx(ctx context.Context, tx pgx.Tx, rec *ChangeRecord) error {
-	edge := rec.After
-	if edge == nil {
-		edge = rec.Before
+	return RecordChangesTx(ctx, tx, []*ChangeRecord{rec})
+}
+
+// RecordChangesTx is RecordChangeTx for several mutations with one INSERT
+// (the system paths of WP-771: re-confirmation, cleanup, interface removal,
+// merge and unmerge); the rows are written in the order of recs. No record
+// writes nothing.
+func RecordChangesTx(ctx context.Context, tx pgx.Tx, recs []*ChangeRecord) error {
+	if len(recs) == 0 {
+		return nil
 	}
-	if edge == nil {
-		return errors.New("record relationship change: no edge")
-	}
-	before, err := sealEdge(ctx, tx, edge.OrganizationID, rec.Before)
-	if err != nil {
-		return err
-	}
-	after, err := sealEdge(ctx, tx, edge.OrganizationID, rec.After)
-	if err != nil {
-		return err
-	}
+	n := len(recs)
+	orgs, ids, sources, targets := make([]string, n), make([]string, n), make([]string, n), make([]string, n)
+	relTypes, kinds, fieldSets := make([]string, n), make([]string, n), make([]string, n)
+	befores, afters := make([]*string, n), make([]*string, n)
+	actorIDs, actorTypes, changeSources := make([]*string, n), make([]string, n), make([]string, n)
+	reasons, requestIDs, correlationIDs := make([]*string, n), make([]*string, n), make([]*string, n)
 	actorID, actorType := changeActor(ctx)
-	source, requestID, correlationID := changeSource(ctx, edge.Source)
-	fields := rec.ChangedFields
-	if fields == nil {
-		fields = []string{}
+	if id, ok := actorID.(string); ok {
+		for i := range actorIDs {
+			actorIDs[i] = &id
+		}
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO relationship_change (organization_id, relationship_id, source_ci_id, target_ci_id, rel_type,
+	for i, rec := range recs {
+		edge := rec.After
+		if edge == nil {
+			edge = rec.Before
+		}
+		if edge == nil {
+			return errors.New("record relationship change: no edge")
+		}
+		var err error
+		if befores[i], err = sealedJSON(ctx, tx, edge.OrganizationID, rec.Before); err != nil {
+			return err
+		}
+		if afters[i], err = sealedJSON(ctx, tx, edge.OrganizationID, rec.After); err != nil {
+			return err
+		}
+		source, requestID, correlationID := changeSource(ctx, edge.Source, rec.DefaultSource)
+		fields := rec.ChangedFields
+		if fields == nil {
+			fields = []string{}
+		}
+		rawFields, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("record relationship change: %w", err)
+		}
+		orgs[i], ids[i], sources[i], targets[i], relTypes[i] = edge.OrganizationID, edge.ID, edge.SourceCIID, edge.TargetCIID, edge.RelType
+		kinds[i], fieldSets[i], actorTypes[i], changeSources[i] = rec.Kind, string(rawFields), actorType, source
+		reasons[i], requestIDs[i], correlationIDs[i] = optional(rec.Reason), optional(requestID), optional(correlationID)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO relationship_change (organization_id, relationship_id, source_ci_id, target_ci_id, rel_type,
 			change_kind, changed_fields, before, after, actor_id, actor_type, source, reason, request_id, correlation_id, observed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, clock_timestamp())`,
-		edge.OrganizationID, edge.ID, edge.SourceCIID, edge.TargetCIID, edge.RelType,
-		rec.Kind, fields, before, after, actorID, actorType, source,
-		nilIfEmptyStr(rec.Reason), nilIfEmptyStr(requestID), nilIfEmptyStr(correlationID)); err != nil {
+		SELECT r.org, r.id, r.src, r.dst, r.rel_type, r.kind, ARRAY(SELECT jsonb_array_elements_text(r.fields::jsonb)),
+			r.before::jsonb, r.after::jsonb, r.actor_id, r.actor_type, r.source, r.reason, r.request_id, r.correlation_id, clock_timestamp()
+		FROM unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
+			$10::uuid[], $11::text[], $12::text[], $13::text[], $14::text[], $15::text[]) WITH ORDINALITY
+			AS r(org, id, src, dst, rel_type, kind, fields, before, after, actor_id, actor_type, source, reason, request_id, correlation_id, n)
+		ORDER BY r.n`,
+		orgs, ids, sources, targets, relTypes, kinds, fieldSets, befores, afters,
+		actorIDs, actorTypes, changeSources, reasons, requestIDs, correlationIDs); err != nil {
 		return fmt.Errorf("record relationship change: %w", err)
 	}
 	return nil
+}
+
+// optional is nil for an empty value (a NULL column).
+func optional(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+// sealedJSON is the JSON text of the edge with its personal values sealed;
+// nil for no edge.
+func sealedJSON(ctx context.Context, tx pgx.Tx, orgID string, rel *Relationship) (*string, error) {
+	sealed, err := sealEdge(ctx, tx, orgID, rel)
+	if err != nil || sealed == nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(sealed)
+	if err != nil {
+		return nil, fmt.Errorf("seal relationship change: %w", err)
+	}
+	s := string(raw)
+	return &s, nil
 }
 
 // sealEdge is the JSON form of the edge with its personal values sealed;
@@ -171,11 +232,14 @@ func changeActor(ctx context.Context) (actorID any, actorType string) {
 }
 
 // changeSource is the source of a change made with ctx and the request and
-// correlation id of its request; without a request context the source
-// follows the source of the edge.
-func changeSource(ctx context.Context, edgeSource string) (source, requestID, correlationID string) {
+// correlation id of its request; without a request context the source is
+// fallback or, without one, follows the source of the edge.
+func changeSource(ctx context.Context, edgeSource, fallback string) (source, requestID, correlationID string) {
 	if info, ok := audit.RequestInfoFrom(ctx); ok && info.Source != "" {
 		return info.Source, info.RequestID, info.CorrelationID
+	}
+	if fallback != "" {
+		return fallback, "", ""
 	}
 	if edgeSource == "discovery" || edgeSource == "agent" {
 		return audit.SourceCollector, "", ""

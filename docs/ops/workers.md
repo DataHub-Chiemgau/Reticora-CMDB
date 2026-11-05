@@ -88,7 +88,7 @@ audit entry (`retention.*`).
 | Run | Data | Kept for | Setting (minimum) |
 |---|---|---|---|
 | `retention.audit_log` (03:17) | `audit_log` | 10 years | `RETICORA_RETENTION_AUDIT_YEARS` (10) |
-| `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change` | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
+| `retention.history` (03:27) | `ci_change`, `entity_change`, `location_change`, `relationship_change` | 3 years | `RETICORA_RETENTION_HISTORY_DAYS` (1095) |
 | `retention.soft_deleted` (03:37) | soft-deleted CIs | 90 days | `RETICORA_RETENTION_SOFT_DELETE_DAYS` (90) |
 | `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
 | `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |

@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -443,5 +446,115 @@ func TestMergeRecordsItsJob(t *testing.T) {
 	}
 	if w = call(orgCtx, http.MethodGet, "/api/v1/cis/"+victim2, ""); w.Code != http.StatusMovedPermanently {
 		t.Errorf("GET victim of the young merge: %d", w.Code)
+	}
+}
+
+// mergeEdges are the edges of TestMergeRecordsEdgeHistory and
+// TestUnmergeRecordsEdgeHistory: moved (victim -> other, hung on the
+// survivor at its source), target (other -> victim, at its target) and dup
+// (victim -> other like an edge of the survivor, removed by the dedupe).
+type mergeEdges struct{ survivor, victim, other, moved, target, dup string }
+
+func seedMergeEdges(t *testing.T, f *scopetest.Fixture, prefix string) mergeEdges {
+	t.Helper()
+	e := mergeEdges{survivor: f.CI(t, f.OrgA, "", prefix+"-survivor"), victim: f.CI(t, f.OrgA, "", prefix+"-victim"),
+		other: f.CI(t, f.OrgA, "", prefix+"-other")}
+	edge := func(src, dst, relType string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(context.Background(), `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, f.OrgA, src, dst, relType).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	edge(e.survivor, e.other, "depends_on")
+	e.moved = edge(e.victim, e.other, "connected_to")
+	e.target = edge(e.other, e.victim, "depends_on")
+	e.dup = edge(e.victim, e.other, "depends_on")
+	return e
+}
+
+// edgeChange is a relationship_change row of a merge or unmerge.
+type edgeChange struct {
+	kind, reason, source, actorType string
+	fields                          []string
+	beforeSource, beforeTarget      string
+	afterSource, afterTarget        string
+	hasBefore, hasAfter             bool
+}
+
+// edgeChanges returns the history rows of the edge with reason.
+func edgeChanges(t *testing.T, f *scopetest.Fixture, id, reason string) []edgeChange {
+	t.Helper()
+	rows, err := f.Admin.Query(context.Background(), `SELECT change_kind, COALESCE(reason, ''), source, actor_type, changed_fields,
+			COALESCE(before->>'source_ci_id', ''), COALESCE(before->>'target_ci_id', ''),
+			COALESCE(after->>'source_ci_id', ''), COALESCE(after->>'target_ci_id', ''), before IS NOT NULL, after IS NOT NULL
+		FROM relationship_change WHERE organization_id = $1 AND relationship_id = $2 AND reason = $3 ORDER BY observed_at, id`, f.OrgA, id, reason)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (edgeChange, error) {
+		var c edgeChange
+		scanErr := row.Scan(&c.kind, &c.reason, &c.source, &c.actorType, &c.fields, &c.beforeSource, &c.beforeTarget,
+			&c.afterSource, &c.afterTarget, &c.hasBefore, &c.hasAfter)
+		return c, scanErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// edgeEventCount counts the relationship events of the edges.
+func edgeEventCount(t *testing.T, f *scopetest.Fixture, ids ...string) int {
+	t.Helper()
+	var n int
+	if err := f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM event_outbox WHERE organization_id = $1
+		AND type LIKE 'relationship.%' AND entity_id = ANY($2::text[])`, f.OrgA, ids).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestMergeRecordsEdgeHistory covers WP-771 (REL-09) against PostgreSQL:
+// the merge writes in its transaction a row rewired per edge it hangs on
+// the survivor (the old and the new endpoint, changed_fields source_ci_id
+// or target_ci_id) and a row removed per edge its dedupe deletes, all with
+// reason merge and source system without a request context; it writes no
+// edge event (ci.merged covers them).
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestMergeRecordsEdgeHistory(t *testing.T) {
+	f := scopetest.Seed(t, "b3")
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	svc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()))
+	e := seedMergeEdges(t, f, "wp771-merge")
+	if _, err := svc.Merge(ctx, f.OrgA, e.survivor, e.victim); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		id   string
+		want edgeChange
+	}{
+		"moved at the source": {e.moved, edgeChange{kind: "rewired", fields: []string{"source_ci_id"},
+			beforeSource: e.victim, beforeTarget: e.other, afterSource: e.survivor, afterTarget: e.other, hasBefore: true, hasAfter: true}},
+		"moved at the target": {e.target, edgeChange{kind: "rewired", fields: []string{"target_ci_id"},
+			beforeSource: e.other, beforeTarget: e.victim, afterSource: e.other, afterTarget: e.survivor, hasBefore: true, hasAfter: true}},
+		"duplicate": {e.dup, edgeChange{kind: "removed", fields: []string{},
+			beforeSource: e.victim, beforeTarget: e.other, hasBefore: true}},
+	} {
+		tc.want.reason, tc.want.source, tc.want.actorType = "merge", audit.SourceSystem, "system"
+		if got := edgeChanges(t, f, tc.id, "merge"); len(got) != 1 || !reflect.DeepEqual(got[0], tc.want) {
+			t.Errorf("%s: history %+v, want %+v", name, got, tc.want)
+		}
+	}
+	var merged int
+	if err := f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM event_outbox WHERE organization_id = $1 AND type = 'ci.merged'
+		AND entity_id = $2`, f.OrgA, e.survivor).Scan(&merged); err != nil || merged != 1 {
+		t.Errorf("%d ci.merged events, want 1 (%v)", merged, err)
+	}
+	if n := edgeEventCount(t, f, e.moved, e.target, e.dup); n != 0 {
+		t.Errorf("the merge wrote %d edge events", n)
 	}
 }

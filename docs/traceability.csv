@@ -1469,3 +1469,4 @@ AST-02;[P2];B;backend/internal/assignment/signature_integration_test.go;WP-276
 LCY-03;[P2];B;backend/internal/lifecycle/guards_integration_test.go;WP-279
 STK-05;[P2];B;backend/internal/order/order_receive_integration_test.go;WP-760
 AST-02;[P2];B;backend/internal/assignment/signature_verify_integration_test.go;WP-748
+REL-09;[P2];B;backend/internal/relationship/history_system_integration_test.go;WP-771

@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -778,26 +779,47 @@ func changeActor(ctx context.Context) any {
 // ends are NO ACTION (000159). The unverified discovery edges at the
 // interfaces are deleted first, whether the interface stays or not, and
 // each is recorded in the history of the CI (ci_change relationship_change
-// with the edge as old_value, AUD-03; reason completes the comment). A bound
+// with the edge as old_value, AUD-03; reason completes the comment) and in
+// the history of the edge (relationship_change removed with reason
+// interface_removed, REL-09). A bound
 // address whose address is also unbound in the same VRF is deleted with its
 // interface; the foreign key would unbind it into a duplicate of that row
 // (F-312). Other addresses are unbound as before.
 func removeInterfaces(ctx context.Context, tx pgx.Tx, orgID, ciID string, ids []string, reason string) ([]string, error) {
-	if _, err := tx.Exec(ctx, `WITH removed AS (
+	rows, err := tx.Query(ctx, `WITH removed AS (
 			DELETE FROM ci_relationship r
 			WHERE r.organization_id = $1 AND (r.source_interface_id = ANY ($3::uuid[]) OR r.target_interface_id = ANY ($3::uuid[]))
 			  AND r.source = 'discovery' AND r.verification_state <> 'verified'
-			RETURNING r.id, r.source_ci_id, r.target_ci_id, r.rel_type, r.source, r.verification_state,
-				r.source_interface_id, r.target_interface_id)
-		INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, comment)
-		SELECT $1, $2, $4::uuid, 'relationship_change', 'relationships', to_jsonb(removed), NULL,
-			format('removed with interface %s%s', (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM network_interface n
-				WHERE n.id = ANY ($3::uuid[]) AND n.id IN (removed.source_interface_id, removed.target_interface_id)), $5::text)
-		FROM removed ORDER BY removed.id`, orgID, ciID, ids, changeActor(ctx), reason); err != nil {
+			RETURNING r.*
+		), logged AS (
+			INSERT INTO ci_change (organization_id, ci_id, actor_id, change_type, field_name, old_value, new_value, comment)
+			SELECT $1, $2, $4::uuid, 'relationship_change', 'relationships',
+				jsonb_build_object('id', removed.id, 'source_ci_id', removed.source_ci_id, 'target_ci_id', removed.target_ci_id,
+					'rel_type', removed.rel_type, 'source', removed.source, 'verification_state', removed.verification_state,
+					'source_interface_id', removed.source_interface_id, 'target_interface_id', removed.target_interface_id), NULL,
+				format('removed with interface %s%s', (SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM network_interface n
+					WHERE n.id = ANY ($3::uuid[]) AND n.id IN (removed.source_interface_id, removed.target_interface_id)), $5::text)
+			FROM removed ORDER BY removed.id
+		)
+		SELECT `+relationship.EdgeColumns+` FROM removed ORDER BY id`, orgID, ciID, ids, changeActor(ctx), reason)
+	if err != nil {
 		return nil, fmt.Errorf("remove discovery edges: %w", err)
 	}
+	edges, err := relationship.ScanEdges(rows)
+	if err != nil {
+		return nil, fmt.Errorf("remove discovery edges: %w", err)
+	}
+	// Each removed edge gets its history row removed (REL-09, WP-771):
+	// source and actor of the request, collector without one; no event.
+	recs := make([]*relationship.ChangeRecord, len(edges))
+	for i, e := range edges {
+		recs[i] = &relationship.ChangeRecord{Kind: relationship.ChangeRemoved, Before: e, Reason: "interface_removed"}
+	}
+	if recErr := relationship.RecordChangesTx(ctx, tx, recs); recErr != nil {
+		return nil, recErr
+	}
 	var free []string
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(n.id::text), '{}') FROM network_interface n
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(array_agg(n.id::text), '{}') FROM network_interface n
 		WHERE n.id = ANY ($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM ci_relationship r
 			WHERE r.source_interface_id = n.id OR r.target_interface_id = n.id)`, ids).Scan(&free); err != nil {
 		return nil, fmt.Errorf("read relationships of interfaces: %w", err)
@@ -805,12 +827,12 @@ func removeInterfaces(ctx context.Context, tx pgx.Tx, orgID, ciID string, ids []
 	if len(free) == 0 {
 		return nil, nil
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM ip_address a WHERE a.interface_id = ANY ($1::uuid[]) AND EXISTS (
+	if _, err = tx.Exec(ctx, `DELETE FROM ip_address a WHERE a.interface_id = ANY ($1::uuid[]) AND EXISTS (
 			SELECT 1 FROM ip_address u WHERE u.organization_id = a.organization_id AND u.vrf_id = a.vrf_id
 			  AND u.address = a.address AND u.interface_id IS NULL)`, free); err != nil {
 		return nil, fmt.Errorf("remove addresses: %w", err)
 	}
-	rows, err := tx.Query(ctx, `DELETE FROM network_interface WHERE id = ANY ($1::uuid[]) RETURNING name`, free)
+	rows, err = tx.Query(ctx, `DELETE FROM network_interface WHERE id = ANY ($1::uuid[]) RETURNING name`, free)
 	if err != nil {
 		return nil, fmt.Errorf("remove interfaces: %w", err)
 	}
