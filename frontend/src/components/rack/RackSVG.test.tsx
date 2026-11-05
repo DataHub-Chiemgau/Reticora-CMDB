@@ -62,7 +62,7 @@ describe('RackSVG theme', () => {
   it('keeps the item colours', () => {
     const { container } = renderRack();
     const items = [...container.querySelectorAll('svg g > rect')];
-    expect(items.map((rect) => rect.getAttribute('fill'))).toEqual(['#4f46e5', '#16a34a']);
+    expect(items.map((rect) => rect.getAttribute('fill'))).toEqual(['#087680', '#16a34a']);
     const labels = [...container.querySelectorAll('svg g > rect + text')];
     expect(labels.map((label) => [label.textContent, label.getAttribute('class')])).toEqual([
       ['pdu-01', 'fill-white'],

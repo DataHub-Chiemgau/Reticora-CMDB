@@ -53,7 +53,7 @@ test('modal: focus moves in, Shift+Tab stays inside, Escape in a field returns f
   page,
 }) => {
   await openList(page);
-  const trigger = page.getByRole('button', { name: 'CI erstellen' }).first();
+  const trigger = page.getByRole('button', { name: 'CI anlegen' }).first();
   await trigger.focus();
   await page.keyboard.press('Enter');
 

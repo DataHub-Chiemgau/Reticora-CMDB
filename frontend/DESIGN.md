@@ -107,7 +107,9 @@ Regeln:
 
 - Eine primäre Aktion je Seite und Dialog.
 - Leere Ansichten laden zur nächsten Handlung ein („CI anlegen“), Fehler nennen Ursache und Ausweg und bieten „Erneut versuchen“.
-- Ein Vorgang heißt im ganzen Ablauf gleich: Der Button „Speichern“ löst den Toast „Gespeichert“ aus.
+- Ein Vorgang heißt im ganzen Ablauf gleich. Anlegen heißt im Kopf „<Objekt> anlegen“ und im Dialog „Anlegen“, Ändern heißt „Speichern“; „erstellen“ kommt nicht vor.
+- Unwiderrufliche Löschungen (Webhook, Benutzer) fragen in einem Dialog nach; der rote Button steht nur dort.
+- Datumsangaben folgen der Oberflächensprache (`i18n.language`), Aufzählungswerte kommen aus dem Katalog, nie als Rohschlüssel.
 - Zeilen, die ein Detail öffnen, sind per Tastatur bedienbar (`useRowNavigation`): Pfeile bewegen, Enter öffnet, Leertaste wählt.
 - Tabellen auf schmalen Bildschirmen scrollen waagerecht in einer fokussierbaren `ScrollRegion`.
 

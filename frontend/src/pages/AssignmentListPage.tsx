@@ -116,7 +116,7 @@ function useRowNames(rows: Assignment[]) {
 type OpenDialog = { kind: 'return' | 'transfer'; target: HeldAsset } | null;
 
 export function AssignmentListPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const statusOptions = [
     { value: '', label: t('common.allStatuses') },
     ...ASSIGNMENT_STATUSES.map((value) => ({
@@ -250,10 +250,12 @@ export function AssignmentListPage() {
                         </Badge>
                       </td>
                       <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
-                        {new Date(item.assigned_at).toLocaleDateString('de-DE')}
+                        {new Date(item.assigned_at).toLocaleDateString(i18n.language)}
                       </td>
                       <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
-                        {item.due_at ? new Date(item.due_at).toLocaleDateString('de-DE') : '—'}
+                        {item.due_at
+                          ? new Date(item.due_at).toLocaleDateString(i18n.language)
+                          : '—'}
                       </td>
                       <td className={cn(tdClasses, 'text-right')}>
                         {target ? (

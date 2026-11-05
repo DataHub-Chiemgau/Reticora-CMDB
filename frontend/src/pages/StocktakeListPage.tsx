@@ -229,7 +229,7 @@ export function StocktakeListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('stocktake.create', 'Inventur starten')}</Button>
           </div>
         </div>
       </Modal>

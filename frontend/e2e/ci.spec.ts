@@ -66,7 +66,7 @@ test('creates a CI and opens it', async ({ page }) => {
   await signIn(page);
   await page.goto('/cmdb');
 
-  await page.getByRole('button', { name: 'CI erstellen' }).first().click();
+  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name').fill('core-sw-e2e');
   const typeSelect = dialog.getByLabel('CI-Typ');

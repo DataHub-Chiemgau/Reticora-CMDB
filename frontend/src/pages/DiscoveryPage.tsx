@@ -191,7 +191,7 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
-function formatHeartbeat(value?: string) {
+function formatHeartbeat(value: string | undefined, language: string) {
   if (!value) {
     return '—';
   }
@@ -201,7 +201,7 @@ function formatHeartbeat(value?: string) {
     return value;
   }
 
-  return new Intl.DateTimeFormat('de-DE', {
+  return new Intl.DateTimeFormat(language, {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date);
@@ -986,7 +986,7 @@ function CollectorCard({
   canManage: boolean;
   canResolve: boolean;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   return (
     <Panel
@@ -1008,13 +1008,13 @@ function CollectorCard({
           <div>
             <dt className="text-xs text-fg-muted">{t('discovery.lastHeartbeat')}</dt>
             <dd className="font-medium tabular-nums text-fg">
-              {formatHeartbeat(collector.last_heartbeat_at)}
+              {formatHeartbeat(collector.last_heartbeat_at, i18n.language)}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-fg-muted">{t('discovery.createdAt')}</dt>
             <dd className="font-medium tabular-nums text-fg">
-              {formatHeartbeat(collector.created_at)}
+              {formatHeartbeat(collector.created_at, i18n.language)}
             </dd>
           </div>
         </dl>

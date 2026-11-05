@@ -25,14 +25,14 @@ import { cn } from '../components/ui/utils';
 import { ScrollRegion } from '../components/ScrollRegion';
 import { TableEmptyRow } from './ListParts';
 
-const methodOptions = [
-  { value: 'reuse', label: 'Wiederverwendung' },
-  { value: 'recycling', label: 'Recycling' },
-  { value: 'destruction', label: 'Vernichtung' },
-  { value: 'secure_erasure', label: 'Sichere Löschung' },
-  { value: 'physical_destruction', label: 'Physische Vernichtung' },
-  { value: 'return_to_vendor', label: 'Rückgabe an Hersteller' },
-];
+const METHODS = [
+  'reuse',
+  'recycling',
+  'destruction',
+  'secure_erasure',
+  'physical_destruction',
+  'return_to_vendor',
+] as const;
 
 export function DisposalListPage() {
   const { t } = useTranslation();
@@ -70,8 +70,8 @@ export function DisposalListPage() {
   });
 
   const records = data?.data ?? [];
-  const methodLabel = (method: string) =>
-    methodOptions.find((option) => option.value === method)?.label ?? method;
+  const methodLabel = (method: string) => t(`disposal.methods.${method}`, method);
+  const methodOptions = METHODS.map((value) => ({ value, label: t(`disposal.methods.${value}`) }));
 
   return (
     <div className="space-y-4">

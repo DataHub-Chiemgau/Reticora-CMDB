@@ -125,7 +125,7 @@ export function TicketListPage() {
         title={t('ticket.title', 'Tickets')}
         actions={
           <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
-            {t('ticket.create', 'Ticket erstellen')}
+            {t('ticket.create', 'Ticket anlegen')}
           </Button>
         }
       />
@@ -285,7 +285,7 @@ export function TicketListPage() {
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
-        title={t('ticket.create', 'Ticket erstellen')}
+        title={t('ticket.create', 'Ticket anlegen')}
       >
         <div className="space-y-4">
           <Input
@@ -316,7 +316,7 @@ export function TicketListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('common.create', 'Anlegen')}</Button>
           </div>
         </div>
       </Modal>

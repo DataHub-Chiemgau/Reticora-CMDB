@@ -82,7 +82,7 @@
       "dashboard": "Zu Dashboard wechseln",
       "cmdb": "Zur CMDB wechseln",
       "discovery": "Zu Discovery wechseln",
-      "createCI": "CI erstellen",
+      "createCI": "CI anlegen",
       "toggleDarkMode": "Dunkelmodus umschalten",
       "assets": "Inventar öffnen",
       "assignments": "Zuweisungen öffnen",
@@ -317,7 +317,7 @@
     "timeline": "Zeitverlauf"
   },
   "form": {
-    "createCI": "CI erstellen",
+    "createCI": "CI anlegen",
     "editCI": "CI bearbeiten",
     "ciDescription": "Pflegen Sie Stammdaten und Status des Configuration Items.",
     "selectPlaceholder": "Bitte auswählen",
@@ -513,10 +513,10 @@
     "secretWriteOnly": "Geheimnis und Header-Werte sind nur schreibbar: Sie werden nach dem Speichern nie wieder angezeigt.",
     "loading": "Webhooks werden geladen",
     "errorTitle": "Webhooks konnten nicht geladen werden",
-    "createSubscription": "Webhook-Abonnement erstellen",
+    "createSubscription": "Webhook-Abonnement anlegen",
     "subscriptions": "Abonnements",
     "emptyTitle": "Keine Webhooks vorhanden",
-    "emptyHint": "Erstellen Sie ein Abonnement, um bei Ereignissen benachrichtigt zu werden.",
+    "emptyHint": "Legen Sie ein Abonnement an, um bei Ereignissen benachrichtigt zu werden.",
     "test": "Test senden",
     "deliveries": "Zustellverlauf",
     "loadingDeliveries": "Zustellungen werden geladen",
@@ -550,7 +550,9 @@
     "createHint": "Wählen Sie die Ereignisse, die Ihre URL aufrufen; die Anfragen werden mit dem Geheimnis signiert.",
     "subscriptionsHint": "Jedes Abonnement sendet die gewählten Ereignisse an seine URL.",
     "deliveriesHint": "Die letzten Zustellversuche für dieses Abonnement.",
-    "deadLettersHint": "Zustellungen, die nach allen Versuchen endgültig fehlgeschlagen sind."
+    "deadLettersHint": "Zustellungen, die nach allen Versuchen endgültig fehlgeschlagen sind.",
+    "deleteTitle": "Webhook löschen?",
+    "deleteText": "Der Webhook „{{name}}“ und sein Zustellprotokoll werden entfernt. Ereignisse werden danach nicht mehr an {{url}} gesendet."
   },
   "accessibility": {
     "closeModal": "Modal schließen",
@@ -575,7 +577,7 @@
     "category": "Kategorie",
     "location": "Standort",
     "supplier": "Lieferant",
-    "create": "Asset erstellen",
+    "create": "Asset anlegen",
     "bulk": {
       "selected": "{{count}} ausgewählt",
       "setStatus": "Status setzen…",
@@ -686,7 +688,7 @@
     "category": "Kategorie",
     "size": "Größe",
     "version": "Version",
-    "upload": "Dokument erstellen",
+    "upload": "Dokument anlegen",
     "categories": {
       "general": "Allgemein",
       "contract": "Vertrag",
@@ -729,7 +731,7 @@
   },
   "ticket": {
     "title": "Tickets",
-    "create": "Ticket erstellen",
+    "create": "Ticket anlegen",
     "ticketTitle": "Titel",
     "priority": "Priorität",
     "category": "Kategorie",
@@ -1000,13 +1002,13 @@
     "subtitle": "Antwort- und Lösungsziele werden pro Ticket nach Priorität verfolgt.",
     "loading": "SLAs werden geladen",
     "errorTitle": "SLAs konnten nicht geladen werden",
-    "createPolicy": "SLA-Richtlinie erstellen",
+    "createPolicy": "SLA-Richtlinie anlegen",
     "name": "Name",
     "responseMinutes": "Antwort (Min.)",
     "resolutionMinutes": "Lösung (Min.)",
     "policies": "Richtlinien",
     "emptyTitle": "Keine SLA-Richtlinien vorhanden",
-    "emptyHint": "Erstellen Sie eine Richtlinie, damit Tickets automatisch SLA-Ziele erhalten.",
+    "emptyHint": "Legen Sie eine Richtlinie an, damit Tickets automatisch SLA-Ziele erhalten.",
     "breaches": "Verletzungen",
     "breached": "Verletzt",
     "noBreaches": "Keine Verletzungen",
@@ -1177,7 +1179,7 @@
     "loading": "Exportaufträge werden geladen",
     "errorTitle": "Exportaufträge konnten nicht geladen werden",
     "startExport": "Export starten",
-    "startJob": "Auftrag erstellen",
+    "startJob": "Export starten",
     "format": "Format",
     "jobs": "Exportaufträge",
     "status": "Status",
@@ -1209,7 +1211,7 @@
     "points": "{{count}} Datenpunkte",
     "noData": "Keine Daten",
     "noDataHint": "Für diese Metrik wurden im gewählten Zeitraum keine Werte gefunden.",
-    "createAlert": "Alarmregel erstellen",
+    "createAlert": "Alarmregel anlegen",
     "ruleName": "Regelname",
     "condition": "Bedingung",
     "threshold": "Schwellenwert",
@@ -1222,7 +1224,7 @@
     "severity_info": "Info",
     "alertRules": "Alarmregeln",
     "noAlerts": "Keine Alarmregeln",
-    "noAlertsHint": "Erstellen Sie eine Regel, um bei Schwellenwertüberschreitungen benachrichtigt zu werden.",
+    "noAlertsHint": "Legen Sie eine Regel an, um bei Schwellenwertüberschreitungen benachrichtigt zu werden.",
     "ciTitle": "Metriken",
     "ciLoad": "Metriken laden",
     "ciNone": "Keine Messwerte in den letzten 24 Stunden.",
@@ -1404,7 +1406,15 @@
     "dataCarrier": "Datenträger-Vernichtung",
     "performedAt": "Durchgeführt",
     "emptyTitle": "Noch keine Entsorgungen dokumentiert",
-    "emptyHint": "Dokumentiere die erste Entsorgung, um sie revisionssicher nachzuweisen."
+    "emptyHint": "Dokumentiere die erste Entsorgung, um sie revisionssicher nachzuweisen.",
+    "methods": {
+      "reuse": "Wiederverwendung",
+      "recycling": "Recycling",
+      "destruction": "Vernichtung",
+      "secure_erasure": "Sichere Löschung",
+      "physical_destruction": "Physische Vernichtung",
+      "return_to_vendor": "Rückgabe an Hersteller"
+    }
   },
   "keys": {
     "summary": "Physische und digitale Schlüssel mit Ausgabe/Rückgabe.",
@@ -1762,7 +1772,20 @@
     "emptyReservationsTitle": "Keine aktiven Reservierungen",
     "emptyReservationsHint": "Reservierte Assets und Artikel erscheinen hier, bis sie freigegeben werden.",
     "emptyAvailabilityTitle": "Noch keine Verfügbarkeit",
-    "emptyAvailabilityHint": "Sobald Bestand gebucht ist, zeigt diese Übersicht, was verfügbar, reserviert und zugewiesen ist."
+    "emptyAvailabilityHint": "Sobald Bestand gebucht ist, zeigt diese Übersicht, was verfügbar, reserviert und zugewiesen ist.",
+    "movementTypes": {
+      "receipt": "Wareneingang",
+      "transfer": "Umlagerung",
+      "assignment": "Zuweisung",
+      "return": "Rückgabe",
+      "deployment": "Einsatz",
+      "retrieval": "Entnahme",
+      "reservation": "Reservierung",
+      "release": "Freigabe",
+      "repair": "Reparatur",
+      "disposal": "Entsorgung",
+      "correction": "Korrektur"
+    }
   },
   "impact": {
     "affectedList": "Betroffen:",

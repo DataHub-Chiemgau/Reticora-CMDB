@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, within, screen, waitFor } from '@testing-library/react';
 import { WebhooksPage } from './WebhooksPage';
 import { renderWithProviders, stubFetchRoutes } from '../test/utils';
 
@@ -270,13 +270,44 @@ describe('WebhooksPage', () => {
     ).toBe(true);
   });
 
+  it('deletes a webhook only after the confirmation', async () => {
+    const fetchMock = stubWebhookApi(
+      managePermissions.permissions,
+      () => new Response(null, { status: 204 }),
+    );
+    renderWithProviders(<WebhooksPage />, { route: '/webhooks' });
+    await screen.findByText('Ticket hook');
+    const deletes = () =>
+      fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'DELETE',
+      );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Webhook löschen?' });
+    expect(dialog).toHaveTextContent('Ticket hook');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abbrechen' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(deletes()).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Löschen' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: 'Webhook löschen?' })).getByRole('button', {
+        name: 'Löschen',
+      }),
+    );
+    await waitFor(() => expect(deletes()).toHaveLength(1));
+  });
+
   it('reports a refused delete and test at the list', async () => {
     let answer = problem(403, { title: 'Forbidden', detail: 'forbidden' });
     stubWebhookApi(managePermissions.permissions, () => answer);
     renderWithProviders(<WebhooksPage />, { route: '/webhooks' });
     await screen.findByText('Ticket hook');
 
+    // Deleting asks first; the refusal comes with the confirmation.
     fireEvent.click(screen.getByRole('button', { name: 'Löschen' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Webhook löschen?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Löschen' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Keine Berechtigung');
     expect(screen.getByText('Ticket hook')).toBeInTheDocument();
 

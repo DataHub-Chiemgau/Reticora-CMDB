@@ -89,7 +89,7 @@ export function DocumentListPage() {
         description={t('document.summary')}
         actions={
           <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
-            {t('common.create', 'Erstellen')}
+            {t('document.upload', 'Dokument anlegen')}
           </Button>
         }
       />
@@ -198,7 +198,7 @@ export function DocumentListPage() {
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
-        title={t('document.upload', 'Dokument erstellen')}
+        title={t('document.upload', 'Dokument anlegen')}
       >
         <div className="space-y-4">
           <Input
@@ -223,7 +223,7 @@ export function DocumentListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('common.create', 'Anlegen')}</Button>
           </div>
         </div>
       </Modal>

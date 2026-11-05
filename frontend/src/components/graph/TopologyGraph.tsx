@@ -122,7 +122,7 @@ export const TopologyGraph: FC<TopologyGraphProps> = ({
         x: node.x ?? Math.cos((2 * Math.PI * i) / nodes.length),
         y: node.y ?? Math.sin((2 * Math.PI * i) / nodes.length),
         size: node.size ?? 10,
-        color: node.color ?? '#4f46e5',
+        color: node.color ?? '#087680',
       });
     });
 

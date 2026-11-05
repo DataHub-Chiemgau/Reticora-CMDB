@@ -102,7 +102,7 @@ export function buildGraphModel(graph: TopologyGraphData): GraphModel {
       return {
         id: node.id,
         label: node.name,
-        color: statusColors[node.status ?? ''] ?? '#4f46e5',
+        color: statusColors[node.status ?? ''] ?? '#087680',
       };
     }),
     edges: [...edgesByPair.values()],

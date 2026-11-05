@@ -23,7 +23,7 @@ const LABEL_WIDTH = 30;
 
 // The default colour of an item without its own colour (indigo-600): the
 // white label reaches 6.3:1 on it, in both themes alike.
-const DEFAULT_ITEM_COLOR = '#4f46e5';
+const DEFAULT_ITEM_COLOR = '#087680';
 
 /**
  * RackSVG renders a server rack diagram as an SVG element.

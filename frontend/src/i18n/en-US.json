@@ -550,7 +550,9 @@
     "createHint": "Choose the events that call your URL; requests are signed with the secret.",
     "subscriptionsHint": "Each subscription sends the chosen events to its URL.",
     "deliveriesHint": "The latest delivery attempts for this subscription.",
-    "deadLettersHint": "Deliveries that failed permanently after all attempts."
+    "deadLettersHint": "Deliveries that failed permanently after all attempts.",
+    "deleteTitle": "Delete webhook?",
+    "deleteText": "The webhook \"{{name}}\" and its delivery log are removed. Events are no longer sent to {{url}}."
   },
   "accessibility": {
     "closeModal": "Close modal",
@@ -1404,7 +1406,15 @@
     "dataCarrier": "Data carrier destruction",
     "performedAt": "Performed",
     "emptyTitle": "No disposals documented yet",
-    "emptyHint": "Document the first disposal to keep an audit-proof record."
+    "emptyHint": "Document the first disposal to keep an audit-proof record.",
+    "methods": {
+      "reuse": "Reuse",
+      "recycling": "Recycling",
+      "destruction": "Destruction",
+      "secure_erasure": "Secure erasure",
+      "physical_destruction": "Physical destruction",
+      "return_to_vendor": "Return to vendor"
+    }
   },
   "keys": {
     "summary": "Physical and digital keys with issue/return.",
@@ -1762,7 +1772,20 @@
     "emptyReservationsTitle": "No active reservations",
     "emptyReservationsHint": "Reserved assets and items appear here until they are released.",
     "emptyAvailabilityTitle": "No availability yet",
-    "emptyAvailabilityHint": "Once stock is booked, this overview shows what is available, reserved and assigned."
+    "emptyAvailabilityHint": "Once stock is booked, this overview shows what is available, reserved and assigned.",
+    "movementTypes": {
+      "receipt": "Goods receipt",
+      "transfer": "Transfer",
+      "assignment": "Assignment",
+      "return": "Return",
+      "deployment": "Deployment",
+      "retrieval": "Retrieval",
+      "reservation": "Reservation",
+      "release": "Release",
+      "repair": "Repair",
+      "disposal": "Disposal",
+      "correction": "Correction"
+    }
   },
   "impact": {
     "affectedList": "Affected:",

@@ -21,6 +21,7 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { Modal } from '../components/ui/Modal';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
 import {
@@ -216,6 +217,12 @@ export function WebhooksPage() {
   const [form, setForm] = useState({ name: '', url: '', secret: '', events: [] as string[] });
   const [createError, setCreateError] = useState<RefusalView | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // The webhook whose deletion awaits confirmation: it cannot be undone.
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    name: string;
+    url: string;
+  } | null>(null);
 
   const toggleEvent = (event: string) => {
     setForm((current) => ({
@@ -247,6 +254,7 @@ export function WebhooksPage() {
   const runDelete = (id: string) => {
     setActionError(null);
     deleteWebhook.mutate(id, actionCallbacks);
+    setPendingDelete(null);
   };
   const runRetry = (id: string, deliveryId: string) => {
     setActionError(null);
@@ -437,7 +445,9 @@ export function WebhooksPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="text-danger hover:text-danger"
-                                onClick={() => runDelete(sub.id)}
+                                onClick={() =>
+                                  setPendingDelete({ id: sub.id, name: sub.name, url: sub.url })
+                                }
                                 disabled={deleteWebhook.isPending}
                               >
                                 {t('common.delete')}
@@ -557,6 +567,33 @@ export function WebhooksPage() {
           />
         )}
       </AdminSection>
+
+      <Modal
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={t('webhook.deleteTitle')}
+        description={
+          pendingDelete
+            ? t('webhook.deleteText', { name: pendingDelete.name, url: pendingDelete.url })
+            : undefined
+        }
+        size="sm"
+      >
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={() => setPendingDelete(null)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            variant="danger"
+            loading={deleteWebhook.isPending}
+            onClick={() => pendingDelete && runDelete(pendingDelete.id)}
+          >
+            {t('common.delete')}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

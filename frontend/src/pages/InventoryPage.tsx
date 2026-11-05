@@ -271,7 +271,7 @@ export function InventoryPage() {
             label={t('inventory.movementType', 'Bewegungsart')}
             options={bookable.map((mt) => ({
               value: mt,
-              label: mt,
+              label: t(`inventory.movementTypes.${mt}`, mt),
             }))}
             value={moveDraft.movement_type}
             onChange={(e) => setMoveDraft({ ...moveDraft, movement_type: e.target.value })}
@@ -308,7 +308,7 @@ export function InventoryPage() {
               {t('common.cancel', 'Abbrechen')}
             </Button>
             <Button type="submit" disabled={record.isPending}>
-              {t('common.save', 'Erfassen')}
+              {t('inventory.record', 'Bewegung erfassen')}
             </Button>
           </div>
         </form>
@@ -342,7 +342,10 @@ function MovementsTab({
           aria-label="type"
           options={[
             { value: '', label: t('inventory.allTypes', 'Alle Arten') },
-            ...MOVEMENT_TYPES.map((mt) => ({ value: mt, label: mt })),
+            ...MOVEMENT_TYPES.map((mt) => ({
+              value: mt,
+              label: t(`inventory.movementTypes.${mt}`, mt),
+            })),
           ]}
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
@@ -387,7 +390,7 @@ function MovementsTab({
                     <td className={tdPrimaryClasses}>
                       <span className="inline-flex items-center gap-2">
                         <MovementIcon type={m.movement_type} />
-                        {m.movement_type}
+                        {t(`inventory.movementTypes.${m.movement_type}`, m.movement_type)}
                       </span>
                     </td>
                     <td className={tdMonoClasses}>

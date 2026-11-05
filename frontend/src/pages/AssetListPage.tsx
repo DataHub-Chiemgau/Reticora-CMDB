@@ -176,7 +176,7 @@ export function AssetListPage() {
         description={t('asset.summary')}
         actions={
           <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
-            {t('common.create', 'Erstellen')}
+            {t('asset.create', 'Asset anlegen')}
           </Button>
         }
       />
@@ -333,7 +333,7 @@ export function AssetListPage() {
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
-        title={t('asset.create', 'Asset erstellen')}
+        title={t('asset.create', 'Asset anlegen')}
       >
         <div className="space-y-4">
           <Input
@@ -368,7 +368,7 @@ export function AssetListPage() {
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('common.save', 'Speichern')}</Button>
+            <Button onClick={handleCreate}>{t('common.create', 'Anlegen')}</Button>
           </div>
         </div>
       </Modal>

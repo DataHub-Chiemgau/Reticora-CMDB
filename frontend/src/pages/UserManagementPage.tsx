@@ -251,7 +251,7 @@ function UsersTab({
   canManage: boolean;
   ownUserId?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { data, isLoading, error, refetch } = useUserList({ search });
   const setStatus = useSetUserStatus();
   const deleteUser = useDeleteUser();
@@ -367,7 +367,7 @@ function UsersTab({
                     </td>
                     <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
                       {user.last_login_at
-                        ? new Date(user.last_login_at).toLocaleDateString('de-DE')
+                        ? new Date(user.last_login_at).toLocaleDateString(i18n.language)
                         : '—'}
                     </td>
                     {withActions ? (
