@@ -347,7 +347,12 @@ function ReservationsTab({
         {(reservations.data?.data ?? []).map((r) => (
           <li key={r.id} className="flex items-center gap-3 py-2 text-sm">
             <span aria-hidden>🔒</span>
-            <span className="font-medium">{r.asset_id ?? r.quantity_item_id}</span>
+            <span className="font-medium">{r.asset_id ?? r.consumable_id}</span>
+            {r.item_kind === 'consumable' && r.location_id ? (
+              <span className="text-xs text-muted">
+                {t('locations.kinds.bin', 'Fach')} {r.location_id.slice(0, 8)}…
+              </span>
+            ) : null}
             {r.quantity > 1 ? <Badge variant="neutral">×{r.quantity}</Badge> : null}
             {r.project_ref ? <Badge variant="info">{r.project_ref}</Badge> : null}
             {r.expires_at ? (

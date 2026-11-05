@@ -1257,7 +1257,13 @@ func reservationHandler(repos *Repositories, opts *Options) *reservation.Handler
 	} else {
 		h = reservation.NewHandler(repos.Reservation, opts.Dispatcher)
 	}
-	return h.WithAvailability(repos.Availability)
+	h.WithAvailability(repos.Availability)
+	// Quantity reservations and their conversion need the feature stock
+	// beyond the route gate assets_basic (E-44, WP-759).
+	if opts.Entitlements != nil {
+		h.WithEntitlements(opts.Entitlements)
+	}
+	return h
 }
 
 // ciHandler builds the CI handler; without the event outbox it hands CI

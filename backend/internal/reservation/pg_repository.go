@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -514,12 +515,23 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id, state string) 
 // else the user of the reservation; a project reservation without holder
 // is a 422. When the assignment fails, everything rolls back and the
 // reservation stays active.
+//
+// A quantity reservation is taken out of its bin instead (convertQuantity,
+// WP-759).
 func (r *PGRepository) Convert(ctx context.Context, orgID, id string, in *ConvertInput) (*ConvertResult, error) {
-	if r.assigner == nil {
-		return nil, ErrConvertUnavailable
-	}
 	var out *ConvertResult
 	err := r.inTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		consumableID, err := reservedConsumable(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if consumableID != "" {
+			out, err = r.convertQuantity(ctx, tx, orgID, id, consumableID, in)
+			return err
+		}
+		if r.assigner == nil {
+			return ErrConvertUnavailable
+		}
 		res, locked, err := lockReservation(ctx, tx, orgID, id)
 		if err != nil {
 			return err
@@ -550,6 +562,86 @@ func (r *PGRepository) Convert(ctx context.Context, orgID, id string, in *Conver
 		return nil, err
 	}
 	return out, nil
+}
+
+// reservedConsumable returns the consumable of the reservation id the
+// caller sees, empty for an asset reservation; an unknown or invisible
+// reservation is ErrNotFound.
+func reservedConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) (string, error) {
+	if !api.IsUUID(id) {
+		return "", ErrNotFound
+	}
+	var consumableID string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(consumable_id::text, '') FROM reservation WHERE id = $1 AND organization_id = $2`,
+		id, orgID).Scan(&consumableID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read reservation: %w", err)
+	}
+	return consumableID, nil
+}
+
+// reservedTaker books the retrieval of a converted quantity reservation in
+// the transaction of the caller: movement.Service (WP-759).
+type reservedTaker interface {
+	RecordReservedRetrievalTx(ctx context.Context, tx pgx.Tx, m *movement.Movement) error
+}
+
+// errHolderOnQuantity: a quantity reservation becomes a retrieval, not an
+// assignment; it names no holder and no due date (422, WP-759).
+var errHolderOnQuantity = &api.FieldError{Field: "assignee_id",
+	Message: "a quantity reservation is converted into a retrieval; assignee_id, team_id and due_at are not allowed",
+	Status:  http.StatusUnprocessableEntity}
+
+// convertQuantity consumes the active quantity reservation id and takes
+// its whole quantity out of its bin in the same transaction (WP-759): the
+// consumable is locked first (consumable.LockConsumable, the first lock of
+// every booking), then the stock row of the bin and the reservation
+// (lockReservation, the order of WP-284). The reservation becomes
+// consumed, the movement service books one retrieval from the bin
+// (movement.RecordReservedRetrievalTx: on_hand and reserved fall together,
+// without a check against on_hand − reserved), and reservation.converted
+// follows in the outbox. Any error rolls everything back; the reservation
+// stays active.
+func (r *PGRepository) convertQuantity(ctx context.Context, tx pgx.Tx, orgID, id, consumableID string,
+	in *ConvertInput) (*ConvertResult, error) {
+	if in.Holder.UserID != "" || in.Holder.TeamID != "" || in.DueAt != nil {
+		return nil, errHolderOnQuantity
+	}
+	if err := consumable.LockConsumable(ctx, tx, orgID, consumableID); err != nil {
+		if errors.Is(err, consumable.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	res, _, err := lockReservation(ctx, tx, orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if stateErr := setState(ctx, tx, res, "consumed"); stateErr != nil {
+		return nil, stateErr
+	}
+	q := res.Quantity
+	m := &movement.Movement{OrganizationID: orgID, ItemKind: "consumable", ConsumableID: res.ConsumableID,
+		MovementType: "retrieval", FromLocationID: res.LocationID, Quantity: &q, ActorID: actor(ctx),
+		Reason: res.Reason, Notes: in.Notes}
+	if taker, ok := r.movements.(reservedTaker); ok {
+		err = taker.RecordReservedRetrievalTx(ctx, tx, m)
+	} else {
+		err = movement.RecordReservedRetrievalTx(ctx, tx, m)
+	}
+	if errors.Is(err, consumable.ErrNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if emitErr := r.emit(ctx, tx, res, events.ReservationConverted); emitErr != nil {
+		return nil, emitErr
+	}
+	return &ConvertResult{Reservation: res, Movement: m}, nil
 }
 
 // ActiveForItem returns the active reservations of one item.

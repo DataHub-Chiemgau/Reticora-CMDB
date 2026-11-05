@@ -7279,7 +7279,7 @@ export interface paths {
     };
     /**
      * Query inventory availability projections
-     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved).
+     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved). This org-wide projection is kept as an alias and is not extended (E-38, WP-759); its successors are GET /api/v1/consumables/{id}/availability for consumables (per bin) and `active_reservation` of GET /api/v1/assets/{id} for assets. The deprecation follows once the web client no longer calls this path.
      */
     get: operations['listInventoryAvailability'];
     put?: never;
@@ -7578,7 +7578,7 @@ export interface paths {
     put?: never;
     /**
      * Reserve an asset or a quantity of a consumable
-     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. A consumable reservation needs the feature `stock` of the organization beyond `assets_basic` of the path (403 `feature-not-entitled`, E-44, WP-759). Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
      */
     post: operations['createReservations'];
     delete?: never;
@@ -8517,8 +8517,10 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Convert a reservation into an assignment
+     * Convert a reservation into an assignment or a retrieval
      * @description Sets the active asset reservation to `consumed` and assigns its asset in the same transaction through the assignment service (WP-275, WP-277): to `assignee_id` or `team_id` of the body, else to the user of the reservation. The movement `assignment` is booked, the holder cache set, and `asset.assigned` and `reservation.converted` are written to the outbox. When the assignment fails, the reservation stays active.
+     *
+     *     A quantity reservation (item_kind consumable) becomes `consumed` and its whole quantity one movement `retrieval` from its bin through the movement service in the same transaction (WP-759): `on_hand` and `reserved` of the bin fall together, without a check against the available stock; `reservation.converted` follows. It names no `assignee_id`, `team_id` or `due_at` (422); `notes` go to the movement. It needs the feature `stock` of the organization (403 `feature-not-entitled`, E-44) and, beyond `assignment:write`, the permission `stock:write` (403, E-138). When the booking fails, the reservation stays active.
      */
     post: operations['convertReservation'];
     delete?: never;
@@ -8584,8 +8586,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the availability of a consumable
-     * @description Planned (E-38); WP-759 implements the operation.
+     * Get the availability of a consumable per bin
+     * @description The availability of the consumable per bin from its stock rows (stock_level) visible under the caller's client and site scope, ordered by bin (STK-03, E-38, WP-759): `on_hand`, `reserved` and `available` = `on_hand` − `reserved`. With `location_id` only that bin. It succeeds `GET /api/v1/inventory/availability` for consumables. An unknown consumable or one outside the caller's scope is 404.
      */
     get: operations['getConsumableAvailability'];
     put?: never;
@@ -13884,6 +13886,22 @@ export interface components {
     ConsumableStockListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ConsumableStock'][];
     };
+    /** @description The availability of a consumable in one bin, read from its stock row (GET /api/v1/consumables/{id}/availability, WP-759). */
+    ConsumableAvailability: {
+      /**
+       * Format: uuid
+       * @description The bin.
+       */
+      location_id: string;
+      on_hand: number;
+      /** @description The sum of the active reservations of the bin; never above on_hand. */
+      reserved: number;
+      /** @description on_hand − reserved. */
+      available: number;
+    };
+    ConsumableAvailabilityListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ConsumableAvailability'][];
+    };
     /** @description A row of the ledger stock_movement of a consumable in the legacy form of /api/v1/consumables/{id}/movements (WP-756): the fields of StockMovement plus direction (in when it books only into to_location_id, else out), location_id (the bin of that direction) and reference (the notes). */
     ConsumableMovement: components['schemas']['StockMovement'] & {
       /** @enum {string} */
@@ -14140,9 +14158,11 @@ export interface components {
       due_at?: string;
       notes?: string;
     };
+    /** @description The consumed reservation with the assignment of its asset, or for a quantity reservation the movement retrieval from its bin (WP-759). */
     ConvertReservationResponse: {
       reservation: components['schemas']['Reservation'];
-      assignment: components['schemas']['Assignment'];
+      assignment?: components['schemas']['Assignment'];
+      movement?: components['schemas']['StockMovement'];
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -40061,7 +40081,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description A project reservation without `assignee_id` or `team_id`, a quantity item reservation, both or a malformed holder, or a holder of another organization; `field` names it. */
+      /** @description A project reservation without `assignee_id` or `team_id`, both or a malformed holder, a holder of another organization, or a quantity reservation with `assignee_id`, `team_id` or `due_at`; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -40165,7 +40185,20 @@ export interface operations {
   };
   getConsumableAvailability: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Only this bin. */
+        location_id?: string;
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -40175,16 +40208,28 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the availability of a consumable. The response schema comes with WP-759. */
+      /** @description The availability per bin of one page. The page follows the cursor contract (API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConsumableAvailabilityListResponse'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description location_id is no UUID; `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   placeOrder: {

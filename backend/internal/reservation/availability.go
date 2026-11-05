@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -123,6 +124,84 @@ func (p *PGAvailability) Availability(ctx context.Context, orgID string, filter 
 		return nil, err
 	}
 	return out, nil
+}
+
+// binSort pins the order of the availability per bin for the keyset
+// cursor.
+const (
+	binSort = "location_id"
+	binDir  = "asc"
+)
+
+// BinAvailability returns the availability of the consumable per bin
+// (GET /api/v1/consumables/{id}/availability, E-38, WP-759): its stock
+// rows the caller sees, with locationID only that bin, ordered by bin, at
+// most page.Limit+1 of them (BinAvailabilityPage), and their number. A
+// consumable that is unknown or outside the caller's scope is
+// ErrItemNotFound; a malformed cursor api.ErrInvalidCursor.
+func (p *PGAvailability) BinAvailability(ctx context.Context, orgID, consumableID, locationID string,
+	page api.PaginationParams) ([]BinAvailability, int, error) {
+	if !api.IsUUID(consumableID) {
+		return nil, 0, ErrItemNotFound
+	}
+	var out []BinAvailability
+	var total int
+	err := database.WithRequestTenant(ctx, p.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM consumable WHERE id = $1 AND organization_id = $2)`,
+			consumableID, orgID).Scan(&visible); err != nil {
+			return fmt.Errorf("check consumable: %w", err)
+		}
+		if !visible {
+			return ErrItemNotFound
+		}
+		where := "organization_id = $1 AND consumable_id = $2 AND ($3::uuid IS NULL OR location_id = $3::uuid)"
+		args := []any{orgID, consumableID, nullUUID(locationID)}
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM stock_level WHERE "+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count bins: %w", err)
+		}
+		if page.Cursor != nil {
+			if !page.Cursor.Matches(binSort, binDir) || !api.IsUUID(page.Cursor.Value) || !api.IsUUID(page.Cursor.ID) {
+				return fmt.Errorf("%w: malformed position", api.ErrInvalidCursor)
+			}
+			where += " AND " + api.KeysetClause(binSort, "uuid", binDir, len(args)+1)
+			args = append(args, page.Cursor.Value, page.Cursor.ID)
+		}
+		tail := fmt.Sprintf(" ORDER BY location_id, id LIMIT $%d", len(args)+1)
+		args = append(args, page.Limit+1)
+		rows, err := tx.Query(ctx, `SELECT id::text, location_id::text, on_hand::float8, reserved::float8,
+			(on_hand - reserved)::float8 FROM stock_level WHERE `+where+tail, args...)
+		if err != nil {
+			return fmt.Errorf("list bins: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (BinAvailability, error) {
+			var b BinAvailability
+			return b, row.Scan(&b.stockID, &b.LocationID, &b.OnHand, &b.Reserved, &b.Available)
+		})
+		if err != nil {
+			return fmt.Errorf("list bins: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// BinAvailabilityPage is the list response of the rows BinAvailability
+// read (at most one more than the limit): when more follow, the page ends
+// at the limit, has_more is set and next_cursor is the keyset cursor after
+// its last row.
+func BinAvailabilityPage(rows []BinAvailability, total int, page api.PaginationParams) api.ListResponse[BinAvailability] {
+	list := api.ListResponse[BinAvailability]{Data: api.NonNilSlice(rows), Total: total, Limit: page.Limit}
+	if page.Limit > 0 && len(rows) > page.Limit {
+		list.Data = rows[:page.Limit]
+		last := &list.Data[page.Limit-1]
+		list.HasMore = true
+		list.NextCursor = api.EncodeCursor(api.Cursor{Sort: binSort, Dir: binDir, Value: last.LocationID, ID: last.stockID})
+	}
+	return list
 }
 
 func nullUUID(id string) any {

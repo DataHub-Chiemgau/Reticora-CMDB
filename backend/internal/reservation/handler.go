@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
@@ -27,11 +28,19 @@ type AvailabilityProvider interface {
 	Availability(ctx context.Context, orgID string, filter AvailabilityFilter) ([]Availability, error)
 }
 
+// BinAvailabilityProvider reads the availability of a consumable per bin
+// (GET /api/v1/consumables/{id}/availability, WP-759); PGAvailability
+// implements it.
+type BinAvailabilityProvider interface {
+	BinAvailability(ctx context.Context, orgID, consumableID, locationID string, page api.PaginationParams) ([]BinAvailability, int, error)
+}
+
 // Handler provides HTTP handlers for reservations and availability.
 type Handler struct {
 	repo         Repository
 	dispatcher   EventDispatcher
 	availability AvailabilityProvider
+	entitlements entitlement.Checker
 }
 
 // NewHandler creates a new reservation handler.
@@ -49,6 +58,29 @@ func (h *Handler) WithAvailability(p AvailabilityProvider) *Handler {
 	return h
 }
 
+// WithEntitlements attaches the feature check of quantity reservations
+// (E-44, WP-759): reserving and converting a consumable need the feature
+// stock of the organization, beyond assets_basic of the route gate on
+// /api/v1/reservations. Without a checker (nil) every organization is
+// entitled.
+func (h *Handler) WithEntitlements(c entitlement.Checker) *Handler {
+	h.entitlements = c
+	return h
+}
+
+// stockEntitled answers 403 feature-not-entitled and reports false when the
+// organization is not entitled to the feature stock (E-44, WP-759).
+func (h *Handler) stockEntitled(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	if h.entitlements == nil || h.entitlements.IsEnabled(r.Context(), orgID, entitlement.FeatureStock) {
+		return true
+	}
+	refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureStock}
+	slog.WarnContext(r.Context(), "quantity reservation refused", "organization_id", orgID,
+		"method", r.Method, "path", r.URL.Path, "feature", refusal.FeatureKey)
+	api.WriteTypedProblem(w, http.StatusForbidden, refusal)
+	return false
+}
+
 // RegisterRoutes registers reservation routes on the given mux.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/reservations", h.List)
@@ -58,6 +90,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/reservations/{id}/convert", h.Convert)
 	r.Post("/api/v1/assets/{id}/reserve", h.ReserveAsset)
 	r.Get("/api/v1/inventory/availability", h.Availability)
+	r.Get("/api/v1/consumables/{id}/availability", h.ConsumableAvailability)
 }
 
 // dispatch hands an event to the webhook dispatcher directly; only the
@@ -270,7 +303,11 @@ func parseTime(field, value string) (*time.Time, error) {
 }
 
 // create validates req and creates the reservation (Create, ReserveAsset).
+// A quantity reservation needs the feature stock (E-44, WP-759).
 func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, req *CreateRequest) {
+	if req.ItemKind == "consumable" && !h.stockEntitled(w, r, orgID) {
+		return
+	}
 	// Ids reach SQL only as UUIDs: a malformed one is a 422 field error,
 	// not a driver message (API-03).
 	for _, f := range [][2]string{{"asset_id", req.AssetID}, {"consumable_id", req.ConsumableID}, {"location_id", req.LocationID},
@@ -356,6 +393,10 @@ func (h *Handler) Release(w http.ResponseWriter, r *http.Request) {
 // active asset reservation becomes consumed and its asset is assigned in
 // the same transaction, to assignee_id or team_id of the body, else to the
 // user of the reservation; 200 with the reservation and the assignment.
+// A quantity reservation becomes consumed and its whole quantity a
+// retrieval from its bin (WP-759); 200 with the reservation and the
+// movement. It needs the feature stock (403 feature-not-entitled, E-44)
+// and, beyond assignment:write of the route, stock:write (403, E-138).
 func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -383,6 +424,9 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "team_id", Message: "must be a UUID", Status: http.StatusUnprocessableEntity})
 		return
 	}
+	if !h.quantityConvertAllowed(w, r, t.OrganizationID, id) {
+		return
+	}
 	out, err := h.repo.Convert(r.Context(), t.OrganizationID, id, &ConvertInput{
 		Holder: assignment.Holder{UserID: req.AssigneeID, TeamID: req.TeamID}, DueAt: req.DueAt, Notes: req.Notes})
 	if err != nil {
@@ -392,7 +436,84 @@ func (h *Handler) Convert(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, out)
 }
 
-// Availability handles GET /api/v1/inventory/availability
+// quantityConvertAllowed reads the reservation id and, for a quantity
+// reservation, checks the feature stock (E-44) and the permission
+// stock:write of the principal (E-138): a conversion takes stock out of the
+// bin like POST /api/v1/stock-movements. It answers and reports false when
+// the reservation is not visible or a check fails; an asset reservation
+// passes.
+func (h *Handler) quantityConvertAllowed(w http.ResponseWriter, r *http.Request, orgID, id string) bool {
+	res, err := h.repo.GetByID(r.Context(), orgID, id)
+	if err != nil {
+		writeReservationError(w, r, err)
+		return false
+	}
+	if res.ItemKind != "consumable" {
+		return true
+	}
+	if !h.stockEntitled(w, r, orgID) {
+		return false
+	}
+	if p, ok := identity.PrincipalFromContext(r.Context()); !ok || !p.Has(identity.PermStockWrite) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "missing required permission: "+string(identity.PermStockWrite))
+		return false
+	}
+	return true
+}
+
+// ConsumableAvailability handles GET /api/v1/consumables/{id}/availability
+// (E-38, WP-759): the availability of the consumable per bin (on_hand,
+// reserved, available = on_hand − reserved) from its stock rows the caller
+// sees, with location_id only that bin, ordered by bin and cursor
+// paginated. An unknown or invisible consumable is 404.
+func (h *Handler) ConsumableAvailability(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	bins, ok := h.availability.(BinAvailabilityProvider)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "availability projection is not configured")
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrItemNotFound.Error())
+	if !ok {
+		return
+	}
+	locationID := r.URL.Query().Get("location_id")
+	if locationID != "" {
+		if err := api.RequireUUID("location_id", locationID); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	}
+	rows, total, err := bins.BinAvailability(r.Context(), t.OrganizationID, id, locationID, page)
+	switch {
+	case errors.Is(err, ErrItemNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrItemNotFound.Error())
+		return
+	case errors.Is(err, api.ErrInvalidCursor):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	case err != nil:
+		slog.WarnContext(r.Context(), "consumable availability failed", "error", err)
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, BinAvailabilityPage(rows, total, page))
+}
+
+// Availability handles GET /api/v1/inventory/availability: the org-wide
+// projection, kept as alias until the web client no longer calls it; its
+// successors are GET /api/v1/consumables/{id}/availability for consumables
+// and active_reservation of GET /api/v1/assets/{id} for assets (E-38,
+// WP-759).
 func (h *Handler) Availability(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {

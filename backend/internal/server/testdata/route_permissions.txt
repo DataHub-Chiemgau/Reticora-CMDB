@@ -151,6 +151,7 @@ GET /api/v1/compliance/rules/{id} compliance:read
 GET /api/v1/compliance/score compliance:read
 GET /api/v1/consumables stock:read
 GET /api/v1/consumables/{id} stock:read
+GET /api/v1/consumables/{id}/availability stock:read
 GET /api/v1/consumables/{id}/movements stock:read
 GET /api/v1/consumables/{id}/stock stock:read
 GET /api/v1/contacts contact:read
