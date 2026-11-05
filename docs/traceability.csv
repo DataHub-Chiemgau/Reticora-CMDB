@@ -1491,3 +1491,4 @@ INV-03;[P2], RFID/Direct-Access [P4];B;backend/internal/labels/batch_integration
 AUD-08;[P2];C;backend/internal/history/asset_replay_integration_test.go;WP-795
 STK-03;[P2];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
+UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318

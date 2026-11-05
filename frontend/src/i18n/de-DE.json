@@ -591,26 +591,63 @@
   "assignment": {
     "title": "Zuweisungen",
     "assign": "Zuweisen",
-    "return": "Rückgabe",
-    "transfer": "Transfer",
-    "type": "Typ",
+    "return": "Zurücknehmen",
+    "transfer": "Übertragen",
+    "type": "Art",
+    "asset": "Asset",
     "assignedTo": "Zugewiesen an",
     "assignedAt": "Zugewiesen am",
-    "assetId": "Asset-ID",
-    "holderKind": "Halter",
-    "holderUser": "Nutzer",
-    "holderTeam": "Team",
-    "userId": "Nutzer-ID",
-    "teamId": "Team-ID",
-    "team": "Team",
+    "recipient": "Empfänger",
+    "newRecipient": "Neuer Empfänger",
     "dueAt": "Fällig am",
+    "teamHolder": "Team {{name}}",
+    "unknownAsset": "Asset nicht lesbar",
+    "returnOf": "Zurücknehmen: {{asset}}",
+    "transferOf": "Übertragen: {{asset}}",
+    "returnTitle": "Asset zurücknehmen",
+    "returnDescription": "„{{asset}}“ von {{holder}} zurücknehmen.",
+    "returnCondition": "Zustand bei Rückgabe",
+    "transferTitle": "Asset übertragen",
+    "transferDescription": "„{{asset}}“ von {{holder}} an einen neuen Empfänger übertragen.",
+    "assignPending": "„{{asset}}“ wird {{holder}} zugewiesen",
+    "assignFailed": "Zuweisen von „{{asset}}“ fehlgeschlagen: {{message}}",
     "conflict": "Der Halter des Assets hat sich zwischenzeitlich geändert. Die Liste wurde neu geladen.",
+    "types": {
+      "assignment": "Zuweisung",
+      "transfer": "Übertragung"
+    },
     "statuses": {
       "active": "Aktiv",
       "returned": "Zurückgegeben",
       "transferred": "Transferiert",
-      "overdue": "Überfällig",
-      "cancelled": "Storniert"
+      "overdue": "Überfällig"
+    }
+  },
+  "pickers": {
+    "kind": "Art",
+    "kinds": {
+      "ci": "CI",
+      "asset": "Asset",
+      "consumable": "Mengenartikel"
+    },
+    "holderKinds": {
+      "user": "Person",
+      "team": "Team"
+    },
+    "searchPlaceholder": "Name eingeben …",
+    "searching": "Suche läuft …",
+    "noHits": "Keine Treffer",
+    "selected": "Ausgewählt",
+    "remove": "{{name}} entfernen",
+    "createCI": "Neues CI anlegen",
+    "locationFilter": "{{label}} filtern",
+    "chosenLocation": "Gewählt: {{path}}",
+    "errors": {
+      "notEntitled": "Ihr Paket enthält diese Funktion nicht.",
+      "limit": "Das Limit Ihres Pakets ist erreicht.",
+      "forbidden": "Keine Berechtigung für diese Aktion.",
+      "forbiddenSearch": "Keine Berechtigung, diese Objekte zu suchen.",
+      "forbiddenPeople": "Keine Berechtigung, Personen zu suchen"
     }
   },
   "document": {

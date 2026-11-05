@@ -184,6 +184,49 @@ describe('ApiError', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error.violations).toEqual([{ field: 'ok', detail: '' }]);
   });
+
+  // UI-15 (WP-318): the problem type tells a 403 of the plan from a missing right.
+  it('takes the problem type of the body into ApiError.type', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'https://reticora.io/problems/feature-not-entitled',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'feature assets_basic is not entitled',
+          },
+          403,
+        ),
+      ),
+    );
+    const { fetchAPI, ApiError, PROBLEM_FEATURE_NOT_ENTITLED } = await importClientWithSession();
+
+    const error = (await fetchAPI('/assets').catch((e: unknown) => e)) as InstanceType<
+      typeof ApiError
+    >;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(403);
+    expect(error.type).toBe(PROBLEM_FEATURE_NOT_ENTITLED);
+  });
+
+  it('leaves ApiError.type empty without a problem body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('denied', { status: 403, statusText: 'Forbidden' })),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+
+    const error = (await fetchAPI('/assets').catch((e: unknown) => e)) as InstanceType<
+      typeof ApiError
+    >;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.type).toBeUndefined();
+    expect(ApiError.fromProblem(403, 'Forbidden', { type: '' }).type).toBeUndefined();
+  });
 });
 
 describe('relationshipApi', () => {

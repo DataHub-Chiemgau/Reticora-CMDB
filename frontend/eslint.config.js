@@ -59,8 +59,16 @@ export default tseslint.config(
       'src/components/metamodel/**/*.tsx',
       // WP-799: the work area of the metamodel drafts.
       'src/pages/MetamodelDraftsPage.tsx',
+      // WP-318: the assignment page, the pickers and the flow dialogs.
+      'src/pages/AssignmentListPage.tsx',
+      'src/components/pickers/**/*.tsx',
+      'src/components/flows/**/*.tsx',
     ],
-    ignores: ['src/components/metamodel/**/*.test.tsx'],
+    ignores: [
+      'src/components/metamodel/**/*.test.tsx',
+      'src/components/pickers/**/*.test.tsx',
+      'src/components/flows/**/*.test.tsx',
+    ],
     rules: {
       'no-restricted-syntax': [
         'error',
