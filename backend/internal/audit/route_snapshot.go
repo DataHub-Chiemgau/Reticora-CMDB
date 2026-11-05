@@ -551,6 +551,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// Routes that change no single row whose values the audit could show.
 	for route, reason := range map[string]string{
 		"POST /api/v1/audit-log/verify":                "verifies the hash chain; changes no data",
+		"POST /api/v1/assets/bulk":                     "bulk over many assets; each changes through its single write path, which records it",
 		"POST /api/v1/compliance/evaluations":          "evaluation run over many CIs; its results are measurements",
 		"POST /api/v1/credentials/rotate-keys":         "re-encrypts every credential; no readable column changes",
 		"POST /api/v1/iga/drift/reconcile":             "reconciliation run over every connector",

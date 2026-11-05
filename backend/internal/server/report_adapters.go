@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
@@ -593,4 +594,98 @@ func (b bulkExports) CreateExport(ctx context.Context, orgID, format string, ids
 		return nil, err
 	}
 	return &ci.BulkExportJob{ID: job.ID, Status: job.Status}, nil
+}
+
+// AssetBulkDelegates wires the delegating actions of POST
+// /api/v1/assets/bulk (WP-781) onto the services of their single
+// operations: the transfer of the movement service (WP-274), the
+// assignment service (WP-275) and the transactional lifecycle transition
+// with the system guards (WP-279). The exporter follows with WP-782. A nil
+// part leaves its port nil: its action answers 503.
+func AssetBulkDelegates(movements *movement.Service, assignments *assignment.Service, transitions *lifecycle.Service,
+	resolver lifecycle.EntityResolver, features *entitlement.Service) asset.BulkDelegates {
+	var d asset.BulkDelegates
+	if movements != nil {
+		d.Movements = assetMovements{svc: movements}
+	}
+	if assignments != nil {
+		d.Assignments = assetAssignments{svc: assignments}
+	}
+	if transitions != nil && resolver != nil {
+		d.Lifecycle = assetLifecycle{svc: transitions, resolver: resolver}
+	}
+	if features != nil {
+		d.Entitlements = features
+	}
+	return d
+}
+
+// assetMovements adapts the movement service to asset.BulkMovements.
+type assetMovements struct {
+	svc *movement.Service
+}
+
+// Transfer books the transfer like POST /api/v1/stock-movements with an
+// asset: lock, location checks (a location the caller cannot see is 422 on
+// to_location_id), the row of the ledger, the location of the asset and
+// its CIs, stock.movement.
+func (a assetMovements) Transfer(ctx context.Context, orgID, assetID, toLocationID, actor string) error {
+	err := a.svc.Record(ctx, &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: assetID,
+		MovementType: "transfer", ToLocationID: toLocationID, ActorID: actor})
+	if errors.Is(err, movement.ErrAssetNotFound) {
+		return asset.ErrNotFound
+	}
+	return err
+}
+
+// assetAssignments adapts the assignment service to asset.BulkAssignments.
+type assetAssignments struct {
+	svc *assignment.Service
+}
+
+// Assign assigns the asset like POST /api/v1/assets/{id}/assign: an asset
+// with a holder or reserved for another is 409 with the problem type of
+// the single route.
+func (a assetAssignments) Assign(ctx context.Context, orgID, assetID string, in *asset.BulkAssignment) error {
+	_, err := a.svc.Assign(ctx, orgID, &assignment.AssignInput{AssetID: assetID,
+		Holder: assignment.Holder{UserID: in.UserID, TeamID: in.TeamID}, DueAt: in.DueAt, Notes: in.Notes})
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, assignment.ErrAssetNotFound), errors.Is(err, movement.ErrAssetNotFound), errors.Is(err, api.ErrNotFound):
+		return asset.ErrNotFound
+	case errors.Is(err, assignment.ErrAlreadyAssigned):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: assignment.ErrAlreadyAssigned.Error(), Problem: assignment.ProblemAssetAssigned}
+	case errors.Is(err, assignment.ErrAssetReserved):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: assignment.ErrAssetReserved.Error(), Problem: assignment.ProblemAssetReserved}
+	}
+	return err
+}
+
+// assetLifecycle adapts the lifecycle service to asset.BulkLifecycle: the
+// effective model of the asset and the transition, both in the
+// transaction of ctx when it carries one (archive).
+type assetLifecycle struct {
+	svc      *lifecycle.Service
+	resolver lifecycle.EntityResolver
+}
+
+func (a assetLifecycle) Transition(ctx context.Context, orgID, assetID string, req *ci.BulkTransition) error {
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/assets/"+assetID+"/lifecycle-transitions", http.NoBody)
+	if err != nil {
+		return err
+	}
+	modelID, err := a.resolver.LifecycleModelFor(r, orgID, "asset", assetID)
+	switch {
+	case errors.Is(err, lifecycle.ErrNoLifecycleModel):
+		return noLifecycleModel()
+	case err != nil:
+		return asset.ErrNotFound
+	}
+	_, err = a.svc.Transition(ctx, orgID, "asset", assetID, modelID, lifecycle.TransitionRequest{ToState: req.ToState,
+		FromState: req.FromState, Context: req.Context, Reason: req.Reason})
+	if out := transitionOutcome(err); !errors.Is(out, ci.ErrNotFound) {
+		return out
+	}
+	return asset.ErrNotFound
 }

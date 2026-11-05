@@ -8281,8 +8281,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Run a bulk operation on assets
-     * @description Planned (E-38); WP-781 implements the operation.
+     * Bulk change of up to 500 assets (API-08, BLK-01, BLK-02)
+     * @description Applies the action to every asset in ids (WP-781): set_status (the default when action is absent; the target in status: in_stock, assigned, maintenance, retired, disposed or lost), set_fields, set_location, add_tags, remove_tags, assign, lifecycle_transition or archive, their parameters in params. Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single operation would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind asset.bulk: 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, an invalid status, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). The action export is unknown (422 on action) until the asset export is wired (WP-782). Requires asset:write; archive also lifecycle:transition, set_location asset:move, assign assignment:write and lifecycle_transition lifecycle:transition: without it the whole request is 403 before any change. An action whose service this deployment lacks (no database) is 503 for the whole request. An asset outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also in another letter case; the report names it in its canonical lower-case form; an id that is no UUID is 400 for that id. Every action runs per asset through the path of its single operation, without writes of its own. set_status and set_fields go through the write path of PATCH /api/v1/assets/{id} (field permissions: 403 with fields; a taken inventory_no, barcode or rfid_tag 409 with the field; invalid values 422 or 400 on the field) with If-Match "*". set_fields takes a merge patch of UpdateAssetRequest without status, location_id, lifecycle_state, tags and the holder cache. set_location books a stock movement of type transfer per asset (as POST /api/v1/stock-movements; a target location the caller cannot see is 422 on to_location_id); linked CIs follow. add_tags and remove_tags write the catalog tags like PUT /api/v1/assets/{id}/tags with the version read (a tag change in between is 409); an asset with nothing to change is ok without a write. assign assigns like POST /api/v1/assets/{id}/assign; an asset with a holder is 409 (asset-assigned). lifecycle_transition runs the transition of POST /api/v1/assets/{id}/lifecycle-transitions with the system guards: a failed guard is 422 of type urn:reticora:problem:lifecycle-guard with the violated fields and the missing references, a missing edge 422 urn:reticora:problem:invalid-transition, another from_state 409. archive sets the system tag archived and enters retired in one transaction; a state from which retired is not reachable is 422 invalid-transition and the asset stays unchanged; an asset in retired with the tag is ok without a change.
      */
     post: operations['bulkAssets'];
     delete?: never;
@@ -11084,6 +11084,45 @@ export interface components {
           [key: string]: string;
         };
       }[];
+    };
+    /** @description Body of POST /api/v1/assets/bulk (WP-781). status only with set_status; params by action: set_fields {fields}, set_location {to_location_id}, add_tags and remove_tags {tags}, assign {assigned_user_id or assigned_team_id, due_at, notes}, lifecycle_transition {to_state, from_state, context, reason}; set_status and archive take none. */
+    AssetBulkRequest: {
+      /**
+       * @default set_status
+       * @enum {string}
+       */
+      action:
+        | 'set_status'
+        | 'set_fields'
+        | 'set_location'
+        | 'add_tags'
+        | 'remove_tags'
+        | 'assign'
+        | 'lifecycle_transition'
+        | 'archive';
+      ids: string[];
+      /** @enum {string} */
+      status?: 'in_stock' | 'assigned' | 'maintenance' | 'retired' | 'disposed' | 'lost';
+      params?: {
+        /** @description Merge patch of UpdateAssetRequest without status, location_id, lifecycle_state, tags and the holder cache. */
+        fields?: Record<string, never>;
+        /** Format: uuid */
+        to_location_id?: string;
+        tags?: string[];
+        /** Format: uuid */
+        assigned_user_id?: string;
+        /** Format: uuid */
+        assigned_team_id?: string;
+        /** Format: date-time */
+        due_at?: string;
+        notes?: string;
+        to_state?: string;
+        from_state?: string;
+        context?: {
+          [key: string]: unknown;
+        };
+        reason?: string;
+      };
     };
     /** @description Body of POST /api/v1/cis/bulk (WP-304): one variant per action. Without action the body is set_status; every other variant names its action. */
     CIBulkRequest:
@@ -39561,19 +39600,65 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssetBulkRequest'];
+      };
+    };
     responses: {
-      /** @description Accepted; the job runs in the background, the Location header names it. The schemas come with WP-781. */
-      202: {
+      /** @description The report per id */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BulkResult'];
+        };
+      };
+      /** @description The bulk change runs as a job asset.bulk (Location /api/v1/jobs/{id}). */
+      202: {
+        headers: {
+          /** @description The job asset.bulk. */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            job_id: string;
+            status: string;
+            kind: string;
+          };
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The right of the action is missing (lifecycle:transition, asset:move, assignment:write). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description More than 500 ids, an unknown action or status, a status outside set_status, unknown, missing or invalid parameters (params.<name>), a tag the catalog lacks (params.tags). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The service of the action is not available in this deployment (no database). */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   assignAsset: {

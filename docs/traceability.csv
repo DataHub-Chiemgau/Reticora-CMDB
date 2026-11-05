@@ -1494,3 +1494,5 @@ STK-03;[P2];B;backend/internal/reservation/consumable_availability_integration_t
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
 UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318
 IMP-IO-01;[P2];C;backend/internal/importer/api_integration_test.go;WP-303
+BLK-02;[P2];C;backend/internal/asset/bulk_integration_test.go;WP-781
+BLK-01;[B];C;backend/internal/asset/bulk_integration_test.go;WP-781

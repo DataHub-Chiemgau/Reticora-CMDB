@@ -544,6 +544,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			documentHandler.WithScans(opts.JobQueue)
 		}
 	}
+	// The asset handler serves POST /assets/bulk (WP-781): its jobs
+	// asset.bulk are wired in registerJobKinds, its delegating actions
+	// below (AssetBulkDelegates).
+	assetHandler := asset.NewHandler(repos.Asset).
+		WithCIs(ciLookup{repo: repos.CI}).
+		// The active reservation in GET /assets/{id} (API-06, WP-750).
+		WithReservations(reservationLookup{repo: repos.Reservation}).
+		// Links write ci.asset_id through the CI service (WP-272).
+		WithCILinks(opts.CIService)
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -563,6 +572,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		jobAPI = jobs.NewAPIHandler(jobService).
 			WithKind(ci.BulkJobKind, identity.PermCIWrite, bulkReverter).
 			WithBulkKind(ci.BulkJobKind).
+			// A bulk on assets (WP-781) has no revert yet (WP-784).
+			WithKind(asset.BulkJobKind, identity.PermAssetWrite, nil).
 			WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
 			// A running template migration is cancelled with citype:manage
@@ -616,8 +627,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 				opts.CIService.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 			}
 		}
+		// A queue bulk job on assets resolves the policy of its creator the
+		// same way (WP-781); without the user status it fails.
+		if users, ok := repos.User.(permission.CreatorStatus); ok {
+			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
+		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -787,6 +803,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		opts.CIService.WithBulkDelegates(CIBulkDelegates(relationshipHandler, repos.Relationship, lifecycleService,
 			repos.LifecycleResolver, exportJobHandler, opts.Entitlements))
 	}
+	// The movements, assignments and lifecycle transitions of POST
+	// /assets/bulk (WP-781); the export follows with WP-782.
+	assetDelegates := AssetBulkDelegates(movements, repos.AssignmentService, lifecycleService, repos.LifecycleResolver, opts.Entitlements)
+	assetHandler.WithBulkDelegates(&assetDelegates)
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -804,12 +824,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		topologyHandler,
 		export.NewHandler(repos.CI).WithDATEVGate(datevGate),
 		exportJobHandler,
-		asset.NewHandler(repos.Asset).
-			WithCIs(ciLookup{repo: repos.CI}).
-			// The active reservation in GET /assets/{id} (API-06, WP-750).
-			WithReservations(reservationLookup{repo: repos.Reservation}).
-			// Links write ci.asset_id through the CI service (WP-272).
-			WithCILinks(opts.CIService),
+		assetHandler,
 		assignment.NewHandler(repos.Assignment).WithService(signingAssignments(&repos, &opts)),
 		documentHandler,
 		// The completion books its corrections through the movement
