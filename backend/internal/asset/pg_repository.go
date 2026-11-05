@@ -570,6 +570,20 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 	return asset, err
 }
 
+// UnknownTags implements TagCatalog (POST /api/v1/assets/bulk, WP-781):
+// the keys of keys the tag catalog of the organization lacks, sorted.
+func (r *PGRepository) UnknownTags(ctx context.Context, orgID string, keys []string) ([]string, error) {
+	var unknown []string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(k ORDER BY k), '{}') FROM unnest($2::text[]) AS k
+			WHERE NOT EXISTS (SELECT 1 FROM tag t WHERE t.organization_id = $1 AND t.key = k)`, orgID, keys).Scan(&unknown); err != nil {
+			return fmt.Errorf("read catalog tags: %w", err)
+		}
+		return nil
+	})
+	return unknown, err
+}
+
 // Delete deletes an asset. The asset table has no deleted_at column, so this is a hard delete.
 // The history keeps the deletion with the asset as it was, without its
 // custom fields (trigger asset_history, WP-794). An

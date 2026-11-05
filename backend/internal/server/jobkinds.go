@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
@@ -27,6 +28,9 @@ var (
 	// A running bulk job can be cancelled: it stops before its next
 	// checkpoint and keeps the partial report (JOB-03, F-162).
 	bulkJobKind = jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
+	// assetBulkJobKind (WP-781): the bulk on assets from 100 ids on, like
+	// ci.bulk not repeated and cancellable while running.
+	assetBulkJobKind = jobs.Kind{Name: asset.BulkJobKind, MaxAttempts: 1, Timeout: 30 * time.Minute, Cancellable: true}
 	// bulkRevertJobKind (WP-305): the revert of a bulk job writes the old
 	// values per CI and marks each change set row; it is not repeated and
 	// not cancellable while running, and it has no revert itself.
@@ -91,15 +95,16 @@ type jobKind struct {
 // import handler (WP-775), the rebuild of the search index on the search
 // handler (WP-786), a label batch on the batch handler (WP-763; without
 // blob storage or a database its handler fails, the route answers 503
-// before).
+// before), a bulk on assets on the asset handler (WP-781).
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
-	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler) []jobKind {
+	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
 		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob},
-		{kind: labelBatchJobKind, handler: labelBatch.RunJob}}
+		{kind: labelBatchJobKind, handler: labelBatch.RunJob},
+		{kind: assetBulkJobKind, handler: assets.RunBulkJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 		// Without the change set store no bulk job is revertible and no
@@ -138,10 +143,11 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
-	labelBatch *labels.BatchHandler) {
+	labelBatch *labels.BatchHandler, assets *asset.Handler) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
+	assets.WithBulkJobs(svc)
 	if templateJobs != nil {
 		templateJobs.WithJobs(svc)
 	}
@@ -150,7 +156,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch) {
+		scanner, searchHandler, labelBatch, assets) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -162,6 +168,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		draftHandler.WithQueue(queue)
 		importHandler.WithQueue(queue)
 		labelBatch.WithQueue(queue)
+		assets.WithBulkQueue(queue)
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}

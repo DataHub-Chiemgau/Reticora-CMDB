@@ -1372,6 +1372,7 @@ SRC-02;[P2];C;backend/internal/search/fields_integration_test.go;WP-308
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/sla/check_integration_test.go;WP-769
 SRC-02;[P2];C;backend/internal/search/hits_integration_test.go;WP-786
 SRC-02;[P2];C;backend/internal/search/hybrid_fields_integration_test.go;WP-787
+SRC-02;[P2];C;backend/internal/search/users_tags_integration_test.go;WP-788
 AST-04;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-03;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-01;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
@@ -1414,6 +1415,7 @@ STK-04;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 BLK-02;[P2];C;backend/internal/jobs/revert_integration_test.go;WP-305
 BLK-02;[P2];C;backend/internal/ci/bulk_delegate_integration_test.go;WP-780
+BLK-02;[P2];C;backend/internal/ci/bulk_revert_ext_integration_test.go;WP-783
 JOB-03;[B];C;backend/internal/jobs/revert_integration_test.go;WP-305
 STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
@@ -1492,3 +1494,6 @@ AUD-08;[P2];C;backend/internal/history/asset_replay_integration_test.go;WP-795
 STK-03;[P2];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
 API-06;[P2]/[P3]/[P4]/[A];B;backend/internal/reservation/consumable_availability_integration_test.go;WP-759
 UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318
+IMP-IO-01;[P2];C;backend/internal/importer/api_integration_test.go;WP-303
+BLK-02;[P2];C;backend/internal/asset/bulk_integration_test.go;WP-781
+BLK-01;[B];C;backend/internal/asset/bulk_integration_test.go;WP-781

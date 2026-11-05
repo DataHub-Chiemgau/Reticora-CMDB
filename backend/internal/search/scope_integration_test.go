@@ -252,7 +252,7 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 	searchAs := func(userID string, granted map[string]bool) map[string]bool {
 		t.Helper()
 		mux := chi.NewRouter()
-		search.NewHandler(repo, permissionStub{granted: granted}).RegisterRoutes(mux)
+		search.NewHandler(repo, permissionStub{granted: granted}).WithGates(allFeatures{}, allModules).RegisterRoutes(mux)
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/search?q=scopehit", nil)
 		ctx := tenant.WithTenant(req.Context(), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: userID})
 		scope := database.OrgWideScope(f.OrgA, f.User)

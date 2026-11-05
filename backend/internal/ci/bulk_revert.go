@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -14,6 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -36,10 +40,51 @@ import (
 // value changed since the bulk (revertExpectation) and marks each row
 // reverted or skipped in the same transaction. The state of the overrides
 // stays as the inverse write leaves it; WP-306 restores it.
+//
+// The other actions (WP-783) record in the transaction of their write
+// path: the owner like a column, each tag actually added or removed (op
+// add/remove, field tags) in the tag path, the template list and the
+// defaults of a migration (TemplateMigrator) or of replace_template_id,
+// the edges in relationship.PGRepository (field relationship) and the
+// lifecycle state in lifecycle.Service.Transition. Their revert: tags,
+// archive, owner and template change go back in the one inverse write of
+// the CI (the tags decided per key on the locked row, a tag deleted from
+// the catalog stays away); edges and lifecycle go through the ports of
+// WP-780 (BulkRelationshipReverter, BulkLifecycleReverter), which mark
+// their rows in their transaction, with the right of the original action
+// per CI; a refused object is skipped with its code and its rows marked
+// skipped.
 
-// revertibleBulkActions are the bulk actions whose change set this revert
-// undoes; the others follow with WP-783.
-var revertibleBulkActions = map[string]bool{BulkSetStatus: true, BulkSetFields: true, BulkSetLocation: true}
+// revertibleBulkActions are the bulk actions whose change set the revert
+// undoes (WP-305: the field operations; WP-783: tags, archive, owner,
+// edges, lifecycle and template change). export is no action of a job
+// ci.bulk: its export job has no revert (E-25).
+var revertibleBulkActions = map[string]bool{
+	BulkSetStatus: true, BulkSetFields: true, BulkSetLocation: true, BulkSetOwner: true,
+	BulkAddTags: true, BulkRemoveTags: true, BulkArchive: true,
+	BulkAddRelationship: true, BulkRemoveRelationship: true, BulkLifecycleTransition: true, BulkChangeTemplate: true,
+}
+
+// Field names of the change set rows outside the CI columns and
+// attributes (WP-783).
+const (
+	// ChangeFieldTags names a tag a bulk added (op add, the key in
+	// new_value) or removed (op remove, the key in old_value).
+	ChangeFieldTags = "tags"
+	// ChangeFieldTemplates names the template list of a CI before and
+	// after a template change (op set).
+	ChangeFieldTemplates = "templates"
+	// ChangeFieldRelationship names an edge a bulk created (op add, the
+	// edge in new_value) or deleted (op remove, the row in old_value).
+	ChangeFieldRelationship = "relationship"
+	// ChangeFieldLifecycle names the lifecycle state of a transition (op
+	// set).
+	ChangeFieldLifecycle = "lifecycle_state"
+)
+
+// capturedOwnerFields are the derived fields the change set records all
+// the same: the owner of set_owner (WP-783).
+var capturedOwnerFields = map[string]bool{"owner_user_id": true, "owner_team_id": true}
 
 // Refusals of a bulk revert (409).
 var (
@@ -71,6 +116,8 @@ var ciColumnFields = map[string]bool{
 // member of UpdateRequest; a row of any other column is skipped.
 var revertColumns = map[string]func(*UpdateRequest, *string){
 	"name":             func(r *UpdateRequest, v *string) { r.Name = v },
+	"owner_user_id":    func(r *UpdateRequest, v *string) { r.OwnerUserID = v },
+	"owner_team_id":    func(r *UpdateRequest, v *string) { r.OwnerTeamID = v },
 	"status":           func(r *UpdateRequest, v *string) { r.Status = v },
 	"client_id":        func(r *UpdateRequest, v *string) { r.ClientID = v },
 	"location_id":      func(r *UpdateRequest, v *string) { r.LocationID = v },
@@ -100,8 +147,11 @@ type overrideState struct {
 	Protected bool      `json:"protected"`
 }
 
-// capturedField is one changed field of a write under a bulk job.
+// capturedField is one changed field of a write under a bulk job: op set
+// with the value before and after, or a tag added (op add) or removed (op
+// remove) with its key in new or old.
 type capturedField struct {
+	op       string
 	name     string
 	old, new any
 }
@@ -123,19 +173,28 @@ type bulkCapture struct {
 // captureBulkChanges takes the changed fields of w and the state of their
 // overrides before recordManualOverrides; nil outside a bulk job or
 // without a change. The computed attributes are no field of the change
-// set: they follow their inputs (WP-717).
+// set: they follow their inputs (WP-717). Of the derived fields the owner
+// is recorded like a column, each tag added or removed as a row of its
+// own and a replaced template list as the field templates (WP-783).
 func captureBulkChanges(ctx context.Context, tx pgx.Tx, w *rowUpdate, req *UpdateRequest, computed map[string]bool) (*bulkCapture, error) {
 	jobID, ok := jobs.ChangeSetFrom(ctx)
-	if !ok || len(w.changes) == 0 {
+	if !ok || (len(w.changes) == 0 && w.templates == nil) {
 		return nil, nil
 	}
 	c := &bulkCapture{jobID: jobID, reason: manualReason(req)}
 	if req.Manual != nil {
 		c.author = req.Manual.Author
 	}
+	var names []string
 	for _, change := range w.changes {
-		if !derivedFields[change.Field] {
-			c.fields = append(c.fields, capturedField{name: change.Field, old: change.Old, new: change.New})
+		switch {
+		case change.Field == ChangeFieldTags:
+			c.fields = append(c.fields, tagChanges(w.before.Tags, w.after.Tags)...)
+		case capturedOwnerFields[change.Field]:
+			c.fields = append(c.fields, capturedField{op: jobs.OpSet, name: change.Field, old: change.Old, new: change.New})
+		case !derivedFields[change.Field]:
+			c.fields = append(c.fields, capturedField{op: jobs.OpSet, name: change.Field, old: change.Old, new: change.New})
+			names = append(names, change.Field)
 		}
 	}
 	keys := changedKeys(w.before.Attributes, w.after.Attributes)
@@ -144,14 +203,18 @@ func captureBulkChanges(ctx context.Context, tx pgx.Tx, w *rowUpdate, req *Updat
 		if computed[key] {
 			continue
 		}
-		c.fields = append(c.fields, capturedField{name: key, old: w.before.Attributes[key], new: w.after.Attributes[key]})
+		c.fields = append(c.fields, capturedField{op: jobs.OpSet, name: key, old: w.before.Attributes[key], new: w.after.Attributes[key]})
+		names = append(names, key)
+	}
+	if w.templates != nil {
+		c.fields = append(c.fields, capturedField{op: jobs.OpSet, name: ChangeFieldTemplates, old: w.templates.before, new: w.templates.after})
 	}
 	if len(c.fields) == 0 {
 		return nil, nil
 	}
-	names := make([]string, len(c.fields))
-	for i := range c.fields {
-		names[i] = c.fields[i].name
+	if len(names) == 0 {
+		// No field of the write can carry an override.
+		return c, nil
 	}
 	var raw []byte
 	if err := tx.QueryRow(ctx, `
@@ -167,6 +230,23 @@ func captureBulkChanges(ctx context.Context, tx pgx.Tx, w *rowUpdate, req *Updat
 		return nil, fmt.Errorf("decode overrides of the bulk change set: %w", err)
 	}
 	return c, nil
+}
+
+// tagChanges are the tags a write added (op add) and removed (op remove):
+// only the keys that actually changed (WP-783).
+func tagChanges(before, after []string) []capturedField {
+	var out []capturedField
+	for _, key := range after {
+		if !slices.Contains(before, key) {
+			out = append(out, capturedField{op: jobs.OpAdd, name: ChangeFieldTags, new: key})
+		}
+	}
+	for _, key := range before {
+		if !slices.Contains(after, key) {
+			out = append(out, capturedField{op: jobs.OpRemove, name: ChangeFieldTags, old: key})
+		}
+	}
+	return out
 }
 
 // overridden takes the fields recordManualOverrides gave an override.
@@ -200,15 +280,62 @@ func (c *bulkCapture) record(ctx context.Context, tx pgx.Tx, orgID string, item 
 			if state, isState := v.(*overrideState); isState && state == nil {
 				continue
 			}
+			if v == nil && f.op != jobs.OpSet {
+				// The side of a tag that was not there (NULL).
+				continue
+			}
 			encoded, err := json.Marshal(v)
 			if err != nil {
 				return fmt.Errorf("encode bulk change set: %w", err)
 			}
 			raw[j] = encoded
 		}
-		changes[i] = jobs.Change{JobID: c.jobID, EntityType: jobs.EntityCI, EntityID: item.ID, Op: jobs.OpSet,
+		changes[i] = jobs.Change{JobID: c.jobID, EntityType: jobs.EntityCI, EntityID: item.ID, Op: f.op,
 			FieldName: f.name, OldValue: raw[0], NewValue: raw[1], OverrideBefore: raw[2], OverrideAfter: raw[3],
 			ClientID: item.ClientID, SiteID: item.SiteID}
+	}
+	return jobs.RecordChangeTx(ctx, tx, orgID, changes)
+}
+
+// recordTemplateMigration writes the change set rows of a template
+// migration under a bulk job (change_template, WP-783) in tx: the template
+// list before and after (field templates) and one row per default the
+// migration filled, with old_value NULL. Nothing outside a bulk job.
+func recordTemplateMigration(ctx context.Context, tx pgx.Tx, orgID string, before, after *Item, defaults map[string]any) error {
+	jobID, ok := jobs.ChangeSetFrom(ctx)
+	if !ok {
+		return nil
+	}
+	prior := before.Templates
+	if prior == nil {
+		prior = []citype.CITemplate{}
+	}
+	oldList, err := json.Marshal(prior)
+	if err != nil {
+		return fmt.Errorf("encode bulk change set: %w", err)
+	}
+	newList, err := json.Marshal(after.Templates)
+	if err != nil {
+		return fmt.Errorf("encode bulk change set: %w", err)
+	}
+	row := jobs.Change{JobID: jobID, EntityType: jobs.EntityCI, EntityID: after.ID, Op: jobs.OpSet,
+		ClientID: after.ClientID, SiteID: after.SiteID}
+	templates := row
+	templates.FieldName, templates.OldValue, templates.NewValue = ChangeFieldTemplates, oldList, newList
+	changes := []jobs.Change{templates}
+	keys := make([]string, 0, len(defaults))
+	for key := range defaults {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, encErr := json.Marshal(defaults[key])
+		if encErr != nil {
+			return fmt.Errorf("encode bulk change set: %w", encErr)
+		}
+		filled := row
+		filled.FieldName, filled.NewValue = key, value
+		changes = append(changes, filled)
 	}
 	return jobs.RecordChangeTx(ctx, tx, orgID, changes)
 }
@@ -256,12 +383,17 @@ func columnValue(item *Item, name string) any {
 // applyRevertExpectation leaves every field of req whose value in the
 // locked row before differs from the value the bulk wrote (new_value),
 // and every row of a field the revert does not write; it marks those
-// rows skipped and the others reverted. Without an expectation in ctx it
+// rows skipped and the others reverted. The tags it decides per key on
+// the locked row (WP-783): a tag the bulk added goes when the CI still
+// has it, a tag the bulk removed comes back when the CI still lacks it and
+// the catalog still holds it (read FOR SHARE in tx); the resulting key
+// list replaces the tags like PUT /cis/{id}/tags. The template list goes
+// back when it is the one the bulk left. Without an expectation in ctx it
 // does nothing.
-func applyRevertExpectation(ctx context.Context, before *Item, req *UpdateRequest) {
+func applyRevertExpectation(ctx context.Context, tx pgx.Tx, orgID string, before *Item, req *UpdateRequest) error {
 	e := revertExpectationFrom(ctx)
 	if e == nil {
-		return
+		return nil
 	}
 	e.marks, e.reverted, e.skipped = nil, nil, nil
 	var attributes map[string]any
@@ -271,11 +403,26 @@ func applyRevertExpectation(ctx context.Context, before *Item, req *UpdateReques
 			attributes[k] = v
 		}
 	}
+	catalog, err := revertTagCatalog(ctx, tx, orgID, e.rows)
+	if err != nil {
+		return err
+	}
+	tags := slices.Clone(before.Tags)
+	tagsChanged := false
 	for i := range e.rows {
 		row := &e.rows[i]
 		setter, writable := revertColumns[row.FieldName]
 		var keep bool
 		switch {
+		case row.FieldName == ChangeFieldTags && row.Op != jobs.OpSet:
+			keep, tags = revertTag(row, tags, catalog)
+			tagsChanged = tagsChanged || keep
+		case row.FieldName == ChangeFieldTemplates:
+			var list []citype.CITemplate
+			keep = req.Templates != nil && json.Unmarshal(row.NewValue, &list) == nil && sameTemplates(before.Templates, list)
+			if !keep {
+				req.Templates = nil
+			}
 		case writable:
 			keep = sameRawJSON(columnValue(before, row.FieldName), row.NewValue)
 		case ciColumnFields[row.FieldName]:
@@ -291,16 +438,74 @@ func applyRevertExpectation(ctx context.Context, before *Item, req *UpdateReques
 		}
 		e.marks = append(e.marks, jobs.ChangeMark{ID: row.ID, Outcome: jobs.OutcomeSkipped})
 		e.skipped = append(e.skipped, row.FieldName)
-		if writable {
+		switch {
+		case writable:
 			setter(req, nil)
-		} else {
+		case row.FieldName != ChangeFieldTags && row.FieldName != ChangeFieldTemplates:
 			delete(attributes, row.FieldName)
 		}
+	}
+	if tagsChanged {
+		sort.Strings(tags)
+		req.LegacyTags = &tags
 	}
 	if len(attributes) == 0 {
 		attributes = nil
 	}
 	req.Attributes = attributes
+	return nil
+}
+
+// revertTag decides one tag row on the tags of the locked row: a tag the
+// bulk added is removed when the CI has it, one the bulk removed is added
+// back when the CI lacks it and the catalog holds it. It reports whether
+// the row is reverted and returns the tags after it.
+func revertTag(row *jobs.Change, tags []string, catalog map[string]bool) (reverted bool, after []string) {
+	var key string
+	raw := row.NewValue
+	if row.Op == jobs.OpRemove {
+		raw = row.OldValue
+	}
+	if json.Unmarshal(raw, &key) != nil || key == "" {
+		return false, tags
+	}
+	has := slices.Contains(tags, key)
+	switch {
+	case row.Op == jobs.OpAdd && has:
+		return true, slices.DeleteFunc(tags, func(k string) bool { return k == key })
+	case row.Op == jobs.OpRemove && !has && catalog[key]:
+		return true, append(tags, key)
+	}
+	return false, tags
+}
+
+// revertTagCatalog reads the catalog keys of the tags the bulk removed
+// (FOR SHARE: they stay until the commit); a tag deleted from the catalog
+// since does not come back.
+func revertTagCatalog(ctx context.Context, tx pgx.Tx, orgID string, rows []jobs.Change) (map[string]bool, error) {
+	var keys []string
+	for i := range rows {
+		var key string
+		if rows[i].FieldName == ChangeFieldTags && rows[i].Op == jobs.OpRemove && json.Unmarshal(rows[i].OldValue, &key) == nil {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	found, err := tx.Query(ctx, `SELECT key FROM tag WHERE organization_id = $1 AND key = ANY($2) FOR SHARE`, orgID, keys)
+	if err != nil {
+		return nil, fmt.Errorf("read catalog tags of the revert: %w", err)
+	}
+	known, err := pgx.CollectRows(found, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read catalog tags of the revert: %w", err)
+	}
+	catalog := make(map[string]bool, len(known))
+	for _, key := range known {
+		catalog[key] = true
+	}
+	return catalog, nil
 }
 
 // markRevertTx records the outcome of the rows of the expectation in ctx
@@ -382,8 +587,8 @@ type BulkRevertResult struct {
 	Items     []BulkRevertItem `json:"items"`
 }
 
-// Revert is the reverter of ci.bulk (jobs.Reverter): a bulk job of a field
-// operation with change set rows the caller sees, finished within
+// Revert is the reverter of ci.bulk (jobs.Reverter): a bulk job of a
+// revertible action with change set rows the caller sees, finished within
 // jobs.RevertWindow, gets a revert job bulk.revert with the idempotency key
 // revert:<job_id> and the caller as creator, on the job queue when there is
 // one, otherwise run in this process with the caller's tenant and scope. A
@@ -527,7 +732,10 @@ func (b *BulkRevert) run(ctx context.Context, revertJob *jobs.Job, bulkJobID str
 }
 
 // revertRequest is the inverse write of the rows of one CI: the old value
-// of each field the revert writes.
+// of each field the revert writes, the template list before a template
+// change and null for an attribute the bulk filled (old_value NULL, the
+// default of a template migration). The tags applyRevertExpectation
+// decides on the locked row.
 func revertRequest(rows []jobs.Change) UpdateRequest {
 	var req UpdateRequest
 	for i := range rows {
@@ -539,12 +747,21 @@ func revertRequest(rows []jobs.Change) UpdateRequest {
 			}
 			continue
 		}
+		if row.FieldName == ChangeFieldTemplates {
+			var list []citype.CITemplate
+			if err := json.Unmarshal(row.OldValue, &list); err == nil {
+				req.Templates = &list
+			}
+			continue
+		}
 		if ciColumnFields[row.FieldName] {
 			continue
 		}
 		var value any
-		if err := json.Unmarshal(row.OldValue, &value); err != nil {
-			continue
+		if len(row.OldValue) > 0 {
+			if err := json.Unmarshal(row.OldValue, &value); err != nil {
+				continue
+			}
 		}
 		if req.Attributes == nil {
 			req.Attributes = map[string]any{}
@@ -554,13 +771,103 @@ func revertRequest(rows []jobs.Change) UpdateRequest {
 	return req
 }
 
-// revertCI writes the old values of the rows of one CI back as a manual
+// BulkEdgeRevert is the inverse operation of one edge of
+// add_relationship (Op add: delete the edge Edge names by its id when it
+// exists unchanged) or remove_relationship (Op remove: create the deleted
+// row Edge holds again). Marks are the change set rows the operation
+// records as reverted in its transaction.
+type BulkEdgeRevert struct {
+	CIID  string
+	Op    string
+	Edge  json.RawMessage
+	Actor string
+	Marks []jobs.ChangeMark
+}
+
+// BulkRelationshipReverter is the revert part of the port
+// BulkRelationships (server/report_adapters.go, WP-783): the edge goes
+// through the paths of DELETE and POST /relationships. A changed or
+// missing edge, an equal edge that exists already (uq_ci_relationship_edge)
+// or a refusal is a *BulkItemError with its status.
+type BulkRelationshipReverter interface {
+	RevertRelationship(ctx context.Context, orgID string, rev *BulkEdgeRevert) error
+}
+
+// BulkLifecycleReverter is the revert part of the port BulkLifecycle: the
+// transition back with the guards of the model, which records marks as
+// reverted in its transaction (WP-783); errors as in Transition.
+type BulkLifecycleReverter interface {
+	RevertTransition(ctx context.Context, orgID, ciID string, req *BulkTransition, marks []jobs.ChangeMark) error
+}
+
+// revertCI reverts the rows of one CI: the edges and the lifecycle state
+// through the ports of WP-780, every other row through the field path
+// (revertFields). A bulk job has one action, so the rows of a CI are of
+// one kind.
+func (b *BulkRevert) revertCI(ctx context.Context, op *bulkOp, id string, rows []jobs.Change) BulkRevertItem {
+	var fields []jobs.Change
+	var edges, transitions []jobs.Change
+	for i := range rows {
+		switch rows[i].FieldName {
+		case ChangeFieldRelationship:
+			edges = append(edges, rows[i])
+		case ChangeFieldLifecycle:
+			transitions = append(transitions, rows[i])
+		default:
+			fields = append(fields, rows[i])
+		}
+	}
+	var items []BulkRevertItem
+	if len(fields) > 0 {
+		items = append(items, b.revertFields(ctx, op, id, fields))
+	}
+	for i := range edges {
+		items = append(items, b.revertEdge(ctx, op, id, &edges[i]))
+	}
+	for i := range transitions {
+		items = append(items, b.revertTransition(ctx, op, id, &transitions[i]))
+	}
+	return mergeRevertItems(id, items)
+}
+
+// mergeRevertItems is the outcome of a CI from the outcomes of its parts:
+// the first error, otherwise reverted when a part went back (Fields: the
+// skipped ones), otherwise the first skipped part.
+func mergeRevertItems(id string, items []BulkRevertItem) BulkRevertItem {
+	if len(items) == 1 {
+		return items[0]
+	}
+	var reverted *BulkRevertItem
+	var skipped []string
+	for i := range items {
+		switch items[i].Result {
+		case revertResultError:
+			return items[i]
+		case revertResultReverted:
+			if reverted == nil {
+				reverted = &items[i]
+			}
+		}
+		skipped = append(skipped, items[i].Fields...)
+	}
+	if reverted != nil {
+		return BulkRevertItem{ID: id, Result: revertResultReverted, Code: http.StatusOK, Fields: skipped}
+	}
+	if len(items) == 0 {
+		return BulkRevertItem{ID: id, Result: revertResultSkipped, Code: http.StatusConflict, Type: problemType(nil, http.StatusConflict)}
+	}
+	return items[0]
+}
+
+// revertFields writes the old values of the rows of one CI back as a manual
 // change of the revert job's creator (If-Match "*", reason
 // bulk.revert:<job_id>) and reports the CI: reverted when a field went
 // back (Fields: the skipped ones), skipped when none did (409 with the
 // fields changed since, 404 for a CI no longer visible or deleted, 403 for
-// refused action or field permissions), error otherwise.
-func (b *BulkRevert) revertCI(ctx context.Context, op *bulkOp, id string, rows []jobs.Change) BulkRevertItem {
+// refused action or field permissions), error otherwise. The tags, the
+// status of archive, the owner and the template list with the defaults of
+// a migration go back in this one write (WP-783).
+func (b *BulkRevert) revertFields(ctx context.Context, op *bulkOp, id string, rows []jobs.Change) BulkRevertItem {
 	expectation := &revertExpectation{rows: rows}
 	_, err := b.svc.Update(withRevertExpectation(ctx, expectation), op.orgID, id, op.manual(revertRequest(rows)))
 	var forbidden *api.FieldForbiddenError
@@ -581,4 +888,115 @@ func (b *BulkRevert) revertCI(ctx context.Context, op *bulkOp, id string, rows [
 			Error: "the fields changed since the bulk", Type: problemType(nil, http.StatusConflict), Fields: expectation.skipped}
 	}
 	return BulkRevertItem{ID: id, Result: revertResultReverted, Code: http.StatusOK, Fields: expectation.skipped}
+}
+
+// revertAllowed checks the right of the original operation on the CI like
+// the bulk did (WP-783): the principal of the request must hold it, and
+// the action grants of the policy (a queue job: the creator's rights at
+// run time) must allow it on the CI's type and scope.
+func revertAllowed(ctx context.Context, perm identity.Permission, item *Item) error {
+	if p, ok := identity.PrincipalFromContext(ctx); ok && !p.Has(perm) {
+		return &api.FieldForbiddenError{Action: string(perm)}
+	}
+	return permission.CheckActionOn(ctx, permission.KindCI, perm, func(context.Context) ([]permission.ActionTarget, error) {
+		return []permission.ActionTarget{ciTarget(item)}, nil
+	})
+}
+
+// revertRefusal reports a part whose inverse operation was refused: a
+// refusal of the object (403, 404, 409, 422) is skipped and its rows are
+// marked skipped, anything else is an error that leaves them for another
+// revert.
+func (b *BulkRevert) revertRefusal(ctx context.Context, orgID, id, field string, row *jobs.Change, err error) BulkRevertItem {
+	f := bulkError(err)
+	item := BulkRevertItem{ID: id, Result: revertResultError, Code: f.code, Error: f.msg, Type: problemType(err, f.code), Fields: f.fields}
+	switch f.code {
+	case http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
+	default:
+		return item
+	}
+	item.Result, item.Fields = revertResultSkipped, []string{field}
+	if markErr := b.markSkipped(ctx, orgID, row); markErr != nil {
+		slog.ErrorContext(ctx, "mark skipped bulk change set row", "row", row.ID, "error", markErr)
+	}
+	return item
+}
+
+// markSkipped records the outcome skipped on a row whose inverse operation
+// was refused, in a transaction of the repository (TxRunner) of its own.
+func (b *BulkRevert) markSkipped(ctx context.Context, orgID string, row *jobs.Change) error {
+	runner, ok := b.svc.repo.(TxRunner)
+	if !ok {
+		return nil
+	}
+	marks := []jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeSkipped}}
+	return runner.RunInTx(ctx, orgID, func(ctx context.Context) error {
+		if !database.InTx(ctx) {
+			return nil
+		}
+		// The repository's transaction of ctx is joined; no pool is needed.
+		return database.WithRequestTenant(ctx, nil, orgID, func(ctx context.Context, tx pgx.Tx) error {
+			return jobs.MarkChangeTx(ctx, tx, orgID, marks)
+		})
+	})
+}
+
+// revertEdge reverts the edge of one row of add_relationship or
+// remove_relationship through the relationship port, after the right
+// relationship:write on the CI (403 skipped without it).
+func (b *BulkRevert) revertEdge(ctx context.Context, op *bulkOp, id string, row *jobs.Change) BulkRevertItem {
+	rev, ok := b.svc.delegates.Relationships.(BulkRelationshipReverter)
+	if !ok {
+		f := unavailableFailure()
+		return BulkRevertItem{ID: id, Result: revertResultError, Code: f.code, Error: f.msg, Type: problemType(nil, f.code)}
+	}
+	item, err := b.svc.repo.GetByID(ctx, op.orgID, id)
+	if err == nil {
+		err = revertAllowed(ctx, identity.PermRelationshipWrite, item)
+	}
+	if err == nil {
+		edge := row.NewValue
+		if row.Op == jobs.OpRemove {
+			edge = row.OldValue
+		}
+		err = rev.RevertRelationship(ctx, op.orgID, &BulkEdgeRevert{CIID: id, Op: row.Op, Edge: edge, Actor: op.author,
+			Marks: []jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeReverted}}})
+	}
+	if err != nil {
+		return b.revertRefusal(ctx, op.orgID, id, ChangeFieldRelationship, row, err)
+	}
+	return BulkRevertItem{ID: id, Result: revertResultReverted, Code: http.StatusOK}
+}
+
+// revertTransition takes one CI back to the lifecycle state before the
+// bulk (old_value) with the guards of its model, from the state the bulk
+// set (from_state = new_value), after the right lifecycle:transition on
+// the CI. A missing edge, a guard (lifecycle-guard), another current state
+// or a CI that had no state are skipped with their problem.
+func (b *BulkRevert) revertTransition(ctx context.Context, op *bulkOp, id string, row *jobs.Change) BulkRevertItem {
+	rev, ok := b.svc.delegates.Lifecycle.(BulkLifecycleReverter)
+	if !ok {
+		f := unavailableFailure()
+		return BulkRevertItem{ID: id, Result: revertResultError, Code: f.code, Error: f.msg, Type: problemType(nil, f.code)}
+	}
+	var from, to string
+	_ = json.Unmarshal(row.NewValue, &from)
+	if len(row.OldValue) > 0 {
+		_ = json.Unmarshal(row.OldValue, &to)
+	}
+	item, err := b.svc.repo.GetByID(ctx, op.orgID, id)
+	if err == nil {
+		err = revertAllowed(ctx, identity.PermLifecycleTransition, item)
+	}
+	if err == nil && to == "" {
+		err = &BulkItemError{Status: http.StatusConflict, Detail: "the CI had no lifecycle state before the bulk", Fields: []string{"to_state"}}
+	}
+	if err == nil {
+		err = rev.RevertTransition(ctx, op.orgID, id, &BulkTransition{ToState: to, FromState: &from, Reason: op.reason},
+			[]jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeReverted}})
+	}
+	if err != nil {
+		return b.revertRefusal(ctx, op.orgID, id, ChangeFieldLifecycle, row, err)
+	}
+	return BulkRevertItem{ID: id, Result: revertResultReverted, Code: http.StatusOK}
 }

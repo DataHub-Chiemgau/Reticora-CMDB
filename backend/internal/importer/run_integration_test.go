@@ -204,9 +204,13 @@ func (s *pgImport) locationCount(t *testing.T) int {
 	return n
 }
 
-// completed returns the data of the import.completed events of a job.
+// completed returns the data of the import.completed events of a job. A
+// run emits the event after it recorded its success (perform), so the
+// job can be succeeded while the event is not yet written: it waits until
+// no run of this process holds a slot any more.
 func (s *pgImport) completed(t *testing.T, jobID string) []events.ImportCompletedData {
 	t.Helper()
+	waitIdle(t)
 	rows, err := s.f.Admin.Query(context.Background(), `SELECT data FROM event_outbox
 		WHERE organization_id = $1 AND type = 'import.completed' AND entity_id = $2 ORDER BY sequence`, s.f.OrgA, jobID)
 	if err != nil {

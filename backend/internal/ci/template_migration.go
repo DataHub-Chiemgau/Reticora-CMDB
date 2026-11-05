@@ -377,6 +377,11 @@ func (r *PGRepository) writeTemplateMigration(ctx context.Context, tx pgx.Tx, or
 		m.before.Attributes, after.Attributes); changeErr != nil {
 		return changeErr
 	}
+	// Under a bulk job (change_template) the change set of the migration,
+	// before audit and outbox (K20, WP-783).
+	if bulkErr := recordTemplateMigration(ctx, tx, orgID, m.before, after, m.defaults); bulkErr != nil {
+		return bulkErr
+	}
 	if auditErr := r.recordAudit(ctx, tx, "ci.template_migrated", after, map[string]interface{}{
 		"template_id": plan.TemplateID, "from_version": plan.FromVersion, "to_version": plan.ToVersion,
 		"defaults": m.result.Defaults, "findings": m.result.Findings,

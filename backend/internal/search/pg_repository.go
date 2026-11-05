@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,6 +47,14 @@ func (r *PGRepository) IndexDocument(ctx context.Context, doc *Document) error {
 // statement. A document without that field keeps the row of its current
 // asset, which the trigger of asset keeps. network.* rows belong to the
 // triggers of the interfaces and addresses.
+//
+// Users and tags (WP-788): the owner of a CI (core.owner_user_id) comes
+// from Document.Fields, the holder of its asset (asset.assigned_user_id,
+// source_id = ci.asset_id) is read in the statement, so linking a CI to an
+// asset sets it. The field row core.tags of a CI document (source
+// 'trigger', search_tag_text of migration 000271) is rebuilt in the same
+// statement: the tags of a new CI are written before its document exists,
+// so the triggers of ci_tag find no document then.
 func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) error {
 	if len(docs) == 0 {
 		return nil
@@ -112,6 +121,7 @@ func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) erro
 			JOIN doc ON doc.entity_type = input.entity_type AND doc.entity_id = input.entity_id
 			WHERE NOT starts_with(f.field, 'attributes.') OR (input.entity_type = 'ci' AND EXISTS (SELECT 1 FROM ci
 				WHERE ci.id = input.entity_id AND search_attribute_searchable($1, ci.ci_type_id, substr(f.field, 12))))
+			  AND NOT (f.field = $18 AND input.entity_type IN ('ci', 'asset'))
 		), stale AS (
 			DELETE FROM search_document_field s USING doc
 			WHERE s.organization_id = $1 AND s.document_id = doc.id AND s.source = 'indexer'
@@ -132,11 +142,15 @@ func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) erro
 				CASE WHEN i.kind = 'ip' THEN host(i.value::inet)::inet END AS addr
 			FROM unnest($11::bigint[], $12::text[], $13::text[], $14::text[]) AS i(ord, field, kind, value)
 			JOIN input ON input.ord = i.ord
+			UNION ALL
+			SELECT input.entity_type, input.entity_id, $17::text, ci.asset_id, asset.assigned_user_id::text, NULL::inet
+			FROM input JOIN ci ON ci.id = input.entity_id JOIN asset ON asset.id = ci.asset_id
+			WHERE input.entity_type = 'ci' AND asset.assigned_user_id IS NOT NULL
 		), ident_new AS (
 			SELECT * FROM ident WHERE norm <> '' AND (field <> $16 OR source_id IS NOT NULL)
 		), ident_stale AS (
 			DELETE FROM search_identifier s USING input
-			WHERE s.organization_id = $1 AND s.entity_type = input.entity_type AND s.entity_id = input.entity_id
+			WHERE s.organization_id = $1 AND input.entity_type = 'ci' AND s.entity_type = input.entity_type AND s.entity_id = input.entity_id
 			  AND s.field = ANY($15::text[])
 			  AND NOT EXISTS (SELECT 1 FROM ident_new n WHERE n.entity_type = s.entity_type AND n.entity_id = s.entity_id
 				AND n.field = s.field AND n.source_id IS NOT DISTINCT FROM s.source_id)
@@ -146,6 +160,20 @@ func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) erro
 			UPDATE search_identifier s SET norm = n.norm, addr = n.addr FROM ident_new n
 			WHERE s.organization_id = $1 AND s.entity_type = n.entity_type AND s.entity_id = n.entity_id AND s.field = n.field
 			  AND s.source_id IS NOT DISTINCT FROM n.source_id AND (s.norm <> n.norm OR s.addr IS DISTINCT FROM n.addr)
+		), tags AS (
+			SELECT doc.id AS document_id, search_tag_text('ci', doc.entity_id) AS content FROM doc WHERE doc.entity_type = 'ci'
+		), tags_gone AS (
+			DELETE FROM search_document_field s USING tags
+			WHERE s.organization_id = $1 AND s.document_id = tags.document_id AND s.field = $18 AND tags.content IS NULL
+		), tags_changed AS (
+			UPDATE search_document_field s SET content = tags.content, source = 'trigger' FROM tags
+			WHERE s.organization_id = $1 AND s.document_id = tags.document_id AND s.field = $18 AND tags.content IS NOT NULL
+			  AND (s.content <> tags.content OR s.source <> 'trigger')
+		), tags_fresh AS (
+			INSERT INTO search_document_field (organization_id, document_id, field, content, source)
+			SELECT $1, tags.document_id, $18, tags.content, 'trigger' FROM tags
+			WHERE tags.content IS NOT NULL
+			  AND NOT EXISTS (SELECT 1 FROM search_document_field s WHERE s.document_id = tags.document_id AND s.field = $18)
 		)
 		INSERT INTO search_identifier (organization_id, entity_type, entity_id, field, source_id, norm, addr)
 		SELECT $1, n.entity_type, n.entity_id, n.field, n.source_id, n.norm, n.addr FROM ident_new n
@@ -153,7 +181,7 @@ func (r *PGRepository) IndexDocuments(ctx context.Context, docs []Document) erro
 			AND s.entity_id = n.entity_id AND s.field = n.field AND s.source_id IS NOT DISTINCT FROM n.source_id)
 		ON CONFLICT (source_id, field, entity_id) WHERE source_id IS NOT NULL DO NOTHING`,
 			orgID, types, ids, titles, summaries, urls, metas, fieldDocs, fieldKeys, contents,
-			identDocs, identFields, identKinds, identValues, indexerIdentifiers, IdentifierAssetInventory)
+			identDocs, identFields, identKinds, identValues, indexerIdentifiers, IdentifierAssetInventory, UserFieldAssetHolder, tagField)
 		return err
 	})
 }
@@ -166,6 +194,8 @@ func identifierValue(kind, value string) (string, bool) {
 	switch kind {
 	case identifierMAC:
 		return NormalizeMAC(value)
+	case identifierUser:
+		return strings.ToLower(value), userIDPattern.MatchString(value)
 	case identifierIP:
 		if addr, err := netip.ParseAddr(value); err == nil {
 			return value, addr.Zone() == ""
@@ -177,6 +207,9 @@ func identifierValue(kind, value string) (string, bool) {
 	}
 	return value, true
 }
+
+// userIDPattern is the text form of a user id (app_user.id).
+var userIDPattern = regexp.MustCompile(`^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$`)
 
 // Delete removes the document with its field rows (cascade) and its
 // identifier rows, except network.* of the interfaces, which their
@@ -215,13 +248,35 @@ const contactTokenMatch = `(search_document.entity_type = 'contact' AND EXISTS (
 	WHERE c.id = search_document.entity_id AND s.search_tokens @> $%d::text[]))`
 
 // attributeMatch finds ci and asset documents whose custom field rows
-// (attributes.<key>, WP-308) match the text of parameter textArg. The
-// field rows have no index on vector (K22); they are read by document over
-// their primary key.
+// (attributes.<key>, WP-308) or tag row (core.tags, WP-788) match the text
+// of parameter textArg. The field rows have no index on vector (K22); they
+// are read by document over their primary key.
 func attributeMatch(textArg int) string {
 	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND EXISTS (SELECT 1 FROM search_document_field f
-		WHERE f.document_id = search_document.id AND starts_with(f.field, 'attributes.')
-		  AND f.vector @@ websearch_to_tsquery('simple', $%d)))`, textArg)
+		WHERE f.document_id = search_document.id AND (starts_with(f.field, 'attributes.') OR f.field = '%s')
+		  AND f.vector @@ websearch_to_tsquery('simple', $%d)))`, tagField, textArg)
+}
+
+// userIn finds the documents with a user field of the fields that holds
+// one of the users the text resolved to (SRC-02, WP-788): equality on norm,
+// served by idx_search_identifier_norm under row level security.
+func userIn(a *sqlArgs, orgArg int, fields, users []string) string {
+	return fmt.Sprintf(`(search_document.entity_type, search_document.entity_id) IN (SELECT si.entity_type, si.entity_id
+		FROM search_identifier si WHERE si.organization_id = $%d AND si.field = ANY($%d::text[]) AND si.norm = ANY($%d::text[]))`,
+		orgArg, a.add(fields), a.add(users))
+}
+
+// userMatch adds the user fields (openUserFields) to the match of a query
+// when the text resolved to users.
+func userMatch(a *sqlArgs, orgArg int, q *Query, restricted []string) string {
+	if len(q.userIDs) == 0 {
+		return ""
+	}
+	fields := openUserFields(q, restricted)
+	if len(fields) == 0 {
+		return ""
+	}
+	return " OR " + userIn(a, orgArg, fields, q.userIDs)
 }
 
 // identifierCond is the condition of the identifier conditions on the row
@@ -320,6 +375,7 @@ func buildPostgresQueryWithTokens(q *Query, tokens []string) (query string, args
 				match += " OR " + identifierIn(a, 1, fields, &ids)
 			}
 		}
+		match += userMatch(a, 1, q, nil)
 		args, pos = a.args, len(a.args)+1
 		where = append(where, "("+match+")")
 	}
@@ -408,6 +464,7 @@ func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where [
 				match += " OR " + identifierIn(a, org, fields, &ids)
 			}
 		}
+		match += userMatch(a, org, q, restricted)
 		where = append(where, "("+match+")")
 	}
 	if len(q.EntityTypes) > 0 {
@@ -445,6 +502,10 @@ func (fs *fieldScope) readable(q *Query) []string {
 	ref := permission.ObjectRef{ID: fs.objectID, ClientID: fs.clientID, SiteID: fs.siteID, TeamID: fs.teamID}
 	out := readableFields(q.Policy, fs.entityType, fs.typeID, &ref)
 	out = append(out, readableIdentifiers(q, fs.entityType, fs.typeID, &ref, fs.assetRef)...)
+	out = append(out, readableUsers(q, fs.entityType, fs.typeID, &ref, fs.assetRef)...)
+	if tagsReadable(q, fs.entityType, fs.typeID, &ref) {
+		out = append(out, tagField)
+	}
 	kind := permission.ObjectKind(fs.entityType)
 	for _, key := range fs.attributes {
 		if !strings.Contains(key, ",") && q.Policy.Level(kind, fs.typeID, key, ref).Readable() {
@@ -552,11 +613,19 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 		// The other types passed the match of phase 1 in the candidates
 		// (contacts also by their blind tokens). A restricted type also
 		// matches by its readable custom fields and identifiers (WP-308).
-		readable := fmt.Sprintf(`EXISTS (SELECT 1 FROM search_document_field f WHERE f.document_id = v.id AND starts_with(f.field, 'attributes.')
-			AND f.field = ANY(string_to_array(v.read_fields, ',')) AND f.vector @@ %s)`, tsq)
+		readable := fmt.Sprintf(`EXISTS (SELECT 1 FROM search_document_field f WHERE f.document_id = v.id
+			AND (starts_with(f.field, 'attributes.') OR f.field = '%s')
+			AND f.field = ANY(string_to_array(v.read_fields, ',')) AND f.vector @@ %s)`, tagField, tsq)
 		if ids, ok := ParseIdentifiers(q.Text); ok {
 			readable += fmt.Sprintf(` OR EXISTS (SELECT 1 FROM search_identifier si WHERE si.organization_id = $%d AND si.entity_type = v.entity_type
 				AND si.entity_id = v.entity_id AND si.field = ANY(string_to_array(v.read_fields, ',')) AND %s)`, org, identifierCond(a, &ids))
+		}
+		// The users the text resolved to, in the readable user fields
+		// (WP-788).
+		if len(q.userIDs) > 0 {
+			readable += fmt.Sprintf(` OR EXISTS (SELECT 1 FROM search_identifier si WHERE si.organization_id = $%d AND si.entity_type = v.entity_type
+				AND si.entity_id = v.entity_id AND si.field = ANY(string_to_array(v.read_fields, ',')) AND si.field = ANY($%d::text[])
+				AND si.norm = ANY($%d::text[]))`, org, a.add(allUserFields), a.add(q.userIDs))
 		}
 		score, match = "ts_rank(vec, "+tsq+")", fmt.Sprintf("(entity_type <> ALL($%d::text[]) OR vec @@ %s OR %s)", restrictedArg, tsq, readable)
 		if q.Highlight {
@@ -572,7 +641,56 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 	return query, a.args, nil
 }
 
-func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
+// resolveUsersSQL resolves a search text to the active users of the
+// organization whose name or e-mail address it matches (SRC-02, WP-788):
+// the e-mail address as a whole or the words of the text in name and
+// e-mail address. A text with a negation resolves to none: it would match
+// every user without the word.
+const resolveUsersSQL = `SELECT u.id::text FROM app_user u
+	WHERE u.organization_id = $1 AND u.is_active AND websearch_to_tsquery('simple', $2)::text !~ '!'
+	  AND (lower(u.email) = lower(btrim($2))
+	       OR to_tsvector('simple', u.display_name || ' ' || u.email) @@ websearch_to_tsquery('simple', $2))
+	ORDER BY u.id LIMIT $3`
+
+// resolveUsersTx returns the users the search text resolves to, at most
+// maxResolvedUsers, or none when the user fields do not count for the
+// query (Query.UsersReadable) or there is no text. Names and e-mail
+// addresses are read here only; the index holds the ids.
+func resolveUsersTx(ctx context.Context, tx pgx.Tx, q *Query) ([]string, error) {
+	if !q.UsersReadable || strings.TrimSpace(q.Text) == "" {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, resolveUsersSQL, q.OrganizationID, q.Text, maxResolvedUsers)
+	if err != nil {
+		return nil, fmt.Errorf("resolve search users: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("resolve search users: %w", err)
+	}
+	return ids, nil
+}
+
+// ResolveUsers resolves the search text of the query to users under the
+// tenant scope of the request, like Query does (WP-788); HybridBackend
+// searches the remote index with them.
+func (r *PGRepository) ResolveUsers(ctx context.Context, q *Query) ([]string, error) {
+	if !q.UsersReadable || strings.TrimSpace(q.Text) == "" {
+		return nil, nil
+	}
+	var ids []string
+	err := database.WithRequestTenant(ctx, r.pool, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		ids, err = resolveUsersTx(ctx, tx, q)
+		return err
+	})
+	return ids, err
+}
+
+func (r *PGRepository) Query(ctx context.Context, in *Query) (Result, error) {
+	// The users of the text are resolved per query on a copy (WP-788).
+	query := *in
+	q := &query
 	limit := q.Limit
 	if limit <= 0 || limit > api.MaxPageLimit {
 		limit = api.DefaultPageLimit
@@ -590,6 +708,9 @@ func (r *PGRepository) Query(ctx context.Context, q *Query) (Result, error) {
 		var sql string
 		var args []any
 		var err error
+		if q.userIDs, err = resolveUsersTx(ctx, tx, q); err != nil {
+			return err
+		}
 		restricted := q.restrictedTypes()
 		if len(restricted) > 0 {
 			sql, args, err = restrictedQuery(ctx, tx, q, tokens, restricted)
@@ -657,9 +778,10 @@ const headlineOptions = `'StartSel=<mark>, StopSel=</mark>, MaxFragments=2'`
 // PII vault (AUD-01).
 func matchedFields(ctx context.Context, tx pgx.Tx, q *Query, restricted []string, hits []Hit, read []*string) error {
 	var at []int
-	var docIDs, types, entityIDs, identAllowed []string
+	var docIDs, types, entityIDs, identAllowed, usersAllowed []string
 	var allowed []*string
 	open := openIdentifierFields(q, restricted)
+	openUsers := openUserFields(q, restricted)
 	for i := range hits {
 		h := &hits[i]
 		if h.EntityType == "contact" {
@@ -675,9 +797,16 @@ func matchedFields(ctx context.Context, tx pgx.Tx, q *Query, restricted []string
 				idents = append(idents, f)
 			}
 		}
+		var users []string
+		for _, f := range userFields[h.EntityType] {
+			if (read[i] != nil && slices.Contains(readable, f)) || (read[i] == nil && slices.Contains(openUsers, f)) {
+				users = append(users, f)
+			}
+		}
 		at = append(at, i)
 		docIDs, types, entityIDs = append(docIDs, h.ID), append(types, h.EntityType), append(entityIDs, h.EntityID)
 		allowed, identAllowed = append(allowed, read[i]), append(identAllowed, strings.Join(idents, ","))
+		usersAllowed = append(usersAllowed, strings.Join(users, ","))
 	}
 	if len(at) == 0 {
 		return nil
@@ -748,12 +877,47 @@ func matchedFields(ctx context.Context, tx pgx.Tx, q *Query, restricted []string
 			return fmt.Errorf("matched identifiers: %w", err)
 		}
 	}
+	if len(q.userIDs) > 0 {
+		if uerr := matchedUsers(ctx, tx, q, types, entityIDs, usersAllowed, func(ord int, m MatchedField) {
+			found[at[ord-1]] = append(found[at[ord-1]], m)
+		}); uerr != nil {
+			return uerr
+		}
+	}
 	for i := range hits {
 		if len(found[i]) == 0 {
 			continue
 		}
 		sortMatchedFields(hits[i].EntityType, found[i])
 		hits[i].MatchedFields = found[i]
+	}
+	return nil
+}
+
+// matchedUsers reports the user fields of the hits (ordinal from 1) that
+// hold a user the text resolved to (WP-788), of the fields per hit
+// (comma-separated). The field carries no highlight: the index holds the
+// id only, and the name or e-mail address is no field of the hit.
+func matchedUsers(ctx context.Context, tx pgx.Tx, q *Query, types, entityIDs, fields []string, add func(ord int, m MatchedField)) error {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT h.ord, si.field
+		FROM unnest($2::text[], $3::uuid[], $4::text[]) WITH ORDINALITY AS h(entity_type, entity_id, fields, ord)
+		JOIN search_identifier si ON si.organization_id = $1 AND si.entity_type = h.entity_type AND si.entity_id = h.entity_id
+			AND si.field = ANY(string_to_array(h.fields, ','))
+		WHERE si.norm = ANY($5::text[])`, q.OrganizationID, types, entityIDs, fields, q.userIDs)
+	if err != nil {
+		return fmt.Errorf("matched users: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ord int
+		var m MatchedField
+		if err := rows.Scan(&ord, &m.Field); err != nil {
+			return err
+		}
+		add(ord, m)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("matched users: %w", err)
 	}
 	return nil
 }
@@ -784,6 +948,9 @@ func fieldRank(entityType, field string) int {
 	}
 	if i := slices.Index(identifierFields[entityType], field); i >= 0 {
 		return 300 + i
+	}
+	if i := slices.Index(userFields[entityType], field); i >= 0 {
+		return 400 + i
 	}
 	if strings.HasPrefix(field, "attributes.") {
 		return 200
@@ -818,7 +985,8 @@ type reindexSource struct {
 // summary (WP-266, backfill of migration 000228), a CI also gets its
 // searchable attributes (search_ci_attribute_fields), the field rows of an
 // asset are the ones of its trigger (search_asset_fields, source 'trigger';
-// WP-308, migration 000233); an empty value gets no row.
+// WP-308, migration 000233); an empty value gets no row. CIs and assets get
+// the row core.tags of the triggers of their tags (reindexTags, WP-788).
 var reindexSources = []reindexSource{
 	{entityType: "ci", table: "ci", live: "e.deleted_at IS NULL", title: "e.name",
 		summary: "concat_ws(' ', e.hostname, e.manufacturer, e.model, e.serial_number, e.os_name, e.os_version)", url: "'/cmdb/' || e.id",
@@ -831,12 +999,16 @@ UNION ALL
 SELECT d.id, f.field, f.content, 'indexer'
   FROM search_document d JOIN ci e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL search_ci_attribute_fields(e) AS f
- WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND d.entity_id = ANY($2::uuid[])`},
+ WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND d.entity_id = ANY($2::uuid[])
+UNION ALL
+` + reindexTags("ci")},
 	{entityType: "asset", table: "asset", live: "true", title: "e.name", summary: "search_asset_summary(e)", url: "'/assets'",
 		fields: `SELECT d.id AS document_id, f.field, f.content, 'trigger' AS source
   FROM search_document d JOIN asset e ON e.id = d.entity_id AND e.organization_id = d.organization_id
  CROSS JOIN LATERAL search_asset_fields(e) AS f
- WHERE d.organization_id = $1 AND d.entity_type = 'asset' AND d.entity_id = ANY($2::uuid[])`},
+ WHERE d.organization_id = $1 AND d.entity_type = 'asset' AND d.entity_id = ANY($2::uuid[])
+UNION ALL
+` + reindexTags("asset")},
 	{entityType: "document", table: "document", live: "e.deleted_at IS NULL", title: "e.title",
 		summary: "concat_ws(' ', e.description, e.file_name, e.category, array_to_string(e.tags, ' '))", url: "'/documents'",
 		fields: `SELECT d.id AS document_id, f.field, f.content, 'indexer' AS source
@@ -859,6 +1031,15 @@ SELECT d.id, f.field, f.content, 'indexer'
 	{entityType: "location", table: "location", live: "true", title: "e.name", summary: "e.kind", url: "'/locations?node=' || e.id"},
 	{entityType: "reservation", table: "reservation", live: "true", title: "COALESCE(e.project_ref, e.reason, 'reservation')",
 		summary: "concat_ws(' ', e.state, e.reason, e.project_ref)", url: "'/reservations'"},
+}
+
+// reindexTags is the statement of the field rows core.tags of the documents
+// of a ci or asset batch (source 'trigger', search_tag_text of migration
+// 000271, WP-788).
+func reindexTags(entityType string) string {
+	return `SELECT d.id, '` + tagField + `', t.content, 'trigger'
+  FROM search_document d CROSS JOIN LATERAL (SELECT search_tag_text(d.entity_type, d.entity_id) AS content) AS t
+ WHERE d.organization_id = $1 AND d.entity_type = '` + entityType + `' AND d.entity_id = ANY($2::uuid[]) AND t.content IS NOT NULL`
 }
 
 // reindexLive is the condition that the entity of a row d of

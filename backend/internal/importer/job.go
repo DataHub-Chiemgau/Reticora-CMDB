@@ -39,9 +39,18 @@ var runSlots = make(chan struct{}, 2)
 // of the starter: every reader of the job sees its parameters (GET
 // /api/v1/jobs, job:read), and the run reloads the starter's current
 // rights instead (jobContext).
+//
+// A run over JSON rows (import_source api, WP-303) has no document: it
+// names the staging object of its rows (StagingKey), their number and
+// their SHA-256 instead, never a value of a row. The key source belongs
+// to the request facts (jobs.ScopeParams: the audit source of the start).
 type JobParams struct {
-	DocumentID      string      `json:"document_id"`
-	DocumentVersion int         `json:"document_version"`
+	DocumentID      string      `json:"document_id,omitempty"`
+	DocumentVersion int         `json:"document_version,omitempty"`
+	ImportSource    string      `json:"import_source,omitempty"`
+	StagingKey      string      `json:"staging_key,omitempty"`
+	RowCount        int         `json:"row_count,omitempty"`
+	RowsSHA256      string      `json:"rows_sha256,omitempty"`
 	ProfileID       string      `json:"profile_id"`
 	Mode            string      `json:"mode"`
 	DryRun          bool        `json:"dry_run"`
@@ -232,16 +241,26 @@ func (h *ImportHandler) RunJob(ctx context.Context, job *jobs.Job) (any, error) 
 // K20), then a success and import.completed after it, or a cancel with the
 // counters of the rows processed so far (their report is kept). A panic of
 // the parser on a hostile file fails the job instead of the process.
+//
+// The staged rows of an API run are deleted once the job ends for good:
+// after a success, a cancel and a failure of the last attempt; a further
+// attempt still finds them.
 func (h *ImportHandler) perform(ctx context.Context, job *jobs.Job) (failure error) {
 	orgID, jobID := job.OrganizationID, job.ID
 	rep := newReport()
+	var p JobParams
+	defer func() {
+		if p.StagingKey == "" || (failure != nil && job.Attempts < job.MaxAttempts) {
+			return
+		}
+		h.dropStagedLogged(context.WithoutCancel(ctx), orgID, p.StagingKey)
+	}()
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.ErrorContext(ctx, "import: run panicked", "job", jobID, "panic", rec)
 			failure = &ParseError{Code: "import-failed", Message: "the import could not be completed", Fatal: true}
 		}
 	}()
-	var p JobParams
 	var run *RunInfo
 	var result JobResult
 	var err error
@@ -317,7 +336,10 @@ func (h *ImportHandler) perform(ctx context.Context, job *jobs.Job) (failure err
 // MaxRows.
 func progressOf(src *source, read int64, rows int) int {
 	pct := rows * 100 / MaxRows
-	if src.format == FormatCSV && src.version.Size > 0 {
+	switch {
+	case src.staged != nil && src.rowCount > 0:
+		pct = rows * 100 / src.rowCount
+	case src.format == FormatCSV && src.version != nil && src.version.Size > 0:
 		pct = int(read * 100 / src.version.Size)
 	}
 	return max(0, min(99, pct))
@@ -327,6 +349,9 @@ func progressOf(src *source, read int64, rows int) int {
 // of the creator, exactly the version of the job, scanned clean, within
 // the size limit and of a readable type, and the profile of the job.
 func (h *ImportHandler) jobSource(ctx context.Context, orgID string, p *JobParams) (*source, error) {
+	if p.ImportSource == SourceAPI {
+		return h.apiSource(ctx, orgID, p)
+	}
 	unavailable := func(msg string) error {
 		return &ParseError{Code: "import-document-unavailable", Message: msg, Fatal: true}
 	}
@@ -357,6 +382,24 @@ func (h *ImportHandler) jobSource(ctx context.Context, orgID string, p *JobParam
 		return nil, &ParseError{Code: CodeFormatUnsupported, Message: "the document version is no CSV or XLSX file", Fatal: true}
 	}
 	return &source{doc: doc, version: v, format: format, profile: profile}, nil
+}
+
+// apiSource is the source of an API run (WP-303): the profile of the job,
+// still of format json, and the staged rows, read outside any database
+// transaction (K20) and checked against rows_sha256.
+func (h *ImportHandler) apiSource(ctx context.Context, orgID string, p *JobParams) (*source, error) {
+	profile, err := h.profiles.Get(ctx, orgID, p.ProfileID)
+	if err != nil {
+		return nil, &ParseError{Code: "import-profile-unavailable", Message: "the import profile is not found", Fatal: true}
+	}
+	if profile.Format != FormatJSON {
+		return nil, &ParseError{Code: CodeFormatUnsupported, Message: "the import profile no longer reads JSON rows", Fatal: true}
+	}
+	rows, err := h.loadStaged(ctx, orgID, p)
+	if err != nil {
+		return nil, err
+	}
+	return &source{format: FormatJSON, profile: profile, staged: rows, rowCount: p.RowCount}, nil
 }
 
 // countingReader counts the bytes read.

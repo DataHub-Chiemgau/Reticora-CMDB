@@ -318,7 +318,82 @@ func TestFormatOfMime(t *testing.T) {
 			t.Errorf("FormatOfMime(%q) = %q, %v", mime, got, ok)
 		}
 	}
-	if _, err := Open("json", strings.NewReader("{}"), ""); err == nil {
-		t.Fatal("json opened")
+	// JSON is no document type; the rows of the API import are an array,
+	// a single object is refused.
+	if _, err := Open(FormatJSON, strings.NewReader("{}"), ""); err == nil {
+		t.Fatal("a JSON object opened as rows")
 	}
+	if _, err := Open("ods", strings.NewReader(""), ""); err == nil {
+		t.Fatal("ods opened")
+	}
+}
+
+// TestOpenJSON covers the JSON row source of the API import (WP-303): the
+// header is the union of the keys in the order of their first occurrence;
+// strings, numbers and booleans become their text, null and a missing key
+// an empty cell; an object or an array is a row error naming its column,
+// and the reading goes on.
+func TestOpenJSON(t *testing.T) {
+	rd, err := Open(FormatJSON, strings.NewReader(`[
+		{"name": "a", "count": 3, "active": true, "note": null},
+		{"name": "b", "extra": "x", "count": 2.50},
+		{"name": "c", "tags": ["x"], "meta": {"k": 1}},
+		{}
+	]`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rd.Close() }()
+	if got := strings.Join(rd.Header(), ","); got != "name,count,active,note,extra,tags,meta" {
+		t.Fatalf("header %q", got)
+	}
+	want := []struct {
+		cells  string
+		nested int // column of the nested value, 0: none
+	}{
+		{"a|3|true||||", 0},
+		{"b|2.50|||x||", 0},
+		{"c|||||||", 6},
+		{"||||||", 0},
+	}
+	for i, w := range want {
+		row, rerr := rd.Next()
+		if row.Line != i+1 {
+			t.Errorf("row %d: line %d", i, row.Line)
+		}
+		if got := strings.Join(row.Cells, "|"); got != w.cells && w.nested == 0 {
+			t.Errorf("row %d: cells %q, want %q", i, got, w.cells)
+		}
+		var pe *ParseError
+		switch {
+		case w.nested == 0 && rerr != nil:
+			t.Errorf("row %d: %v", i, rerr)
+		case w.nested > 0 && (!errors.As(rerr, &pe) || pe.Fatal || pe.Code != CodeNestedValue || pe.Column != w.nested || pe.Line != i+1):
+			t.Errorf("row %d: error %+v, want %s in column %d", i, rerr, CodeNestedValue, w.nested)
+		}
+	}
+	if _, err = rd.Next(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after the last row: %v", err)
+	}
+
+	// No array of objects, trailing data, too many keys: fatal.
+	for name, body := range map[string]string{
+		"scalar row": `[1]`, "string": `"rows"`, "trailing": `[{"a":1}] [{"a":2}]`, "broken": `[{"a":1}`,
+		"wide": `[{` + jsonKeys(MaxColumns+1) + `}]`,
+	} {
+		_, err = OpenJSON(strings.NewReader(body))
+		var pe *ParseError
+		if !errors.As(err, &pe) || !pe.Fatal {
+			t.Errorf("%s: %v, want a fatal error", name, err)
+		}
+	}
+}
+
+// jsonKeys are n distinct keys with value 1.
+func jsonKeys(n int) string {
+	keys := make([]string, n)
+	for i := range keys {
+		keys[i] = fmt.Sprintf(`"k%d":1`, i)
+	}
+	return strings.Join(keys, ",")
 }

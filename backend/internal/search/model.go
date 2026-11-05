@@ -57,21 +57,74 @@ type Query struct {
 	// principal holds ipam:read, the permission of GET
 	// /api/v1/cis/{id}/interfaces (SRC-02, WP-308). ApplyPrincipal sets it.
 	NetworkReadable bool
+	// UsersReadable lets the user fields (userFields) count for a hit: the
+	// principal holds user:read, the permission of GET /api/v1/users
+	// (SRC-02, WP-788). The search text is resolved to the active users
+	// whose name or e-mail address it matches; the index holds their ids
+	// only. ApplyPrincipal sets it.
+	UsersReadable bool
+	// HoldersSearchable lets the holder fields (core.assigned_user_id,
+	// asset.assigned_user_id) count: the organization has assets_basic
+	// (WP-788). ApplyPrincipal sets it.
+	HoldersSearchable bool
+	// userIDs are the users the text resolved to (PGRepository.ResolveUsers),
+	// set by the backend for one query.
+	userIDs []string
 }
 
-// ApplyPrincipal sets the field policy of the request context and the
-// network permission of the principal on the query (RBA-07, SRC-02); has
-// reports whether the principal holds a permission. The REST handler and
-// the GraphQL resolver share it. A policy that cannot be resolved is an
-// error (fail-closed).
-func ApplyPrincipal(ctx context.Context, q *Query, has func(perm string) bool) error {
+// ApplyPrincipal sets the field policy of the request context, the network
+// and user permissions of the principal and the entitlement of the holder
+// fields on the query (RBA-07, SRC-02); has reports whether the principal
+// holds a permission, enabled whether the organization has a feature. The
+// REST handler and the GraphQL resolver share it. A policy that cannot be
+// resolved is an error (fail-closed); without has or enabled the query
+// gets none of them.
+func ApplyPrincipal(ctx context.Context, q *Query, has, enabled func(key string) bool) error {
 	policy, err := permission.PolicyFrom(ctx)
 	if err != nil {
 		return err
 	}
 	q.Policy = policy
 	q.NetworkReadable = has != nil && has(string(identity.PermIPAMRead))
+	q.UsersReadable = has != nil && has(string(identity.PermUserRead))
+	q.HoldersSearchable = enabled != nil && enabled(FeatureAssetsBasic)
 	return nil
+}
+
+// Feature keys and modules of the gated hit types (WP-244, WP-214). The
+// search package names them itself: it imports neither entitlement nor
+// server.
+const (
+	FeatureAssetsBasic        = "assets_basic"
+	FeatureDocuments          = "documents"
+	FeatureTicketingEssential = "ticketing_essential"
+	ModuleInventory           = "inventory"
+	ModuleDocuments           = "documents"
+	ModuleTicketing           = "ticketing"
+)
+
+// hitGates are the feature and the module a hit of the entity type needs
+// (SRC-02, WP-788). Types missing here are core (E-105).
+var hitGates = map[string]struct{ feature, module string }{
+	"asset":       {FeatureAssetsBasic, ModuleInventory},
+	"reservation": {FeatureAssetsBasic, ModuleInventory},
+	"document":    {FeatureDocuments, ModuleDocuments},
+	"ticket":      {FeatureTicketingEssential, ModuleTicketing},
+}
+
+// HitAllowed reports whether a hit of the entity type may be shown: a type
+// of hitGates needs its feature (enabled; nil never) and, when module is
+// set, its module (REST: ModuleSet.Enabled); GraphQL checks no module
+// (WP-311). Fail-closed: without a check the gated hits are dropped.
+func HitAllowed(entityType string, enabled, module func(key string) bool) bool {
+	gate, gated := hitGates[entityType]
+	if !gated {
+		return true
+	}
+	if enabled == nil || !enabled(gate.feature) {
+		return false
+	}
+	return module == nil || module(gate.module)
 }
 
 // SummaryFields are the field keys of the summary columns per entity type,
@@ -176,6 +229,102 @@ func readableIdentifiers(q *Query, entityType, typeID string, ref *permission.Ob
 		}
 	}
 	return out
+}
+
+// User fields of search_identifier (SRC-02, WP-788): the surrogate
+// (app_user.id) of the owner of a ci or asset, of the holder of an asset
+// and, at a CI, of the holder of its asset (ci.asset_id, source_id =
+// asset). Name and e-mail are never indexed (SEC-05); the text is resolved
+// to ids at query time.
+const (
+	UserFieldOwner       = "core.owner_user_id"
+	UserFieldHolder      = "core.assigned_user_id"
+	UserFieldAssetHolder = "asset.assigned_user_id"
+	maxResolvedUsers     = 50
+	tagField             = "core.tags"
+	tagPath              = "tags"
+)
+
+// userFields are the user fields per entity type.
+var userFields = map[string][]string{
+	"ci":    {UserFieldOwner, UserFieldAssetHolder},
+	"asset": {UserFieldOwner, UserFieldHolder},
+}
+
+// allUserFields are the user fields of all types, in a fixed order.
+var allUserFields = []string{UserFieldOwner, UserFieldHolder, UserFieldAssetHolder}
+
+// userFieldCounts reports whether a user field may count for a hit at all:
+// with user:read, a holder field only with assets_basic.
+func userFieldCounts(q *Query, field string) bool {
+	if !q.UsersReadable {
+		return false
+	}
+	return q.HoldersSearchable || (field != UserFieldHolder && field != UserFieldAssetHolder)
+}
+
+// openUserFields are the user fields whose rows count for a hit without a
+// check per document, like openIdentifierFields: the holder of the asset at
+// a CI only when the policy does not restrict assets; a type in restricted
+// keeps all its fields, the restricted query checks them per document.
+func openUserFields(q *Query, restricted []string) []string {
+	out := []string{}
+	for _, t := range fieldTypes {
+		if len(q.EntityTypes) > 0 && !slices.Contains(q.EntityTypes, t) {
+			continue
+		}
+		for _, f := range userFields[t] {
+			switch {
+			case !userFieldCounts(q, f), slices.Contains(out, f):
+			case f == UserFieldAssetHolder && !slices.Contains(restricted, t) && q.Policy != nil && q.Policy.Restricted(permission.KindAsset):
+			default:
+				out = append(out, f)
+			}
+		}
+	}
+	return out
+}
+
+// readableUsers returns the user fields of the entity type the principal
+// may read for an object of the type and scope, under the rule of the DTO
+// projection (WP-265, WP-271): owner_user_id under the policy of the type,
+// assigned_user_id of the asset (at a CI: of the linked asset, assetRef:
+// hitAssetRef) under the asset policy.
+func readableUsers(q *Query, entityType, typeID string, ref *permission.ObjectRef, assetRef string) []string {
+	var out []string
+	for _, field := range userFields[entityType] {
+		if !userFieldCounts(q, field) {
+			continue
+		}
+		readable := false
+		switch field {
+		case UserFieldOwner:
+			readable = permission.Readable(q.Policy, permission.ObjectKind(entityType), typeID, *ref, "owner_user_id")
+		case UserFieldHolder:
+			readable = permission.Readable(q.Policy, permission.KindAsset, typeID, *ref, "assigned_user_id")
+		case UserFieldAssetHolder:
+			if !q.Policy.Restricted(permission.KindAsset) {
+				readable = true
+			} else if parts := strings.Split(assetRef, "|"); len(parts) == 4 {
+				asset := permission.ObjectRef{ID: parts[0], ClientID: parts[2], SiteID: parts[3]}
+				readable = permission.Readable(q.Policy, permission.KindAsset, parts[1], asset, "assigned_user_id")
+			}
+		}
+		if readable {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+// tagsReadable reports whether the field row core.tags of a ci or asset
+// counts for a hit: like the DTO member tags in the projection (WP-265,
+// E-105; structural at a CI).
+func tagsReadable(q *Query, entityType, typeID string, ref *permission.ObjectRef) bool {
+	if entityType != "ci" && entityType != "asset" {
+		return false
+	}
+	return permission.Readable(q.Policy, permission.ObjectKind(entityType), typeID, *ref, tagPath)
 }
 
 type Hit struct {

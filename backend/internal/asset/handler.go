@@ -56,6 +56,8 @@ type Handler struct {
 	reservations ReservationLookup
 	// links writes the asset↔CI links through the CI domain (WP-272).
 	links CILinker
+	// bulk holds the jobs and ports of POST /api/v1/assets/bulk (WP-781).
+	bulk bulkWiring
 }
 
 // NewHandler creates a new asset handler.
@@ -93,6 +95,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/assets/{id}/cis/{ci_id}", h.UnlinkCI)
 	// Tags from the tag catalog (API-06, WP-755).
 	r.Put("/api/v1/assets/{id}/tags", h.ReplaceTags)
+	// Bulk operations on assets (BLK-01, BLK-02, WP-781).
+	r.Post("/api/v1/assets/bulk", h.Bulk)
 }
 
 // requestContext returns the organization and the field policy of the
@@ -570,41 +574,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	} else if sent {
 		req.IfMatch = &version
 	}
-	if err := rejectReadOnly(&req); err != nil {
-		api.WriteFieldError(w, err)
-		return
-	}
-	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
-		api.WriteFieldError(w, err)
-		return
-	}
-	if req.Currency != nil {
-		if err := validCurrency(*req.Currency); err != nil {
-			api.WriteFieldError(w, err)
-			return
-		}
-	}
-	if req.AssetTag != nil && strings.TrimSpace(*req.AssetTag) == "" {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", "inventory_no must not be empty")
-		return
-	}
-	if req.PurchaseCost != nil {
-		price, err := purchasePrice(*req.PurchaseCost)
-		if err != nil {
-			api.WriteFieldError(w, err)
-			return
-		}
-		req.PurchaseCost = &price
-	}
-
-	// A primary CI is linked through the CI domain (WP-272), which needs
-	// ci:write as PATCH /cis/{id} does; clearing it writes no CI.
-	if _, linked := h.linkStore(); linked && req.CIID != nil && strings.TrimSpace(*req.CIID) != "" &&
-		!requirePermission(w, r, identity.PermCIWrite) {
-		return
-	}
-	req.Check = checkUpdate(policy, &req)
-	item, err := h.update(r.Context(), orgID, id, &req)
+	item, err := h.applyUpdate(r.Context(), orgID, id, policy, &req)
 	if err != nil {
 		writeAssetError(w, r, err)
 		return
@@ -617,6 +587,55 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, http.StatusOK, body)
+}
+
+// applyUpdate is the one write path of PATCH /api/v1/assets/{id} and of
+// the field operations of POST /api/v1/assets/bulk (WP-781): the read-only
+// members and custom_fields.tags (422, 400), the currency, the inventory
+// number and the purchase price, ci:write for a primary CI the CI domain
+// links, the field permissions of policy on the locked asset (checkUpdate),
+// If-Match and Repository.Update. Its errors are those writeAssetError
+// answers and bulkError reports.
+func (h *Handler) applyUpdate(ctx context.Context, orgID, id string, policy *permission.FieldPolicy, req *UpdateRequest) (*Asset, error) {
+	if err := rejectReadOnly(req); err != nil {
+		return nil, err
+	}
+	if err := rejectCustomFieldTags(req.CustomFields); err != nil {
+		return nil, err
+	}
+	if req.Currency != nil {
+		if err := validCurrency(*req.Currency); err != nil {
+			return nil, err
+		}
+	}
+	if req.AssetTag != nil && strings.TrimSpace(*req.AssetTag) == "" {
+		return nil, &api.FieldError{Field: "inventory_no", Message: "must not be empty"}
+	}
+	if req.PurchaseCost != nil {
+		price, err := purchasePrice(*req.PurchaseCost)
+		if err != nil {
+			return nil, err
+		}
+		req.PurchaseCost = &price
+	}
+	// A primary CI is linked through the CI domain (WP-272), which needs
+	// ci:write as PATCH /cis/{id} does; clearing it writes no CI.
+	if _, linked := h.linkStore(); linked && req.CIID != nil && strings.TrimSpace(*req.CIID) != "" {
+		if err := checkPermission(ctx, identity.PermCIWrite); err != nil {
+			return nil, err
+		}
+	}
+	req.Check = checkUpdate(policy, req)
+	return h.update(ctx, orgID, id, req)
+}
+
+// checkPermission refuses a principal without perm with a 403 naming it
+// (fail-closed without a principal).
+func checkPermission(ctx context.Context, perm identity.Permission) error {
+	if p, ok := identity.PrincipalFromContext(ctx); ok && p.Has(perm) {
+		return nil
+	}
+	return &api.FieldForbiddenError{Action: string(perm)}
 }
 
 // checkUpdate returns the check of a PATCH against the field permissions

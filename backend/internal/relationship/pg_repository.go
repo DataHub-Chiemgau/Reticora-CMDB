@@ -1,6 +1,7 @@
 package relationship
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
@@ -17,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -393,8 +395,129 @@ func (r *PGRepository) Create(ctx context.Context, rel *Relationship) error {
 		if err := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeCreated, After: &stored}); err != nil {
 			return err
 		}
+		// The change set of a bulk (add_relationship) and the marks of a
+		// revert (remove_relationship), before the event (K20, WP-783).
+		if err := recordBulkEdge(ctx, tx, rel.OrganizationID, jobs.OpAdd, &stored); err != nil {
+			return err
+		}
 		return r.recordEvent(ctx, tx, events.RelationshipCreated, rel)
 	})
+}
+
+// The change set of the edge actions of a CI bulk (BLK-02, WP-783): the
+// bulk names the CI of each edge (BulkEdgeContext.EntityID: the source, for
+// direction incoming the target) and runs under its job
+// (jobs.WithChangeSet); Create and DeleteWithPolicy then record in their
+// transaction one row: op add with the new edge (with its id) in
+// new_value, op remove with the deleted row in old_value. The revert
+// passes the rows it reverts (Marks), which the same transaction marks
+// reverted (jobs.MarkChangeTx), and for a delete the edge as the bulk
+// created it (Expect): a changed edge stays (ErrEdgeChanged).
+
+// ChangeFieldRelationship is the field name of the change set rows of an
+// edge.
+const ChangeFieldRelationship = "relationship"
+
+// ErrEdgeChanged refuses the revert of add_relationship for an edge that
+// changed since the bulk created it (409).
+var ErrEdgeChanged = errors.New("the relationship changed since the bulk")
+
+// BulkEdgeContext is the bulk part of an edge write.
+type BulkEdgeContext struct {
+	// EntityID is the CI of the bulk the change set row belongs to.
+	EntityID string
+	// Expect is the edge a revert deletes only unchanged.
+	Expect *Relationship
+	// Marks are the change set rows the write records as reverted.
+	Marks []jobs.ChangeMark
+}
+
+type bulkEdgeKey struct{}
+
+// WithBulkEdge returns ctx whose edge writes carry b.
+func WithBulkEdge(ctx context.Context, b *BulkEdgeContext) context.Context {
+	return context.WithValue(ctx, bulkEdgeKey{}, b)
+}
+
+func bulkEdgeFrom(ctx context.Context) *BulkEdgeContext {
+	b, _ := ctx.Value(bulkEdgeKey{}).(*BulkEdgeContext)
+	return b
+}
+
+// sameEdgeForm is what SameEdge compares: the type, the ends, the origin,
+// the verification, the notes and the attributes of an edge.
+type sameEdgeForm struct {
+	SourceCIID, TargetCIID, RelType, Source, VerificationState string
+	SourceSystem, Notes, SourceInterfaceID, TargetInterfaceID  string
+	Confidence                                                 *float64
+	Attributes                                                 any
+}
+
+func edgeForm(e *Relationship) (*sameEdgeForm, error) {
+	raw, err := json.Marshal(e.Attributes)
+	if err != nil {
+		return nil, err
+	}
+	var attributes any
+	if decodeErr := json.Unmarshal(raw, &attributes); decodeErr != nil {
+		return nil, decodeErr
+	}
+	if m, ok := attributes.(map[string]any); ok && len(m) == 0 {
+		attributes = nil
+	}
+	return &sameEdgeForm{SourceCIID: strings.ToLower(e.SourceCIID), TargetCIID: strings.ToLower(e.TargetCIID), RelType: e.RelType,
+		Source: e.Source, VerificationState: e.VerificationState, SourceSystem: e.SourceSystem, Notes: e.Notes,
+		SourceInterfaceID: strings.ToLower(e.SourceInterfaceID), TargetInterfaceID: strings.ToLower(e.TargetInterfaceID),
+		Confidence: e.Confidence, Attributes: attributes}, nil
+}
+
+// SameEdge reports whether two edges have the same id, type, ends, origin,
+// verification, notes and attributes.
+func SameEdge(a, b *Relationship) bool {
+	if !strings.EqualFold(a.ID, b.ID) {
+		return false
+	}
+	x, errA := edgeForm(a)
+	y, errB := edgeForm(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	ja, errA := json.Marshal(x)
+	jb, errB := json.Marshal(y)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
+
+// recordBulkEdge marks the change set rows of a revert and records the
+// change set row of a bulk edge write (op with edge) in tx; nothing
+// outside a bulk.
+func recordBulkEdge(ctx context.Context, tx pgx.Tx, orgID, op string, edge *Relationship) error {
+	bulk := bulkEdgeFrom(ctx)
+	if bulk == nil {
+		return nil
+	}
+	if err := jobs.MarkChangeTx(ctx, tx, orgID, bulk.Marks); err != nil {
+		return err
+	}
+	jobID, ok := jobs.ChangeSetFrom(ctx)
+	if !ok || bulk.EntityID == "" {
+		return nil
+	}
+	value, err := json.Marshal(edge)
+	if err != nil {
+		return fmt.Errorf("encode bulk change set: %w", err)
+	}
+	change := jobs.Change{JobID: jobID, EntityType: jobs.EntityCI, EntityID: bulk.EntityID, Op: op, FieldName: ChangeFieldRelationship}
+	if op == jobs.OpRemove {
+		change.OldValue = value
+	} else {
+		change.NewValue = value
+	}
+	// The scope of the row is the CI's.
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ci
+		WHERE id = $1 AND organization_id = $2`, bulk.EntityID, orgID).Scan(&change.ClientID, &change.SiteID); err != nil {
+		return fmt.Errorf("read the CI of the bulk change set: %w", err)
+	}
+	return jobs.RecordChangeTx(ctx, tx, orgID, []jobs.Change{change})
 }
 
 // lockCardinalityEnds locks the CI rows whose edges of the type the
@@ -584,12 +707,22 @@ func (r *PGRepository) DeleteWithPolicy(ctx context.Context, orgID, id string, o
 		if source == "discovery" && !opts.Force {
 			return ErrForceRequired
 		}
+		// The revert of add_relationship deletes the edge only as the bulk
+		// created it (WP-783).
+		if bulk := bulkEdgeFrom(ctx); bulk != nil && bulk.Expect != nil && !SameEdge(bulk.Expect, edge) {
+			return ErrEdgeChanged
+		}
 		if _, err = tx.Exec(ctx, `DELETE FROM ci_relationship WHERE id = $1 AND organization_id = $2`, id, orgID); err != nil {
 			return fmt.Errorf("delete relationship: %w", err)
 		}
 		if source != "discovery" {
 			if recErr := RecordChangeTx(ctx, tx, &ChangeRecord{Kind: ChangeRemoved, Before: edge}); recErr != nil {
 				return recErr
+			}
+			// The change set of remove_relationship and the marks of the
+			// revert of add_relationship (WP-783).
+			if bulkErr := recordBulkEdge(ctx, tx, orgID, jobs.OpRemove, edge); bulkErr != nil {
+				return bulkErr
 			}
 			return r.recordEvent(ctx, tx, events.RelationshipRemoved, edge)
 		}

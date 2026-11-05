@@ -20,6 +20,49 @@ type Handler struct {
 	permissions permission.Repository
 	jobs        ReindexJobs
 	queue       ReindexQueue
+	features    FeatureChecker
+	modules     func(key string) bool
+}
+
+// FeatureChecker reports whether a feature is enabled for an organization;
+// *entitlement.Service implements it.
+type FeatureChecker interface {
+	IsEnabled(ctx context.Context, orgID, featureKey string) bool
+}
+
+// WithGates sets the entitlement and the module check of the hits (SRC-02,
+// WP-788): a hit of asset, reservation, document or ticket needs its
+// feature and its module (HitAllowed), the holder fields assets_basic.
+// Without them these hits are dropped (fail-closed).
+func (h *Handler) WithGates(features FeatureChecker, modules func(key string) bool) *Handler {
+	h.features, h.modules = features, modules
+	return h
+}
+
+// featureCheck returns the feature check of the organization for one
+// request, each feature asked once; nil without entitlements.
+func (h *Handler) featureCheck(ctx context.Context, orgID string) func(key string) bool {
+	if h.features == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	return func(key string) bool {
+		on, ok := seen[key]
+		if !ok {
+			on = h.features.IsEnabled(ctx, orgID, key)
+			seen[key] = on
+		}
+		return on
+	}
+}
+
+// moduleCheck returns the module check of the hits: never without one
+// (fail-closed).
+func (h *Handler) moduleCheck() func(key string) bool {
+	if h.modules == nil {
+		return func(string) bool { return false }
+	}
+	return h.modules
 }
 
 func NewHandler(backend Backend, permissions permission.Repository) *Handler {
@@ -113,8 +156,10 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	// The hits match and show the fields the caller may read (RBA-07,
 	// WP-266), the addresses and MACs of the interfaces with ipam:read
-	// (WP-308); a policy that cannot be resolved answers 500 (fail-closed).
-	if err := ApplyPrincipal(r.Context(), &q, func(perm string) bool { return h.allowed(r.Context(), t, perm) }); err != nil {
+	// (WP-308), the users with user:read, their holders with assets_basic
+	// (WP-788); a policy that cannot be resolved answers 500 (fail-closed).
+	enabled := h.featureCheck(r.Context(), t.OrganizationID)
+	if err := ApplyPrincipal(r.Context(), &q, func(perm string) bool { return h.allowed(r.Context(), t, perm) }, enabled); err != nil {
 		slog.ErrorContext(r.Context(), "search: field permissions could not be resolved", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the field permissions could not be resolved")
 		return
@@ -131,7 +176,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	// the next page continues at the backend offset, not after the hits
 	// left over (API-02).
 	more := res.HasMore
-	res.Data = h.filterAllowed(r.Context(), t, res.Data)
+	res.Data = h.filterAllowed(r.Context(), t, res.Data, enabled)
 	res.Total = len(res.Data)
 	res.HasMore = more
 	if more {
@@ -181,11 +226,12 @@ func (h *Handler) Reindex(w http.ResponseWriter, r *http.Request) {
 }
 
 // filterAllowed keeps the hits whose entity type the caller may read
-// (SRC-01). It fails closed: without a permission repository or a user every
-// hit is dropped, as are hits of types without a read permission. The
-// result is never nil: an empty page answers "data": [] like every list,
-// also when the backend found nothing (API-02, F-401).
-func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit) []Hit {
+// (SRC-01) and whose feature and module are enabled (HitAllowed, WP-788).
+// It fails closed: without a permission repository or a user every hit is
+// dropped, as are hits of types without a read permission. The result is
+// never nil: an empty page answers "data": [] like every list, also when
+// the backend found nothing (API-02, F-401).
+func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits []Hit, enabled func(key string) bool) []Hit {
 	out := make([]Hit, 0, len(hits))
 	if h.permissions == nil || t.UserID == "" {
 		return out
@@ -194,7 +240,7 @@ func (h *Handler) filterAllowed(ctx context.Context, t tenant.TenantInfo, hits [
 	for i := range hits {
 		hit := &hits[i]
 		key, ok := ReadPermission[hit.EntityType]
-		if !ok {
+		if !ok || !HitAllowed(hit.EntityType, enabled, h.moduleCheck()) {
 			continue
 		}
 		granted, seen := allowed[key]

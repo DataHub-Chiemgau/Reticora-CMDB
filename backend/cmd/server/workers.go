@@ -24,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -341,7 +342,9 @@ type systemJobDeps struct {
 	// notifier bundles the digests (notify.digest); nil: no digest run.
 	notifier *notify.Notifier
 	// blobs holds the document content the soft-delete run deletes with
-	// the documents (WP-732); nil keeps documents with stored content.
+	// the documents (WP-732) and the staged rows of the API imports
+	// (import.staging.sweep, WP-303); nil keeps documents with stored
+	// content and registers no staging sweep.
 	blobs blob.Store
 }
 
@@ -440,6 +443,12 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		}
 		// Unconfirmed and suppressed discovery edges are removed (TOP-02).
 		systemJobs = append(systemJobs, relationship.NewCleanup(pool).Schedule())
+		// Staged rows of API imports whose job ended without a run
+		// (cancelled before the start, failed by the reaper) are deleted
+		// every hour (IMP-IO-01, WP-303); with the blob storage only.
+		if d.blobs != nil {
+			systemJobs = append(systemJobs, importer.NewStagingSweep(pool, d.blobs).Schedule())
+		}
 		// Weekly CI snapshots, the base of the replay at a point in time
 		// (AUD-08, WP-312); asset snapshots only with the module inventory
 		// (WP-795), like the reservation sweeper.

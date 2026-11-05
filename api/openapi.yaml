@@ -2959,18 +2959,33 @@ paths:
       summary: Revert a succeeded job where the revert is defined (E-25)
       description: >-
         The revert is defined for ci.merge (the unmerge within 30 days,
-        CI-12, answered 200) and for the bulk kind ci.bulk of the CI field
-        operations set_status, set_fields and set_location (BLK-02, WP-305)
-        within 24 hours of the end of the bulk job. A bulk revert answers 202
-        with the revert job bulk.revert (Location: its job), which writes
-        the old values back per CI as a manual change, leaves every field
+        CI-12, answered 200) and for the bulk kind ci.bulk (BLK-02, WP-305,
+        WP-783) within 24 hours of the end of the bulk job. A bulk revert
+        answers 202 with the revert job bulk.revert (Location: its job),
+        which undoes the change set of the bulk per CI, leaves everything
         changed since the bulk (reported as skipped in its result) and
         records the revert on the bulk job when it ends; a repeated POST
         while it runs answers the same revert job. It needs ci:write, also
-        from the creator of the bulk job. Every other kind (bulk.revert and
-        export among them), a bulk job of another action, a bulk job without
-        change set rows the caller sees and a job that did not succeed are
-        409. A revert is recorded on the job (reverted_at, reverted_by); a
+        from the creator of the bulk job; each CI needs the right of the
+        original action (relationship:write, lifecycle:transition, field
+        permissions), otherwise it is skipped with 403. The revert per bulk
+        action: set_status, set_fields, set_location and set_owner write the
+        old values back as a manual change; add_tags and remove_tags remove
+        or add back each tag the bulk actually changed through the tag path
+        (a tag deleted from the catalog or changed since is skipped);
+        archive sets the old status and removes the tag archived in one
+        write; add_relationship deletes the edge it created when it is
+        unchanged; remove_relationship creates the deleted edge again with
+        its type, ends and attributes (an equal edge created since is
+        skipped with 409); lifecycle_transition runs the transition back
+        with the guards of the model (a missing transition, a guard or
+        another current state is skipped with its problem type, such as
+        urn:reticora:problem:lifecycle-guard); change_template restores the
+        template list and removes the defaults the migration filled unless
+        they changed since. export is not revertible: its export job has no
+        revert. Every other kind (bulk.revert and export among them), a bulk
+        job without change set rows the caller sees and a job that did not
+        succeed are 409. A revert is recorded on the job (reverted_at, reverted_by); a
         further revert is 409 "the job is already reverted" (F-329). The
         revert of ci.merge makes the merged CI active again: with max_cis
         reached it is 403 entitlement-limit like POST /cis/{id}/unmerge and
@@ -19545,23 +19560,111 @@ paths:
   /api/v1/assets/bulk:
     x-phase: P2
     x-feature: assets_basic
-    x-status: planned
     post:
       operationId: bulkAssets
       tags: [Assets]
-      summary: Run a bulk operation on assets
-      description: Planned (E-38); WP-781 implements the operation.
+      summary: Bulk change of up to 500 assets (API-08, BLK-01, BLK-02)
+      description: >-
+        Applies the action to every asset in ids (WP-781): set_status (the
+        default when action is absent; the target in status: in_stock,
+        assigned, maintenance, retired, disposed or lost), set_fields,
+        set_location, add_tags, remove_tags, assign, lifecycle_transition
+        or archive, their parameters in params. Below 100 ids the answer is
+        the partial failure report (200): every id with ok or its error,
+        the HTTP status the single operation would have answered, its
+        problem type and the fields it names. From 100 ids on the change
+        runs as a job of kind asset.bulk: 202 with the job, whose result is
+        the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an
+        unknown action, an invalid status, a status outside set_status and
+        unknown, missing or invalid parameters are 422 for the whole
+        request (params.<name>) before any change, so is a tag key the
+        catalog lacks (params.tags). The action export is unknown (422 on
+        action) until the asset export is wired (WP-782). Requires
+        asset:write; archive also lifecycle:transition, set_location
+        asset:move, assign assignment:write and lifecycle_transition
+        lifecycle:transition: without it the whole request is 403 before
+        any change. An action whose service this deployment lacks (no
+        database) is 503 for the whole request. An asset outside the scope
+        of the caller is 404 for its id. An id that occurs more than once
+        counts once, also in another letter case; the report names it in
+        its canonical lower-case form; an id that is no UUID is 400 for
+        that id.
+        Every action runs per asset through the path of its single
+        operation, without writes of its own. set_status and set_fields go
+        through the write path of PATCH /api/v1/assets/{id} (field
+        permissions: 403 with fields; a taken inventory_no, barcode or
+        rfid_tag 409 with the field; invalid values 422 or 400 on the
+        field) with If-Match "*". set_fields takes a merge patch of
+        UpdateAssetRequest without status, location_id, lifecycle_state,
+        tags and the holder cache. set_location books a stock movement of
+        type transfer per asset (as POST /api/v1/stock-movements; a target
+        location the caller cannot see is 422 on to_location_id); linked
+        CIs follow. add_tags and remove_tags write the catalog tags like
+        PUT /api/v1/assets/{id}/tags with the version read (a tag change
+        in between is 409); an asset with nothing to change is ok without
+        a write. assign assigns like POST /api/v1/assets/{id}/assign; an
+        asset with a holder is 409 (asset-assigned). lifecycle_transition
+        runs the transition of POST /api/v1/assets/{id}/lifecycle-transitions
+        with the system guards: a failed guard is 422 of type
+        urn:reticora:problem:lifecycle-guard with the violated fields and
+        the missing references, a missing edge 422
+        urn:reticora:problem:invalid-transition, another from_state 409.
+        archive sets the system tag archived and enters retired in one
+        transaction; a state from which retired is not reachable is 422
+        invalid-transition and the asset stays unchanged; an asset in
+        retired with the tag is ok without a change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetBulkRequest'
       responses:
+        '200':
+          description: The report per id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResult'
         '202':
-          description: Accepted; the job runs in the background, the Location header names it. The schemas come with WP-781.
+          description: The bulk change runs as a job asset.bulk (Location /api/v1/jobs/{id}).
+          headers:
+            Location:
+              description: The job asset.bulk.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status, kind]
+                properties:
+                  job_id: { type: string }
+                  status: { type: string }
+                  kind: { type: string }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The right of the action is missing (lifecycle:transition,
+            asset:move, assignment:write).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            More than 500 ids, an unknown action or status, a status outside
+            set_status, unknown, missing or invalid parameters
+            (params.<name>), a tag the catalog lacks (params.tags).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '503':
+          description: The service of the action is not available in this deployment (no database).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
 
   /api/v1/assets/{id}/assign:
     x-phase: P2
@@ -21223,6 +21326,32 @@ paths:
         import-file-too-complex). Progress and status are in the job
         (/api/v1/jobs/{id}), which a holder of import:run cancels while it
         runs. Without job service or blob storage 503. Requires import:run.
+
+
+        API import (WP-303): instead of `document_id` the body carries the
+        JSON rows themselves (`rows`, application/json, no NDJSON): 1 to
+        5000 objects of column name and scalar (string, number, boolean,
+        null) with a profile of format json. `rows` and `document_id`
+        together or neither, an empty `rows`, more than 5000 rows (E-49) or
+        a profile of another format are 422; an object or array as value
+        is a row error of the report, not a 422. The body is at most 16 MiB
+        (413). The rows pass the same pipeline as a file (mapping,
+        validation, field permissions, identity, write decision with source
+        import, max_cis and identity locks); they are staged in the blob
+        storage and the job parameters name only the staging object, the
+        number and the SHA-256 of the rows, never a value. Only the
+        principal who started an API run reads it and its report (404 for
+        everyone else). Without blob storage 503.
+
+
+        Double imports are prevented in two stages: the HTTP idempotency
+        (`Idempotency-Key`, 24 hours) replays the first 202 with
+        `Idempotency-Replayed: true`; beyond it the job carries a key
+        derived from principal, header value and body hash, so a repeated
+        start returns the first job with 202 and no second run, also when
+        the idempotency cache is down. The header value is not stored.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -21231,9 +21360,15 @@ paths:
               $ref: '#/components/schemas/ImportStartRequest'
       responses:
         '202':
-          description: The import runs as a job; the Location header names it.
+          description: >-
+            The import runs as a job; the Location header names it. A
+            repeated start with the same Idempotency-Key and body returns the
+            first job.
           headers:
             Location:
+              schema: { type: string }
+            Idempotency-Replayed:
+              description: true when the answer is the stored one of the first request.
               schema: { type: string }
           content:
             application/json:
@@ -21248,9 +21383,28 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: >-
+            The document version is not scanned clean (document-pending-scan,
+            document-quarantined), the Idempotency-Key was used with another
+            body (urn:reticora:problem:idempotency-mismatch) or a request
+            with the key is still in progress.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '413':
+          description: Body larger than 16 MiB (16777216 bytes)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: >-
+            A field is missing or invalid (rows and document_id together or
+            neither, an empty rows, more than 5000 rows, a row that is no
+            object) or the file or the profile format is refused
+            (import-format-unsupported, import-file-too-large).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -21311,7 +21465,9 @@ paths:
         mode, status, progress, the counters of the result and the error
         code of a failed run. A job of another kind, one outside the
         caller's scope and one whose document the caller does not see are
-        404. The runs are listed by the job list with kind=import.run.
+        404. A run over JSON rows (source api, WP-303) has no document: only
+        the principal who started it reads it and its report, everyone else
+        gets 404. The runs are listed by the job list with kind=import.run.
         Without job service 503. Requires import:run.
       responses:
         '200':
@@ -24882,6 +25038,55 @@ components:
               message:
                 type: object
                 additionalProperties: { type: string }
+    AssetBulkRequest:
+      type: object
+      description: >-
+        Body of POST /api/v1/assets/bulk (WP-781). status only with
+        set_status; params by action: set_fields {fields}, set_location
+        {to_location_id}, add_tags and remove_tags {tags}, assign
+        {assigned_user_id or assigned_team_id, due_at, notes},
+        lifecycle_transition {to_state, from_state, context, reason};
+        set_status and archive take none.
+      required: [ids]
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          enum: [set_status, set_fields, set_location, add_tags, remove_tags, assign, lifecycle_transition, archive]
+          default: set_status
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string }
+        status:
+          type: string
+          enum: [in_stock, assigned, maintenance, retired, disposed, lost]
+        params:
+          type: object
+          additionalProperties: false
+          properties:
+            fields:
+              type: object
+              minProperties: 1
+              description: >-
+                Merge patch of UpdateAssetRequest without status,
+                location_id, lifecycle_state, tags and the holder cache.
+            to_location_id: { type: string, format: uuid }
+            tags:
+              type: array
+              minItems: 1
+              items: { type: string }
+            assigned_user_id: { type: string, format: uuid }
+            assigned_team_id: { type: string, format: uuid }
+            due_at: { type: string, format: date-time }
+            notes: { type: string }
+            to_state: { type: string }
+            from_state: { type: string }
+            context:
+              type: object
+              additionalProperties: true
+            reason: { type: string }
     CIBulkRequest:
       description: >-
         Body of POST /api/v1/cis/bulk (WP-304): one variant per action.
@@ -31052,6 +31257,14 @@ components:
                 $ref: '#/components/schemas/ImportProfile'
 
     ImportStartRequest:
+      description: >-
+        The start of an import: a document (ImportStartDocumentRequest) or
+        the JSON rows themselves (ImportStartRowsRequest, WP-303).
+      oneOf:
+        - $ref: '#/components/schemas/ImportStartDocumentRequest'
+        - $ref: '#/components/schemas/ImportStartRowsRequest'
+
+    ImportStartDocumentRequest:
       type: object
       required: [document_id, profile_id]
       additionalProperties: false
@@ -31060,6 +31273,34 @@ components:
           type: string
         profile_id:
           type: string
+        mode:
+          type: string
+          enum: [create_missing, update_existing, both]
+          description: Defaults to the mode of the profile.
+        dry_run:
+          type: boolean
+          default: false
+
+    ImportStartRowsRequest:
+      type: object
+      required: [rows, profile_id]
+      additionalProperties: false
+      properties:
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 5000
+          description: >-
+            The rows, each an object of column name and scalar; the profile
+            (format json) maps the column names. An object or array as value
+            is a row error (import-row-nested-value) of the report.
+          items:
+            type: object
+            additionalProperties:
+              type: [string, number, boolean, object, array, 'null']
+        profile_id:
+          type: string
+          description: A profile of format json.
         mode:
           type: string
           enum: [create_missing, update_existing, both]
@@ -31111,7 +31352,7 @@ components:
 
     ImportRun:
       type: object
-      required: [id, kind, status, progress, document_id, document_version, profile_id, mode, dry_run,
+      required: [id, kind, status, progress, source, document_id, document_version, row_count, profile_id, mode, dry_run,
         sheet, rows_total, rows_failed, error_code, error, cancellable, created_at, started_at, finished_at]
       properties:
         id: { type: string }
@@ -31125,8 +31366,19 @@ components:
           type: integer
           minimum: 0
           maximum: 100
-        document_id: { type: string }
-        document_version: { type: integer }
+        source:
+          type: string
+          enum: [document, api]
+          description: A document or the JSON rows of the request (api, WP-303).
+        document_id:
+          type: [string, 'null']
+          description: The document; null for a run over JSON rows.
+        document_version:
+          type: [integer, 'null']
+          description: The document version; null for a run over JSON rows.
+        row_count:
+          type: [integer, 'null']
+          description: The JSON rows of the request; null for a run of a document.
         profile_id: { type: string }
         mode:
           type: string
