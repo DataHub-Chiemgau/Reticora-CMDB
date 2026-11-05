@@ -4575,29 +4575,6 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
-  /api/v1/assets/{id}/label.svg:
-    x-phase: P2
-    x-feature: barcode
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      - name: base_url
-        in: query
-        schema: { type: string }
-        description: CMDB base URL for the deep link on the label.
-    get:
-      operationId: getAssetLabel
-      tags: [Assets]
-      summary: Render the printable direct-access label (SVG) for an asset
-      responses:
-        '200':
-          description: SVG label
-          content:
-            image/svg+xml: {}
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /api/v1/asset-locations:
     x-phase: P4
     post:
@@ -19499,23 +19476,65 @@ paths:
   /api/v1/assets/{id}/label:
     x-phase: P2
     x-feature: barcode
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAssetLabel
       tags: [Assets]
-      summary: Render the label of an asset
-      description: Planned (E-38); WP-763 implements the operation.
+      summary: Render the label of an asset (INV-03)
+      description: >-
+        Renders the printable label of the asset (E-52). The barcode
+        content is the inventory number, without one (or without the
+        right to read it) the URN `urn:reticora:asset:<uuid>`; both
+        resolve through `GET /api/v1/labels/lookup`. The label carries the
+        content as Code128 (where it is printable ASCII and fits the label)
+        and as QR code, the name and manufacturer/model as text (as the
+        caller's field permissions allow), and no host or deep link.
+        `svg` is the 50×25 mm asset label, `png` the two symbols without
+        text, `pdf` the label in a template. The path needs the features
+        barcode and assets_basic (403 feature-not-entitled) and the
+        permission asset:read. Replaces `label.svg` (E-38, without alias).
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: Output format; an unknown value is 422.
+          schema:
+            type: string
+            enum: [svg, png, pdf]
+            default: svg
+        - name: template
+          in: query
+          required: false
+          description: >-
+            PDF template (format pdf only): `asset_50x25` (50×25 mm),
+            `bin_100x50` (100×50 mm), each one label per page, or `a4_24`
+            (A4 sheet with 24 labels). An unknown value is 422 for every
+            format.
+          schema:
+            type: string
+            enum: [asset_50x25, bin_100x50, a4_24]
+            default: asset_50x25
       responses:
         '200':
-          description: Render the label of an asset. The response schema comes with WP-763.
+          description: The label
+          content:
+            image/svg+xml:
+              schema: { type: string }
+            image/png:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/FeatureNotEntitled'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/assets/{id}/as-of:
     x-phase: P2

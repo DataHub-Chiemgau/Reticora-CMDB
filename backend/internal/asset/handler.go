@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -83,9 +84,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/assets/{id}", h.Get)
 	r.Patch("/api/v1/assets/{id}", h.Update)
 	r.Delete("/api/v1/assets/{id}", h.Delete)
-	// Direct-access label (spec §13): printable SVG label with asset tag,
-	// barcode/RFID marker and CMDB deep link.
-	r.Get("/api/v1/assets/{id}/label.svg", h.Label)
+	// The label of the asset (INV-03, WP-849, E-52): Code128 and QR as
+	// SVG, PNG or PDF; label.svg is gone without an alias (E-38).
+	r.Get("/api/v1/assets/{id}/label", h.Label)
 	// Asset↔CI links (AST-04, WP-272); the CIs of an asset are listed by
 	// GET /api/v1/cis?filter[asset_id]=.
 	r.Post("/api/v1/assets/{id}/cis", h.LinkCI)
@@ -680,30 +681,88 @@ func normalizedValue(raw json.RawMessage) []byte {
 	}
 }
 
-// Label handles GET /api/v1/assets/{id}/label.svg — renders the printable
-// direct-access label for the asset.
+// Label handles GET /api/v1/assets/{id}/label?format=svg|png|pdf&template=
+// (INV-03, WP-849, E-52): the label carries the inventory number, without
+// one the URN of the asset, in Code128 and QR. format defaults to svg;
+// template applies to pdf only (default asset_50x25). An unknown format
+// or template is 422. The label shows only what the field policy lets
+// the caller read; it carries no host and no deep link.
 func (h *Handler) Label(w http.ResponseWriter, r *http.Request) {
-	t := tenant.FromContext(r.Context())
-	if t.OrganizationID == "" {
-		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+	orgID, policy, ok := requestContext(w, r)
+	if !ok {
 		return
 	}
 	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
+	query := r.URL.Query()
+	format := query.Get("format")
+	if format == "" {
+		format = labels.FormatSVG
+	}
+	contentType, err := labels.ContentType(format)
+	if err != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "format", Message: "must be svg, png or pdf", Status: http.StatusUnprocessableEntity})
+		return
+	}
+	template := query.Get("template")
+	if template == "" {
+		template = labels.TemplateAsset50x25
+	}
+	if _, layoutErr := labels.Layout(template); layoutErr != nil {
+		api.WriteFieldError(w, &api.FieldError{Field: "template", Message: "must be asset_50x25, bin_100x50 or a4_24", Status: http.StatusUnprocessableEntity})
+		return
+	}
+	item, err := h.repo.GetByID(r.Context(), orgID, id)
 	if err != nil {
 		writeAssetError(w, r, err)
 		return
 	}
-	baseURL := r.URL.Query().Get("base_url")
-	if baseURL == "" {
-		baseURL = "https://" + r.Host
+	visible, err := labelFields(policy, item)
+	if err != nil {
+		slog.WarnContext(r.Context(), "asset label projection failed", "error", err)
+		api.WriteRepoError(w, err)
+		return
 	}
-	w.Header().Set("Content-Type", "image/svg+xml")
+	subject := LabelSubject(visible)
+	body, err := labels.Render(&subject, format, template)
+	if err != nil {
+		slog.WarnContext(r.Context(), "asset label rendering failed", "error", err)
+		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the label could not be rendered")
+		return
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `inline; filename="asset-`+item.ID+`-label.`+format+`"`)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(RenderLabelSVG(item, baseURL)))
+	_, _ = w.Write(body)
+}
+
+// labelFields returns the fields of the asset the label prints as the
+// field policy lets the caller read them (RBA-07): an unreadable field
+// is empty, an unreadable inventory number makes the URN the code.
+func labelFields(policy *permission.FieldPolicy, a *Asset) (*Asset, error) {
+	if !permission.NeedsProjection(policy, permission.KindAsset) {
+		return a, nil
+	}
+	projected, err := project(policy, a)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(projected)
+	if err != nil {
+		return nil, err
+	}
+	var fields struct {
+		AssetTag     string `json:"inventory_no"`
+		Name         string `json:"name"`
+		Manufacturer string `json:"manufacturer"`
+		Model        string `json:"model"`
+	}
+	if decodeErr := json.Unmarshal(raw, &fields); decodeErr != nil {
+		return nil, decodeErr
+	}
+	return &Asset{ID: a.ID, AssetTag: fields.AssetTag, Name: fields.Name, Manufacturer: fields.Manufacturer, Model: fields.Model}, nil
 }
 
 // Delete handles DELETE /api/v1/assets/{id}

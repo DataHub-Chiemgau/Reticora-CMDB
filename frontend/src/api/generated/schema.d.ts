@@ -2094,29 +2094,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/assets/{id}/label.svg': {
-    parameters: {
-      query?: {
-        /** @description CMDB base URL for the deep link on the label. */
-        base_url?: string;
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /** Render the printable direct-access label (SVG) for an asset */
-    get: operations['getAssetLabel'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/asset-locations': {
     parameters: {
       query?: never;
@@ -8400,8 +8377,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Render the label of an asset
-     * @description Planned (E-38); WP-763 implements the operation.
+     * Render the label of an asset (INV-03)
+     * @description Renders the printable label of the asset (E-52). The barcode content is the inventory number, without one (or without the right to read it) the URN `urn:reticora:asset:<uuid>`; both resolve through `GET /api/v1/labels/lookup`. The label carries the content as Code128 (where it is printable ASCII and fits the label) and as QR code, the name and manufacturer/model as text (as the caller's field permissions allow), and no host or deep link. `svg` is the 50×25 mm asset label, `png` the two symbols without text, `pdf` the label in a template. The path needs the features barcode and assets_basic (403 feature-not-entitled) and the permission asset:read. Replaces `label.svg` (E-38, without alias).
      */
     get: operations['getAssetLabel'];
     put?: never;
@@ -21759,34 +21736,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-    };
-  };
-  getAssetLabel: {
-    parameters: {
-      query?: {
-        /** @description CMDB base URL for the deep link on the label. */
-        base_url?: string;
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description SVG label */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'image/svg+xml': unknown;
-        };
-      };
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
     };
   };
   recordAssetLocation: {
@@ -39289,7 +39238,12 @@ export interface operations {
   };
   getAssetLabel: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Output format; an unknown value is 422. */
+        format?: 'svg' | 'png' | 'pdf';
+        /** @description PDF template (format pdf only): `asset_50x25` (50×25 mm), `bin_100x50` (100×50 mm), each one label per page, or `a4_24` (A4 sheet with 24 labels). An unknown value is 422 for every format. */
+        template?: 'asset_50x25' | 'bin_100x50' | 'a4_24';
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -39299,16 +39253,22 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Render the label of an asset. The response schema comes with WP-763. */
+      /** @description The label */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'image/svg+xml': string;
+          'image/png': string;
+          'application/pdf': string;
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['FeatureNotEntitled'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getAssetAsOf: {

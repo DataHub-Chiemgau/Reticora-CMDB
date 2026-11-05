@@ -90,7 +90,7 @@ GET /api/v1/api-keys apikey:manage
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/children asset:read
-GET /api/v1/assets/{id}/label.svg asset:read
+GET /api/v1/assets/{id}/label asset:read
 GET /api/v1/assets/{id}/lifecycle-transitions asset:read
 GET /api/v1/assets/{id}/locations asset:read
 GET /api/v1/assets/{id}/movements asset:read
