@@ -1428,14 +1428,13 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List assignments */
+    /**
+     * List assignments
+     * @description Read only (E-38, WP-746): assignments are written through `POST /api/v1/assets/{id}/assign`, `…/return` and `…/transfer`; the assignments of one asset are listed with `asset_id`.
+     */
     get: operations['listAssignments'];
     put?: never;
-    /**
-     * Create an assignment
-     * @description Assigns the asset of `asset_id`, or the asset of the CI of `ci_id` (`ci.asset_id`), to the user `assigned_to` through the assignment service (WP-275, until WP-746); `id` is the id of the assignment movement. A CI without asset is 422; an assigned asset 409.
-     */
-    post: operations['createAssignment'];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1456,11 +1455,7 @@ export interface paths {
     get: operations['getAssignment'];
     put?: never;
     post?: never;
-    /**
-     * Delete an assignment
-     * @description Refused with 409 (`https://reticora.io/problems/assignment-append-only`): the history of assignments is append-only (WP-275); return or transfer the asset instead.
-     */
-    delete: operations['deleteAssignment'];
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -4047,52 +4042,6 @@ export interface paths {
     head?: never;
     /** Update a network interface */
     patch: operations['updateNetworkInterface'];
-    trace?: never;
-  };
-  '/api/v1/assignments/{id}/return': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Return an assigned asset or CI
-     * @description Returns the asset of the assignment (its `asset_id`, or the asset of its CI) from the holder of the assignment through the assignment service (WP-275, until WP-746): the movement `return` is booked and the open assignments of the asset are closed, recording the return condition and timestamp. The optional `notes` field overwrites the assignment notes when non-empty. 409 when the assignment is closed or the asset has another holder.
-     */
-    post: operations['returnAssignment'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/v1/assignments/{id}/transfer': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer an assignment to a new assignee
-     * @description Transfers the asset of the assignment from its holder to the user `new_assignee` through the assignment service (WP-275, until WP-746): the open assignments are closed as transferred and a new active assignment is created. 409 when the assignment is closed or the asset has another holder.
-     */
-    post: operations['transferAssignment'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
     trace?: never;
   };
   '/api/v1/cis/{id}/relationships': {
@@ -7284,13 +7233,13 @@ export interface paths {
     };
     /**
      * Manage quantity-based inventory items
-     * @description The planned successor is /api/v1/consumables (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     * @description Alias of GET /api/v1/consumables (E-38, E-40, WP-757): the consumables in the form of a quantity item, stock_level the sum of on_hand over the bins the caller sees, location_id the bin when the article lies in exactly one, attributes empty. The successor is GET /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
      */
     get: operations['listInventoryItems'];
     put?: never;
     /**
      * Manage quantity-based inventory items
-     * @description The planned successor is POST /api/v1/consumables (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     * @description Alias of POST /api/v1/consumables (E-38, E-40, WP-757): creates a consumable; a stock_level > 0 is booked as a receipt into the bin location_id through the movement service in the same transaction. The successor is POST /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
      */
     post: operations['createInventoryItems'];
     delete?: never;
@@ -7308,21 +7257,24 @@ export interface paths {
     };
     /**
      * Read, update or delete a quantity inventory item
-     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757): alias of GET /api/v1/consumables/{id} in the form of a quantity item (stock_level the sum of on_hand over the visible bins, location_id the only bin). The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     get: operations['getInventoryItemsId'];
     put?: never;
     post?: never;
     /**
      * Read, update or delete a quantity inventory item
-     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757): alias of DELETE /api/v1/consumables/{id}. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     delete: operations['deleteInventoryItemsId'];
     options?: never;
     head?: never;
     /**
      * Read, update or delete a quantity inventory item
-     * @description The planned successor is /api/v1/consumables/{id} (E-38); the deprecation follows once the successor is implemented (WP-283, WP-757).
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757): alias of PATCH /api/v1/consumables/{id} for name, category, unit, min_level and notes. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     patch: operations['updateInventoryItemsId'];
     trace?: never;
@@ -7552,10 +7504,16 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Manage inventory reservations */
+    /**
+     * List reservations
+     * @description The reservations of assets and quantity items visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
+     */
     get: operations['listReservations'];
     put?: never;
-    /** Manage inventory reservations */
+    /**
+     * Reserve an asset or a quantity of an item
+     * @description Reserves the asset `asset_id` or a quantity of `quantity_item_id`. An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     */
     post: operations['createReservations'];
     delete?: never;
     options?: never;
@@ -7567,7 +7525,10 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     /** Read a reservation */
@@ -7584,12 +7545,18 @@ export interface paths {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     get?: never;
     put?: never;
-    /** Release a reservation */
+    /**
+     * Release a reservation
+     * @description Sets the active reservation to `released` after locking its asset and itself (WP-277); the movement `release` and `reservation.released` are written in the same transaction.
+     */
     post: operations['createReservationsIdRelease'];
     delete?: never;
     options?: never;
@@ -7672,13 +7639,13 @@ export interface paths {
     };
     /**
      * List the movements of the ledger (append-only)
-     * @description The movements of assets, consumables and quantity items under the caller's scope, newest first on (occurred_at, id) with a keyset cursor (WP-274). location_id matches the source or the target; occurred_from and occurred_to bound occurred_at inclusively.
+     * @description The movements of assets and consumables under the caller's scope, newest first on (occurred_at, id) with a keyset cursor (WP-274). location_id matches the source or the target; occurred_from and occurred_to bound occurred_at inclusively. quantity_item_id is the deprecated alias of consumable_id (E-40, WP-757).
      */
     get: operations['listStockMovements'];
     put?: never;
     /**
      * Book a physical movement
-     * @description Books through the movement service (WP-274, WP-756) in one transaction. A consumable (consumable_id) books receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) or transfer (two different bins) with quantity > 0 on its stock per bin; the consumable and then its stock rows in location order are locked, so opposite transfers do not deadlock and no bin drops below zero. A quantity item (until the merge into consumable, E-40) books the same types on its stock level. An asset moves only by transfer to to_location_id without quantity (E-142), which also needs asset:move. The references are checked and stock.movement is written to the outbox in the same transaction; any error rolls back the whole booking.
+     * @description Books through the movement service (WP-274, WP-756) in one transaction. A consumable (consumable_id) books receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) or transfer (two different bins) with quantity > 0 on its stock per bin; the consumable and then its stock rows in location order are locked, so opposite transfers do not deadlock and no bin drops below zero. quantity_item_id is the deprecated alias of consumable_id since the merge of quantity_item into consumable with the same ids (E-40, WP-757). An asset moves only by transfer to to_location_id without quantity (E-142), which also needs asset:move. The references are checked and stock.movement is written to the outbox in the same transaction; any error rolls back the whole booking.
      */
     post: operations['createStockMovements'];
     delete?: never;
@@ -7696,7 +7663,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Convert one unit of a quantity item into a serialized asset */
+    /**
+     * Convert one unit of a quantity item into a serialized asset
+     * @description Retrieves one unit of the article (a consumable, E-40, WP-757) from the bin location_id and creates the serialized asset in that bin, both in one transaction through the movement service (WP-274); location_id may be left out when the article lies in exactly one bin. Any error rolls back asset and movement. The operation has no successor and goes away with the sunset of inventory/items (E-38); until then it is not deprecated on its own.
+     */
     post: operations['convertInventoryItemToAsset'];
     delete?: never;
     options?: never;
@@ -7715,7 +7685,7 @@ export interface paths {
     put?: never;
     /**
      * Execute a structured filter spec (saved-view DSL) against CIs or assets
-     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. At most 10 levels and 100 nodes. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value or where.value[0], or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query need asset:read as well. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
+     * @description The flat fields of the filter spec are AND-ed with the filter AST in where (SRC-03): groups and, or and not nest comparisons of a field with eq, ne, lt, lte, gt, gte, like (* as wildcard), in, exists or, for number and time fields, between (a list of two values, inclusive). Fields are the whitelisted columns of the entity kind (for assets also the AST-01 columns manufacturer, model, cost_center, currency, supplier_id, contract_id, owner_user_id and owner_team_id), its dynamic attributes (attributes.<key>), its tags (tags with has_any or has_all and a list of tag keys of the tag catalog; the flat tags mean has_all) and, for CIs, the fields of the linked asset (asset.<field>) and its custom fields (asset.attributes.<key>). An attribute (also of the flat attributes, also a computed one) must have a definition of the organization or the system for the queried types (ci_type, else every type): an unknown attribute is 422, one that is not searchable 400 with a hint, one searchable with different data types 400 with the hint to give ci_type; it compares by the data type of its definition. An unknown tag key is 422. The node related (FilterRelated, SRC-04, CIs only; 422 for assets) matches the CIs that reach, over at most max_depth (1 to 5, default 1) relationships of rel_types (keys of relationship_type; unknown 422, none: every type) in direction out (the CI is the source, e.g. a VM runs_on a host), in (the target) or both, a CI that matches its where; the walk passes only through visible CIs that are not deleted. At most 10 levels and 100 nodes, the nodes of the where of related included. The filter AST is $defs/filter of api/rules.schema.json. Every value is checked against its field before any query runs: UUID fields take UUIDs, time and date fields an RFC 3339 time or a date (YYYY-MM-DD), number fields numbers, boolean fields true or false, text fields strings without NUL; each element of in likewise, and exists takes true, false or no value. A dynamic attribute compares by the data type of its definition (a number value may be given as a numeric string). A stored attribute value of another JSON type counts as missing: it matches neither eq, in, between nor an order comparison and, like a missing key, matches ne. The ids in client_id, location_id, upstream_of and downstream_of are UUIDs. A violation is 422 with field naming it (where.<path>, e.g. where.and[1].value, where.value[0] or where.and[1].related.max_depth, or the flat field). Requires search:read and the read permission of the entity kind (ci:read for ci, asset:read for asset); asset.<field> and asset.attributes.<key> of a CI query (also in the where of related) need asset:read as well, related and the flat has_relationship, lacks_relationship, upstream_of and downstream_of relationship:read. An asset query and the asset fields of a CI query need the module inventory and the entitlement assets_basic (403 feature-not-entitled); the route itself is not gated. Saving a view (POST and PATCH /api/v1/saved-views) checks its filter_spec by the same rules (field filter_spec.<field>). The results follow the caller's client, site and team scope. Rebuilding the index (/api/v1/search/reindex) requires search:write. sort and columns present the result of a saved view (VIE-01) and select no rows: sort orders the rows by its keys (NULLs last, then by id; without sort by name), columns adds the value of each listed field to every row (columns of the row, keyed by field name). Both take the fields a saved view takes: the whitelisted columns of the entity kind, attributes.<key> (custom fields for assets) and id; an other field or a direction other than asc or desc is 422 on sort[<i>].field, sort[<i>].dir or columns[<i>], more than 50 keys or columns 422 on sort or columns.
      */
     post: operations['queryByFilterSpec'];
     delete?: never;
@@ -7922,6 +7892,26 @@ export interface paths {
      * @description Removes the value from attributes._instance (MET-14); the definition stays. Requires ci_instance_attribute:manage; a manual write like PATCH /cis/{id} (If-Match, version, history, audit ci.updated, event ci.changed). A key without a definition is 422.
      */
     delete: operations['deleteCIInstanceAttribute'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/labels/lookup': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Resolve a scanned code to its object (INV-03)
+     * @description Resolves `code` in this order: (1) the URN `urn:reticora:<asset|consumable|location>:<uuid>` of a label (E-52), (2) the barcode register of the organization (the barcode of an asset, consumable or location and the inventory number of an asset, unique per organization). The object is read under the caller's client and site scope. The caller needs the read permission of the object's kind (asset:read, stock:read, location:read) and the organization the feature of the kind (assets_basic for assets, stock for consumables; locations are core). An unknown code, a malformed URN, an object outside the caller's scope and a missing permission or feature of the kind all answer 404 alike, without revealing whether the code exists. The path needs the feature barcode (403 feature-not-entitled). A missing or blank `code` is 422.
+     */
+    get: operations['lookupLabelCode'];
+    put?: never;
+    post?: never;
+    delete?: never;
     options?: never;
     head?: never;
     patch?: never;
@@ -8247,7 +8237,7 @@ export interface paths {
     put?: never;
     /**
      * Assign an asset
-     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
+     * @description Assigns the free asset to exactly one holder, a user or a team, in one transaction (AST-02, AST-07, WP-275): the asset is locked, the movement `assignment` is booked in the ledger, the holder cache of the asset (`assigned_user_id`, `assigned_team_id`, `assignment_due_at`) is set and `asset.assigned` is written to the outbox. 409 when the asset has a holder already (`https://reticora.io/problems/asset-assigned`) or an active reservation of another user or of a project (`https://reticora.io/problems/asset-reserved`; the holder's own reservation is consumed, WP-277); 422 for no or two holders and for a user or team of another organization; 404 for an asset outside the caller's scope.
      */
     post: operations['assignAsset'];
     delete?: never;
@@ -8316,7 +8306,7 @@ export interface paths {
     put?: never;
     /**
      * Reserve an asset
-     * @description Planned (E-38); WP-277 implements the operation.
+     * @description Reserves the asset for a user (`assignee_id`) or a project (`project_ref`) until `reserved_until` (AST-06, WP-277). In one transaction the asset is locked in the caller's scope (`SELECT … FOR UPDATE`, update policy of the asset: a principal restricted to clients cannot reserve an organization-wide asset), an active reservation is refused, the movement `reservation` is booked and `reservation.created` is written to the outbox. Without `expires_at` the reservation expires at `reserved_until` (system job `reservation.expire`).
      */
     post: operations['reserveAsset'];
     delete?: never;
@@ -8460,7 +8450,7 @@ export interface paths {
     put?: never;
     /**
      * Convert a reservation into an assignment
-     * @description Planned (E-38); WP-277 implements the operation.
+     * @description Sets the active asset reservation to `consumed` and assigns its asset in the same transaction through the assignment service (WP-275, WP-277): to `assignee_id` or `team_id` of the body, else to the user of the reservation. The movement `assignment` is booked, the holder cache set, and `asset.assigned` and `reservation.converted` are written to the outbox. When the assignment fails, the reservation stays active.
      */
     post: operations['convertReservation'];
     delete?: never;
@@ -10637,11 +10627,12 @@ export interface components {
        */
       face: 'front' | 'rear' | 'both';
     };
-    /** @description One node of the filter AST (SRC-03): exactly one of and, or, not or a comparison (field, op, value). */
+    /** @description One node of the filter AST (SRC-03): exactly one of and, or, not, related or a comparison (field, op, value). It matches $defs/filter of api/rules.schema.json, which also describes the evaluation in SQL; api/rules.conformance.json holds its cases (filter_cases, invalid_filters). */
     FilterExpr: {
       and?: components['schemas']['FilterExpr'][];
       or?: components['schemas']['FilterExpr'][];
       not?: components['schemas']['FilterExpr'];
+      related?: components['schemas']['FilterRelated'];
       /** @description A column of the entity kind, attributes.<key> (a searchable attribute definition, custom fields for assets), tags (with has_any or has_all only) or, for CIs, asset.<field> and asset.attributes.<key> of the linked asset. */
       field?: string;
       /**
@@ -10663,6 +10654,19 @@ export interface components {
         | 'has_all';
       /** @description A value of the field's kind (UUID, RFC 3339 time or date, number, boolean or string; an attribute takes the kind of its definition, a number also as a numeric string); a non-empty list of them for in; a list of exactly two for between; a non-empty list of tag keys for has_any and has_all; true, false or nothing for exists. */
       value?: unknown;
+    };
+    /** @description Relationship node of the filter AST (SRC-04, WP-789), for entity_kind ci only: the CI reaches, over at most max_depth relationships of rel_types, a CI that is not deleted and matches where. With out the CI is the source of each relationship (a VM runs_on a host), with in its target, with both either. The walk passes only through CIs visible to the caller that are not deleted; the structural type contains (parent CI) counts like a stored relationship. Example, VMs on hosts in rack R12 whose warranty ends within 30 days: {"and": [{"field": "ci_type", "op": "eq", "value": "vm"}, {"related": {"direction": "out", "rel_types": ["runs_on", "hosted_on"], "where": {"and": [{"field": "location_id", "op": "eq", "value": "<rack id>"}, {"field": "attributes.warranty_days_left", "op": "lt", "value": 30}]}}}]}. */
+    FilterRelated: {
+      /** @enum {string} */
+      direction: 'out' | 'in' | 'both';
+      /** @description Keys of relationship_type (system and organization types); an unknown key is 422. Absent or empty: every type. */
+      rel_types?: string[];
+      /**
+       * @description Relationships at most between the CI and the matching CI.
+       * @default 1
+       */
+      max_depth: number;
+      where: components['schemas']['FilterExpr'];
     };
     SavedViewSortKey: {
       field: string;
@@ -12949,17 +12953,6 @@ export interface components {
       /** @enum {string} */
       method?: 'touchscreen' | 'drawn' | 'typed';
     };
-    CreateAssignmentRequest: {
-      /** @description Digital handover signature (optional). */
-      signature?: components['schemas']['Signature'];
-      asset_id?: string;
-      ci_id?: string;
-      assigned_to: string;
-      assignment_type?: string;
-      /** Format: date-time */
-      due_date?: string;
-      notes?: string;
-    };
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
     };
@@ -13414,12 +13407,16 @@ export interface components {
       /** Format: uuid */
       site_id?: string;
       /** @enum {string} */
-      item_kind: 'asset' | 'consumable' | 'quantity_item';
+      item_kind: 'asset' | 'consumable';
       /** Format: uuid */
       asset_id?: string;
       /** Format: uuid */
       consumable_id?: string;
-      /** Format: uuid */
+      /**
+       * Format: uuid
+       * @deprecated
+       * @description Never set since the merge into consumable (WP-757).
+       */
       quantity_item_id?: string;
       movement_type: components['schemas']['MovementType'];
       /** Format: uuid */
@@ -13453,15 +13450,22 @@ export interface components {
       /** Format: date-time */
       created_at: string;
     };
-    /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; for a quantity item (quantity_item_id, until the merge into consumable, E-40) the same types with quantity > 0 on its stock level. For an asset (asset_id) only transfer to to_location_id without quantity. */
+    /** @description A physical movement of exactly one object (E-38, E-142, WP-756). For a consumable (consumable_id) receipt (only to_location_id), retrieval (only from_location_id), correction (exactly one of them) and transfer (two different bins) with quantity > 0 on its stock per bin; quantity_item_id is its deprecated alias (E-40, WP-757). For an asset (asset_id) only transfer to to_location_id without quantity. */
     CreateStockMovementRequest: {
-      /** @enum {string} */
+      /**
+       * @description quantity_item is the deprecated alias of consumable (WP-757).
+       * @enum {string}
+       */
       item_kind?: 'asset' | 'consumable' | 'quantity_item';
       /** Format: uuid */
       asset_id?: string;
       /** Format: uuid */
       consumable_id?: string;
-      /** Format: uuid */
+      /**
+       * Format: uuid
+       * @deprecated
+       * @description Deprecated alias of consumable_id (WP-757).
+       */
       quantity_item_id?: string;
       movement_type: components['schemas']['MovementType'];
       /** Format: uuid */
@@ -13479,6 +13483,103 @@ export interface components {
       workflow_run_id?: string;
       /** Format: uuid */
       document_id?: string;
+    };
+    /** @enum {string} */
+    ReservationState: 'active' | 'released' | 'expired' | 'consumed';
+    /** @description A reservation of an asset or of a quantity of an item (AST-06). It expires at `expires_at`; without it, it does not expire. */
+    Reservation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      quantity: number;
+      state: components['schemas']['ReservationState'];
+      /** Format: date-time */
+      reserved_from: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /**
+       * Format: uuid
+       * @description The user the item is reserved for.
+       */
+      assignee_id?: string;
+      /** @description The project the item is reserved for. */
+      project_ref?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      reason?: string;
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ReservationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Reservation'][];
+    };
+    ReservationCreateRequest: {
+      /** @enum {string} */
+      item_kind?: 'asset' | 'quantity_item';
+      /** Format: uuid */
+      asset_id?: string;
+      /** Format: uuid */
+      quantity_item_id?: string;
+      quantity?: number;
+      /** Format: date-time */
+      reserved_from?: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /** Format: uuid */
+      assignee_id?: string;
+      project_ref?: string;
+      /** Format: uuid */
+      order_id?: string;
+      /** Format: uuid */
+      ticket_id?: string;
+      /**
+       * Format: date-time
+       * @description Defaults to `reserved_until`.
+       */
+      expires_at?: string;
+      reason?: string;
+    };
+    /** @description Exactly one of `assignee_id` (a user) and `project_ref` (a project). */
+    ReserveAssetRequest: {
+      /** Format: date-time */
+      reserved_until: string;
+      /** Format: uuid */
+      assignee_id?: string;
+      project_ref?: string;
+      reason?: string;
+      /**
+       * Format: date-time
+       * @description Defaults to `reserved_until`.
+       */
+      expires_at?: string;
+    };
+    /** @description The holder of the assignment, at most one of a user (`assignee_id`) and a team (`team_id`); without both the user of the reservation. */
+    ConvertReservationRequest: {
+      /** Format: uuid */
+      assignee_id?: string;
+      /** Format: uuid */
+      team_id?: string;
+      /** Format: date-time */
+      due_at?: string;
+      notes?: string;
+    };
+    ConvertReservationResponse: {
+      reservation: components['schemas']['Reservation'];
+      assignment: components['schemas']['Assignment'];
     };
     StockMovementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['StockMovement'][];
@@ -14237,6 +14338,19 @@ export interface components {
     };
     ImportReportLink: {
       download_url: string;
+    };
+    /** @description The object a scanned code names (INV-03, WP-762). */
+    LabelLookupResult: {
+      /** @enum {string} */
+      kind: 'asset' | 'consumable' | 'location';
+      /** Format: uuid */
+      id: string;
+      name: string;
+      /**
+       * Format: uuid
+       * @description The asset's node in the location tree; assets only, absent without a location.
+       */
+      location_id?: string;
     };
     /** @description A supplier of the organization or one of its clients (MGT-12, E-41). name is the company name and no personal data; the contact person is only referenced by contact_id (the contacts resource reveals name, phone and e-mail from the PII vault, WP-242). */
     Supplier: {
@@ -16062,17 +16176,6 @@ export interface components {
     };
     NetworkInterfaceListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['NetworkInterface'][];
-    };
-    /** @description Payload for returning an assigned asset or CI. */
-    ReturnAssignmentRequest: {
-      /** @description Digital return signature (optional). */
-      signature?: components['schemas']['Signature'];
-      return_condition?: string;
-      notes?: string;
-    };
-    TransferAssignmentRequest: {
-      new_assignee: string;
-      notes?: string;
     };
     Collector: {
       id: string;
@@ -19951,36 +20054,6 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  createAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['CreateAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description Assignment created */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
   getAssignment: {
     parameters: {
       query?: never;
@@ -20004,23 +20077,6 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-    };
-  };
-  deleteAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
     };
   };
   listDocuments: {
@@ -26805,72 +26861,6 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
-    };
-  };
-  returnAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: {
-      content: {
-        'application/json': components['schemas']['ReturnAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description Assignment returned */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  transferAssignment: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['TransferAssignmentRequest'];
-      };
-    };
-    responses: {
-      /** @description New assignment created for the new assignee */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': components['schemas']['Assignment'];
-        };
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
-      500: components['responses']['InternalServerError'];
     };
   };
   listCIRelationships: {
@@ -35884,7 +35874,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description client_id or location_id is no UUID, client_id names no client of the organization, or location_id a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      /** @description client_id or location_id is no UUID, client_id names no client of the organization, attributes are not empty (consumable keeps none), stock_level is negative, stock_level > 0 comes without location_id or location_id without stock_level, or location_id names no bin of the article's client visible to the caller (unknown, of another organization or outside the scope alike); `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -35955,7 +35945,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The item has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
+      /** @description The item still has stock in a bin, or it has movements in the ledger, which are kept (dependencies stock_movement, WP-274). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -35996,7 +35986,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description location_id is no UUID or names a location that is unknown, of another organization or outside the caller's scope (all alike). */
+      /** @description location_id or attributes are given: stock moves between bins by a transfer through POST /api/v1/stock-movements, and consumable keeps no attributes; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36524,27 +36514,42 @@ export interface operations {
   };
   listReservations: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        state?: components['schemas']['ReservationState'];
+      };
       header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Manage inventory reservations */
+      /** @description The reservations of one page. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['ReservationListResponse'];
         };
-        content?: never;
       };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
     };
   };
   createReservations: {
@@ -36554,49 +36559,58 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReservationCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Manage inventory reservations */
+      /** @description Reserved. */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Reservation'];
+        };
       };
       /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
       400: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
         };
-        content?: never;
       };
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
-      /** @description The asset has an active reservation already. */
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
       409: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
-      /** @description An id field is no UUID; `field` names it. */
+      /** @description An id field is no UUID or a time no RFC 3339 date-time; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -36604,31 +36618,33 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Read a reservation */
+      /** @description The reservation. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Reservation'];
         };
-        content?: never;
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       /** @description The reservation is unknown, of another organization or outside the caller's scope. */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -36636,38 +36652,42 @@ export interface operations {
     parameters: {
       query?: never;
       header?: never;
-      path?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Release a reservation */
+      /** @description Released. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
-      };
-      /** @description Unauthorized */
-      401: {
-        headers: {
-          [name: string]: unknown;
+        content: {
+          'application/json': components['schemas']['Reservation'];
         };
-        content?: never;
       };
-      /** @description The reservation is unknown, of another organization or reserves an item outside the caller's scope (all alike, TEN-04). */
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The reservation is unknown, of another organization, reserves an item outside the caller's scope or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
       /** @description The reservation is no longer active. */
       409: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
       };
     };
   };
@@ -36925,6 +36945,10 @@ export interface operations {
         offset?: components['parameters']['Offset'];
         asset_id?: string;
         consumable_id?: string;
+        /**
+         * @deprecated
+         * @description Deprecated alias of consumable_id (WP-757).
+         */
         quantity_item_id?: string;
         movement_type?: components['schemas']['MovementType'];
         location_id?: string;
@@ -37012,21 +37036,21 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The asset, consumable or quantity item is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      /** @description The asset or consumable (also named by quantity_item_id) is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description The withdrawal exceeds the available stock of the bin or the stock level of the quantity item (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
+      /** @description The withdrawal exceeds the available stock of the bin (type https://reticora.io/problems/insufficient-stock); nothing is recorded. */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content?: never;
       };
-      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable or quantity item, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, or a ticket, order, workflow run or document that is not visible. */
+      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, or a ticket, order, workflow run or document that is not visible. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37042,10 +37066,38 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': {
+          asset_tag: string;
+          serial_number?: string;
+          /**
+           * Format: uuid
+           * @description The bin to take the unit from.
+           */
+          location_id?: string;
+        };
+      };
+    };
     responses: {
       /** @description Serialized asset created from one unit */
       201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /** Format: uuid */
+            asset_id: string;
+            /** Format: uuid */
+            quantity_item_id: string;
+            /** Format: uuid */
+            movement_id: string;
+          };
+        };
+      };
+      /** @description The body is no valid JSON or asset_tag is missing. */
+      400: {
         headers: {
           [name: string]: unknown;
         };
@@ -37065,8 +37117,15 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description No stock available to convert */
+      /** @description The bin holds no available unit (type https://reticora.io/problems/insufficient-stock), or the asset tag is taken; nothing is created. */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description location_id is no UUID, is missing while the article lies in none or several bins, or names no bin of the article's client visible to the caller; `field` names it. */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -37116,7 +37175,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read), or asset:read for asset fields of a CI query (ProblemDetail, "missing permission asset:read"); the organization lacks assets_basic or the module inventory is off for an asset query or asset fields (type https://reticora.io/problems/feature-not-entitled); or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (flat or compared with has_any or has_all, as attributes.tags), a sort key, a column or, for CIs, asset.<field> and asset.attributes.<key>, when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
+      /** @description The caller lacks search:read or the read permission of the queried entity kind (ci:read or asset:read), asset:read for asset fields of a CI query (ProblemDetail, "missing permission asset:read") or relationship:read for related and the flat relationship fields (ProblemDetail, "missing permission relationship:read"); the organization lacks assets_basic or the module inventory is off for an asset query or asset fields (type https://reticora.io/problems/feature-not-entitled); or the spec reads a field the caller may not read (field permissions, RBA-07, WP-729; type urn:reticora:problem:forbidden, FieldForbiddenProblem: `fields` names the fields as the request names them): a typed field or attributes.<key> of the AST, a flat field on a column (asset_category, warranty_within_days and the other flat filters of an asset), a key of attributes, tags (flat or compared with has_any or has_all, as attributes.tags), a sort key, a column or, for CIs, asset.<field> and asset.attributes.<key>, also a field of the where of related (checked for every type), when the caller cannot read it in every client and site scope of its role assignments for one of the queried types (ci_type, without it every type; asset.<field> and asset queries every asset type), or any such field under an object grant none. Structural fields (id, name, type, client, site, timestamps, for CIs also status, lifecycle, location and discovery source) are not checked. No rows and no total are answered. In the results summary joins only the readable columns and attributes holds only the readable keys of each row; without field permissions the answer is unchanged. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -37708,6 +37767,33 @@ export interface operations {
           'application/problem+json': components['schemas']['ViolationProblem'];
         };
       };
+    };
+  };
+  lookupLabelCode: {
+    parameters: {
+      query?: {
+        /** @description The scanned code: an object URN, a barcode or an inventory number. Required; without it the answer is 422 with field `code`. */
+        code?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The object the code names */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelLookupResult'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['FeatureNotEntitled'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSuppliers: {
@@ -38671,19 +38757,34 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReserveAssetRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-277. */
-      200: {
+      /** @description Reserved. */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Reservation'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -38964,20 +39065,43 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['ConvertReservationRequest'];
+      };
+    };
     responses: {
-      /** @description Done. The request and response schemas come with WP-277. */
+      /** @description Converted. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ConvertReservationResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The reservation is no longer active, or the asset has a holder already (`https://reticora.io/problems/asset-assigned`). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A project reservation without `assignee_id` or `team_id`, a quantity item reservation, both or a malformed holder, or a holder of another organization; `field` names it. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   verifyStockMovementSignature: {

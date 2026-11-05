@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -304,6 +305,89 @@ func relationshipExists(relType, p string) string {
 			AND EXISTS (SELECT 1 FROM ci s WHERE s.id = e.source_ci_id)))`, stored, p, p)
 }
 
+// relatedLevel is the nesting level of a related node compiled on table:
+// 1 on the queried table, one more within the filter of a related node
+// (whose CIs are rn<level>).
+func relatedLevel(table string) int {
+	if n, ok := strings.CutPrefix(table, "rn"); ok {
+		if level, err := strconv.Atoi(n); err == nil {
+			return level + 1
+		}
+	}
+	return 1
+}
+
+// relatedSQL renders a related node (SRC-04, WP-789) on table as a
+// recursive CTE: its start set are the CIs that are not deleted and match
+// the filter (sub, compiled on rn<level>); each step follows one
+// relationship from a CI of the set to the CI at its other end, at most
+// max_depth steps; the CIs reached in one step or more match. With out a
+// step goes from the target of a relationship to its source, with in from
+// the source to the target, with both either way. Like upstream_of and
+// downstream_of the walk runs under the caller's RLS (ci_relationship
+// carries the scope of both ends) and only passes through visible CIs that
+// are not deleted. The steps are a LATERAL union with one arm per
+// direction and source, each an equality on the CI of the set, so that
+// every arm reads idx_ci_rel_org_target or idx_ci_rel_org_source. The
+// structural types of projectedRelTypes are read from the view
+// ci_structure_edge where both ends are CIs (contains; mounted_in and
+// located_in end at a location), as relationshipExists reads them (F-244).
+// The type keys are parameters, the depth a validated number.
+func relatedSQL(table string, level int, r *RelatedExpr, sub string, param func(any) string) string {
+	var stored, projected []string
+	for _, key := range r.RelTypes {
+		if projectedRelTypes[key] {
+			projected = append(projected, key)
+		} else {
+			stored = append(stored, key)
+		}
+	}
+	all := len(r.RelTypes) == 0
+	if all {
+		for key := range projectedRelTypes {
+			projected = append(projected, key)
+		}
+	}
+	sort.Strings(projected)
+	walk, start, step, reached := fmt.Sprintf("rel%d", level), fmt.Sprintf("rn%d", level), fmt.Sprintf("rs%d", level), fmt.Sprintf("rc%d", level)
+	// The ends of a step per direction: near is the end in the set, far
+	// the end it reaches.
+	type ends struct{ near, far string }
+	var steps []ends
+	if r.Direction != DirectionIn {
+		steps = append(steps, ends{"target_ci_id", "source_ci_id"})
+	}
+	if r.Direction != DirectionOut {
+		steps = append(steps, ends{"source_ci_id", "target_ci_id"})
+	}
+	var arms []string
+	if all || len(stored) > 0 {
+		cond := ""
+		if !all {
+			cond = " AND r.rel_type = ANY(" + param(stored) + "::text[])"
+		}
+		for _, s := range steps {
+			arms = append(arms, fmt.Sprintf("SELECT r.%s AS far FROM ci_relationship r WHERE r.%s = %s.id%s", s.far, s.near, walk, cond))
+		}
+	}
+	if len(projected) > 0 {
+		p := param(projected)
+		for _, s := range steps {
+			arms = append(arms, fmt.Sprintf("SELECT e.%s AS far FROM ci_structure_edge e WHERE e.%s = %s.id AND e.rel_type = ANY(%s::text[]) AND e.target_ci_id IS NOT NULL",
+				s.far, s.near, walk, p))
+		}
+	}
+	return fmt.Sprintf(`%[1]s.id IN (WITH RECURSIVE %[2]s (id, depth) AS (
+				SELECT %[3]s.id, 0 FROM ci %[3]s WHERE %[3]s.deleted_at IS NULL AND %[4]s
+				UNION
+				SELECT %[5]s.id, %[2]s.depth + 1 FROM %[2]s
+				CROSS JOIN LATERAL (%[6]s) %[7]s
+				JOIN ci %[5]s ON %[5]s.id = %[7]s.far AND %[5]s.deleted_at IS NULL
+				WHERE %[2]s.depth < %[8]d
+			) SELECT id FROM %[2]s WHERE depth > 0)`,
+		table, walk, start, sub, reached, strings.Join(arms, " UNION ALL "), step, r.depth())
+}
+
 // QueryResult is one row of a filter execution.
 type QueryResult struct {
 	ID         string         `json:"id"`
@@ -333,11 +417,14 @@ type SummaryPart struct {
 // FieldRef is a field a filter spec reads (RBA-07, WP-729): the entity kind
 // whose field permissions cover it ("ci" or "asset"; asset.<field> of a CI
 // query is "asset"), its path in that kind (a column or attributes.<key>)
-// and the name the request gives it, which a refusal names.
+// and the name the request gives it, which a refusal names. Related marks a
+// field of the related CIs of a related node (WP-789): their types are not
+// those of ci_type of the spec.
 type FieldRef struct {
 	EntityKind string
 	Path       string
 	Name       string
+	Related    bool
 }
 
 // ReferencedFields returns every field the spec reads for the entity kind,
@@ -349,13 +436,15 @@ type FieldRef struct {
 // every comparison of the AST in where (asset.<field> and
 // asset.attributes.<key> of a CI as the asset's field, the tag comparisons
 // as attributes.tags; between and computed attributes are comparisons of
-// their field), the sort keys and the columns. The caller decides which of
-// them field permissions cover (WP-729, WP-309).
+// their field; the fields of the filter of a related node as fields of the
+// related CIs, Related), the sort keys and the columns. The caller decides
+// which of them field permissions cover (WP-729, WP-309, WP-789).
 func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 	var out []FieldRef
 	seen := map[FieldRef]bool{}
+	related := false // adding the fields of a related node
 	add := func(kind, path, name string) {
-		ref := FieldRef{EntityKind: kind, Path: path, Name: name}
+		ref := FieldRef{EntityKind: kind, Path: path, Name: name, Related: related && kind == "ci"}
 		if !seen[ref] {
 			seen[ref] = true
 			out = append(out, ref)
@@ -413,9 +502,13 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 		add(entityKind, "attributes."+k, "attributes."+k)
 	}
 	if f.Where != nil {
-		f.Where.walk(func(e *Expr) {
+		// The fields of the filter of a related node are fields of the
+		// related CIs (WP-789).
+		f.Where.walkPaths("", func(e *Expr, path string) {
 			if e.Field != "" {
+				related = inRelated(path)
 				field(e.Field)
+				related = false
 			}
 		})
 	}
@@ -429,23 +522,61 @@ func (f *FilterSpec) ReferencedFields(entityKind string) []FieldRef {
 }
 
 // Filter AST (SRC-03, MET-45): Where combines comparisons with and, or and
-// not. A node is either a group (exactly one of And, Or, Not) or a
-// comparison of a whitelisted field with an operator and a value. Fields
-// are the columns of the entity, its dynamic attributes (attributes.<key>),
-// its tags (tags with has_any and has_all) and, for CIs, the fields of the
-// linked asset (asset.<field>) and its custom fields
-// (asset.attributes.<key>). Only values reach the SQL as parameters;
-// columns come from the whitelist, attribute keys pass validAttributeKey.
+// not. A node is either a group (exactly one of And, Or, Not), a
+// relationship node (Related, SRC-04, WP-789) or a comparison of a
+// whitelisted field with an operator and a value. Fields are the columns of
+// the entity, its dynamic attributes (attributes.<key>), its tags (tags
+// with has_any and has_all) and, for CIs, the fields of the linked asset
+// (asset.<field>) and its custom fields (asset.attributes.<key>). Only
+// values reach the SQL as parameters; columns come from the whitelist,
+// attribute keys pass validAttributeKey. api/rules.schema.json describes
+// the AST as $defs/filter; api/rules.conformance.json holds the cases
+// (filter_cases, invalid_filters) that Validate and parseFilter of
+// frontend/src/rules/filter.ts both pass.
 
 // Expr is one node of the filter AST.
 type Expr struct {
-	And   []Expr `json:"and,omitempty"`
-	Or    []Expr `json:"or,omitempty"`
-	Not   *Expr  `json:"not,omitempty"`
-	Field string `json:"field,omitempty"`
-	Op    string `json:"op,omitempty"`
-	Value any    `json:"value,omitempty"`
+	And     []Expr       `json:"and,omitempty"`
+	Or      []Expr       `json:"or,omitempty"`
+	Not     *Expr        `json:"not,omitempty"`
+	Related *RelatedExpr `json:"related,omitempty"`
+	Field   string       `json:"field,omitempty"`
+	Op      string       `json:"op,omitempty"`
+	Value   any          `json:"value,omitempty"`
 }
+
+// RelatedExpr is the relationship node of the filter AST (SRC-04, WP-789),
+// for entity kind ci only: a CI matches when it reaches, over at most
+// MaxDepth relationships of RelTypes (all types when empty) in Direction,
+// a CI that matches Where. With out the CI is the source of the
+// relationship (a VM runs_on a host), with in its target, with both
+// either.
+type RelatedExpr struct {
+	Direction string   `json:"direction"`
+	RelTypes  []string `json:"rel_types,omitempty"`
+	// MaxDepth counts relationships, 1 to MaxRelationshipDepth; nil is 1.
+	MaxDepth *int  `json:"max_depth,omitempty"`
+	Where    *Expr `json:"where,omitempty"`
+}
+
+// Directions of a related node.
+const (
+	DirectionOut  = "out"
+	DirectionIn   = "in"
+	DirectionBoth = "both"
+)
+
+// depth returns MaxDepth, 1 when it is not set.
+func (r *RelatedExpr) depth() int {
+	if r.MaxDepth == nil {
+		return 1
+	}
+	return *r.MaxDepth
+}
+
+// FilterOps are the operators of a comparison, the enum of op in
+// $defs/filter_compare of api/rules.schema.json.
+var FilterOps = []string{OpEq, OpNe, OpLt, OpLte, OpGt, OpGte, OpLike, OpIn, OpExists, OpBetween, OpHasAny, OpHasAll}
 
 // Operators of a comparison.
 const (
@@ -566,6 +697,15 @@ func (e *Expr) walkPaths(path string, visit func(n *Expr, path string)) {
 	if e.Not != nil {
 		e.Not.walkPaths(path+".not", visit)
 	}
+	if e.Related != nil && e.Related.Where != nil {
+		e.Related.Where.walkPaths(path+".related.where", visit)
+	}
+}
+
+// inRelated reports whether the path of a node (walkPaths) lies in the
+// filter of a related node, i.e. the node compares a related CI.
+func inRelated(path string) bool {
+	return strings.Contains(path, ".related.where")
 }
 
 // catalog is what PGQueryEngine resolves for a spec in the transaction of
@@ -573,9 +713,20 @@ func (e *Expr) walkPaths(path string, visit func(n *Expr, path string)) {
 // spec compares, by the entity whose JSON holds it ("ci": ci.attributes,
 // "asset": asset.custom_fields, also of the linked asset of a CI). A nil
 // catalog is the static compilation: attributes compare by the type of
-// their value.
+// their value. relAttrs are the attributes compared in the filter of a
+// related node (WP-789): they belong to the related CIs, whose types are
+// not those of ci_type of the spec, so they resolve for every type.
 type catalog struct {
-	attrs map[attrRef]resolvedAttribute
+	attrs    map[attrRef]resolvedAttribute
+	relAttrs map[attrRef]resolvedAttribute
+}
+
+// related returns the catalog of the filter of a related node.
+func (c *catalog) related() *catalog {
+	if c == nil {
+		return nil
+	}
+	return &catalog{attrs: c.relAttrs, relAttrs: c.relAttrs}
 }
 
 // attrRef names a dynamic attribute: the entity whose JSON holds it and
@@ -630,13 +781,13 @@ func (e *Expr) validate(entityKind, path string, depth int, nodes *int, cat *cat
 		return &ASTError{path, fmt.Sprintf("more than %d nodes", MaxExprNodes)}
 	}
 	parts := 0
-	for _, set := range []bool{len(e.And) > 0, len(e.Or) > 0, e.Not != nil, e.Field != ""} {
+	for _, set := range []bool{len(e.And) > 0, len(e.Or) > 0, e.Not != nil, e.Related != nil, e.Field != ""} {
 		if set {
 			parts++
 		}
 	}
 	if parts != 1 {
-		return &ASTError{path, "a node is exactly one of and, or, not or a comparison"}
+		return &ASTError{path, "a node is exactly one of and, or, not, related or a comparison"}
 	}
 	for i := range e.And {
 		if err := e.And[i].validate(entityKind, fmt.Sprintf("%s.and[%d]", path, i), depth+1, nodes, cat); err != nil {
@@ -651,6 +802,9 @@ func (e *Expr) validate(entityKind, path string, depth int, nodes *int, cat *cat
 	if e.Not != nil {
 		return e.Not.validate(entityKind, path+".not", depth+1, nodes, cat)
 	}
+	if e.Related != nil {
+		return e.Related.validate(entityKind, path+".related", depth, nodes, cat)
+	}
 	if e.Field == "" {
 		return nil
 	}
@@ -659,6 +813,35 @@ func (e *Expr) validate(entityKind, path string, depth int, nodes *int, cat *cat
 		return &ASTError{path, err.Error()}
 	}
 	return e.validateComparison(kind, typed, path)
+}
+
+// validate checks a related node at path (where.<…>.related) of depth: it
+// applies to entity kind ci only, direction is out, in or both, max_depth
+// lies in 1..MaxRelationshipDepth, each of rel_types is a key, and where is
+// a valid filter on CIs one level deeper; its nodes count towards
+// MaxExprDepth and MaxExprNodes. Whether the rel_types exist is checked
+// against relationship_type in the transaction (resolveCatalog).
+func (r *RelatedExpr) validate(entityKind, path string, depth int, nodes *int, cat *catalog) error {
+	if entityKind != "ci" {
+		return &ASTError{path, "related applies to entity_kind ci only"}
+	}
+	switch r.Direction {
+	case DirectionOut, DirectionIn, DirectionBoth:
+	default:
+		return &ASTError{path + ".direction", "must be out, in or both"}
+	}
+	if d := r.depth(); d < 1 || d > MaxRelationshipDepth {
+		return &ASTError{path + ".max_depth", fmt.Sprintf("must be between 1 and %d", MaxRelationshipDepth)}
+	}
+	for i, key := range r.RelTypes {
+		if key == "" || strings.ContainsRune(key, 0) {
+			return &ASTError{fmt.Sprintf("%s.rel_types[%d]", path, i), "must be a relationship type key"}
+		}
+	}
+	if r.Where == nil {
+		return &ASTError{path + ".where", "related needs a filter (where)"}
+	}
+	return r.Where.validate("ci", path+".where", depth+1, nodes, cat.related())
 }
 
 // fieldKind resolves the comparison's field. An attribute the catalog holds
@@ -876,6 +1059,17 @@ func (e *Expr) compile(entityKind, table string, cat *catalog, args []any, start
 		case n.Not != nil:
 			s, cerr := compile(n.Not)
 			return "(NOT COALESCE(" + s + ", false))", cerr
+		case n.Related != nil:
+			// The filter of the related CIs reads them under their own
+			// alias, numbered by nesting (relatedLevel), with its own
+			// catalog (WP-789).
+			level := relatedLevel(table)
+			sub, subArgs, subNext, cerr := n.Related.Where.compile("ci", fmt.Sprintf("rn%d", level), cat.related(), args, next)
+			if cerr != nil {
+				return "", cerr
+			}
+			args, next = subArgs, subNext
+			return relatedSQL(table, level, n.Related, sub, param), nil
 		}
 		kind, _, ferr := n.fieldKind(entityKind, cat)
 		if ferr != nil {
@@ -969,7 +1163,8 @@ func tagExists(table, cond string) string {
 	if table == "asset" {
 		return `EXISTS (SELECT 1 FROM asset_tag_link atl JOIN tag t ON t.id = atl.tag_id WHERE atl.asset_id = asset.id AND ` + cond + `)`
 	}
-	return `EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ci.id AND ` + cond + `)`
+	// table is ci or the alias of the CIs of a related node (WP-789).
+	return `EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = ` + table + `.id AND ` + cond + `)`
 }
 
 // sortedKeys returns the keys of m in order.

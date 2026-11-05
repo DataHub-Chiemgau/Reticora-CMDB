@@ -138,53 +138,96 @@ func (e *PGQueryEngine) Query(ctx context.Context, orgID string, spec *FilterSpe
 }
 
 // attributeUse is a dynamic attribute of a spec and the field that names it
-// in an error.
+// in an error; related marks an attribute of the related CIs of a related
+// node (WP-789).
 type attributeUse struct {
-	ref   attrRef
-	field string
+	ref     attrRef
+	field   string
+	related bool
 }
 
-// tagUse is a tag key of a spec and the field that names it in an error.
-type tagUse struct{ key, field string }
+// keyUse is a tag key or relationship type key of a spec and the field
+// that names it in an error.
+type keyUse struct{ key, field string }
 
 // specUses returns the dynamic attributes the spec compares (the flat
-// attributes, attributes.<key> and asset.attributes.<key> of the AST) and
-// the tag keys it names (the flat tags, the values of has_any and has_all),
-// in the order of the spec.
-func specUses(spec *FilterSpec) (attrs []attributeUse, tags []tagUse) {
+// attributes, attributes.<key> and asset.attributes.<key> of the AST, also
+// in the filter of a related node), the tag keys it names (the flat tags,
+// the values of has_any and has_all) and the relationship types of its
+// related nodes, in the order of the spec.
+func specUses(spec *FilterSpec) (attrs []attributeUse, tags, relTypes []keyUse) {
 	entityKind := spec.entityKind()
 	for _, k := range sortedKeys(spec.Attributes) {
-		attrs = append(attrs, attributeUse{attrRef{entityKind, k}, "attributes." + k})
+		attrs = append(attrs, attributeUse{attrRef{entityKind, k}, "attributes." + k, false})
 	}
 	for i, tag := range spec.Tags {
-		tags = append(tags, tagUse{tag, fmt.Sprintf("tags[%d]", i)})
+		tags = append(tags, keyUse{tag, fmt.Sprintf("tags[%d]", i)})
 	}
 	if spec.Where != nil {
 		spec.Where.walkPaths("", func(n *Expr, path string) {
-			if ref, ok := attributeRef(entityKind, n.Field); ok {
-				attrs = append(attrs, attributeUse{ref, "where" + path})
+			kind := entityKind
+			if inRelated(path) {
+				kind = "ci"
+			}
+			if ref, ok := attributeRef(kind, n.Field); ok {
+				attrs = append(attrs, attributeUse{ref, "where" + path, inRelated(path)})
 			}
 			if values, ok := n.Value.([]any); ok && n.Field == TagsField {
 				for i, v := range values {
-					tags = append(tags, tagUse{fmt.Sprint(v), fmt.Sprintf("where%s.value[%d]", path, i)})
+					tags = append(tags, keyUse{fmt.Sprint(v), fmt.Sprintf("where%s.value[%d]", path, i)})
+				}
+			}
+			if n.Related != nil {
+				for i, key := range n.Related.RelTypes {
+					relTypes = append(relTypes, keyUse{key, fmt.Sprintf("where%s.related.rel_types[%d]", path, i)})
 				}
 			}
 		})
 	}
-	return attrs, tags
+	return attrs, tags, relTypes
+}
+
+// knownKeys checks that query (with the keys as $1) finds every key of
+// uses; an unknown one is a 422 naming its field (what: tag, relationship
+// type).
+func knownKeys(ctx context.Context, tx pgx.Tx, query, what string, uses []keyUse) error {
+	if len(uses) == 0 {
+		return nil
+	}
+	keys := make([]string, len(uses))
+	for i, u := range uses {
+		keys[i] = u.key
+	}
+	rows, err := tx.Query(ctx, query, keys)
+	if err != nil {
+		return fmt.Errorf("%ss of the filter: %w", what, err)
+	}
+	known, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("%ss of the filter: %w", what, err)
+	}
+	for _, u := range uses {
+		if !slices.Contains(known, u.key) {
+			return &api.FieldError{Field: u.field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown %s %q", what, u.key)}
+		}
+	}
+	return nil
 }
 
 // resolveCatalog validates the spec and resolves, under the caller's row
 // level security, the definitions of the dynamic attributes it compares
-// (attributeDefinition) and the tag keys it names: an unknown tag is a 422
-// naming the value.
+// (attributeDefinition), the tag keys it names and the relationship types
+// of its related nodes, system and organization types of relationship_type
+// (WP-789): an unknown tag or type is a 422 naming the value. The
+// attributes of the filter of a related node belong to the related CIs and
+// resolve for every type.
 func resolveCatalog(ctx context.Context, tx pgx.Tx, spec *FilterSpec) (*catalog, error) {
 	entityKind := spec.entityKind()
 	if err := spec.Validate(entityKind); err != nil {
 		return nil, err
 	}
-	attrs, tags := specUses(spec)
-	cat := &catalog{attrs: map[attrRef]resolvedAttribute{}}
+	attrs, tags, relTypes := specUses(spec)
+	cat := &catalog{attrs: map[attrRef]resolvedAttribute{}, relAttrs: map[attrRef]resolvedAttribute{}}
 	if len(attrs) > 0 {
 		// The types of a CI query that names ci_type (key or name, as the
 		// filter compares it); an asset query and the linked asset count
@@ -201,34 +244,25 @@ func resolveCatalog(ctx context.Context, tx pgx.Tx, spec *FilterSpec) (*catalog,
 			}
 		}
 		for _, u := range attrs {
-			if _, done := cat.attrs[u.ref]; done {
+			into := cat.attrs
+			if u.related {
+				into = cat.relAttrs
+			}
+			if _, done := into[u.ref]; done {
 				continue
 			}
-			a, err := attributeDefinition(ctx, tx, u.ref.key, u.field, ciTypes, named && u.ref.entity == "ci")
+			a, err := attributeDefinition(ctx, tx, u.ref.key, u.field, ciTypes, named && u.ref.entity == "ci" && !u.related)
 			if err != nil {
 				return nil, err
 			}
-			cat.attrs[u.ref] = a
+			into[u.ref] = a
 		}
 	}
-	if len(tags) > 0 {
-		keys := make([]string, len(tags))
-		for i, t := range tags {
-			keys[i] = t.key
-		}
-		rows, err := tx.Query(ctx, `SELECT key FROM tag WHERE key = ANY($1::text[])`, keys)
-		if err != nil {
-			return nil, fmt.Errorf("tags of the filter: %w", err)
-		}
-		known, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
-			return nil, fmt.Errorf("tags of the filter: %w", err)
-		}
-		for _, t := range tags {
-			if !slices.Contains(known, t.key) {
-				return nil, &api.FieldError{Field: t.field, Status: http.StatusUnprocessableEntity, Message: fmt.Sprintf("unknown tag %q", t.key)}
-			}
-		}
+	if err := knownKeys(ctx, tx, `SELECT key FROM tag WHERE key = ANY($1::text[])`, "tag", tags); err != nil {
+		return nil, err
+	}
+	if err := knownKeys(ctx, tx, `SELECT DISTINCT key FROM relationship_type WHERE key = ANY($1::text[])`, "relationship type", relTypes); err != nil {
+		return nil, err
 	}
 	return cat, nil
 }

@@ -1,7 +1,6 @@
 DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assets/{id}/cis/{ci_id} ci:write
-DELETE /api/v1/assignments/{id} assignment:write
 DELETE /api/v1/attribute-definitions/{id} ci_attribute:manage
 DELETE /api/v1/attribute-sets/{id} citype:manage
 DELETE /api/v1/buildings/{id} location:write
@@ -219,6 +218,7 @@ GET /api/v1/jobs/{id}/result job:read
 GET /api/v1/keys key:read
 GET /api/v1/keys/{id} key:read
 GET /api/v1/keys/{id}/assignments key:read
+GET /api/v1/labels/lookup authenticated
 GET /api/v1/layouts ci:read
 GET /api/v1/layouts/{id} ci:read
 GET /api/v1/lifecycle-definitions asset:read
@@ -427,11 +427,9 @@ POST /api/v1/assets asset:write
 POST /api/v1/assets/{id}/assign assignment:write
 POST /api/v1/assets/{id}/cis ci:write
 POST /api/v1/assets/{id}/lifecycle-transitions lifecycle:transition
+POST /api/v1/assets/{id}/reserve reservation:write
 POST /api/v1/assets/{id}/return assignment:write
 POST /api/v1/assets/{id}/transfer assignment:write
-POST /api/v1/assignments assignment:write
-POST /api/v1/assignments/{id}/return assignment:write
-POST /api/v1/assignments/{id}/transfer assignment:write
 POST /api/v1/attribute-definitions ci_attribute:manage
 POST /api/v1/attribute-definitions/{id}/reindex ci_attribute:manage
 POST /api/v1/attribute-sets citype:manage
@@ -547,6 +545,7 @@ POST /api/v1/racks/{id}/mounts rack:write
 POST /api/v1/relationship-types relationship_type:manage
 POST /api/v1/relationships relationship:write
 POST /api/v1/reservations reservation:write
+POST /api/v1/reservations/{id}/convert assignment:write
 POST /api/v1/reservations/{id}/release reservation:write
 POST /api/v1/review-items/{id}/resolve review:resolve
 POST /api/v1/review-items/{id}/ticket ticket:write

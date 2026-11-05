@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -827,16 +830,305 @@ func TestReferencedFieldsWP309(t *testing.T) {
 		{"field": "attributes.warranty_days_left", "op": "lt", "value": 30}]}`)}
 	got := fmt.Sprint(spec.ReferencedFields("ci"))
 	want := fmt.Sprint([]FieldRef{
-		{"asset", "attributes.room", "asset.attributes.room"},
-		{"ci", "attributes.tags", "tags"},
-		{"asset", "cost_center", "asset.cost_center"},
-		{"ci", "created_at", "created_at"},
-		{"ci", "attributes.warranty_days_left", "attributes.warranty_days_left"},
+		{"asset", "attributes.room", "asset.attributes.room", false},
+		{"ci", "attributes.tags", "tags", false},
+		{"asset", "cost_center", "asset.cost_center", false},
+		{"ci", "created_at", "created_at", false},
+		{"ci", "attributes.warranty_days_left", "attributes.warranty_days_left", false},
 	})
 	if got != want {
 		t.Errorf("ReferencedFields:\n got %s\nwant %s", got, want)
 	}
 	if key, checked, known := fieldKey("asset", "attributes.room"); key != "attributes.room" || !checked || !known {
 		t.Errorf("fieldKey(asset, attributes.room) = %q, %v, %v", key, checked, known)
+	}
+}
+
+// squash collapses the white space of SQL.
+func squash(sql string) string { return strings.Join(strings.Fields(sql), " ") }
+
+// TestFilterASTRelated covers the related node (SRC-04, WP-789): a
+// recursive CTE seeded with the CIs that are not deleted and match the
+// filter (on rn1, values as parameters), stepping in a LATERAL union over
+// ci_relationship of the types (a parameter) from the target to the source
+// (out), from the source to the target (in) or both ways, through visible
+// CIs that are not
+// deleted and at most max_depth steps (default 1). The structural type
+// contains is read from ci_structure_edge; without rel_types every stored
+// and structural type counts. A related node nests with its own alias.
+func TestFilterASTRelated(t *testing.T) {
+	sql, args, next, err := mustAST(t, `{"related": {"direction": "out", "rel_types": ["runs_on", "hosted_on"],
+		"where": {"and": [{"field": "location_id", "op": "eq", "value": "00000000-0000-0000-0000-0000000000aa"},
+			{"field": "tags", "op": "has_any", "value": ["prod"]}]}}}`).CompileSQL("ci", "ci", []any{"org"}, 2)
+	want := `ci.id IN (WITH RECURSIVE rel1 (id, depth) AS ( ` +
+		`SELECT rn1.id, 0 FROM ci rn1 WHERE rn1.deleted_at IS NULL AND ((rn1.location_id)::uuid = $2::uuid AND ` +
+		`EXISTS (SELECT 1 FROM ci_tag ct JOIN tag t ON t.id = ct.tag_id WHERE ct.ci_id = rn1.id AND t.key = ANY($3::text[]))) ` +
+		`UNION SELECT rc1.id, rel1.depth + 1 FROM rel1 ` +
+		`CROSS JOIN LATERAL (SELECT r.source_ci_id AS far FROM ci_relationship r WHERE r.target_ci_id = rel1.id AND r.rel_type = ANY($4::text[])) rs1 ` +
+		`JOIN ci rc1 ON rc1.id = rs1.far AND rc1.deleted_at IS NULL WHERE rel1.depth < 1 ) SELECT id FROM rel1 WHERE depth > 0)`
+	if err != nil || squash(sql) != want || next != 5 {
+		t.Errorf("out:\n got %s (%v, next %d)\nwant %s", squash(sql), err, next, want)
+	}
+	if len(args) != 4 || fmt.Sprint(args[3]) != "[runs_on hosted_on]" {
+		t.Errorf("out args %v", args)
+	}
+
+	for _, c := range []struct {
+		name, raw string
+		want      []string
+		not       []string
+	}{
+		{"in at depth 3", `{"related": {"direction": "in", "max_depth": 3, "rel_types": ["depends_on"], "where": {"field": "name", "op": "eq", "value": "db"}}}`,
+			[]string{`(SELECT r.target_ci_id AS far FROM ci_relationship r WHERE r.source_ci_id = rel1.id AND r.rel_type = ANY($3::text[])) rs1`, `rel1.depth < 3`},
+			[]string{"r.source_ci_id AS far", "ci_structure_edge"}},
+		{"both", `{"related": {"direction": "both", "rel_types": ["depends_on"], "where": {"field": "name", "op": "eq", "value": "db"}}}`,
+			[]string{`(SELECT r.source_ci_id AS far FROM ci_relationship r WHERE r.target_ci_id = rel1.id AND r.rel_type = ANY($3::text[]) UNION ALL ` +
+				`SELECT r.target_ci_id AS far FROM ci_relationship r WHERE r.source_ci_id = rel1.id AND r.rel_type = ANY($3::text[])) rs1`},
+			[]string{"ci_structure_edge"}},
+		{"structural type", `{"related": {"direction": "out", "rel_types": ["contains"], "where": {"field": "name", "op": "eq", "value": "rack"}}}`,
+			[]string{`(SELECT e.source_ci_id AS far FROM ci_structure_edge e WHERE e.target_ci_id = rel1.id AND e.rel_type = ANY($3::text[]) AND e.target_ci_id IS NOT NULL) rs1`},
+			[]string{"ci_relationship"}},
+		{"all types", `{"related": {"direction": "out", "where": {"field": "name", "op": "eq", "value": "rack"}}}`,
+			[]string{`(SELECT r.source_ci_id AS far FROM ci_relationship r WHERE r.target_ci_id = rel1.id UNION ALL ` +
+				`SELECT e.source_ci_id AS far FROM ci_structure_edge e WHERE e.target_ci_id = rel1.id AND e.rel_type = ANY($3::text[]) AND e.target_ci_id IS NOT NULL) rs1`},
+			nil},
+		{"nested", `{"related": {"direction": "out", "where": {"related": {"direction": "in", "rel_types": ["contains"], "where": {"field": "name", "op": "eq", "value": "R12"}}}}}`,
+			[]string{`SELECT rn1.id, 0 FROM ci rn1 WHERE rn1.deleted_at IS NULL AND rn1.id IN (WITH RECURSIVE rel2 (id, depth) AS ( SELECT rn2.id, 0 FROM ci rn2 WHERE rn2.deleted_at IS NULL AND rn2.name = $2`},
+			nil},
+		{"under not", `{"not": {"related": {"direction": "out", "rel_types": ["backed_up_by"], "where": {"field": "name", "op": "like", "value": "bk*"}}}}`,
+			[]string{`(NOT COALESCE(ci.id IN (WITH RECURSIVE rel1`}, nil},
+	} {
+		caseSQL, caseArgs, _, caseErr := mustAST(t, c.raw).CompileSQL("ci", "ci", []any{"org"}, 2)
+		got := squash(caseSQL)
+		if caseErr != nil {
+			t.Errorf("%s: %v", c.name, caseErr)
+			continue
+		}
+		for _, w := range c.want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s: %q missing in %s (%v)", c.name, w, got, caseArgs)
+			}
+		}
+		for _, w := range c.not {
+			if strings.Contains(got, w) {
+				t.Errorf("%s: %q in %s", c.name, w, got)
+			}
+		}
+	}
+	// Without rel_types the structural types are the projected ones in order.
+	_, args, _, err = mustAST(t, `{"related": {"direction": "out", "where": {"field": "name", "op": "eq", "value": "x"}}}`).CompileSQL("ci", "ci", []any{"org"}, 2)
+	if err != nil || fmt.Sprint(args) != "[org x [contains located_in mounted_in]]" {
+		t.Errorf("all types: args %v (%v)", args, err)
+	}
+
+	// Refusals with the path of the node (422 on where.<path>).
+	for _, c := range []struct{ name, kind, raw, path string }{
+		{"asset", "asset", `{"related": {"direction": "out", "where": {"field": "name", "op": "eq", "value": "x"}}}`, "where.related"},
+		{"max_depth 0", "ci", `{"related": {"direction": "out", "max_depth": 0, "where": {"field": "name", "op": "eq", "value": "x"}}}`, "where.related.max_depth"},
+		{"max_depth 6", "ci", `{"related": {"direction": "out", "max_depth": 6, "where": {"field": "name", "op": "eq", "value": "x"}}}`, "where.related.max_depth"},
+		{"mixed node", "ci", `{"field": "name", "op": "eq", "value": "x", "related": {"direction": "out", "where": {"field": "name", "op": "eq", "value": "x"}}}`, "where"},
+		{"unknown field in the filter", "ci", `{"related": {"direction": "out", "where": {"field": "secret", "op": "eq", "value": "x"}}}`, "where.related.where"},
+		{"value per field kind in the filter", "ci", `{"related": {"direction": "in", "where": {"field": "location_id", "op": "eq", "value": "R12"}}}`, "where.related.where.value"},
+		{"between on text in the filter", "ci", `{"related": {"direction": "in", "where": {"field": "name", "op": "between", "value": ["a", "b"]}}}`, "where.related.where"},
+		{"unknown asset field in the filter", "ci", `{"related": {"direction": "in", "where": {"field": "asset.nope", "op": "eq", "value": "x"}}}`, "where.related.where"},
+	} {
+		spec := FilterSpec{EntityKind: c.kind, Where: mustAST(t, c.raw)}
+		var fe *api.FieldError
+		if err := spec.Validate(c.kind); !errors.As(err, &fe) || fe.Field != c.path || fe.Status != http.StatusUnprocessableEntity {
+			t.Errorf("%s: %v, want a 422 on %s", c.name, err, c.path)
+		}
+		if _, _, err := spec.CompileSQL(c.kind, nil, 1); err == nil {
+			t.Errorf("%s compiles", c.name)
+		}
+	}
+}
+
+// TestFilterASTRelatedCatalog: the attributes of the filter of a related
+// node are resolved apart from those of the queried CIs (relAttrs) and
+// compared by their definition on the alias of the related CIs.
+func TestFilterASTRelatedCatalog(t *testing.T) {
+	cat := &catalog{
+		attrs:    map[attrRef]resolvedAttribute{{"ci", "days"}: {kind: kindText}},
+		relAttrs: map[attrRef]resolvedAttribute{{"ci", "days"}: {kind: kindNumber, types: []string{"t1"}}},
+	}
+	sql, args, _, err := mustAST(t, `{"and": [{"field": "attributes.days", "op": "eq", "value": "x"},
+		{"related": {"direction": "out", "where": {"field": "attributes.days", "op": "lt", "value": "30"}}}]}`).compile("ci", "ci", cat, []any{"org"}, 2)
+	got := squash(sql)
+	for _, want := range []string{
+		`(reticora_attr_text(attributes, 'days') = $2 AND ci.id IN`,
+		`WHERE rn1.deleted_at IS NULL AND (rn1.ci_type_id = ANY($3::uuid[]) AND CASE WHEN jsonb_typeof(rn1.attributes->'days') = 'number' ` +
+			`THEN (reticora_attr_text(attributes, 'days'))::numeric END < $4::numeric)`,
+	} {
+		if err != nil || !strings.Contains(got, want) {
+			t.Errorf("%q missing in %s (%v)", want, got, err)
+		}
+	}
+	if len(args) != 5 {
+		t.Errorf("args %v", args)
+	}
+	// A text value for the number attribute of a related CI is refused.
+	spec := FilterSpec{Where: mustAST(t, `{"related": {"direction": "out", "where": {"field": "attributes.days", "op": "lt", "value": "soon"}}}`)}
+	var fe *api.FieldError
+	if err := spec.validate("ci", cat); !errors.As(err, &fe) || fe.Field != "where.related.where.value" {
+		t.Errorf("text for a number attribute of a related CI: %v", err)
+	}
+}
+
+// TestReferencedFieldsRelated: the fields of the filter of a related node
+// are fields of the related CIs (Related) for the field permission check
+// (WP-789); asset fields there stay asset fields.
+func TestReferencedFieldsRelated(t *testing.T) {
+	spec := FilterSpec{Where: mustAST(t, `{"and": [{"field": "hostname", "op": "eq", "value": "vm"},
+		{"related": {"direction": "out", "where": {"and": [{"field": "hostname", "op": "eq", "value": "h"},
+			{"field": "attributes.warranty_days_left", "op": "lt", "value": 30},
+			{"field": "asset.cost_center", "op": "eq", "value": "CC"}]}}}]}`)}
+	got := fmt.Sprint(spec.ReferencedFields("ci"))
+	want := fmt.Sprint([]FieldRef{
+		{"ci", "hostname", "hostname", false},
+		{"ci", "hostname", "hostname", true},
+		{"ci", "attributes.warranty_days_left", "attributes.warranty_days_left", true},
+		{"asset", "cost_center", "asset.cost_center", false},
+	})
+	if got != want {
+		t.Errorf("ReferencedFields:\n got %s\nwant %s", got, want)
+	}
+	attrs, _, relTypes := specUses(&FilterSpec{Where: mustAST(t, `{"related": {"direction": "out", "rel_types": ["runs_on"],
+		"where": {"field": "attributes.days", "op": "lt", "value": 3}}}`)})
+	if fmt.Sprint(attrs) != "[{{ci days} where.related.where true}]" || fmt.Sprint(relTypes) != "[{runs_on where.related.rel_types[0]}]" {
+		t.Errorf("specUses: %v %v", attrs, relTypes)
+	}
+}
+
+// TestUsesRelationships: related and the flat relationship fields need
+// relationship:read (WP-789).
+func TestUsesRelationships(t *testing.T) {
+	for _, c := range []struct {
+		spec FilterSpec
+		want bool
+	}{
+		{FilterSpec{}, false},
+		{FilterSpec{Where: mustAST(t, `{"field": "name", "op": "eq", "value": "x"}`)}, false},
+		{FilterSpec{HasRelationship: "runs_on"}, true},
+		{FilterSpec{LacksRelationship: "backed_up_by"}, true},
+		{FilterSpec{UpstreamOf: "00000000-0000-0000-0000-0000000000aa"}, true},
+		{FilterSpec{DownstreamOf: "00000000-0000-0000-0000-0000000000aa"}, true},
+		{FilterSpec{Where: mustAST(t, `{"not": {"related": {"direction": "in", "where": {"field": "name", "op": "eq", "value": "x"}}}}`)}, true},
+	} {
+		if got := usesRelationships(&c.spec); got != c.want {
+			t.Errorf("%+v: %v, want %v", c.spec, got, c.want)
+		}
+	}
+}
+
+// filterConformance are the filter cases of api/rules.conformance.json
+// (MET-45, WP-789).
+type filterConformance struct {
+	FilterCases []struct {
+		Name       string          `json:"name"`
+		EntityKind string          `json:"entity_kind"`
+		Filter     json.RawMessage `json:"filter"`
+	} `json:"filter_cases"`
+	InvalidFilters []struct {
+		Name       string          `json:"name"`
+		EntityKind string          `json:"entity_kind"`
+		Filter     json.RawMessage `json:"filter"`
+		Path       string          `json:"path"`
+	} `json:"invalid_filters"`
+}
+
+// decodeFilter decodes a filter as the API does (unknown members refused).
+func decodeFilter(raw json.RawMessage) (*Expr, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var e Expr
+	err := dec.Decode(&e)
+	return &e, err
+}
+
+// TestFilterConformance runs the filter cases of api/rules.conformance.json
+// (MET-45, WP-789) through Validate: every filter of filter_cases is valid
+// for its entity kind, compiles and survives a JSON round trip, every
+// filter of invalid_filters is refused at its path (where.<path>);
+// frontend/src/rules/filter.test.ts runs the same cases through parseFilter.
+func TestFilterConformance(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/rules.conformance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c filterConformance
+	if err = json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.FilterCases) == 0 || len(c.InvalidFilters) == 0 {
+		t.Fatal("no filter cases")
+	}
+	for _, tc := range c.FilterCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			e, derr := decodeFilter(tc.Filter)
+			if derr != nil {
+				t.Fatal(derr)
+			}
+			if verr := e.Validate(tc.EntityKind); verr != nil {
+				t.Fatalf("valid filter refused: %v", verr)
+			}
+			again, merr := json.Marshal(e)
+			if merr != nil {
+				t.Fatal(merr)
+			}
+			var want, got any
+			_ = json.Unmarshal(tc.Filter, &want)
+			_ = json.Unmarshal(again, &got)
+			if !reflect.DeepEqual(want, got) {
+				t.Errorf("round trip %s, want %s", again, tc.Filter)
+			}
+			if _, _, _, cerr := e.CompileSQL(tc.EntityKind, tc.EntityKind, nil, 1); cerr != nil {
+				t.Errorf("compile: %v", cerr)
+			}
+		})
+	}
+	for _, tc := range c.InvalidFilters {
+		t.Run(tc.Name, func(t *testing.T) {
+			e, derr := decodeFilter(tc.Filter)
+			if derr != nil {
+				t.Fatal(derr)
+			}
+			var astErr *ASTError
+			if verr := e.Validate(tc.EntityKind); !errors.As(verr, &astErr) || "where"+astErr.Path != tc.Path {
+				t.Errorf("%v, want an error at %s", verr, tc.Path)
+			}
+		})
+	}
+}
+
+// TestFilterSchemaMatchesOperators: $defs/filter of api/rules.schema.json
+// has the nodes of Expr and the operators FilterOps (WP-789).
+func TestFilterSchemaMatchesOperators(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/rules.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Defs map[string]struct {
+			OneOf []struct {
+				Ref string `json:"$ref"`
+			} `json:"oneOf"`
+			Required   []string `json:"required"`
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err = json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var nodes []string
+	for _, alt := range schema.Defs["filter"].OneOf {
+		nodes = append(nodes, strings.Join(schema.Defs[strings.TrimPrefix(alt.Ref, "#/$defs/")].Required, "+"))
+	}
+	if got := strings.Join(nodes, " "); got != "and or not related field+op" {
+		t.Errorf("$defs/filter nodes %s", got)
+	}
+	if got := schema.Defs["filter_compare"].Properties["op"].Enum; !slices.Equal(got, FilterOps) {
+		t.Errorf("$defs/filter_compare operators %v, Go %v", got, FilterOps)
 	}
 }

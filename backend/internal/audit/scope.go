@@ -102,7 +102,7 @@ var resourceTables = map[string][]string{
 	"import-profiles":           {"import_profile"},
 	"imports":                   {"job"},
 	"iga":                       {"iga_connector", "iga_access_request", "iga_access_review", "iga_lifecycle_policy", "iga_drift_finding", "iga_provisioning_task"},
-	"inventory":                 {"quantity_item"},
+	"inventory":                 {"consumable"},
 	"invitations":               {"user_invitation"},
 	"ip-addresses":              {"ip_address"},
 	"ips":                       {"ip_address"},
@@ -201,7 +201,7 @@ var scopeParents = map[string]map[string]string{
 	"role_assignment": {"scope_client_id": "client", "scope_site_id": "site"},
 	// The policy of the ledger filters client and site of the booking
 	// (WP-744); the referenced objects must be visible as well.
-	"stock_movement": {"asset_id": "asset", "consumable_id": "consumable", "quantity_item_id": "quantity_item",
+	"stock_movement": {"asset_id": "asset", "consumable_id": "consumable",
 		"from_location_id": "location", "to_location_id": "location", "ticket_id": "ticket", "order_id": "internal_order",
 		"document_id": "document"},
 }

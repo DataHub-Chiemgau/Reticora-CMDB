@@ -30,6 +30,10 @@ const (
 	ProblemAssetNotAssigned = "https://reticora.io/problems/asset-not-assigned"
 	// ProblemAppendOnly: an assignment is history and is not deleted.
 	ProblemAppendOnly = "https://reticora.io/problems/assignment-append-only"
+	// ProblemAssetReserved: the asset has an active reservation of another
+	// user or of a project (WP-277); the reservation path answers an
+	// asset reserved already with it as well.
+	ProblemAssetReserved = "https://reticora.io/problems/asset-reserved"
 )
 
 var (
@@ -43,7 +47,27 @@ var (
 	ErrAlreadyAssigned = errors.New("the asset is assigned already; return or transfer it")
 	// ErrNotAssigned: the asset to return or transfer has no holder (409).
 	ErrNotAssigned = errors.New("the asset is not assigned")
+	// ErrAssetReserved: the asset to assign or transfer has an active
+	// reservation of another user or of a project (409, WP-277).
+	ErrAssetReserved = errors.New("the asset is reserved for another user or a project")
 )
+
+// ReservationEventData is the data of the reservation events (WP-277):
+// the reservation, its asset or quantity item, its state and times and
+// the client and site of the locked asset. The reservation package writes
+// it as well; it lives here because reservation imports this package for
+// the conversion, not the other way round.
+type ReservationEventData struct {
+	ID             string     `json:"id"`
+	ItemKind       string     `json:"item_kind"`
+	AssetID        string     `json:"asset_id,omitempty"`
+	QuantityItemID string     `json:"quantity_item_id,omitempty"`
+	State          string     `json:"state"`
+	ReservedUntil  *time.Time `json:"reserved_until,omitempty"`
+	ExpiresAt      *time.Time `json:"expires_at,omitempty"`
+	ClientID       string     `json:"client_id,omitempty"`
+	SiteID         string     `json:"site_id,omitempty"`
+}
 
 // MovementBooker books a movement in the transaction of the caller.
 // Satisfied by movement.Service (WP-274).
@@ -125,7 +149,10 @@ type TransferInput struct {
 // tenant scope (database.WithRequestTenantTx) or join the transaction of
 // the context. In this order they lock the asset (SELECT … FOR UPDATE in
 // the caller's scope; not lockable: ErrAssetNotFound), check the holder
-// cache (ErrAlreadyAssigned, ErrNotAssigned, ErrHolderMismatch), book the
+// cache (ErrAlreadyAssigned, ErrNotAssigned, ErrHolderMismatch), check
+// the active reservation of the asset on Assign and Transfer (another
+// user's or a project's: ErrAssetReserved; the new holder's is consumed,
+// claimReservation, WP-277), book the
 // movements assignment and return through the movement service, set
 // asset.assigned_user_id, assigned_team_id and assignment_due_at, write the
 // transition rows of assignment (until WP-747) and register the events
@@ -252,6 +279,9 @@ func (s *Service) Assign(ctx context.Context, orgID string, in *AssignInput) (*A
 		if a.holder.id() != "" {
 			return ErrAlreadyAssigned
 		}
+		if resErr := s.claimReservation(ctx, tx, orgID, in.AssetID, in.Holder, a); resErr != nil {
+			return resErr
+		}
 		dueAt := in.DueAt
 		if dueAt == nil && dueDate != "" {
 			var at time.Time
@@ -339,6 +369,9 @@ func (s *Service) Transfer(ctx context.Context, orgID string, in *TransferInput)
 		if expectErr := a.expect(in.ExpectedHolder); expectErr != nil {
 			return expectErr
 		}
+		if resErr := s.claimReservation(ctx, tx, orgID, in.AssetID, in.Holder, a); resErr != nil {
+			return resErr
+		}
 		by := actor(ctx)
 		back := &movement.Movement{OrganizationID: orgID, ItemKind: "asset", AssetID: in.AssetID, MovementType: "return",
 			ActorID: by, AssigneeUserID: a.holder.UserID, AssigneeTeamID: a.holder.TeamID, Notes: in.Notes}
@@ -387,6 +420,42 @@ func (s *Service) AssetOfCI(ctx context.Context, orgID, ciID string) (string, er
 		return "", fmt.Errorf("asset of ci: %w", err)
 	}
 	return assetID, nil
+}
+
+// claimReservation checks the active reservation of the locked asset
+// (WP-277), locking it after the asset like the reservation paths: none
+// passes; one of another user or of a project is ErrAssetReserved; one of
+// the user h is consumed in the same transaction and reservation.converted
+// is registered before the commit, so no active reservation stays beside
+// the assignment. The SQL stands here because the reservation package
+// imports this one (convert).
+func (s *Service) claimReservation(ctx context.Context, tx pgx.Tx, orgID, assetID string, h Holder, a *lockedAsset) error {
+	d := events.Event{OrgID: orgID, Type: events.ReservationConverted}
+	data := ReservationEventData{AssetID: assetID, ClientID: a.client, SiteID: a.site}
+	var assignee string
+	err := tx.QueryRow(ctx, `SELECT id::text, item_kind, COALESCE(assignee_id::text, ''), reserved_until, expires_at
+		FROM reservation WHERE asset_id = $1 AND organization_id = $2 AND state = 'active' FOR UPDATE`, assetID, orgID).
+		Scan(&data.ID, &data.ItemKind, &assignee, &data.ReservedUntil, &data.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check reservation: %w", err)
+	}
+	if h.UserID == "" || !strings.EqualFold(assignee, h.UserID) {
+		return ErrAssetReserved
+	}
+	if err = tx.QueryRow(ctx, `UPDATE reservation SET state = 'consumed', updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND state = 'active' RETURNING state`, data.ID, orgID).Scan(&data.State); err != nil {
+		return fmt.Errorf("consume reservation: %w", err)
+	}
+	d.EntityID, d.Data = data.ID, data
+	return database.BeforeCommit(ctx, func() error {
+		if _, appendErr := s.outbox.Append(ctx, tx, &d); appendErr != nil {
+			return fmt.Errorf("append %s: %w", d.Type, appendErr)
+		}
+		return nil
+	})
 }
 
 // setHolder writes the holder cache of the asset; a user or team of

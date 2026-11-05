@@ -43,30 +43,6 @@ type Assignment struct {
 	checkoutSigner, returnSigner string
 }
 
-// CreateRequest is the payload for creating an assignment.
-type CreateRequest struct {
-	AssetID        string     `json:"asset_id,omitempty"`
-	CIID           string     `json:"ci_id,omitempty"`
-	AssignedTo     string     `json:"assigned_to"`
-	AssignmentType string     `json:"assignment_type,omitempty"`
-	DueDate        string     `json:"due_date,omitempty"`
-	Notes          string     `json:"notes,omitempty"`
-	Signature      *Signature `json:"signature,omitempty"`
-}
-
-// ReturnRequest is the payload for returning an assignment.
-type ReturnRequest struct {
-	ReturnCondition string     `json:"return_condition,omitempty"`
-	Notes           string     `json:"notes,omitempty"`
-	Signature       *Signature `json:"signature,omitempty"`
-}
-
-// TransferRequest is the payload for transferring an assignment.
-type TransferRequest struct {
-	NewAssignee string `json:"new_assignee"`
-	Notes       string `json:"notes,omitempty"`
-}
-
 // FilterParams holds filter parameters for listing assignments.
 type FilterParams struct {
 	Status     string

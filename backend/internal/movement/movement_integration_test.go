@@ -24,6 +24,10 @@ import (
 const (
 	ledgerMigration = "../../migrations/000242_stock_movement_canonical"
 	dropMigration   = "../../migrations/000246_drop_asset_movement"
+	// mergeMigration takes the transitional column quantity_item_id of the
+	// ledger away (WP-757); the replays of 000242 and 000246 revert it
+	// first.
+	mergeMigration = "../../migrations/000256_quantity_item_merge"
 )
 
 // readMigration returns the up and the down part of the migration path.
@@ -79,8 +83,9 @@ func siteOf(t *testing.T, f *scopetest.Fixture, id string) string {
 }
 
 // TestStockMovementCanonicalMigration covers the data migration of 000242
-// (STK-04, AST-07, WP-744) in a rolled-back transaction: after the down part
-// of 000246 (which restores asset_movement, WP-842) and of 000242 the legacy
+// (STK-04, AST-07, WP-744) in a rolled-back transaction: after the down
+// parts of 000256 (which restores quantity_item_id, WP-757), of 000246
+// (which restores asset_movement, WP-842) and of 000242 the legacy
 // ledgers asset_movement, the former stock_movement and
 // assignment get rows; the up part maps the types, keeps the ids, clears
 // asset quantities and second object columns, takes the assignee from the
@@ -95,6 +100,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 	ctx := context.Background()
 	up, down := readMigration(t, ledgerMigration)
 	_, dropDown := readMigration(t, dropMigration)
+	_, mergeDown := readMigration(t, mergeMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig242-a1")
 	asset2 := f.Asset(t, f.OrgA, f.Client1, "mig242-a2")
 	foreign := f.Asset(t, f.OrgB, "", "mig242-foreign")
@@ -113,6 +119,7 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 			t.Fatalf("%.60s...: %v", strings.TrimSpace(sql), execErr)
 		}
 	}
+	exec(mergeDown)
 	exec(dropDown)
 	exec(down)
 	exec(`UPDATE ci SET asset_id = $2 WHERE id = $1`, ciWithAsset, asset2)
@@ -318,7 +325,8 @@ func TestStockMovementCanonicalMigration(t *testing.T) {
 }
 
 // TestDropAssetMovementMigration covers 000246 (AST-07, WP-842) in a
-// rolled-back transaction: the down part restores asset_movement (state
+// rolled-back transaction after the down part of 000256 (WP-757): the down
+// part restores asset_movement (state
 // after 000075: append-only, ENABLE + FORCE RLS, truncate guard, RESTRICT
 // on the locations) from the ledger with the former type names, without
 // the movements of the assignment history and the consumables, and with
@@ -331,6 +339,7 @@ func TestDropAssetMovementMigration(t *testing.T) {
 	f := scopetest.Seed(t, "2f")
 	ctx := context.Background()
 	up, down := readMigration(t, dropMigration)
+	_, mergeDown := readMigration(t, mergeMigration)
 	asset1 := f.Asset(t, f.OrgA, f.Client1, "mig246-a1")
 	room := f.Room(t, f.Client1, "mig246-room")
 
@@ -354,6 +363,7 @@ func TestDropAssetMovementMigration(t *testing.T) {
 		return n
 	}
 
+	exec(mergeDown)
 	item, cons := f.ID(), f.ID()
 	exec(`INSERT INTO quantity_item (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'mig246')`, item, f.OrgA, f.Client1)
 	exec(`INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'mig246')`, cons, f.OrgA, f.Client1)
@@ -500,8 +510,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 		}
 	}
 	admin(`UPDATE asset SET location_id = $2 WHERE id = $1`, located, room2)
-	item, cons, team := f.ID(), f.ID(), f.ID()
-	admin(`INSERT INTO quantity_item (id, organization_id, client_id, name, location_id) VALUES ($1, $2, $3, 'ledger', $4)`, item, f.OrgA, f.Client1, room1)
+	cons, team := f.ID(), f.ID()
 	admin(`INSERT INTO consumable (id, organization_id, client_id, name) VALUES ($1, $2, $3, 'ledger')`, cons, f.OrgA, f.Client1)
 	// The stock of the consumable lies in a bin since WP-283.
 	consBin := stockBin(t, f, f.Client1, "ledger-bin")
@@ -531,20 +540,20 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			}
 			return ""
 		}
-		insert := `INSERT INTO stock_movement (organization_id, item_kind, asset_id, consumable_id, quantity_item_id, movement_type,
+		insert := `INSERT INTO stock_movement (organization_id, item_kind, asset_id, consumable_id, movement_type,
 			quantity, from_location_id, to_location_id, assignee_user_id, assignee_team_id, client_id, site_id)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, $6, $7,
-			NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, '')::uuid, NULLIF($12, '')::uuid, NULLIF($13, '')::uuid)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, $6,
+			NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, '')::uuid, NULLIF($12, '')::uuid)
 			RETURNING id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, '')`
 		one := 1.0
 		type mv struct {
-			kind, asset, cons, item, typ   string
+			kind, asset, cons, typ         string
 			quantity                       *float64
 			from, to, user, team, cl, site string
 		}
 		book := func(m mv) (id, client, site string) {
 			t.Helper()
-			if err = tx.QueryRow(ctx, insert, f.OrgA, m.kind, m.asset, m.cons, m.item, m.typ, m.quantity, m.from, m.to, m.user, m.team, m.cl, m.site).
+			if err = tx.QueryRow(ctx, insert, f.OrgA, m.kind, m.asset, m.cons, m.typ, m.quantity, m.from, m.to, m.user, m.team, m.cl, m.site).
 				Scan(&id, &client, &site); err != nil {
 				t.Fatalf("book %+v: %v", m, err)
 			}
@@ -561,7 +570,7 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			{"asset to a location", mv{kind: "asset", asset: asset1, typ: "transfer", from: room2, to: room1, cl: f.Client2, site: site2}, f.Client1, site1},
 			{"asset from a location", mv{kind: "asset", asset: asset1, typ: "transfer", from: room2}, f.Client1, site2},
 			{"asset without location", mv{kind: "asset", asset: located, typ: "assignment", user: user}, f.Client1, site2},
-			{"quantity item without location", mv{kind: "quantity_item", item: item, typ: "receipt", quantity: &one, cl: f.Client2}, f.Client1, site1},
+			{"consumable from a bin", mv{kind: "consumable", cons: cons, typ: "retrieval", quantity: &one, from: consBin, cl: f.Client2}, f.Client1, siteOf(t, f, consBin)},
 			{"consumable", mv{kind: "consumable", cons: cons, typ: "receipt", quantity: &one, site: site1}, f.Client1, ""},
 			{"team assignee", mv{kind: "asset", asset: asset2, typ: "assignment", team: team}, f.Client2, ""},
 		} {
@@ -570,21 +579,20 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			}
 		}
 		id, _, _ := book(mv{kind: "asset", asset: asset1, typ: "receipt", to: room1})
-		bookedItem, _, _ := book(mv{kind: "quantity_item", item: item, typ: "receipt", quantity: &one})
+		bookedCons, _, _ := book(mv{kind: "consumable", cons: cons, typ: "receipt", quantity: &one, to: consBin})
 		book(mv{kind: "asset", asset: asset1, typ: "transfer", from: room3, to: room1})
 
 		// Append-only.
 		if code := try(`UPDATE stock_movement SET notes = 'x' WHERE id = $1`, id); code != "P0001" {
 			t.Errorf("UPDATE of a movement: %q, want P0001", code)
 		}
-		if code := try(`DELETE FROM stock_movement WHERE id = $1`, bookedItem); code != "P0001" {
+		if code := try(`DELETE FROM stock_movement WHERE id = $1`, bookedCons); code != "P0001" {
 			t.Errorf("DELETE of a movement: %q, want P0001", code)
 		}
 		// RESTRICT on every object.
 		for _, c := range []struct{ name, sql, id string }{
 			{"asset", `DELETE FROM asset WHERE id = $1`, asset1},
 			{"consumable", `DELETE FROM consumable WHERE id = $1`, cons},
-			{"quantity item", `DELETE FROM quantity_item WHERE id = $1`, item},
 			{"location", `DELETE FROM location WHERE id = $1`, room3},
 		} {
 			if code := try(c.sql, c.id); code != "23503" {
@@ -597,13 +605,16 @@ func TestStockMovementLedgerRules(t *testing.T) {
 			m    mv
 		}{
 			{"object not matching item_kind", mv{kind: "asset", cons: cons, typ: "receipt"}},
-			{"two objects", mv{kind: "asset", asset: asset1, item: item, typ: "receipt"}},
+			{"two objects", mv{kind: "asset", asset: asset1, cons: cons, typ: "receipt"}},
 			{"quantity of an asset", mv{kind: "asset", asset: asset1, typ: "receipt", quantity: &one}},
-			{"quantity item without quantity", mv{kind: "quantity_item", item: item, typ: "receipt"}},
+			{"consumable without quantity", mv{kind: "consumable", cons: cons, typ: "receipt"}},
+			// The kind of the transition until the merge into consumable
+			// (WP-757).
+			{"quantity item", mv{kind: "quantity_item", cons: cons, typ: "receipt", quantity: &one}},
 			{"unknown type", mv{kind: "asset", asset: asset1, typ: "warehouse_transfer"}},
 			{"two assignees", mv{kind: "asset", asset: asset1, typ: "assignment", user: user, team: team}},
 		} {
-			if code := try(insert, f.OrgA, c.m.kind, c.m.asset, c.m.cons, c.m.item, c.m.typ, c.m.quantity, c.m.from, c.m.to, c.m.user, c.m.team, "", ""); code != "23514" {
+			if code := try(insert, f.OrgA, c.m.kind, c.m.asset, c.m.cons, c.m.typ, c.m.quantity, c.m.from, c.m.to, c.m.user, c.m.team, "", ""); code != "23514" {
 				t.Errorf("%s: %q, want 23514", c.name, code)
 			}
 		}

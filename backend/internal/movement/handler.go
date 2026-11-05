@@ -22,7 +22,8 @@ type Recorder interface {
 	Record(ctx context.Context, m *Movement) error
 }
 
-// Handler provides HTTP handlers for the movement ledger and quantity items.
+// Handler provides HTTP handlers for the movement ledger and the deprecated
+// alias inventory/items on consumable (E-40, WP-757).
 // Bookings go through the movement service, which writes stock.movement to
 // the outbox (WP-274).
 type Handler struct {
@@ -74,12 +75,13 @@ func WriteLedgerDependency(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// writeMovementError answers a failed movement or quantity-item request: an
-// asset, consumable or quantity item that is unknown, of another
+// writeMovementError answers a failed movement or inventory-item request:
+// an asset, consumable or article of the alias that is unknown, of another
 // organization or outside the caller's scope is 404 with a fixed text
 // (TEN-04), a location or reference likewise 422 on its field, a taken SKU
 // 409, a shortfall 409 insufficient-stock (api.WriteTypedProblem), a
-// delete kept by movements 409 with dependencies.
+// delete kept by movements 409 with dependencies, one kept by stock in a
+// bin 409.
 // Database errors go through api.WriteRepoError; no table, constraint,
 // policy or SQLSTATE text reaches the client (API-03, F-047), the log keeps
 // it.
@@ -97,6 +99,8 @@ func writeMovementError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteTypedProblem(w, http.StatusConflict, err)
 	case errors.Is(err, ErrHasMovements):
 		WriteLedgerDependency(w, r)
+	case errors.Is(err, consumable.ErrHasStock):
+		api.WriteError(w, http.StatusConflict, "Conflict", consumable.ErrHasStock.Error())
 	case errors.Is(err, api.ErrInvalidCursor):
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
 	case api.WriteFieldError(w, err):
@@ -169,7 +173,7 @@ func (h *Handler) listMovements(w http.ResponseWriter, r *http.Request, orgID st
 
 // ListMovements handles GET /api/v1/stock-movements: the movements of
 // every object kind, filtered by asset_id, consumable_id,
-// quantity_item_id, movement_type (STK-04 type, else 422), location_id
+// quantity_item_id (deprecated alias of consumable_id), movement_type (STK-04 type, else 422), location_id
 // (source or target) and occurred_from/occurred_to (RFC 3339, else 422),
 // newest first on (occurred_at, id) with a keyset cursor.
 func (h *Handler) ListMovements(w http.ResponseWriter, r *http.Request) {
@@ -229,8 +233,9 @@ func (h *Handler) ListAssetMovements(w http.ResponseWriter, r *http.Request) {
 
 // checkCreateRequest answers a booking POST /api/v1/stock-movements does
 // not take and reports whether req passed (E-38, E-142, WP-756): for a
-// consumable and, until the merge into consumable (E-40), a quantity item
-// receipt, retrieval, correction and transfer with quantity > 0; for an
+// consumable (quantity_item_id is its deprecated alias since the merge,
+// E-40, WP-757) receipt, retrieval, correction and transfer with quantity
+// > 0; for an
 // asset only transfer to to_location_id, without quantity. The types of
 // the domain paths are 422 movement-type-reserved; legacy names, unknown
 // types and every other combination are 422 on their field. The rules of
@@ -253,7 +258,7 @@ func checkCreateRequest(w http.ResponseWriter, req *CreateMovementRequest) bool 
 		writeField(w, "asset_id", "exactly one of asset_id, consumable_id and quantity_item_id is required")
 	case req.AssetID != "" && req.ItemKind != "" && req.ItemKind != "asset",
 		req.ConsumableID != "" && req.ItemKind != "" && req.ItemKind != "consumable",
-		req.QuantityItemID != "" && req.ItemKind != "" && req.ItemKind != "quantity_item":
+		req.QuantityItemID != "" && req.ItemKind != "" && req.ItemKind != "quantity_item" && req.ItemKind != "consumable":
 		writeField(w, "item_kind", "item_kind does not match the moved object")
 	case req.AssetID != "" && !AssetMovementTypes[req.MovementType]:
 		writeField(w, "movement_type", "an asset moves through this route only by transfer")
@@ -261,10 +266,8 @@ func checkCreateRequest(w http.ResponseWriter, req *CreateMovementRequest) bool 
 		writeField(w, "quantity", "an asset movement has no quantity")
 	case req.AssetID != "" && req.ToLocationID == "":
 		writeField(w, "to_location_id", "an asset transfer needs to_location_id")
-	case req.ConsumableID != "" && !ConsumableMovementTypes[req.MovementType]:
+	case (req.ConsumableID != "" || req.QuantityItemID != "") && !ConsumableMovementTypes[req.MovementType]:
 		writeField(w, "movement_type", "movement_type is not booked for a consumable")
-	case req.QuantityItemID != "" && !QuantityMovementTypes[req.MovementType]:
-		writeField(w, "movement_type", "movement_type is not booked for a quantity item")
 	case req.AssetID == "" && (req.Quantity == nil || *req.Quantity <= 0):
 		writeField(w, "quantity", "quantity must be greater than 0")
 	default:
@@ -286,7 +289,8 @@ func mayMoveAssets(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // Record handles POST /api/v1/stock-movements: it books a quantity
-// booking of a consumable or quantity item, or the transfer of an asset,
+// booking of a consumable (also named by the deprecated alias
+// quantity_item_id, WP-757), or the transfer of an asset,
 // through the movement service (lock, checks, stock per bin,
 // stock.movement in the outbox, all in one transaction).
 func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
@@ -427,7 +431,8 @@ func (h *Handler) RecordConsumableMovement(w http.ResponseWriter, r *http.Reques
 	api.WriteJSON(w, http.StatusCreated, map[string]any{"movement": LegacyConsumableMovement(m)})
 }
 
-// ListItems handles GET /api/v1/inventory/items
+// ListItems handles GET /api/v1/inventory/items, the alias of GET
+// /api/v1/consumables in the answer form QuantityItem (E-40, WP-757).
 func (h *Handler) ListItems(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -441,12 +446,13 @@ func (h *Handler) ListItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[QuantityItem]{
-		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		Data: api.NonNilSlice(items), Total: total, Limit: page.Limit, Offset: page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
 }
 
-// GetItem handles GET /api/v1/inventory/items/{id}
+// GetItem handles GET /api/v1/inventory/items/{id}, the deprecated alias of
+// GET /api/v1/consumables/{id} (WP-757).
 func (h *Handler) GetItem(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -465,7 +471,9 @@ func (h *Handler) GetItem(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
-// CreateItem handles POST /api/v1/inventory/items
+// CreateItem handles POST /api/v1/inventory/items, the alias of POST
+// /api/v1/consumables (WP-757): a stock_level > 0 is booked as a receipt
+// into the bin location_id through the movement service.
 func (h *Handler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -496,6 +504,7 @@ func (h *Handler) CreateItem(w http.ResponseWriter, r *http.Request) {
 		LocationID:     req.LocationID,
 		Notes:          req.Notes,
 		Attributes:     req.Attributes,
+		actorID:        t.UserID,
 	}
 	if err := h.repo.CreateItem(r.Context(), item); err != nil {
 		writeMovementError(w, r, err)
@@ -504,7 +513,9 @@ func (h *Handler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusCreated, item)
 }
 
-// UpdateItem handles PATCH /api/v1/inventory/items/{id}
+// UpdateItem handles PATCH /api/v1/inventory/items/{id}, the deprecated
+// alias of PATCH /api/v1/consumables/{id} (WP-757); location_id and
+// attributes are 422.
 func (h *Handler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -520,9 +531,6 @@ func (h *Handler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.LocationID != nil && !requireUUIDs(w, "location_id", *req.LocationID) {
-		return
-	}
 	item, err := h.repo.UpdateItem(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		writeMovementError(w, r, err)
@@ -532,7 +540,8 @@ func (h *Handler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 }
 
 // AssetCreator creates a serialized asset from a quantity item conversion
-// (spec §6). Satisfied by the asset repository.
+// (spec §6). Satisfied by the asset repository; with a context that carries
+// a transaction (database.ContextWithTx) it creates the asset in it.
 type AssetCreator interface {
 	Create(ctx context.Context, a *AssetRef) (string, error)
 }
@@ -556,9 +565,12 @@ func (h *Handler) WithAssets(creator AssetCreator) *Handler {
 	return h
 }
 
-// ConvertToAsset handles POST /api/v1/inventory/items/{id}/convert — converts
-// one unit of a quantity item into a serialized asset (spec §6). The stock
-// level decrements by one and a receipt-of-identity movement is recorded.
+// ConvertToAsset handles POST /api/v1/inventory/items/{id}/convert: one
+// unit of the article is retrieved from the bin location_id (the only bin
+// of the article when absent, else 422 on location_id) and becomes a
+// serialized asset in that bin, both in one transaction (Repository.
+// ConvertItem, WP-757). A shortfall is 409 insufficient-stock and leaves
+// neither asset nor movement.
 func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -573,14 +585,10 @@ func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.repo.GetItem(r.Context(), t.OrganizationID, id)
-	if err != nil {
-		writeMovementError(w, r, err)
-		return
-	}
 	var req struct {
 		AssetTag     string `json:"asset_tag"`
 		SerialNumber string `json:"serial_number,omitempty"`
+		LocationID   string `json:"location_id,omitempty"`
 	}
 	if readErr := api.ReadJSON(r, &req); readErr != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", readErr.Error())
@@ -590,40 +598,24 @@ func (h *Handler) ConvertToAsset(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "asset_tag is required")
 		return
 	}
-	if item.StockLevel < 1 {
-		api.WriteError(w, http.StatusConflict, "Conflict", "no stock available to convert")
+	if !requireUUIDs(w, "location_id", req.LocationID) {
 		return
 	}
-	assetID, err := h.assets.Create(r.Context(), &AssetRef{
-		OrganizationID: t.OrganizationID,
-		ClientID:       item.ClientID,
-		AssetTag:       req.AssetTag,
-		Name:           item.Name,
-		Category:       "hardware",
-		LocationID:     item.LocationID,
-		SerialNumber:   req.SerialNumber,
-	})
-	if err != nil {
-		api.WriteRepoError(w, err)
+	conv := &Conversion{OrganizationID: t.OrganizationID, ItemID: id, LocationID: req.LocationID, AssetTag: req.AssetTag,
+		SerialNumber: req.SerialNumber, ActorID: t.UserID}
+	if err := h.repo.ConvertItem(r.Context(), conv, h.assets); err != nil {
+		writeMovementError(w, r, err)
 		return
 	}
-	// Decrement the quantity stock via an out-movement of one unit.
-	one := 1.0
-	_ = h.repo.Record(r.Context(), &Movement{
-		OrganizationID: t.OrganizationID,
-		ItemKind:       "quantity_item",
-		QuantityItemID: item.ID,
-		MovementType:   "deployment",
-		Quantity:       &one,
-		Reason:         "converted to serialized asset " + assetID,
-	})
 	api.WriteJSON(w, http.StatusCreated, map[string]any{
-		"asset_id":         assetID,
-		"quantity_item_id": item.ID,
+		"asset_id":         conv.AssetID,
+		"quantity_item_id": id,
+		"movement_id":      conv.Movement.ID,
 	})
 }
 
-// DeleteItem handles DELETE /api/v1/inventory/items/{id}
+// DeleteItem handles DELETE /api/v1/inventory/items/{id}, the deprecated
+// alias of DELETE /api/v1/consumables/{id} (WP-757).
 func (h *Handler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {

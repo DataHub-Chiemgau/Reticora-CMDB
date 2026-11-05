@@ -47,7 +47,9 @@ import type {
   AssetCreateRequest,
   AssetUpdateRequest,
   AssetListParams,
-  AssignmentCreateRequest,
+  AssignAssetRequest,
+  ReturnAssetRequest,
+  TransferAssetRequest,
   AssignmentListParams,
   DocumentCreateRequest,
   DocumentListParams,
@@ -451,10 +453,13 @@ export function useAssignmentList(params: AssignmentListParams) {
   });
 }
 
+// The writes go through the asset (WP-746) and refresh the assignment
+// lists.
 export function useCreateAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: AssignmentCreateRequest) => assignmentApi.create(data),
+    mutationFn: ({ assetId, data }: { assetId: string; data: AssignAssetRequest }) =>
+      assignmentApi.assign(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
     },
@@ -464,13 +469,8 @@ export function useCreateAssignment() {
 export function useReturnAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      data,
-    }: {
-      id: string;
-      data: { return_condition?: string; notes?: string };
-    }) => assignmentApi.returnAssignment(id, data),
+    mutationFn: ({ assetId, data }: { assetId: string; data: ReturnAssetRequest }) =>
+      assignmentApi.returnAsset(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
     },
@@ -480,8 +480,8 @@ export function useReturnAssignment() {
 export function useTransferAssignment() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { new_assignee: string; notes?: string } }) =>
-      assignmentApi.transfer(id, data),
+    mutationFn: ({ assetId, data }: { assetId: string; data: TransferAssetRequest }) =>
+      assignmentApi.transfer(assetId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assignments'] });
     },

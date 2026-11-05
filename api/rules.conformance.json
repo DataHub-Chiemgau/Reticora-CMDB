@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. Only backend/internal/rules/rules_test.go evaluates expressions for now; frontend/src/rules reads only cases, invalid_rules, condition_cases and invalid_conditions until WP-315 adds the TypeScript evaluation.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. Only backend/internal/rules/rules_test.go evaluates expressions for now; frontend/src/rules reads only cases, invalid_rules, condition_cases and invalid_conditions until WP-315 adds the TypeScript evaluation. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
   "version": 1,
   "cases": [
     {
@@ -2421,6 +2421,1008 @@
         ]
       },
       "path": "args[1].args[0]"
+    }
+  ],
+  "filter_cases": [
+    {
+      "name": "comparison",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "eq", "value": "web-01" }
+    },
+    {
+      "name": "and of order comparisons",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "created_at", "op": "gte", "value": "2024-01-01" },
+          {
+            "field": "updated_at",
+            "op": "lt",
+            "value": "2025-06-30T12:00:00Z"
+          },
+          { "field": "status", "op": "ne", "value": "retired" }
+        ]
+      }
+    },
+    {
+      "name": "or and not",
+      "entity_kind": "ci",
+      "filter": {
+        "or": [
+          { "field": "hostname", "op": "like", "value": "web-*" },
+          { "not": { "field": "is_manual", "op": "eq", "value": true } }
+        ]
+      }
+    },
+    {
+      "name": "in on text",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "status",
+        "op": "in",
+        "value": ["active", "planned"]
+      }
+    },
+    {
+      "name": "between on a time field",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "created_at",
+        "op": "between",
+        "value": ["2024-01-01", "2024-12-31"]
+      }
+    },
+    {
+      "name": "between on an attribute",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "attributes.ram_gb",
+        "op": "between",
+        "value": [8, 16]
+      }
+    },
+    {
+      "name": "exists without value",
+      "entity_kind": "ci",
+      "filter": { "field": "fqdn", "op": "exists" }
+    },
+    {
+      "name": "exists false",
+      "entity_kind": "ci",
+      "filter": { "field": "fqdn", "op": "exists", "value": false }
+    },
+    {
+      "name": "tags has_any",
+      "entity_kind": "ci",
+      "filter": { "field": "tags", "op": "has_any", "value": ["prod", "dmz"] }
+    },
+    {
+      "name": "tags has_all",
+      "entity_kind": "asset",
+      "filter": { "field": "tags", "op": "has_all", "value": ["prod"] }
+    },
+    {
+      "name": "asset field of a CI",
+      "entity_kind": "ci",
+      "filter": { "field": "asset.cost_center", "op": "eq", "value": "CC-1" }
+    },
+    {
+      "name": "asset attribute of a CI",
+      "entity_kind": "ci",
+      "filter": { "field": "asset.attributes.room", "op": "eq", "value": "R1" }
+    },
+    {
+      "name": "asset query",
+      "entity_kind": "asset",
+      "filter": {
+        "and": [
+          { "field": "inventory_no", "op": "like", "value": "INV-*" },
+          { "field": "purchase_price", "op": "gt", "value": 1000 }
+        ]
+      }
+    },
+    {
+      "name": "related: VMs on hosts in rack R12 (SRC-04)",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "ci_type", "op": "eq", "value": "vm" },
+          {
+            "related": {
+              "direction": "out",
+              "rel_types": ["runs_on", "hosted_on"],
+              "where": {
+                "and": [
+                  {
+                    "field": "location_id",
+                    "op": "eq",
+                    "value": "6f1c2a3e-8d4b-4e5f-9a6b-7c8d9e0f1a2b"
+                  },
+                  {
+                    "field": "attributes.warranty_days_left",
+                    "op": "lt",
+                    "value": 30
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "related in at depth 5",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "in",
+          "max_depth": 5,
+          "where": { "field": "ci_type", "op": "eq", "value": "service" }
+        }
+      }
+    },
+    {
+      "name": "related both without rel_types",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "both",
+          "max_depth": 2,
+          "where": { "field": "tags", "op": "has_any", "value": ["prod"] }
+        }
+      }
+    },
+    {
+      "name": "related under not",
+      "entity_kind": "ci",
+      "filter": {
+        "not": {
+          "related": {
+            "direction": "out",
+            "rel_types": ["depends_on"],
+            "where": { "field": "ci_type", "op": "eq", "value": "backup" }
+          }
+        }
+      }
+    },
+    {
+      "name": "related within related",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "rel_types": ["runs_on"],
+          "where": {
+            "related": {
+              "direction": "out",
+              "rel_types": ["contains"],
+              "where": { "field": "name", "op": "eq", "value": "R12" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "10 levels",
+      "entity_kind": "ci",
+      "filter": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "not": { "field": "name", "op": "eq", "value": "x" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "10 levels through related",
+      "entity_kind": "ci",
+      "filter": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "related": {
+                          "direction": "out",
+                          "where": {
+                            "field": "name",
+                            "op": "eq",
+                            "value": "x"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "100 nodes",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" }
+        ]
+      }
+    },
+    {
+      "name": "100 nodes with related",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          {
+            "related": {
+              "direction": "out",
+              "where": { "field": "name", "op": "eq", "value": "x" }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "invalid_filters": [
+    {
+      "name": "empty node",
+      "entity_kind": "ci",
+      "filter": {},
+      "path": "where"
+    },
+    {
+      "name": "group and comparison in one node",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [{ "field": "name", "op": "eq", "value": "x" }],
+        "field": "name",
+        "op": "eq",
+        "value": "x"
+      },
+      "path": "where"
+    },
+    {
+      "name": "related and comparison in one node",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "where": { "field": "name", "op": "eq", "value": "x" }
+        },
+        "field": "name",
+        "op": "eq",
+        "value": "x"
+      },
+      "path": "where"
+    },
+    {
+      "name": "empty and",
+      "entity_kind": "ci",
+      "filter": { "and": [] },
+      "path": "where"
+    },
+    {
+      "name": "empty or in a group",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [{ "field": "name", "op": "eq", "value": "x" }, { "or": [] }]
+      },
+      "path": "where.and[1]"
+    },
+    {
+      "name": "unknown operator",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "regex", "value": "x" },
+      "path": "where"
+    },
+    {
+      "name": "in without a list",
+      "entity_kind": "ci",
+      "filter": { "field": "status", "op": "in", "value": "active" },
+      "path": "where.value"
+    },
+    {
+      "name": "in with an empty list",
+      "entity_kind": "ci",
+      "filter": { "field": "status", "op": "in", "value": [] },
+      "path": "where.value"
+    },
+    {
+      "name": "in with an object",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "status",
+        "op": "in",
+        "value": ["active", { "x": 1 }]
+      },
+      "path": "where.value[1]"
+    },
+    {
+      "name": "eq without value",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "eq" },
+      "path": "where.value"
+    },
+    {
+      "name": "eq with null",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "eq", "value": null },
+      "path": "where.value"
+    },
+    {
+      "name": "eq with a list",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "eq", "value": ["a"] },
+      "path": "where.value"
+    },
+    {
+      "name": "exists with a string",
+      "entity_kind": "ci",
+      "filter": { "field": "fqdn", "op": "exists", "value": "yes" },
+      "path": "where.value"
+    },
+    {
+      "name": "between with one value",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "created_at",
+        "op": "between",
+        "value": ["2024-01-01"]
+      },
+      "path": "where.value"
+    },
+    {
+      "name": "between with three values",
+      "entity_kind": "ci",
+      "filter": {
+        "field": "attributes.ram_gb",
+        "op": "between",
+        "value": [1, 2, 3]
+      },
+      "path": "where.value"
+    },
+    {
+      "name": "between without a list",
+      "entity_kind": "ci",
+      "filter": { "field": "attributes.ram_gb", "op": "between", "value": 8 },
+      "path": "where.value"
+    },
+    {
+      "name": "has_any on a column",
+      "entity_kind": "ci",
+      "filter": { "field": "name", "op": "has_any", "value": ["x"] },
+      "path": "where"
+    },
+    {
+      "name": "tags with eq",
+      "entity_kind": "ci",
+      "filter": { "field": "tags", "op": "eq", "value": "prod" },
+      "path": "where"
+    },
+    {
+      "name": "has_all with an empty list",
+      "entity_kind": "ci",
+      "filter": { "field": "tags", "op": "has_all", "value": [] },
+      "path": "where.value"
+    },
+    {
+      "name": "has_any with a number",
+      "entity_kind": "ci",
+      "filter": { "field": "tags", "op": "has_any", "value": [1] },
+      "path": "where.value[0]"
+    },
+    {
+      "name": "has_any with an empty key",
+      "entity_kind": "asset",
+      "filter": { "field": "tags", "op": "has_any", "value": ["prod", ""] },
+      "path": "where.value[1]"
+    },
+    {
+      "name": "invalid attribute key",
+      "entity_kind": "ci",
+      "filter": { "field": "attributes.Ram-GB", "op": "eq", "value": 1 },
+      "path": "where"
+    },
+    {
+      "name": "related on assets",
+      "entity_kind": "asset",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "where": { "field": "name", "op": "eq", "value": "x" }
+        }
+      },
+      "path": "where.related"
+    },
+    {
+      "name": "related without direction",
+      "entity_kind": "ci",
+      "filter": {
+        "related": { "where": { "field": "name", "op": "eq", "value": "x" } }
+      },
+      "path": "where.related.direction"
+    },
+    {
+      "name": "related with an unknown direction",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "up",
+          "where": { "field": "name", "op": "eq", "value": "x" }
+        }
+      },
+      "path": "where.related.direction"
+    },
+    {
+      "name": "related max_depth 0",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          {
+            "related": {
+              "direction": "out",
+              "max_depth": 0,
+              "where": { "field": "name", "op": "eq", "value": "x" }
+            }
+          }
+        ]
+      },
+      "path": "where.and[1].related.max_depth"
+    },
+    {
+      "name": "related max_depth 6",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          {
+            "related": {
+              "direction": "out",
+              "max_depth": 6,
+              "where": { "field": "name", "op": "eq", "value": "x" }
+            }
+          }
+        ]
+      },
+      "path": "where.and[1].related.max_depth"
+    },
+    {
+      "name": "related with an empty type key",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "rel_types": ["runs_on", ""],
+          "where": { "field": "name", "op": "eq", "value": "x" }
+        }
+      },
+      "path": "where.related.rel_types[1]"
+    },
+    {
+      "name": "related without where",
+      "entity_kind": "ci",
+      "filter": { "related": { "direction": "in" } },
+      "path": "where.related.where"
+    },
+    {
+      "name": "invalid comparison in the filter of related",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "where": {
+            "and": [
+              { "field": "name", "op": "eq", "value": "x" },
+              { "field": "status", "op": "in", "value": [] }
+            ]
+          }
+        }
+      },
+      "path": "where.related.where.and[1].value"
+    },
+    {
+      "name": "related within related on an empty node",
+      "entity_kind": "ci",
+      "filter": {
+        "related": {
+          "direction": "out",
+          "where": { "related": { "direction": "out", "where": {} } }
+        }
+      },
+      "path": "where.related.where.related.where"
+    },
+    {
+      "name": "11 levels",
+      "entity_kind": "ci",
+      "filter": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "not": {
+                          "not": { "field": "name", "op": "eq", "value": "x" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "path": "where.not.not.not.not.not.not.not.not.not.not"
+    },
+    {
+      "name": "11 levels through related",
+      "entity_kind": "ci",
+      "filter": {
+        "not": {
+          "not": {
+            "not": {
+              "not": {
+                "not": {
+                  "not": {
+                    "not": {
+                      "not": {
+                        "not": {
+                          "related": {
+                            "direction": "out",
+                            "where": {
+                              "field": "name",
+                              "op": "eq",
+                              "value": "x"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "path": "where.not.not.not.not.not.not.not.not.not.related.where"
+    },
+    {
+      "name": "101 nodes",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" }
+        ]
+      },
+      "path": "where.and[99]"
+    },
+    {
+      "name": "101 nodes with related",
+      "entity_kind": "ci",
+      "filter": {
+        "and": [
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          { "field": "name", "op": "eq", "value": "x" },
+          {
+            "related": {
+              "direction": "out",
+              "where": { "field": "name", "op": "eq", "value": "x" }
+            }
+          }
+        ]
+      },
+      "path": "where.and[98].related.where"
     }
   ]
 }

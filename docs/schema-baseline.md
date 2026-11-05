@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000255_barcode_registry
+Stand: Migration 000256_quantity_item_merge
 
 ## Prüfung
 
@@ -1342,9 +1342,10 @@ Kanonisches Bestandsledger (STK-04, AST-07, WP-744, Migration 000242):
 `stock_movement` ersetzt das Consumable-Ledger aus 000045 (umbenannt in
 `stock_movement_legacy`, übernommen und gelöscht). Spalten `id`,
 `organization_id`, `client_id`, `site_id`, `item_kind`
-(`stock_movement_item_kind_check`: `asset`, `consumable`, `quantity_item`),
-`asset_id`, `consumable_id`, `quantity_item_id`
-(`stock_movement_object_check`: genau eine, passend zu `item_kind`),
+(`stock_movement_item_kind_check`: `asset`, `consumable`; seit 000256 ohne
+`quantity_item`), `asset_id`, `consumable_id`
+(`stock_movement_object_check`: genau eine, passend zu `item_kind`; die
+Übergangsspalte `quantity_item_id` entfällt mit 000256),
 `movement_type` (`stock_movement_movement_type_check`: `receipt`,
 `transfer`, `assignment`, `return`, `deployment`, `retrieval`,
 `reservation`, `release`, `repair`, `disposal`, `correction`),
@@ -1358,17 +1359,17 @@ Kanonisches Bestandsledger (STK-04, AST-07, WP-744, Migration 000242):
 `stock_movement_id_organization_key` (`id`, `organization_id`). Verweise
 mit Organisation (K19), alle ON DELETE RESTRICT:
 `stock_movement_asset_id_fkey` → `asset`,
-`stock_movement_consumable_id_fkey` → `consumable`,
-`stock_movement_quantity_item_id_fkey` → `quantity_item` (neuer Schlüssel
-`quantity_item_id_organization_key`),
+`stock_movement_consumable_id_fkey` → `consumable` (der neue Schlüssel
+`quantity_item_id_organization_key` von 000242 bleibt bis WP-758 an
+`quantity_item`),
 `stock_movement_from_location_id_fkey` und
 `stock_movement_to_location_id_fkey` → `location`,
 `stock_movement_assignee_user_id_fkey` → `app_user`,
 `stock_movement_assignee_team_id_fkey` → `team`; `organization_id` →
 `organization` ON DELETE CASCADE. Indizes `idx_stock_movement_org`
 (`organization_id`, `occurred_at` DESC), Teilindizes
-`idx_stock_movement_asset`, `idx_stock_movement_consumable`,
-`idx_stock_movement_quantity_item` (Objekt, `occurred_at` DESC),
+`idx_stock_movement_asset`, `idx_stock_movement_consumable` (Objekt,
+`occurred_at` DESC),
 `idx_stock_movement_from_location`, `idx_stock_movement_to_location` und
 `idx_stock_movement_type` (`organization_id`, `movement_type`). Trigger
 `stock_movement_append_only` (BEFORE UPDATE OR DELETE,
@@ -1550,6 +1551,23 @@ wie `asset_tag_link`) sowie die restriktiven
 Code); belegte Codes stehen mit Grund `barcode_conflict` (Asset und
 Mengenartikel mit `barcode` NULL; Knoten) bzw. `barcode_ambiguous` (mehrere
 Knoten) in `migration_quarantine` (Migration `000255`).
+
+Übernahme der Mengenartikel (STK-03, API-06, WP-757, E-40, Migration
+000256): jede Zeile von `quantity_item` steht ID-gleich in `consumable`
+(`id`, `organization_id`, `client_id`, `sku`, `name`, `category`, `unit`,
+`min_level`, `notes`, `created_at`, `updated_at`). Bestand > 0 in einem Bin
+mit verträglichem Client ergibt eine `stock_level`-Zeile; Bestand ohne Bin
+(`stock_without_bin`), in einem Bin eines fremden Clients
+(`bin_client_mismatch`), negative Mengen (`negative_stock`, als 0
+behandelt), eine mit einem bestehenden `consumable` kollidierende SKU
+(`sku_conflict`, SKU NULL) und nicht leere `attributes`
+(`attributes_dropped`) stehen mit der ganzen Zeile in `migration_quarantine`
+(Migration `000256`). Die Ledger-Zeilen mit `item_kind` `quantity_item` sind
+bei ausgesetztem `stock_movement_append_only` auf `consumable_id` und
+`item_kind` `consumable` umgeschrieben; `stock_movement.quantity_item_id`
+mit Fremdschlüssel und Index ist entfernt, `derive_stock_movement_scope()`
+kennt nur noch `asset` und `consumable`. `quantity_item` selbst bleibt
+unverändert bis WP-758.
 
 ## Tabellen, RLS und Policies
 

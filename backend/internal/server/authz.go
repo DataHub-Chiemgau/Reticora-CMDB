@@ -309,6 +309,9 @@ var routeRules = []routeRule{
 	{http.MethodPost, "assets/*/return", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/transfer", identity.PermAssignmentWrite},
 	{http.MethodPost, "assets/*/reserve", identity.PermReservationWrite},
+	// Converting a reservation assigns its asset (WP-277), like POST
+	// /assignments; without a rule it would derive reservation:write.
+	{http.MethodPost, "reservations/*/convert", identity.PermAssignmentWrite},
 	// Linking a CI to an asset writes ci.asset_id like PATCH /cis/{id}
 	// (WP-272); the handler also requires asset:write.
 	{http.MethodPost, "assets/*/cis", identity.PermCIWrite},
@@ -489,6 +492,12 @@ func PermissionForRoute(method, path string) (identity.Permission, routeAccess) 
 	case "notifications":
 		// The notification center serves the signed-in user's own inbox
 		// and preferences (NTF-04).
+		return "", routeProtected
+	case "labels":
+		// The code lookup (WP-762, INV-03) names assets, consumables and
+		// locations: the handler checks the read permission of the
+		// object's kind (asset:read, stock:read, location:read) and
+		// answers 404 without it; the route needs a principal only.
 		return "", routeProtected
 	}
 

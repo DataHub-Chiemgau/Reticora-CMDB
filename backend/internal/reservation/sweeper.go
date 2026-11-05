@@ -11,9 +11,12 @@ import (
 // ScheduleKind is the system job that releases expired reservations.
 const ScheduleKind = "reservation.expire"
 
-// Sweeper releases expired reservations and emits a reservation_release
-// movement per expiry (spec §10: expiration support). It runs as a system
-// job of the scheduler (JOB-02), once a minute on the leading replica.
+// Sweeper expires the reservations whose expires_at has passed (spec §10:
+// expiration support). It runs as a system job of the scheduler (JOB-02),
+// once a minute on the leading replica; the repository writes the movement
+// release, the audit entry reservations.expire and reservation.expired of
+// each expiry in the transaction of its batch (PGRepository.ExpireDue,
+// WP-277).
 type Sweeper struct {
 	repo       Repository
 	dispatcher EventDispatcher

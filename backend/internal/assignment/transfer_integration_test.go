@@ -461,7 +461,7 @@ func TestAssignmentServiceRollbackAndScope(t *testing.T) {
 		Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 		Permissions: identity.AllPermissions()}
 	for _, route := range []string{"POST /api/v1/assets/" + asset + "/assign", "POST /api/v1/assets/" + asset + "/return",
-		"POST /api/v1/assets/" + asset + "/transfer", "POST /api/v1/assignments", "DELETE /api/v1/assignments/" + asset} {
+		"POST /api/v1/assets/" + asset + "/transfer"} {
 		method, target, _ := strings.Cut(route, " ")
 		req := httptest.NewRequest(method, target, strings.NewReader(`{}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -503,15 +503,14 @@ func memoryRouter(t *testing.T) http.Handler {
 	return mux
 }
 
-// TestAssignmentLegacyPathsAndBackfill covers the paths below
-// /api/v1/assignments until WP-746 and the backfill 000254 (WP-275): a
-// ci_id with an asset books on that asset, a ci_id without asset is 422,
-// the return of a row books through the service, DELETE is 409; POST
-// /api/v1/assets/{id}/return closes an open row with only a ci_id; the
-// backfill takes the newest open row per asset, a row with only a ci_id
-// through ci.asset_id, the due date as the end of the day in the time zone
-// of the organization, and no user of another organization.
-func TestAssignmentLegacyPathsAndBackfill(t *testing.T) {
+// TestAssignmentCIOnlyRowAndBackfill covers the rows of assignment from
+// before WP-275 and the backfill 000254 (WP-275, WP-746): POST
+// /api/v1/assets/{id}/return closes an open row with only a ci_id whose CI
+// belongs to the asset; the backfill takes the newest open row per asset, a
+// row with only a ci_id through ci.asset_id, the due date as the end of the
+// day in the time zone of the organization, and no user of another
+// organization.
+func TestAssignmentCIOnlyRowAndBackfill(t *testing.T) {
 	f := scopetest.Seed(t, "a6")
 	bg := context.Background()
 	actor := f.AppUser(t, f.OrgA, "wp275actor")
@@ -519,56 +518,11 @@ func TestAssignmentLegacyPathsAndBackfill(t *testing.T) {
 	alice := f.AppUser(t, f.OrgA, "wp275alice")
 	bob := f.AppUser(t, f.OrgA, "wp275bob")
 	ctx := a.org()
-	linkCI := func(ciID, assetID string) {
-		t.Helper()
-		if _, err := f.Admin.Exec(bg, `UPDATE ci SET asset_id = $2 WHERE id = $1`, ciID, assetID); err != nil {
-			t.Fatal(err)
-		}
-	}
 
-	// ci_id with an asset books on the asset.
 	asset := f.Asset(t, f.OrgA, f.Client1, "wp275-legacy")
 	server1 := f.CI(t, f.OrgA, f.Client1, "wp275-ci")
-	linkCI(server1, asset)
-	w := a.call(ctx, http.MethodPost, "/api/v1/assignments", `{"ci_id":"`+server1+`","assigned_to":"`+alice+`","due_date":"2026-12-24"}`)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("legacy create: %d %s", w.Code, w.Body.String())
-	}
-	created := decodeAssignment(t, w)
-	if created.AssetID != asset || created.CIID != server1 || created.DueDate != "2026-12-24" {
-		t.Fatalf("legacy create = %+v", created)
-	}
-	if h := a.holder(asset); h.user != alice || h.due == nil {
-		t.Fatalf("holder after legacy create = %+v", h)
-	}
-	if l := a.ledger(asset); len(l) != 1 || l[0].id != created.ID {
-		t.Fatalf("ledger after legacy create = %+v", l)
-	}
-	// ci_id without asset: 422.
-	loose := f.CI(t, f.OrgA, f.Client1, "wp275-loose")
-	if w = a.call(ctx, http.MethodPost, "/api/v1/assignments", `{"ci_id":"`+loose+`","assigned_to":"`+alice+`"}`); w.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("legacy create on a CI without asset: %d %s, want 422", w.Code, w.Body.String())
-	}
-	// DELETE: 409, the row stays.
-	if w = a.call(ctx, http.MethodDelete, "/api/v1/assignments/"+created.ID, ""); w.Code != http.StatusConflict ||
-		problemType(t, w) != assignment.ProblemAppendOnly {
-		t.Fatalf("delete: %d %s, want 409", w.Code, w.Body.String())
-	}
-	// Return of the row through the service.
-	if w = a.call(ctx, http.MethodPost, "/api/v1/assignments/"+created.ID+"/return", `{"return_condition":"scratched"}`); w.Code != http.StatusOK {
-		t.Fatalf("legacy return: %d %s", w.Code, w.Body.String())
-	}
-	if got := decodeAssignment(t, w); got.Status != "returned" || got.ReturnCondition != "scratched" {
-		t.Fatalf("legacy return = %+v", got)
-	}
-	if l := a.ledger(asset); len(l) != 2 || l[1].kind != "return" || l[1].user != alice || l[1].reason != "scratched" {
-		t.Fatalf("ledger after legacy return = %+v", l)
-	}
-	if h := a.holder(asset); h != (holderCache{}) {
-		t.Fatalf("holder after legacy return = %+v", h)
-	}
-	if w = a.call(ctx, http.MethodPost, "/api/v1/assignments/"+created.ID+"/transfer", `{"new_assignee":"`+bob+`"}`); w.Code != http.StatusConflict {
-		t.Fatalf("legacy transfer of a returned row: %d %s, want 409", w.Code, w.Body.String())
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET asset_id = $2 WHERE id = $1`, server1, asset); err != nil {
+		t.Fatal(err)
 	}
 
 	// An open row with only a ci_id (before WP-275) is closed by the
@@ -581,7 +535,7 @@ func TestAssignmentLegacyPathsAndBackfill(t *testing.T) {
 	if _, err := f.Admin.Exec(bg, `UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, asset, bob); err != nil {
 		t.Fatal(err)
 	}
-	if w = a.call(ctx, http.MethodPost, "/api/v1/assets/"+asset+"/return", `{"expected_holder":"`+bob+`"}`); w.Code != http.StatusOK {
+	if w := a.call(ctx, http.MethodPost, "/api/v1/assets/"+asset+"/return", `{"expected_holder":"`+bob+`"}`); w.Code != http.StatusOK {
 		t.Fatalf("return: %d %s", w.Code, w.Body.String())
 	}
 	if rows := a.rows(`id = $1`, ciOnly); len(rows) != 1 || rows[0].status != "returned" || !rows[0].returned {

@@ -54,6 +54,8 @@ var LateModules = []Module{
 		"/api/v1/stock-movements", "/api/v1/compositions", "/api/v1/inventory",
 		// Suppliers (WP-736) and contracts (WP-269) of MGT-12 (E-105).
 		"/api/v1/suppliers", "/api/v1/contracts",
+		// The code lookup and the labels (WP-762, WP-763; E-105).
+		"/api/v1/labels",
 	}, Nav: []string{"assets", "assignments", "inventory"}},
 	{Key: "documents", Phase: "P2", Prefixes: []string{"/api/v1/documents"}, Nav: []string{"documents"}},
 	// Metamodel extensions of phase 2 (E-105): attribute sets (WP-250),

@@ -46,6 +46,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/keymgmt"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/location"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
@@ -155,6 +156,7 @@ type Repositories struct {
 	RelationshipType  relationshiptype.Repository
 	Lifecycle         lifecycle.Repository
 	LocationTree      locations.Repository
+	Labels            labels.Repository // code lookup (WP-762, INV-03); nil: the route answers 503
 	Movement          movement.Repository
 	Reservation       reservation.Repository
 	Override          override.Repository
@@ -811,8 +813,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		importHandler,
 		lifecycle.NewHandler(repos.Lifecycle, lifecycleService, repos.LifecycleResolver).WithCIScope(lifecycleCIScope(repos.CI)),
 		locationsHandler,
+		// The code lookup checks the read permission and the feature of
+		// the object's kind; the path itself is gated with barcode
+		// (WP-762, E-44).
+		labels.NewHandler(repos.Labels).WithFeatures(opts.Entitlements),
 		movement.NewHandler(movements).WithAssets(assetCreator{repo: repos.Asset}),
-		reservation.NewHandler(repos.Reservation, opts.Dispatcher).WithAvailability(repos.Availability),
+		reservationHandler(&repos, &opts),
 		// The overrides follow the field permissions of the CI (WP-265).
 		override.NewHandler(repos.Override, opts.Dispatcher).WithCIs(overrideCILookup{repo: repos.CI, fields: repos.CIType}),
 		historyHandler,
@@ -1183,6 +1189,19 @@ func (l overrideCILookup) FieldScope(ctx context.Context, orgID, ciID string) (*
 		}
 	}
 	return &override.CIScope{TypeID: item.CITypeID, ClientID: item.ClientID, SiteID: item.SiteID, InstanceKeys: keys}, nil
+}
+
+// reservationHandler builds the reservation handler; the PostgreSQL
+// repository writes reservation.* to the outbox (WP-277), only without it
+// (--no-db) the handler hands them to the webhook dispatcher directly.
+func reservationHandler(repos *Repositories, opts *Options) *reservation.Handler {
+	var h *reservation.Handler
+	if repos.EventOutbox || opts.Dispatcher == nil {
+		h = reservation.NewHandler(repos.Reservation)
+	} else {
+		h = reservation.NewHandler(repos.Reservation, opts.Dispatcher)
+	}
+	return h.WithAvailability(repos.Availability)
 }
 
 // ciHandler builds the CI handler; without the event outbox it hands CI
