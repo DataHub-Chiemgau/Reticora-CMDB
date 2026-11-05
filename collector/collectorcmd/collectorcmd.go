@@ -715,9 +715,9 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 	for i := range hits {
 		hit := &hits[i]
 		wg.Add(1)
+		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 			probedAt := time.Now()
 			rec, err := plug.Collect(ctx, hit.IP, creds)

@@ -111,14 +111,19 @@ func (p *Plugin) Probe(ctx context.Context, targets []string, creds map[string]s
 	var failed []plugins.TargetError
 	var wg sync.WaitGroup
 
+feed:
 	for _, target := range targets {
 		if ctx.Err() != nil {
 			break
 		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break feed
+		}
 		wg.Add(1)
 		go func(t string) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			url := p.baseURL(t) + serviceRootPath
