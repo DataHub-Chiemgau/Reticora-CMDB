@@ -509,12 +509,15 @@ func TestConsumableStockMigration(t *testing.T) {
 		}
 	}
 	// The register trigger of 000255 (WP-289) reads consumable.barcode,
-	// which the down part of 000252 drops: revert 000255 first.
-	laterDown, err := os.ReadFile("../../migrations/000255_barcode_registry.down.sql")
-	if err != nil {
-		t.Fatal(err)
+	// which the down part of 000252 drops, and the reservations of 000264
+	// (WP-284) reference stock_level, which it drops: revert both first.
+	for _, later := range []string{"000264_reservation_consumable_bin", "000255_barcode_registry"} {
+		laterDown, readErr := os.ReadFile("../../migrations/" + later + ".down.sql")
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		exec(string(laterDown))
 	}
-	exec(string(laterDown))
 	exec(string(rawDown))
 	positive, negative, located, empty := f.ID(), f.ID(), f.ID(), f.ID()
 	for _, c := range []struct {

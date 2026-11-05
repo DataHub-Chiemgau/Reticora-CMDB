@@ -69,7 +69,7 @@ func TestReservationRepositoryClientScope(t *testing.T) {
 
 // TestReservationScopeColumns covers WP-750 (TEN-02, E-09, E-40): the
 // trigger reservation_scope derives client_id and site_id from the asset
-// or quantity item whatever the writer passes, they follow a change of
+// (for consumables from the bin, WP-284) whatever the writer passes, they follow a change of
 // client or site of the asset, the policy reservation_isolation scopes
 // the rows without the former subquery reservationVisible, a scoped
 // principal cannot reserve an org-wide item, and the reservation.* events
@@ -105,7 +105,6 @@ func TestReservationScopeColumns(t *testing.T) {
 	foreign := f.Asset(t, f.OrgA, f.Client2, "wp750-foreign")
 	orgWide := f.Asset(t, f.OrgA, "", "wp750-orgwide")
 	atSite1, atSite2 := located("wp750-site1", site1), located("wp750-site2", site2)
-	orgItem := scalar(t, `INSERT INTO quantity_item (organization_id, name) VALUES ($1, 'wp750-item') RETURNING id::text`, f.OrgA)
 
 	repo := reservation.NewPGRepository(f.App).WithEvents(events.NewOutbox())
 	reserve := func(t *testing.T, ctx context.Context, assetID string) *reservation.Reservation {
@@ -162,10 +161,8 @@ func TestReservationScopeColumns(t *testing.T) {
 		if client, site := scopeOf(t, id); client != f.Client1 || site != site1 {
 			t.Errorf("updated scope stored as %q/%q, want client 1/site 1", client, site)
 		}
-		if client, _ := scopeOf(t, scalar(t, `INSERT INTO reservation (organization_id, item_kind, quantity_item_id, client_id)
-			VALUES ($1, 'quantity_item', $2, $3) RETURNING id::text`, f.OrgA, orgItem, f.Client1)); client != "" {
-			t.Errorf("reservation of an org-wide quantity item stored client %q, want none", client)
-		}
+		// Quantity reservations take the scope of their bin since WP-284
+		// (consumable_reservation_integration_test.go).
 	})
 
 	t.Run("client scope by the policy", func(t *testing.T) {
@@ -223,14 +220,9 @@ func TestReservationScopeColumns(t *testing.T) {
 		if err := repo.Create(f.ClientCtx(f.Client1), res); !errors.Is(err, reservation.ErrAssetNotFound) {
 			t.Errorf("client-1 reservation of an org-wide asset: %v, want ErrAssetNotFound", err)
 		}
-		item := &reservation.Reservation{OrganizationID: f.OrgA, ItemKind: "quantity_item", QuantityItemID: orgItem, Quantity: 1}
-		if err := repo.Create(f.ClientCtx(f.Client1), item); !errors.Is(err, reservation.ErrItemNotFound) {
-			t.Errorf("client-1 reservation of an org-wide quantity item: %v, want ErrItemNotFound", err)
-		}
-		if err := repo.Create(siteCtx(site2), &reservation.Reservation{OrganizationID: f.OrgA, ItemKind: "quantity_item",
-			QuantityItemID: orgItem, Quantity: 1}); !errors.Is(err, reservation.ErrItemNotFound) {
-			t.Errorf("site-2 reservation of a quantity item without site: %v, want ErrItemNotFound", err)
-		}
+		// An org-wide consumable lies in a bin with client and site; its
+		// reservation by scoped principals is covered by WP-284
+		// (TestConsumableReservationScope).
 	})
 
 	t.Run("event payloads from the columns", func(t *testing.T) {

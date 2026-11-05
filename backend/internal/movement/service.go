@@ -68,7 +68,16 @@ func placeOnlyBin(m *Movement, bin string) {
 // (ErrInsufficientStock) are checked there; an invisible consumable is
 // consumable.ErrNotFound. With onlyBin the bin is the only one of the
 // consumable (consumable.OnlyBin).
+//
+// The types reservation and release (consumable.ReservationTypes, WP-284)
+// change only reserved of the bin through consumable.ApplyReservation: the
+// stock row is locked, a reservation beyond on_hand − reserved is
+// ErrInsufficientStock, on_hand stays. Only the reservation path books
+// them (POST /api/v1/stock-movements refuses them, ReservedMovementTypes).
 func bookConsumable(ctx context.Context, tx pgx.Tx, m *Movement) error {
+	if consumable.ReservationTypes[m.MovementType] {
+		return consumable.ApplyReservation(ctx, tx, bookingOf(m))
+	}
 	if m.onlyBin {
 		bin, err := consumable.OnlyBin(ctx, tx, m.OrganizationID, m.ConsumableID)
 		if err != nil {

@@ -1170,8 +1170,8 @@
         },
         "item_kind": {
           "type": "string",
-          "enum": ["asset", "quantity_item"],
-          "description": "Kind of the reserved object."
+          "enum": ["asset", "consumable", "quantity_item"],
+          "description": "Kind of the reserved object; quantity reservations carry consumable since WP-284 (quantity_item only in earlier events)."
         },
         "asset_id": {
           "type": "string",
@@ -1181,7 +1181,32 @@
         "quantity_item_id": {
           "type": "string",
           "format": "uuid",
-          "description": "The reserved quantity item (item_kind quantity_item)."
+          "deprecated": true,
+          "description": "The reserved quantity item (item_kind quantity_item); events since WP-284 carry consumable_id instead."
+        },
+        "consumable_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved consumable (item_kind consumable, WP-284)."
+        },
+        "location_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The bin of the reserved quantity (item_kind consumable, WP-284)."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "The reserved quantity (item_kind consumable, WP-284)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the reservation: of the asset or of the bin (WP-750, WP-284)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the reservation: of the asset or of the bin (WP-750, WP-284)."
         }
       },
       "examples": [
@@ -1205,8 +1230,8 @@
         },
         "item_kind": {
           "type": "string",
-          "enum": ["asset", "quantity_item"],
-          "description": "Kind of the reserved object."
+          "enum": ["asset", "consumable", "quantity_item"],
+          "description": "Kind of the reserved object; quantity reservations carry consumable since WP-284 (quantity_item only in earlier events)."
         },
         "asset_id": {
           "type": "string",
@@ -1216,7 +1241,32 @@
         "quantity_item_id": {
           "type": "string",
           "format": "uuid",
-          "description": "The reserved quantity item (item_kind quantity_item)."
+          "deprecated": true,
+          "description": "The reserved quantity item (item_kind quantity_item); events since WP-284 carry consumable_id instead."
+        },
+        "consumable_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved consumable (item_kind consumable, WP-284)."
+        },
+        "location_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The bin of the reserved quantity (item_kind consumable, WP-284)."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "The reserved quantity (item_kind consumable, WP-284)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the reservation: of the asset or of the bin (WP-750, WP-284)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the reservation: of the asset or of the bin (WP-750, WP-284)."
         }
       },
       "examples": [
@@ -1240,8 +1290,8 @@
         },
         "item_kind": {
           "type": "string",
-          "enum": ["asset", "quantity_item"],
-          "description": "Kind of the reserved object."
+          "enum": ["asset", "consumable", "quantity_item"],
+          "description": "Kind of the reserved object; quantity reservations carry consumable since WP-284 (quantity_item only in earlier events)."
         },
         "asset_id": {
           "type": "string",
@@ -1251,7 +1301,32 @@
         "quantity_item_id": {
           "type": "string",
           "format": "uuid",
-          "description": "The reserved quantity item (item_kind quantity_item)."
+          "deprecated": true,
+          "description": "The reserved quantity item (item_kind quantity_item); events since WP-284 carry consumable_id instead."
+        },
+        "consumable_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved consumable (item_kind consumable, WP-284)."
+        },
+        "location_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The bin of the reserved quantity (item_kind consumable, WP-284)."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "The reserved quantity (item_kind consumable, WP-284)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the reservation: of the asset or of the bin (WP-750, WP-284)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the reservation: of the asset or of the bin (WP-750, WP-284)."
         }
       },
       "examples": [
@@ -1275,8 +1350,8 @@
         },
         "item_kind": {
           "type": "string",
-          "enum": ["asset", "quantity_item"],
-          "description": "Kind of the reserved object."
+          "enum": ["asset", "consumable", "quantity_item"],
+          "description": "Kind of the reserved object; quantity reservations carry consumable since WP-284 (quantity_item only in earlier events)."
         },
         "asset_id": {
           "type": "string",
@@ -1286,7 +1361,32 @@
         "quantity_item_id": {
           "type": "string",
           "format": "uuid",
-          "description": "The reserved quantity item (item_kind quantity_item)."
+          "deprecated": true,
+          "description": "The reserved quantity item (item_kind quantity_item); events since WP-284 carry consumable_id instead."
+        },
+        "consumable_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The reserved consumable (item_kind consumable, WP-284)."
+        },
+        "location_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The bin of the reserved quantity (item_kind consumable, WP-284)."
+        },
+        "quantity": {
+          "type": "number",
+          "description": "The reserved quantity (item_kind consumable, WP-284)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the reservation: of the asset or of the bin (WP-750, WP-284)."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the reservation: of the asset or of the bin (WP-750, WP-284)."
         }
       },
       "examples": [

@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -32,9 +33,9 @@ func (p permissionStub) HasPermission(_ context.Context, _, _, key string) (bool
 // query-time check, the rows follow a moved entity, and the handler drops
 // hits whose entity type the caller may not read. Assets and their
 // reservations carry the site of the asset's location, reservations of
-// quantity items client and site of the item (WP-393, migration 000152;
-// asset site: WP-392): a site-1 principal finds no asset or reservation of
-// site 2.
+// consumables client and site of their bin (WP-393, migration 000152;
+// asset site: WP-392; bin: WP-284, migration 000264): a site-1 principal
+// finds no asset or reservation of site 2.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
@@ -68,31 +69,64 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 	}
 	assetSite1 := assetAt("scopehit-asset-site1", site1)
 	assetSite2 := assetAt("scopehit-asset-site2", site2)
-	itemAt := func(client, name string, site any) string {
+	// Quantity reservations lie in a bin (WP-284): a storage branch
+	// warehouse > zone > shelf > bin under a site, a consumable with stock
+	// in the bin, the reservation on consumable_id and location_id.
+	locs := locations.NewPGRepository(f.App)
+	shelfAndBin := func(site, name string) (shelf, bin string) {
+		parent := site
+		for _, kind := range []locations.Kind{locations.KindWarehouse, locations.KindZone, locations.KindShelf, locations.KindBin} {
+			l, err := locs.Create(f.OrgCtx(f.OrgA), f.OrgA, locations.CreateRequest{Kind: kind, ParentID: parent, Name: name + "-" + string(kind)})
+			if err != nil {
+				t.Fatalf("create %s %s: %v", kind, name, err)
+			}
+			if kind == locations.KindShelf {
+				shelf = l.ID
+			}
+			parent = l.ID
+		}
+		return shelf, parent
+	}
+	siteClient2 := f.ID()
+	if _, err := f.Admin.Exec(bg, `INSERT INTO site (id, organization_id, client_id, name) VALUES ($1, $2, $3, $4)`,
+		siteClient2, f.OrgA, f.Client2, "search "+siteClient2); err != nil {
+		t.Fatalf("seed site: %v", err)
+	}
+	itemAt := func(client, name, bin string) string {
 		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO quantity_item (organization_id, client_id, name, location_id) VALUES ($1, $2, $3, $4) RETURNING id::text`,
-			f.OrgA, client, name, site).Scan(&id); err != nil {
-			t.Fatalf("seed quantity item: %v", err)
+		if err := f.Admin.QueryRow(bg, `INSERT INTO consumable (organization_id, client_id, name) VALUES ($1, NULLIF($2, '')::uuid, $3) RETURNING id::text`,
+			f.OrgA, client, name).Scan(&id); err != nil {
+			t.Fatalf("seed consumable: %v", err)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand) VALUES ($1, $2, $3, 5)`,
+			f.OrgA, id, bin); err != nil {
+			t.Fatalf("seed stock: %v", err)
 		}
 		return id
 	}
-	itemSite2 := itemAt(f.Client1, "scopehit-item-site2", site2)
-	itemClient2 := itemAt(f.Client2, "scopehit-item-client2", nil)
-	reserve := func(column, item, ref string) string {
-		kind := "asset"
-		if column == "quantity_item_id" {
-			kind = "quantity_item"
-		}
+	_, binSite2 := shelfAndBin(site2, "scopehit-site2")
+	_, binClient2 := shelfAndBin(siteClient2, "scopehit-client2")
+	itemSite2 := itemAt(f.Client1, "scopehit-item-site2", binSite2)
+	itemClient2 := itemAt("", "scopehit-item-client2", binClient2)
+	reserve := func(asset, ref string) string {
 		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO reservation (organization_id, item_kind, `+column+`, project_ref) VALUES ($1, $2, $3, $4) RETURNING id::text`,
-			f.OrgA, kind, item, ref).Scan(&id); err != nil {
+		if err := f.Admin.QueryRow(bg, `INSERT INTO reservation (organization_id, item_kind, asset_id, project_ref) VALUES ($1, 'asset', $2, $3) RETURNING id::text`,
+			f.OrgA, asset, ref).Scan(&id); err != nil {
 			t.Fatalf("seed reservation: %v", err)
 		}
 		return id
 	}
-	resSite2 := reserve("asset_id", assetSite2, "scopehit-res-site2")
-	resItemSite2 := reserve("quantity_item_id", itemSite2, "scopehit-res-item-site2")
-	resItemClient2 := reserve("quantity_item_id", itemClient2, "scopehit-res-item-client2")
+	reserveItem := func(item, bin, ref string) string {
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO reservation (organization_id, item_kind, consumable_id, location_id, project_ref)
+			VALUES ($1, 'consumable', $2, $3, $4) RETURNING id::text`, f.OrgA, item, bin, ref).Scan(&id); err != nil {
+			t.Fatalf("seed reservation: %v", err)
+		}
+		return id
+	}
+	resSite2 := reserve(assetSite2, "scopehit-res-site2")
+	resItemSite2 := reserveItem(itemSite2, binSite2, "scopehit-res-item-site2")
+	resItemClient2 := reserveItem(itemClient2, binClient2, "scopehit-res-item-client2")
 
 	repo := search.NewPGRepository(f.App)
 	if _, err := repo.ReindexTenant(f.OrgCtx(f.OrgA), f.OrgA); err != nil {
@@ -116,8 +150,9 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 	for _, c := range []struct{ name, id, client, site string }{
 		{"site-2 asset", assetSite2, f.Client1, site2},
 		{"reservation of the site-2 asset", resSite2, f.Client1, site2},
-		{"reservation of the site-2 quantity item", resItemSite2, f.Client1, site2},
-		{"reservation of the client-2 quantity item", resItemClient2, f.Client2, ""},
+		{"reservation in the site-2 bin", resItemSite2, f.Client1, site2},
+		// An org-wide consumable: client and site of the bin (WP-284).
+		{"reservation of an org-wide consumable in the client-2 bin", resItemClient2, f.Client2, siteClient2},
 	} {
 		if gotClient, gotSite := derived(c.id); gotClient != c.client || gotSite != c.site {
 			t.Errorf("search row of the %s: client %q site %q, want %q %q", c.name, gotClient, gotSite, c.client, c.site)
@@ -146,10 +181,10 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 	}{
 		{"client 1", f.ClientCtx(f.Client1), map[string]bool{atSite1: true, atSite2: true, ownAsset: true,
 			assetSite1: true, assetSite2: true, resSite2: true, resItemSite2: true}},
-		// Rows without site (the unplaced assets, the CI and the quantity
-		// item of client 2) stay visible; nothing of site 2.
+		// Rows without site (the unplaced assets and the CI of client 2)
+		// stay visible; nothing of site 2 or of the bin of another site.
 		{"site 1", database.ContextWithTenantScope(bg, &siteScope), map[string]bool{atSite1: true, foreign: true, foreignAsset: true, ownAsset: true,
-			assetSite1: true, resItemClient2: true}},
+			assetSite1: true}},
 	} {
 		got := hits(c.ctx)
 		for _, id := range all {
@@ -176,18 +211,21 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 		t.Errorf("site 1 reads %d search rows of site 2 directly, %v", n, err)
 	}
 
-	// An asset or quantity item that moves to site 2 takes its search rows
-	// and those of its reservations along.
-	resSite1 := reserve("asset_id", assetSite1, "scopehit-res-site1")
-	itemSite1 := itemAt(f.Client1, "scopehit-item-site1", site1)
-	resItemSite1 := reserve("quantity_item_id", itemSite1, "scopehit-res-item-site1")
+	// An asset or a bin that moves to site 2 takes its search rows and
+	// those of its reservations along.
+	resSite1 := reserve(assetSite1, "scopehit-res-site1")
+	_, binSite1 := shelfAndBin(site1, "scopehit-site1")
+	shelfSite2, _ := shelfAndBin(site2, "scopehit-site2b")
+	itemSite1 := itemAt(f.Client1, "scopehit-item-site1", binSite1)
+	resItemSite1 := reserveItem(itemSite1, binSite1, "scopehit-res-item-site1")
 	if _, err := repo.ReindexTenant(f.OrgCtx(f.OrgA), f.OrgA); err != nil {
 		t.Fatalf("reindex: %v", err)
 	}
-	for _, c := range []struct{ table, id string }{{"asset", assetSite1}, {"quantity_item", itemSite1}} {
-		if _, err := f.Admin.Exec(bg, `UPDATE `+c.table+` SET location_id = $2 WHERE id = $1`, c.id, site2); err != nil {
-			t.Fatalf("move %s: %v", c.table, err)
-		}
+	if _, err := f.Admin.Exec(bg, `UPDATE asset SET location_id = $2 WHERE id = $1`, assetSite1, site2); err != nil {
+		t.Fatalf("move asset: %v", err)
+	}
+	if _, err := locs.Move(f.OrgCtx(f.OrgA), f.OrgA, binSite1, shelfSite2); err != nil {
+		t.Fatalf("move bin: %v", err)
 	}
 	for _, id := range []string{assetSite1, resSite1, resItemSite1} {
 		if _, s := derived(id); s != site2 {
@@ -195,7 +233,7 @@ func TestSearchHitsRespectClientSiteAndReadPermission(t *testing.T) {
 		}
 	}
 	if got := hits(database.ContextWithTenantScope(bg, &siteScope)); got[assetSite1] || got[resSite1] || got[resItemSite1] {
-		t.Error("site 1 still finds the asset, quantity item reservation or asset reservation that moved to site 2")
+		t.Error("site 1 still finds the asset, bin reservation or asset reservation that moved to site 2")
 	}
 
 	// A CI that moves to client 2 takes its search row along. It leaves its

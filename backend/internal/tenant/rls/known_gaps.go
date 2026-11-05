@@ -478,7 +478,6 @@ var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
 	"rack_mount.rack_id":                             {Constraint: "rack_mount_rack_id_fkey", Target: "rack", Reason: refG1},
 	"relationship_suppression.source_ci_id":          {Constraint: "relationship_suppression_source_ci_id_fkey", Target: "ci", Reason: refG1},
 	"relationship_suppression.target_ci_id":          {Constraint: "relationship_suppression_target_ci_id_fkey", Target: "ci", Reason: refG1},
-	"reservation.quantity_item_id":                   {Constraint: "reservation_quantity_item_id_fkey", Target: "quantity_item", Reason: refWP758},
 	"role_assignment.role_id":                        {Constraint: "role_assignment_role_id_fkey", Target: "role", Reason: refG1},
 	"role_assignment.scope_site_id":                  {Constraint: "role_assignment_scope_site_id_fkey", Target: "site", Reason: refG1},
 	"role_assignment.user_id":                        {Constraint: "role_assignment_user_id_fkey", Target: "app_user", Reason: refG1},

@@ -7236,7 +7236,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Query inventory availability projections */
+    /**
+     * Query inventory availability projections
+     * @description Availability of assets and consumables under the caller's scope. A consumable (item_kind consumable; the filter item_kind=quantity_item is its alias) counts its stock rows per bin (WP-284): total = Σ on_hand, reserved = Σ reserved, available = Σ (on_hand − reserved).
+     */
     get: operations['listInventoryAvailability'];
     put?: never;
     post?: never;
@@ -7528,13 +7531,13 @@ export interface paths {
     };
     /**
      * List reservations
-     * @description The reservations of assets and quantity items visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
+     * @description The reservations of assets and consumables visible under the caller's scope, newest first, optionally of one state. Pages by offset; `next_cursor` continues the list.
      */
     get: operations['listReservations'];
     put?: never;
     /**
-     * Reserve an asset or a quantity of an item
-     * @description Reserves the asset `asset_id` or a quantity of `quantity_item_id`. An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
+     * Reserve an asset or a quantity of a consumable
+     * @description Reserves the asset `asset_id` or a `quantity` (> 0, default 1) of the consumable `consumable_id` in the bin `location_id` (WP-284; without `location_id` the only bin with a stock row of the consumable). `quantity_item_id` is the deprecated alias of `consumable_id` and `item_kind: quantity_item` that of `consumable` until the sunset of inventory/items (E-38). An asset reservation runs like POST /api/v1/assets/{id}/reserve (WP-277): the asset is locked in the caller's scope, the movement `reservation` is booked and `reservation.created` is written to the outbox in one transaction. A consumable reservation locks the stock row of the bin, checks on_hand − reserved, raises `reserved` by the movement `reservation` (on_hand stays) and writes `reservation.created` in the same transaction; client and site are those of the bin. Without `expires_at` the reservation expires at `reserved_until`; one without both does not expire.
      */
     post: operations['createReservations'];
     delete?: never;
@@ -7577,7 +7580,7 @@ export interface paths {
     put?: never;
     /**
      * Release a reservation
-     * @description Sets the active reservation to `released` after locking its asset and itself (WP-277); the movement `release` and `reservation.released` are written in the same transaction.
+     * @description Sets the active reservation to `released` after locking its asset, or the stock row of its bin, and itself (WP-277, WP-284); the movement `release` (which lowers `reserved` of the bin for a consumable, on_hand stays) and `reservation.released` are written in the same transaction.
      */
     post: operations['createReservationsIdRelease'];
     delete?: never;
@@ -13684,26 +13687,34 @@ export interface components {
     };
     /** @enum {string} */
     ReservationState: 'active' | 'released' | 'expired' | 'consumed';
-    /** @description A reservation of an asset or of a quantity of an item (AST-06). It expires at `expires_at`; without it, it does not expire. */
+    /** @description A reservation of an asset or of a quantity of a consumable in a bin (AST-06, STK-03). It expires at `expires_at`; without it, it does not expire. */
     Reservation: {
       /** Format: uuid */
       id: string;
       /** Format: uuid */
       organization_id: string;
       /** @enum {string} */
-      item_kind: 'asset' | 'quantity_item';
+      item_kind: 'asset' | 'consumable';
       /** Format: uuid */
       asset_id?: string;
-      /** Format: uuid */
-      quantity_item_id?: string;
       /**
        * Format: uuid
-       * @description Client of the asset or quantity item, derived by the database (WP-750); absent for an org-wide item.
+       * @description The reserved consumable (item_kind consumable, WP-284).
+       */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The bin of the reserved quantity (item_kind consumable, WP-284).
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the asset or of the bin, derived by the database (WP-750, WP-284); absent for an org-wide asset.
        */
       readonly client_id?: string;
       /**
        * Format: uuid
-       * @description Site of the asset or quantity item, derived by the database (WP-750); absent without a location.
+       * @description Site of the asset or of the bin, derived by the database (WP-750, WP-284); absent for an asset without location.
        */
       readonly site_id?: string;
       quantity: number;
@@ -13736,11 +13747,25 @@ export interface components {
       data: components['schemas']['Reservation'][];
     };
     ReservationCreateRequest: {
-      /** @enum {string} */
-      item_kind?: 'asset' | 'quantity_item';
+      /**
+       * @description Without it, asset when asset_id is set, else consumable; quantity_item is the deprecated alias of consumable (E-38).
+       * @enum {string}
+       */
+      item_kind?: 'asset' | 'consumable' | 'quantity_item';
       /** Format: uuid */
       asset_id?: string;
       /** Format: uuid */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The bin (location of kind bin) of a consumable reservation; without it the only bin with a stock row of the consumable.
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @deprecated
+       * @description Deprecated alias of consumable_id until the sunset of inventory/items (E-38, WP-284).
+       */
       quantity_item_id?: string;
       quantity?: number;
       /** Format: date-time */
@@ -36898,7 +36923,7 @@ export interface operations {
           'application/json': components['schemas']['Reservation'];
         };
       };
-      /** @description Neither asset_id nor quantity_item_id is set, or a value is invalid. */
+      /** @description Neither asset_id nor consumable_id (quantity_item_id) is set, or a value is invalid. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -36909,7 +36934,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description The asset or quantity item is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
+      /** @description The asset, consumable or bin is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
@@ -36918,7 +36943,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`). */
+      /** @description The asset has an active reservation already (`https://reticora.io/problems/asset-reserved`) or a holder (`https://reticora.io/problems/asset-assigned`), or the available stock of the bin (on_hand − reserved) does not cover the quantity (`https://reticora.io/problems/insufficient-stock`). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -36927,7 +36952,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description An id field is no UUID or a time no RFC 3339 date-time; `field` names it. */
+      /** @description An id field is no UUID or a time no RFC 3339 date-time, the request names both or the wrong object for item_kind, location_id is no bin, or location_id is missing while the consumable has none or several bins; `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;

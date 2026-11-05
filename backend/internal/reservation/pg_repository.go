@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -22,7 +23,7 @@ import (
 
 const selectColumns = `
 	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
-	COALESCE(quantity_item_id::text, ''), COALESCE(client_id::text, ''),
+	COALESCE(consumable_id::text, ''), COALESCE(location_id::text, ''), COALESCE(client_id::text, ''),
 	COALESCE(site_id::text, ''), quantity, state, reserved_from,
 	reserved_until, COALESCE(assignee_id::text, ''), COALESCE(project_ref, ''),
 	COALESCE(order_id::text, ''), COALESCE(ticket_id::text, ''), expires_at,
@@ -32,8 +33,12 @@ const selectColumns = `
 // PGRepository implements Repository backed by PostgreSQL with RLS. Every
 // writing path locks in a fixed order (WP-277): first the asset (SELECT …
 // FOR UPDATE in the caller's scope, under the update policy
-// asset_scoped_update; several assets ordered by id), then the reservation
-// (FOR UPDATE, state active). With the wiring of the With methods it books
+// asset_scoped_update; several assets ordered by id) or the stock row of
+// the bin of a quantity reservation (several ordered by consumable_id and
+// location_id, WP-284), then the reservation (FOR UPDATE, state active).
+// Quantity reservations always book their movements reservation and
+// release, which change stock_level.reserved, so reserved stays the sum of
+// the active quantities of each stock row. With the wiring of the With methods it books
 // the movements reservation and release through the movement service,
 // converts through the assignment service, writes the events
 // reservation.* to the outbox and audits the expiry, all in the
@@ -96,34 +101,44 @@ func (r *PGRepository) inTx(ctx context.Context, orgID string, fn func(ctx conte
 	})
 }
 
-// requireItem fails with ErrAssetNotFound or ErrItemNotFound when the item
-// to reserve is not visible under the caller's scope. The foreign keys are
-// checked without row level security: an item of another organization
-// passed them and an unknown one failed with the constraint text, so the
-// two could be told apart (TEN-04, API-03, F-047). The check runs before
-// the insert, in the same transaction.
-func requireItem(ctx context.Context, tx pgx.Tx, res *Reservation) error {
-	for _, item := range []struct {
-		table, id string
-		missing   error
-	}{
-		{"asset", res.AssetID, ErrAssetNotFound},
-		{"quantity_item", res.QuantityItemID, ErrItemNotFound},
-	} {
-		if nilIfEmpty(item.id) == nil {
-			continue
+// requireBin resolves and checks the bin of the quantity reservation res
+// in tx (WP-284): without location_id the only bin with a stock row of the
+// consumable the caller sees (consumable.ReservationBin; none or several
+// are 422 on location_id, none of an invisible consumable
+// ErrItemNotFound); a location that is not visible under the caller's
+// scope is ErrBinNotFound (404), one of another kind errNotABin (422). The
+// foreign key on stock_level is checked without row level security, so
+// the check runs before the write, in its transaction (TEN-04, API-03,
+// F-047).
+func requireBin(ctx context.Context, tx pgx.Tx, res *Reservation) error {
+	if !api.IsUUID(res.ConsumableID) {
+		return ErrItemNotFound
+	}
+	if res.LocationID == "" {
+		bin, err := consumable.ReservationBin(ctx, tx, res.OrganizationID, res.ConsumableID)
+		if errors.Is(err, consumable.ErrNotFound) {
+			return ErrItemNotFound
 		}
-		if !api.IsUUID(item.id) {
-			return item.missing
+		if err != nil {
+			return err
 		}
-		var visible bool
-		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+item.table+" WHERE id = $1 AND organization_id = $2)",
-			item.id, res.OrganizationID).Scan(&visible); err != nil {
-			return fmt.Errorf("check %s of reservation: %w", item.table, err)
-		}
-		if !visible {
-			return item.missing
-		}
+		res.LocationID = bin
+		return nil
+	}
+	if !api.IsUUID(res.LocationID) {
+		return ErrBinNotFound
+	}
+	var kind string
+	err := tx.QueryRow(ctx, `SELECT kind FROM location WHERE id = $1 AND organization_id = $2`,
+		res.LocationID, res.OrganizationID).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrBinNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("check bin of reservation: %w", err)
+	}
+	if kind != "bin" {
+		return errNotABin
 	}
 	return nil
 }
@@ -181,9 +196,34 @@ func actor(ctx context.Context) string {
 	return ""
 }
 
-// book books the movement typ (reservation, release) of the asset
-// reservation res in tx; quantity items follow with WP-284.
+// book books the movement typ (reservation, release) of res in tx. A
+// quantity reservation always books, through the movement service or,
+// without its wiring, through movement.RecordTx (convention 14): the
+// reservation names its bin as from_location_id, the release as
+// to_location_id, and consumable.ApplyReservation changes reserved of the
+// stock row (WP-284); an invisible consumable is ErrItemNotFound. An asset
+// reservation books only with the wiring of WithMovements.
 func (r *PGRepository) book(ctx context.Context, tx pgx.Tx, res *Reservation, typ string) error {
+	if res.ItemKind == "consumable" {
+		q := res.Quantity
+		m := &movement.Movement{OrganizationID: res.OrganizationID, ItemKind: "consumable", ConsumableID: res.ConsumableID,
+			MovementType: typ, Quantity: &q, ActorID: actor(ctx), Reason: res.Reason}
+		if typ == "reservation" {
+			m.FromLocationID = res.LocationID
+		} else {
+			m.ToLocationID = res.LocationID
+		}
+		var err error
+		if r.movements != nil {
+			err = r.movements.RecordTx(ctx, tx, m)
+		} else {
+			err = movement.RecordTx(ctx, tx, m)
+		}
+		if errors.Is(err, consumable.ErrNotFound) {
+			return ErrItemNotFound
+		}
+		return err
+	}
 	if r.movements == nil || res.ItemKind != "asset" || res.AssetID == "" {
 		return nil
 	}
@@ -199,14 +239,19 @@ func (r *PGRepository) book(ctx context.Context, tx pgx.Tx, res *Reservation, ty
 
 // emit registers the event typ of res last before the commit (K20); the
 // payload carries the client and site of the reservation's columns
-// (000258, WP-750).
+// (000258, WP-750), for a quantity reservation those of the bin, with
+// consumable_id, location_id and quantity (WP-284).
 func (r *PGRepository) emit(ctx context.Context, tx pgx.Tx, res *Reservation, typ string) error {
 	if r.outbox == nil {
 		return nil
 	}
 	data := assignment.ReservationEventData{ID: res.ID, ItemKind: res.ItemKind, AssetID: res.AssetID,
-		QuantityItemID: res.QuantityItemID, State: res.State, ReservedUntil: res.ReservedUntil, ExpiresAt: res.ExpiresAt,
-		ClientID: res.ClientID, SiteID: res.SiteID}
+		ConsumableID: res.ConsumableID, LocationID: res.LocationID, State: res.State,
+		ReservedUntil: res.ReservedUntil, ExpiresAt: res.ExpiresAt, ClientID: res.ClientID, SiteID: res.SiteID}
+	if res.ItemKind == "consumable" {
+		q := res.Quantity
+		data.Quantity = &q
+	}
 	e := &events.Event{OrgID: res.OrganizationID, Type: typ, EntityID: res.ID, Data: data}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := r.outbox.Append(ctx, tx, e); err != nil {
@@ -274,7 +319,10 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Reservat
 // reservation of it is ErrConflict, which the partial unique index
 // idx_reservation_one_active_per_asset also guarantees, an asset with a
 // holder assignment.ErrAlreadyAssigned (409 asset-assigned). Without expires_at
-// the reservation expires at reserved_until. The movement reservation and
+// the reservation expires at reserved_until. A consumable is reserved in
+// its bin (requireBin): the stock row is locked and reserved raised by the
+// movement reservation before the insert, never beyond on_hand − reserved
+// (consumable.ErrInsufficientStock, WP-284). The movement reservation and
 // reservation.created are written in the same transaction.
 func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 	if res.ExpiresAt == nil && res.ReservedUntil != nil {
@@ -302,18 +350,26 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 				return assignment.ErrAlreadyAssigned
 			}
 		}
-		if err := requireItem(ctx, tx, res); err != nil {
-			return err
+		if res.ItemKind == "consumable" {
+			// The stock row of the bin is locked and its reserved raised
+			// first (the order of WP-277: object, then reservation); a
+			// shortfall is consumable.ErrInsufficientStock (WP-284).
+			if err := requireBin(ctx, tx, res); err != nil {
+				return err
+			}
+			if err := r.book(ctx, tx, res, "reservation"); err != nil {
+				return err
+			}
 		}
 		row := tx.QueryRow(ctx, fmt.Sprintf(`
 			INSERT INTO reservation (
-				organization_id, item_kind, asset_id, quantity_item_id, quantity,
+				organization_id, item_kind, asset_id, consumable_id, location_id, quantity,
 				state, reserved_from, reserved_until, assignee_id, project_ref,
 				order_id, ticket_id, expires_at, reason, created_by
-			) VALUES ($1,$2,$3,$4,$5,'active',COALESCE($6, now()),$7,$8,$9,$10,$11,$12,$13,$14)
+			) VALUES ($1,$2,$3,$4,$5,$6,'active',COALESCE($7, now()),$8,$9,$10,$11,$12,$13,$14,$15)
 			RETURNING %s`, selectColumns),
 			res.OrganizationID, res.ItemKind, nilIfEmpty(res.AssetID),
-			nilIfEmpty(res.QuantityItemID), res.Quantity, nilIfZero(res.ReservedFrom),
+			nilIfEmpty(res.ConsumableID), nilIfEmpty(res.LocationID), res.Quantity, nilIfZero(res.ReservedFrom),
 			res.ReservedUntil, nilIfEmpty(res.AssigneeID), nilIfEmpty(res.ProjectRef),
 			nilIfEmpty(res.OrderID), nilIfEmpty(res.TicketID), res.ExpiresAt,
 			nilIfEmpty(res.Reason), nilIfEmpty(res.CreatedBy))
@@ -335,30 +391,46 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 			return fmt.Errorf("create reservation: %w", err)
 		}
 		*res = *scanned
-		if bookErr := r.book(ctx, tx, res, "reservation"); bookErr != nil {
-			return bookErr
+		if res.ItemKind != "consumable" {
+			if bookErr := r.book(ctx, tx, res, "reservation"); bookErr != nil {
+				return bookErr
+			}
 		}
 		return r.emit(ctx, tx, res, events.ReservationCreated)
 	})
 }
 
-// lockReservation locks the reservation id and, before it, its asset (the
-// fixed order of WP-277). A reservation that is unknown, of another
-// organization, reserves an item outside the caller's scope or an asset
-// the caller may not lock is ErrNotFound, a visible one that is no longer
-// active ErrNotActive. The asset of a quantity item reservation is nil.
+// lockReservation locks the reservation id and, before it, its asset or
+// the stock row of its bin (the fixed order of WP-277 and WP-284). A
+// reservation that is unknown, of another organization, reserves an item
+// outside the caller's scope or an asset the caller may not lock is
+// ErrNotFound, a visible one that is no longer active ErrNotActive. The
+// asset of a quantity reservation is nil.
 func lockReservation(ctx context.Context, tx pgx.Tx, orgID, id string) (*Reservation, *lockedAsset, error) {
 	if !api.IsUUID(id) {
 		return nil, nil, ErrNotFound
 	}
 	var assetID string
-	err := tx.QueryRow(ctx, "SELECT COALESCE(asset_id::text, '') FROM reservation WHERE id = $1 AND organization_id = $2",
-		id, orgID).Scan(&assetID)
+	var stock consumable.StockKey
+	err := tx.QueryRow(ctx, `SELECT COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''), COALESCE(location_id::text, '')
+		FROM reservation WHERE id = $1 AND organization_id = $2`,
+		id, orgID).Scan(&assetID, &stock.ConsumableID, &stock.LocationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("read reservation: %w", err)
+	}
+	if stock.ConsumableID != "" {
+		// The stock row of the bin before the reservation (WP-284); one
+		// outside the caller's scope is not lockable.
+		n, lockErr := consumable.LockStock(ctx, tx, orgID, []consumable.StockKey{stock})
+		if lockErr != nil {
+			return nil, nil, lockErr
+		}
+		if n == 0 {
+			return nil, nil, ErrNotFound
+		}
 	}
 	var locked *lockedAsset
 	if assetID != "" {
@@ -485,8 +557,8 @@ func (r *PGRepository) ActiveForItem(ctx context.Context, orgID, itemKind, itemI
 	var out []Reservation
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		column := "asset_id"
-		if itemKind == "quantity_item" {
-			column = "quantity_item_id"
+		if itemKind == "consumable" || itemKind == "quantity_item" {
+			column = "consumable_id"
 		}
 		rows, err := tx.Query(ctx, fmt.Sprintf(
 			"SELECT %s FROM reservation WHERE organization_id = $1 AND %s = $2 AND state = 'active'",
@@ -543,7 +615,10 @@ func (r *PGRepository) ExpireDue(ctx context.Context, now time.Time) (int, error
 }
 
 // dueReservation is a reservation the expiry takes.
-type dueReservation struct{ id, asset string }
+type dueReservation struct {
+	id, asset string
+	stock     consumable.StockKey
+}
 
 // expireBatch expires up to expireBatchSize due reservations of orgID in
 // one transaction (see ExpireDue); more reports a full batch.
@@ -551,7 +626,8 @@ func (r *PGRepository) expireBatch(ctx context.Context, orgID string, now time.T
 	scope := database.OrgWideScope(orgID, "")
 	err = database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		txCtx := database.ContextWithTx(ctx, tx)
-		rows, queryErr := tx.Query(txCtx, `SELECT id::text, COALESCE(asset_id::text, '') FROM reservation
+		rows, queryErr := tx.Query(txCtx, `SELECT id::text, COALESCE(asset_id::text, ''), COALESCE(consumable_id::text, ''),
+			COALESCE(location_id::text, '') FROM reservation
 			WHERE organization_id = $1 AND state = 'active' AND expires_at IS NOT NULL AND expires_at < $2
 			ORDER BY id LIMIT $3`, orgID, now, expireBatchSize)
 		if queryErr != nil {
@@ -559,19 +635,28 @@ func (r *PGRepository) expireBatch(ctx context.Context, orgID string, now time.T
 		}
 		dues, collectErr := pgx.CollectRows(rows, func(row pgx.CollectableRow) (dueReservation, error) {
 			var d dueReservation
-			return d, row.Scan(&d.id, &d.asset)
+			return d, row.Scan(&d.id, &d.asset, &d.stock.ConsumableID, &d.stock.LocationID)
 		})
 		if collectErr != nil {
 			return fmt.Errorf("read due reservations: %w", collectErr)
 		}
 		more = len(dues) == expireBatchSize
 		var assetIDs []string
+		var stock []consumable.StockKey
 		for _, d := range dues {
 			if d.asset != "" {
 				assetIDs = append(assetIDs, d.asset)
 			}
+			if d.stock.ConsumableID != "" {
+				stock = append(stock, d.stock)
+			}
 		}
 		if lockErr := lockAssets(txCtx, tx, orgID, assetIDs); lockErr != nil {
+			return lockErr
+		}
+		// The stock rows of the quantity reservations, ordered by
+		// (consumable_id, location_id), before the reservations (WP-284).
+		if _, lockErr := consumable.LockStock(txCtx, tx, orgID, stock); lockErr != nil {
 			return lockErr
 		}
 		for _, d := range dues {
@@ -622,9 +707,12 @@ func (r *PGRepository) auditExpiry(ctx context.Context, tx pgx.Tx, res *Reservat
 	if r.recorder == nil {
 		return nil
 	}
+	changes := map[string]any{"state": map[string]any{"old": "active", "new": res.State}, "asset_id": res.AssetID}
+	if res.ItemKind == "consumable" {
+		changes["consumable_id"], changes["location_id"], changes["quantity"] = res.ConsumableID, res.LocationID, res.Quantity
+	}
 	entry := audit.Entry{OrganizationID: res.OrganizationID, ActorType: "system", Action: "reservations.expire",
-		ResourceType: "reservations", ResourceID: res.ID, Source: audit.SourceSystem,
-		Changes: map[string]any{"state": map[string]any{"old": "active", "new": res.State}, "asset_id": res.AssetID}}
+		ResourceType: "reservations", ResourceID: res.ID, Source: audit.SourceSystem, Changes: changes}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := r.recorder.Record(ctx, tx, entry); err != nil {
 			return fmt.Errorf("audit reservation expiry: %w", err)
@@ -641,7 +729,7 @@ func scan(s scanner) (*Reservation, error) {
 	res := &Reservation{}
 	if err := s.Scan(
 		&res.ID, &res.OrganizationID, &res.ItemKind, &res.AssetID,
-		&res.QuantityItemID, &res.ClientID, &res.SiteID, &res.Quantity, &res.State, &res.ReservedFrom,
+		&res.ConsumableID, &res.LocationID, &res.ClientID, &res.SiteID, &res.Quantity, &res.State, &res.ReservedFrom,
 		&res.ReservedUntil, &res.AssigneeID, &res.ProjectRef, &res.OrderID,
 		&res.TicketID, &res.ExpiresAt, &res.Reason, &res.CreatedBy,
 		&res.CreatedAt, &res.UpdatedAt,

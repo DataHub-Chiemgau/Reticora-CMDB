@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000263_lifecycle_guards_lcy03
+Stand: Migration 000264_reservation_consumable_bin
 
 ## Prüfung
 
@@ -375,10 +375,11 @@ E-40) mit Fremdschlüsseln samt Organisation (K19):
 `reservation_site_id_fkey` auf `site (id, organization_id)`, beide ohne
 Löschaktion. Der Trigger `reservation_scope` (`derive_reservation_scope`)
 leitet beide bei INSERT und bei einer Änderung von Objekt, Client oder
-Standort aus dem Asset ab, sonst aus dem Mengenartikel (`quantity_item`),
+Standort aus dem Asset ab, sonst seit Migration 000264 (WP-284) aus der
+`stock_level`-Zeile des Bins (`consumable_id`, `location_id`),
 und überschreibt geschriebene Werte; er liest unter der RLS des Schreibenden,
 ein Objekt außerhalb des Scopes ergibt NULL und scheitert für gescopte
-Prinzipale an WITH CHECK (E-09). Ändert ein Asset oder Mengenartikel Client
+Prinzipale an WITH CHECK (E-09). Ändert ein Asset oder eine Bestandszeile Client
 oder Standort, leitet `propagate_reservation_scope` dessen Reservierungen mit
 erweitertem Scope (`app_scope_widen`) neu ab. Die Policies folgen `asset`
 (000151) mit den restriktiven UPDATE- und DELETE-Policies; die Unterabfrage
@@ -681,7 +682,6 @@ ersetzen, folgen K19 in ihren Nachfolgern.
 | `rack_mount.rack_id` | `rack_mount_rack_id_fkey` | `rack` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `relationship_suppression.source_ci_id` | `relationship_suppression_source_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `relationship_suppression.target_ci_id` | `relationship_suppression_target_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `reservation.quantity_item_id` | `reservation_quantity_item_id_fkey` | `quantity_item` | quantity_item is dropped by WP-758 (E-40, K19); its successor references with the organization |
 | `role_assignment.role_id` | `role_assignment_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `role_assignment.scope_site_id` | `role_assignment_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 | `role_assignment.user_id` | `role_assignment_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
@@ -1692,6 +1692,36 @@ Crypto-Shredding möglich bleibt) mit `stock_movement_signer_check`
 genau einem Unterzeichner). Append-only-Trigger, Policies und RLS bleiben
 unverändert. Down bricht ab, solange Dokumente der Kategorie `signature` oder
 Bewegungen mit `signature_hash` existieren.
+Mengenreservierung auf Artikel und Bin (STK-03, E-40, WP-284, Migration
+000264): `reservation` erhält `consumable_id` und `location_id` (UUID) mit
+`reservation_stock_level_fkey` (`consumable_id`, `location_id`,
+`organization_id`) → `stock_level` ON DELETE RESTRICT (K19; Schlüssel
+`stock_level_consumable_location_organization_key` neu) und dem Teilindex
+`idx_reservation_consumable_bin_active` (`consumable_id`, `location_id`)
+WHERE `state = 'active'`; `quantity_item_id` samt
+`reservation_quantity_item_id_fkey` entfällt. CHECK
+`reservation_item_kind_check` (`asset`, `consumable`) und
+`reservation_item_check` (genau Asset ohne Artikel/Bin oder Artikel mit Bin
+ohne Asset). `derive_reservation_scope()` (Trigger `reservation_scope`, nun
+BEFORE INSERT OR UPDATE OF `organization_id`, `asset_id`, `consumable_id`,
+`location_id`, `client_id`, `site_id`) leitet Client und Standort einer
+Mengenreservierung aus der `stock_level`-Zeile ab, also aus dem Bin;
+`stock_level_reservation_scope_propagation` (AFTER UPDATE ON `stock_level`
+bei geändertem `client_id` oder `site_id`, `propagate_reservation_scope()`)
+ersetzt `quantity_item_reservation_scope_propagation`.
+`derive_search_document_scope()` liest im Zweig `reservation` die Spalten
+der Reservierung, `reservation_search_scope_propagation` reagiert auf
+`client_id`/`site_id`, `propagate_search_scope()` verliert den Zweig
+`quantity_item`. `derive_stock_movement_scope()` gibt den Bewegungen
+`reservation` und `release` eines Artikels ohne (sichtbaren) Client den
+Client ihres Bins. Datenübernahme: Reservierungen mit `quantity_item_id`
+erhalten den einzigen Bin des Artikels, sonst `migration_quarantine`
+(`reservation_without_bin`); Überreservierungen je Bin werden von der
+jüngsten an freigegeben und kopiert (`over_reservation`);
+`stock_level.reserved` = Σ der aktiven Mengen. Down stellt den Stand von
+000263 wieder her; Reservierungen von Artikeln ohne `quantity_item`-Zeile
+legt es in `migration_quarantine` (`reservation_without_quantity_item`), das
+nächste Up holt sie zurück.
 
 ## Tabellen, RLS und Policies
 

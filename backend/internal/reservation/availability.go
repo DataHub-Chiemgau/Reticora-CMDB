@@ -10,7 +10,8 @@ import (
 )
 
 // PGAvailability implements AvailabilityProvider with SQL projections over
-// assets, quantity items, reservations and lifecycle states (spec §10).
+// assets, the stock of consumables per bin, reservations and lifecycle
+// states (spec §10).
 type PGAvailability struct {
 	pool *pgxpool.Pool
 }
@@ -24,8 +25,10 @@ func NewPGAvailability(pool *pgxpool.Pool) *PGAvailability {
 //
 // Assets are counted as units (1 per serialized asset) bucketed by lifecycle:
 // deployed/assigned, repair, unavailable (retired/disposed/lost), reserved
-// (active reservation), and available (everything else). Quantity items
-// project stock_level minus active reservation quantities.
+// (active reservation), and available (everything else). Consumables
+// (item_kind consumable; the filter quantity_item is its alias) project
+// their stock rows per bin: Σ on_hand, Σ reserved and Σ (on_hand −
+// reserved), WP-284.
 func (p *PGAvailability) Availability(ctx context.Context, orgID string, filter AvailabilityFilter) ([]Availability, error) {
 	var out []Availability
 	// Reservations count against availability whoever made them, so the
@@ -73,21 +76,28 @@ func (p *PGAvailability) Availability(ctx context.Context, orgID string, filter 
 			}
 		}
 
-		if filter.ItemKind == "" || filter.ItemKind == "quantity_item" {
+		if filter.ItemKind == "" || filter.ItemKind == "consumable" || filter.ItemKind == "quantity_item" {
+			// The stock per bin (WP-284): total = Σ on_hand, reserved =
+			// Σ reserved, available = Σ (on_hand − reserved) over the stock
+			// rows the caller sees; reserved never exceeds on_hand
+			// (stock_level_reserved_check), so no clamping. A visible
+			// consumable without stock row counts 0.
 			rows, err := tx.Query(ctx, `
-				SELECT q.id::text,
-					q.stock_level,
-					GREATEST(q.stock_level - COALESCE(res.reserved_qty, 0), 0),
-					COALESCE(res.reserved_qty, 0)
-				FROM quantity_item q
-				LEFT JOIN (
-					SELECT quantity_item_id, SUM(quantity) AS reserved_qty
-					FROM reservation
-					WHERE organization_id = $1 AND state = 'active' AND quantity_item_id IS NOT NULL
-					GROUP BY quantity_item_id
-				) res ON res.quantity_item_id = q.id
-				WHERE q.organization_id = $1
-					AND ($2::uuid IS NULL OR q.id = $2::uuid)`,
+				WITH stock AS (
+					SELECT consumable_id, SUM(on_hand) AS total, SUM(on_hand - reserved) AS available,
+						SUM(reserved) AS reserved
+					FROM stock_level
+					WHERE organization_id = $1 AND ($2::uuid IS NULL OR consumable_id = $2::uuid)
+					GROUP BY consumable_id
+				), items AS (
+					SELECT consumable_id AS id FROM stock
+					UNION
+					SELECT id FROM consumable WHERE organization_id = $1 AND ($2::uuid IS NULL OR id = $2::uuid)
+				)
+				SELECT items.id::text, COALESCE(s.total, 0)::float8, COALESCE(s.available, 0)::float8,
+					COALESCE(s.reserved, 0)::float8
+				FROM items LEFT JOIN stock s ON s.consumable_id = items.id
+				ORDER BY items.id`,
 				orgID, nullUUID(filter.ItemID))
 			if err != nil {
 				return fmt.Errorf("project quantity availability: %w", err)
@@ -99,7 +109,7 @@ func (p *PGAvailability) Availability(ctx context.Context, orgID string, filter 
 				if err := rows.Scan(&id, &a.Total, &a.Available, &a.Reserved); err != nil {
 					return err
 				}
-				a.ItemKind = "quantity_item"
+				a.ItemKind = "consumable"
 				a.ItemID = id
 				out = append(out, a)
 			}
