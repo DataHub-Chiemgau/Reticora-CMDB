@@ -1,3 +1,4 @@
+import { ChevronLeft, ChevronRight, Download, Plus, Search, Server } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +13,17 @@ import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trInteractiveClasses,
+} from '../components/ui/table';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { useRowNavigation } from '../components/ui/useRowNavigation';
@@ -430,34 +442,38 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('nav.cmdb')}</h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('ci.title')}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={onCreateCI}>{t('form.createCI')}</Button>
-          <Button
-            variant="secondary"
-            loading={exportState.phase === 'running' && exportState.format === 'csv'}
-            disabled={exportState.phase === 'running'}
-            onClick={() => void startExport('csv')}
-          >
-            {t('ci.exportCsv')}
-          </Button>
-          <Button
-            variant="secondary"
-            loading={exportState.phase === 'running' && exportState.format === 'json'}
-            disabled={exportState.phase === 'running'}
-            onClick={() => void startExport('json')}
-          >
-            {t('ci.exportJson')}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={t('nav.cmdb')}
+        description={t('ci.title')}
+        actions={
+          <>
+            <Button
+              variant="secondary"
+              icon={<Download />}
+              loading={exportState.phase === 'running' && exportState.format === 'csv'}
+              disabled={exportState.phase === 'running'}
+              onClick={() => void startExport('csv')}
+            >
+              {t('ci.exportCsv')}
+            </Button>
+            <Button
+              variant="secondary"
+              icon={<Download />}
+              loading={exportState.phase === 'running' && exportState.format === 'json'}
+              disabled={exportState.phase === 'running'}
+              onClick={() => void startExport('json')}
+            >
+              {t('ci.exportJson')}
+            </Button>
+            <Button icon={<Plus />} onClick={onCreateCI}>
+              {t('form.createCI')}
+            </Button>
+          </>
+        }
+      />
 
       {exportState.phase === 'running' ? (
-        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {t('ci.exportJob.progress', {
             format: exportState.format.toUpperCase(),
             status: t(`export.status_${exportState.status}`),
@@ -466,7 +482,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
         </p>
       ) : null}
       {exportState.phase === 'done' ? (
-        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {t('ci.exportJob.done', {
             format: exportState.format.toUpperCase(),
             rows: exportState.rows,
@@ -474,42 +490,48 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
         </p>
       ) : null}
       {exportState.phase === 'error' ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {t(exportState.messageKey)}
         </p>
       ) : null}
 
-      <Card>
-        <div className="flex flex-wrap gap-3">
-          <Input
-            type="text"
-            placeholder={t('common.search')}
-            value={search}
-            onChange={(event) => {
-              setSearch(event.target.value);
-              setOffset(0);
-            }}
-            className="max-w-sm"
-            aria-label={t('accessibility.searchCIs')}
-          />
-          <Select
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value);
-              setOffset(0);
-            }}
-            options={[
-              { value: '', label: t('ci.allStatus') },
-              { value: 'active', label: t('ci.statusActive') },
-              { value: 'inactive', label: t('ci.statusInactive') },
-              { value: 'maintenance', label: t('ci.statusMaintenance') },
-              { value: 'decommissioned', label: t('ci.statusDecommissioned') },
-            ]}
-            className="max-w-xs"
-            aria-label={t('accessibility.filterCIStatus')}
-          />
-        </div>
-      </Card>
+      <Toolbar>
+        <Input
+          type="text"
+          icon={<Search />}
+          placeholder={t('common.search')}
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setOffset(0);
+          }}
+          className="w-64"
+          aria-label={t('accessibility.searchCIs')}
+        />
+        <Select
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value);
+            setOffset(0);
+          }}
+          options={[
+            { value: '', label: t('ci.allStatus') },
+            { value: 'active', label: t('ci.statusActive') },
+            { value: 'inactive', label: t('ci.statusInactive') },
+            { value: 'maintenance', label: t('ci.statusMaintenance') },
+            { value: 'decommissioned', label: t('ci.statusDecommissioned') },
+          ]}
+          className="w-44"
+          aria-label={t('accessibility.filterCIStatus')}
+        />
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
       {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
@@ -523,6 +545,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
 
       {data && data.data.length === 0 ? (
         <EmptyState
+          icon={<Server />}
           title={t('ci.emptyTitle')}
           description={t('ci.emptyHint')}
           action={<Button onClick={onCreateCI}>{t('form.createCI')}</Button>}
@@ -551,7 +574,7 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
           <Card className="p-0 overflow-hidden">
             {selectedIds.length > 0 ? (
               <div
-                className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-primary/5 px-4 py-2 dark:border-gray-800"
+                className="flex flex-wrap items-center gap-3 border-b border-line bg-accent-soft px-4 py-2.5"
                 role="toolbar"
                 aria-label={t('ci.bulk.toolbarLabel')}
               >
@@ -618,34 +641,33 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
               </div>
             ) : null}
             <ScrollRegion label={t('ci.title')}>
-              <table className="w-full text-left text-sm">
-                <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950">
+              <table className={tableClasses}>
+                <thead className={theadClasses}>
                   <tr>
-                    <th scope="col" className="w-10 px-4 py-3">
+                    <th scope="col" className={`${thClasses} w-10`}>
                       <input
                         type="checkbox"
                         checked={allVisibleSelected}
                         onChange={toggleSelectAll}
                         aria-label={t('ci.bulk.selectAll')}
-                        className="h-4 w-4 rounded border-gray-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                       />
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.name')}
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.status')}
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.manufacturer')}
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.model')}
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.managementIp')}
                     </th>
-                    <th scope="col" className="px-4 py-3">
+                    <th scope="col" className={thClasses}>
                       {t('ci.source')}
                     </th>
                   </tr>
@@ -656,9 +678,9 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                       key={ci.id}
                       {...rowNavigation.getRowProps(ci.id)}
                       onClick={() => navigate(`/cmdb/${ci.id}`)}
-                      className="cursor-pointer border-b border-gray-100 transition hover:bg-gray-50 focus-visible:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40 dark:border-gray-800 dark:hover:bg-gray-950 dark:focus-visible:bg-gray-950"
+                      className={trInteractiveClasses}
                     >
-                      <td className="px-4 py-3">
+                      <td className={tdClasses}>
                         <input
                           type="checkbox"
                           checked={selectedSet.has(ci.id)}
@@ -667,29 +689,28 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
                           // The row is the Tab stop; Space on it toggles this box.
                           tabIndex={-1}
                           aria-label={t('ci.bulk.selectRow', { name: ci.name })}
-                          className="h-4 w-4 rounded border-gray-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
+                      <td className={tdPrimaryClasses}>
                         <Link
                           to={`/cmdb/${ci.id}`}
                           onClick={(event) => event.stopPropagation()}
                           // The row is the Tab stop; Enter on it opens this link's target.
                           tabIndex={-1}
-                          className="underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          className="rounded underline-offset-2 hover:text-accent hover:underline focus-visible:outline-none"
                         >
                           {ci.name}
                         </Link>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className={tdClasses}>
                         <Badge variant={getStatusBadgeVariant(ci.status)}>
                           {t(getStatusTranslationKey(ci.status))}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3">{ci.manufacturer || '—'}</td>
-                      <td className="px-4 py-3">{ci.model || '—'}</td>
-                      <td className="px-4 py-3 font-mono text-xs">{ci.management_ip || '—'}</td>
-                      <td className="px-4 py-3">{ci.discovery_source || '—'}</td>
+                      <td className={tdClasses}>{ci.manufacturer || '—'}</td>
+                      <td className={tdClasses}>{ci.model || '—'}</td>
+                      <td className={tdMonoClasses}>{ci.management_ip || '—'}</td>
+                      <td className={tdClasses}>{ci.discovery_source || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -700,24 +721,30 @@ export function CIListPage({ onCreateCI }: CIListPageProps) {
       ) : null}
 
       {data ? (
-        <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-          <span>
-            {data.total} {t('common.entries')}
+        <div className="flex items-center justify-between gap-3 text-sm text-fg-muted">
+          <span className="tabular-nums">
+            {data.total === 0
+              ? `0 ${t('common.entries')}`
+              : `${offset + 1}–${offset + data.data.length} / ${data.total}`}
           </span>
           <div className="flex gap-2">
             <Button
               variant="secondary"
+              size="sm"
+              icon={<ChevronLeft />}
               disabled={offset === 0}
               onClick={() => setOffset(Math.max(0, offset - limit))}
             >
-              ← {t('common.back')}
+              {t('common.back')}
             </Button>
             <Button
               variant="secondary"
+              size="sm"
+              iconAfter={<ChevronRight />}
               disabled={!data.has_more}
               onClick={() => setOffset(offset + limit)}
             >
-              {t('common.next')} →
+              {t('common.next')}
             </Button>
           </div>
         </div>

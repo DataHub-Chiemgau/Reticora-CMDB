@@ -9,7 +9,7 @@ export function Skeleton({ className }: { className?: string }) {
   return (
     <span
       aria-hidden="true"
-      className={cn('block animate-pulse rounded-lg bg-gray-200 dark:bg-gray-800', className)}
+      className={cn('block animate-pulse rounded-lg bg-fg/[0.07]', className)}
     />
   );
 }

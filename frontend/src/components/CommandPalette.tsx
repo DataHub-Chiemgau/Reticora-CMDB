@@ -1,11 +1,14 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { CornerDownLeft, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useSearch } from '../api/hooks';
 import type { SearchHit } from '../api/client';
 import { navFeatureFor } from '../hooks/useEntitlements';
-import { Badge } from './ui/Badge';
+import { Kbd } from './ui/Kbd';
+import { NAV_GROUPS } from './shell/navigation';
+import { OPEN_PALETTE_EVENT } from './shell/paletteEvent';
 import { Button } from './ui/Button';
 import { cn } from './ui/utils';
 
@@ -145,7 +148,7 @@ function ContactCard({ hit, onBack }: { hit: SearchHit; onBack: () => void }) {
     cardRef.current?.focus();
   }, []);
   const link = (key: (typeof CONTACT_FIELDS)[number], value: string) => {
-    const linkClass = 'text-primary underline-offset-2 hover:underline';
+    const linkClass = 'text-accent underline-offset-2 hover:underline';
     if (key === 'email') {
       return (
         <a className={linkClass} href={`mailto:${value}`}>
@@ -164,13 +167,8 @@ function ContactCard({ hit, onBack }: { hit: SearchHit; onBack: () => void }) {
   };
   return (
     <section ref={cardRef} tabIndex={-1} aria-labelledby={headingId} className="p-4 outline-none">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {t('commandPalette.contact.label')}
-      </p>
-      <h3
-        id={headingId}
-        className="mt-1 text-lg font-semibold text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100"
-      >
+      <p className="text-xs font-medium text-fg-subtle">{t('commandPalette.contact.label')}</p>
+      <h3 id={headingId} className="mt-1 text-lg font-semibold text-fg [overflow-wrap:anywhere]">
         {hit.title || '—'}
       </h3>
       <dl className="mt-3 space-y-2 text-sm">
@@ -178,10 +176,8 @@ function ContactCard({ hit, onBack }: { hit: SearchHit; onBack: () => void }) {
           const value = hit.metadata?.[key];
           return (
             <div key={key} className="grid grid-cols-[6rem_minmax(0,1fr)] gap-2">
-              <dt className="text-gray-500 dark:text-gray-400">
-                {t(`commandPalette.contact.${key}`)}
-              </dt>
-              <dd className="min-w-0 text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
+              <dt className="text-fg-subtle">{t(`commandPalette.contact.${key}`)}</dt>
+              <dd className="min-w-0 text-fg [overflow-wrap:anywhere]">
                 {value ? link(key, value) : '—'}
               </dd>
             </div>
@@ -267,188 +263,198 @@ export function CommandPalette({
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const focusAfterCloseRef = useRef<FocusAfterClose>('restore');
 
-  const commands = useMemo<CommandItem[]>(
-    () =>
-      [
-        {
-          id: 'nav-dashboard',
-          label: t('commandPalette.commands.dashboard'),
-          keywords: ['dashboard overview'],
-          action: () => onNavigate('dashboard'),
-        },
-        {
-          id: 'nav-cmdb',
-          label: t('commandPalette.commands.cmdb'),
-          keywords: ['cmdb cis configuration items'],
-          action: () => onNavigate('cmdb'),
-        },
-        {
-          id: 'nav-topology',
-          label: t('commandPalette.commands.topology'),
-          keywords: ['topology topologie graph netzwerk'],
-          action: () => onNavigate('topology'),
-        },
-        {
-          id: 'nav-racks',
-          label: t('commandPalette.commands.racks'),
-          keywords: ['racks rack schrank he units'],
-          action: () => onNavigate('racks'),
-        },
-        {
-          id: 'nav-discovery',
-          label: t('commandPalette.commands.discovery'),
-          keywords: ['discovery collectors'],
-          action: () => onNavigate('discovery'),
-        },
-        {
-          id: 'create-ci',
-          label: t('commandPalette.commands.createCI'),
-          keywords: ['create ci new asset item'],
-          action: onCreateCI,
-        },
-        {
-          id: 'toggle-theme',
-          label: themeToggleLabel ?? t('commandPalette.commands.toggleDarkMode'),
-          keywords: ['theme dark light system appearance farbschema hell dunkel'],
-          action: onToggleDarkMode,
-        },
-        {
-          id: 'nav-assets',
-          label: t('commandPalette.commands.assets', 'Inventar öffnen'),
-          keywords: ['assets inventar hardware'],
-          action: () => onNavigate('assets'),
-        },
-        {
-          id: 'nav-assignments',
-          label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
-          keywords: ['assignments zuweisungen transfer'],
-          action: () => onNavigate('assignments'),
-        },
-        {
-          id: 'nav-documents',
-          label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
-          keywords: ['documents dokumente files'],
-          action: () => onNavigate('documents'),
-        },
-        {
-          id: 'nav-stocktake',
-          label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
-          keywords: ['stocktake inventur scan'],
-          action: () => onNavigate('stocktake'),
-        },
-        {
-          id: 'nav-tickets',
-          label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
-          keywords: ['tickets support helpdesk'],
-          action: () => onNavigate('tickets'),
-        },
-        {
-          id: 'nav-users',
-          label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
-          keywords: ['users teams roles benutzer rollen'],
-          action: () => onNavigate('users'),
-        },
-        {
-          id: 'nav-permissions',
-          label: t('commandPalette.commands.permissions'),
-          keywords: ['permissions berechtigungen rbac abac'],
-          action: () => onNavigate('permissions'),
-        },
-        {
-          id: 'nav-slas',
-          label: t('commandPalette.commands.slas'),
-          keywords: ['sla service levels breach policies'],
-          action: () => onNavigate('slas'),
-        },
-        {
-          id: 'nav-forms',
-          label: t('commandPalette.commands.forms'),
-          keywords: ['forms formulare submissions'],
-          action: () => onNavigate('forms'),
-        },
-        {
-          id: 'nav-workflows',
-          label: t('commandPalette.commands.workflows'),
-          keywords: ['workflow automation approvals'],
-          action: () => onNavigate('workflows'),
-        },
-        {
-          id: 'nav-compliance',
-          label: t('commandPalette.commands.compliance'),
-          keywords: ['compliance iso nis2 score'],
-          action: () => onNavigate('compliance'),
-        },
-        {
-          id: 'nav-iga',
-          label: t('commandPalette.commands.iga'),
-          keywords: ['iga provisioning scim access reviews'],
-          action: () => onNavigate('iga'),
-        },
-        {
-          id: 'nav-assistant',
-          label: t('commandPalette.commands.assistant'),
-          keywords: ['assistant ki ai rag'],
-          action: () => onNavigate('assistant'),
-        },
-        {
-          id: 'nav-webhooks',
-          label: t('commandPalette.commands.webhooks'),
-          keywords: ['webhooks subscriptions deliveries dead letter'],
-          action: () => onNavigate('webhooks'),
-        },
-        {
-          id: 'nav-export',
-          label: t('commandPalette.commands.export'),
-          keywords: ['export csv datev json download'],
-          action: () => onNavigate('export'),
-        },
-        {
-          id: 'nav-monitoring',
-          label: t('commandPalette.commands.monitoring'),
-          keywords: ['monitoring metrics alerts'],
-          action: () => onNavigate('monitoring'),
-        },
-        {
-          id: 'nav-audit',
-          label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
-          keywords: ['audit protokoll hash chain compliance'],
-          action: () => onNavigate('audit'),
-        },
-        {
-          id: 'nav-security',
-          label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
-          keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
-          action: () => onNavigate('security'),
-        },
-        {
-          id: 'nav-map',
-          label: t('commandPalette.commands.map', 'Karte öffnen'),
-          keywords: ['map karte gis standorte sites'],
-          action: () => onNavigate('map'),
-        },
-        {
-          id: 'nav-roomplan',
-          label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
-          keywords: ['roomplan raumplan floorplan raum position'],
-          action: () => onNavigate('roomplan'),
-        },
-      ].filter((cmd) => {
-        // Hide navigation commands for modules the tenant's plan does not
-        // include, mirroring the gated main navigation.
-        if (!cmd.id.startsWith('nav-')) return true;
-        const page = cmd.id.slice(4) as AppPage;
-        return isFeatureEnabled(navFeatureFor[page]) && isPageEnabled(page);
-      }),
-    [
-      onCreateCI,
-      onNavigate,
-      onToggleDarkMode,
-      themeToggleLabel,
-      t,
-      isFeatureEnabled,
-      isPageEnabled,
-    ],
-  );
+  const commands = useMemo<CommandItem[]>(() => {
+    const written: CommandItem[] = [
+      {
+        id: 'nav-dashboard',
+        label: t('commandPalette.commands.dashboard'),
+        keywords: ['dashboard overview'],
+        action: () => onNavigate('dashboard'),
+      },
+      {
+        id: 'nav-cmdb',
+        label: t('commandPalette.commands.cmdb'),
+        keywords: ['cmdb cis configuration items'],
+        action: () => onNavigate('cmdb'),
+      },
+      {
+        id: 'nav-topology',
+        label: t('commandPalette.commands.topology'),
+        keywords: ['topology topologie graph netzwerk'],
+        action: () => onNavigate('topology'),
+      },
+      {
+        id: 'nav-racks',
+        label: t('commandPalette.commands.racks'),
+        keywords: ['racks rack schrank he units'],
+        action: () => onNavigate('racks'),
+      },
+      {
+        id: 'nav-discovery',
+        label: t('commandPalette.commands.discovery'),
+        keywords: ['discovery collectors'],
+        action: () => onNavigate('discovery'),
+      },
+      {
+        id: 'create-ci',
+        label: t('commandPalette.commands.createCI'),
+        keywords: ['create ci new asset item'],
+        action: onCreateCI,
+      },
+      {
+        id: 'toggle-theme',
+        label: themeToggleLabel ?? t('commandPalette.commands.toggleDarkMode'),
+        keywords: ['theme dark light system appearance farbschema hell dunkel'],
+        action: onToggleDarkMode,
+      },
+      {
+        id: 'nav-assets',
+        label: t('commandPalette.commands.assets', 'Inventar öffnen'),
+        keywords: ['assets inventar hardware'],
+        action: () => onNavigate('assets'),
+      },
+      {
+        id: 'nav-assignments',
+        label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
+        keywords: ['assignments zuweisungen transfer'],
+        action: () => onNavigate('assignments'),
+      },
+      {
+        id: 'nav-documents',
+        label: t('commandPalette.commands.documents', 'Dokumente öffnen'),
+        keywords: ['documents dokumente files'],
+        action: () => onNavigate('documents'),
+      },
+      {
+        id: 'nav-stocktake',
+        label: t('commandPalette.commands.stocktake', 'Inventur öffnen'),
+        keywords: ['stocktake inventur scan'],
+        action: () => onNavigate('stocktake'),
+      },
+      {
+        id: 'nav-tickets',
+        label: t('commandPalette.commands.tickets', 'Tickets öffnen'),
+        keywords: ['tickets support helpdesk'],
+        action: () => onNavigate('tickets'),
+      },
+      {
+        id: 'nav-users',
+        label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
+        keywords: ['users teams roles benutzer rollen'],
+        action: () => onNavigate('users'),
+      },
+      {
+        id: 'nav-permissions',
+        label: t('commandPalette.commands.permissions'),
+        keywords: ['permissions berechtigungen rbac abac'],
+        action: () => onNavigate('permissions'),
+      },
+      {
+        id: 'nav-slas',
+        label: t('commandPalette.commands.slas'),
+        keywords: ['sla service levels breach policies'],
+        action: () => onNavigate('slas'),
+      },
+      {
+        id: 'nav-forms',
+        label: t('commandPalette.commands.forms'),
+        keywords: ['forms formulare submissions'],
+        action: () => onNavigate('forms'),
+      },
+      {
+        id: 'nav-workflows',
+        label: t('commandPalette.commands.workflows'),
+        keywords: ['workflow automation approvals'],
+        action: () => onNavigate('workflows'),
+      },
+      {
+        id: 'nav-compliance',
+        label: t('commandPalette.commands.compliance'),
+        keywords: ['compliance iso nis2 score'],
+        action: () => onNavigate('compliance'),
+      },
+      {
+        id: 'nav-iga',
+        label: t('commandPalette.commands.iga'),
+        keywords: ['iga provisioning scim access reviews'],
+        action: () => onNavigate('iga'),
+      },
+      {
+        id: 'nav-assistant',
+        label: t('commandPalette.commands.assistant'),
+        keywords: ['assistant ki ai rag'],
+        action: () => onNavigate('assistant'),
+      },
+      {
+        id: 'nav-webhooks',
+        label: t('commandPalette.commands.webhooks'),
+        keywords: ['webhooks subscriptions deliveries dead letter'],
+        action: () => onNavigate('webhooks'),
+      },
+      {
+        id: 'nav-export',
+        label: t('commandPalette.commands.export'),
+        keywords: ['export csv datev json download'],
+        action: () => onNavigate('export'),
+      },
+      {
+        id: 'nav-monitoring',
+        label: t('commandPalette.commands.monitoring'),
+        keywords: ['monitoring metrics alerts'],
+        action: () => onNavigate('monitoring'),
+      },
+      {
+        id: 'nav-audit',
+        label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
+        keywords: ['audit protokoll hash chain compliance'],
+        action: () => onNavigate('audit'),
+      },
+      {
+        id: 'nav-security',
+        label: t('commandPalette.commands.security', 'Sicherheit & DSGVO öffnen'),
+        keywords: ['security sicherheit dsgvo gdpr privacy retention compliance report'],
+        action: () => onNavigate('security'),
+      },
+      {
+        id: 'nav-map',
+        label: t('commandPalette.commands.map', 'Karte öffnen'),
+        keywords: ['map karte gis standorte sites'],
+        action: () => onNavigate('map'),
+      },
+      {
+        id: 'nav-roomplan',
+        label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
+        keywords: ['roomplan raumplan floorplan raum position'],
+        action: () => onNavigate('roomplan'),
+      },
+    ];
+    const writtenIds = new Set(written.map((command) => command.id));
+    // Every page of the navigation is reachable from the keyboard: the pages
+    // without a hand-written command above get a generic one.
+    const generated: CommandItem[] = NAV_GROUPS.flatMap((group) => group.items)
+      .filter(({ page }) => !writtenIds.has(`nav-${page}`))
+      .map(({ page }) => ({
+        id: `nav-${page}`,
+        label: t('commandPalette.openPage', { page: t(`nav.${page}`) }),
+        keywords: [page, t(`nav.${page}`)],
+        action: () => onNavigate(page),
+      }));
+    return [...written, ...generated].filter((cmd) => {
+      // Hide navigation commands for modules the tenant's plan does not
+      // include, mirroring the gated main navigation.
+      if (!cmd.id.startsWith('nav-')) return true;
+      const page = cmd.id.slice(4) as AppPage;
+      return isFeatureEnabled(navFeatureFor[page]) && isPageEnabled(page);
+    });
+  }, [
+    onCreateCI,
+    onNavigate,
+    onToggleDarkMode,
+    themeToggleLabel,
+    t,
+    isFeatureEnabled,
+    isPageEnabled,
+  ]);
 
   const filteredCommands = useMemo(() => {
     const local = commands.filter((command) =>
@@ -469,24 +475,35 @@ export function CommandPalette({
   }, [commands, query, search.data?.data]);
 
   useEffect(() => {
+    // Remember where focus was before the search field's autoFocus moves it.
+    const rememberFocus = () => {
+      if (!openRef.current) {
+        returnFocusRef.current =
+          document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+            ? document.activeElement
+            : null;
+        focusAfterCloseRef.current = 'restore';
+      }
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        if (!openRef.current) {
-          // Taken before the search field's autoFocus moves focus.
-          returnFocusRef.current =
-            document.activeElement instanceof HTMLElement &&
-            document.activeElement !== document.body
-              ? document.activeElement
-              : null;
-          focusAfterCloseRef.current = 'restore';
-        }
+        rememberFocus();
         setOpen((current) => !current);
       }
     };
+    // The header's search field opens the palette without a key press.
+    const handleOpenRequest = () => {
+      rememberFocus();
+      setOpen(true);
+    };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener(OPEN_PALETTE_EVENT, handleOpenRequest);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener(OPEN_PALETTE_EVENT, handleOpenRequest);
+    };
   }, []);
 
   useEffect(() => {
@@ -587,19 +604,20 @@ export function CommandPalette({
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-gray-950/50 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 z-40 animate-fade-in bg-gray-950/55 backdrop-blur-[2px]" />
         {/* Portaled under <body>, outside the App shell: the content sets the
             theme text colour itself instead of inheriting it from the shell. */}
         <Dialog.Content
           onCloseAutoFocus={handleCloseAutoFocus}
-          className="fixed left-1/2 top-[18vh] z-50 w-[min(92vw,36rem)] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white text-gray-900 shadow-2xl outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-gray-100"
+          className="fixed left-1/2 top-[14vh] z-50 w-[min(94vw,40rem)] -translate-x-1/2 animate-pop-in-top overflow-hidden rounded-xl border border-line bg-raised text-gray-900 shadow-2xl outline-none dark:text-gray-100"
         >
           <Dialog.Title className="sr-only">{t('commandPalette.title')}</Dialog.Title>
           {contact ? (
             <ContactCard hit={contact} onBack={() => setContact(null)} />
           ) : (
             <>
-              <div className="border-b border-gray-200 p-3 dark:border-gray-800">
+              <div className="flex items-center gap-3 border-b border-line px-4">
+                <Search aria-hidden="true" className="h-4 w-4 shrink-0 text-fg-subtle" />
                 <input
                   autoFocus
                   role="combobox"
@@ -614,8 +632,9 @@ export function CommandPalette({
                   onKeyDown={handleListNavigation}
                   placeholder={t('commandPalette.searchPlaceholder')}
                   aria-label={t('accessibility.commandPaletteSearch')}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  className="h-12 w-full bg-transparent text-[15px] text-fg outline-none placeholder:text-fg-subtle"
                 />
+                <Kbd>Esc</Kbd>
               </div>
               <div
                 ref={listRef}
@@ -623,10 +642,10 @@ export function CommandPalette({
                 // Without options the container only shows the "no results" note.
                 role={filteredCommands.length > 0 ? 'listbox' : undefined}
                 aria-label={filteredCommands.length > 0 ? t('commandPalette.title') : undefined}
-                className="max-h-80 overflow-y-auto p-2"
+                className="scroll-thin max-h-80 overflow-y-auto p-2"
               >
                 {filteredCommands.length === 0 ? (
-                  <p className="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">
+                  <p className="px-3 py-8 text-center text-sm text-fg-muted">
                     {t('common.noResults')}
                   </p>
                 ) : (
@@ -645,17 +664,37 @@ export function CommandPalette({
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => handleSelect(command)}
                       className={cn(
-                        'flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors',
+                        'flex h-9 w-full items-center justify-between gap-3 rounded-lg px-3 text-left text-sm transition-colors',
                         index === selectedIndex
-                          ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                          : 'text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800',
+                          ? 'bg-accent-soft text-accent-strong'
+                          : 'text-fg-muted',
                       )}
                     >
-                      <span>{command.label}</span>
-                      <Badge variant="neutral">↵</Badge>
+                      <span className="truncate">{command.label}</span>
+                      {index === selectedIndex ? (
+                        <CornerDownLeft aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                      ) : null}
                     </button>
                   ))
                 )}
+              </div>
+              <div
+                aria-hidden="true"
+                className="flex items-center gap-4 border-t border-line bg-canvas px-4 py-2 text-xs text-fg-subtle"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Kbd>↑</Kbd>
+                  <Kbd>↓</Kbd>
+                  {t('commandPalette.hintNavigate')}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Kbd>↵</Kbd>
+                  {t('commandPalette.hintOpen')}
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Kbd>Esc</Kbd>
+                  {t('commandPalette.hintClose')}
+                </span>
               </div>
             </>
           )}

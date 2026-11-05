@@ -182,12 +182,14 @@ const ORGANIZATION = {
 };
 
 // DEFAULTS answer the reads of the application shell (organization, scope
-// selection, navigation, notifications) and the CI types on every page.
+// selection, navigation, review counter, notifications) and the CI types on every page.
 const DEFAULTS: Handler[] = [
   { path: '/org', reply: () => ({ body: ORGANIZATION }) },
   { path: '/clients', reply: () => ({ body: list([]) }) },
   { path: '/sites', reply: () => ({ body: list([]) }) },
   { path: '/notifications', reply: () => ({ body: list([]) }) },
+  // The open-item counter beside the review inbox in the navigation.
+  { path: '/review-items', reply: () => ({ body: list([]) }) },
   // No late module is switched on (API-06, WP-214).
   { path: '/modules', reply: () => ({ body: { data: [] } }) },
   {

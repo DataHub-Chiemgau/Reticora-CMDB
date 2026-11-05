@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError } from '../api/client';
 import { useAcceptInvitation } from '../api/hooks';
+import { AuthCard } from '../components/shell/AuthCard';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 
@@ -124,60 +125,52 @@ export function InvitationAcceptPage() {
   const linkUnusable = !token || refusal?.final === true;
 
   return (
-    <section className="mx-auto flex min-h-[60vh] max-w-md flex-col justify-center">
-      <div className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-50">
-          {t('invitationAccept.title')}
-        </h1>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {t('invitationAccept.description')}
+    <AuthCard title={t('invitationAccept.title')} description={t('invitationAccept.description')}>
+      {refusal ? (
+        <p
+          role="alert"
+          className="mt-5 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
+        >
+          {refusal.message}
         </p>
-        {refusal ? (
-          <p
-            role="alert"
-            className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          >
-            {refusal.message}
-          </p>
-        ) : null}
-        {!token ? (
-          <p
-            role="alert"
-            className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
-          >
-            {t('invitationAccept.errors.missingToken')}
-          </p>
-        ) : null}
-        {linkUnusable ? (
-          <p className="mt-4 text-sm">
-            <Link to="/login" className="text-blue-600 hover:underline dark:text-blue-400">
-              {t('invitationAccept.toLogin')}
-            </Link>
-          </p>
-        ) : (
-          <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
-            <Input
-              label={t('invitationAccept.displayName')}
-              autoComplete="name"
-              maxLength={MAX_DISPLAY_NAME_LENGTH}
-              value={form.display_name}
-              error={refusal?.fields.display_name}
-              onChange={(event) => setForm({ ...form, display_name: event.target.value })}
-            />
-            <Input
-              label={t('invitationAccept.password', { min: MIN_PASSWORD_LENGTH })}
-              type="password"
-              autoComplete="new-password"
-              value={form.password}
-              error={refusal?.fields.password}
-              onChange={(event) => setForm({ ...form, password: event.target.value })}
-            />
-            <Button type="submit" className="w-full" loading={accept.isPending}>
-              {t('invitationAccept.submit')}
-            </Button>
-          </form>
-        )}
-      </div>
-    </section>
+      ) : null}
+      {!token ? (
+        <p
+          role="alert"
+          className="mt-5 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-100"
+        >
+          {t('invitationAccept.errors.missingToken')}
+        </p>
+      ) : null}
+      {linkUnusable ? (
+        <p className="mt-5 text-sm">
+          <Link to="/login" className="font-medium text-accent underline underline-offset-2">
+            {t('invitationAccept.toLogin')}
+          </Link>
+        </p>
+      ) : (
+        <form className="mt-6 space-y-4" onSubmit={submit} noValidate>
+          <Input
+            label={t('invitationAccept.displayName')}
+            autoComplete="name"
+            maxLength={MAX_DISPLAY_NAME_LENGTH}
+            value={form.display_name}
+            error={refusal?.fields.display_name}
+            onChange={(event) => setForm({ ...form, display_name: event.target.value })}
+          />
+          <Input
+            label={t('invitationAccept.password', { min: MIN_PASSWORD_LENGTH })}
+            type="password"
+            autoComplete="new-password"
+            value={form.password}
+            error={refusal?.fields.password}
+            onChange={(event) => setForm({ ...form, password: event.target.value })}
+          />
+          <Button type="submit" size="lg" className="w-full" loading={accept.isPending}>
+            {t('invitationAccept.submit')}
+          </Button>
+        </form>
+      )}
+    </AuthCard>
   );
 }

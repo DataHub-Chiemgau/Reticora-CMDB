@@ -1,14 +1,39 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* The light theme. color-scheme tells the browser which scheme the page
    paints in, so native controls, scrollbars and the default text colour
-   (CanvasText) follow the chosen theme instead of the operating system. */
+   (CanvasText) follow the chosen theme instead of the operating system.
+   Colours are HSL channels ("H S% L%") so Tailwind can add an alpha.
+   --color-surface is the canvas the panels sit on; --color-primary is the
+   accent (legacy names, kept for the pages that use bg-primary/bg-surface). */
 :root {
   color-scheme: light;
-  --color-primary: 220 90% 56%;
-  --color-surface: 0 0% 100%;
+  --color-primary: 185 88% 26.7%;
+  --color-surface: 200 18% 96.7%;
+
+  --canvas: var(--color-surface);
+  --panel: 0 0% 100%;
+  --raised: 0 0% 100%;
+  --line: 202 15% 89.8%;
+  --line-strong: 203 14% 82.2%;
+  /* The outline of form controls: 3:1 against the panel (WCAG 1.4.11). */
+  --control: 205 11% 55.3%;
+  --fg: 205 21% 11.4%;
+  --fg-muted: 203 13% 35.1%;
+  --fg-subtle: 202 12% 41.4%;
+  --accent: var(--color-primary);
+  --accent-strong: 185 88% 20.4%;
+  --accent-soft: 184 42% 92.5%;
+  --accent-fg: 0 0% 100%;
+
+  --sidebar-width: 15rem;
+  --sidebar-width-collapsed: 4rem;
+  --header-height: 3.5rem;
 }
 
 /* Pre-JS fallback only: until stores/theme.ts has resolved the theme and set
@@ -19,17 +44,29 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --color-surface: 220 13% 10%;
+    --color-surface: 202 24% 6.7%;
   }
 }
 
 /* Dark mode (class set by stores/theme.ts, also when chosen against the system
-   setting): dark surface and a lighter primary colour, so primary text and
-   links reach WCAG AA (6.5:1 on the surface, F-172). */
+   setting): near-black canvas, graphite panels and a lighter accent, so
+   accent text and links reach WCAG AA (8:1 on the panel). */
 .dark {
   color-scheme: dark;
-  --color-primary: 217 91% 68%;
-  --color-surface: 220 13% 10%;
+  --color-primary: 185 57% 55.3%;
+  --color-surface: 202 24% 6.7%;
+
+  --panel: 207 21% 10.4%;
+  --raised: 206 21% 13.3%;
+  --line: 206 17% 18%;
+  --line-strong: 204 16% 25.1%;
+  --control: 205 11% 44.7%;
+  --fg: 197 18% 92.4%;
+  --fg-muted: 204 12% 67.5%;
+  --fg-subtle: 205 11% 58.8%;
+  --accent-strong: 184 60% 69.4%;
+  --accent-soft: 190 48% 12.2%;
+  --accent-fg: 202 24% 6.7%;
 }
 
 /* The canvas carries the surface as well (WP-630): content wider than a phone
@@ -47,6 +84,139 @@ html {
 @layer base {
   body {
     @apply text-gray-900 dark:text-gray-100;
+  }
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply font-sans text-sm antialiased;
+    font-feature-settings:
+      'cv11' 1,
+      'ss03' 1;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background-color: hsl(var(--accent) / 0.22);
+  }
+
+  /* One focus indicator for everything that has no ring of its own. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--accent));
+    outline-offset: 2px;
+  }
+
+  /* Tables hand-written in the pages share one skeleton: quiet header,
+     hairline rows, tabular figures. Utility classes on a cell still win. */
+  table {
+    font-variant-numeric: tabular-nums;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  thead th {
+    @apply whitespace-nowrap text-xs font-medium text-gray-600 dark:text-gray-400;
+    letter-spacing: 0.005em;
+  }
+
+  tbody tr:last-child > td {
+    border-bottom-width: 0;
+  }
+
+  code,
+  kbd,
+  samp {
+    @apply font-mono;
+  }
+
+  /* Checkboxes and radios are drawn by the system, not the OS: same size,
+     border and accent everywhere. They stay native inputs, so labels,
+     keyboard and screen readers work unchanged. */
+  input[type='checkbox'],
+  input[type='radio'] {
+    appearance: none;
+    flex-shrink: 0;
+    height: 1rem;
+    width: 1rem;
+    cursor: pointer;
+    border: 1px solid hsl(var(--control));
+    background-color: hsl(var(--panel));
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    transition:
+      background-color 120ms,
+      border-color 120ms;
+  }
+
+  input[type='checkbox'] {
+    border-radius: 4px;
+  }
+
+  input[type='radio'] {
+    border-radius: 9999px;
+  }
+
+  input[type='checkbox']:hover:not(:disabled),
+  input[type='radio']:hover:not(:disabled) {
+    border-color: hsl(var(--fg-muted));
+  }
+
+  input[type='checkbox']:checked,
+  input[type='checkbox']:indeterminate,
+  input[type='radio']:checked {
+    background-color: hsl(var(--accent));
+    border-color: hsl(var(--accent));
+  }
+
+  input[type='checkbox']:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 8.5 2.75 2.75L12 5.5'/%3E%3C/svg%3E");
+  }
+
+  input[type='checkbox']:indeterminate {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round'%3E%3Cpath d='M4.5 8h7'/%3E%3C/svg%3E");
+  }
+
+  input[type='radio']:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='white'/%3E%3C/svg%3E");
+  }
+
+  .dark input[type='checkbox']:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230D1215' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 8.5 2.75 2.75L12 5.5'/%3E%3C/svg%3E");
+  }
+
+  .dark input[type='checkbox']:indeterminate {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230D1215' stroke-width='2.25' stroke-linecap='round'%3E%3Cpath d='M4.5 8h7'/%3E%3C/svg%3E");
+  }
+
+  .dark input[type='radio']:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3' fill='%230D1215'/%3E%3C/svg%3E");
+  }
+
+  input[type='checkbox']:disabled,
+  input[type='radio']:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-gray-500 dark:text-gray-400;
+  }
+
+  summary {
+    cursor: pointer;
   }
 }
 
@@ -68,6 +238,41 @@ html {
   }
 
   .text-danger {
-    @apply text-red-600 dark:text-red-400;
+    @apply text-red-700 dark:text-red-400;
+  }
+
+  /* A native select drawn like the other fields: own chevron, no OS arrow.
+     Text stays selectable and keyboard-operable as a real <select>. */
+  .field-select {
+    appearance: none;
+    /* !important: a px-* utility on the select must not push the text under the chevron. */
+    padding-right: 2rem !important;
+    background-repeat: no-repeat;
+    background-position: right 0.625rem center;
+    background-size: 1rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235D6D76' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  .dark .field-select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2398A4AC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  /* Scrollbars: thin, neutral, only where content scrolls. */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--line-strong)) transparent;
+  }
+}
+
+/* Motion answers an action (open, close, confirm). Users who ask for less
+   motion get none. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

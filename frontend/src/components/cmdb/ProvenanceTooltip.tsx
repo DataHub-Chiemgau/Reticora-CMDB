@@ -4,6 +4,7 @@
  * (override with author – by display name, else the id – and reason, the highest-ranked source, the asset or
  * the CI record). It opens on hover and on keyboard focus.
  */
+import { Info } from 'lucide-react';
 import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { components } from '../../api/generated/schema';
@@ -30,7 +31,7 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
     >
       <button
         type="button"
-        className="rounded-full px-1 text-xs text-muted hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-fg-subtle transition-colors hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         aria-label={t('provenance.show', { field: provenance.field })}
         aria-describedby={open ? tooltipId : undefined}
         onFocus={() => setOpen(true)}
@@ -39,34 +40,34 @@ export function ProvenanceTooltip({ provenance }: { provenance: CIFieldProvenanc
           if (event.key === 'Escape') setOpen(false);
         }}
       >
-        ⓘ
+        <Info aria-hidden="true" className="h-4 w-4" />
       </button>
       {open ? (
         <span
           role="tooltip"
           id={tooltipId}
-          className="absolute left-6 top-0 z-30 w-72 rounded-md border border-gray-200 bg-white p-3 text-xs shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute left-7 top-0 z-30 w-72 max-w-[calc(100vw-4rem)] rounded-lg border border-line bg-raised p-3 text-xs font-normal text-fg shadow-lg"
         >
-          <span className="mb-1 block font-semibold">
+          <span className="mb-2 block text-sm font-semibold">
             {t(`provenance.reasons.${provenance.reason}`)}
           </span>
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1">
-            <dt className="text-muted">{t('provenance.source')}</dt>
+            <dt className="text-fg-muted">{t('provenance.source')}</dt>
             <dd>{provenance.source}</dd>
-            <dt className="text-muted">{t('provenance.rank')}</dt>
+            <dt className="text-fg-muted">{t('provenance.rank')}</dt>
             <dd>{provenance.rank}</dd>
-            <dt className="text-muted">{t('provenance.recordedAt')}</dt>
+            <dt className="text-fg-muted">{t('provenance.recordedAt')}</dt>
             <dd>{time(provenance.recorded_at)}</dd>
-            <dt className="text-muted">{t('provenance.observedAt')}</dt>
+            <dt className="text-fg-muted">{t('provenance.observedAt')}</dt>
             <dd>{time(provenance.observed_at)}</dd>
             {provenance.reason === 'override' ? (
               <>
-                <dt className="text-muted">{t('provenance.overrideReason')}</dt>
+                <dt className="text-fg-muted">{t('provenance.overrideReason')}</dt>
                 <dd>{provenance.override_reason || '—'}</dd>
-                <dt className="text-muted">{t('provenance.overrideAuthor')}</dt>
+                <dt className="text-fg-muted">{t('provenance.overrideAuthor')}</dt>
                 {/* The display name the server resolves (UI-15); the id when it has none. */}
                 <dd>{provenance.override_author_name || provenance.override_author || '—'}</dd>
-                <dt className="text-muted">{t('provenance.covers')}</dt>
+                <dt className="text-fg-muted">{t('provenance.covers')}</dt>
                 <dd>
                   {fieldValueText(t, provenance.field, provenance.discovered_value, display)}
                   {provenance.discovered_source ? ` (${provenance.discovered_source})` : ''}

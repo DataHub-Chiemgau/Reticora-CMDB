@@ -13,6 +13,7 @@
  * sends the whole list with PUT /templates/{id}/versions/{version}; a 422
  * shows at its item.
  */
+import { Plus, Save, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -43,6 +44,13 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { describeFlagRefusal } from './AttributeEditor';
 import { SortableList } from './SortableList';
+
+/** One badge variant per state of a template version: the draft is work in progress. */
+export const VERSION_STATUS_VARIANT = {
+  draft: 'warning',
+  published: 'success',
+  retired: 'neutral',
+} as const;
 
 const NUMERIC_TYPES = new Set(['integer', 'decimal', 'number']);
 const TEXT_TYPES = new Set(['text', 'multiline', 'textarea', 'string', 'email', 'url']);
@@ -429,20 +437,20 @@ export function TemplateVersionEditor({
   return (
     <section
       aria-labelledby={heading}
-      className="space-y-3 rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+      className="space-y-3 rounded-xl border border-line bg-panel p-5"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 id={heading} className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <h4 id={heading} className="text-base font-semibold text-fg">
           {t('templates.editor.title', { version: version.version })}
         </h4>
-        <Badge variant={version.status === 'draft' ? 'info' : 'neutral'}>
+        <Badge variant={VERSION_STATUS_VARIANT[version.status]}>
           {t(`templates.versionStatuses.${version.status}`)}
         </Badge>
       </div>
       {editable ? (
-        <p className="text-xs text-muted">{t('templates.editor.hint')}</p>
+        <p className="max-w-[68ch] text-xs text-fg-muted">{t('templates.editor.hint')}</p>
       ) : (
-        <p className="text-sm text-gray-600 dark:text-gray-300">
+        <p className="text-sm text-fg-muted">
           {template.is_system
             ? t('templates.editor.systemReadOnly')
             : version.status !== 'draft'
@@ -451,7 +459,7 @@ export function TemplateVersionEditor({
         </p>
       )}
       {drafts.length === 0 ? (
-        <p className="text-sm text-muted">{t('templates.editor.empty')}</p>
+        <p className="text-sm text-fg-muted">{t('templates.editor.empty')}</p>
       ) : null}
       <SortableList
         items={drafts}
@@ -463,7 +471,7 @@ export function TemplateVersionEditor({
           setDrafts(next);
         }}
         label={t('templates.editor.itemsLabel', { version: version.version })}
-        className="divide-y divide-gray-100 dark:divide-gray-800"
+        className="divide-y divide-line"
         renderItem={(draft) => {
           const definition = definitions.get(draft.attribute_definition_id);
           const messages = [
@@ -489,7 +497,7 @@ export function TemplateVersionEditor({
         }}
       />
       {editable ? (
-        <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-wrap items-end gap-2 border-t border-line pt-4">
           <div className="min-w-[14rem]">
             <Select
               label={t('templates.editor.addLabel')}
@@ -507,22 +515,22 @@ export function TemplateVersionEditor({
               ]}
             />
           </div>
-          <Button size="sm" variant="secondary" disabled={!choice} onClick={add}>
+          <Button variant="secondary" icon={<Plus />} disabled={!choice} onClick={add}>
             {t('templates.editor.add')}
           </Button>
           <div className="flex-1" />
-          <Button size="sm" onClick={onSave} disabled={save.isPending}>
+          <Button icon={<Save />} onClick={onSave} disabled={save.isPending}>
             {t('templates.editor.save')}
           </Button>
         </div>
       ) : null}
       {general ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {general}
         </p>
       ) : null}
       {saved ? (
-        <p role="status" className="text-sm text-green-700 dark:text-green-300">
+        <p role="status" className="text-sm text-green-800 dark:text-green-300">
           {t('templates.editor.saved')}
         </p>
       ) : null}
@@ -573,13 +581,13 @@ function ItemView({
   ].filter(Boolean);
 
   return (
-    <div className="space-y-2 text-sm" data-item-key={key}>
+    <div className="space-y-3 py-1 text-sm" data-item-key={key}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{label}</span>
-          {label !== key ? <span className="text-xs text-muted">{key}</span> : null}
+          <span className="font-medium text-fg">{label}</span>
+          {label !== key ? <span className="font-mono text-xs text-fg-muted">{key}</span> : null}
           {dataType ? (
-            <span className="text-xs text-muted">
+            <span className="text-xs text-fg-muted">
               {t(`citypes.dataTypes.${dataType}`, dataType)}
             </span>
           ) : null}
@@ -592,19 +600,21 @@ function ItemView({
           {definition?.unique ? <Badge variant="neutral">{t('citypes.flagUnique')}</Badge> : null}
         </div>
         {editable ? (
-          <button
-            type="button"
-            className="text-xs text-danger hover:underline"
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<X />}
+            className="text-danger hover:text-danger"
             aria-label={t('templates.editor.removeAction', { name: key })}
             onClick={onRemove}
           >
             {t('templates.editor.remove')}
-          </button>
+          </Button>
         ) : null}
       </div>
       {editable ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="flex items-center gap-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-fg">
             <input
               type="checkbox"
               checked={draft.required || definitionRequired}
@@ -624,12 +634,12 @@ function ItemView({
           />
           {options.length > 0 ? (
             <fieldset className="sm:col-span-2">
-              <legend className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              <legend className="text-sm font-medium text-fg">
                 {t('templates.editor.options', { name: key })}
               </legend>
               <div className="mt-1 flex flex-wrap gap-3">
                 {options.map((option) => (
-                  <label key={option} className="flex items-center gap-1">
+                  <label key={option} className="flex items-center gap-1.5 text-fg">
                     <input
                       type="checkbox"
                       checked={draft.options.includes(option)}
@@ -686,10 +696,10 @@ function ItemView({
           ) : null}
         </div>
       ) : summary.length > 0 ? (
-        <p className="text-xs text-muted">{summary.join(' · ')}</p>
+        <p className="text-xs text-fg-muted">{summary.join(' · ')}</p>
       ) : null}
       {messages.length > 0 ? (
-        <ul id={errorId} role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <ul id={errorId} role="alert" className="text-sm text-danger">
           {messages.map((m) => (
             <li key={m}>{m}</li>
           ))}

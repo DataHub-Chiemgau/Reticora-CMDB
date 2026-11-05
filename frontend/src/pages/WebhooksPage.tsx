@@ -1,3 +1,4 @@
+import { Inbox, Plus, RotateCw, Webhook } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -15,11 +16,23 @@ import {
 } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { AdminSection } from '../components/admin/AdminSection';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 import { ScrollRegion } from '../components/ScrollRegion';
 
 type WebhookEvent = components['schemas']['WebhookEvent'];
@@ -99,6 +112,18 @@ const eventOrigin: Record<WebhookEvent, 'register' | 'former' | 'deprecated'> = 
  */
 const availableEvents = (Object.keys(eventOrigin) as WebhookEvent[]).filter(
   (event) => eventOrigin[event] === 'register',
+);
+
+/** eventGroups sorts the offered events by their resource (the part before the dot). */
+const eventGroups = availableEvents.reduce<{ group: string; events: WebhookEvent[] }[]>(
+  (groups, event) => {
+    const group = event.split('.')[0]!;
+    const existing = groups.find((g) => g.group === group);
+    if (existing) existing.events.push(event);
+    else groups.push({ group, events: [event] });
+    return groups;
+  },
+  [],
 );
 
 type FormField = 'name' | 'url' | 'secret' | 'events';
@@ -228,267 +253,310 @@ export function WebhooksPage() {
     retryDelivery.mutate({ id, deliveryId }, actionCallbacks);
   };
 
+  const header = <PageHeader title={t('webhook.title')} description={t('webhook.subtitle')} />;
+
   if (subscriptions.isLoading || deadLetters.isLoading) {
-    return <SkeletonList rows={6} label={t('webhook.loading')} />;
-  }
-
-  if (subscriptions.isError) {
     return (
-      <ErrorState
-        title={t('webhook.errorTitle')}
-        description={subscriptions.error.message}
-        retryLabel={t('common.retry')}
-        onRetry={() => subscriptions.refetch()}
-      />
+      <div className="space-y-6">
+        {header}
+        <SkeletonList rows={6} label={t('webhook.loading')} />
+      </div>
     );
   }
 
-  if (deadLetters.isError) {
+  if (subscriptions.isError || deadLetters.isError) {
+    const failed = subscriptions.isError ? subscriptions : deadLetters;
     return (
-      <ErrorState
-        title={t('webhook.errorTitle')}
-        description={deadLetters.error.message}
-        retryLabel={t('common.retry')}
-        onRetry={() => deadLetters.refetch()}
-      />
+      <div className="space-y-6">
+        {header}
+        <ErrorState
+          title={t('webhook.errorTitle')}
+          description={failed.error?.message}
+          retryLabel={t('common.retry')}
+          onRetry={() => failed.refetch()}
+        />
+      </div>
     );
   }
+
+  const formComplete = form.name && form.url && form.secret && form.events.length > 0;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('webhook.title')}</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('webhook.subtitle')}</p>
-      </div>
+    <div className="space-y-8">
+      {header}
 
       {canManage ? (
-        <Card title={t('webhook.createSubscription')}>
-          <div className="space-y-4">
-            {createError ? (
-              <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                {createError.message}
-              </p>
-            ) : null}
-            <div className="grid gap-4 md:grid-cols-3 md:items-end">
-              <Input
-                label={t('webhook.name')}
-                value={form.name}
-                error={createError?.fields.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-              />
-              <Input
-                label={t('webhook.url')}
-                type="url"
-                value={form.url}
-                error={createError?.fields.url}
-                onChange={(event) => setForm({ ...form, url: event.target.value })}
-              />
-              <Input
-                label={t('webhook.secret')}
-                type="password"
-                value={form.secret}
-                error={createError?.fields.secret}
-                onChange={(event) => setForm({ ...form, secret: event.target.value })}
-              />
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {t('webhook.secretWriteOnly')}
-            </p>
-            <fieldset>
-              <legend className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-300">
-                {t('webhook.events')}
-              </legend>
-              <div className="flex flex-wrap gap-3">
-                {availableEvents.map((event) => (
-                  <label
-                    key={event}
-                    className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.events.includes(event)}
-                      onChange={() => toggleEvent(event)}
-                    />
-                    {event}
-                  </label>
-                ))}
-              </div>
-              {createError?.fields.events ? (
-                <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-                  {createError.fields.events}
+        <AdminSection title={t('webhook.createSubscription')} description={t('webhook.createHint')}>
+          <Card>
+            <div className="space-y-5">
+              {createError ? (
+                <p role="alert" className="text-sm text-danger">
+                  {createError.message}
                 </p>
               ) : null}
-            </fieldset>
-            <Button
-              onClick={submit}
-              disabled={
-                createWebhook.isPending ||
-                !form.name ||
-                !form.url ||
-                !form.secret ||
-                form.events.length === 0
-              }
-            >
-              {t('common.save')}
-            </Button>
-          </div>
-        </Card>
+              <div className="grid gap-4 md:grid-cols-3 md:items-start">
+                <Input
+                  label={t('webhook.name')}
+                  value={form.name}
+                  error={createError?.fields.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+                <Input
+                  label={t('webhook.url')}
+                  type="url"
+                  value={form.url}
+                  error={createError?.fields.url}
+                  className="font-mono text-xs"
+                  onChange={(event) => setForm({ ...form, url: event.target.value })}
+                />
+                <Input
+                  label={t('webhook.secret')}
+                  type="password"
+                  value={form.secret}
+                  error={createError?.fields.secret}
+                  onChange={(event) => setForm({ ...form, secret: event.target.value })}
+                />
+              </div>
+              <p className="-mt-2 text-xs text-fg-muted">{t('webhook.secretWriteOnly')}</p>
+              <fieldset>
+                <legend className="mb-3 text-sm font-medium text-fg">{t('webhook.events')}</legend>
+                <div className="columns-1 gap-x-6 sm:columns-2 lg:columns-3 xl:columns-4">
+                  {eventGroups.map(({ group, events }) => (
+                    <div
+                      key={group}
+                      role="group"
+                      aria-label={group}
+                      className="mb-4 break-inside-avoid space-y-1.5"
+                    >
+                      <p aria-hidden="true" className="text-xs font-medium text-fg-muted">
+                        {group}
+                      </p>
+                      {events.map((event) => (
+                        <label
+                          key={event}
+                          className="flex items-center gap-2 font-mono text-xs text-fg"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.events.includes(event)}
+                            onChange={() => toggleEvent(event)}
+                          />
+                          {event}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                {createError?.fields.events ? (
+                  <p className="mt-2 text-sm text-danger">{createError.fields.events}</p>
+                ) : null}
+              </fieldset>
+              <div className="flex justify-end border-t border-line pt-4">
+                <Button
+                  icon={<Plus />}
+                  onClick={submit}
+                  loading={createWebhook.isPending}
+                  disabled={!formComplete}
+                >
+                  {t('common.save')}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </AdminSection>
       ) : managePermission === false ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('webhook.readOnly')}</p>
+        <p className="text-sm text-fg-muted">{t('webhook.readOnly')}</p>
       ) : null}
 
-      <Card title={`${t('webhook.subscriptions')} (${subscriptions.data?.total ?? 0})`}>
+      <AdminSection
+        title={`${t('webhook.subscriptions')} (${subscriptions.data?.total ?? 0})`}
+        description={t('webhook.subscriptionsHint')}
+      >
         {actionError ? (
-          <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {actionError}
           </p>
         ) : null}
         {subscriptions.data?.data.length ? (
-          <ScrollRegion label={t('webhook.subscriptions')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('webhook.name')}</th>
-                  <th className="pb-2">{t('webhook.url')}</th>
-                  <th className="pb-2">{t('webhook.events')}</th>
-                  <th className="pb-2">{t('webhook.active')}</th>
-                  <th className="pb-2">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {subscriptions.data.data.map((sub) => (
-                  <tr key={sub.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-medium">{sub.name}</td>
-                    <td className="py-2 font-mono text-xs">{sub.url}</td>
-                    <td className="py-2">{sub.events.join(', ')}</td>
-                    <td className="py-2">
-                      <Badge variant={sub.is_active ? 'success' : 'neutral'}>
-                        {sub.is_active ? t('webhook.active') : t('webhook.inactive')}
-                      </Badge>
-                    </td>
-                    <td className="py-2">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedId(selectedId === sub.id ? null : sub.id)}
-                        >
-                          {t('webhook.deliveries')}
-                        </Button>
-                        {canManage ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => runTest(sub.id)}
-                              disabled={testWebhook.isPending}
-                            >
-                              {t('webhook.test')}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => runDelete(sub.id)}
-                              disabled={deleteWebhook.isPending}
-                            >
-                              {t('common.delete')}
-                            </Button>
-                          </>
-                        ) : null}
-                      </div>
-                    </td>
+          <Card className="overflow-hidden p-0">
+            <ScrollRegion label={t('webhook.subscriptions')}>
+              <table className={tableClasses}>
+                <thead className={theadClasses}>
+                  <tr className="text-fg-muted">
+                    <th scope="col" className={thClasses}>
+                      {t('webhook.name')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('webhook.url')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('webhook.events')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('webhook.active')}
+                    </th>
+                    <th scope="col" className={cn(thClasses, 'text-right')}>
+                      {t('common.actions')}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollRegion>
+                </thead>
+                <tbody>
+                  {subscriptions.data.data.map((sub) => (
+                    <tr key={sub.id} className={trClasses}>
+                      <td className={tdPrimaryClasses}>{sub.name}</td>
+                      <td className={cn(tdMonoClasses, 'max-w-[18rem] break-all')}>{sub.url}</td>
+                      <td className={cn(tdClasses, 'max-w-[18rem] font-mono text-xs')}>
+                        {sub.events.join(', ')}
+                      </td>
+                      <td className={tdClasses}>
+                        <Badge variant={sub.is_active ? 'success' : 'neutral'}>
+                          {sub.is_active ? t('webhook.active') : t('webhook.inactive')}
+                        </Badge>
+                      </td>
+                      <td className={cn(tdClasses, 'text-right')}>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            aria-expanded={selectedId === sub.id}
+                            onClick={() => setSelectedId(selectedId === sub.id ? null : sub.id)}
+                          >
+                            {t('webhook.deliveries')}
+                          </Button>
+                          {canManage ? (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => runTest(sub.id)}
+                                disabled={testWebhook.isPending}
+                              >
+                                {t('webhook.test')}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-danger hover:text-danger"
+                                onClick={() => runDelete(sub.id)}
+                                disabled={deleteWebhook.isPending}
+                              >
+                                {t('common.delete')}
+                              </Button>
+                            </>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          </Card>
         ) : (
-          <EmptyState title={t('webhook.emptyTitle')} description={t('webhook.emptyHint')} />
+          <EmptyState
+            icon={<Webhook />}
+            title={t('webhook.emptyTitle')}
+            description={t('webhook.emptyHint')}
+          />
         )}
-      </Card>
+      </AdminSection>
 
       {selectedId ? (
-        <Card title={`${t('webhook.deliveries')} (${deliveries.data?.total ?? 0})`}>
+        <AdminSection
+          title={`${t('webhook.deliveries')} (${deliveries.data?.total ?? 0})`}
+          description={t('webhook.deliveriesHint')}
+        >
           {deliveries.isLoading ? (
             <SkeletonList rows={3} label={t('webhook.loadingDeliveries')} />
           ) : deliveries.data?.data.length ? (
-            <ul className="space-y-2">
-              {deliveries.data.data.map((delivery) => (
-                <li
-                  key={delivery.id}
-                  className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
-                >
-                  <span className="font-medium">{delivery.event}</span>{' '}
-                  <Badge
-                    variant={
-                      delivery.status === 'delivered'
-                        ? 'success'
-                        : delivery.status === 'dead'
-                          ? 'danger'
-                          : delivery.status === 'failed'
-                            ? 'warning'
-                            : 'info'
-                    }
-                  >
-                    {t(`webhook.status.${delivery.status}`, delivery.status)}
-                  </Badge>{' '}
-                  <span className="text-gray-500 dark:text-gray-400">
-                    {t('webhook.attemptOf', {
-                      attempt: delivery.attempt,
-                      max: delivery.max_attempts,
-                    })}
-                  </span>
-                  {canManage && (delivery.status === 'failed' || delivery.status === 'dead') ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => selectedId && runRetry(selectedId, delivery.id)}
-                      disabled={retryDelivery.isPending}
-                    >
-                      {t('webhook.retry')}
-                    </Button>
-                  ) : null}
-                  {delivery.error ? (
-                    <p className="mt-1 text-xs text-red-600 dark:text-red-400">{delivery.error}</p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
+            <Card className="overflow-hidden p-0">
+              <ul className="divide-y divide-line">
+                {deliveries.data.data.map((delivery) => (
+                  <li key={delivery.id} className="px-4 py-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-mono text-xs font-medium text-fg">
+                        {delivery.event}
+                      </span>
+                      <Badge
+                        variant={
+                          delivery.status === 'delivered'
+                            ? 'success'
+                            : delivery.status === 'dead'
+                              ? 'danger'
+                              : delivery.status === 'failed'
+                                ? 'warning'
+                                : 'info'
+                        }
+                      >
+                        {t(`webhook.status.${delivery.status}`, delivery.status)}
+                      </Badge>
+                      <span className="text-fg-muted tabular-nums">
+                        {t('webhook.attemptOf', {
+                          attempt: delivery.attempt,
+                          max: delivery.max_attempts,
+                        })}
+                      </span>
+                      {canManage && (delivery.status === 'failed' || delivery.status === 'dead') ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-auto"
+                          icon={<RotateCw />}
+                          onClick={() => selectedId && runRetry(selectedId, delivery.id)}
+                          disabled={retryDelivery.isPending}
+                        >
+                          {t('webhook.retry')}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {delivery.error ? (
+                      <p className="mt-1 text-xs text-danger">{delivery.error}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </Card>
           ) : (
             <EmptyState
+              icon={<Inbox />}
               title={t('webhook.noDeliveries')}
               description={t('webhook.noDeliveriesHint')}
             />
           )}
-        </Card>
+        </AdminSection>
       ) : null}
 
-      <Card title={`${t('webhook.deadLetters')} (${deadLetters.data?.total ?? 0})`}>
+      <AdminSection
+        title={`${t('webhook.deadLetters')} (${deadLetters.data?.total ?? 0})`}
+        description={t('webhook.deadLettersHint')}
+      >
         {deadLetters.data?.data.length ? (
-          <ul className="space-y-2">
-            {deadLetters.data.data.map((letter) => (
-              <li
-                key={letter.id}
-                className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-800"
-              >
-                <span className="font-medium">{letter.event}</span>{' '}
-                <Badge variant="danger">{t('webhook.dead')}</Badge>{' '}
-                <span className="text-gray-500 dark:text-gray-400">
-                  {t('webhook.attempts', { count: letter.attempts })}
-                </span>
-                {letter.last_error ? (
-                  <p className="mt-1 text-xs text-red-600 dark:text-red-400">{letter.last_error}</p>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+          <Card className="overflow-hidden p-0">
+            <ul className="divide-y divide-line">
+              {deadLetters.data.data.map((letter) => (
+                <li key={letter.id} className="px-4 py-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="font-mono text-xs font-medium text-fg">{letter.event}</span>
+                    <Badge variant="danger">{t('webhook.dead')}</Badge>
+                    <span className="text-fg-muted tabular-nums">
+                      {t('webhook.attempts', { count: letter.attempts })}
+                    </span>
+                  </div>
+                  {letter.last_error ? (
+                    <p className="mt-1 text-xs text-danger">{letter.last_error}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </Card>
         ) : (
           <EmptyState
+            icon={<Inbox />}
             title={t('webhook.noDeadLetters')}
             description={t('webhook.noDeadLettersHint')}
           />
         )}
-      </Card>
+      </AdminSection>
     </div>
   );
 }

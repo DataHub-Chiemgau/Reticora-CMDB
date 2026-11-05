@@ -10,20 +10,35 @@
  */
 import { useEffect } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Building2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ApiError, fetchAPI, siteApi } from '../api/client';
 import { clientApi } from '../api/cmdb';
 import type { components } from '../api/generated/schema';
 import { useScopeStore } from '../stores/scope';
+import { cn } from './ui/utils';
 
 type Organization = components['schemas']['Organization'];
 
 const PAGE_SIZE = 200;
 
-const selectClass =
-  'rounded-lg border border-gray-300 bg-white px-2 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
 const moreClass =
-  'rounded-lg px-2 py-1 text-xs text-blue-700 hover:underline disabled:opacity-50 dark:text-blue-300';
+  'rounded-md px-2 py-1 text-xs font-medium text-accent hover:underline disabled:opacity-50';
+
+/**
+ * scopeSelectClass: a select that reads as part of the scope path. At rest it
+ * is quiet text; with a client or site chosen it turns accent, because the
+ * lists below are then narrowed and the user must see it.
+ */
+function scopeSelectClass(active: boolean, stacked: boolean): string {
+  return [
+    'field-select h-8 rounded-lg border text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-60',
+    stacked ? 'w-full pl-3' : 'max-w-40 truncate pl-2.5',
+    active
+      ? 'border-accent/40 bg-accent-soft text-accent-strong'
+      : 'border-transparent bg-transparent text-fg-muted hover:border-line-strong hover:bg-panel hover:text-fg',
+  ].join(' ');
+}
 
 interface Page<T> {
   data: T[] | null;
@@ -54,10 +69,10 @@ function inaccessible(error: unknown): boolean {
   return error instanceof ApiError && [400, 403, 404].includes(error.status);
 }
 
-export function ScopeSwitcher() {
+export function ScopeSwitcher({ layout = 'inline' }: { layout?: 'inline' | 'stacked' }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { clientId, siteId, setClient, setSite } = useScopeStore();
+  const { clientId, siteId, setClient, setSite, reset } = useScopeStore();
 
   const org = useQuery({
     queryKey: ['scope', 'org'],
@@ -137,21 +152,32 @@ export function ScopeSwitcher() {
     });
   }
 
+  const stacked = layout === 'stacked';
+  const orgName = org.data?.name ?? t('scope.organization', 'Organisation');
+
   return (
     <div
       role="group"
       aria-label={t('scope.label', 'Arbeitsbereich')}
-      className="flex flex-wrap items-center gap-2 text-sm"
+      className={cn(
+        'text-sm',
+        stacked ? 'flex flex-col gap-2' : 'flex min-w-0 flex-nowrap items-center gap-1',
+      )}
     >
       <span
-        className="max-w-40 truncate font-medium"
+        className={cn(
+          'flex min-w-0 items-center gap-2 font-medium text-fg',
+          stacked ? 'px-0.5' : 'max-w-36 px-1.5',
+        )}
         title={t('scope.organization', 'Organisation')}
       >
-        {org.data?.name ?? t('scope.organization', 'Organisation')}
+        <Building2 aria-hidden="true" className="h-4 w-4 shrink-0 text-fg-subtle" />
+        <span className="truncate">{orgName}</span>
       </span>
+      {stacked ? null : <Separator />}
       <select
         aria-label={t('scope.client', 'Kunde')}
-        className={selectClass}
+        className={scopeSelectClass(clientId !== '', stacked)}
         value={clientId}
         disabled={!clients.isSuccess}
         onChange={(event) => {
@@ -176,9 +202,10 @@ export function ScopeSwitcher() {
           {t('scope.moreClients', 'Weitere Kunden laden')}
         </button>
       )}
+      {stacked ? null : <Separator />}
       <select
         aria-label={t('scope.site', 'Standort')}
-        className={selectClass}
+        className={scopeSelectClass(siteId !== '', stacked)}
         value={siteId}
         disabled={!sites.isSuccess}
         onChange={(event) => {
@@ -203,6 +230,33 @@ export function ScopeSwitcher() {
           {t('scope.moreSites', 'Weitere Standorte laden')}
         </button>
       )}
+      {clientId || siteId ? (
+        <button
+          type="button"
+          title={t('scope.reset', 'Bereich zurücksetzen')}
+          aria-label={t('scope.reset', 'Bereich zurücksetzen')}
+          className={cn(
+            'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-fg-muted transition-colors hover:bg-fg/[0.06] hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent',
+            stacked && 'w-fit',
+          )}
+          onClick={() => {
+            reset();
+            refresh();
+          }}
+        >
+          <X aria-hidden="true" className="h-3.5 w-3.5" />
+          {stacked ? t('scope.reset', 'Bereich zurücksetzen') : null}
+        </button>
+      ) : null}
     </div>
+  );
+}
+
+/** Separator is the slash between the levels of the scope path. */
+function Separator() {
+  return (
+    <span aria-hidden="true" className="select-none text-fg-subtle/70">
+      /
+    </span>
   );
 }

@@ -156,9 +156,9 @@ describe('theme source in src/index.css', () => {
     const root = topLevelRule(css, ':root');
     const dark = topLevelRule(css, '.dark');
     expect(root).toMatch(/(^|;|\s)color-scheme:\s*light\s*;/);
-    expect(root).toMatch(/--color-surface:\s*0 0% 100%\s*;/);
+    expect(root).toMatch(/--color-surface:\s*200 18% 96\.7%\s*;/);
     expect(dark).toMatch(/(^|;|\s)color-scheme:\s*dark\s*;/);
-    expect(dark).toMatch(/--color-surface:\s*220 13% 10%\s*;/);
+    expect(dark).toMatch(/--color-surface:\s*202 24% 6\.7%\s*;/);
     expect(topLevelRule(css, 'html')).toMatch(
       /background-color:\s*hsl\(var\(--color-surface\)\)\s*;/,
     );

@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react';
 import { Button } from './Button';
 import { cn } from './utils';
 
@@ -24,17 +25,25 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex flex-col items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/40',
+        'flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3.5 dark:border-red-500/30 dark:bg-red-500/10',
         className,
       )}
     >
-      <p className="text-sm font-semibold text-red-800 dark:text-red-200">{title}</p>
-      {description ? <p className="text-sm text-red-700 dark:text-red-300">{description}</p> : null}
-      {onRetry && retryLabel ? (
-        <Button variant="secondary" size="sm" onClick={onRetry}>
-          {retryLabel}
-        </Button>
-      ) : null}
+      <TriangleAlert
+        aria-hidden="true"
+        className="mt-0.5 h-4 w-4 shrink-0 text-red-700 dark:text-red-300"
+      />
+      <div className="flex min-w-0 flex-col items-start gap-1">
+        <p className="text-sm font-semibold text-red-900 dark:text-red-100">{title}</p>
+        {description ? (
+          <p className="text-sm text-red-800 dark:text-red-200">{description}</p>
+        ) : null}
+        {onRetry && retryLabel ? (
+          <Button variant="secondary" size="sm" className="mt-2" onClick={onRetry}>
+            {retryLabel}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }

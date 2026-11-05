@@ -1,3 +1,4 @@
+import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useToastStore } from '../../stores/toast';
@@ -5,16 +6,25 @@ import type { Toast } from '../../stores/toast';
 import { cn } from './utils';
 
 const variantClasses: Record<Toast['variant'], string> = {
-  info: 'border-gray-200 bg-white text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100',
+  info: 'border-line-strong bg-raised text-fg',
   success:
-    'border-green-300 bg-green-50 text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-100',
+    'border-green-300 bg-green-50 text-green-900 dark:border-green-500/40 dark:bg-green-950 dark:text-green-100',
   error:
-    'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100',
+    'border-red-300 bg-red-50 text-red-900 dark:border-red-500/40 dark:bg-red-950 dark:text-red-100',
 };
+
+const iconClasses: Record<Toast['variant'], string> = {
+  info: 'text-accent',
+  success: 'text-green-700 dark:text-green-300',
+  error: 'text-red-700 dark:text-red-300',
+};
+
+const icons = { info: Info, success: CircleCheck, error: CircleAlert } as const;
 
 function ToastItem({ toast }: { toast: Toast }) {
   const { t } = useTranslation();
   const dismiss = useToastStore((state) => state.dismiss);
+  const Icon = icons[toast.variant];
 
   useEffect(() => {
     const timer = setTimeout(() => dismiss(toast.id), toast.durationMs);
@@ -24,11 +34,15 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       className={cn(
-        'pointer-events-auto flex items-center gap-3 rounded-xl border px-4 py-3 shadow-lg',
+        'pointer-events-auto flex animate-toast-in items-start gap-3 rounded-xl border px-4 py-3 shadow-lg',
         variantClasses[toast.variant],
       )}
     >
-      <p className="text-sm">{toast.message}</p>
+      <Icon
+        aria-hidden="true"
+        className={cn('mt-0.5 h-4 w-4 shrink-0', iconClasses[toast.variant])}
+      />
+      <p className="min-w-0 flex-1 text-sm">{toast.message}</p>
       {toast.actionLabel && toast.onAction ? (
         <button
           type="button"
@@ -36,7 +50,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             toast.onAction?.();
             dismiss(toast.id);
           }}
-          className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          className="shrink-0 rounded-md px-1.5 text-sm font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
         >
           {toast.actionLabel}
         </button>
@@ -45,19 +59,9 @@ function ToastItem({ toast }: { toast: Toast }) {
         type="button"
         onClick={() => dismiss(toast.id)}
         aria-label={t('toast.dismiss')}
-        className="shrink-0 rounded-lg p-1 text-current opacity-70 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="-mr-1 shrink-0 rounded-md p-0.5 text-current opacity-70 hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-4 w-4"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M18 6 6 18" />
-          <path d="m6 6 12 12" />
-        </svg>
+        <X aria-hidden="true" className="h-4 w-4" />
       </button>
     </div>
   );

@@ -29,8 +29,8 @@ const DEFAULT_ITEM_COLOR = '#4f46e5';
  * RackSVG renders a server rack diagram as an SVG element.
  * Each unit is 1U (20px), items can span multiple units. The frame, the unit
  * lines and the unit numbers follow the theme through fill-/stroke- classes
- * with dark: variants (as the map in MapPage); the unit numbers sit outside
- * the frame on the card background and keep 4.5:1 there in both themes.
+ * from the design tokens (as the map in MapPage); the unit numbers sit outside
+ * the frame on the panel background and keep 4.5:1 there in both themes.
  */
 export const RackSVG: FC<RackSVGProps> = ({
   units,
@@ -57,7 +57,7 @@ export const RackSVG: FC<RackSVGProps> = ({
         width={rackWidth}
         height={totalHeight}
         strokeWidth={1}
-        className="fill-gray-100 stroke-gray-300 dark:fill-gray-800 dark:stroke-gray-700"
+        className="fill-canvas stroke-line-strong"
       />
 
       {/* Unit lines and labels */}
@@ -71,14 +71,14 @@ export const RackSVG: FC<RackSVGProps> = ({
               x2={width}
               y2={y}
               strokeWidth={0.5}
-              className="stroke-gray-300 dark:stroke-gray-700"
+              className="stroke-line"
             />
             <text
               x={LABEL_WIDTH - 4}
               y={y + UNIT_HEIGHT / 2 + 4}
               textAnchor="end"
               fontSize={9}
-              className="fill-gray-600 dark:fill-gray-400"
+              className="fill-fg-muted"
             >
               {units - i}
             </text>
@@ -105,7 +105,7 @@ export const RackSVG: FC<RackSVGProps> = ({
               rx={2}
               fill={item.color ?? DEFAULT_ITEM_COLOR}
               strokeWidth={0.5}
-              className="stroke-indigo-500"
+              className="stroke-black/20"
             />
             <text
               x={LABEL_WIDTH + rackWidth / 2}

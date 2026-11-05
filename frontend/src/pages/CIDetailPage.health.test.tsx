@@ -79,9 +79,9 @@ describe('CIDetailPage health badge (DB-05, F-087)', () => {
   // color is the class of the Badge variant (success, warning, danger,
   // neutral).
   const cases = [
-    { health: 'ok', de: 'Zustand: OK', en: 'Health: OK', color: 'bg-green-100' },
-    { health: 'warning', de: 'Zustand: Warnung', en: 'Health: warning', color: 'bg-yellow-100' },
-    { health: 'critical', de: 'Zustand: kritisch', en: 'Health: critical', color: 'bg-red-100' },
+    { health: 'ok', de: 'Zustand: OK', en: 'Health: OK', color: 'bg-green-50' },
+    { health: 'warning', de: 'Zustand: Warnung', en: 'Health: warning', color: 'bg-amber-50' },
+    { health: 'critical', de: 'Zustand: kritisch', en: 'Health: critical', color: 'bg-red-50' },
     { health: 'unknown', de: 'Zustand: unbekannt', en: 'Health: unknown', color: 'bg-gray-100' },
   ];
 

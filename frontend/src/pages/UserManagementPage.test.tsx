@@ -125,7 +125,7 @@ function requests(fetchMock: ReturnType<typeof vi.fn>, method: string, path: str
 }
 
 async function openInvitations() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Einladungen' }));
+  fireEvent.click(await screen.findByRole('tab', { name: 'Einladungen' }));
   return screen.findByRole('heading', { name: /^Einladungen \(/ });
 }
 
@@ -141,11 +141,36 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('UserManagementPage tabs', () => {
+  it('is a tablist with one tab stop that the arrow keys move', async () => {
+    stubUserApi(managePermissions.permissions);
+    renderWithProviders(<UserManagementPage />, { route: '/users' });
+
+    const users = await screen.findByRole('tab', { name: 'Benutzer' });
+    expect(screen.getByRole('tablist')).toBeInTheDocument();
+    expect(users).toHaveAttribute('aria-selected', 'true');
+    expect(users).toHaveAttribute('tabindex', '0');
+    expect(screen.getByRole('tab', { name: 'Teams' })).toHaveAttribute('tabindex', '-1');
+
+    users.focus();
+    fireEvent.keyDown(users, { key: 'ArrowRight' });
+    const teams = screen.getByRole('tab', { name: 'Teams' });
+    expect(teams).toHaveAttribute('aria-selected', 'true');
+    expect(teams).toHaveFocus();
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', teams.id);
+
+    fireEvent.keyDown(teams, { key: 'End' });
+    expect(screen.getByRole('tab', { name: 'Einladungen' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Einladungen' }), { key: 'ArrowRight' });
+    expect(screen.getByRole('tab', { name: 'Benutzer' })).toHaveFocus();
+  });
+});
+
 describe('UserManagementPage roles', () => {
   it('marks the standard roles as System and custom roles as Custom (F-201)', async () => {
     stubUserApi(managePermissions.permissions);
     renderWithProviders(<UserManagementPage />, { route: '/users' });
-    fireEvent.click(await screen.findByRole('button', { name: /^(Rollen|Roles)$/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /^(Rollen|Roles)$/ }));
 
     const viewer = (await screen.findByText('viewer')).closest('tr')!;
     expect(within(viewer).getByText('System')).toBeInTheDocument();

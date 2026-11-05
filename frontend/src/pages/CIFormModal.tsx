@@ -9,6 +9,7 @@ import { useCreateCI, useUpdateCI } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
 import { Button } from '../components/ui/Button';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
@@ -304,51 +305,61 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     <Modal
       open={open}
       onOpenChange={onOpenChange}
+      size="lg"
       title={isEditMode ? t('form.editCI') : t('form.createCI')}
       description={t('form.ciDescription')}
     >
-      <form className="space-y-4" onSubmit={handleSubmit}>
-        <Input
-          label={t('form.fields.name')}
-          value={values.name}
-          onChange={(event) => setValue('name', event.target.value)}
-          error={fieldErrors.name}
-          required
-        />
-        <Select
-          label={t('form.fields.ciType')}
-          value={values.ci_type_id}
-          onChange={(event) => {
-            setValue('ci_type_id', event.target.value);
-            setAttributeErrors({});
-          }}
-          options={typeOptions}
-          error={
-            fieldErrors.ci_type_id ?? (ciTypes.isError ? t('form.typesLoadFailed') : undefined)
-          }
-          disabled={isEditMode}
-          required
-        />
-        {typesUnavailable ? (
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="secondary"
-              loading={ciTypes.isFetching}
-              onClick={() => void ciTypes.refetch()}
-            >
-              {t('common.retry')}
-            </Button>
-          </div>
-        ) : null}
-        <Select
-          label={t('form.fields.status')}
-          value={values.status}
-          onChange={(event) => setValue('status', event.target.value)}
-          options={statusOptions}
-          error={fieldErrors.status}
-        />
+      <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
+        {/* Identity first: what the CI is called, what kind it is and its
+            state. These are the fields every CI needs. */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Input
+              label={t('form.fields.name')}
+              value={values.name}
+              onChange={(event) => setValue('name', event.target.value)}
+              error={fieldErrors.name}
+              autoFocus={!isEditMode}
+              required
+            />
+          </div>
+          <Select
+            label={t('form.fields.ciType')}
+            value={values.ci_type_id}
+            onChange={(event) => {
+              setValue('ci_type_id', event.target.value);
+              setAttributeErrors({});
+            }}
+            options={typeOptions}
+            error={
+              fieldErrors.ci_type_id ?? (ciTypes.isError ? t('form.typesLoadFailed') : undefined)
+            }
+            disabled={isEditMode}
+            required
+          />
+          <Select
+            label={t('form.fields.status')}
+            value={values.status}
+            onChange={(event) => setValue('status', event.target.value)}
+            options={statusOptions}
+            error={fieldErrors.status}
+          />
+          {typesUnavailable ? (
+            <div className="flex sm:col-span-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={ciTypes.isFetching}
+                onClick={() => void ciTypes.refetch()}
+              >
+                {t('common.retry')}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+
+        {/* The optional master data of the device. */}
+        <div className="grid grid-cols-1 gap-4 border-t border-line pt-5 sm:grid-cols-2">
           <Input
             label={t('form.fields.manufacturer')}
             value={values.manufacturer}
@@ -362,14 +373,15 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             error={fieldErrors.model}
           />
           {assetManaged ? (
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               <Input
                 label={t('form.fields.serialNumber')}
                 value={ci?.asset ? (ci.asset.serial_number ?? '') : values.serial_number}
                 disabled
+                className="font-mono"
                 aria-describedby={`${assetHintId}-serial`}
               />
-              <p id={`${assetHintId}-serial`} className="text-xs text-gray-500 dark:text-gray-400">
+              <p id={`${assetHintId}-serial`} className="text-xs text-fg-muted">
                 {t('form.assetManaged')}
               </p>
             </div>
@@ -379,6 +391,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
               value={values.serial_number}
               onChange={(event) => setValue('serial_number', event.target.value)}
               error={fieldErrors.serial_number}
+              className="font-mono"
             />
           )}
           <Input
@@ -386,26 +399,23 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             value={values.management_ip}
             onChange={(event) => setValue('management_ip', event.target.value)}
             error={fieldErrors.management_ip}
+            className="font-mono"
           />
           <Input
             label={t('form.fields.firmwareVersion')}
             value={values.firmware_version}
             onChange={(event) => setValue('firmware_version', event.target.value)}
             error={fieldErrors.firmware_version}
-            className="sm:col-span-2"
           />
           {assetManaged ? (
-            <div className="space-y-1 sm:col-span-2">
+            <div className="space-y-1.5">
               <Input
                 label={t('form.fields.location')}
                 value={locations.path(assetLocation) ?? ''}
                 disabled
                 aria-describedby={`${assetHintId}-location`}
               />
-              <p
-                id={`${assetHintId}-location`}
-                className="text-xs text-gray-500 dark:text-gray-400"
-              >
+              <p id={`${assetHintId}-location`} className="text-xs text-fg-muted">
                 {t('form.assetManaged')}
               </p>
             </div>
@@ -413,10 +423,8 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
         </div>
 
         {typeFields.length > 0 ? (
-          <div className="space-y-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              {t('form.typeAttributes')}
-            </h3>
+          <div className="space-y-4 border-t border-line pt-5">
+            <h3 className="text-sm font-semibold text-fg">{t('form.typeAttributes')}</h3>
             <DynamicForm
               fields={typeFields}
               values={attributes}
@@ -426,16 +434,13 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           </div>
         ) : null}
         {selectedType.isError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{t('form.typeSchemaLoadFailed')}</p>
+          <p className="text-sm text-danger">{t('form.typeSchemaLoadFailed')}</p>
         ) : null}
 
-        {bannerMessage ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {bannerMessage}
-          </p>
-        ) : null}
+        {bannerMessage ? <ErrorState title={bannerMessage} /> : null}
 
-        <div className="flex justify-end gap-3 pt-2">
+        {/* The actions stay in view while a long type schema scrolls. */}
+        <div className="sticky -bottom-6 z-10 -mx-6 -mb-6 flex justify-end gap-2 rounded-b-xl border-t border-line bg-panel px-6 py-4">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>

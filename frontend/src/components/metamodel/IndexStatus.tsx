@@ -9,7 +9,9 @@
  */
 import { useTranslation } from 'react-i18next';
 import type { AttributeIndexStatus } from '../../api/cmdb';
+import { RotateCw } from 'lucide-react';
 import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
 
 type Variant = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 
@@ -53,20 +55,21 @@ export function IndexStatus({ status, attributeKey, onReindex, reindexing }: Ind
         <Badge variant={VARIANTS[state]}>{t('citypes.indexStatus.label', { status: label })}</Badge>
       </span>
       {showError ? (
-        <span className="text-xs text-red-700 dark:text-red-300">
+        <span className="text-xs text-danger">
           {t('citypes.indexStatus.error', { error: status.error })}
         </span>
       ) : null}
       {rebuild ? (
-        <button
-          type="button"
-          className="text-xs text-primary hover:underline disabled:opacity-50"
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<RotateCw />}
           aria-label={t('citypes.indexStatus.reindexAction', { name: attributeKey })}
-          disabled={reindexing}
+          loading={reindexing}
           onClick={onReindex}
         >
           {t('citypes.indexStatus.reindex')}
-        </button>
+        </Button>
       ) : null}
     </span>
   );

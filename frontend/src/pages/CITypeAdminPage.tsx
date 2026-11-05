@@ -2,6 +2,18 @@ import { useCallback, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
+  Copy,
+  Info,
+  LayoutTemplate,
+  ListTree,
+  Pencil,
+  Plus,
+  Power,
+  PowerOff,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import {
   useAllCITypes,
   useApplicableAttributeDefinitions,
   useAttributeSets,
@@ -40,11 +52,14 @@ import {
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
+import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Toolbar } from '../components/ui/Toolbar';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
 import { TypeTree, ancestorsOf } from '../components/metamodel/TypeTree';
@@ -188,9 +203,9 @@ function DraftPlaceholders({ items, t }: { items: MetamodelDraftItem[]; t: TFunc
         <li
           key={`draft:${item.id}`}
           data-draft-item={item.id}
-          className="flex flex-wrap items-center gap-2 py-2 text-sm"
+          className="flex flex-wrap items-center gap-2 py-3 text-sm"
         >
-          <span className="font-medium">
+          <span className="font-medium text-fg">
             {draftItemName(item, i18n.language) || t('metamodelDrafts.noTarget')}
           </span>
           <DraftMarker change="created" />
@@ -256,50 +271,62 @@ export function CITypeAdminPage() {
     );
   };
 
+  // Below lg the tree sits above the detail: choosing a type brings the detail
+  // into view, otherwise nothing seems to happen.
+  const selectType = (id: string) => {
+    setSelectedId(id);
+    if (window.matchMedia?.('(max-width: 1023px)').matches) {
+      window.requestAnimationFrame(() =>
+        document.getElementById('type-detail')?.scrollIntoView?.({ block: 'start' }),
+      );
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('citypes.title', 'CI-Typen')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t(
-              'citypes.subtitle',
-              'Metadaten-getriebene Typen: Felder, Gruppen, Validierung, Lebenszyklus.',
-            )}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-start gap-2">
-          {/* Export and import of the metamodel (WP-800). */}
-          <MetamodelTransfer />
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              createType.reset();
-              setShowTemplates(true);
-            }}
-          >
-            {t('citypes.fromTemplate')}
-          </Button>
-          <Button size="sm" onClick={() => setTypeDialog({ mode: 'create' })}>
-            {t('citypes.create', 'Typ anlegen')}
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title={t('citypes.title', 'CI-Typen')}
+        description={t(
+          'citypes.subtitle',
+          'Metadaten-getriebene Typen: Felder, Gruppen, Validierung, Lebenszyklus.',
+        )}
+        actions={
+          <>
+            {/* Export and import of the metamodel (WP-800). */}
+            <MetamodelTransfer />
+            <Button
+              variant="secondary"
+              icon={<LayoutTemplate />}
+              onClick={() => {
+                createType.reset();
+                setShowTemplates(true);
+              }}
+            >
+              {t('citypes.fromTemplate')}
+            </Button>
+            <Button icon={<Plus />} onClick={() => setTypeDialog({ mode: 'create' })}>
+              {t('citypes.create', 'Typ anlegen')}
+            </Button>
+          </>
+        }
+      />
       <MetamodelTabs />
 
-      <Card>
-        <div className="flex flex-wrap items-center gap-3">
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('common.search', 'Suchen')}
-            className="max-w-xs"
-            aria-label={t('common.search', 'Suchen')}
-          />
-          <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)] lg:items-start">
+        {/* The type tree: a pane of its own that stays in view and scrolls by itself. */}
+        <div className="flex min-w-0 flex-col gap-3 lg:sticky lg:top-[calc(var(--header-height)+1rem)]">
+          <Toolbar>
+            <div className="min-w-0 flex-1">
+              <Input
+                icon={<Search />}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('common.search', 'Suchen')}
+                aria-label={t('common.search', 'Suchen')}
+              />
+            </div>
+          </Toolbar>
+          <label className="flex items-center gap-2 text-sm text-fg-muted">
             <input
               type="checkbox"
               checked={showInactive}
@@ -307,57 +334,54 @@ export function CITypeAdminPage() {
             />
             {t('citypes.showInactive', 'Deaktivierte anzeigen')}
           </label>
-        </div>
-      </Card>
-
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
-      {error ? (
-        <ErrorState
-          title={t('app.error')}
-          retryLabel={t('common.retry')}
-          onRetry={() => void refetch()}
-        />
-      ) : null}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-1">
-          {data ? (
-            <TypeTree
-              types={types}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              search={search}
-              label={label}
+          {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+          {error ? (
+            <ErrorState
+              title={t('app.error')}
+              retryLabel={t('common.retry')}
+              onRetry={() => void refetch()}
             />
+          ) : null}
+          {data ? (
+            <div className="-mx-1 max-h-80 overflow-y-auto px-1 py-1 scroll-thin lg:max-h-[calc(100vh-var(--header-height)-11rem)]">
+              <TypeTree
+                types={types}
+                selectedId={selectedId}
+                onSelect={selectType}
+                search={search}
+                label={label}
+              />
+            </div>
           ) : null}
           <DraftTypes types={types} label={label} t={t} />
         </div>
 
-        <div className="space-y-4 lg:col-span-2">
-          {selected ? (
-            <CITypeDetail
-              key={selected.id}
-              type={selected}
-              types={types}
-              label={label}
-              onSelectType={setSelectedId}
-              onEdit={() => setTypeDialog({ mode: 'edit', type: selected })}
-              onAddAttribute={() =>
-                setEditor({ mode: 'create', scope: 'type', ciTypeId: selected.id })
-              }
-              onEditAttribute={(definition) => setEditor({ mode: 'edit', definition })}
-              sets={sets}
-              setsEnabled={metamodelOn && !setsOff}
-              onOpenSet={openSet}
-              t={t}
-            />
-          ) : (
-            <Card>
-              <p className="text-sm text-muted">
-                {t('citypes.select', 'Typ auswählen, um Felder zu bearbeiten.')}
-              </p>
-            </Card>
-          )}
+        <div className="min-w-0 space-y-6">
+          <div id="type-detail" className="scroll-mt-20">
+            {selected ? (
+              <CITypeDetail
+                key={selected.id}
+                type={selected}
+                types={types}
+                label={label}
+                onSelectType={setSelectedId}
+                onEdit={() => setTypeDialog({ mode: 'edit', type: selected })}
+                onAddAttribute={() =>
+                  setEditor({ mode: 'create', scope: 'type', ciTypeId: selected.id })
+                }
+                onEditAttribute={(definition) => setEditor({ mode: 'edit', definition })}
+                sets={sets}
+                setsEnabled={metamodelOn && !setsOff}
+                onOpenSet={openSet}
+                t={t}
+              />
+            ) : (
+              <EmptyState
+                icon={<ListTree />}
+                title={t('citypes.select', 'Typ auswählen, um Felder zu bearbeiten.')}
+              />
+            )}
+          </div>
           <GlobalAttributesSection
             types={types}
             label={label}
@@ -380,25 +404,35 @@ export function CITypeAdminPage() {
 
       {/* Templates modal: the catalog of type templates (GET /ci-types/templates) */}
       <Modal open={showTemplates} onOpenChange={setShowTemplates} title={t('citypes.templates')}>
-        <div className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+        {(templates.data?.data ?? []).length === 0 && templates.isSuccess ? (
+          <p className="text-sm text-fg-muted">{t('common.noData')}</p>
+        ) : null}
+        <div className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto scroll-thin md:grid-cols-2">
           {(templates.data?.data ?? []).map((tpl) => (
             <button
               key={tpl.key}
+              type="button"
               onClick={() => instantiateTemplate(tpl)}
-              className="rounded-lg border border-gray-200 px-3 py-2 text-left hover:border-primary dark:border-gray-700"
+              className="rounded-lg border border-line px-3.5 py-3 text-left transition-colors hover:border-line-strong hover:bg-fg/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
             >
-              <p className="font-medium text-gray-900 dark:text-gray-100">{label(tpl)}</p>
-              <p className="text-xs text-muted">
-                {/* eslint-disable-next-line no-restricted-syntax -- GLO-10: the template category is free metamodel text (ci_type.category, no enum), not a catalog key */}
-                {tpl.category}
-                {tpl.is_logical ? ` · ${t('citypes.logicalShort')}` : ''} ·{' '}
-                {t('citypes.fieldCount', { count: (tpl.fields ?? []).length })}
+              <p className="font-medium text-fg">{label(tpl)}</p>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-fg-muted">
+                {tpl.category ? (
+                  <span>
+                    {/* eslint-disable-next-line no-restricted-syntax -- GLO-10: the template category is free metamodel text (ci_type.category, no enum), not a catalog key */}
+                    {tpl.category}
+                  </span>
+                ) : null}
+                {tpl.is_logical ? <Badge>{t('citypes.logicalShort')}</Badge> : null}
+                <span className="tabular-nums">
+                  {t('citypes.fieldCount', { count: (tpl.fields ?? []).length })}
+                </span>
               </p>
             </button>
           ))}
         </div>
         {createType.error ? (
-          <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mt-3 text-sm text-danger">
             {t('citypes.typeErrors.notSaved', {
               reason: describeFlagRefusal(createType.error, t),
             })}
@@ -548,7 +582,7 @@ function TypeDialog({
           error={errors.key}
         />
         {editing ? (
-          <p className="text-xs text-muted">{t('citypes.typeDialog.keyImmutable')}</p>
+          <p className="text-xs text-fg-muted">{t('citypes.typeDialog.keyImmutable')}</p>
         ) : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Input
@@ -591,7 +625,7 @@ function TypeDialog({
           error={errors.parent_type_id}
         />
         {error ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {shownAtField > 0
               ? t('citypes.typeErrors.checkFields')
               : t('citypes.typeErrors.notSaved', { reason: describeFlagRefusal(error, t) })}
@@ -648,17 +682,17 @@ function AttributeRow({
   const d = definition;
   const name = localizedText(d.display_name, i18n.language) || d.key;
   return (
-    <li className="flex flex-wrap items-start justify-between gap-2 py-2 text-sm">
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{name}</span>
-          {name !== d.key ? <span className="text-xs text-muted">{d.key}</span> : null}
-          <span className="text-xs text-muted">
+    <li className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3 text-sm">
+      <div className="min-w-0 flex-1 basis-48 space-y-1.5">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="font-medium text-fg [overflow-wrap:anywhere]">{name}</span>
+          {name !== d.key ? <span className="font-mono text-xs text-fg-muted">{d.key}</span> : null}
+          <span className="text-xs text-fg-muted">
             {t(`citypes.dataTypes.${d.data_type}`, d.data_type)}
-            {d.group ? ` · ${d.group}` : ''}
           </span>
+          {d.group ? <span className="text-xs text-fg-subtle">{d.group}</span> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1.5">
           {origin?.kind === 'own' ? (
             <Badge variant="neutral">{t('citypes.origin.own')}</Badge>
           ) : null}
@@ -703,54 +737,50 @@ function AttributeRow({
           reindexing={reindexing}
         />
       </div>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap items-center gap-1">
         {onOpenOrigin && origin?.kind === 'inherited' ? (
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline"
-            onClick={onOpenOrigin}
-          >
+          <Button variant="ghost" size="sm" className={linkAction} onClick={onOpenOrigin}>
             {t('citypes.origin.open', { type: originLabel(origin, i18n.language) })}
-          </button>
+          </Button>
         ) : null}
         {onOpenOrigin && origin?.kind === 'set' ? (
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline"
-            onClick={onOpenOrigin}
-          >
+          <Button variant="ghost" size="sm" className={linkAction} onClick={onOpenOrigin}>
             {t('citypes.origin.openSet', { name: setLabel(origin.set, i18n.language) })}
-          </button>
+          </Button>
         ) : null}
         {origin?.kind === 'global' ? (
-          <a href="#global-attributes" className="text-xs text-primary hover:underline">
-            {t('citypes.origin.openGlobal')}
-          </a>
+          <Button variant="ghost" size="sm" className={linkAction} asChild>
+            <a href="#global-attributes">{t('citypes.origin.openGlobal')}</a>
+          </Button>
         ) : null}
         {onEdit ? (
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline"
-            aria-label={editLabel}
+          <IconButton
+            size="sm"
+            icon={<Pencil />}
+            label={editLabel ?? t('common.edit', 'Bearbeiten')}
             onClick={onEdit}
-          >
-            {t('common.edit', 'Bearbeiten')}
-          </button>
+          />
         ) : null}
         {onDelete ? (
-          <button
-            type="button"
-            className="text-xs text-danger hover:underline"
-            aria-label={deleteLabel}
+          <IconButton
+            size="sm"
+            icon={<Trash2 />}
+            label={deleteLabel ?? t('common.delete', 'Löschen')}
+            className={deleteIcon}
             onClick={onDelete}
-          >
-            {t('common.delete', 'Löschen')}
-          </button>
+          />
         ) : null}
       </div>
     </li>
   );
 }
+
+/** A text action beside a row: a link in the accent colour. */
+const linkAction = 'text-accent hover:text-accent-strong';
+/** A text action that removes or switches off: the danger colour at rest. */
+const dangerAction = 'text-danger hover:text-danger';
+/** An icon action that deletes: quiet at rest, red when it is about to be used. */
+const deleteIcon = 'hover:text-danger';
 
 function originLabel(origin: Origin, language: string): string {
   return origin.kind === 'inherited'
@@ -849,174 +879,195 @@ function CITypeDetail({
   };
 
   return (
-    <Card
-      title={label(type)}
-      actions={
-        <div className="flex flex-wrap justify-end gap-2">
-          {!readOnly ? (
-            <Button size="sm" variant="secondary" onClick={onEdit}>
-              {t('citypes.editType')}
-            </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={cloneType.isPending}
-            onClick={() => {
-              setLastAction('clone');
-              setActive.reset();
-              // The clone is a type of the organization: select it so its
-              // attributes can be added right away (the way out of a system type).
-              cloneType.mutate(
-                { id: type.id },
-                { onSuccess: (clone) => (isDraftItem(clone) ? undefined : onSelectType(clone.id)) },
-              );
-            }}
-          >
-            {t('citypes.clone', 'Klonen')}
-          </Button>
-          {!readOnly ? (
+    <Card className="p-0">
+      <div className="space-y-3 px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-semibold text-fg [overflow-wrap:anywhere]">
+                {label(type)}
+              </h3>
+              {typeChange ? <DraftMarker change={typeChange} /> : null}
+            </div>
+            <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-fg-muted">
+              <span className="font-mono">{type.key}</span>
+              <span className="tabular-nums">v{type.version}</span>
+              <span className="tabular-nums">
+                {t('citypes.schemaVersion')} {type.schema_version}
+              </span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {!readOnly ? (
+              <Button variant="secondary" size="sm" icon={<Pencil />} onClick={onEdit}>
+                {t('citypes.editType')}
+              </Button>
+            ) : null}
             <Button
+              variant="secondary"
               size="sm"
-              variant={type.is_active ? 'danger' : 'primary'}
-              disabled={setActive.isPending}
+              icon={<Copy />}
+              disabled={cloneType.isPending}
               onClick={() => {
-                setLastAction(type.is_active ? 'deactivate' : 'activate');
-                cloneType.reset();
-                setActive.mutate({ id: type.id, active: !type.is_active });
+                setLastAction('clone');
+                setActive.reset();
+                // The clone is a type of the organization: select it so its
+                // attributes can be added right away (the way out of a system type).
+                cloneType.mutate(
+                  { id: type.id },
+                  {
+                    onSuccess: (clone) => (isDraftItem(clone) ? undefined : onSelectType(clone.id)),
+                  },
+                );
               }}
             >
-              {type.is_active
-                ? t('citypes.deactivate', 'Deaktivieren')
-                : t('citypes.activate', 'Aktivieren')}
+              {t('citypes.clone', 'Klonen')}
+            </Button>
+            {!readOnly ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={type.is_active ? <PowerOff /> : <Power />}
+                className={type.is_active ? dangerAction : undefined}
+                disabled={setActive.isPending}
+                onClick={() => {
+                  setLastAction(type.is_active ? 'deactivate' : 'activate');
+                  cloneType.reset();
+                  setActive.mutate({ id: type.id, active: !type.is_active });
+                }}
+              >
+                {type.is_active
+                  ? t('citypes.deactivate', 'Deaktivieren')
+                  : t('citypes.activate', 'Aktivieren')}
+              </Button>
+            ) : null}
+          </div>
+        </div>
+        {actionError ? (
+          <p role="alert" className="text-sm text-danger">
+            {describeActionError(lastAction, actionError, t)}
+          </p>
+        ) : null}
+        {type.description ? <p className="text-sm text-fg-muted">{type.description}</p> : null}
+        {parent ? (
+          <p className="text-sm text-fg-muted">{t('citypes.parentOf', { name: label(parent) })}</p>
+        ) : null}
+        {readOnly ? (
+          <div
+            role="note"
+            className="flex gap-3 rounded-lg border border-line bg-accent-soft p-3 text-sm text-fg"
+          >
+            <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-accent-strong" />
+            <div>
+              <p className="font-medium">{t('citypes.systemReadOnly')}</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-fg-muted">
+                <li>{t('citypes.systemReadOnlyClone')}</li>
+                <li>{t('citypes.systemReadOnlyOrgFields')}</li>
+              </ul>
+            </div>
+          </div>
+        ) : null}
+      </div>
+      {setsEnabled ? (
+        <div className="border-t border-line px-5 py-4">
+          <TypeSetAssignment type={type} sets={sets} />
+        </div>
+      ) : null}
+      <section className="border-t border-line px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold text-fg">
+            {t('citypes.attributes.title')} ({count})
+          </h4>
+          {!readOnly ? (
+            <Button variant="secondary" size="sm" icon={<Plus />} onClick={onAddAttribute}>
+              {t('citypes.addField', 'Feld hinzufügen')}
             </Button>
           ) : null}
         </div>
-      }
-    >
-      {actionError ? (
-        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
-          {describeActionError(lastAction, actionError, t)}
-        </p>
-      ) : null}
-      {typeChange ? (
-        <p className="mb-2">
-          <DraftMarker change={typeChange} />
-        </p>
-      ) : null}
-      {type.description ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{type.description}</p>
-      ) : null}
-      {parent ? (
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-          {t('citypes.parentOf', { name: label(parent) })}
-        </p>
-      ) : null}
-      {readOnly ? (
-        <div
-          role="note"
-          className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100"
-        >
-          <p>{t('citypes.systemReadOnly')}</p>
-          <ul className="mt-1 list-disc space-y-1 pl-5">
-            <li>{t('citypes.systemReadOnlyClone')}</li>
-            <li>{t('citypes.systemReadOnlyOrgFields')}</li>
-          </ul>
-        </div>
-      ) : null}
-      {setsEnabled ? <TypeSetAssignment type={type} sets={sets} /> : null}
-      <div className="mt-4 flex items-center justify-between">
-        <h4 className="text-sm font-semibold">
-          {t('citypes.attributes.title')} ({count})
-        </h4>
-        {!readOnly ? (
-          <Button size="sm" variant="secondary" onClick={onAddAttribute}>
-            {t('citypes.addField', 'Feld hinzufügen')}
-          </Button>
+        {loading ? <SkeletonList rows={3} label={t('app.loading')} className="mt-3" /> : null}
+        {failed ? (
+          <ErrorState
+            className="mt-3"
+            title={t('app.error')}
+            retryLabel={t('common.retry')}
+            onRetry={() => {
+              void applicable.refetch();
+              ancestorDefinitions.forEach((q) => void q.refetch());
+              setDefinitions.forEach((q) => void q.refetch());
+            }}
+          />
         ) : null}
-      </div>
-      {loading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
-      {failed ? (
-        <ErrorState
-          title={t('app.error')}
-          retryLabel={t('common.retry')}
-          onRetry={() => {
-            void applicable.refetch();
-            ancestorDefinitions.forEach((q) => void q.refetch());
-            setDefinitions.forEach((q) => void q.refetch());
-          }}
-        />
-      ) : null}
-      {deleteDefinition.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          {t('citypes.attributes.deleteFailed', {
-            name: deleteDefinition.variables?.key,
-            reason: describeFlagRefusal(deleteDefinition.error, t),
+        {deleteDefinition.error ? (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            {t('citypes.attributes.deleteFailed', {
+              name: deleteDefinition.variables?.key,
+              reason: describeFlagRefusal(deleteDefinition.error, t),
+            })}
+          </p>
+        ) : null}
+        {reindex.error ? (
+          <p role="alert" className="mt-3 text-sm text-danger">
+            {t('citypes.indexStatus.reindexFailed', {
+              reason: describeFlagRefusal(reindex.error, t),
+            })}
+          </p>
+        ) : null}
+        <ul className="mt-1 divide-y divide-line">
+          {own.map((d) => {
+            const editable = !readOnly && !d.is_system;
+            return (
+              <AttributeRow
+                key={d.id}
+                definition={d}
+                origin={{ kind: 'own' }}
+                draftChange={attributeChange(draftItems, d)}
+                sensitive={isSensitive(marks, d, chain)}
+                onEdit={editable ? () => onEditAttribute(d) : undefined}
+                editLabel={t('citypes.editFieldAction', { name: d.key })}
+                onDelete={editable ? () => remove(d) : undefined}
+                deleteLabel={t('citypes.deleteFieldAction', { name: d.key })}
+                onReindex={editable ? () => reindex.mutate(d.id) : undefined}
+                reindexing={reindex.isPending}
+                t={t}
+              />
+            );
           })}
-        </p>
-      ) : null}
-      {reindex.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
-          {t('citypes.indexStatus.reindexFailed', {
-            reason: describeFlagRefusal(reindex.error, t),
-          })}
-        </p>
-      ) : null}
-      <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
-        {own.map((d) => {
-          const editable = !readOnly && !d.is_system;
-          return (
+          {inherited.map(({ definition: d, from }) => (
             <AttributeRow
-              key={d.id}
+              key={`${from.id}:${d.id}`}
               definition={d}
-              origin={{ kind: 'own' }}
-              draftChange={attributeChange(draftItems, d)}
+              origin={{ kind: 'inherited', from }}
               sensitive={isSensitive(marks, d, chain)}
-              onEdit={editable ? () => onEditAttribute(d) : undefined}
-              editLabel={t('citypes.editFieldAction', { name: d.key })}
-              onDelete={editable ? () => remove(d) : undefined}
-              deleteLabel={t('citypes.deleteFieldAction', { name: d.key })}
-              onReindex={editable ? () => reindex.mutate(d.id) : undefined}
-              reindexing={reindex.isPending}
+              onOpenOrigin={() => onSelectType(from.id)}
               t={t}
             />
-          );
-        })}
-        {inherited.map(({ definition: d, from }) => (
-          <AttributeRow
-            key={`${from.id}:${d.id}`}
-            definition={d}
-            origin={{ kind: 'inherited', from }}
-            sensitive={isSensitive(marks, d, chain)}
-            onOpenOrigin={() => onSelectType(from.id)}
-            t={t}
-          />
-        ))}
-        {fromSets.map(({ definition: d, set }) => (
-          <AttributeRow
-            key={`set:${set.id}:${d.id}`}
-            definition={d}
-            origin={{ kind: 'set', set }}
-            sensitive={isSensitive(marks, d, chain)}
-            onOpenOrigin={() => onOpenSet(set.id)}
-            t={t}
-          />
-        ))}
-        {globals.map((d) => (
-          <AttributeRow
-            key={`global:${d.id}`}
-            definition={d}
-            origin={{ kind: 'global' }}
-            draftChange={attributeChange(draftItems, d)}
-            sensitive={isSensitive(marks, d, chain)}
-            t={t}
-          />
-        ))}
-        <DraftPlaceholders items={newAttributes} t={t} />
+          ))}
+          {fromSets.map(({ definition: d, set }) => (
+            <AttributeRow
+              key={`set:${set.id}:${d.id}`}
+              definition={d}
+              origin={{ kind: 'set', set }}
+              sensitive={isSensitive(marks, d, chain)}
+              onOpenOrigin={() => onOpenSet(set.id)}
+              t={t}
+            />
+          ))}
+          {globals.map((d) => (
+            <AttributeRow
+              key={`global:${d.id}`}
+              definition={d}
+              origin={{ kind: 'global' }}
+              draftChange={attributeChange(draftItems, d)}
+              sensitive={isSensitive(marks, d, chain)}
+              t={t}
+            />
+          ))}
+          <DraftPlaceholders items={newAttributes} t={t} />
+        </ul>
         {!loading && !failed && count === 0 && newAttributes.length === 0 ? (
-          <li className="py-2 text-sm text-muted">{t('citypes.noFields')}</li>
+          <p className="mt-3 text-sm text-fg-muted">{t('citypes.noFields')}</p>
         ) : null}
-      </ul>
+      </section>
     </Card>
   );
 }
@@ -1084,15 +1135,15 @@ function GlobalAttributesSection({
         title={t('citypes.globals.title')}
         actions={
           canManage ? (
-            <Button size="sm" variant="secondary" onClick={onAdd}>
+            <Button size="sm" variant="secondary" icon={<Plus />} onClick={onAdd}>
               {t('citypes.globals.add')}
             </Button>
           ) : null
         }
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.globals.hint')}</p>
+        <p className="text-sm text-fg-muted">{t('citypes.globals.hint')}</p>
         {canManage === false ? (
-          <p className="mt-1 text-xs text-muted">{t('citypes.globals.readOnly')}</p>
+          <p className="mt-1 text-xs text-fg-muted">{t('citypes.globals.readOnly')}</p>
         ) : null}
         {definitions.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
         {definitions.error ? (
@@ -1103,7 +1154,7 @@ function GlobalAttributesSection({
           />
         ) : null}
         {deleteDefinition.error ? (
-          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mt-2 text-sm text-danger">
             {t('citypes.attributes.deleteFailed', {
               name: deleteDefinition.variables?.key,
               reason: describeFlagRefusal(deleteDefinition.error, t),
@@ -1111,13 +1162,13 @@ function GlobalAttributesSection({
           </p>
         ) : null}
         {reindex.error ? (
-          <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="mt-2 text-sm text-danger">
             {t('citypes.indexStatus.reindexFailed', {
               reason: describeFlagRefusal(reindex.error, t),
             })}
           </p>
         ) : null}
-        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+        <ul className="mt-2 divide-y divide-line">
           {list.map((d) => {
             const editable = !!canManage && !d.is_system;
             return (
@@ -1139,7 +1190,7 @@ function GlobalAttributesSection({
           })}
           <DraftPlaceholders items={newGlobals} t={t} />
           {definitions.isSuccess && list.length === 0 && newGlobals.length === 0 ? (
-            <li className="py-2 text-sm text-muted">{t('citypes.globals.empty')}</li>
+            <li className="py-2 text-sm text-fg-muted">{t('citypes.globals.empty')}</li>
           ) : null}
         </ul>
       </Card>
@@ -1189,7 +1240,7 @@ function AttributeSetsSection({
     return (
       <div id="attribute-sets">
         <Card title={t('citypes.sets.title')}>
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.sets.moduleOff')}</p>
+          <p className="text-sm text-fg-muted">{t('citypes.sets.moduleOff')}</p>
         </Card>
       </div>
     );
@@ -1211,29 +1262,34 @@ function AttributeSetsSection({
       <Card
         title={t('citypes.sets.title')}
         actions={
-          <Button size="sm" variant="secondary" onClick={() => setDialog({ mode: 'create' })}>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Plus />}
+            onClick={() => setDialog({ mode: 'create' })}
+          >
             {t('citypes.sets.create')}
           </Button>
         }
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.sets.hint')}</p>
+        <p className="text-sm text-fg-muted">{t('citypes.sets.hint')}</p>
         {loading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
         {error ? (
           <ErrorState title={t('app.error')} retryLabel={t('common.retry')} onRetry={onRetry} />
         ) : null}
-        <ul className="mt-2 divide-y divide-gray-100 dark:divide-gray-800">
+        <ul className="mt-2 divide-y divide-line">
           {list.map((set) => {
             const name = setLabel(set, i18n.language);
             const deleteError =
               deleteSet.error && deleteSet.variables === set.id ? deleteSet.error : null;
             return (
-              <li key={set.id} className="space-y-1 py-2 text-sm">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0 space-y-1">
+              <li key={set.id} className="space-y-1 py-3 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+                  <div className="min-w-0 flex-1 basis-48 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{name}</span>
+                      <span className="font-medium text-fg">{name}</span>
                       {name !== set.key ? (
-                        <span className="text-xs text-muted">{set.key}</span>
+                        <span className="font-mono text-xs text-fg-muted">{set.key}</span>
                       ) : null}
                       {set.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
                       {!set.is_active ? (
@@ -1242,44 +1298,42 @@ function AttributeSetsSection({
                       <SetDraftMarker items={draftItems} id={set.id} />
                     </div>
                     {set.description ? (
-                      <p className="text-xs text-gray-600 dark:text-gray-300">{set.description}</p>
+                      <p className="text-xs text-fg-muted">{set.description}</p>
                     ) : null}
                   </div>
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      className="text-xs text-primary hover:underline"
+                  <div className="flex flex-wrap items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={linkAction}
                       aria-expanded={openSetId === set.id}
                       aria-label={t('citypes.sets.attributesAction', { name })}
                       onClick={() => onOpenSet(openSetId === set.id ? undefined : set.id)}
                     >
                       {t('citypes.sets.attributes')}
-                    </button>
+                    </Button>
                     {!set.is_system ? (
                       <>
-                        <button
-                          type="button"
-                          className="text-xs text-primary hover:underline"
-                          aria-label={t('citypes.sets.editAction', { name })}
+                        <IconButton
+                          size="sm"
+                          icon={<Pencil />}
+                          label={t('citypes.sets.editAction', { name })}
                           onClick={() => setDialog({ mode: 'edit', set })}
-                        >
-                          {t('common.edit')}
-                        </button>
-                        <button
-                          type="button"
-                          className="text-xs text-danger hover:underline"
-                          aria-label={t('citypes.sets.deleteAction', { name })}
+                        />
+                        <IconButton
+                          size="sm"
+                          icon={<Trash2 />}
+                          label={t('citypes.sets.deleteAction', { name })}
+                          className={deleteIcon}
                           disabled={deleteSet.isPending}
                           onClick={() => remove(set)}
-                        >
-                          {t('common.delete')}
-                        </button>
+                        />
                       </>
                     ) : null}
                   </div>
                 </div>
                 {deleteError ? (
-                  <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                  <p role="alert" className="text-sm text-danger">
                     {deleteError instanceof ApiError && deleteError.status === 409
                       ? t('citypes.sets.deleteAssigned', { name })
                       : t('citypes.sets.deleteFailed', {
@@ -1293,7 +1347,7 @@ function AttributeSetsSection({
           })}
           <DraftPlaceholders items={draftCreations(draftItems, 'attribute_set')} t={t} />
           {!loading && !error && list.length === 0 ? (
-            <li className="py-2 text-sm text-muted">{t('citypes.sets.empty')}</li>
+            <li className="py-2 text-sm text-fg-muted">{t('citypes.sets.empty')}</li>
           ) : null}
         </ul>
         {open ? (
@@ -1396,7 +1450,7 @@ function SetDialog({
           onChange={(e) => set({ key: e.target.value })}
           error={errors.key}
         />
-        {editing ? <p className="text-xs text-muted">{t('citypes.sets.keyImmutable')}</p> : null}
+        {editing ? <p className="text-xs text-fg-muted">{t('citypes.sets.keyImmutable')}</p> : null}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Input
             label={t('citypes.labelDe')}
@@ -1416,7 +1470,7 @@ function SetDialog({
           onChange={(e) => set({ description: e.target.value })}
           error={errors.description}
         />
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+        <label className="flex items-center gap-2 text-sm text-fg">
           <input
             type="checkbox"
             checked={draft.active}
@@ -1424,11 +1478,9 @@ function SetDialog({
           />
           {t('citypes.sets.active')}
         </label>
-        {errors.is_active ? (
-          <p className="text-sm text-red-600 dark:text-red-400">{errors.is_active}</p>
-        ) : null}
+        {errors.is_active ? <p className="text-sm text-danger">{errors.is_active}</p> : null}
         {error ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {shownAtField > 0
               ? t('citypes.typeErrors.checkFields')
               : t('citypes.sets.notSaved', { reason: describeFlagRefusal(error, t) })}
@@ -1471,15 +1523,15 @@ function DraftTypes({ types, label, t }: { types: CIType[]; label: TypeLabel; t:
       : t('metamodelDrafts.noTarget');
   };
   return (
-    <Card title={t('metamodelDrafts.newParts')} className="mt-4">
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+    <Card title={t('metamodelDrafts.newParts')} className="p-4">
+      <ul className="divide-y divide-line">
         {created.map((item) => (
           <li
             key={item.id}
             data-draft-item={item.id}
-            className="flex flex-wrap items-center gap-2 py-2 text-sm"
+            className="flex flex-wrap items-center gap-2 py-2.5 text-sm"
           >
-            <span className="font-medium">{nameOf(item)}</span>
+            <span className="font-medium text-fg">{nameOf(item)}</span>
             <DraftMarker change="created" />
           </li>
         ))}

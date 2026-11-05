@@ -11,7 +11,9 @@ import {
 import { useAssetList, useCIList, useConsumableList } from '../../api/hooks';
 import { useEntitlements, useModules } from '../../hooks/useEntitlements';
 import { CIFormModal } from '../../pages/CIFormModal';
-import { Button } from '../ui/Button';
+import { Plus, Search, X } from 'lucide-react';
+import { Button, IconButton } from '../ui/Button';
+import { fieldClasses, labelClasses } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { cn } from '../ui/utils';
 
@@ -165,35 +167,38 @@ export function PickerCombobox({
 
   return (
     <div className="relative space-y-1.5">
-      <label
-        htmlFor={inputId}
-        className="block text-sm font-medium text-gray-700 dark:text-gray-200"
-      >
+      <label htmlFor={inputId} className={labelClasses}>
         {label}
       </label>
-      <input
-        ref={inputRef}
-        id={inputId}
-        type="text"
-        role="combobox"
-        autoComplete="off"
-        aria-autocomplete="list"
-        aria-expanded={expanded}
-        aria-controls={listboxId}
-        aria-activedescendant={expanded ? optionId(activeIndex) : undefined}
-        aria-required={required || undefined}
-        value={query}
-        placeholder={t('pickers.searchPlaceholder')}
-        onChange={(event) => {
-          onQueryChange(event.target.value);
-          setOpen(true);
-          setActive(0);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onKeyDown={handleKeyDown}
-        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-      />
+      <div className="relative">
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle"
+        />
+        <input
+          ref={inputRef}
+          id={inputId}
+          type="text"
+          role="combobox"
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={expanded}
+          aria-controls={listboxId}
+          aria-activedescendant={expanded ? optionId(activeIndex) : undefined}
+          aria-required={required || undefined}
+          value={query}
+          placeholder={t('pickers.searchPlaceholder')}
+          onChange={(event) => {
+            onQueryChange(event.target.value);
+            setOpen(true);
+            setActive(0);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={handleKeyDown}
+          className={cn(fieldClasses, 'pl-9')}
+        />
+      </div>
       {/* Without options the container carries no listbox role (an empty
           listbox has no required children). */}
       <ul
@@ -201,7 +206,7 @@ export function PickerCombobox({
         role={expanded ? 'listbox' : undefined}
         aria-label={expanded ? label : undefined}
         hidden={!expanded}
-        className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-line bg-raised p-1 shadow-lg"
       >
         {expanded
           ? options.map((option, index) => (
@@ -216,22 +221,20 @@ export function PickerCombobox({
                 onClick={() => choose(index)}
                 className={cn(
                   'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm',
-                  index === activeIndex
-                    ? 'bg-primary/10 text-primary dark:bg-primary/20'
-                    : 'text-gray-700 dark:text-gray-200',
+                  index === activeIndex ? 'bg-accent-soft text-accent-strong' : 'text-fg',
                 )}
               >
-                <span className="text-xs text-gray-600 dark:text-gray-300">{option.kindLabel}</span>
+                <span className="text-xs text-fg-muted">{option.kindLabel}</span>
                 <span className="font-medium">{option.name}</span>
                 {option.code ? (
-                  <span className="text-xs text-gray-600 dark:text-gray-300">{option.code}</span>
+                  <span className="font-mono text-xs text-fg-muted">{option.code}</span>
                 ) : null}
               </li>
             ))
           : null}
       </ul>
       {status ? (
-        <p role="status" className="text-sm text-gray-600 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {status}
         </p>
       ) : null}
@@ -403,30 +406,33 @@ export function ObjectPicker({
           {value.map((item) => (
             <li
               key={`${item.kind}:${item.id}`}
-              className="flex items-center gap-2 rounded-full border border-gray-300 px-3 py-1 text-sm dark:border-gray-700"
+              className="flex items-center gap-2 rounded-lg border border-line bg-panel py-0.5 pl-3 pr-1 text-sm text-fg"
             >
-              <span className="text-xs text-gray-600 dark:text-gray-300">
-                {kindLabel(item.kind)}
-              </span>
+              <span className="text-xs text-fg-muted">{kindLabel(item.kind)}</span>
               <span className="font-medium">{item.name}</span>
               {item.code ? (
-                <span className="text-xs text-gray-600 dark:text-gray-300">{item.code}</span>
+                <span className="font-mono text-xs text-fg-muted">{item.code}</span>
               ) : null}
-              <button
-                type="button"
-                aria-label={t('pickers.remove', { name: item.name })}
+              <IconButton
+                size="sm"
+                icon={<X />}
+                label={t('pickers.remove', { name: item.name })}
                 onClick={() => onChange(value.filter((other) => other !== item))}
-                className="rounded px-1 text-gray-600 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:text-gray-300 dark:hover:text-white"
-              >
-                ✕
-              </button>
+                className="h-6 w-6"
+              />
             </li>
           ))}
         </ul>
       ) : null}
       {allowCreate && kind === 'ci' ? (
         <>
-          <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(true)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon={<Plus />}
+            onClick={() => setCreating(true)}
+          >
             {t('pickers.createCI')}
           </Button>
           <CIFormModal open={creating} onOpenChange={setCreating} onSuccess={created} />

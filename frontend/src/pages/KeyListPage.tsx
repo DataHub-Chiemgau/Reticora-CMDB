@@ -1,3 +1,4 @@
+import { KeyRound, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +12,19 @@ import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 function statusVariant(status: string): 'neutral' | 'warning' | 'success' | 'danger' {
   switch (status) {
@@ -69,68 +83,106 @@ export function KeyListPage() {
     onSuccess: invalidate,
   });
 
+  const keys = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.keys', 'Schlüssel')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('keys.summary', 'Physische und digitale Schlüssel mit Ausgabe/Rückgabe.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('keys.create', 'Schlüssel anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.keys', 'Schlüssel')}
+        description={t('keys.summary', 'Physische und digitale Schlüssel mit Ausgabe/Rückgabe.')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('keys.create', 'Schlüssel anlegen')}
+          </Button>
+        }
+      />
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {(data?.data ?? []).map((k: KeyItem) => (
-          <Card
-            key={k.id}
-            title={k.name}
-            actions={
-              <Badge variant={statusVariant(k.status)}>
-                {t(`keys.statuses.${k.status}`, k.status)}
-              </Badge>
-            }
-          >
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {k.key_type} · {k.identifier || '—'}
-            </p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{k.location || '—'}</p>
-            <div className="mt-3 flex gap-2">
-              {k.status === 'available' ? (
-                <Button size="sm" onClick={() => setIssueFor(k)}>
-                  {t('keys.issue', 'Ausgeben')}
-                </Button>
-              ) : null}
-              {k.status === 'issued' ? (
-                <Button size="sm" variant="secondary" onClick={() => returnMutation.mutate(k.id)}>
-                  {t('keys.return', 'Zurücknehmen')}
-                </Button>
-              ) : null}
-            </div>
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.keys', 'Schlüssel')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('keys.type', 'Typ')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('keys.identifier', 'Kennung')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('common.location', 'Standort')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map((k: KeyItem) => (
+                  <tr key={k.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{k.name}</td>
+                    <td className={tdClasses}>{t(`keys.${k.key_type}`, k.key_type)}</td>
+                    <td className={tdMonoClasses}>{k.identifier || '—'}</td>
+                    <td className={tdClasses}>{k.location || '—'}</td>
+                    <td className={tdClasses}>
+                      <Badge variant={statusVariant(k.status)}>
+                        {t(`keys.statuses.${k.status}`, k.status)}
+                      </Badge>
+                    </td>
+                    <td className={cn(tdClasses, 'text-right')}>
+                      {k.status === 'available' ? (
+                        <Button size="sm" variant="secondary" onClick={() => setIssueFor(k)}>
+                          {t('keys.issue', 'Ausgeben')}
+                        </Button>
+                      ) : null}
+                      {k.status === 'issued' ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => returnMutation.mutate(k.id)}
+                        >
+                          {t('keys.return', 'Zurücknehmen')}
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+                {keys.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<KeyRound />}
+                    title={t('keys.emptyTitle')}
+                    description={t('keys.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('keys.create', 'Schlüssel anlegen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.name', 'Name')}
             value={form.name}
@@ -176,7 +228,7 @@ export function KeyListPage() {
         }}
         title={t('keys.issueTitle', 'Schlüssel ausgeben')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Select
             label={t('keys.assignTo', 'Ausgeben an')}
             value={issueUser}

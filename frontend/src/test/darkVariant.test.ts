@@ -105,7 +105,7 @@ describe('dark variant of low-contrast text colours', () => {
 
   it('defines the shared classes with a dark variant', () => {
     expect(css).toMatch(/\.text-muted\s*\{\s*@apply text-gray-600 dark:text-gray-400;\s*\}/);
-    expect(css).toMatch(/\.text-danger\s*\{\s*@apply text-red-600 dark:text-red-400;\s*\}/);
+    expect(css).toMatch(/\.text-danger\s*\{\s*@apply text-red-700 dark:text-red-400;\s*\}/);
   });
 
   it('scans the pages and components', () => {

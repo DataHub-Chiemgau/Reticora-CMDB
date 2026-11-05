@@ -5,7 +5,8 @@
  * retry, never as "no notifications"; while the unread count is unknown the
  * bell shows no number (F-348).
  */
-import { useState } from 'react';
+import { Bell } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useMarkAllNotificationsRead,
@@ -13,10 +14,12 @@ import {
   useNotifications,
 } from '../hooks/useNotifications';
 import { Button } from './ui/Button';
+import { cn } from './ui/utils';
 
 export function NotificationCenter() {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
   const unread = useNotifications(true);
   const all = useNotifications(false, open);
   const markRead = useMarkNotificationRead();
@@ -27,11 +30,22 @@ export function NotificationCenter() {
   const items = all.data?.data ?? [];
   const failed = [unread, all].filter((query) => query.isError);
 
+  // A click outside closes the panel like Escape does.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (container.current && !container.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
   return (
-    <div className="relative">
-      <Button
-        variant="secondary"
-        size="sm"
+    <div className="relative" ref={container}>
+      <button
+        type="button"
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label={
@@ -39,30 +53,25 @@ export function NotificationCenter() {
             ? t('notifications.openUnknown')
             : t('notifications.open', { count: unreadCount })
         }
+        title={t('notifications.title')}
         onClick={() => setOpen((value) => !value)}
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fg/[0.06] hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent aria-expanded:bg-fg/[0.06] aria-expanded:text-fg"
       >
-        <svg
-          viewBox="0 0 24 24"
-          className="h-4 w-4"
-          aria-hidden="true"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-        </svg>
+        <Bell aria-hidden="true" className="h-4 w-4" />
         {unreadCount !== undefined && unreadCount > 0 ? (
-          <span className="ml-1 rounded-full bg-red-600 px-1.5 text-xs font-semibold text-white">
-            {unreadCount}
+          <span
+            aria-hidden="true"
+            className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold leading-none tabular-nums text-accent-fg ring-2 ring-canvas"
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         ) : null}
-      </Button>
+      </button>
       {open ? (
         <div
           role="dialog"
           aria-label={t('notifications.title')}
-          className="absolute right-0 z-40 mt-2 w-80 rounded-lg border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+          className="absolute right-0 z-40 mt-2 w-[min(92vw,24rem)] animate-menu-in rounded-xl border border-line bg-raised p-3 shadow-lg"
           onKeyDown={(event) => {
             if (event.key === 'Escape') setOpen(false);
           }}
@@ -79,7 +88,7 @@ export function NotificationCenter() {
             </Button>
           </div>
           {failed.length > 0 ? (
-            <div role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">
+            <div role="alert" className="mb-2 text-sm text-danger">
               <p>{t('notifications.loadError')}</p>
               <Button
                 variant="secondary"
@@ -94,15 +103,15 @@ export function NotificationCenter() {
           {all.isError ? null : all.isLoading ? (
             <p className="text-sm text-muted">{t('app.loading')}</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-muted">{t('notifications.empty')}</p>
+            <p className="py-4 text-center text-sm text-muted">{t('notifications.empty')}</p>
           ) : (
-            <ul className="max-h-96 space-y-2 overflow-y-auto">
+            <ul className="scroll-thin max-h-96 space-y-1 overflow-y-auto">
               {items.map((item) => {
                 const isUnread = !item.read_at;
                 return (
                   <li
                     key={item.id}
-                    className={`rounded-md p-2 text-sm ${isUnread ? 'bg-primary/10' : ''}`}
+                    className={cn('rounded-lg p-2.5 text-sm', isUnread && 'bg-accent-soft')}
                     data-unread={isUnread ? 'true' : undefined}
                   >
                     <p className="font-medium">
@@ -111,17 +120,15 @@ export function NotificationCenter() {
                       ) : null}
                       {item.subject}
                     </p>
-                    {item.body ? (
-                      <p className="text-gray-600 dark:text-gray-300">{item.body}</p>
-                    ) : null}
-                    <div className="mt-1 flex items-center justify-between text-xs text-muted">
+                    {item.body ? <p className="mt-0.5 text-fg-muted">{item.body}</p> : null}
+                    <div className="mt-1.5 flex items-center justify-between text-xs text-muted">
                       <time dateTime={item.created_at}>
                         {new Date(item.created_at).toLocaleString(i18n.language)}
                       </time>
                       {isUnread ? (
                         <button
                           type="button"
-                          className="text-primary hover:underline"
+                          className="font-medium text-accent hover:underline"
                           onClick={() => markRead.mutate(item.id)}
                         >
                           {t('notifications.markRead')}

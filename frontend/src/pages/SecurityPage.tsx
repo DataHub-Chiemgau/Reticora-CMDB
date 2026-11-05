@@ -1,3 +1,4 @@
+import { Eraser, KeyRound, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,7 +13,20 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { Input } from '../components/ui/Input';
+import { MetricCard } from '../components/ui/MetricCard';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import {
+  tableClasses,
+  tdClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { ScrollRegion } from '../components/ScrollRegion';
 import { useModules } from '../hooks/useEntitlements';
 
 /**
@@ -38,17 +52,52 @@ export function SecurityPage() {
   const erasure = useRunErasure();
   const rotateKeys = useRotateCredentialKeys();
 
+  const header = (
+    <PageHeader
+      title={t('security.title')}
+      description={t('security.subtitle')}
+      actions={
+        reportOn ? (
+          <>
+            <Select
+              aria-label={t('security.standardLabel')}
+              className="w-40"
+              value={standard}
+              onChange={(e) => setStandard(e.target.value)}
+              options={[
+                { value: 'iso27001', label: 'ISO 27001' },
+                { value: 'nis2', label: 'NIS2' },
+                { value: 'kritis', label: 'KRITIS' },
+              ]}
+            />
+            <Button variant="secondary" icon={<RefreshCw />} onClick={() => void report.refetch()}>
+              {t('security.refresh')}
+            </Button>
+          </>
+        ) : null
+      }
+    />
+  );
+
   if (modules.isLoading || (reportOn && report.isLoading)) {
-    return <SkeletonList rows={6} label={t('app.loading')} />;
+    return (
+      <div className="space-y-4">
+        {header}
+        <SkeletonList rows={6} label={t('app.loading')} />
+      </div>
+    );
   }
   if (reportOn && report.isError) {
     return (
-      <ErrorState
-        title={t('security.errorTitle')}
-        description={report.error instanceof Error ? report.error.message : undefined}
-        retryLabel={t('common.retry')}
-        onRetry={() => void report.refetch()}
-      />
+      <div className="space-y-4">
+        {header}
+        <ErrorState
+          title={t('security.errorTitle')}
+          description={report.error instanceof Error ? report.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void report.refetch()}
+        />
+      </div>
     );
   }
 
@@ -57,71 +106,42 @@ export function SecurityPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {t('security.title')}
-          </h1>
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('security.subtitle')}</p>
-        </div>
-        {reportOn ? (
-          <div className="flex items-center gap-2">
-            <select
-              aria-label={t('security.standardLabel')}
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-              value={standard}
-              onChange={(e) => setStandard(e.target.value)}
-            >
-              <option value="iso27001">ISO 27001</option>
-              <option value="nis2">NIS2</option>
-              <option value="kritis">KRITIS</option>
-            </select>
-            <Button variant="secondary" onClick={() => void report.refetch()}>
-              {t('security.refresh')}
-            </Button>
-          </div>
-        ) : null}
-      </div>
+      {header}
 
       {reportOn ? (
         <>
           <div className="grid gap-4 md:grid-cols-3">
+            <MetricCard
+              label={t('compliance.score')}
+              value={`${Math.round(data?.compliance_score.score ?? 0)}%`}
+              hint={t('compliance.scoreHint', {
+                passed: data?.compliance_score.passed ?? 0,
+                failed: data?.compliance_score.failed ?? 0,
+              })}
+            />
+
             <Card title={t('security.auditIntegrity')}>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Badge variant={data?.audit_integrity.intact ? 'success' : 'danger'}>
                   {data?.audit_integrity.intact ? t('audit.intact') : t('audit.broken')}
                 </Badge>
-                <span className="text-sm text-gray-600 dark:text-gray-300">
+                <span className="text-sm text-fg-muted">
                   {t('audit.checkedCount', { count: data?.audit_integrity.checked ?? 0 })}
                 </span>
               </div>
               {data?.audit_integrity.broken_reason ? (
-                <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-                  {data.audit_integrity.broken_reason}
-                </p>
+                <p className="mt-2 text-sm text-danger">{data.audit_integrity.broken_reason}</p>
               ) : null}
             </Card>
 
-            <Card title={t('compliance.score')}>
-              <div className="text-4xl font-bold text-primary">
-                {Math.round(data?.compliance_score.score ?? 0)}%
-              </div>
-              <p className="text-sm text-muted">
-                {t('compliance.scoreHint', {
-                  passed: data?.compliance_score.passed ?? 0,
-                  failed: data?.compliance_score.failed ?? 0,
-                })}
-              </p>
-            </Card>
-
             <Card title={t('security.bySeverity')}>
-              <ul className="space-y-1 text-sm">
+              <ul className="space-y-1.5 text-sm">
                 {(['critical', 'high', 'medium', 'low'] as const).map((sev) => (
                   <li key={sev} className="flex items-center justify-between">
                     <Badge variant={sev === 'critical' || sev === 'high' ? 'danger' : 'info'}>
                       {t(`compliance.severities.${sev}`, sev)}
                     </Badge>
-                    <span className="font-mono text-gray-700 dark:text-gray-300">
+                    <span className="font-mono text-xs tabular-nums text-fg">
                       {data?.failures_by_severity?.[sev] ?? 0}
                     </span>
                   </li>
@@ -130,39 +150,69 @@ export function SecurityPage() {
             </Card>
           </div>
 
-          <Card title={`${t('security.findings')} (${findings.length})`}>
+          <section className="space-y-3" aria-labelledby="security-findings">
+            <h2 id="security-findings" className="text-base font-semibold text-fg">
+              {t('security.findings')}{' '}
+              <span className="tabular-nums text-fg-muted">({findings.length})</span>
+            </h2>
             {findings.length ? (
-              <ul className="space-y-2">
-                {findings.map((finding) => (
-                  <li
-                    key={finding.rule_id}
-                    className="rounded-lg border border-red-200 p-3 text-sm dark:border-red-900"
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium">{finding.rule_name}</span>
-                      <Badge variant="danger">
-                        {t(`compliance.severities.${finding.severity}`, finding.severity)}
-                      </Badge>
-                      <Badge variant="info">
-                        {t(`compliance.categories.${finding.category}`, finding.category)}
-                      </Badge>
-                      <span className="text-muted">
-                        {t('security.affectedCIs', { count: finding.affected_cis.length })}
-                      </span>
-                    </div>
-                    {finding.remediation_hint ? (
-                      <p className="mt-1 text-muted">{finding.remediation_hint}</p>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+              <Card className="overflow-hidden p-0">
+                <ScrollRegion label={t('security.findings')}>
+                  <table className={tableClasses}>
+                    <thead className={theadClasses}>
+                      <tr>
+                        <th scope="col" className={thClasses}>
+                          {t('security.rule')}
+                        </th>
+                        <th scope="col" className={thClasses}>
+                          {t('compliance.severity')}
+                        </th>
+                        <th scope="col" className={thClasses}>
+                          {t('ticket.category')}
+                        </th>
+                        <th scope="col" className={`${thClasses} text-right`}>
+                          {t('compliance.ci')}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {findings.map((finding) => (
+                        <tr key={finding.rule_id} className={trClasses}>
+                          <td className={tdPrimaryClasses}>
+                            {finding.rule_name}
+                            {finding.remediation_hint ? (
+                              <p className="mt-0.5 text-sm font-normal text-fg-muted">
+                                {finding.remediation_hint}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className={tdClasses}>
+                            <Badge variant="danger">
+                              {t(`compliance.severities.${finding.severity}`, finding.severity)}
+                            </Badge>
+                          </td>
+                          <td className={tdClasses}>
+                            <Badge variant="info">
+                              {t(`compliance.categories.${finding.category}`, finding.category)}
+                            </Badge>
+                          </td>
+                          <td className={`${tdClasses} whitespace-nowrap text-right tabular-nums`}>
+                            {t('security.affectedCIs', { count: finding.affected_cis.length })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </ScrollRegion>
+              </Card>
             ) : (
               <EmptyState
+                icon={<ShieldCheck />}
                 title={t('security.noFindings')}
                 description={t('security.noFindingsHint')}
               />
             )}
-          </Card>
+          </section>
         </>
       ) : null}
 
@@ -175,34 +225,31 @@ export function SecurityPage() {
             saveRetention.mutate({ retention_days: days, mode: retentionMode });
           }}
         >
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-gray-600 dark:text-gray-300">{t('security.retentionDays')}</span>
-            <input
-              type="number"
-              min={0}
-              className="w-32 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-              placeholder={String(retention.data?.retention_days ?? 0)}
-              value={retentionDays}
-              onChange={(e) => setRetentionDays(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-gray-600 dark:text-gray-300">{t('security.retentionMode')}</span>
-            <select
-              className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-              value={retentionMode}
-              onChange={(e) => setRetentionMode(e.target.value as 'anonymize' | 'delete')}
-            >
-              <option value="anonymize">{t('security.modeAnonymize')}</option>
-              <option value="delete">{t('security.modeDelete')}</option>
-            </select>
-          </label>
+          <Input
+            label={t('security.retentionDays')}
+            type="number"
+            min={0}
+            className="w-52"
+            placeholder={String(retention.data?.retention_days ?? 0)}
+            value={retentionDays}
+            onChange={(e) => setRetentionDays(e.target.value)}
+          />
+          <Select
+            label={t('security.retentionMode')}
+            className="w-72"
+            value={retentionMode}
+            onChange={(e) => setRetentionMode(e.target.value as 'anonymize' | 'delete')}
+            options={[
+              { value: 'anonymize', label: t('security.modeAnonymize') },
+              { value: 'delete', label: t('security.modeDelete') },
+            ]}
+          />
           <Button type="submit" loading={saveRetention.isPending}>
             {t('common.save')}
           </Button>
         </form>
         {retention.data ? (
-          <p className="mt-2 text-sm text-muted">
+          <p className="mt-3 text-sm text-fg-muted">
             {t('security.retentionCurrent', {
               days: retention.data.retention_days,
               mode: t(
@@ -211,19 +258,20 @@ export function SecurityPage() {
             })}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-muted">{t('security.retentionNone')}</p>
+          <p className="mt-3 text-sm text-fg-muted">{t('security.retentionNone')}</p>
         )}
         {saveRetention.isError ? (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+          <p className="mt-2 text-sm text-danger">
             {saveRetention.error instanceof Error
               ? saveRetention.error.message
               : t('security.retentionError')}
           </p>
         ) : null}
 
-        <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-800">
+        <div className="mt-4 border-t border-line pt-4">
           <Button
             variant="secondary"
+            icon={<Eraser />}
             loading={erasure.isPending}
             onClick={() => {
               if (window.confirm(t('security.erasureConfirm'))) {
@@ -234,7 +282,7 @@ export function SecurityPage() {
             {t('security.runErasure')}
           </Button>
           {erasure.data ? (
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+            <p className="mt-2 text-sm text-fg-muted">
               {t('security.erasureResult', {
                 contacts: erasure.data.contacts_affected,
                 users: erasure.data.users_affected,
@@ -242,7 +290,7 @@ export function SecurityPage() {
             </p>
           ) : null}
           {erasure.isError ? (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            <p className="mt-2 text-sm text-danger">
               {erasure.error instanceof Error ? erasure.error.message : t('security.erasureError')}
             </p>
           ) : null}
@@ -250,10 +298,11 @@ export function SecurityPage() {
       </Card>
 
       <Card title={t('security.keyRotationTitle')}>
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('security.keyRotationHint')}</p>
+        <p className="text-sm text-fg-muted">{t('security.keyRotationHint')}</p>
         <div className="mt-3">
           <Button
             variant="secondary"
+            icon={<KeyRound />}
             loading={rotateKeys.isPending}
             onClick={() => {
               if (window.confirm(t('security.keyRotationConfirm'))) {
@@ -264,7 +313,7 @@ export function SecurityPage() {
             {t('security.rotateKeys')}
           </Button>
           {rotateKeys.data ? (
-            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+            <p className="mt-2 text-sm text-fg-muted">
               {t('security.keyRotationResult', {
                 version: rotateKeys.data.key_version,
                 rotated: rotateKeys.data.rotated,
@@ -272,7 +321,7 @@ export function SecurityPage() {
             </p>
           ) : null}
           {rotateKeys.isError ? (
-            <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            <p className="mt-2 text-sm text-danger">
               {rotateKeys.error instanceof Error
                 ? rotateKeys.error.message
                 : t('security.keyRotationError')}

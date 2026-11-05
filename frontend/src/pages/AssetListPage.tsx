@@ -1,3 +1,4 @@
+import { Package, Plus, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Asset } from '../api/client';
@@ -6,11 +7,26 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useToastStore } from '../stores/toast';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 // Stored asset values (English keys); the labels come from the catalog.
 export const ASSET_STATUSES = [
@@ -50,17 +66,16 @@ function statusVariant(status: string) {
 
 export function AssetListPage() {
   const { t } = useTranslation();
-  const statusOptions = [
-    { value: '', label: t('common.all', 'Alle') },
-    ...ASSET_STATUSES.map((value) => ({ value, label: t(`asset.statuses.${value}`, value) })),
-  ];
-  const categoryOptions = [
-    { value: '', label: t('common.all', 'Alle') },
-    ...ASSET_CATEGORIES.map((value) => ({
-      value,
-      label: t(`asset.categories.${value}`, value),
-    })),
-  ];
+  const statusValues = ASSET_STATUSES.map((value) => ({
+    value,
+    label: t(`asset.statuses.${value}`, value),
+  }));
+  const categoryValues = ASSET_CATEGORIES.map((value) => ({
+    value,
+    label: t(`asset.categories.${value}`, value),
+  }));
+  const statusOptions = [{ value: '', label: t('common.allStatuses') }, ...statusValues];
+  const categoryOptions = [{ value: '', label: t('common.allCategories') }, ...categoryValues];
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [category, setCategory] = useState('');
@@ -71,7 +86,7 @@ export function AssetListPage() {
   const pushToast = useToastStore((state) => state.push);
   const { scheduleDelete } = useUndoableDelete();
 
-  const { data, isLoading } = useAssetList({ search, status, category });
+  const { data, isLoading, error, refetch } = useAssetList({ search, status, category });
   const createMutation = useCreateAsset();
   const deleteMutation = useDeleteAsset();
   const updateMutation = useUpdateAsset();
@@ -152,46 +167,72 @@ export function AssetListPage() {
     );
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('asset.title', 'Inventar')}
-        </h1>
-        <Button onClick={() => setShowCreate(true)}>{t('common.create', 'Erstellen')}</Button>
-      </div>
+  const filtered = Boolean(search || status || category);
 
-      <div className="flex gap-4 flex-wrap">
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title={t('asset.title', 'Inventar')}
+        description={t('asset.summary')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('common.create', 'Erstellen')}
+          </Button>
+        }
+      />
+
+      <Toolbar>
         <Input
-          label={t('common.search', 'Suche')}
+          type="text"
+          icon={<Search />}
+          placeholder={t('common.search', 'Suche')}
+          aria-label={t('common.search', 'Suche')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="w-full sm:w-64"
         />
         <Select
-          label={t('ci.status', 'Status')}
+          aria-label={t('ci.status', 'Status')}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           options={statusOptions}
+          className="w-40 sm:w-44"
         />
         <Select
-          label={t('asset.category', 'Kategorie')}
+          aria-label={t('asset.category', 'Kategorie')}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
           options={categoryOptions}
+          className="w-40 sm:w-44"
         />
-      </div>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
-      {isLoading ? (
-        <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
-      ) : (
-        <Card title={`${t('asset.title', 'Inventar')} (${data?.total ?? 0})`}>
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+
+      {data ? (
+        <Card className="p-0 overflow-hidden">
           {selectedIds.length > 0 ? (
             <div
-              className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-primary/5 px-4 py-2 dark:border-gray-800"
+              className="flex flex-wrap items-center gap-3 border-b border-line bg-accent-soft px-4 py-2.5"
               role="toolbar"
               aria-label={t('asset.bulk.toolbarLabel')}
             >
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+              <span className="text-sm font-medium text-fg">
                 {t('asset.bulk.selected', { count: selectedIds.length })}
               </span>
               <Select
@@ -199,7 +240,7 @@ export function AssetListPage() {
                 onChange={(event) => setBulkStatus(event.target.value)}
                 aria-label={t('asset.bulk.setStatus')}
                 className="max-w-xs"
-                options={statusOptions}
+                options={[{ value: '', label: t('asset.bulk.setStatus') }, ...statusValues]}
               />
               <Button
                 size="sm"
@@ -215,80 +256,79 @@ export function AssetListPage() {
             </div>
           ) : null}
           <ScrollRegion label={t('asset.title', 'Inventar')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th scope="col" className="w-10 pb-2">
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={cn(thClasses, 'w-10')}>
                     <input
                       type="checkbox"
                       checked={allVisibleSelected}
                       onChange={toggleSelectAll}
                       aria-label={t('asset.bulk.selectAll')}
-                      className="h-4 w-4 rounded border-gray-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                     />
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={thClasses}>
                     {t('asset.assetTag', 'Asset-Tag')}
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={thClasses}>
                     {t('ci.name', 'Name')}
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={thClasses}>
                     {t('asset.category', 'Kategorie')}
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={thClasses}>
                     {t('ci.status', 'Status')}
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={thClasses}>
                     {t('asset.location', 'Standort')}
                   </th>
-                  <th scope="col" className="pb-2">
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
                     {t('common.actions', 'Aktionen')}
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              <tbody>
                 {assetList.map((asset) => (
-                  <tr key={asset.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2">
+                  <tr key={asset.id} className={trClasses}>
+                    <td className={tdClasses}>
                       <input
                         type="checkbox"
                         checked={selectedIds.includes(asset.id)}
                         onChange={() => toggleSelect(asset.id)}
                         aria-label={t('asset.bulk.selectRow', { name: asset.name })}
-                        className="h-4 w-4 rounded border-gray-300 accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                       />
                     </td>
-                    <td className="py-2 font-mono">{asset.asset_tag}</td>
-                    <td className="py-2">{asset.name}</td>
-                    <td className="py-2">
+                    <td className={tdMonoClasses}>{asset.asset_tag || '—'}</td>
+                    <td className={tdPrimaryClasses}>{asset.name}</td>
+                    <td className={tdClasses}>
                       {t(`asset.categories.${asset.category}`, asset.category)}
                     </td>
-                    <td className="py-2">
+                    <td className={tdClasses}>
                       <Badge variant={statusVariant(asset.status)}>
                         {t(`asset.statuses.${asset.status}`, asset.status)}
                       </Badge>
                     </td>
-                    <td className="py-2">{asset.location || '—'}</td>
-                    <td className="py-2">
+                    <td className={tdClasses}>{asset.location || '—'}</td>
+                    <td className={cn(tdClasses, 'text-right')}>
                       <Button variant="ghost" size="sm" onClick={() => deleteAssetWithUndo(asset)}>
                         {t('common.delete', 'Löschen')}
                       </Button>
                     </td>
                   </tr>
                 ))}
-                {assetList.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
-                      {t('common.noData', 'Keine Daten')}
-                    </td>
-                  </tr>
-                )}
+                {assetList.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={7}
+                    icon={<Package />}
+                    title={filtered ? t('common.noResults') : t('asset.emptyTitle')}
+                    description={filtered ? t('common.noResultsHint') : t('asset.emptyHint')}
+                  />
+                ) : null}
               </tbody>
             </table>
           </ScrollRegion>
         </Card>
-      )}
+      ) : null}
 
       <Modal
         open={showCreate}

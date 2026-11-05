@@ -31,7 +31,7 @@
     "security": "Security",
     "map": "Map",
     "roomplan": "Room plan",
-    "consumables": "Inventory stock",
+    "consumables": "Consumables",
     "orders": "Orders",
     "maintenance": "Maintenance",
     "disposal": "Disposal",
@@ -40,7 +40,7 @@
     "desks": "Desks",
     "agents": "Agents",
     "findings": "Findings",
-    "inventory": "Inventory",
+    "inventory": "Stock",
     "saved-views": "Saved views",
     "locations": "Locations",
     "ci-types": "CI Types",
@@ -70,7 +70,10 @@
     "name": "Name",
     "title": "Title",
     "location": "Location",
-    "all": "All"
+    "all": "All",
+    "noResultsHint": "Adjust the search or filters.",
+    "allStatuses": "All statuses",
+    "allCategories": "All categories"
   },
   "commandPalette": {
     "title": "Command Menu",
@@ -110,7 +113,11 @@
       "phone": "Phone",
       "role": "Role",
       "back": "Back to search"
-    }
+    },
+    "openPage": "Open {{page}}",
+    "hintNavigate": "navigate",
+    "hintOpen": "open",
+    "hintClose": "close"
   },
   "dashboard": {
     "summary": "Quick overview of your configuration data.",
@@ -151,7 +158,12 @@
       "openTickets": "Open tickets",
       "criticalTickets": "Critical tickets"
     },
-    "customize": "Show/hide widgets"
+    "customize": "Show/hide widgets",
+    "sections": {
+      "infrastructure": "Infrastructure",
+      "attention": "Needs attention",
+      "operations": "Operations and stock"
+    }
   },
   "toast": {
     "undo": "Undo",
@@ -301,7 +313,8 @@
       "maintenance": "Maintenance",
       "decommissioned": "Decommissioned",
       "unknown": "Unknown"
-    }
+    },
+    "timeline": "Timeline"
   },
   "form": {
     "createCI": "Create CI",
@@ -471,6 +484,10 @@
         "forbidden": "You lack the permission (discovery:manage).",
         "notFound": "The scope no longer exists.",
         "reason": "{{detail}}"
+      },
+      "columns": {
+        "schedule": "Schedule",
+        "status": "Status"
       }
     },
     "suggestions": {
@@ -480,7 +497,9 @@
       "accept": "Add as scope",
       "dismiss": "Dismiss",
       "failed": "The suggestion could not be resolved: {{reason}}"
-    }
+    },
+    "empty": "No collector connected yet",
+    "emptyHint": "Connect a collector in the customer network. Its subnets appear here as suggestions for you to confirm."
   },
   "webhook": {
     "title": "Webhooks",
@@ -527,7 +546,11 @@
       "delivered": "delivered",
       "failed": "failed",
       "dead": "dead"
-    }
+    },
+    "createHint": "Choose the events that call your URL; requests are signed with the secret.",
+    "subscriptionsHint": "Each subscription sends the chosen events to its URL.",
+    "deliveriesHint": "The latest delivery attempts for this subscription.",
+    "deadLettersHint": "Deliveries that failed permanently after all attempts."
   },
   "accessibility": {
     "closeModal": "Close modal",
@@ -586,7 +609,10 @@
       "cloud_resource": "Cloud resource",
       "accessory": "Accessory",
       "other": "Other"
-    }
+    },
+    "summary": "Manage assets with their category, status and location.",
+    "emptyTitle": "No assets yet",
+    "emptyHint": "Create the first asset to track stock, status and location."
   },
   "assignment": {
     "title": "Assignments",
@@ -621,7 +647,10 @@
       "returned": "Returned",
       "transferred": "Transferred",
       "overdue": "Overdue"
-    }
+    },
+    "summary": "Track the assignment, return and transfer of assets.",
+    "emptyTitle": "No assignments yet",
+    "emptyHint": "Assign an asset to a person or a team to track it here."
   },
   "pickers": {
     "kind": "Kind",
@@ -667,7 +696,10 @@
       "certificate": "Certificate",
       "policy": "Policy",
       "other": "Other"
-    }
+    },
+    "summary": "Manage contracts, invoices and manuals as documents.",
+    "emptyTitle": "No documents yet",
+    "emptyHint": "Create a document to collect contracts, invoices and manuals."
   },
   "stocktake": {
     "title": "Stocktake",
@@ -690,7 +722,10 @@
       "site": "Site",
       "room": "Room",
       "rack": "Rack"
-    }
+    },
+    "summary": "Start stocktakes and follow progress and missing items.",
+    "emptyTitle": "No stocktakes yet",
+    "emptyHint": "Start a stocktake to compare stock against the expected count."
   },
   "ticket": {
     "title": "Tickets",
@@ -714,7 +749,14 @@
       "problem": "Problem",
       "change": "Change",
       "task": "Task"
-    }
+    },
+    "priorities": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "critical": "Critical"
+    },
+    "allPriorities": "All priorities"
   },
   "userMgmt": {
     "title": "Users & Teams",
@@ -752,7 +794,12 @@
       "forbidden": "You are not allowed to change {{name}}.",
       "unavailable": "{{name}} was not changed: the user's sessions could not be revoked. Try again later.",
       "failed": "The action for {{name}} failed (HTTP {{status}})."
-    }
+    },
+    "subtitle": "Manage who can sign in, which teams they belong to and what they are allowed to do.",
+    "usersHint": "Every account in this organization; deactivating blocks sign-in and keeps the records.",
+    "teamsHint": "Teams group users so that work can be assigned to them together.",
+    "rolesHint": "Roles bundle permissions that are granted to users within a scope.",
+    "loadError": "This list could not be loaded"
   },
   "invitations": {
     "title": "Invitations",
@@ -799,7 +846,9 @@
       "mailFailed": "The invitation email could not be sent; nothing was saved or changed. Please try again later or contact your operations team.",
       "rejected": "The server rejected the invitation: {{detail}}",
       "failed": "The action failed: {{detail}}"
-    }
+    },
+    "inviteHint": "Send a link that lets a person join the organization with a role and a scope.",
+    "listHint": "Open invitations can be renewed or revoked until they are accepted."
   },
   "invitationAccept": {
     "title": "Accept invitation",
@@ -909,7 +958,9 @@
       "subnet": "Subnet (projected from IPAM)",
       "vlan": "VLAN (projected from IPAM)",
       "spof": "Single point of failure of a service"
-    }
+    },
+    "filters": "Filters",
+    "counts": "{{nodes}} nodes, {{edges}} relationships"
   },
   "rack": {
     "title": "Racks",
@@ -941,7 +992,8 @@
     "action": "Action",
     "effective": "Effective",
     "granted": "Granted",
-    "notGranted": "Not granted"
+    "notGranted": "Not granted",
+    "catalogueHint": "Every permission of the system and whether your account holds it."
   },
   "sla": {
     "title": "SLA Policies",
@@ -958,7 +1010,11 @@
     "breaches": "Breaches",
     "breached": "Breached",
     "noBreaches": "No breaches",
-    "noBreachesHint": "No tickets are currently outside their SLA targets."
+    "noBreachesHint": "No tickets are currently outside their SLA targets.",
+    "responseDue": "Response due",
+    "resolutionDue": "Resolution due",
+    "ticket": "Ticket",
+    "status": "Status"
   },
   "forms": {
     "title": "Forms",
@@ -993,7 +1049,9 @@
       "succeeded": "Succeeded",
       "failed": "Failed",
       "cancelled": "Cancelled"
-    }
+    },
+    "trigger": "Trigger",
+    "steps": "Steps"
   },
   "compliance": {
     "title": "Compliance",
@@ -1023,7 +1081,10 @@
     "categories": {
       "security": "Security",
       "hygiene": "Data hygiene"
-    }
+    },
+    "severity": "Severity",
+    "ci": "CI",
+    "details": "Details"
   },
   "iga": {
     "loading": "Loading identity governance",
@@ -1085,7 +1146,11 @@
       "medium": "Medium",
       "high": "High",
       "critical": "Critical"
-    }
+    },
+    "action": "Action",
+    "entitlement": "Entitlement",
+    "status": "Status",
+    "due": "Due"
   },
   "assistant": {
     "title": "AI assistant",
@@ -1100,7 +1165,10 @@
     "placeholder": "Which critical tickets affect routers?",
     "ask": "Ask",
     "answer": "Answer",
-    "citations": "Sources"
+    "citations": "Sources",
+    "newConversation": "New conversation",
+    "thinking": "Preparing an answer…",
+    "sendHint": "Enter sends, Shift+Enter adds a line."
   },
   "export": {
     "omittedFields": "{{count}} fields not included",
@@ -1124,7 +1192,9 @@
     "status_running": "Running",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_expired": "Expired"
+    "status_expired": "Expired",
+    "startHint": "Choose a format; the file is ready to download once the job completes.",
+    "jobsHint": "Finished exports stay available for 24 hours."
   },
   "monitoring": {
     "title": "Monitoring",
@@ -1210,7 +1280,8 @@
     "keyRotationConfirm": "Rotate the encryption keys now? All credentials stay decryptable afterwards.",
     "rotateKeys": "Rotate keys now",
     "keyRotationResult": "Rotation complete: key version {{version}}, {{rotated}} credentials re-encrypted.",
-    "keyRotationError": "Key rotation failed"
+    "keyRotationError": "Key rotation failed",
+    "rule": "Rule"
   },
   "map": {
     "summary": "Sites on the map. Markers open the site.",
@@ -1219,7 +1290,9 @@
     "worldAria": "World map with site markers",
     "hint": "Select a marker to see details.",
     "openSite": "Show site CIs",
-    "noCoords": "Without coordinates"
+    "noCoords": "Without coordinates",
+    "empty": "No sites yet",
+    "emptyHint": "Add a site with coordinates to see it on the map."
   },
   "roomplan": {
     "summary": "Position objects on the floor plan via drag & drop, arrow keys or coordinates.",
@@ -1241,7 +1314,8 @@
     "conflict": "The room plan was changed elsewhere in the meantime and has been reloaded. Please check the position and move the object again.",
     "rangeError": "Position not saved: the coordinates must lie between 0 and 100 %.",
     "saveError": "Position not saved: {{message}}",
-    "staleObject": "Position not saved: an object is no longer assigned to this room. The room plan was reloaded; please move the object again."
+    "staleObject": "Position not saved: an object is no longer assigned to this room. The room plan was reloaded; please move the object again.",
+    "count": "{{count}} objects"
   },
   "consumables": {
     "summary": "Consumable stock with level and minimum level.",
@@ -1249,12 +1323,15 @@
     "lowStockOnly": "Only below minimum level",
     "low": "low",
     "ok": "OK",
-    "minLevel": "Minimum level"
+    "minLevel": "Minimum level",
+    "stock": "Stock",
+    "emptyTitle": "No items yet",
+    "emptyHint": "Create an item to monitor its stock and minimum level."
   },
   "orders": {
     "summary": "Internal orders with approval workflow.",
     "create": "Create order",
-    "positions": "items",
+    "positions": "Items",
     "submit": "Submit",
     "approve": "Approve",
     "reject": "Reject",
@@ -1269,7 +1346,10 @@
       "received": "Received",
       "closed": "Closed",
       "cancelled": "Cancelled"
-    }
+    },
+    "number": "Number",
+    "emptyTitle": "No orders yet",
+    "emptyHint": "Create an order to follow procurement and approval."
   },
   "maintenance": {
     "summary": "Schedule maintenance and notify affected customers.",
@@ -1308,7 +1388,11 @@
       "pending": "pending",
       "sent": "sent",
       "failed": "failed"
-    }
+    },
+    "period": "Period",
+    "affected": "Affected CIs",
+    "emptyTitle": "No maintenance planned",
+    "emptyHint": "Plan a maintenance window to inform affected customers in time."
   },
   "disposal": {
     "summary": "Revision-safe disposal documentation (append-only, BSI/ISO).",
@@ -1318,7 +1402,9 @@
     "selectAsset": "Select asset",
     "certificate": "Certificate reference",
     "dataCarrier": "Data carrier destruction",
-    "performedAt": "Performed"
+    "performedAt": "Performed",
+    "emptyTitle": "No disposals documented yet",
+    "emptyHint": "Document the first disposal to keep an audit-proof record."
   },
   "keys": {
     "summary": "Physical and digital keys with issue/return.",
@@ -1337,7 +1423,9 @@
       "issued": "Issued",
       "lost": "Lost",
       "retired": "Retired"
-    }
+    },
+    "emptyTitle": "No keys yet",
+    "emptyHint": "Create a key to track its issue and return."
   },
   "trainings": {
     "summary": "Courses with assignment, due date and proof.",
@@ -1346,7 +1434,9 @@
     "validity": "Validity",
     "months": "months",
     "validityMonths": "Validity (months)",
-    "general": "General"
+    "general": "General",
+    "emptyTitle": "No courses yet",
+    "emptyHint": "Create a course to track due dates and proof."
   },
   "desks": {
     "summary": "Book shared desks.",
@@ -1359,7 +1449,9 @@
       "available": "Available",
       "occupied": "Occupied",
       "maintenance": "Under maintenance"
-    }
+    },
+    "emptyTitle": "No desks yet",
+    "emptyHint": "Create a desk so it can be booked."
   },
   "agents": {
     "summary": "Registered endpoint agents with policy and kill-switch.",
@@ -1375,7 +1467,10 @@
       "online": "Online",
       "offline": "Offline",
       "disabled": "Disabled"
-    }
+    },
+    "emptyTitle": "No agents registered",
+    "emptyHint": "Endpoint agents appear here once they enroll with this organization.",
+    "platform": "Platform"
   },
   "findings": {
     "summary": "Patch posture and vulnerabilities per CI.",
@@ -1392,7 +1487,12 @@
       "medium": "Medium",
       "high": "High",
       "critical": "Critical"
-    }
+    },
+    "package": "Package",
+    "fixedVersion": "Fixed in",
+    "reference": "Reference",
+    "emptyTitle": "No findings",
+    "emptyHint": "There are no security findings for this status filter."
   },
   "citypes": {
     "create": "Create type",
@@ -1616,6 +1716,14 @@
         "choosePlaceholder": "Choose a set",
         "add": "Assign"
       }
+    },
+    "editor": {
+      "groups": {
+        "naming": "Naming",
+        "data": "Data",
+        "constraints": "Constraints",
+        "applicability": "Applicability"
+      }
     }
   },
   "inventory": {
@@ -1643,7 +1751,18 @@
     "available": "Available",
     "subtitle": "Movement ledger, quantity items, reservations and availability.",
     "objectKind": "Object kind",
-    "kindAsset": "Asset (serialized)"
+    "kindAsset": "Asset (serialized)",
+    "occurredAt": "Time",
+    "project": "Project",
+    "expiresAt": "Valid until",
+    "emptyMovementsTitle": "No movements yet",
+    "emptyMovementsHint": "Record a movement to trace stock coming in and going out.",
+    "emptyItemsTitle": "No quantity items yet",
+    "emptyItemsHint": "Quantity items appear here once they are created.",
+    "emptyReservationsTitle": "No active reservations",
+    "emptyReservationsHint": "Reserved assets and items appear here until they are released.",
+    "emptyAvailabilityTitle": "No availability yet",
+    "emptyAvailabilityHint": "Once stock is booked, this overview shows what is available, reserved and assigned."
   },
   "impact": {
     "affectedList": "Affected:",
@@ -1694,7 +1813,7 @@
     "name": "Name",
     "type": "Type",
     "subtitle": "Unified hierarchy: Site → Building → Room → Rack and Site → Warehouse → Zone → Shelf → Bin.",
-    "addChild": "child",
+    "addChild": "Add child",
     "createRoot": "Create site",
     "empty": "No locations yet. Create a site first.",
     "nodeNotFound": "The linked node does not exist or is not visible to you.",
@@ -1863,7 +1982,8 @@
     "moreClients": "Load more clients",
     "moreSites": "Load more sites",
     "outsideCI": "This CI lies outside the selected scope ({{scope}}).",
-    "switchToObject": "Switch scope"
+    "switchToObject": "Switch scope",
+    "reset": "Reset scope"
   },
   "reviews": {
     "title": "Review inbox",
@@ -1908,7 +2028,8 @@
       "action": "Action",
       "choose": "Choose action",
       "run": "Run",
-      "result": "{{resolved}} resolved, {{failed}} failed."
+      "result": "{{resolved}} resolved, {{failed}} failed.",
+      "clear": "Clear selection"
     },
     "actions": {
       "merge": "Merge",
@@ -1940,7 +2061,11 @@
     "openCI": "Open CI",
     "loadError": "The review items could not be loaded",
     "empty": "No review items",
-    "emptyHint": "Reconciliation has nothing to decide."
+    "emptyHint": "Reconciliation has nothing to decide.",
+    "object": "Object",
+    "age": "Age",
+    "selectTitle": "Select an item",
+    "selectHint": "Compare the observation with its CI and decide here."
   },
   "notifications": {
     "title": "Notifications",
@@ -2013,7 +2138,8 @@
       "template": {
         "migrate": "Template migration"
       }
-    }
+    },
+    "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts."
   },
   "provenance": {
     "show": "Provenance of {{field}}",
@@ -2107,7 +2233,8 @@
       "title": "Done",
       "text": "{{count}} CIs are already in your CMDB.",
       "open": "Open the CMDB"
-    }
+    },
+    "stepDone": "Done:"
   },
   "language": {
     "label": "Language",
@@ -2253,7 +2380,10 @@
       "openCI": "Open CI {{id}}",
       "violationCount": "{{shown}} of {{total}} violations",
       "truncated": "At most 10000 violations are stored.",
-      "more": "Load more"
+      "more": "Load more",
+      "count": "Drafts: {{count}}",
+      "createdAt": "Created {{at}}",
+      "versionLabel": "Version {{version}}"
     },
     "problem": {
       "detail": "Error {{status}}: {{detail}}",
@@ -2517,6 +2647,29 @@
         "not-imported": "Not imported",
         "field-permissions-skipped": "Field permissions skipped"
       }
-    }
+    },
+    "count": "Templates: {{count}}",
+    "currentVersion": "Current version"
+  },
+  "navGroup": {
+    "infrastructure": "Infrastructure",
+    "capture": "Data capture",
+    "operations": "Operations",
+    "assets": "Assets",
+    "stock": "Stock & procurement",
+    "workplace": "Workplace",
+    "governance": "Governance",
+    "admin": "Administration"
+  },
+  "shell": {
+    "search": "Search pages, objects and commands …",
+    "searchShort": "Open search and commands",
+    "openNavigation": "Open navigation",
+    "closeNavigation": "Close navigation",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar",
+    "account": "Account",
+    "accountMenu": "Account menu of {{name}}",
+    "openCount": "{{count}} open"
   }
 }

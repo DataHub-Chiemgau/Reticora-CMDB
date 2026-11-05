@@ -1,3 +1,4 @@
+import { Check, GripVertical, LayoutGrid } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, FormEvent, KeyboardEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -5,12 +6,16 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { ApiError, ciApi, roomApi, buildingApi } from '../api/client';
 import type { Room, CI, Versioned } from '../api/client';
+import { Panel } from '../components/spatial/Panel';
 import { Badge } from '../components/ui/Badge';
-import { Card } from '../components/ui/Card';
+import { IconButton } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { Skeleton } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
 
 export interface PlanPosition {
   x: number;
@@ -247,61 +252,66 @@ export function RoomPlanPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {t('nav.roomplan', 'Raumplan')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('roomplan.summary')}</p>
-      </div>
+    <div className="space-y-4">
+      <PageHeader title={t('nav.roomplan', 'Raumplan')} description={t('roomplan.summary')} />
 
-      <Card>
-        <div className="flex flex-wrap gap-3">
-          <Select
-            value={buildingId}
-            onChange={(e) => {
-              setBuildingId(e.target.value);
-              setRoomId('');
-            }}
-            aria-label={t('roomplan.building', 'Gebäude')}
-            className="max-w-xs"
-            options={[
-              { value: '', label: t('roomplan.selectBuilding', 'Gebäude wählen') },
-              ...(buildings.data?.data ?? []).map((b) => ({ value: b.id, label: b.name })),
-            ]}
-          />
-          <Select
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            aria-label={t('roomplan.room', 'Raum')}
-            className="max-w-xs"
-            disabled={!buildingId}
-            options={[
-              { value: '', label: t('roomplan.selectRoom', 'Raum wählen') },
-              ...(rooms.data?.data ?? []).map((r: Room) => ({ value: r.id, label: r.name })),
-            ]}
-          />
-        </div>
-      </Card>
+      <Toolbar className="grid grid-cols-2 sm:flex sm:flex-wrap">
+        <Select
+          value={buildingId}
+          onChange={(e) => {
+            setBuildingId(e.target.value);
+            setRoomId('');
+          }}
+          aria-label={t('roomplan.building', 'Gebäude')}
+          className="w-full pr-8 sm:w-52"
+          options={[
+            { value: '', label: t('roomplan.selectBuilding', 'Gebäude wählen') },
+            ...(buildings.data?.data ?? []).map((b) => ({ value: b.id, label: b.name })),
+          ]}
+        />
+        <Select
+          value={roomId}
+          onChange={(e) => setRoomId(e.target.value)}
+          aria-label={t('roomplan.room', 'Raum')}
+          className="w-full pr-8 sm:w-52"
+          disabled={!buildingId}
+          options={[
+            { value: '', label: t('roomplan.selectRoom', 'Raum wählen') },
+            ...(rooms.data?.data ?? []).map((r: Room) => ({ value: r.id, label: r.name })),
+          ]}
+        />
+        {roomId && !room.isLoading && !room.error ? (
+          <ToolbarEnd className="col-span-2 sm:col-span-1">
+            <span className="text-sm tabular-nums text-fg-muted">
+              {t('roomplan.count', { count: roomCIs.length })}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
       {!roomId ? (
         <EmptyState
+          icon={<LayoutGrid />}
           title={t('roomplan.empty', 'Kein Raum gewählt')}
           description={t('roomplan.emptyHint', 'Wählen Sie ein Gebäude und einen Raum.')}
         />
       ) : room.isLoading ? (
         <Skeleton className="h-96 w-full" />
       ) : room.error ? (
-        <ErrorState title={t('app.error')} />
+        <ErrorState
+          title={t('app.error')}
+          retryLabel={t('common.retry')}
+          onRetry={() => void room.refetch()}
+        />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-          <Card className="lg:col-span-3">
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="min-w-0 rounded-xl border border-line bg-panel p-3">
             <div
               ref={planRef}
               onDragOver={(e) => e.preventDefault()}
               onDrop={onDrop}
               data-testid="room-plan"
-              className="relative h-[28rem] w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 bg-[linear-gradient(to_right,rgba(0,0,0,0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,0,0,0.05)_1px,transparent_1px)] bg-[size:24px_24px] dark:border-gray-700 dark:bg-gray-900"
+              className="relative h-[28rem] w-full lg:h-[38rem] overflow-hidden rounded-lg border border-line bg-canvas bg-[linear-gradient(to_right,hsl(var(--line))_1px,transparent_1px),linear-gradient(to_bottom,hsl(var(--line))_1px,transparent_1px)] bg-[size:24px_24px]"
               style={
                 floorplanURL
                   ? {
@@ -331,49 +341,47 @@ export function RoomPlanPage() {
                     onDragStart={(e) => e.dataTransfer.setData('text/ci-id', ci.id)}
                     onDoubleClick={() => navigate(`/cmdb/${ci.id}`)}
                     title={`${ci.name} (${t('roomplan.dragHint')})`}
-                    className="absolute -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-lg border border-primary/40 bg-white/90 px-2 py-1 text-xs text-gray-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary active:cursor-grabbing dark:bg-gray-800 dark:text-gray-100"
+                    className="absolute flex -translate-x-1/2 -translate-y-1/2 cursor-grab items-center gap-1.5 whitespace-nowrap rounded-lg border border-accent/50 bg-raised px-2 py-1 text-xs font-medium text-fg shadow-sm hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:cursor-grabbing"
                     style={{ left: `${pos.x * 100}%`, top: `${pos.y * 100}%` }}
                   >
+                    <GripVertical aria-hidden="true" className="h-3 w-3 text-fg-subtle" />
                     {ci.name}
                   </div>
                 );
               })}
               {roomCIs.length === 0 ? (
-                <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-600 dark:text-gray-300">
+                <p className="absolute inset-0 flex items-center justify-center text-sm text-fg-muted">
                   {t('roomplan.noCIs', 'Keine CIs in diesem Raum zugeordnet.')}
                 </p>
               ) : null}
             </div>
-            <p
-              id="roomplan-keyboard-hint"
-              className="mt-2 text-xs text-gray-600 dark:text-gray-300"
-            >
+            <p id="roomplan-keyboard-hint" className="mt-2 text-xs text-fg-muted">
               {t('roomplan.keyboardHint')}
             </p>
-            {saving ? <p className="mt-2 text-xs text-muted">{t('app.loading')}</p> : null}
+            {saving ? <p className="mt-2 text-xs text-fg-muted">{t('app.loading')}</p> : null}
             {conflict ? (
               <p role="alert" className="mt-2 text-sm text-amber-800 dark:text-amber-300">
                 {t('roomplan.conflict')}
               </p>
             ) : null}
             {saveError ? (
-              <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
+              <p role="alert" className="mt-2 text-sm text-danger">
                 {saveError}
               </p>
             ) : null}
-          </Card>
+          </div>
 
-          <Card title={t('roomplan.objects')}>
-            <ul className="space-y-3 text-sm">
+          <Panel title={t('roomplan.objects')} padded={false}>
+            <ul className="max-h-[28rem] divide-y lg:max-h-[38rem] divide-line overflow-y-auto text-sm">
               {roomCIs.map((ci) => {
                 const pos = ciPosition(ci);
                 return (
-                  <li key={ci.id} className="space-y-1.5">
+                  <li key={ci.id} className="space-y-2 px-4 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <span
                         draggable
                         onDragStart={(e) => e.dataTransfer.setData('text/ci-id', ci.id)}
-                        className="cursor-grab text-gray-700 dark:text-gray-300"
+                        className="min-w-0 cursor-grab font-medium text-fg [overflow-wrap:anywhere]"
                       >
                         {ci.name}
                       </span>
@@ -385,44 +393,41 @@ export function RoomPlanPage() {
                       aria-label={t('roomplan.positionFor', { name: ci.name })}
                       onSubmit={(e) => onPositionSubmit(e, ci)}
                       noValidate
-                      className="flex items-end gap-2"
+                      className="grid grid-cols-[1fr_1fr_auto] items-end gap-2"
                     >
-                      <label className="text-xs text-gray-600 dark:text-gray-300">
-                        {t('roomplan.positionX')}
-                        <input
-                          name="x"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          defaultValue={percent(pos.x)}
-                          className="mt-0.5 block w-16 rounded border border-gray-300 bg-white px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                        />
-                      </label>
-                      <label className="text-xs text-gray-600 dark:text-gray-300">
-                        {t('roomplan.positionY')}
-                        <input
-                          name="y"
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={1}
-                          defaultValue={percent(pos.y)}
-                          className="mt-0.5 block w-16 rounded border border-gray-300 bg-white px-1.5 py-1 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                        />
-                      </label>
-                      <button
+                      <Input
+                        label={t('roomplan.positionX')}
+                        name="x"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        defaultValue={percent(pos.x)}
+                        className="h-8"
+                      />
+                      <Input
+                        label={t('roomplan.positionY')}
+                        name="y"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        defaultValue={percent(pos.y)}
+                        className="h-8"
+                      />
+                      <IconButton
                         type="submit"
-                        className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-800 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary dark:border-gray-700 dark:text-gray-100 dark:hover:bg-gray-800"
-                      >
-                        {t('roomplan.applyPosition')}
-                      </button>
+                        size="sm"
+                        variant="secondary"
+                        label={t('roomplan.applyPosition')}
+                        icon={<Check />}
+                      />
                     </form>
                   </li>
                 );
               })}
             </ul>
-          </Card>
+          </Panel>
         </div>
       )}
     </div>

@@ -13,6 +13,7 @@
  * in the editors (E-113): the badge "in draft" at each target and
  * placeholder rows for new parts from the item payload.
  */
+import { GitBranch, LogOut, Plus, Repeat } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -22,7 +23,12 @@ import {
   useMetamodelDraftItems,
   useOpenMetamodelDrafts,
 } from '../../api/cmdbHooks';
-import { localizedText, type LocalizedText, type MetamodelDraftItem } from '../../api/cmdb';
+import {
+  localizedText,
+  type LocalizedText,
+  type MetamodelDraft,
+  type MetamodelDraftItem,
+} from '../../api/cmdb';
 import { ApiError } from '../../api/client';
 import { useEffectivePermissions, useHasPermission } from '../../api/hooks';
 import { useModules } from '../../hooks/useEntitlements';
@@ -32,6 +38,21 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Modal } from '../ui/Modal';
+
+/**
+ * One badge variant per state of a metamodel draft, shared by the banner and
+ * the draft pages: a draft is work in progress, a tested one waits for its
+ * publication, a published one is done, a discarded one is closed.
+ */
+export const DRAFT_STATUS_VARIANT: Record<
+  MetamodelDraft['status'],
+  'warning' | 'info' | 'success' | 'neutral'
+> = {
+  draft: 'warning',
+  tested: 'info',
+  published: 'success',
+  discarded: 'neutral',
+};
 
 /** How a draft changes a target: labels metamodelDrafts.marker.*. */
 export type DraftChange = 'created' | 'updated' | 'deleted';
@@ -174,10 +195,10 @@ export function DraftBanner() {
     return (
       <section
         aria-label={t('metamodelDrafts.bannerLabel')}
-        className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-6 py-2 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-2.5 text-sm text-fg-muted"
       >
         <p>{t('metamodelDrafts.directHint')}</p>
-        <Button size="sm" variant="secondary" onClick={() => setChooser(true)}>
+        <Button size="sm" variant="secondary" icon={<GitBranch />} onClick={() => setChooser(true)}>
           {t('metamodelDrafts.workInDraft')}
         </Button>
         {chooser ? <DraftChooser onClose={() => setChooser(false)} /> : null}
@@ -190,22 +211,34 @@ export function DraftBanner() {
   return (
     <section
       aria-label={t('metamodelDrafts.bannerLabel')}
-      className="border-b border-amber-300 bg-amber-50 px-6 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="flex flex-wrap items-center gap-2">
-          <span>{t('metamodelDrafts.activeDraft', { name: draft.name })}</span>
-          {status ? <Badge variant="info">{t(`metamodelDrafts.statuses.${status}`)}</Badge> : null}
-          <span>{t('metamodelDrafts.itemCount', { count })}</span>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="font-medium">
+            {t('metamodelDrafts.activeDraft', { name: draft.name })}
+          </span>
+          {status ? (
+            <Badge variant={DRAFT_STATUS_VARIANT[status]}>
+              {t(`metamodelDrafts.statuses.${status}`)}
+            </Badge>
+          ) : null}
+          <span className="tabular-nums">{t('metamodelDrafts.itemCount', { count })}</span>
         </p>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" asChild>
             <Link to={`/ci-types/drafts/${draft.id}`}>{t('metamodelDrafts.open')}</Link>
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => setChooser(true)}>
+          <Button size="sm" variant="secondary" icon={<Repeat />} onClick={() => setChooser(true)}>
             {t('metamodelDrafts.switch')}
           </Button>
-          <Button size="sm" variant="ghost" onClick={clear}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<LogOut />}
+            className="text-amber-900 hover:text-amber-950 dark:text-amber-100 dark:hover:text-amber-50"
+            onClick={clear}
+          >
             {t('metamodelDrafts.leave')}
           </Button>
         </div>
@@ -213,10 +246,10 @@ export function DraftBanner() {
       <p className="mt-1 text-xs">{t('metamodelDrafts.notProductive')}</p>
       {list.length > 0 ? (
         <details className="mt-2">
-          <summary className="cursor-pointer text-xs font-medium">
+          <summary className="w-fit cursor-pointer rounded text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
             {t('metamodelDrafts.showItems', { count: list.length })}
           </summary>
-          <ul aria-label={t('metamodelDrafts.itemsLabel')} className="mt-1 space-y-0.5 text-xs">
+          <ul aria-label={t('metamodelDrafts.itemsLabel')} className="mt-2 space-y-1 text-xs">
             {list.map((item) => (
               <li key={item.id}>
                 {t('metamodelDrafts.itemLine', {
@@ -266,7 +299,7 @@ function DraftChooser({ onClose }: { onClose: () => void }) {
       onOpenChange={(isOpen) => (isOpen ? undefined : onClose())}
       title={t('metamodelDrafts.chooserTitle')}
     >
-      <form onSubmit={submit} className="space-y-2">
+      <form onSubmit={submit} className="space-y-3">
         <Input
           label={t('metamodelDrafts.newName')}
           value={name}
@@ -275,33 +308,43 @@ function DraftChooser({ onClose }: { onClose: () => void }) {
           onChange={(e) => setName(e.target.value)}
         />
         {create.error ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {t('metamodelDrafts.createFailed')}
           </p>
         ) : null}
         <div className="flex justify-end">
-          <Button type="submit" size="sm" disabled={create.isPending || !name.trim()}>
+          <Button type="submit" icon={<Plus />} disabled={create.isPending || !name.trim()}>
             {t('metamodelDrafts.create')}
           </Button>
         </div>
       </form>
-      <h3 className="mt-4 text-sm font-semibold">{t('metamodelDrafts.openDrafts')}</h3>
-      {open.isLoading ? <p className="text-sm text-muted">{t('app.loading')}</p> : null}
+      <h3 className="mt-6 border-t border-line pt-4 text-sm font-semibold text-fg">
+        {t('metamodelDrafts.openDrafts')}
+      </h3>
+      {open.isLoading ? <p className="mt-2 text-sm text-fg-muted">{t('app.loading')}</p> : null}
       {open.error ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {t('app.error')}
         </p>
       ) : null}
       {open.isSuccess && others.length === 0 ? (
-        <p className="text-sm text-muted">{t('metamodelDrafts.noOpenDrafts')}</p>
+        <p className="mt-2 text-sm text-fg-muted">{t('metamodelDrafts.noOpenDrafts')}</p>
       ) : null}
       {others.length > 0 ? (
-        <ul className="mt-1 divide-y divide-gray-100 text-sm dark:divide-gray-800">
+        <ul className="mt-1 divide-y divide-line text-sm">
           {others.map((d) => (
-            <li key={d.id} className="flex items-center justify-between gap-2 py-1.5">
-              <span>
-                {d.name} · {t(`metamodelDrafts.statuses.${d.status}`)} ·{' '}
-                {t('metamodelDrafts.itemCount', { count: d.item_count })}
+            <li
+              key={d.id}
+              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2.5"
+            >
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium text-fg [overflow-wrap:anywhere]">{d.name}</span>
+                <Badge variant={DRAFT_STATUS_VARIANT[d.status]}>
+                  {t(`metamodelDrafts.statuses.${d.status}`)}
+                </Badge>
+                <span className="text-xs tabular-nums text-fg-muted">
+                  {t('metamodelDrafts.itemCount', { count: d.item_count })}
+                </span>
               </span>
               <Button
                 size="sm"

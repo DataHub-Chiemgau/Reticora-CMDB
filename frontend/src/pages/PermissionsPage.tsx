@@ -1,10 +1,21 @@
+import { ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useEffectivePermissions, usePermissionCatalogue } from '../api/hooks';
+import { AdminSection } from '../components/admin/AdminSection';
 import { Badge } from '../components/ui/Badge';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
 import { ScrollRegion } from '../components/ScrollRegion';
 
 export function PermissionsPage() {
@@ -12,68 +23,76 @@ export function PermissionsPage() {
   const catalogue = usePermissionCatalogue();
   const effective = useEffectivePermissions();
 
-  if (catalogue.isLoading || effective.isLoading) {
-    return <SkeletonList rows={6} label={t('permissions.loading')} />;
-  }
-
-  if (catalogue.isError) {
-    return (
-      <ErrorState
-        title={t('permissions.errorTitle')}
-        description={catalogue.error.message}
-        retryLabel={t('common.retry')}
-        onRetry={() => catalogue.refetch()}
-      />
-    );
-  }
-
   const ownPermissions = new Set(effective.data?.permissions ?? []);
   const permissions = catalogue.data ?? [];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('permissions.title')}
-        </h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('permissions.subtitle')}</p>
-      </div>
+      <PageHeader title={t('permissions.title')} description={t('permissions.subtitle')} />
 
-      {permissions.length === 0 ? (
-        <EmptyState title={t('permissions.emptyTitle')} description={t('permissions.emptyHint')} />
+      {catalogue.isLoading || effective.isLoading ? (
+        <SkeletonList rows={6} label={t('permissions.loading')} />
+      ) : catalogue.isError ? (
+        <ErrorState
+          title={t('permissions.errorTitle')}
+          description={catalogue.error.message}
+          retryLabel={t('common.retry')}
+          onRetry={() => catalogue.refetch()}
+        />
+      ) : permissions.length === 0 ? (
+        <EmptyState
+          icon={<ShieldCheck />}
+          title={t('permissions.emptyTitle')}
+          description={t('permissions.emptyHint')}
+        />
       ) : (
-        <Card title={`${t('permissions.catalogue')} (${permissions.length})`}>
-          <ScrollRegion label={t('permissions.catalogue')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">{t('permissions.key')}</th>
-                  <th className="pb-2">{t('permissions.resource')}</th>
-                  <th className="pb-2">{t('permissions.action')}</th>
-                  <th className="pb-2">{t('common.description')}</th>
-                  <th className="pb-2">{t('permissions.effective')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {permissions.map((permission) => (
-                  <tr key={permission.key} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-mono text-xs">{permission.key}</td>
-                    <td className="py-2">{permission.resource}</td>
-                    <td className="py-2">{permission.action}</td>
-                    <td className="py-2">{permission.description}</td>
-                    <td className="py-2">
-                      {ownPermissions.has(permission.key) ? (
-                        <Badge variant="success">{t('permissions.granted')}</Badge>
-                      ) : (
-                        <Badge variant="neutral">{t('permissions.notGranted')}</Badge>
-                      )}
-                    </td>
+        <AdminSection
+          title={`${t('permissions.catalogue')} (${permissions.length})`}
+          description={t('permissions.catalogueHint')}
+        >
+          <Card className="overflow-hidden p-0">
+            <ScrollRegion label={t('permissions.catalogue')}>
+              <table className={tableClasses}>
+                <thead className={theadClasses}>
+                  <tr className="text-fg-muted">
+                    <th scope="col" className={thClasses}>
+                      {t('permissions.key')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('permissions.resource')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('permissions.action')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('common.description')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('permissions.effective')}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollRegion>
-        </Card>
+                </thead>
+                <tbody>
+                  {permissions.map((permission) => (
+                    <tr key={permission.key} className={trClasses}>
+                      <td className={tdMonoClasses}>{permission.key}</td>
+                      <td className={tdClasses}>{permission.resource}</td>
+                      <td className={tdClasses}>{permission.action}</td>
+                      <td className={tdClasses}>{permission.description}</td>
+                      <td className={tdClasses}>
+                        {ownPermissions.has(permission.key) ? (
+                          <Badge variant="success">{t('permissions.granted')}</Badge>
+                        ) : (
+                          <Badge variant="neutral">{t('permissions.notGranted')}</Badge>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          </Card>
+        </AdminSection>
       )}
     </div>
   );

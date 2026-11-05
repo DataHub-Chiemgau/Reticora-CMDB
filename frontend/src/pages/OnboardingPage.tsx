@@ -5,6 +5,7 @@
  * steps run without a session (the verification link carries the token),
  * the others after sign-in; each later step is done when its data exists.
  */
+import { Check } from 'lucide-react';
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -23,6 +24,8 @@ import {
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { Input } from '../components/ui/Input';
+import { PageHeader } from '../components/ui/PageHeader';
+import { cn } from '../components/ui/utils';
 import { solveAltcha, type AltchaChallenge } from './auth/altcha';
 
 export const ONBOARDING_STEPS = ['signup', 'verify', 'collector', 'scopes', 'cis'] as const;
@@ -202,30 +205,48 @@ function Progress({ current }: { current: OnboardingStep | 'done' }) {
           done: index,
           total: ONBOARDING_STEPS.length,
         })}
-        className="h-2 overflow-hidden rounded bg-gray-200 dark:bg-gray-700"
+        className="h-1 overflow-hidden rounded-full bg-fg/10"
       >
         <div
-          className="h-full bg-primary transition-all"
+          className="h-full rounded-full bg-accent transition-all"
           style={{ width: `${(index / ONBOARDING_STEPS.length) * 100}%` }}
         />
       </div>
-      <ol className="mt-3 grid grid-cols-5 gap-2 text-xs">
-        {ONBOARDING_STEPS.map((step, i) => (
-          <li
-            key={step}
-            aria-current={step === current ? 'step' : undefined}
-            className={
-              i < index
-                ? 'text-green-700 dark:text-green-400'
-                : step === current
-                  ? 'font-semibold text-primary'
-                  : 'text-muted'
-            }
-          >
-            {i < index ? '✓ ' : `${i + 1}. `}
-            {t(`onboarding.steps.${step}`)}
-          </li>
-        ))}
+      {/* The steps are a real sequence, so they are numbered. */}
+      <ol className="mt-4 grid grid-cols-5 gap-2">
+        {ONBOARDING_STEPS.map((step, i) => {
+          const done = i < index;
+          const isCurrent = step === current;
+          return (
+            <li
+              key={step}
+              aria-current={isCurrent ? 'step' : undefined}
+              className="flex min-w-0 flex-col items-start gap-1.5"
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs font-semibold tabular-nums',
+                  done && 'border-accent bg-accent text-accent-fg',
+                  isCurrent && 'border-accent bg-accent-soft text-accent-strong',
+                  !done && !isCurrent && 'border-line-strong text-fg-subtle',
+                )}
+              >
+                {done ? <Check className="h-3.5 w-3.5" /> : i + 1}
+              </span>
+              <span
+                className={cn(
+                  'w-full text-xs leading-4 [overflow-wrap:anywhere]',
+                  isCurrent ? 'font-semibold text-fg' : 'text-fg-muted',
+                  !isCurrent && 'max-sm:sr-only',
+                )}
+              >
+                {done ? <span className="sr-only">{t('onboarding.stepDone')} </span> : null}
+                {t(`onboarding.steps.${step}`)}
+              </span>
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
@@ -307,7 +328,7 @@ function SignupStep() {
  */
 function SignedInHint({ children }: { children: ReactNode }) {
   return (
-    <div className="space-y-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+    <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
       {children}
     </div>
   );
@@ -351,7 +372,7 @@ function VerifyStep({ token, signedInAs }: { token: string; signedInAs?: string 
             <Link
               to="/login"
               state={ONBOARDING_LOGIN_STATE}
-              className="inline-block font-medium text-primary underline"
+              className="inline-block font-medium text-accent underline underline-offset-2"
             >
               {t('onboarding.verify.login')}
             </Link>
@@ -446,7 +467,7 @@ function CollectorStep() {
       {code.data ? (
         <div>
           <p className="text-gray-600 dark:text-gray-300">{t('onboarding.collector.code')}</p>
-          <code className="block rounded bg-gray-100 p-3 font-mono text-base dark:bg-gray-800">
+          <code className="block rounded-lg border border-line bg-canvas p-3 text-center font-mono text-lg tracking-widest text-fg">
             {code.data.code}
           </code>
           <p className="mt-2 text-muted">{t('onboarding.collector.waiting')}</p>
@@ -582,13 +603,8 @@ export function OnboardingPage() {
   });
 
   return (
-    <section className="mx-auto max-w-2xl space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {t('onboarding.title')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('onboarding.subtitle')}</p>
-      </div>
+    <section className="mx-auto max-w-2xl space-y-6 pt-[4vh]">
+      <PageHeader title={t('onboarding.title')} description={t('onboarding.subtitle')} />
       <Progress current={step} />
       <Card title={step === 'done' ? t('onboarding.done.title') : t(`onboarding.steps.${step}`)}>
         {step === 'signup' ? <SignupStep /> : null}
@@ -599,7 +615,7 @@ export function OnboardingPage() {
         {step === 'done' ? (
           <div className="space-y-3 text-sm">
             <p>{t('onboarding.done.text', { count: cis.data?.total ?? 0 })}</p>
-            <Link to="/cmdb" className="font-medium text-primary underline">
+            <Link to="/cmdb" className="font-medium text-accent underline underline-offset-2">
               {t('onboarding.done.open')}
             </Link>
           </div>

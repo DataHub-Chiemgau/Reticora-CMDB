@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { LocationKind, LocationTreeNode } from '../../api/cmdb';
 import { useLocationTree } from '../../api/cmdbHooks';
+import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { cn } from '../ui/utils';
 
@@ -219,34 +220,37 @@ export function LocationPicker({ label, value, onChange, kinds }: LocationPicker
               setFocused(item.id);
               choose(item);
             }}
-            className="outline-none focus-visible:[&>div]:ring-2 focus-visible:[&>div]:ring-primary/40"
+            className="outline-none focus-visible:[&>div]:ring-2 focus-visible:[&>div]:ring-accent"
           >
             <div
               className={cn(
                 'flex items-center gap-2 rounded-md px-2 py-1 text-sm',
                 item.id === value
-                  ? 'bg-primary/10 font-medium text-primary dark:bg-primary/20'
+                  ? 'bg-accent-soft font-medium text-accent-strong'
                   : item.selectable
-                    ? 'cursor-pointer text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-gray-800'
-                    : 'text-gray-600 dark:text-gray-300',
+                    ? 'cursor-pointer text-fg hover:bg-fg/[0.05]'
+                    : 'text-fg-muted',
               )}
               style={{ paddingLeft: `${(item.level - 1) * 1.25 + 0.5}rem` }}
             >
               <span
                 aria-hidden="true"
-                className="inline-block w-4 cursor-pointer text-center"
+                className="inline-flex h-4 w-4 cursor-pointer items-center justify-center text-fg-subtle"
                 onClick={(event) => {
                   event.stopPropagation();
                   if (item.hasChildren) toggle(item.id);
                 }}
               >
-                {item.hasChildren ? (open ? '▾' : '▸') : ''}
+                {item.hasChildren ? (
+                  open ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
+                  )
+                ) : null}
               </span>
               <span id={`${itemId(item.id)}-name`}>{item.node.name}</span>
-              <span
-                id={`${itemId(item.id)}-kind`}
-                className="text-xs text-gray-600 dark:text-gray-300"
-              >
+              <span id={`${itemId(item.id)}-kind`} className="text-xs text-fg-muted">
                 {kindLabel(item.node.kind)}
               </span>
             </div>
@@ -260,25 +264,26 @@ export function LocationPicker({ label, value, onChange, kinds }: LocationPicker
     <div className="space-y-2">
       <Input
         label={t('pickers.locationFilter', { label })}
+        icon={<Search />}
         value={filter}
         onChange={(event) => setFilter(event.target.value)}
       />
       {tree.isLoading ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>
+        <p className="text-sm text-fg-muted">{t('app.loading')}</p>
       ) : flat.length === 0 ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('pickers.noHits')}</p>
+        <p className="text-sm text-fg-muted">{t('pickers.noHits')}</p>
       ) : (
         <ul
           role="tree"
           aria-label={label}
           onKeyDown={handleKeyDown}
-          className="max-h-72 overflow-y-auto rounded-lg border border-gray-200 p-1 dark:border-gray-700"
+          className="max-h-72 overflow-y-auto rounded-lg border border-line p-1"
         >
           {renderLevel(undefined)}
         </ul>
       )}
       {selectedPath ? (
-        <p className="text-sm text-gray-700 dark:text-gray-200">
+        <p className="text-sm text-fg">
           {t('pickers.chosenLocation', {
             path: selectedPath.map((node) => node.name).join(' › '),
           })}

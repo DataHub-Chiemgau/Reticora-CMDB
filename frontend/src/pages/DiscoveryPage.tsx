@@ -1,3 +1,4 @@
+import { Check, Copy, Plug, Plus, Radar, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -26,12 +27,27 @@ import {
   describeEnrollmentRefusal,
   useEnrollmentClientChoice,
 } from '../components/EnrollmentClientSelect';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { Panel } from '../components/spatial/Panel';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { Card } from '../components/ui/Card';
+import { EmptyState } from '../components/ui/EmptyState';
+import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
+import { SkeletonList } from '../components/ui/Skeleton';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
 
 interface EnrollmentCodeResponse {
   id: string;
@@ -101,18 +117,18 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
     >
       {!code ? (
         <div className="space-y-4">
-          <p className="text-sm text-gray-600 dark:text-gray-300">
+          <p className="text-sm text-fg-muted">
             {t(
               'discovery.enroll.intro',
               'Schließen Sie einen Collector an: Erzeugen Sie einen einmaligen Enrollment-Code und geben Sie ihn im Collector ein. Der Collector muss den Server über Port 4222/TCP erreichen. Die Subnetze, die er meldet, erscheinen hier als Vorschläge; erst bestätigte Subnetze scannt er.',
             )}
           </p>
-          <label className="block text-sm">
-            <span className="mb-1 block text-gray-700 dark:text-gray-300">
-              {t('discovery.enroll.label', 'Bezeichnung (z. B. Standort)')}
-            </span>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="site-a" />
-          </label>
+          <Input
+            label={t('discovery.enroll.label', 'Bezeichnung (z. B. Standort)')}
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="site-a"
+          />
           <EnrollmentClientSelect
             choice={choice}
             value={clientId}
@@ -138,22 +154,25 @@ function EnrollWizard({ open, onClose }: { open: boolean; onClose: () => void })
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-gray-600 dark:text-gray-300">
+          <p className="text-sm text-fg-muted">
             {t(
               'discovery.enroll.once',
               'Dieser Code wird nur einmal angezeigt und läuft ab. Führen Sie im Kundennetz aus:',
             )}
           </p>
-          <pre className="overflow-x-auto rounded-lg bg-gray-900 p-3 text-xs text-green-200 dark:bg-black">
+          <pre
+            tabIndex={0}
+            className="overflow-x-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          >
             {enrollCommand}
           </pre>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-fg-muted">
             {t('discovery.enroll.expires', 'Gültig bis')}:{' '}
             {new Date(code.expires_at).toLocaleString()}
           </p>
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('discovery.enroll.after')}</p>
+          <p className="text-sm text-fg-muted">{t('discovery.enroll.after')}</p>
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={copy}>
+            <Button variant="secondary" icon={copied ? <Check /> : <Copy />} onClick={copy}>
               {copied ? t('common.copied', 'Kopiert!') : t('common.copy', 'Kopieren')}
             </Button>
             <Button
@@ -227,15 +246,13 @@ function ScopeErrors({ health }: { health?: DiscoveryScopeHealth }) {
   const { t } = useTranslation();
   if (!health?.errors?.length) return null;
   return (
-    <ul className="w-full space-y-1 text-xs text-red-700 dark:text-red-300">
+    <ul className="space-y-1 text-xs text-red-700 dark:text-red-300">
       {health.errors.map((err, i) => (
         <li key={`${err.protocol}-${err.target}-${i}`}>
           <span className="font-medium">{t(`discovery.scopes.cause.${err.cause}`, err.cause)}</span>
           {err.protocol ? ` · ${err.protocol}` : ''}
           {err.target ? ` · ${err.target}` : ''}
-          {err.message ? (
-            <span className="text-gray-500 dark:text-gray-400"> — {err.message}</span>
-          ) : null}
+          {err.message ? <span className="text-fg-muted"> — {err.message}</span> : null}
         </li>
       ))}
     </ul>
@@ -281,21 +298,19 @@ function ScopeSuggestions({ canResolve }: { canResolve: boolean }) {
     );
   };
   return (
-    <Card title={t('discovery.suggestions.title')}>
-      <p className="mb-3 text-sm text-gray-600 dark:text-gray-300">
-        {t('discovery.suggestions.intro')}
-      </p>
+    <Panel title={t('discovery.suggestions.title')} leading={<Radar className="text-accent" />}>
+      <p className="mb-3 text-sm text-fg-muted">{t('discovery.suggestions.intro')}</p>
       {error ? (
-        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mb-3 text-sm text-danger">
           {error}
         </p>
       ) : null}
-      <ul className="space-y-2 text-sm">
+      <ul className="-my-1.5 divide-y divide-line text-sm">
         {items.map((item) => (
-          <li key={item.id} className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-gray-900 dark:text-gray-100">
+          <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+            <span className="text-fg">
               <span className="font-mono">{item.payload.cidr}</span>{' '}
-              <span className="text-gray-500 dark:text-gray-400">
+              <span className="text-fg-muted">
                 {t('discovery.suggestions.from', {
                   collector: item.payload.collector_name ?? item.payload.collector_id ?? '',
                 })}
@@ -305,6 +320,8 @@ function ScopeSuggestions({ canResolve }: { canResolve: boolean }) {
               <span className="flex gap-2">
                 <Button
                   size="sm"
+                  variant="secondary"
+                  icon={<Check />}
                   disabled={resolve.isPending}
                   onClick={() => act(item.id, 'accept')}
                 >
@@ -312,7 +329,7 @@ function ScopeSuggestions({ canResolve }: { canResolve: boolean }) {
                 </Button>
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="ghost"
                   disabled={resolve.isPending}
                   onClick={() => act(item.id, 'dismiss')}
                 >
@@ -323,7 +340,7 @@ function ScopeSuggestions({ canResolve }: { canResolve: boolean }) {
           </li>
         ))}
       </ul>
-    </Card>
+    </Panel>
   );
 }
 
@@ -519,7 +536,7 @@ function ScopeForm({
   const fieldError = (field: ScopeField) => refusal?.fields[field];
 
   return (
-    <form className="space-y-4" onSubmit={submit} noValidate>
+    <form className="space-y-5" onSubmit={submit} noValidate>
       <Input
         label={t('discovery.scopes.form.name')}
         placeholder={t('discovery.scopes.form.namePlaceholder')}
@@ -541,6 +558,7 @@ function ScopeForm({
           value={values.target}
           onChange={(e) => set('target', e.target.value)}
           error={fieldError('target')}
+          className="font-mono"
         />
         <Select
           label={t('discovery.scopes.form.site')}
@@ -563,85 +581,76 @@ function ScopeForm({
           error={fieldError('vrf_id')}
         />
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <Input
           label={t('discovery.scopes.schedule')}
           value={values.schedule}
           onChange={(e) => set('schedule', e.target.value)}
           error={fieldError('schedule')}
+          className="font-mono"
         />
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {t('discovery.scopes.form.scheduleHint')}
-        </p>
+        <p className="text-xs text-fg-muted">{t('discovery.scopes.form.scheduleHint')}</p>
       </div>
-      <fieldset>
-        <legend className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
-          {t('discovery.scopes.form.plugins')}
-        </legend>
-        <div className="flex flex-wrap gap-x-4 gap-y-1">
-          {DISCOVERY_PLUGINS.map((p) => (
-            <label
-              key={p}
-              className="flex items-center gap-1 text-sm text-gray-700 dark:text-gray-300"
-            >
-              <input
-                type="checkbox"
-                checked={values.plugins.includes(p)}
-                onChange={() => set('plugins', toggled(values.plugins, p))}
-              />
-              {t(`discovery.scopes.plugin.${p}`)}
-            </label>
-          ))}
-        </div>
-        {fieldError('plugins') ? (
-          <p className="mt-1 text-sm text-red-600 dark:text-red-400">{fieldError('plugins')}</p>
-        ) : null}
-      </fieldset>
-      <fieldset>
-        <legend className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-200">
-          {t('discovery.scopes.form.credentials')}
-        </legend>
-        <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">
-          {t('discovery.scopes.form.credentialsHint')}
-        </p>
-        {credentials.isError ? (
-          <p className="text-sm text-amber-700 dark:text-amber-300">
-            {t('discovery.scopes.form.credentialsUnavailable')}
-          </p>
-        ) : credentialList.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t('discovery.scopes.form.credentialsNone')}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {credentialList.map((c) => (
-              <label
-                key={c.id}
-                className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
-              >
+      <div className="border-t border-line pt-4">
+        <fieldset className="space-y-2">
+          <legend className="mb-2 text-sm font-medium text-fg">
+            {t('discovery.scopes.form.plugins')}
+          </legend>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+            {DISCOVERY_PLUGINS.map((p) => (
+              <label key={p} className="flex items-center gap-2 text-sm text-fg">
                 <input
                   type="checkbox"
-                  checked={values.credential_ids.includes(c.id)}
-                  onChange={() => set('credential_ids', toggled(values.credential_ids, c.id))}
+                  checked={values.plugins.includes(p)}
+                  onChange={() => set('plugins', toggled(values.plugins, p))}
                 />
-                {c.name}
-                <span className="text-xs text-gray-500 dark:text-gray-400">({c.kind})</span>
+                {t(`discovery.scopes.plugin.${p}`)}
               </label>
             ))}
           </div>
-        )}
-        {fieldError('credential_ids') ? (
-          <p className="mt-1 text-sm text-red-600 dark:text-red-400">
-            {fieldError('credential_ids')}
-          </p>
-        ) : null}
-      </fieldset>
+          {fieldError('plugins') ? (
+            <p className="text-sm text-danger">{fieldError('plugins')}</p>
+          ) : null}
+        </fieldset>
+      </div>
+      <div className="border-t border-line pt-4">
+        <fieldset className="space-y-2">
+          <legend className="mb-1 text-sm font-medium text-fg">
+            {t('discovery.scopes.form.credentials')}
+          </legend>
+          <p className="text-xs text-fg-muted">{t('discovery.scopes.form.credentialsHint')}</p>
+          {credentials.isError ? (
+            <p className="text-sm text-amber-700 dark:text-amber-300">
+              {t('discovery.scopes.form.credentialsUnavailable')}
+            </p>
+          ) : credentialList.length === 0 ? (
+            <p className="text-sm text-fg-muted">{t('discovery.scopes.form.credentialsNone')}</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {credentialList.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 text-sm text-fg">
+                  <input
+                    type="checkbox"
+                    checked={values.credential_ids.includes(c.id)}
+                    onChange={() => set('credential_ids', toggled(values.credential_ids, c.id))}
+                  />
+                  {c.name}
+                  <span className="text-xs text-fg-muted">({c.kind})</span>
+                </label>
+              ))}
+            </div>
+          )}
+          {fieldError('credential_ids') ? (
+            <p className="text-sm text-danger">{fieldError('credential_ids')}</p>
+          ) : null}
+        </fieldset>
+      </div>
       {refusal ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {refusal.message}
         </p>
       ) : null}
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 border-t border-line pt-4">
         <Button variant="secondary" onClick={onClose}>
           {t('common.cancel')}
         </Button>
@@ -650,6 +659,102 @@ function ScopeForm({
         </Button>
       </div>
     </form>
+  );
+}
+
+/**
+ * ScopeRows is the row of a scope in the table of its collector and, below
+ * it, the causes of the failed targets of its last run (DIS-08).
+ */
+function ScopeRows({
+  scope,
+  canManage,
+  switching,
+  onEdit,
+  onSwitch,
+  onDelete,
+}: {
+  scope: DiscoveryScope;
+  canManage: boolean;
+  switching: boolean;
+  onEdit: () => void;
+  onSwitch: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  const hasErrors = (scope.health?.errors?.length ?? 0) > 0;
+  const cell = hasErrors ? 'border-b-0 pb-1.5' : '';
+  return (
+    <>
+      <tr className={trClasses}>
+        <td className={cn(tdPrimaryClasses, cell, 'min-w-[9rem]')}>
+          {scope.name && scope.name !== scope.target ? scope.name : '—'}
+        </td>
+        <td className={cn(tdMonoClasses, cell, 'whitespace-nowrap')}>{scope.target}</td>
+        <td className={cn(tdClasses, cell)}>
+          {t(`discovery.scopes.kind.${scope.kind}`, scope.kind)}
+        </td>
+        <td className={cn(tdClasses, cell, 'font-mono text-xs text-fg')}>{scope.schedule}</td>
+        <td className={cn(tdClasses, cell)}>
+          <span>{scope.plugins.join(', ')}</span>
+          {scope.credential_ids.length > 0 ? (
+            <span className="block text-xs text-fg-subtle">
+              {t('discovery.scopes.credentialCount', { count: scope.credential_ids.length })}
+            </span>
+          ) : null}
+        </td>
+        <td className={cn(tdClasses, cell)}>
+          <span className="flex flex-wrap items-center gap-1.5">
+            <ScopeHealthBadge health={scope.health} />
+            <Badge variant={scope.enabled ? 'success' : 'neutral'}>
+              {scope.enabled ? t('discovery.scopes.enabled') : t('discovery.scopes.disabled')}
+            </Badge>
+          </span>
+        </td>
+        {canManage ? (
+          <td className={cn(tdClasses, cell)}>
+            <span className="flex items-center justify-end gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t('discovery.scopes.editNamed', { name: scope.name })}
+                onClick={onEdit}
+              >
+                {t('discovery.scopes.edit')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label={t(
+                  scope.enabled ? 'discovery.scopes.disableNamed' : 'discovery.scopes.enableNamed',
+                  { name: scope.name },
+                )}
+                disabled={switching}
+                onClick={onSwitch}
+              >
+                {scope.enabled ? t('discovery.scopes.disable') : t('discovery.scopes.enable')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-danger hover:text-danger"
+                aria-label={t('discovery.scopes.deleteNamed', { name: scope.name })}
+                onClick={onDelete}
+              >
+                {t('discovery.scopes.delete')}
+              </Button>
+            </span>
+          </td>
+        ) : null}
+      </tr>
+      {hasErrors ? (
+        <tr>
+          <td colSpan={canManage ? 7 : 6} className="border-b border-line px-4 pb-3 pt-0">
+            <ScopeErrors health={scope.health} />
+          </td>
+        </tr>
+      ) : null}
+    </>
   );
 }
 
@@ -698,89 +803,70 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
     });
   };
 
+  const scopes = data?.data ?? [];
+
   return (
-    <div className="mt-4 border-t border-gray-200 pt-4 dark:border-gray-700">
-      <div className="flex items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          {t('discovery.scopes.title')}
-        </h4>
+    <div className="border-t border-line">
+      <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+        <h4 className="text-sm font-semibold text-fg">{t('discovery.scopes.title')}</h4>
         {canManage ? (
-          <Button size="sm" onClick={() => setEditing('new')}>
+          <Button size="sm" variant="secondary" icon={<Plus />} onClick={() => setEditing('new')}>
             {t('discovery.scopes.add')}
           </Button>
         ) : null}
       </div>
       {actionError ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="px-4 pb-2 text-sm text-danger">
           {actionError}
         </p>
       ) : null}
-      {data?.data.length ? (
-        <ul className="mt-2 space-y-2 text-sm">
-          {data.data.map((scope) => (
-            <li key={scope.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span className="min-w-0 text-gray-900 [overflow-wrap:anywhere] dark:text-gray-100">
-                {scope.name && scope.name !== scope.target ? (
-                  <span className="font-medium">{scope.name} </span>
-                ) : null}
-                <span className="font-mono">{scope.target}</span>{' '}
-                <span className="text-gray-500 dark:text-gray-400">
-                  ({t(`discovery.scopes.kind.${scope.kind}`, scope.kind)}, {scope.schedule},{' '}
-                  {scope.plugins.join(', ')}
-                  {scope.credential_ids.length > 0
-                    ? `, ${t('discovery.scopes.credentialCount', { count: scope.credential_ids.length })}`
-                    : ''}
-                  )
-                </span>
-              </span>
-              <span className="flex flex-wrap items-center gap-2">
-                <ScopeHealthBadge health={scope.health} />
-                <Badge variant={scope.enabled ? 'success' : 'neutral'}>
-                  {scope.enabled ? t('discovery.scopes.enabled') : t('discovery.scopes.disabled')}
-                </Badge>
+      {scopes.length ? (
+        <ScrollRegion label={`${t('discovery.scopes.title')} ${collector.name}`}>
+          <table className={cn(tableClasses, 'min-w-[44rem]')}>
+            <thead className={cn(theadClasses, 'border-t border-line')}>
+              <tr>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.form.name')}
+                </th>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.target')}
+                </th>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.kindLabel')}
+                </th>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.columns.schedule')}
+                </th>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.form.plugins')}
+                </th>
+                <th scope="col" className={cn(thClasses, 'text-fg-muted')}>
+                  {t('discovery.scopes.columns.status')}
+                </th>
                 {canManage ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-label={t('discovery.scopes.editNamed', { name: scope.name })}
-                      onClick={() => setEditing(scope)}
-                    >
-                      {t('discovery.scopes.edit')}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-label={t(
-                        scope.enabled
-                          ? 'discovery.scopes.disableNamed'
-                          : 'discovery.scopes.enableNamed',
-                        { name: scope.name },
-                      )}
-                      disabled={update.isPending}
-                      onClick={() => switchScope(scope)}
-                    >
-                      {scope.enabled ? t('discovery.scopes.disable') : t('discovery.scopes.enable')}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      aria-label={t('discovery.scopes.deleteNamed', { name: scope.name })}
-                      onClick={() => setDeleting(scope)}
-                    >
-                      {t('discovery.scopes.delete')}
-                    </Button>
-                  </>
+                  <th scope="col" className={cn(thClasses, 'text-right text-fg-muted')}>
+                    {t('common.actions')}
+                  </th>
                 ) : null}
-              </span>
-              <ScopeErrors health={scope.health} />
-            </li>
-          ))}
-        </ul>
+              </tr>
+            </thead>
+            <tbody>
+              {scopes.map((scope) => (
+                <ScopeRows
+                  key={scope.id}
+                  scope={scope}
+                  canManage={canManage}
+                  switching={update.isPending}
+                  onEdit={() => setEditing(scope)}
+                  onSwitch={() => switchScope(scope)}
+                  onDelete={() => setDeleting(scope)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </ScrollRegion>
       ) : (
-        <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-          {t('discovery.scopes.none')}
-        </p>
+        <p className="px-4 pb-4 text-sm text-fg-muted">{t('discovery.scopes.none')}</p>
       )}
       {canManage ? (
         <Modal
@@ -834,7 +920,7 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
 const SUGGESTIONS_ANCHOR = 'scope-suggestions';
 
 const hintClass =
-  'rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100';
+  'flex gap-2.5 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100';
 
 /**
  * CollectorHints says why a collector delivers nothing: it has no edge
@@ -858,27 +944,33 @@ function CollectorHints({ collector, canResolve }: { collector: Collector; canRe
   ).length;
   if (!noEdge && !noScope) return null;
   return (
-    <div className="mb-4 space-y-2">
+    <div className="space-y-2">
       {noEdge ? (
         <div role="note" className={hintClass}>
-          <p className="font-medium">{t('discovery.collectorHints.noEdge')}</p>
-          <p className="mt-1">{t('discovery.collectorHints.noEdgeCauses')}</p>
+          <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">{t('discovery.collectorHints.noEdge')}</p>
+            <p className="mt-1">{t('discovery.collectorHints.noEdgeCauses')}</p>
+          </div>
         </div>
       ) : null}
       {noScope ? (
         <div role="note" className={hintClass}>
-          <p className="font-medium">{t('discovery.collectorHints.noScope')}</p>
-          {suggested > 0 ? (
-            <a
-              href={`#${SUGGESTIONS_ANCHOR}`}
-              className="mt-1 inline-block font-medium underline underline-offset-2"
-            >
-              {t('discovery.collectorHints.showSuggestions', { count: suggested })}
-            </a>
-          ) : null}
-          {!canResolve ? (
-            <p className="mt-1">{t('discovery.collectorHints.noScopeRights')}</p>
-          ) : null}
+          <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">{t('discovery.collectorHints.noScope')}</p>
+            {suggested > 0 ? (
+              <a
+                href={`#${SUGGESTIONS_ANCHOR}`}
+                className="mt-1 inline-block font-medium underline underline-offset-2"
+              >
+                {t('discovery.collectorHints.showSuggestions', { count: suggested })}
+              </a>
+            ) : null}
+            {!canResolve ? (
+              <p className="mt-1">{t('discovery.collectorHints.noScopeRights')}</p>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
@@ -897,43 +989,44 @@ function CollectorCard({
   const { t } = useTranslation();
 
   return (
-    <Card
+    <Panel
       title={collector.name}
       actions={
         <Badge variant={getCollectorVariant(collector.status)}>
           {t(`discovery.collectorStatus.${collector.status}`, collector.status)}
         </Badge>
       }
+      padded={false}
     >
-      <CollectorHints collector={collector} canResolve={canResolve} />
-      <dl className="space-y-2 text-sm">
-        <div className="flex justify-between gap-4">
-          <dt className="text-gray-500 dark:text-gray-400">{t('discovery.version')}</dt>
-          <dd className="font-medium text-gray-900 dark:text-gray-100">
-            {collector.version || '—'}
-          </dd>
-        </div>
-        <div className="flex justify-between gap-4">
-          <dt className="text-gray-500 dark:text-gray-400">{t('discovery.lastHeartbeat')}</dt>
-          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">
-            {formatHeartbeat(collector.last_heartbeat_at)}
-          </dd>
-        </div>
-        <div className="flex justify-between gap-4">
-          <dt className="text-gray-500 dark:text-gray-400">{t('discovery.createdAt')}</dt>
-          <dd className="font-medium text-right text-gray-900 dark:text-gray-100">
-            {formatHeartbeat(collector.created_at)}
-          </dd>
-        </div>
-      </dl>
+      <div className="space-y-3 px-4 py-3">
+        <CollectorHints collector={collector} canResolve={canResolve} />
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-xs text-fg-muted">{t('discovery.version')}</dt>
+            <dd className="font-medium text-fg">{collector.version || '—'}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-fg-muted">{t('discovery.lastHeartbeat')}</dt>
+            <dd className="font-medium tabular-nums text-fg">
+              {formatHeartbeat(collector.last_heartbeat_at)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs text-fg-muted">{t('discovery.createdAt')}</dt>
+            <dd className="font-medium tabular-nums text-fg">
+              {formatHeartbeat(collector.created_at)}
+            </dd>
+          </div>
+        </dl>
+      </div>
       <ScopeList collector={collector} canManage={canManage} />
-    </Card>
+    </Panel>
   );
 }
 
 export function DiscoveryPage() {
   const { t } = useTranslation();
-  const { data, isLoading, error } = useCollectors({ limit: 100, offset: 0 });
+  const { data, isLoading, error, refetch } = useCollectors({ limit: 100, offset: 0 });
   const [enrollOpen, setEnrollOpen] = useState(false);
   // The server decides every request; the page offers only what the user
   // may do, fail-closed while the rights load: scopes need discovery:manage,
@@ -944,25 +1037,23 @@ export function DiscoveryPage() {
   const canResolve = useHasPermission('review:resolve') === true && canManage;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.discovery')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('discovery.summary')}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500 dark:text-gray-400">
+    <div className="space-y-4">
+      <PageHeader
+        title={t('nav.discovery')}
+        description={t('discovery.summary')}
+        meta={
+          <Badge variant="neutral">
             {data?.total ?? 0} {t('discovery.collectors')}
-          </span>
-          {canEnroll ? (
-            <Button size="sm" onClick={() => setEnrollOpen(true)}>
+          </Badge>
+        }
+        actions={
+          canEnroll ? (
+            <Button icon={<Plug />} onClick={() => setEnrollOpen(true)}>
               {t('discovery.enroll.button', 'Collector verbinden')}
             </Button>
-          ) : null}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       <EnrollWizard open={enrollOpen} onClose={() => setEnrollOpen(false)} />
 
@@ -971,13 +1062,17 @@ export function DiscoveryPage() {
         <ScopeSuggestions canResolve={canResolve} />
       </div>
 
-      {isLoading ? (
-        <p className="text-sm text-gray-600 dark:text-gray-300">{t('app.loading')}</p>
+      {isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('app.error')}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
       ) : null}
-      {error ? <p className="text-sm text-red-600 dark:text-red-400">{t('app.error')}</p> : null}
 
       {data?.data.length ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="space-y-4">
           {data.data.map((collector) => (
             <CollectorCard
               key={collector.id}
@@ -990,9 +1085,11 @@ export function DiscoveryPage() {
       ) : null}
 
       {data && data.data.length === 0 ? (
-        <Card>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{t('common.noResults')}</p>
-        </Card>
+        <EmptyState
+          icon={<Radar />}
+          title={t('discovery.empty')}
+          description={t('discovery.emptyHint')}
+        />
       ) : null}
     </div>
   );

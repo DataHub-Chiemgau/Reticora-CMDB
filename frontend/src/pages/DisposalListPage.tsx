@@ -1,3 +1,4 @@
+import { Plus, Recycle } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -11,6 +12,18 @@ import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 const methodOptions = [
   { value: 'reuse', label: 'Wiederverwendung' },
@@ -56,61 +69,100 @@ export function DisposalListPage() {
     },
   });
 
+  const records = data?.data ?? [];
+  const methodLabel = (method: string) =>
+    methodOptions.find((option) => option.value === method)?.label ?? method;
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.disposal', 'Entsorgung')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t(
-              'disposal.summary',
-              'Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).',
-            )}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('disposal.create', 'Entsorgung dokumentieren')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.disposal', 'Entsorgung')}
+        description={t(
+          'disposal.summary',
+          'Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).',
+        )}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('disposal.create', 'Entsorgung dokumentieren')}
+          </Button>
+        }
+      />
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="space-y-3">
-        {(data?.data ?? []).map((rec: DisposalRecord) => (
-          <Card
-            key={rec.id}
-            title={rec.certificate_ref || rec.id.slice(0, 8)}
-            actions={<Badge variant="neutral">{rec.method}</Badge>}
-          >
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {t('disposal.performedAt', 'Durchgeführt')}:{' '}
-              {new Date(rec.performed_at).toLocaleString()}
-              {rec.performed_by ? ` · ${rec.performed_by}` : ''}
-            </p>
-            {rec.data_carrier ? (
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                {t('disposal.dataCarrier', 'Datenträger')}: {rec.data_carrier}
-              </p>
-            ) : null}
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.disposal', 'Entsorgung')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('disposal.certificate', 'Zertifikats-Referenz')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('disposal.method', 'Methode')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('disposal.performedAt', 'Durchgeführt')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('disposal.dataCarrier', 'Datenträger')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((rec: DisposalRecord) => (
+                  <tr key={rec.id} className={trClasses}>
+                    <td className={cn(tdMonoClasses, 'font-medium')}>
+                      {rec.certificate_ref || rec.id.slice(0, 8)}
+                    </td>
+                    <td className={tdClasses}>
+                      <Badge variant="neutral">{methodLabel(rec.method)}</Badge>
+                    </td>
+                    <td className={tdClasses}>
+                      <span className="tabular-nums">
+                        {new Date(rec.performed_at).toLocaleString()}
+                      </span>
+                      {rec.performed_by ? (
+                        <span
+                          className="block max-w-[16ch] truncate text-xs text-fg-subtle"
+                          title={rec.performed_by}
+                        >
+                          {rec.performed_by}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={tdClasses}>{rec.data_carrier || '—'}</td>
+                  </tr>
+                ))}
+                {records.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={4}
+                    icon={<Recycle />}
+                    title={t('disposal.emptyTitle')}
+                    description={t('disposal.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('disposal.create', 'Entsorgung dokumentieren')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Select
             label={t('disposal.method', 'Methode')}
             value={form.method}

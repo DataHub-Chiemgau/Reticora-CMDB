@@ -3,13 +3,12 @@ import type { ComponentProps } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
-import { ScopeSwitcher } from './components/ScopeSwitcher';
-import { NotificationCenter } from './components/NotificationCenter';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
 import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
-import { Button } from './components/ui/Button';
+import { AppShell, PublicShell } from './components/shell/AppShell';
+import { NAV_GROUPS } from './components/shell/navigation';
 import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
@@ -24,10 +23,10 @@ import {
   useEntitlements,
   useModules,
 } from './hooks/useEntitlements';
-import { useEffectivePermissions } from './api/hooks';
+import { useEffectivePermissions, useHasPermission } from './api/hooks';
+import { useOpenReviewCount } from './hooks/useReviews';
 import { nextThemeMode, useThemeStore } from './stores/theme';
 import type { ThemeMode } from './stores/theme';
-import { LanguageSwitch } from './components/LanguageSwitch';
 
 // Route-level code splitting: every feature page is a separate chunk so the
 // initial bundle stays small (perceived speed, spec §8.1). Pages use named
@@ -117,14 +116,9 @@ function PageFallback() {
   );
 }
 
-const pathToPage: Record<string, AppPage> = Object.fromEntries(
-  Object.entries(pageToPath).map(([k, v]) => [v, k as AppPage]),
-);
-
 function App() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const mode = useThemeStore((state) => state.mode);
   const resolvedTheme = useThemeStore((state) => state.resolved);
@@ -132,20 +126,9 @@ function App() {
   const setMode = useThemeStore((state) => state.setMode);
   const user = useAuthStore((state) => state.user);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
-
-  const currentPage: AppPage =
-    pathToPage[location.pathname] ||
-    (Object.entries(pageToPath).find(
-      ([, path]) => path !== '/' && location.pathname.startsWith(`${path}/`),
-    )?.[0] as AppPage) ||
-    'cmdb';
-
-  const shortcutHint = useMemo(() => {
-    if (typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)) {
-      return '⌘K';
-    }
-    return 'Ctrl+K';
-  }, []);
+  // Both read only with a session (their queries are enabled by it).
+  const { isEnabled } = useEntitlements();
+  const { isPageEnabled } = useModules();
 
   // The theme toggle (header and command palette) cycles relative to the OS
   // theme: system -> opposite of the OS -> OS theme -> system, so every click
@@ -164,6 +147,7 @@ function App() {
         : themeLabels[mode],
     next: themeLabels[nextThemeMode(mode, osTheme)],
   });
+  const theme = { mode, label: themeToggleLabel, onToggle: cycleTheme };
 
   function cycleTheme() {
     setMode(nextThemeMode(mode, osTheme));
@@ -172,61 +156,6 @@ function App() {
   function handleNavigate(page: AppPage) {
     navigate(pageToPath[page] || '/cmdb');
   }
-
-  // Entitlement-gated navigation: modules the tenant's plan does not include
-  // are hidden instead of producing a 403 on click (progressive disclosure).
-  // Pages that need a permission (navPermissionFor) are filtered in
-  // PrimaryNavigation and PermittedCommandPalette (UI-12, WP-804).
-  const { isEnabled } = useEntitlements();
-  // Modules of later phases are switched off in the G1 release (WP-214):
-  // their pages are hidden whatever the plan includes.
-  const { isPageEnabled } = useModules();
-  const navItems: { page: AppPage; label: string }[] = (
-    [
-      'dashboard',
-      'cmdb',
-      'topology',
-      'map',
-      'roomplan',
-      'racks',
-      'assets',
-      'inventory',
-      'locations',
-      'saved-views',
-      'tickets',
-      'assignments',
-      'documents',
-      'stocktake',
-      'consumables',
-      'orders',
-      'maintenance',
-      'disposal',
-      'keys',
-      'trainings',
-      'desks',
-      'agents',
-      'findings',
-      'discovery',
-      'reviews',
-      'jobs',
-      'users',
-      'permissions',
-      'ci-types',
-      'slas',
-      'forms',
-      'workflows',
-      'compliance',
-      'iga',
-      'assistant',
-      'webhooks',
-      'export',
-      'monitoring',
-      'audit',
-      'security',
-    ] as AppPage[]
-  )
-    .filter((page) => isEnabled(navFeatureFor[page]) && isPageEnabled(page))
-    .map((page) => ({ page, label: t(`nav.${page}`, page) }));
 
   function openCreateCI() {
     navigate('/cmdb');
@@ -242,158 +171,183 @@ function App() {
     }
   }
 
-  return (
-    <div className="min-h-screen bg-surface text-gray-900 transition-colors dark:text-gray-100">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-white"
-      >
-        {t('accessibility.skipToContent')}
-      </a>
-      <header className="border-b border-gray-200 bg-white/90 px-6 py-4 backdrop-blur dark:border-gray-800 dark:bg-gray-950/90">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-xl font-semibold">{t('app.title')}</h1>
-            {isAuthenticated ? <ScopeSwitcher /> : null}
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            {isAuthenticated ? (
-              <PrimaryNavigation
-                items={navItems}
-                currentPage={currentPage}
-                onNavigate={handleNavigate}
-              />
-            ) : null}
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-              {isAuthenticated ? <NotificationCenter /> : null}
-              {isAuthenticated ? (
-                <span className="max-w-48 truncate">{user?.name || user?.email}</span>
-              ) : null}
-              <span>{shortcutHint}</span>
-              <LanguageSwitch />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={cycleTheme}
-                aria-label={themeToggleLabel}
-                title={themeToggleLabel}
-              >
-                <ThemeIcon mode={mode} />
-              </Button>
-              {isAuthenticated ? (
-                <Button variant="ghost" size="sm" onClick={handleLogout}>
-                  {t('auth.logout')}
-                </Button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </header>
-      {/* Expiring entitlements (ENT-07, WP-464). */}
-      {isAuthenticated ? <EntitlementExpiryBanner /> : null}
-      {/* The active metamodel draft above every page (MET-53, WP-798). */}
-      {isAuthenticated ? <DraftBanner /> : null}
-      {/* Focusable by script only: target of the skip link and of the command
-          palette after a navigation (UI-10, WP-519). */}
-      <main id="main-content" tabIndex={-1} className="p-6 outline-none">
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth/callback" element={<CallbackPage />} />
-          {/* Signup and verification run without a session (UI-17). */}
-          <Route
-            path="/onboarding"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <OnboardingPage />
-              </Suspense>
-            }
-          />
-          {/* The invitation link opens the acceptance without a session (TLC-03). */}
-          <Route
-            path="/invitations/accept"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <InvitationAcceptPage />
-              </Suspense>
-            }
-          />
-          <Route element={<RequireAuth />}>
-            <Route
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <Outlet />
-                </Suspense>
-              }
-            >
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
-              <Route path="/cmdb/:id" element={<CIDetailPage />} />
-              <Route path="/topology" element={<TopologyPage />} />
-              <Route path="/map" element={<MapPage />} />
-              <Route path="/roomplan" element={<RoomPlanPage />} />
-              <Route path="/racks" element={<RackPage />} />
-              <Route path="/discovery" element={<DiscoveryPage />} />
-              <Route path="/assets" element={<AssetListPage />} />
-              <Route path="/inventory" element={<InventoryPage />} />
-              <Route path="/locations" element={<LocationTreePage />} />
-              <Route path="/saved-views" element={<SavedViewsPage />} />
-              <Route path="/ci-types" element={<CITypeAdminPage />} />
-              <Route path="/ci-types/templates" element={<TemplatesPage />} />
-              <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
-              <Route path="/ci-types/drafts" element={<MetamodelDraftsPage />} />
-              <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
-              <Route path="/assignments" element={<AssignmentListPage />} />
-              <Route path="/documents" element={<DocumentListPage />} />
-              <Route path="/stocktake" element={<StocktakeListPage />} />
-              <Route path="/consumables" element={<ConsumableListPage />} />
-              <Route path="/orders" element={<OrderListPage />} />
-              <Route path="/maintenance" element={<MaintenancePage />} />
-              <Route path="/disposal" element={<DisposalListPage />} />
-              <Route path="/keys" element={<KeyListPage />} />
-              <Route path="/trainings" element={<TrainingListPage />} />
-              <Route path="/desks" element={<DeskListPage />} />
-              <Route path="/agents" element={<AgentListPage />} />
-              <Route path="/findings" element={<FindingsPage />} />
-              <Route path="/reviews" element={<ReviewInboxPage />} />
-              <Route path="/jobs" element={<JobCenterPage />} />
-              <Route path="/tickets" element={<TicketListPage />} />
-              <Route path="/users" element={<UserManagementPage />} />
-              <Route path="/permissions" element={<PermissionsPage />} />
-              <Route path="/slas" element={<SLAPage />} />
-              <Route path="/forms" element={<FormsPage />} />
-              <Route path="/workflows" element={<WorkflowPage />} />
-              <Route path="/compliance" element={<CompliancePage />} />
-              <Route path="/iga" element={<IGAPage />} />
-              <Route path="/assistant" element={<AssistantPage />} />
-              <Route path="/webhooks" element={<WebhooksPage />} />
-              <Route path="/export" element={<ExportPage />} />
-              <Route path="/monitoring" element={<MonitoringPage />} />
-              <Route path="/audit" element={<AuditPage />} />
-              <Route path="/security" element={<SecurityPage />} />
-              <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
-            </Route>
-          </Route>
-        </Routes>
-      </main>
+  const routes = (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/auth/callback" element={<CallbackPage />} />
+      {/* Signup and verification run without a session (UI-17). */}
+      <Route
+        path="/onboarding"
+        element={
+          <Suspense fallback={<PageFallback />}>
+            <OnboardingPage />
+          </Suspense>
+        }
+      />
+      {/* The invitation link opens the acceptance without a session (TLC-03). */}
+      <Route
+        path="/invitations/accept"
+        element={
+          <Suspense fallback={<PageFallback />}>
+            <InvitationAcceptPage />
+          </Suspense>
+        }
+      />
+      <Route element={<RequireAuth />}>
+        <Route
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Outlet />
+            </Suspense>
+          }
+        >
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
+          <Route path="/cmdb/:id" element={<CIDetailPage />} />
+          <Route path="/topology" element={<TopologyPage />} />
+          <Route path="/map" element={<MapPage />} />
+          <Route path="/roomplan" element={<RoomPlanPage />} />
+          <Route path="/racks" element={<RackPage />} />
+          <Route path="/discovery" element={<DiscoveryPage />} />
+          <Route path="/assets" element={<AssetListPage />} />
+          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/locations" element={<LocationTreePage />} />
+          <Route path="/saved-views" element={<SavedViewsPage />} />
+          <Route path="/ci-types" element={<CITypeAdminPage />} />
+          <Route path="/ci-types/templates" element={<TemplatesPage />} />
+          <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
+          <Route path="/ci-types/drafts" element={<MetamodelDraftsPage />} />
+          <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
+          <Route path="/assignments" element={<AssignmentListPage />} />
+          <Route path="/documents" element={<DocumentListPage />} />
+          <Route path="/stocktake" element={<StocktakeListPage />} />
+          <Route path="/consumables" element={<ConsumableListPage />} />
+          <Route path="/orders" element={<OrderListPage />} />
+          <Route path="/maintenance" element={<MaintenancePage />} />
+          <Route path="/disposal" element={<DisposalListPage />} />
+          <Route path="/keys" element={<KeyListPage />} />
+          <Route path="/trainings" element={<TrainingListPage />} />
+          <Route path="/desks" element={<DeskListPage />} />
+          <Route path="/agents" element={<AgentListPage />} />
+          <Route path="/findings" element={<FindingsPage />} />
+          <Route path="/reviews" element={<ReviewInboxPage />} />
+          <Route path="/jobs" element={<JobCenterPage />} />
+          <Route path="/tickets" element={<TicketListPage />} />
+          <Route path="/users" element={<UserManagementPage />} />
+          <Route path="/permissions" element={<PermissionsPage />} />
+          <Route path="/slas" element={<SLAPage />} />
+          <Route path="/forms" element={<FormsPage />} />
+          <Route path="/workflows" element={<WorkflowPage />} />
+          <Route path="/compliance" element={<CompliancePage />} />
+          <Route path="/iga" element={<IGAPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/export" element={<ExportPage />} />
+          <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/security" element={<SecurityPage />} />
+          <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
+        </Route>
+      </Route>
+    </Routes>
+  );
 
-      {isAuthenticated ? (
-        <PermittedCommandPalette
-          onNavigate={handleNavigate}
-          onCreateCI={openCreateCI}
-          onToggleDarkMode={cycleTheme}
-          themeToggleLabel={themeToggleLabel}
-          isFeatureEnabled={isEnabled}
-          isPageEnabled={isPageEnabled}
-        />
-      ) : null}
-      {isAuthenticated ? (
-        <Suspense fallback={null}>
-          <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
-        </Suspense>
-      ) : null}
+  if (!isAuthenticated) {
+    return (
+      <>
+        <PublicShell theme={theme}>{routes}</PublicShell>
+        <ToastViewport />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SignedInShell
+        theme={theme}
+        user={{ name: user?.name, email: user?.email }}
+        onSignOut={() => void handleLogout()}
+      >
+        {routes}
+      </SignedInShell>
+      <PermittedCommandPalette
+        onNavigate={handleNavigate}
+        onCreateCI={openCreateCI}
+        onToggleDarkMode={cycleTheme}
+        themeToggleLabel={themeToggleLabel}
+        isFeatureEnabled={isEnabled}
+        isPageEnabled={isPageEnabled}
+      />
+      <Suspense fallback={null}>
+        <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+      </Suspense>
       <ToastViewport />
-    </div>
+    </>
+  );
+}
+
+/**
+ * SignedInShell is the frame of the signed-in pages. It lives apart from App
+ * so that the requests it makes (entitlements, release modules, rights, open
+ * reviews) happen only with a session: the sign-in page sends none.
+ */
+function SignedInShell({
+  children,
+  theme,
+  user,
+  onSignOut,
+}: {
+  children: React.ReactNode;
+  theme: ComponentProps<typeof AppShell>['theme'];
+  user: { name?: string; email?: string };
+  onSignOut: () => void;
+}) {
+  // Entitlement-gated navigation: modules the tenant's plan does not
+  // include are hidden instead of producing a 403 on click (progressive
+  // disclosure). Modules of later phases are switched off in the G1 release
+  // (WP-214): their pages are hidden whatever the plan includes. Pages that
+  // need a permission (navPermissionFor) are filtered as well (UI-12,
+  // WP-804), so the palette and the sidebar offer the same pages.
+  const { isEnabled } = useEntitlements();
+  const { isPageEnabled } = useModules();
+  const isPermitted = usePermittedPage();
+  const visiblePages = useMemo(() => {
+    const pages = new Set<AppPage>();
+    for (const group of NAV_GROUPS) {
+      for (const { page } of group.items) {
+        if (isEnabled(navFeatureFor[page]) && isPageEnabled(page) && isPermitted(page)) {
+          pages.add(page);
+        }
+      }
+    }
+    return pages;
+  }, [isEnabled, isPageEnabled, isPermitted]);
+
+  // The inbox shows its open items beside the navigation entry. Without
+  // discovery:read the request is not made (like the dashboard widget).
+  const canReadReviews = useHasPermission('discovery:read');
+  const openReviews = useOpenReviewCount(canReadReviews === true && visiblePages.has('reviews'));
+  const counts = { reviews: openReviews.data };
+
+  return (
+    <AppShell
+      theme={theme}
+      user={user}
+      onSignOut={onSignOut}
+      visiblePages={visiblePages}
+      counts={counts}
+      banners={
+        <>
+          {/* Expiring entitlements (ENT-07, WP-464). */}
+          <EntitlementExpiryBanner />
+          {/* The active metamodel draft above every page (MET-53, WP-798). */}
+          <DraftBanner />
+        </>
+      }
+    >
+      {children}
+    </AppShell>
   );
 }
 
@@ -439,53 +393,6 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-/** ThemeIcon shows the current theme mode: sun (light), moon (dark), monitor (system). */
-function ThemeIcon({ mode }: { mode: ThemeMode }) {
-  if (mode === 'light') {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="h-4 w-4"
-        aria-hidden="true"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-      >
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2" />
-        <path d="M12 20v2" />
-        <path d="m4.93 4.93 1.41 1.41" />
-        <path d="m17.66 17.66 1.41 1.41" />
-        <path d="M2 12h2" />
-        <path d="M20 12h2" />
-        <path d="m6.34 17.66-1.41 1.41" />
-        <path d="m19.07 4.93-1.41 1.41" />
-      </svg>
-    );
-  }
-  if (mode === 'dark') {
-    return (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
-        <path d="M21 12.79A9 9 0 0 1 11.21 3c0-.34.02-.67.05-1A10 10 0 1 0 22 12c0-.05 0-.11-.01-.16-.3.63-.64.95-.99.95Z" />
-      </svg>
-    );
-  }
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-4 w-4"
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <path d="M8 21h8" />
-      <path d="M12 17v4" />
-    </svg>
-  );
-}
-
 /**
  * usePermittedPage tells whether the signed-in user holds the permission a
  * page requires (navPermissionFor, UI-12, WP-804), read from the effective
@@ -502,31 +409,6 @@ function usePermittedPage(): (page: AppPage) => boolean {
   };
 }
 
-/** PrimaryNavigation shows the navigation entries the user may use. */
-function PrimaryNavigation({
-  items,
-  currentPage,
-  onNavigate,
-}: {
-  items: { page: AppPage; label: string }[];
-  currentPage: AppPage;
-  onNavigate: (page: AppPage) => void;
-}) {
-  const { t } = useTranslation();
-  const isPermitted = usePermittedPage();
-  return (
-    <nav className="flex flex-wrap gap-2" aria-label={t('accessibility.primaryNavigation')}>
-      {items
-        .filter(({ page }) => isPermitted(page))
-        .map(({ page, label }) => (
-          <NavButton key={page} active={currentPage === page} onClick={() => onNavigate(page)}>
-            {label}
-          </NavButton>
-        ))}
-    </nav>
-  );
-}
-
 /**
  * PermittedCommandPalette passes the command palette a page predicate that
  * combines the release modules with the permission of navPermissionFor, so
@@ -539,22 +421,6 @@ function PermittedCommandPalette({
   const isPermitted = usePermittedPage();
   return (
     <CommandPalette {...props} isPageEnabled={(page) => isPageEnabled(page) && isPermitted(page)} />
-  );
-}
-
-function NavButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button variant={active ? 'primary' : 'ghost'} size="sm" onClick={onClick}>
-      {children}
-    </Button>
   );
 }
 

@@ -28,6 +28,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react';
+import { cn } from '../ui/utils';
 
 export interface SortableListProps<T> {
   items: T[];
@@ -45,7 +46,7 @@ export interface SortableListProps<T> {
 }
 
 const iconButton =
-  'inline-flex h-7 w-7 items-center justify-center rounded text-gray-600 hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800';
+  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fg-muted transition-colors hover:bg-fg/[0.06] hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none disabled:opacity-40';
 
 export function SortableList<T>({
   items,
@@ -212,12 +213,15 @@ function SortableEntry({
       ref={setNodeRef}
       style={style}
       data-sortable-index={index}
-      className={`flex items-start gap-2 py-2 ${isDragging ? 'relative z-10 rounded-lg bg-gray-50 shadow dark:bg-gray-800' : ''}`}
+      className={cn(
+        'flex items-start gap-2 py-2',
+        isDragging && 'relative z-10 rounded-lg border border-line bg-raised px-2 shadow-md',
+      )}
     >
       <button
         type="button"
         ref={setActivatorNodeRef}
-        className={`${iconButton} cursor-grab`}
+        className={cn(iconButton, 'cursor-grab touch-none active:cursor-grabbing')}
         {...attributes}
         {...listeners}
         aria-label={t('citypes.sets.sortable.handle', { name })}

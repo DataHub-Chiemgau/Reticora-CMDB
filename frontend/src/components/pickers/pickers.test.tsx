@@ -387,7 +387,7 @@ describe('LocationPicker', () => {
     fireEvent.change(screen.getByLabelText('Lagerplatz filtern'), { target: { value: 'raum' } });
 
     const names = screen.getAllByRole('treeitem').map((item) => item.firstChild?.textContent);
-    expect(names).toEqual(['▾Werk NordStandort', '▾HalleGebäude', 'Raum 1Raum']);
+    expect(names).toEqual(['Werk NordStandort', 'HalleGebäude', 'Raum 1Raum']);
     fireEvent.click(screen.getByRole('treeitem', { name: /Raum 1/ }));
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'room-1', path: ['Werk Nord', 'Halle', 'Raum 1'] }),

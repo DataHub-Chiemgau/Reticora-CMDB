@@ -7,6 +7,7 @@
  * drop, keyboard or the buttons of SortableList) the editor saves the changed
  * values by PATCH and reads the list again. A system set is read-only.
  */
+import { Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { localizedText, type AttributeDefinition, type AttributeSet } from '../../api/cmdb';
@@ -16,7 +17,7 @@ import {
   useSetAttributeDefinitions,
 } from '../../api/cmdbHooks';
 import { Badge } from '../ui/Badge';
-import { Button } from '../ui/Button';
+import { Button, IconButton } from '../ui/Button';
 import { ErrorState } from '../ui/ErrorState';
 import { SkeletonList } from '../ui/Skeleton';
 import {
@@ -80,38 +81,33 @@ export function AttributeSetEditor({ set, onClose }: AttributeSetEditorProps) {
 
   const headingId = `attribute-set-editor-${set.id}`;
   return (
-    <div
-      role="region"
-      aria-labelledby={headingId}
-      className="mt-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700"
-    >
+    <div role="region" aria-labelledby={headingId} className="mt-4 border-t border-line pt-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 id={headingId} className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+        <h4 id={headingId} className="text-sm font-semibold text-fg">
           {t('citypes.sets.editorTitle', { name: setName })}
         </h4>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {!readOnly ? (
             <Button
               size="sm"
               variant="secondary"
+              icon={<Plus />}
               onClick={() => setEditor({ mode: 'create', scope: 'set', attributeSetId: set.id })}
             >
               {t('citypes.sets.addAttribute')}
             </Button>
           ) : null}
           {onClose ? (
-            <Button size="sm" variant="ghost" onClick={onClose}>
+            <Button size="sm" variant="ghost" icon={<X />} onClick={onClose}>
               {t('citypes.sets.closeEditor')}
             </Button>
           ) : null}
         </div>
       </div>
       {readOnly ? (
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-          {t('citypes.sets.systemReadOnly')}
-        </p>
+        <p className="mt-2 text-sm text-fg-muted">{t('citypes.sets.systemReadOnly')}</p>
       ) : (
-        <p className="mt-2 text-xs text-muted">{t('citypes.sets.orderHint')}</p>
+        <p className="mt-2 text-xs text-fg-muted">{t('citypes.sets.orderHint')}</p>
       )}
       {query?.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
       {query?.error ? (
@@ -122,12 +118,12 @@ export function AttributeSetEditor({ set, onClose }: AttributeSetEditorProps) {
         />
       ) : null}
       {reorder.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {t('citypes.sets.reorderFailed', { reason: describeFlagRefusal(reorder.error, t) })}
         </p>
       ) : null}
       {deleteDefinition.error ? (
-        <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-2 text-sm text-danger">
           {t('citypes.attributes.deleteFailed', {
             name: deleteDefinition.variables?.key,
             reason: describeFlagRefusal(deleteDefinition.error, t),
@@ -135,7 +131,7 @@ export function AttributeSetEditor({ set, onClose }: AttributeSetEditorProps) {
         </p>
       ) : null}
       {query?.isSuccess && list.length === 0 ? (
-        <p className="mt-2 text-sm text-muted">{t('citypes.sets.noAttributes')}</p>
+        <p className="mt-2 text-sm text-fg-muted">{t('citypes.sets.noAttributes')}</p>
       ) : null}
       <SortableList
         items={list}
@@ -144,18 +140,20 @@ export function AttributeSetEditor({ set, onClose }: AttributeSetEditorProps) {
         onReorder={onReorder}
         disabled={readOnly}
         label={t('citypes.sets.attributesLabel', { name: setName })}
-        className="mt-2 divide-y divide-gray-100 dark:divide-gray-800"
+        className="mt-2 divide-y divide-line"
         renderItem={(d) => (
           <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
             <div className="min-w-0 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{nameOf(d)}</span>
-                {nameOf(d) !== d.key ? <span className="text-xs text-muted">{d.key}</span> : null}
-                <span className="text-xs text-muted">
+                <span className="font-medium text-fg">{nameOf(d)}</span>
+                {nameOf(d) !== d.key ? (
+                  <span className="font-mono text-xs text-fg-muted">{d.key}</span>
+                ) : null}
+                <span className="text-xs text-fg-muted">
                   {t(`citypes.dataTypes.${d.data_type}`, d.data_type)}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {d.required ? <Badge variant="warning">{t('citypes.flagRequired')}</Badge> : null}
                 {d.searchable ? (
                   <Badge variant="neutral">{t('citypes.flagSearchable')}</Badge>
@@ -167,23 +165,20 @@ export function AttributeSetEditor({ set, onClose }: AttributeSetEditorProps) {
               </div>
             </div>
             {!readOnly && !d.is_system ? (
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:underline"
-                  aria-label={t('citypes.editFieldAction', { name: d.key })}
+              <div className="flex items-center gap-1">
+                <IconButton
+                  size="sm"
+                  icon={<Pencil />}
+                  label={t('citypes.editFieldAction', { name: d.key })}
                   onClick={() => setEditor({ mode: 'edit', definition: d })}
-                >
-                  {t('common.edit')}
-                </button>
-                <button
-                  type="button"
-                  className="text-xs text-danger hover:underline"
-                  aria-label={t('citypes.deleteFieldAction', { name: d.key })}
+                />
+                <IconButton
+                  size="sm"
+                  icon={<Trash2 />}
+                  label={t('citypes.deleteFieldAction', { name: d.key })}
+                  className="hover:text-danger"
                   onClick={() => remove(d)}
-                >
-                  {t('common.delete')}
-                </button>
+                />
               </div>
             ) : null}
           </div>

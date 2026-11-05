@@ -14,6 +14,7 @@
  * draft; 413 and 422 show the problem detail with the conflict report and
  * the trace id.
  */
+import { Download, Upload } from 'lucide-react';
 import { useRef, useState, type ChangeEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -144,7 +145,8 @@ export function MetamodelTransfer() {
         <Button
           size="sm"
           variant="secondary"
-          disabled={exportMetamodel.isPending}
+          icon={<Download />}
+          loading={exportMetamodel.isPending}
           onClick={runExport}
         >
           {t('templates.transfer.export')}
@@ -154,7 +156,8 @@ export function MetamodelTransfer() {
             <Button
               size="sm"
               variant="secondary"
-              disabled={importMetamodel.isPending}
+              icon={<Upload />}
+              loading={importMetamodel.isPending}
               onClick={() => fileInput.current?.click()}
             >
               {t('templates.transfer.import')}
@@ -178,12 +181,12 @@ export function MetamodelTransfer() {
         />
       ) : null}
       {fileError ? (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="text-sm text-danger">
           {fileError}
         </p>
       ) : null}
       {unchanged ? (
-        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {t('templates.transfer.unchanged')}
         </p>
       ) : null}
@@ -208,9 +211,9 @@ export function ImportReportNotice() {
   return (
     <section
       aria-label={t('templates.transfer.reportTitle')}
-      className="rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700"
+      className="rounded-xl border border-line bg-panel p-4 text-sm text-fg"
     >
-      <h3 className="font-semibold">{t('templates.transfer.reportTitle')}</h3>
+      <h3 className="text-base font-semibold text-fg">{t('templates.transfer.reportTitle')}</h3>
       <ImportReportView report={report} />
     </section>
   );
@@ -225,7 +228,7 @@ export function ImportReportView({ report }: { report: MetamodelImportReport }) 
     <div className="mt-2 space-y-2">
       {report.conflicts.length > 0 ? (
         <div>
-          <h4 className="font-medium">{t('templates.transfer.conflicts')}</h4>
+          <h4 className="font-medium text-fg">{t('templates.transfer.conflicts')}</h4>
           <ul aria-label={t('templates.transfer.conflicts')} className="list-disc pl-5">
             {report.conflicts.map((c, i) => (
               <li key={`${c.code}-${c.kind}-${c.key}-${i}`}>
@@ -239,7 +242,7 @@ export function ImportReportView({ report }: { report: MetamodelImportReport }) 
       ) : null}
       {changed.length > 0 ? (
         <div>
-          <h4 className="font-medium">{t('templates.transfer.items')}</h4>
+          <h4 className="font-medium text-fg">{t('templates.transfer.items')}</h4>
           <ul aria-label={t('templates.transfer.items')} className="list-disc pl-5">
             {changed.map((item, i) => (
               <li key={`${item.kind}-${item.key}-${i}`}>
@@ -252,7 +255,7 @@ export function ImportReportView({ report }: { report: MetamodelImportReport }) 
       ) : null}
       {report.notes.length > 0 ? (
         <div>
-          <h4 className="font-medium">{t('templates.transfer.notes')}</h4>
+          <h4 className="font-medium text-fg">{t('templates.transfer.notes')}</h4>
           <ul aria-label={t('templates.transfer.notes')} className="list-disc pl-5">
             {report.notes.map((n, i) => (
               <li key={`${n.code}-${n.kind}-${n.key}-${i}`}>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { X } from 'lucide-react';
 import { ApiError } from '../../api/client';
 import { useTeamList, useUserList } from '../../api/hooks';
 import {
@@ -8,6 +9,7 @@ import {
   accessErrorMessage,
   useDebouncedValue,
 } from './ObjectPicker';
+import { IconButton } from '../ui/Button';
 
 export type HolderKind = 'user' | 'team';
 
@@ -100,19 +102,16 @@ export function UserTeamPicker({
         notice={notice}
       />
       {value ? (
-        <p className="flex items-center gap-2 text-sm">
-          <span className="text-xs text-gray-600 dark:text-gray-300">
-            {t(`pickers.holderKinds.${value.kind}`)}
-          </span>
+        <p className="flex w-fit items-center gap-2 rounded-lg border border-line bg-panel py-0.5 pl-3 pr-1 text-sm text-fg">
+          <span className="text-xs text-fg-muted">{t(`pickers.holderKinds.${value.kind}`)}</span>
           <span className="font-medium">{value.name}</span>
-          <button
-            type="button"
-            aria-label={t('pickers.remove', { name: value.name })}
+          <IconButton
+            size="sm"
+            icon={<X />}
+            label={t('pickers.remove', { name: value.name })}
             onClick={() => onChange(null)}
-            className="rounded px-1 text-gray-600 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:text-gray-300 dark:hover:text-white"
-          >
-            ✕
-          </button>
+            className="h-6 w-6"
+          />
         </p>
       ) : null}
     </div>

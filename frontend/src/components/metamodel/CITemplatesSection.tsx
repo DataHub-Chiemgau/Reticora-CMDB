@@ -13,6 +13,7 @@
  * (E-105); otherwise it renders nothing and reads nothing, so users without
  * the right never see the word "template" (UI-12).
  */
+import { Plus, Rocket, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
@@ -125,8 +126,8 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
   };
 
   return (
-    <details className="rounded-lg border border-gray-200 dark:border-gray-700">
-      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+    <details className="rounded-xl border border-line bg-panel">
+      <summary className="cursor-pointer select-none rounded-xl px-4 py-3 text-sm font-semibold text-fg transition-colors hover:bg-fg/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
         {t('templates.ciSection.title')}
         {assigned.data ? (
           <Badge variant="neutral" className="ml-2">
@@ -134,14 +135,14 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
           </Badge>
         ) : null}
       </summary>
-      <div className="space-y-3 border-t border-gray-200 px-4 py-3 dark:border-gray-700">
-        <p className="text-xs text-muted">{t('templates.ciSection.hint')}</p>
+      <div className="space-y-3 border-t border-line px-4 py-4">
+        <p className="text-xs text-fg-muted">{t('templates.ciSection.hint')}</p>
         {assigned.isLoading ? <SkeletonList rows={2} label={t('app.loading')} /> : null}
         {assigned.error ? (
           <ProblemNotice error={assigned.error} prefix={t('templates.ciSection.loadError')} />
         ) : null}
         {assigned.isSuccess && shown.length === 0 ? (
-          <p className="text-sm text-muted">{t('templates.ciSection.empty')}</p>
+          <p className="text-sm text-fg-muted">{t('templates.ciSection.empty')}</p>
         ) : null}
         {shown.length > 0 ? (
           <SortableList
@@ -150,7 +151,7 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
             getName={nameOf}
             label={t('templates.ciSection.listLabel')}
             disabled={!canWrite}
-            className="divide-y divide-gray-100 dark:divide-gray-800"
+            className="divide-y divide-line"
             onReorder={(next) => setEntries(next)}
             renderItem={(entry, index) => {
               const tpl = byId.get(entry.template_id);
@@ -158,40 +159,44 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
               const errors = violationsAt(index);
               return (
                 <div className="space-y-1 text-sm" data-template-key={entry.key}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{nameOf(entry)}</span>
-                    <span className="text-xs text-muted">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-medium text-fg">{nameOf(entry)}</span>
+                    <span className="text-xs text-fg-muted">
                       {t('templates.ciSection.entryMeta', {
                         version: entry.version,
                         position: index + 1,
                       })}
                     </span>
                     {!dirty && tpl && current != null && current > entry.version ? (
-                      <button
-                        type="button"
-                        className="text-xs text-primary hover:underline"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<Rocket />}
+                        className="text-accent hover:text-accent-strong"
                         onClick={() =>
                           setMigrate({ template: tpl, from: entry.version, to: current })
                         }
                       >
                         {t('templates.ciSection.migrate', { version: current })}
-                      </button>
+                      </Button>
                     ) : null}
                     {canWrite ? (
-                      <button
-                        type="button"
-                        className="text-xs text-red-600 hover:underline dark:text-red-400"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon={<X />}
+                        className="text-danger hover:text-danger"
                         aria-label={t('templates.ciSection.removeAction', { name: nameOf(entry) })}
                         onClick={() =>
                           setEntries(shown.filter((e) => e.template_id !== entry.template_id))
                         }
                       >
                         {t('templates.ciSection.remove')}
-                      </button>
+                      </Button>
                     ) : null}
                   </div>
                   {errors.map((v, i) => (
-                    <p key={i} className="text-xs text-red-600 dark:text-red-400">
+                    <p key={i} className="text-xs text-danger">
                       {v.detail}
                     </p>
                   ))}
@@ -204,11 +209,11 @@ function TemplatesBody({ ciId, ciTypeId, version }: CITemplatesSectionProps) {
         {canWrite ? (
           <AddTemplate candidates={candidates} onAdd={(entry) => setEntries([...shown, entry])} />
         ) : (
-          <p className="text-xs text-muted">{t('templates.ciSection.needsWrite')}</p>
+          <p className="text-xs text-fg-muted">{t('templates.ciSection.needsWrite')}</p>
         )}
 
         {reloaded ? (
-          <p role="status" className="text-sm text-amber-700 dark:text-amber-300">
+          <p role="status" className="text-sm text-amber-800 dark:text-amber-300">
             {t('templates.ciSection.reloaded')}
           </p>
         ) : null}
@@ -302,8 +307,8 @@ function AddTemplate({
         />
       </div>
       <Button
-        size="sm"
         variant="secondary"
+        icon={<Plus />}
         disabled={!chosen || !selectedVersion}
         onClick={() => {
           if (!chosen || !selectedVersion) return;

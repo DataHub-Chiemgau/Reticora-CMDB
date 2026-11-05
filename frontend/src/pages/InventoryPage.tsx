@@ -1,4 +1,22 @@
-import { useState } from 'react';
+import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
+  Boxes,
+  CircleDot,
+  Lock,
+  LockOpen,
+  Pencil,
+  Plus,
+  Recycle,
+  Rocket,
+  Undo2,
+  UserCheck,
+  Warehouse,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
@@ -18,6 +36,21 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Toolbar } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 /** The eleven movement types of the ledger (STK-04, WP-274). */
 export const MOVEMENT_TYPES = [
@@ -47,25 +80,26 @@ export const BOOKABLE_TYPES = {
 
 type ObjectKind = keyof typeof BOOKABLE_TYPES;
 
-const MOVEMENT_ICONS: Record<string, string> = {
-  receipt: '📥',
-  transfer: '🔄',
-  assignment: '👤',
-  return: '↩️',
-  deployment: '🚀',
-  retrieval: '📤',
-  reservation: '🔒',
-  release: '🔓',
-  repair: '🔧',
-  disposal: '🗑️',
-  correction: '✏️',
+const MOVEMENT_ICONS: Record<string, LucideIcon> = {
+  receipt: ArrowDownToLine,
+  transfer: ArrowLeftRight,
+  assignment: UserCheck,
+  return: Undo2,
+  deployment: Rocket,
+  retrieval: ArrowUpFromLine,
+  reservation: Lock,
+  release: LockOpen,
+  repair: Wrench,
+  disposal: Recycle,
+  correction: Pencil,
 };
+
+type InventoryTab = 'movements' | 'items' | 'reservations' | 'availability';
 
 export function InventoryPage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<'movements' | 'items' | 'reservations' | 'availability'>(
-    'movements',
-  );
+  const [tab, setTab] = useState<InventoryTab>('movements');
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [typeFilter, setTypeFilter] = useState('');
   const [showMove, setShowMove] = useState(false);
   const [moveDraft, setMoveDraft] = useState<{
@@ -115,54 +149,92 @@ export function InventoryPage() {
     { id: 'availability', label: t('inventory.availability', 'Verfügbarkeit') },
   ] as const;
 
+  /** Arrow keys, Home and End move between the tabs (WAI-ARIA tabs pattern). */
+  function onTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = tabs.length - 1;
+    const next =
+      event.key === 'ArrowRight'
+        ? (index + 1) % tabs.length
+        : event.key === 'ArrowLeft'
+          ? (index + last) % tabs.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : null;
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    const target = tabs[next]!;
+    setTab(target.id);
+    tabRefs.current[target.id]?.focus();
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('inventory.title', 'Inventar')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t(
-              'inventory.subtitle',
-              'Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit.',
-            )}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowMove(true)}>
-          {t('inventory.record', 'Bewegung erfassen')}
-        </Button>
+      <PageHeader
+        title={t('inventory.title', 'Inventar')}
+        description={t(
+          'inventory.subtitle',
+          'Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit.',
+        )}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowMove(true)}>
+            {t('inventory.record', 'Bewegung erfassen')}
+          </Button>
+        }
+      />
+
+      <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-line">
+        {tabs.map((tb, index) => {
+          const selected = tab === tb.id;
+          return (
+            <button
+              key={tb.id}
+              ref={(node) => {
+                tabRefs.current[tb.id] = node;
+              }}
+              type="button"
+              role="tab"
+              id={`inventory-tab-${tb.id}`}
+              aria-selected={selected}
+              aria-controls="inventory-panel"
+              tabIndex={selected ? 0 : -1}
+              onClick={() => setTab(tb.id)}
+              onKeyDown={(event) => onTabKeyDown(event, index)}
+              className={cn(
+                '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+                selected
+                  ? 'border-accent text-fg'
+                  : 'border-transparent text-fg-muted hover:text-fg',
+              )}
+            >
+              {tb.label}
+            </button>
+          );
+        })}
       </div>
 
-      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {tabs.map((tb) => (
-          <button
-            key={tb.id}
-            onClick={() => setTab(tb.id)}
-            className={`px-4 py-2 text-sm font-medium ${tab === tb.id ? 'border-b-2 border-primary text-primary' : 'text-muted'}`}
-          >
-            {tb.label}
-          </button>
-        ))}
+      <div role="tabpanel" id="inventory-panel" aria-labelledby={`inventory-tab-${tab}`}>
+        {tab === 'movements' ? (
+          <MovementsTab
+            movements={movements}
+            typeFilter={typeFilter}
+            setTypeFilter={setTypeFilter}
+            t={t}
+          />
+        ) : null}
+        {tab === 'items' ? <ItemsTab items={items} t={t} /> : null}
+        {tab === 'reservations' ? (
+          <ReservationsTab
+            reservations={reservations}
+            onRelease={(id: string) => releaseReservation.mutate(id)}
+            t={t}
+          />
+        ) : null}
+        {tab === 'availability' ? <AvailabilityTab availability={availability} t={t} /> : null}
       </div>
-
-      {tab === 'movements' ? (
-        <MovementsTab
-          movements={movements}
-          typeFilter={typeFilter}
-          setTypeFilter={setTypeFilter}
-          t={t}
-        />
-      ) : null}
-      {tab === 'items' ? <ItemsTab items={items} t={t} /> : null}
-      {tab === 'reservations' ? (
-        <ReservationsTab
-          reservations={reservations}
-          onRelease={(id: string) => releaseReservation.mutate(id)}
-          t={t}
-        />
-      ) : null}
-      {tab === 'availability' ? <AvailabilityTab availability={availability} t={t} /> : null}
 
       <Modal
         open={showMove}
@@ -170,7 +242,7 @@ export function InventoryPage() {
         title={t('inventory.record', 'Bewegung erfassen')}
       >
         <form
-          className="space-y-3"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             record.mutate();
@@ -199,7 +271,7 @@ export function InventoryPage() {
             label={t('inventory.movementType', 'Bewegungsart')}
             options={bookable.map((mt) => ({
               value: mt,
-              label: `${MOVEMENT_ICONS[mt] ?? ''} ${mt}`,
+              label: mt,
             }))}
             value={moveDraft.movement_type}
             onChange={(e) => setMoveDraft({ ...moveDraft, movement_type: e.target.value })}
@@ -245,6 +317,12 @@ export function InventoryPage() {
   );
 }
 
+/** MovementIcon shows the kind of a movement as a small glyph before its label. */
+function MovementIcon({ type }: { type: string }) {
+  const Icon = MOVEMENT_ICONS[type] ?? CircleDot;
+  return <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-fg-subtle" />;
+}
+
 function MovementsTab({
   movements,
   typeFilter,
@@ -256,9 +334,10 @@ function MovementsTab({
   setTypeFilter: (v: string) => void;
   t: TFunction;
 }) {
+  const rows = movements.data?.data ?? [];
   return (
-    <Card>
-      <div className="mb-3">
+    <div className="space-y-4">
+      <Toolbar>
         <Select
           aria-label="type"
           options={[
@@ -267,66 +346,151 @@ function MovementsTab({
           ]}
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="max-w-xs"
+          className="w-48"
         />
-      </div>
-      {movements.isLoading ? <SkeletonList rows={5} label="…" /> : null}
+      </Toolbar>
+      {movements.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {movements.error ? (
         <ErrorState
           title={t('app.error')}
+          description={movements.error instanceof Error ? movements.error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void movements.refetch()}
         />
       ) : null}
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-        {(movements.data?.data ?? []).map((m) => (
-          <li key={m.id} className="flex items-center gap-3 py-2 text-sm">
-            <span aria-hidden>{MOVEMENT_ICONS[m.movement_type] ?? '•'}</span>
-            <span className="font-medium">{m.movement_type}</span>
-            <span className="text-muted">
-              {m.asset_id ?? m.quantity_item_id ?? m.consumable_id}
-            </span>
-            {m.consumable_id ? <Badge variant="neutral">{m.item_kind}</Badge> : null}
-            {m.quantity ? <Badge variant="neutral">×{m.quantity}</Badge> : null}
-            {m.reason ? <span className="text-muted">{m.reason}</span> : null}
-            <span className="ml-auto text-xs text-muted">
-              <time dateTime={m.occurred_at}>{new Date(m.occurred_at).toLocaleString()}</time>
-            </span>
-          </li>
-        ))}
-        {(movements.data?.data ?? []).length === 0 && !movements.isLoading ? (
-          <li className="py-4 text-center text-sm text-muted">
-            {t('inventory.noMovements', 'Keine Bewegungen.')}
-          </li>
-        ) : null}
-      </ul>
-    </Card>
+      {movements.data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('inventory.movements', 'Bewegungen')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.movementType', 'Bewegungsart')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.item', 'Artikel')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.quantity', 'Menge')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.reason', 'Grund')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.occurredAt')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((m) => (
+                  <tr key={m.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>
+                      <span className="inline-flex items-center gap-2">
+                        <MovementIcon type={m.movement_type} />
+                        {m.movement_type}
+                      </span>
+                    </td>
+                    <td className={tdMonoClasses}>
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span>{m.asset_id ?? m.quantity_item_id ?? m.consumable_id}</span>
+                        {m.consumable_id ? <Badge variant="neutral">{m.item_kind}</Badge> : null}
+                      </span>
+                    </td>
+                    <td className={tdNumericClasses}>{m.quantity ? m.quantity : '—'}</td>
+                    <td className={tdClasses}>{m.reason || '—'}</td>
+                    <td className={cn(tdClasses, 'whitespace-nowrap text-right tabular-nums')}>
+                      <time dateTime={m.occurred_at}>
+                        {new Date(m.occurred_at).toLocaleString()}
+                      </time>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={5}
+                    icon={<ArrowLeftRight />}
+                    title={typeFilter ? t('common.noResults') : t('inventory.emptyMovementsTitle')}
+                    description={
+                      typeFilter ? t('common.noResultsHint') : t('inventory.emptyMovementsHint')
+                    }
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 
 function ItemsTab({ items, t }: { items: ReturnType<typeof useQuantityItems>; t: TFunction }) {
+  const rows = items.data?.data ?? [];
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-      {items.isLoading ? <SkeletonList rows={4} label="…" /> : null}
-      {(items.data?.data ?? []).map((it) => (
-        <Card
-          key={it.id}
-          title={it.name}
-          actions={
-            it.stock_level <= it.min_level ? (
-              <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
-            ) : (
-              <Badge variant="success">OK</Badge>
-            )
-          }
-        >
-          <p className="text-sm text-gray-600 dark:text-gray-300">{it.sku || '—'}</p>
-          <p className="mt-1 text-lg font-semibold">
-            {it.stock_level} {it.unit}{' '}
-            <span className="text-xs font-normal text-muted">/ min {it.min_level}</span>
-          </p>
+    <div className="space-y-4">
+      {items.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
+      {items.error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={items.error instanceof Error ? items.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void items.refetch()}
+        />
+      ) : null}
+      {items.data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('inventory.items', 'Mengenartikel')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('common.name', 'Name')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    SKU
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('consumables.stock')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('consumables.minLevel', 'Mindestbestand')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((it) => (
+                  <tr key={it.id} className={trClasses}>
+                    <td className={tdPrimaryClasses}>{it.name}</td>
+                    <td className={tdMonoClasses}>{it.sku || '—'}</td>
+                    <td className={cn(tdNumericClasses, 'whitespace-nowrap text-fg')}>
+                      {it.stock_level} {it.unit}
+                    </td>
+                    <td className={tdNumericClasses}>{it.min_level}</td>
+                    <td className={tdClasses}>
+                      {it.stock_level <= it.min_level ? (
+                        <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
+                      ) : (
+                        <Badge variant="success">{t('consumables.ok', 'OK')}</Badge>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={5}
+                    icon={<Boxes />}
+                    title={t('inventory.emptyItemsTitle')}
+                    description={t('inventory.emptyItemsHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
         </Card>
-      ))}
+      ) : null}
     </div>
   );
 }
@@ -340,38 +504,80 @@ function ReservationsTab({
   onRelease: (id: string) => void;
   t: TFunction;
 }) {
+  const rows = reservations.data?.data ?? [];
   return (
-    <Card>
-      {reservations.isLoading ? <SkeletonList rows={4} label="…" /> : null}
-      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-        {(reservations.data?.data ?? []).map((r) => (
-          <li key={r.id} className="flex items-center gap-3 py-2 text-sm">
-            <span aria-hidden>🔒</span>
-            <span className="font-medium">{r.asset_id ?? r.consumable_id}</span>
-            {r.item_kind === 'consumable' && r.location_id ? (
-              <span className="text-xs text-muted">
-                {t('locations.kinds.bin', 'Fach')} {r.location_id.slice(0, 8)}…
-              </span>
-            ) : null}
-            {r.quantity > 1 ? <Badge variant="neutral">×{r.quantity}</Badge> : null}
-            {r.project_ref ? <Badge variant="info">{r.project_ref}</Badge> : null}
-            {r.expires_at ? (
-              <span className="text-xs text-muted">
-                bis {new Date(r.expires_at).toLocaleDateString()}
-              </span>
-            ) : null}
-            <Button size="sm" variant="ghost" className="ml-auto" onClick={() => onRelease(r.id)}>
-              {t('inventory.release', 'Freigeben')}
-            </Button>
-          </li>
-        ))}
-        {(reservations.data?.data ?? []).length === 0 && !reservations.isLoading ? (
-          <li className="py-4 text-center text-sm text-muted">
-            {t('inventory.noReservations', 'Keine aktiven Reservierungen.')}
-          </li>
-        ) : null}
-      </ul>
-    </Card>
+    <div className="space-y-4">
+      {reservations.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
+      {reservations.error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={reservations.error instanceof Error ? reservations.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void reservations.refetch()}
+        />
+      ) : null}
+      {reservations.data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('inventory.reservations', 'Reservierungen')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.item', 'Artikel')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.quantity', 'Menge')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.project')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.expiresAt')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className={trClasses}>
+                    <td className={tdMonoClasses}>
+                      <span className="font-medium">{r.asset_id ?? r.consumable_id}</span>
+                      {r.item_kind === 'consumable' && r.location_id ? (
+                        <span className="block text-fg-muted">
+                          {t('locations.kinds.bin', 'Fach')} {r.location_id.slice(0, 8)}…
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className={tdNumericClasses}>{r.quantity}</td>
+                    <td className={tdClasses}>
+                      {r.project_ref ? <Badge variant="info">{r.project_ref}</Badge> : '—'}
+                    </td>
+                    <td className={cn(tdClasses, 'whitespace-nowrap tabular-nums')}>
+                      {r.expires_at ? new Date(r.expires_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td className={cn(tdClasses, 'text-right')}>
+                      <Button size="sm" variant="secondary" onClick={() => onRelease(r.id)}>
+                        {t('inventory.release', 'Freigeben')}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={5}
+                    icon={<Lock />}
+                    title={t('inventory.emptyReservationsTitle')}
+                    description={t('inventory.emptyReservationsHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 
@@ -382,38 +588,73 @@ function AvailabilityTab({
   availability: ReturnType<typeof useAvailability>;
   t: TFunction;
 }) {
+  const rows = availability.data?.data ?? [];
   return (
-    <Card>
-      {availability.isLoading ? <SkeletonList rows={4} label="…" /> : null}
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs uppercase text-muted">
-            <th className="py-2">{t('inventory.item', 'Artikel')}</th>
-            <th>{t('inventory.total', 'Gesamt')}</th>
-            <th>{t('inventory.available', 'Verfügbar')}</th>
-            <th>{t('inventory.reserved', 'Reserviert')}</th>
-            <th>{t('inventory.assigned', 'Zugewiesen')}</th>
-            <th>{t('inventory.repair', 'Reparatur')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(availability.data?.data ?? []).map((a) => (
-            <tr
-              key={`${a.item_kind}-${a.item_id}`}
-              className="border-t border-gray-100 dark:border-gray-800"
-            >
-              <td className="py-2 font-medium">
-                {a.item_id.slice(0, 8)}… <Badge variant="neutral">{a.item_kind}</Badge>
-              </td>
-              <td>{a.total}</td>
-              <td className="text-green-600">{a.available}</td>
-              <td className="text-amber-600">{a.reserved}</td>
-              <td>{a.assigned}</td>
-              <td>{a.repair}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <div className="space-y-4">
+      {availability.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
+      {availability.error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={availability.error instanceof Error ? availability.error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void availability.refetch()}
+        />
+      ) : null}
+      {availability.data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('inventory.availability', 'Verfügbarkeit')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('inventory.item', 'Artikel')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.total', 'Gesamt')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.available', 'Verfügbar')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.reserved', 'Reserviert')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.assigned', 'Zugewiesen')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('inventory.repair', 'Reparatur')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((a) => (
+                  <tr key={`${a.item_kind}-${a.item_id}`} className={trClasses}>
+                    <td className={tdMonoClasses}>
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span>{a.item_id.slice(0, 8)}…</span>
+                        <Badge variant="neutral">{a.item_kind}</Badge>
+                      </span>
+                    </td>
+                    <td className={tdNumericClasses}>{a.total}</td>
+                    <td className={cn(tdNumericClasses, 'font-medium text-fg')}>{a.available}</td>
+                    <td className={tdNumericClasses}>{a.reserved}</td>
+                    <td className={tdNumericClasses}>{a.assigned}</td>
+                    <td className={tdNumericClasses}>{a.repair}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<Warehouse />}
+                    title={t('inventory.emptyAvailabilityTitle')}
+                    description={t('inventory.emptyAvailabilityHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
+    </div>
   );
 }

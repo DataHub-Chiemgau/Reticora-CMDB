@@ -5,6 +5,8 @@ interface EmptyStateProps {
   title: string;
   description?: string;
   action?: ReactNode;
+  /** A 20px icon that hints at what would be here. */
+  icon?: ReactNode;
   className?: string;
 }
 
@@ -12,19 +14,25 @@ interface EmptyStateProps {
  * EmptyState explains why a view has no content and offers the next step,
  * instead of leaving the user in front of an empty table.
  */
-export function EmptyState({ title, description, action, className }: EmptyStateProps) {
+export function EmptyState({ title, description, action, icon, className }: EmptyStateProps) {
   return (
     <div
       className={cn(
-        'flex flex-col items-center gap-2 rounded-2xl border border-dashed border-gray-300 px-6 py-12 text-center dark:border-gray-700',
+        'flex flex-col items-center gap-1.5 rounded-xl border border-dashed border-line-strong px-6 py-12 text-center',
         className,
       )}
     >
-      <p className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</p>
-      {description ? (
-        <p className="max-w-md text-sm text-gray-600 dark:text-gray-300">{description}</p>
+      {icon ? (
+        <span
+          aria-hidden="true"
+          className="mb-2 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-panel text-fg-muted [&_svg]:h-5 [&_svg]:w-5"
+        >
+          {icon}
+        </span>
       ) : null}
-      {action ? <div className="mt-2">{action}</div> : null}
+      <p className="text-base font-semibold text-fg">{title}</p>
+      {description ? <p className="max-w-md text-sm text-fg-muted">{description}</p> : null}
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
   );
 }

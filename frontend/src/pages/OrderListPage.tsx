@@ -1,3 +1,4 @@
+import { Plus, ShoppingCart } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -10,6 +11,20 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdNumericClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { ScrollRegion } from '../components/ScrollRegion';
+import { TableEmptyRow } from './ListParts';
 
 function statusVariant(status: string): 'neutral' | 'warning' | 'success' | 'danger' | 'info' {
   switch (status) {
@@ -54,73 +69,121 @@ export function OrderListPage() {
   const approveMutation = useMutation({ mutationFn: orderApi.approve, onSuccess: invalidate });
   const rejectMutation = useMutation({ mutationFn: orderApi.reject, onSuccess: invalidate });
 
+  const orders = data?.data ?? [];
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            {t('nav.orders', 'Bestellungen')}
-          </h2>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-            {t('orders.summary', 'Interne Bestellungen mit Genehmigungs-Workflow.')}
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          {t('orders.create', 'Bestellung anlegen')}
-        </Button>
-      </div>
+      <PageHeader
+        title={t('nav.orders', 'Bestellungen')}
+        description={t('orders.summary', 'Interne Bestellungen mit Genehmigungs-Workflow.')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('orders.create', 'Bestellung anlegen')}
+          </Button>
+        }
+      />
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
       {error ? (
         <ErrorState
           title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
       ) : null}
 
-      <div className="space-y-3">
-        {(data?.data ?? []).map((o: Order) => (
-          <Card
-            key={o.id}
-            title={`${o.order_number} — ${o.title}`}
-            actions={
-              <Badge variant={statusVariant(o.status)}>
-                {t(`orders.statuses.${o.status}`, o.status)}
-              </Badge>
-            }
-          >
-            <p className="text-sm text-gray-600 dark:text-gray-300">{o.supplier || '—'}</p>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              {o.items?.length ?? 0} {t('orders.positions', 'Positionen')}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {o.status === 'draft' ? (
-                <Button size="sm" variant="secondary" onClick={() => submitMutation.mutate(o.id)}>
-                  {t('orders.submit', 'Einreichen')}
-                </Button>
-              ) : null}
-              {o.status === 'submitted' ? (
-                <>
-                  <Button size="sm" onClick={() => approveMutation.mutate(o.id)}>
-                    {t('orders.approve', 'Genehmigen')}
-                  </Button>
-                  <Button size="sm" variant="danger" onClick={() => rejectMutation.mutate(o.id)}>
-                    {t('orders.reject', 'Ablehnen')}
-                  </Button>
-                </>
-              ) : null}
-            </div>
-          </Card>
-        ))}
-      </div>
+      {data ? (
+        <Card className="p-0 overflow-hidden">
+          <ScrollRegion label={t('nav.orders', 'Bestellungen')}>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    {t('orders.number')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('common.title', 'Titel')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('orders.supplier', 'Lieferant')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('orders.positions', 'Positionen')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((o: Order) => (
+                  <tr key={o.id} className={trClasses}>
+                    <td className={tdMonoClasses}>{o.order_number}</td>
+                    <td className={tdPrimaryClasses}>{o.title}</td>
+                    <td className={tdClasses}>{o.supplier || '—'}</td>
+                    <td className={tdNumericClasses}>{o.items?.length ?? 0}</td>
+                    <td className={tdClasses}>
+                      <Badge variant={statusVariant(o.status)}>
+                        {t(`orders.statuses.${o.status}`, o.status)}
+                      </Badge>
+                    </td>
+                    <td className={cn(tdClasses, 'text-right')}>
+                      <div className="flex justify-end gap-1">
+                        {o.status === 'draft' ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => submitMutation.mutate(o.id)}
+                          >
+                            {t('orders.submit', 'Einreichen')}
+                          </Button>
+                        ) : null}
+                        {o.status === 'submitted' ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => approveMutation.mutate(o.id)}
+                            >
+                              {t('orders.approve', 'Genehmigen')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => rejectMutation.mutate(o.id)}
+                            >
+                              {t('orders.reject', 'Ablehnen')}
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {orders.length === 0 ? (
+                  <TableEmptyRow
+                    colSpan={6}
+                    icon={<ShoppingCart />}
+                    title={t('orders.emptyTitle')}
+                    description={t('orders.emptyHint')}
+                  />
+                ) : null}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Card>
+      ) : null}
 
       <Modal
         open={showCreate}
         onOpenChange={setShowCreate}
         title={t('orders.create', 'Bestellung anlegen')}
       >
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Input
             label={t('common.title', 'Titel')}
             value={form.title}

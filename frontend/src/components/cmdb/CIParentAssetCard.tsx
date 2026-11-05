@@ -4,6 +4,7 @@ import { useCIParent } from '../../api/cmdbHooks';
 import type { ParentAssetRef } from '../../api/cmdb';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { DetailRow } from './CIDetailSections';
 
 /**
  * Displays the shared inventory identity a child CI inherits from its parent
@@ -32,37 +33,30 @@ export function CIParentAssetCard({ ciId }: { ciId: string }) {
 
   return (
     <Card title={t('composition.parentTitle', 'Übergeordnetes Asset')}>
-      <div className="space-y-3 text-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          {parent ? (
-            <Link
-              to={`/assets?highlight=${data.composition.parent_asset_id}`}
-              className="font-medium text-primary underline-offset-2 hover:underline"
-            >
-              {parent.name || parent.asset_tag || data.composition.parent_asset_id}
-            </Link>
-          ) : (
-            <span className="font-medium text-gray-900 dark:text-gray-100">
-              {data.composition.parent_asset_id}
-            </span>
-          )}
-          {data.composition.role && <Badge variant="neutral">{data.composition.role}</Badge>}
-          <Badge variant="neutral">{t('composition.readOnly', 'schreibgeschützt')}</Badge>
-        </div>
-
-        <p className="text-gray-500 dark:text-gray-400">{t('composition.inheritedHint')}</p>
-
-        {rows.length > 0 && (
-          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {rows.map(([label, value]) => (
-              <div key={label}>
-                <dt className="text-gray-500 dark:text-gray-400">{label}</dt>
-                <dd className="break-all font-medium text-gray-900 dark:text-gray-100">{value}</dd>
-              </div>
-            ))}
-          </dl>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {parent ? (
+          <Link
+            to={`/assets?highlight=${data.composition.parent_asset_id}`}
+            className="rounded font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {parent.name || parent.asset_tag || data.composition.parent_asset_id}
+          </Link>
+        ) : (
+          <span className="font-medium text-fg">{data.composition.parent_asset_id}</span>
         )}
+        {data.composition.role && <Badge variant="neutral">{data.composition.role}</Badge>}
+        <Badge variant="neutral">{t('composition.readOnly', 'schreibgeschützt')}</Badge>
       </div>
+
+      <p className="mt-3 max-w-[68ch] text-sm text-fg-muted">{t('composition.inheritedHint')}</p>
+
+      {rows.length > 0 && (
+        <dl className="mt-3">
+          {rows.map(([label, value]) => (
+            <DetailRow key={label} label={label} value={value} />
+          ))}
+        </dl>
+      )}
     </Card>
   );
 }

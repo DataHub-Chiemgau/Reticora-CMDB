@@ -1,3 +1,4 @@
+import { Server } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -5,11 +6,15 @@ import type { RackLayoutMount } from '../api/client';
 import { useRackLayout, useRackList } from '../api/hooks';
 import { RackSVG } from '../components/rack/RackSVG';
 import type { RackUnit } from '../components/rack/RackSVG';
-import { Card } from '../components/ui/Card';
+import { Panel } from '../components/spatial/Panel';
+import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import { cn } from '../components/ui/utils';
 
 export type RackFace = 'front' | 'rear';
 
@@ -81,12 +86,11 @@ export function RackPage() {
   const bothLabel = t('rack.faceBoth');
   const units = useMemo(() => buildRackUnits(mounts, face, bothLabel), [mounts, face, bothLabel]);
 
+  const faceName = t(face === 'front' ? 'rack.faceFront' : 'rack.faceRear');
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('rack.title')}</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('rack.subtitle')}</p>
-      </div>
+      <PageHeader title={t('rack.title')} description={t('rack.subtitle')} />
 
       {racksQuery.isLoading ? <SkeletonList rows={3} label={t('app.loading')} /> : null}
 
@@ -100,95 +104,106 @@ export function RackPage() {
       ) : null}
 
       {racksQuery.data && racks.length === 0 ? (
-        <EmptyState title={t('rack.empty')} description={t('rack.emptyHint')} />
+        <EmptyState icon={<Server />} title={t('rack.empty')} description={t('rack.emptyHint')} />
       ) : null}
 
       {racks.length > 0 ? (
-        <Card>
+        <Toolbar className="grid grid-cols-1 sm:flex sm:flex-wrap">
           <Select
-            label={t('rack.selectRack')}
+            aria-label={t('rack.selectRack')}
             value={selectedRackId}
             onChange={(event) => setSelectedRackId(event.target.value)}
-            className="max-w-sm"
+            className="w-full pr-8 sm:w-64"
             options={racks.map((rack) => ({
               value: rack.id,
               label: `${rack.name} (${rack.height_units} HE)`,
             }))}
           />
-        </Card>
+          <div
+            className="inline-flex w-fit rounded-lg border border-line-strong bg-panel p-0.5"
+            role="group"
+            aria-label={t('rack.faceLabel')}
+          >
+            {(['front', 'rear'] as const).map((value) => (
+              <Button
+                key={value}
+                variant="ghost"
+                size="sm"
+                aria-pressed={face === value}
+                onClick={() => setFace(value)}
+                className={cn(
+                  'h-7',
+                  face === value ? 'bg-accent-soft text-accent-strong hover:bg-accent-soft' : false,
+                )}
+              >
+                {t(value === 'front' ? 'rack.faceFront' : 'rack.faceRear')}
+              </Button>
+            ))}
+          </div>
+          {selectedRack ? (
+            <ToolbarEnd>
+              <span className="text-sm tabular-nums text-fg-muted">
+                {selectedRack.height_units} HE · {visibleMounts.length} {t('rack.mounts')}
+              </span>
+            </ToolbarEnd>
+          ) : null}
+        </Toolbar>
       ) : null}
 
       {selectedRack ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[auto,1fr]">
-          <Card
-            title={`${selectedRack.name} · ${t(face === 'front' ? 'rack.faceFront' : 'rack.faceRear')}`}
-            actions={
-              <div className="flex gap-1" role="group" aria-label={t('rack.faceLabel')}>
-                {(['front', 'rear'] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={face === value}
-                    onClick={() => setFace(value)}
-                    className={
-                      face === value
-                        ? 'rounded-lg bg-primary px-3 py-1 text-sm font-medium text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
-                        : 'rounded-lg px-3 py-1 text-sm font-medium text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 dark:text-gray-300 dark:hover:bg-gray-800'
+        <div className="grid grid-cols-1 gap-4 items-start lg:grid-cols-[auto,minmax(0,1fr)]">
+          <Panel title={`${selectedRack.name} · ${faceName}`}>
+            <div className="flex justify-center overflow-x-auto">
+              {mountsQuery.isLoading ? (
+                <SkeletonList rows={4} label={t('app.loading')} className="w-full" />
+              ) : mountsQuery.error ? (
+                <ErrorState
+                  title={t('rack.mountsLoadError')}
+                  retryLabel={t('common.retry')}
+                  onRetry={() => void mountsQuery.refetch()}
+                />
+              ) : (
+                <RackSVG
+                  units={selectedRack.height_units}
+                  items={units}
+                  onItemClick={(item) => {
+                    const mount = mounts.find((entry) => entry.id === item.id);
+                    if (mount) {
+                      navigate(`/cmdb/${mount.ci_id}`);
                     }
-                  >
-                    {t(value === 'front' ? 'rack.faceFront' : 'rack.faceRear')}
-                  </button>
-                ))}
-              </div>
-            }
-          >
-            {mountsQuery.isLoading ? (
-              <SkeletonList rows={4} label={t('app.loading')} />
-            ) : mountsQuery.error ? (
-              <ErrorState
-                title={t('rack.mountsLoadError')}
-                retryLabel={t('common.retry')}
-                onRetry={() => void mountsQuery.refetch()}
-              />
-            ) : (
-              <RackSVG
-                units={selectedRack.height_units}
-                items={units}
-                onItemClick={(item) => {
-                  const mount = mounts.find((entry) => entry.id === item.id);
-                  if (mount) {
-                    navigate(`/cmdb/${mount.ci_id}`);
-                  }
-                }}
-              />
-            )}
-          </Card>
+                  }}
+                />
+              )}
+            </div>
+          </Panel>
 
-          <Card
-            title={`${t('rack.mounts')} (${t(face === 'front' ? 'rack.faceFront' : 'rack.faceRear')})`}
-          >
+          <Panel title={`${t('rack.mounts')} (${faceName})`} padded={false}>
             {visibleMounts.length === 0 && !mountsQuery.isLoading ? (
-              <EmptyState title={t('rack.noMounts')} description={t('rack.noMountsHint')} />
+              <div className="p-4">
+                <EmptyState
+                  icon={<Server />}
+                  title={t('rack.noMounts')}
+                  description={t('rack.noMountsHint')}
+                />
+              </div>
             ) : (
-              <ul className="space-y-2 text-sm">
+              <ul className="divide-y divide-line text-sm">
                 {visibleMounts.map((mount) => (
                   <li
                     key={mount.id}
-                    className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+                    className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2.5"
                   >
                     <span className="flex min-w-0 flex-wrap items-baseline gap-2">
                       <button
                         type="button"
                         onClick={() => navigate(`/cmdb/${mount.ci_id}`)}
-                        className="min-w-0 break-words text-left font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                        className="min-w-0 break-words rounded text-left font-medium text-accent underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       >
                         {mountLabel(mount)}
                       </button>
-                      <span className="text-xs text-gray-600 dark:text-gray-300">
-                        {mount.ci_type}
-                      </span>
+                      <span className="text-xs text-fg-muted">{mount.ci_type}</span>
                     </span>
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                    <span className="text-xs tabular-nums text-fg-muted">
                       {t('rack.position')} {mount.position_u} · {mount.height_u} HE ·{' '}
                       {mount.face === 'both' ? bothLabel : mount.face}
                     </span>
@@ -196,7 +211,7 @@ export function RackPage() {
                 ))}
               </ul>
             )}
-          </Card>
+          </Panel>
         </div>
       ) : null}
     </div>

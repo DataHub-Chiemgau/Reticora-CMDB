@@ -7,6 +7,7 @@ import { useUndoableSubmit } from '../../hooks/useUndoableSubmit';
 import { ObjectPicker, accessErrorMessage, type PickedObject } from '../pickers/ObjectPicker';
 import { UserTeamPicker, type PickedHolder } from '../pickers/UserTeamPicker';
 import { Button } from '../ui/Button';
+import { ErrorState } from '../ui/ErrorState';
 import { Input } from '../ui/Input';
 import { Modal } from '../ui/Modal';
 
@@ -161,11 +162,7 @@ interface HeldDialogProps extends DialogProps {
 /** DialogError shows the problem of a failed write inside the dialog. */
 function DialogError({ message }: { message?: string }) {
   if (!message) return null;
-  return (
-    <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-      {message}
-    </p>
-  );
+  return <ErrorState title={message} />;
 }
 
 /**

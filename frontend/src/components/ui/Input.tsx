@@ -1,41 +1,60 @@
 import { useId } from 'react';
-import type { InputHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode } from 'react';
 import { cn } from './utils';
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
+  /** A 16px icon inside the field, before the text (decorative). */
+  icon?: ReactNode;
 }
 
-export function Input({ label, error, id, className, ...props }: InputProps) {
+/** fieldClasses is the look of every single-line control (input, select). */
+export const fieldClasses =
+  'h-9 w-full rounded-lg border border-control bg-panel px-3 text-sm text-fg shadow-sm outline-none transition-[border-color,box-shadow] placeholder:text-fg-subtle hover:border-fg-muted focus:border-accent focus:ring-2 focus:ring-accent/25 disabled:cursor-not-allowed disabled:bg-canvas disabled:opacity-60';
+
+export const fieldErrorClasses =
+  'border-red-500 hover:border-red-500 focus:border-red-500 focus:ring-red-500/25';
+
+export const labelClasses = 'block text-sm font-medium text-fg';
+
+export function Input({ label, error, id, className, icon, ...props }: InputProps) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const errorId = error ? `${inputId}-error` : undefined;
 
+  const input = (
+    <input
+      id={inputId}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={errorId}
+      className={cn(fieldClasses, icon ? 'pl-9' : false, error && fieldErrorClasses, className)}
+      {...props}
+    />
+  );
+
   return (
     <div className="space-y-1.5">
       {label ? (
-        <label
-          htmlFor={inputId}
-          className="block text-sm font-medium text-gray-700 dark:text-gray-200"
-        >
+        <label htmlFor={inputId} className={labelClasses}>
           {label}
         </label>
       ) : null}
-      <input
-        id={inputId}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={errorId}
-        className={cn(
-          'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100',
-          error &&
-            'border-red-500 focus:border-red-500 focus:ring-red-200 dark:border-red-500 dark:focus:ring-red-500/20',
-          className,
-        )}
-        {...props}
-      />
+      {icon ? (
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-fg-subtle [&_svg]:h-4 [&_svg]:w-4"
+          >
+            {icon}
+          </span>
+          {input}
+        </div>
+      ) : (
+        input
+      )}
       {error ? (
-        <p id={errorId} className="text-sm text-red-600 dark:text-red-400">
+        <p id={errorId} className="text-sm text-danger">
           {error}
         </p>
       ) : null}

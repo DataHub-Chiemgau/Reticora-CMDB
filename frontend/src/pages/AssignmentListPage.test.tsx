@@ -307,6 +307,6 @@ describe('AssignmentListPage', () => {
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['Alle', 'Aktiv', 'Zurückgegeben', 'Transferiert', 'Überfällig']);
+    ).toEqual(['Alle Status', 'Aktiv', 'Zurückgegeben', 'Transferiert', 'Überfällig']);
   });
 });

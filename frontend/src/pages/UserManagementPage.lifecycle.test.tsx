@@ -296,7 +296,7 @@ describe('UserManagementPage user lifecycle', () => {
   it('marks the standard roles as System in the roles tab (F-201)', async () => {
     stubServer(['user:read', 'user:manage']);
     renderWithProviders(<UserManagementPage />, { route: '/users' });
-    fireEvent.click(await screen.findByRole('button', { name: 'Rollen' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Rollen' }));
 
     const admin = (await screen.findByText('org_admin')).closest('tr')!;
     expect(within(admin).getByText('System')).toBeInTheDocument();

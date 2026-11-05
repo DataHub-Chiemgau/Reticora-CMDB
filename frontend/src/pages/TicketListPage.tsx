@@ -1,8 +1,23 @@
+import { Plus, Search, Ticket } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTicketList, useCreateTicket, useUpdateTicket, useDeleteTicket } from '../api/hooks';
 import { ApiError } from '../api/client';
 import { Card } from '../components/ui/Card';
+import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
+import { SkeletonList } from '../components/ui/Skeleton';
+import { Textarea } from '../components/ui/Textarea';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdMonoClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trClasses,
+} from '../components/ui/table';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
@@ -23,13 +38,7 @@ export const TICKET_STATUSES = [
 
 export const TICKET_CATEGORIES = ['incident', 'request', 'problem', 'change', 'task'] as const;
 
-const priorityOptions = [
-  { value: '', label: 'Alle' },
-  { value: 'low', label: 'Niedrig' },
-  { value: 'medium', label: 'Mittel' },
-  { value: 'high', label: 'Hoch' },
-  { value: 'critical', label: 'Kritisch' },
-];
+export const TICKET_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
 
 function statusVariant(status: string) {
   switch (status) {
@@ -66,10 +75,18 @@ function priorityVariant(priority: string) {
 }
 
 export function TicketListPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const statusOptions = [
-    { value: '', label: t('common.all', 'Alle') },
+    { value: '', label: t('ci.allStatus') },
     ...TICKET_STATUSES.map((value) => ({ value, label: t(`ticket.statuses.${value}`, value) })),
+  ];
+  const priorityLabelOptions = TICKET_PRIORITIES.map((value) => ({
+    value,
+    label: t(`ticket.priorities.${value}`, value),
+  }));
+  const priorityOptions = [
+    { value: '', label: t('ticket.allPriorities') },
+    ...priorityLabelOptions,
   ];
   const categoryOptions = TICKET_CATEGORIES.map((value) => ({
     value,
@@ -80,7 +97,7 @@ export function TicketListPage() {
   const [priority, setPriority] = useState('');
   const [showCreate, setShowCreate] = useState(false);
 
-  const { data, isLoading } = useTicketList({ search, status, priority });
+  const { data, isLoading, error, refetch } = useTicketList({ search, status, priority });
   const createMutation = useCreateTicket();
   const updateMutation = useUpdateTicket();
   const deleteMutation = useDeleteTicket();
@@ -103,101 +120,149 @@ export function TicketListPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-          {t('ticket.title', 'Tickets')}
-        </h1>
-        <Button onClick={() => setShowCreate(true)}>
-          {t('ticket.create', 'Ticket erstellen')}
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={t('ticket.title', 'Tickets')}
+        actions={
+          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+            {t('ticket.create', 'Ticket erstellen')}
+          </Button>
+        }
+      />
 
-      <div className="flex gap-4 flex-wrap">
+      <Toolbar>
         <Input
-          label={t('common.search', 'Suche')}
+          type="text"
+          icon={<Search />}
+          placeholder={t('common.search', 'Suche')}
+          aria-label={t('common.search', 'Suche')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="w-64"
         />
         <Select
-          label={t('ci.status', 'Status')}
+          aria-label={t('ci.status', 'Status')}
           value={status}
           onChange={(e) => setStatus(e.target.value)}
           options={statusOptions}
+          className="w-44"
         />
         <Select
-          label={t('ticket.priority', 'Priorität')}
+          aria-label={t('ticket.priority', 'Priorität')}
           value={priority}
           onChange={(e) => setPriority(e.target.value)}
           options={priorityOptions}
+          className="w-44"
         />
-      </div>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {data.total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
-      {isLoading ? (
-        <p className="text-gray-500 dark:text-gray-400">{t('app.loading', 'Laden...')}</p>
-      ) : (
-        <Card title={`${t('ticket.title', 'Tickets')} (${data?.total ?? 0})`}>
+      {isLoading ? <SkeletonList rows={5} label={t('app.loading', 'Laden...')} /> : null}
+      {error ? (
+        <ErrorState
+          title={t('app.error')}
+          description={error instanceof Error ? error.message : undefined}
+          retryLabel={t('common.retry')}
+          onRetry={() => void refetch()}
+        />
+      ) : null}
+
+      {!isLoading && !error ? (
+        <Card className="overflow-hidden p-0">
           <ScrollRegion label={t('ticket.title', 'Tickets')}>
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead>
-                <tr className="text-left text-sm font-medium text-gray-500 dark:text-gray-400">
-                  <th className="pb-2">#</th>
-                  <th className="pb-2">{t('ticket.ticketTitle', 'Titel')}</th>
-                  <th className="pb-2">{t('ci.status', 'Status')}</th>
-                  <th className="pb-2">{t('ticket.priority', 'Priorität')}</th>
-                  <th className="pb-2">{t('ticket.category', 'Kategorie')}</th>
-                  <th className="pb-2">{t('ticket.createdAt', 'Erstellt')}</th>
-                  <th className="pb-2">{t('common.actions', 'Aktionen')}</th>
+            <table className={tableClasses}>
+              <thead className={theadClasses}>
+                <tr>
+                  <th scope="col" className={thClasses}>
+                    #
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ticket.ticketTitle', 'Titel')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ci.status', 'Status')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ticket.priority', 'Priorität')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ticket.category', 'Kategorie')}
+                  </th>
+                  <th scope="col" className={thClasses}>
+                    {t('ticket.createdAt', 'Erstellt')}
+                  </th>
+                  <th scope="col" className={`${thClasses} text-right`}>
+                    {t('common.actions', 'Aktionen')}
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+              <tbody>
                 {data?.data.map((ticket) => (
-                  <tr key={ticket.id} className="text-sm text-gray-700 dark:text-gray-300">
-                    <td className="py-2 font-mono text-xs">#{ticket.ticket_number}</td>
-                    <td className="py-2 font-medium">{ticket.title}</td>
-                    <td className="py-2">
+                  <tr key={ticket.id} className={trClasses}>
+                    <td className={tdMonoClasses}>#{ticket.ticket_number}</td>
+                    <td className={`${tdPrimaryClasses} min-w-[14rem]`}>{ticket.title}</td>
+                    <td className={tdClasses}>
                       <Badge variant={statusVariant(ticket.status)}>
                         {t(`ticket.statuses.${ticket.status}`, ticket.status)}
                       </Badge>
                     </td>
-                    <td className="py-2">
-                      <Badge variant={priorityVariant(ticket.priority)}>{ticket.priority}</Badge>
+                    <td className={tdClasses}>
+                      <Badge variant={priorityVariant(ticket.priority)}>
+                        {t(`ticket.priorities.${ticket.priority}`, ticket.priority)}
+                      </Badge>
                     </td>
-                    <td className="py-2">
+                    <td className={tdClasses}>
                       {t(`ticket.categories.${ticket.category}`, ticket.category)}
                     </td>
-                    <td className="py-2">
-                      {new Date(ticket.created_at).toLocaleDateString('de-DE')}
+                    <td className={`${tdClasses} whitespace-nowrap tabular-nums`}>
+                      {new Date(ticket.created_at).toLocaleDateString(i18n.language)}
                     </td>
-                    <td className="py-2 space-x-1">
-                      {(ticket.status === 'new' || ticket.status === 'open') && (
+                    <td className={tdClasses}>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {(ticket.status === 'new' || ticket.status === 'open') && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              updateMutation.mutate({
+                                id: ticket.id,
+                                data: { status: 'in_progress' },
+                              })
+                            }
+                          >
+                            {t('ticket.startWork', 'Bearbeiten')}
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() =>
-                            updateMutation.mutate({
-                              id: ticket.id,
-                              data: { status: 'in_progress' },
-                            })
-                          }
+                          className="text-danger"
+                          onClick={() => deleteMutation.mutate(ticket.id)}
                         >
-                          {t('ticket.startWork', 'Bearbeiten')}
+                          {t('common.delete', 'Löschen')}
                         </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(ticket.id)}
-                      >
-                        {t('common.delete', 'Löschen')}
-                      </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
                 {(!data?.data || data.data.length === 0) && (
                   <tr>
-                    <td colSpan={7} className="py-4 text-center text-gray-600 dark:text-gray-300">
-                      {t('common.noData', 'Keine Daten')}
+                    <td colSpan={7} className="px-4 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <span
+                          aria-hidden="true"
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-line bg-panel text-fg-muted"
+                        >
+                          <Ticket className="h-5 w-5" />
+                        </span>
+                        <p className="text-sm text-fg-muted">{t('common.noData', 'Keine Daten')}</p>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -205,14 +270,16 @@ export function TicketListPage() {
             </table>
           </ScrollRegion>
         </Card>
-      )}
+      ) : null}
 
       {updateMutation.error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {updateMutation.error instanceof ApiError && updateMutation.error.status === 409
-            ? (updateMutation.error.detail ?? updateMutation.error.message)
-            : updateMutation.error.message}
-        </p>
+        <ErrorState
+          title={
+            updateMutation.error instanceof ApiError && updateMutation.error.status === 409
+              ? (updateMutation.error.detail ?? updateMutation.error.message)
+              : updateMutation.error.message
+          }
+        />
       )}
 
       <Modal
@@ -227,8 +294,9 @@ export function TicketListPage() {
             onChange={(e) => setForm({ ...form, title: e.target.value })}
             required
           />
-          <Input
+          <Textarea
             label={t('common.description', 'Beschreibung')}
+            rows={3}
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
@@ -236,7 +304,7 @@ export function TicketListPage() {
             label={t('ticket.priority', 'Priorität')}
             value={form.priority}
             onChange={(e) => setForm({ ...form, priority: e.target.value })}
-            options={priorityOptions.slice(1)}
+            options={priorityLabelOptions}
           />
           <Select
             label={t('ticket.category', 'Kategorie')}

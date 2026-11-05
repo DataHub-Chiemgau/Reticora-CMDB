@@ -293,7 +293,7 @@ describe('CITypeAdminPage system types', () => {
 });
 
 describe('CITypeAdminPage dialog text colours', () => {
-  it('gives the checkbox labels of the field editor explicit light and dark colours', async () => {
+  it('gives the checkbox labels of the field editor an explicit theme text colour', async () => {
     stubBackend();
     await openType(/Server-Kopie/);
     fireEvent.click(await screen.findByRole('button', { name: 'Feld hinzufügen' }));
@@ -301,22 +301,16 @@ describe('CITypeAdminPage dialog text colours', () => {
     fireEvent.click(within(dialog).getByLabelText('Eindeutig'));
 
     for (const name of ['Pflichtfeld', 'Durchsuchbar (indiziert)', 'Eindeutig']) {
-      expect(within(dialog).getByLabelText(name).closest('label'), name).toHaveClass(
-        'text-gray-700',
-        'dark:text-gray-200',
-      );
+      expect(within(dialog).getByLabelText(name).closest('label'), name).toHaveClass('text-fg');
     }
   });
 
-  it('gives the template names explicit light and dark colours', async () => {
+  it('gives the template names an explicit theme text colour', async () => {
     stubBackend();
     renderWithProviders(<CITypeAdminPage />, { route: '/admin/ci-types' });
     fireEvent.click(await screen.findByRole('button', { name: 'Aus Typvorlage' }));
     const dialog = screen.getByRole('dialog');
 
-    expect(await within(dialog).findByText('Vorlage Server')).toHaveClass(
-      'text-gray-900',
-      'dark:text-gray-100',
-    );
+    expect(await within(dialog).findByText('Vorlage Server')).toHaveClass('text-fg');
   });
 });

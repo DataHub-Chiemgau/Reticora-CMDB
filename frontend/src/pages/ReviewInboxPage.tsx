@@ -17,7 +17,8 @@
  * every side of payload.holders; accept names the stale side as ci_id and
  * is no bulk action (NET-06, E-53, WP-773).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, Inbox, MousePointerClick } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
@@ -29,8 +30,21 @@ import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
+import { PageHeader } from '../components/ui/PageHeader';
 import { Select } from '../components/ui/Select';
 import { SkeletonList } from '../components/ui/Skeleton';
+import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
+import {
+  tableClasses,
+  tdClasses,
+  tdPrimaryClasses,
+  theadClasses,
+  thClasses,
+  trInteractiveClasses,
+} from '../components/ui/table';
+import { cn } from '../components/ui/utils';
+import { useRowNavigation } from '../components/ui/useRowNavigation';
+import { ScrollRegion } from '../components/ScrollRegion';
 import {
   REVIEW_KINDS,
   REVIEW_PAGE_SIZE,
@@ -154,6 +168,34 @@ export function commonActions(items: ReviewItem[]): ReviewAction[] {
   );
 }
 
+/** relativeAge words the age of an item ("3 days ago"); the full date is the tooltip. */
+function relativeAge(iso: string, language: string): string {
+  const created = new Date(iso).getTime();
+  if (Number.isNaN(created)) return '—';
+  const formatter = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+  const minutes = Math.round((created - Date.now()) / 60_000);
+  if (Math.abs(minutes) < 60) return formatter.format(Math.min(minutes, 0), 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return formatter.format(hours, 'hour');
+  const days = Math.round(hours / 24);
+  if (Math.abs(days) < 60) return formatter.format(days, 'day');
+  return formatter.format(Math.round(days / 30), 'month');
+}
+
+function Age({ iso }: { iso: string }) {
+  const { i18n } = useTranslation();
+  const date = new Date(iso);
+  return (
+    <time
+      dateTime={iso}
+      title={Number.isNaN(date.getTime()) ? undefined : date.toLocaleString(i18n.language)}
+      className="whitespace-nowrap tabular-nums"
+    >
+      {relativeAge(iso, i18n.language)}
+    </time>
+  );
+}
+
 export function ReviewInboxPage() {
   const { t } = useTranslation();
   const [status, setStatus] = useState('open');
@@ -168,6 +210,7 @@ export function ReviewInboxPage() {
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [selectingAll, setSelectingAll] = useState(false);
   const [selectAllError, setSelectAllError] = useState('');
+  const detailRef = useRef<HTMLDivElement>(null);
   // The server decides every resolution; without review:resolve the inbox
   // offers none (fail closed while the rights load).
   const canResolve = useHasPermission('review:resolve') === true;
@@ -185,6 +228,7 @@ export function ReviewInboxPage() {
   const checkedItems = [...checked.values()];
   const bulkActions = commonActions(checkedItems);
   const openItems = items.filter((item) => item.status === 'open');
+  const pageSelected = openItems.filter((item) => checked.has(item.id)).length;
   // Open items of the filter beyond this page: only the open filter counts
   // them in total.
   const moreOpen = status === 'open' && total > openItems.length;
@@ -192,6 +236,11 @@ export function ReviewInboxPage() {
   useEffect(() => {
     if (data && items.length === 0 && offset > 0) setOffset(0);
   }, [data, items.length, offset]);
+
+  // On a narrow screen the detail sits below the queue: bring it into view.
+  useEffect(() => {
+    if (selectedId) detailRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [selectedId]);
 
   function resetSelection() {
     resolve.reset();
@@ -208,7 +257,7 @@ export function ReviewInboxPage() {
     });
   }
 
-  function selectPage(on: boolean) {
+  function selectPageItems(on: boolean) {
     setChecked((prev) => {
       const next = new Map(prev);
       for (const item of openItems) {
@@ -247,92 +296,87 @@ export function ReviewInboxPage() {
     );
   }
 
+  function open(item: ReviewItem) {
+    if (item.id !== selectedId) resolve.reset();
+    setSelectedId(item.id);
+  }
+
+  // Table keyboard pattern: one row in the Tab order, arrows move, Enter
+  // opens the item next to the queue, Space toggles its selection.
+  const rowNavigation = useRowNavigation({
+    rowIds: items.map((item) => item.id),
+    onOpen: (id) => {
+      const item = items.find((entry) => entry.id === id);
+      if (item) open(item);
+    },
+    onToggle: (id) => {
+      const item = items.find((entry) => entry.id === id);
+      if (item && canResolve && item.status === 'open') toggle(item);
+    },
+  });
+
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-          {t('reviews.title')}
-        </h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">{t('reviews.subtitle')}</p>
-      </div>
+      <PageHeader title={t('reviews.title')} description={t('reviews.subtitle')} />
 
-      <Card>
-        <div className="flex flex-wrap items-end gap-3">
-          <Select
-            label={t('reviews.status')}
-            value={status}
+      <Toolbar>
+        <Select
+          aria-label={t('reviews.status')}
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value);
+            resetSelection();
+          }}
+          className="w-44"
+          options={[
+            { value: '', label: t('reviews.allStatuses') },
+            ...STATUSES.map((value) => ({ value, label: t(`reviews.statuses.${value}`) })),
+          ]}
+        />
+        <Select
+          aria-label={t('reviews.kind')}
+          value={kind}
+          onChange={(event) => {
+            setKind(event.target.value);
+            resetSelection();
+          }}
+          className="w-56"
+          options={[
+            { value: '', label: t('reviews.allKinds') },
+            ...REVIEW_KINDS.map((value) => ({ value, label: t(`reviews.kinds.${value}`) })),
+          ]}
+        />
+        <label className="inline-flex h-9 items-center gap-2 px-1 text-sm text-fg">
+          <input
+            type="checkbox"
+            checked={escalated}
             onChange={(event) => {
-              setStatus(event.target.value);
+              const on = event.target.checked;
+              setSearchParams(
+                (prev) => {
+                  const next = new URLSearchParams(prev);
+                  if (on) next.set('escalated', 'true');
+                  else next.delete('escalated');
+                  return next;
+                },
+                { replace: true },
+              );
               resetSelection();
             }}
-            options={[
-              { value: '', label: t('reviews.allStatuses') },
-              ...STATUSES.map((value) => ({ value, label: t(`reviews.statuses.${value}`) })),
-            ]}
           />
-          <Select
-            label={t('reviews.kind')}
-            value={kind}
-            onChange={(event) => {
-              setKind(event.target.value);
-              resetSelection();
-            }}
-            options={[
-              { value: '', label: t('reviews.allKinds') },
-              ...REVIEW_KINDS.map((value) => ({ value, label: t(`reviews.kinds.${value}`) })),
-            ]}
-          />
-          <label className="flex items-center gap-2 pb-2 text-sm text-gray-700 dark:text-gray-300">
-            <input
-              type="checkbox"
-              checked={escalated}
-              onChange={(event) => {
-                const on = event.target.checked;
-                setSearchParams(
-                  (prev) => {
-                    const next = new URLSearchParams(prev);
-                    if (on) next.set('escalated', 'true');
-                    else next.delete('escalated');
-                    return next;
-                  },
-                  { replace: true },
-                );
-                resetSelection();
-              }}
-            />
-            {t('reviews.escalatedOnly')}
-          </label>
-        </div>
-      </Card>
-
-      {canResolve && checkedItems.length > 0 ? (
-        <Card>
-          <div
-            className="flex flex-wrap items-end gap-3"
-            role="group"
-            aria-label={t('reviews.bulk.label')}
-          >
-            <p className="pb-2 text-sm">
-              {t('reviews.bulk.selected', { count: checkedItems.length })}
-            </p>
-            <Select
-              label={t('reviews.bulk.action')}
-              value={bulkAction}
-              onChange={(event) => setBulkAction(event.target.value as ReviewAction | '')}
-              options={[
-                { value: '', label: t('reviews.bulk.choose') },
-                ...bulkActions.map((value) => ({ value, label: t(`reviews.actions.${value}`) })),
-              ]}
-            />
-            <Button onClick={runBulk} disabled={!bulkAction || bulk.isPending}>
-              {t('reviews.bulk.run')}
-            </Button>
-          </div>
-        </Card>
-      ) : null}
+          {t('reviews.escalatedOnly')}
+        </label>
+        {data ? (
+          <ToolbarEnd>
+            <span className="text-sm text-fg-muted tabular-nums">
+              {total} {t('common.entries')}
+            </span>
+          </ToolbarEnd>
+        ) : null}
+      </Toolbar>
 
       {bulkResult ? (
-        <p role="status" className="text-sm text-gray-700 dark:text-gray-300">
+        <p role="status" className="text-sm text-fg-muted">
           {t('reviews.bulk.result', {
             resolved: bulkResult.resolved.length,
             failed: bulkResult.failed.length,
@@ -341,11 +385,11 @@ export function ReviewInboxPage() {
       ) : null}
 
       {resolve.error ? (
-        <p role="alert" className="text-sm text-danger">
-          {t('reviews.resolveError', {
+        <ErrorState
+          title={t('reviews.resolveError', {
             message: resolve.error instanceof Error ? resolve.error.message : String(resolve.error),
           })}
-        </p>
+        />
       ) : null}
 
       {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
@@ -358,24 +402,179 @@ export function ReviewInboxPage() {
         />
       ) : null}
       {data && items.length === 0 ? (
-        <EmptyState title={t('reviews.empty')} description={t('reviews.emptyHint')} />
+        <EmptyState
+          icon={<Inbox />}
+          title={t('reviews.empty')}
+          description={t('reviews.emptyHint')}
+        />
       ) : null}
 
       {items.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <Card>
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-              <p className="text-gray-700 dark:text-gray-300">
-                {t('reviews.paging.range', {
-                  from: offset + 1,
-                  to: offset + items.length,
-                  total,
-                })}
-              </p>
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,30rem)]">
+          <Card className="min-w-0 overflow-hidden p-0">
+            {canResolve && checkedItems.length > 0 ? (
+              <div
+                className="flex flex-wrap items-center gap-2 border-b border-line bg-accent-soft px-4 py-2.5"
+                role="group"
+                aria-label={t('reviews.bulk.label')}
+              >
+                <span className="mr-1 text-sm font-medium text-fg">
+                  {t('reviews.bulk.selected', { count: checkedItems.length })}
+                </span>
+                <Select
+                  aria-label={t('reviews.bulk.action')}
+                  value={bulkAction}
+                  onChange={(event) => setBulkAction(event.target.value as ReviewAction | '')}
+                  className="h-8 w-44"
+                  options={[
+                    { value: '', label: t('reviews.bulk.choose') },
+                    ...bulkActions.map((value) => ({
+                      value,
+                      label: t(`reviews.actions.${value}`),
+                    })),
+                  ]}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={runBulk}
+                  disabled={!bulkAction}
+                  loading={bulk.isPending}
+                >
+                  {t('reviews.bulk.run')}
+                </Button>
+                {moreOpen && checkedItems.length < total ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={selectingAll}
+                    onClick={() => void selectAllMatching()}
+                  >
+                    {t('reviews.selectAllMatching', { total })}
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto"
+                  onClick={() => setChecked(new Map())}
+                >
+                  {t('reviews.bulk.clear')}
+                </Button>
+                {selectAllError ? (
+                  <p role="alert" className="w-full text-sm text-danger">
+                    {t('reviews.selectAllError', { message: selectAllError })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            <ScrollRegion label={t('reviews.title')}>
+              <table className={tableClasses}>
+                <thead className={theadClasses}>
+                  <tr>
+                    {canResolve ? (
+                      <th scope="col" className={`${thClasses} w-10 pr-0`}>
+                        <input
+                          type="checkbox"
+                          className="align-middle"
+                          aria-label={t('reviews.selectAll', { count: openItems.length })}
+                          checked={openItems.length > 0 && pageSelected === openItems.length}
+                          disabled={openItems.length === 0}
+                          ref={(element) => {
+                            if (element) {
+                              element.indeterminate =
+                                pageSelected > 0 && pageSelected < openItems.length;
+                            }
+                          }}
+                          onChange={(event) => selectPageItems(event.target.checked)}
+                        />
+                      </th>
+                    ) : null}
+                    <th scope="col" className={thClasses}>
+                      {t('reviews.kind')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('reviews.object')}
+                    </th>
+                    <th scope="col" className={thClasses}>
+                      {t('reviews.age')}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((item) => (
+                    <tr
+                      key={item.id}
+                      {...rowNavigation.getRowProps(item.id)}
+                      onClick={() => open(item)}
+                      className={cn(
+                        trInteractiveClasses,
+                        selectedId === item.id && 'bg-accent-soft hover:bg-accent-soft',
+                      )}
+                    >
+                      {canResolve ? (
+                        <td className={`${tdClasses} w-10 pr-0`}>
+                          <input
+                            type="checkbox"
+                            aria-label={t('reviews.select', { name: summary(item) })}
+                            checked={checked.has(item.id)}
+                            disabled={item.status !== 'open'}
+                            onChange={() => toggle(item)}
+                            onClick={(event) => event.stopPropagation()}
+                            // The row is the Tab stop; Space on it toggles this box.
+                            tabIndex={-1}
+                          />
+                        </td>
+                      ) : null}
+                      <td className={tdClasses}>
+                        <Badge variant="info">{t(`reviews.kinds.${item.kind}`, item.kind)}</Badge>
+                      </td>
+                      <td
+                        className={cn(
+                          tdPrimaryClasses,
+                          'min-w-[11rem] max-w-[18rem] [overflow-wrap:anywhere]',
+                        )}
+                      >
+                        <button
+                          type="button"
+                          // The row is the Tab stop; Enter on it opens this item.
+                          tabIndex={-1}
+                          className="rounded text-left underline-offset-2 hover:text-accent hover:underline focus-visible:outline-none"
+                          aria-current={selectedId === item.id ? 'true' : undefined}
+                        >
+                          <span className="sr-only">
+                            {t(`reviews.kinds.${item.kind}`, item.kind)}{' '}
+                          </span>
+                          {summary(item)}
+                        </button>
+                        {item.status !== 'open' ? (
+                          <span className="ml-2 align-middle">
+                            <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className={tdClasses}>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Age iso={item.created_at} />
+                          {item.escalated ? (
+                            <Badge variant="danger">{t('reviews.escalated')}</Badge>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+            <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-2.5 text-sm text-fg-muted">
+              <span className="tabular-nums">
+                {t('reviews.paging.range', { from: offset + 1, to: offset + items.length, total })}
+              </span>
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   variant="secondary"
+                  icon={<ChevronLeft />}
                   disabled={offset === 0}
                   onClick={() => setOffset(Math.max(0, offset - REVIEW_PAGE_SIZE))}
                 >
@@ -384,6 +583,7 @@ export function ReviewInboxPage() {
                 <Button
                   size="sm"
                   variant="secondary"
+                  iconAfter={<ChevronRight />}
                   disabled={!data?.has_more}
                   onClick={() => setOffset(offset + items.length)}
                 >
@@ -391,75 +591,24 @@ export function ReviewInboxPage() {
                 </Button>
               </div>
             </div>
-            {canResolve && openItems.length > 0 ? (
-              <div className="mb-2 flex flex-wrap items-center gap-3 text-sm">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={openItems.every((item) => checked.has(item.id))}
-                    onChange={(event) => selectPage(event.target.checked)}
-                  />
-                  {t('reviews.selectAll', { count: openItems.length })}
-                </label>
-                {moreOpen ? (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    disabled={selectingAll}
-                    onClick={() => void selectAllMatching()}
-                  >
-                    {t('reviews.selectAllMatching', { total })}
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {selectAllError ? (
-              <p role="alert" className="mb-2 text-sm text-danger">
-                {t('reviews.selectAllError', { message: selectAllError })}
-              </p>
-            ) : null}
-            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-              {items.map((item) => (
-                <li key={item.id} className="flex items-center gap-3 py-2 text-sm">
-                  {canResolve ? (
-                    <input
-                      type="checkbox"
-                      aria-label={t('reviews.select', { name: summary(item) })}
-                      checked={checked.has(item.id)}
-                      disabled={item.status !== 'open'}
-                      onChange={() => toggle(item)}
-                    />
-                  ) : null}
-                  <button
-                    type="button"
-                    className="flex flex-1 flex-wrap items-center gap-2 text-left hover:underline"
-                    aria-current={selectedId === item.id ? 'true' : undefined}
-                    onClick={() => {
-                      if (item.id !== selectedId) resolve.reset();
-                      setSelectedId(item.id);
-                    }}
-                  >
-                    <Badge variant="info">{t(`reviews.kinds.${item.kind}`, item.kind)}</Badge>
-                    <span className="font-medium">{summary(item)}</span>
-                    {item.escalated ? (
-                      <Badge variant="danger">{t('reviews.escalated')}</Badge>
-                    ) : null}
-                    {item.status !== 'open' ? (
-                      <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-            </ul>
           </Card>
-          {selected ? (
-            <ReviewDetail
-              key={selected.id}
-              item={selected}
-              canResolve={canResolve}
-              resolve={resolve}
-            />
-          ) : null}
+          <div ref={detailRef} className="min-w-0 lg:sticky lg:top-4">
+            {selected ? (
+              <ReviewDetail
+                key={selected.id}
+                item={selected}
+                canResolve={canResolve}
+                resolve={resolve}
+              />
+            ) : (
+              <EmptyState
+                icon={<MousePointerClick />}
+                title={t('reviews.selectTitle')}
+                description={t('reviews.selectHint')}
+                className="py-10"
+              />
+            )}
+          </div>
         </div>
       ) : null}
     </div>
@@ -526,56 +675,82 @@ function ReviewDetail({
     return { action };
   }
 
+  // The first decision that is not dismiss is the primary one; dismiss is
+  // the quiet way out, set apart at the right.
+  const primaryAction = actions.find((action) => action !== 'dismiss');
+  const resolving = resolve.isPending ? resolve.variables?.resolution.action : undefined;
+
   return (
-    <Card title={t(`reviews.kinds.${item.kind}`, item.kind)}>
-      {candidates.length > 1 ? (
-        <Select
-          label={holders ? t('reviews.holders.side') : t('reviews.candidate')}
-          value={candidate}
-          onChange={(event) => setCandidate(event.target.value)}
-          options={candidates.map((id) => ({
-            value: id,
-            label: candidateLabel(id, candidateCIs.get(id)),
-          }))}
-        />
-      ) : null}
-      {holders ? (
-        <DuplicateSides item={item} holders={holders} cis={candidateCIs} />
-      ) : (
-        <DiffTable rows={rows} ci={ci} />
-      )}
-      {genericCI ? (
-        <p className="mt-4 text-sm text-gray-700 dark:text-gray-300">
-          {t('reviews.noProfileMatch')}{' '}
-          <Link to={`/cmdb/${genericCI}`} className="text-blue-600 hover:underline">
-            {t('reviews.openCI')}
-          </Link>
-        </p>
-      ) : null}
-      {askType ? (
-        <div className="mt-4">
-          <Select
-            label={t('reviews.ciType')}
-            value={ciTypeId}
-            onChange={(event) => setChosenType(event.target.value)}
-            error={ciTypes.isError ? t('reviews.ciTypesLoadError') : undefined}
-            options={[
-              { value: '', label: t('reviews.chooseCIType') },
-              ...typeOptions.map(({ value, label }) => ({ value, label })),
-            ]}
-          />
-          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400">
-            {t('reviews.ciTypeHint', { name: reportedType || '—' })}
+    <Card className="flex flex-col overflow-hidden p-0">
+      <div className="space-y-4 p-5 lg:max-h-[calc(100vh-17rem)] lg:overflow-y-auto">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold text-fg [overflow-wrap:anywhere]">
+              {t(`reviews.kinds.${item.kind}`, item.kind)}
+            </h3>
+            {item.escalated ? <Badge variant="danger">{t('reviews.escalated')}</Badge> : null}
+            {item.status !== 'open' ? (
+              <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
+            ) : null}
+          </div>
+          <p className="flex flex-wrap items-center gap-x-2 text-sm text-fg-muted">
+            <span className="font-mono text-xs [overflow-wrap:anywhere]">{summary(item)}</span>
+            <Age iso={item.created_at} />
           </p>
         </div>
-      ) : null}
-      {item.status === 'open' ? (
-        <div className="mt-4 flex flex-wrap gap-2">
+        {candidates.length > 1 ? (
+          <Select
+            label={holders ? t('reviews.holders.side') : t('reviews.candidate')}
+            value={candidate}
+            onChange={(event) => setCandidate(event.target.value)}
+            options={candidates.map((id) => ({
+              value: id,
+              label: candidateLabel(id, candidateCIs.get(id)),
+            }))}
+          />
+        ) : null}
+        {holders ? (
+          <DuplicateSides item={item} holders={holders} cis={candidateCIs} />
+        ) : (
+          <DiffTable rows={rows} ci={ci} />
+        )}
+        {genericCI ? (
+          <p className="text-sm text-fg-muted">
+            {t('reviews.noProfileMatch')}{' '}
+            <Link to={`/cmdb/${genericCI}`} className="text-accent hover:underline">
+              {t('reviews.openCI')}
+            </Link>
+          </p>
+        ) : null}
+        {askType ? (
+          <div className="space-y-1.5">
+            <Select
+              label={t('reviews.ciType')}
+              value={ciTypeId}
+              onChange={(event) => setChosenType(event.target.value)}
+              error={ciTypes.isError ? t('reviews.ciTypesLoadError') : undefined}
+              options={[
+                { value: '', label: t('reviews.chooseCIType') },
+                ...typeOptions.map(({ value, label }) => ({ value, label })),
+              ]}
+            />
+            <p className="text-xs text-fg-muted">
+              {t('reviews.ciTypeHint', { name: reportedType || '—' })}
+            </p>
+          </div>
+        ) : null}
+      </div>
+      {item.status === 'open' && actions.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 border-t border-line bg-canvas/60 px-5 py-3">
           {actions.map((action) => (
             <Button
               key={action}
               size="sm"
-              variant={action === 'dismiss' ? 'secondary' : 'primary'}
+              variant={
+                action === primaryAction ? 'primary' : action === 'dismiss' ? 'ghost' : 'secondary'
+              }
+              className={action === 'dismiss' ? 'ml-auto' : undefined}
+              loading={resolving === action}
               disabled={
                 resolve.isPending ||
                 (action === 'merge' && !candidate) ||
@@ -592,34 +767,45 @@ function ReviewDetail({
   );
 }
 
+const detailThClasses = 'py-2 pr-3 text-left text-xs font-medium text-fg-muted';
+const detailTdClasses = 'border-t border-line py-2 pr-3 align-top';
+
 /** DiffTable compares the observed fields of an item with its CI. */
 function DiffTable({ rows, ci }: { rows: DiffRow[]; ci: CI | undefined }) {
   const { t } = useTranslation();
   // Fixed columns that wrap long names, serials and addresses keep the table
   // inside a phone-wide viewport (UI-18 reflow).
   return (
-    <table className="mt-3 w-full table-fixed text-left text-sm [overflow-wrap:anywhere]">
+    <table className="w-full table-fixed text-left text-sm [overflow-wrap:anywhere]">
       <caption className="sr-only">{t('reviews.diff')}</caption>
-      <thead className="text-xs uppercase text-muted">
+      <thead>
         <tr>
-          <th className="pb-2">{t('reviews.field')}</th>
-          <th className="pb-2">{t('reviews.observed')}</th>
-          <th className="pb-2">{ci ? ci.name : t('reviews.current')}</th>
+          <th scope="col" className={cn(detailThClasses, 'w-[28%]')}>
+            {t('reviews.field')}
+          </th>
+          <th scope="col" className={detailThClasses}>
+            {t('reviews.observed')}
+          </th>
+          <th scope="col" className={cn(detailThClasses, 'pr-0')}>
+            {ci ? ci.name : t('reviews.current')}
+          </th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
           <tr
             key={row.field}
-            className={row.differs ? 'bg-amber-50 dark:bg-amber-950' : undefined}
+            className={row.differs ? 'bg-amber-500/10' : undefined}
             data-differs={row.differs ? 'true' : undefined}
           >
-            <td className="py-1 font-mono text-xs">{row.field}</td>
-            <td className="py-1">{row.observed || '—'}</td>
-            <td className="py-1">
+            <td className={cn(detailTdClasses, 'pl-2 font-mono text-xs text-fg-muted')}>
+              {row.field}
+            </td>
+            <td className={cn(detailTdClasses, 'text-fg')}>{row.observed || '—'}</td>
+            <td className={cn(detailTdClasses, 'pr-2 text-fg')}>
               {row.current || '—'}
               {row.differs ? (
-                <span className="ml-2">
+                <span className="ml-2 inline-block">
                   <Badge variant="warning">{t('reviews.differs')}</Badge>
                 </span>
               ) : null}
@@ -649,38 +835,46 @@ function DuplicateSides({
   const p = item.payload ?? {};
   return (
     <section
-      className="mt-3 text-sm [overflow-wrap:anywhere]"
+      className="space-y-3 text-sm [overflow-wrap:anywhere]"
       aria-label={t('reviews.holders.title')}
     >
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        <dt className="text-muted">{t('reviews.holders.address')}</dt>
-        <dd className="font-mono">{display(p.address) || '—'}</dd>
-        <dt className="text-muted">{t('reviews.holders.vrf')}</dt>
-        <dd className="font-mono">{display(p.vrf_id) || '—'}</dd>
+        <dt className="text-fg-muted">{t('reviews.holders.address')}</dt>
+        <dd className="font-mono text-xs text-fg">{display(p.address) || '—'}</dd>
+        <dt className="text-fg-muted">{t('reviews.holders.vrf')}</dt>
+        <dd className="font-mono text-xs text-fg">{display(p.vrf_id) || '—'}</dd>
       </dl>
-      <table className="mt-3 w-full table-fixed text-left">
+      <table className="w-full table-fixed text-left">
         <caption className="sr-only">{t('reviews.holders.title')}</caption>
-        <thead className="text-xs uppercase text-muted">
+        <thead>
           <tr>
-            <th className="pb-2">{t('reviews.holders.ci')}</th>
-            <th className="pb-2">{t('reviews.holders.interface')}</th>
-            <th className="pb-2">{t('reviews.holders.type')}</th>
+            <th scope="col" className={detailThClasses}>
+              {t('reviews.holders.ci')}
+            </th>
+            <th scope="col" className={detailThClasses}>
+              {t('reviews.holders.interface')}
+            </th>
+            <th scope="col" className={cn(detailThClasses, 'pr-0')}>
+              {t('reviews.holders.type')}
+            </th>
           </tr>
         </thead>
         <tbody>
           {holders.map((holder) => (
             <tr key={holder.ip_address_id}>
-              <td className="py-1">
+              <td className={detailTdClasses}>
                 {holder.ci_id ? (
-                  <Link to={`/cmdb/${holder.ci_id}`} className="text-blue-600 hover:underline">
+                  <Link to={`/cmdb/${holder.ci_id}`} className="text-accent hover:underline">
                     {cis.get(holder.ci_id)?.name ?? holder.ci_id}
                   </Link>
                 ) : (
                   t('reviews.holders.noCI')
                 )}
               </td>
-              <td className="py-1 font-mono text-xs">{holder.interface_id || '—'}</td>
-              <td className="py-1">{holder.type}</td>
+              <td className={cn(detailTdClasses, 'font-mono text-xs')}>
+                {holder.interface_id || '—'}
+              </td>
+              <td className={cn(detailTdClasses, 'pr-0')}>{holder.type}</td>
             </tr>
           ))}
         </tbody>

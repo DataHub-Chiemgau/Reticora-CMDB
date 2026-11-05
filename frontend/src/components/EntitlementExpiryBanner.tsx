@@ -7,6 +7,7 @@
  * until the end.
  */
 import { useQuery } from '@tanstack/react-query';
+import { Hourglass } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { entitlementApi } from '../api/client';
 import type { Entitlement } from '../api/client';
@@ -58,8 +59,9 @@ export function EntitlementExpiryBanner() {
   return (
     <section
       aria-label={t('entitlementExpiry.title')}
-      className="border-b border-amber-300 bg-amber-50 px-6 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+      className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100"
     >
+      <Hourglass aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       <ul className="flex flex-col gap-1">
         {expiring.map(({ feature, validUntil, daysLeft }) => {
           const values = {

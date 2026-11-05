@@ -277,8 +277,9 @@ function createOf(target: AttributeEditorTarget & { mode: 'create' }, draft: Dra
   return body;
 }
 
-const checkboxLabel = 'flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200';
-const fieldErrorClass = 'text-sm text-red-600 dark:text-red-400';
+const checkboxLabel = 'flex items-center gap-2 text-sm text-fg';
+const fieldErrorClass = 'text-sm text-danger';
+const legendClass = 'p-0 text-sm font-semibold text-fg';
 
 export interface AttributeEditorProps {
   target: AttributeEditorTarget;
@@ -342,154 +343,174 @@ export function AttributeEditor({
     ) : null;
 
   return (
-    <Modal open onOpenChange={(open) => (open ? undefined : onClose())} title={title}>
-      <form className="space-y-3" onSubmit={submit}>
-        {scope === 'global' && !editing ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">
-            {t('citypes.globals.editorHint')}
-          </p>
-        ) : null}
-        {editing ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.editHint')}</p>
-        ) : (
-          <Input
-            label={t('citypes.fieldName')}
-            value={draft.key}
-            required
-            onChange={(e) => set({ key: e.target.value })}
-            error={errors.key}
-          />
-        )}
-        {editing && errors.key ? <p className={fieldErrorClass}>{errors.key}</p> : null}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input
-            label={t('citypes.labelDe')}
-            value={draft.de}
-            onChange={(e) => set({ de: e.target.value })}
-            error={errors.display_name}
-          />
-          <Input
-            label={t('citypes.labelEn')}
-            value={draft.en}
-            onChange={(e) => set({ en: e.target.value })}
-          />
-        </div>
-        <Input
-          label={t('citypes.description')}
-          value={draft.description}
-          onChange={(e) => set({ description: e.target.value })}
-          error={errors.description}
-        />
-        <Select
-          label={t('citypes.fieldType')}
-          options={dataTypes.map((ft) => ({ value: ft, label: t(`citypes.dataTypes.${ft}`, ft) }))}
-          value={draft.data_type}
-          onChange={(e) => set({ data_type: e.target.value })}
-          error={errors.data_type}
-        />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Input
-            label={t('citypes.fieldGroup')}
-            value={draft.group}
-            onChange={(e) => set({ group: e.target.value })}
-            error={errors.group}
-          />
-          <Input
-            label={t('citypes.fieldOrder')}
-            type="number"
-            value={draft.order}
-            onChange={(e) => set({ order: e.target.value })}
-            error={errors.order}
-          />
-        </div>
-        {ENUM_TYPES.has(draft.data_type) ? (
-          <Input
-            label={t('citypes.enumValues')}
-            value={draft.enum_values}
-            onChange={(e) => set({ enum_values: e.target.value })}
-            error={errors.enum_values}
-          />
-        ) : null}
-        {computed ? (
-          <p className="text-sm text-gray-600 dark:text-gray-300">{t('citypes.computedHint')}</p>
-        ) : null}
-        {scope !== 'global' && !computed ? (
-          <>
-            <label className={checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={draft.required}
-                aria-describedby={errors.required ? errorId('required') : undefined}
-                onChange={(e) => set({ required: e.target.checked })}
-              />
-              {t('citypes.required')}
-            </label>
-            {checkboxError('required')}
-          </>
-        ) : null}
-        {scope !== 'global' ? (
-          <>
-            <label className={checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={draft.inheritable}
-                aria-describedby={errors.inheritable ? errorId('inheritable') : undefined}
-                onChange={(e) => set({ inheritable: e.target.checked })}
-              />
-              {t('citypes.inheritable')}
-            </label>
-            {checkboxError('inheritable')}
-          </>
-        ) : null}
-        <label className={checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={draft.flags.searchable}
-            aria-describedby={errors.searchable ? errorId('searchable') : undefined}
-            onChange={(e) => setFlags({ searchable: e.target.checked })}
-          />
-          {t('citypes.searchable')}
-        </label>
-        {checkboxError('searchable')}
-        {!computed ? (
-          <>
-            <label className={checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={draft.flags.unique}
-                aria-invalid={errors.unique ? true : undefined}
-                aria-describedby={errors.unique ? errorId('unique') : undefined}
-                onChange={(e) => setFlags({ unique: e.target.checked })}
-              />
-              {t('citypes.unique')}
-            </label>
-            {checkboxError('unique')}
-            {draft.flags.unique ? (
-              <Select
-                label={t('citypes.uniqueScope')}
-                options={[
-                  { value: 'org', label: t('citypes.uniqueScopeOrg') },
-                  { value: 'client', label: t('citypes.uniqueScopeClient') },
-                ]}
-                value={draft.flags.unique_scope}
-                onChange={(e) =>
-                  setFlags({ unique_scope: e.target.value as AttributeIndexFlags['unique_scope'] })
-                }
-                error={errors.unique_scope}
-              />
+    <Modal open onOpenChange={(open) => (open ? undefined : onClose())} title={title} size="lg">
+      <form className="space-y-6" onSubmit={submit}>
+        <div className="grid grid-cols-1 gap-x-8 gap-y-6 md:grid-cols-2">
+          <fieldset className="min-w-0 space-y-3">
+            <legend className={legendClass}>{t('citypes.editor.groups.naming')}</legend>
+            {scope === 'global' && !editing ? (
+              <p className="text-sm text-fg-muted">{t('citypes.globals.editorHint')}</p>
             ) : null}
-          </>
-        ) : null}
-        {scope === 'global' ? (
-          <AppliesToInputs
-            draft={draft}
-            set={set}
-            errors={errors}
-            types={types}
-            typeLabel={typeLabel}
-            t={t}
-          />
-        ) : null}
+            {editing ? (
+              <p className="text-sm text-fg-muted">{t('citypes.editHint')}</p>
+            ) : (
+              <Input
+                label={t('citypes.fieldName')}
+                value={draft.key}
+                required
+                onChange={(e) => set({ key: e.target.value })}
+                error={errors.key}
+              />
+            )}
+            {editing && errors.key ? <p className={fieldErrorClass}>{errors.key}</p> : null}
+            <Input
+              label={t('citypes.labelDe')}
+              value={draft.de}
+              onChange={(e) => set({ de: e.target.value })}
+              error={errors.display_name}
+            />
+            <Input
+              label={t('citypes.labelEn')}
+              value={draft.en}
+              onChange={(e) => set({ en: e.target.value })}
+            />
+            <Input
+              label={t('citypes.description')}
+              value={draft.description}
+              onChange={(e) => set({ description: e.target.value })}
+              error={errors.description}
+            />
+          </fieldset>
+
+          <div className="min-w-0 space-y-6">
+            <fieldset className="space-y-3">
+              <legend className={legendClass}>{t('citypes.editor.groups.data')}</legend>
+              <Select
+                label={t('citypes.fieldType')}
+                options={dataTypes.map((ft) => ({
+                  value: ft,
+                  label: t(`citypes.dataTypes.${ft}`, ft),
+                }))}
+                value={draft.data_type}
+                onChange={(e) => set({ data_type: e.target.value })}
+                error={errors.data_type}
+              />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Input
+                  label={t('citypes.fieldGroup')}
+                  value={draft.group}
+                  onChange={(e) => set({ group: e.target.value })}
+                  error={errors.group}
+                />
+                <Input
+                  label={t('citypes.fieldOrder')}
+                  type="number"
+                  value={draft.order}
+                  onChange={(e) => set({ order: e.target.value })}
+                  error={errors.order}
+                />
+              </div>
+              {ENUM_TYPES.has(draft.data_type) ? (
+                <Input
+                  label={t('citypes.enumValues')}
+                  value={draft.enum_values}
+                  onChange={(e) => set({ enum_values: e.target.value })}
+                  error={errors.enum_values}
+                />
+              ) : null}
+            </fieldset>
+
+            <fieldset className="space-y-2.5">
+              <legend className={legendClass}>{t('citypes.editor.groups.constraints')}</legend>
+              {computed ? (
+                <p className="text-sm text-fg-muted">{t('citypes.computedHint')}</p>
+              ) : null}
+              {scope !== 'global' && !computed ? (
+                <>
+                  <label className={checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={draft.required}
+                      aria-describedby={errors.required ? errorId('required') : undefined}
+                      onChange={(e) => set({ required: e.target.checked })}
+                    />
+                    {t('citypes.required')}
+                  </label>
+                  {checkboxError('required')}
+                </>
+              ) : null}
+              {scope !== 'global' ? (
+                <>
+                  <label className={checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={draft.inheritable}
+                      aria-describedby={errors.inheritable ? errorId('inheritable') : undefined}
+                      onChange={(e) => set({ inheritable: e.target.checked })}
+                    />
+                    {t('citypes.inheritable')}
+                  </label>
+                  {checkboxError('inheritable')}
+                </>
+              ) : null}
+              <label className={checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={draft.flags.searchable}
+                  aria-describedby={errors.searchable ? errorId('searchable') : undefined}
+                  onChange={(e) => setFlags({ searchable: e.target.checked })}
+                />
+                {t('citypes.searchable')}
+              </label>
+              {checkboxError('searchable')}
+              {!computed ? (
+                <>
+                  <label className={checkboxLabel}>
+                    <input
+                      type="checkbox"
+                      checked={draft.flags.unique}
+                      aria-invalid={errors.unique ? true : undefined}
+                      aria-describedby={errors.unique ? errorId('unique') : undefined}
+                      onChange={(e) => setFlags({ unique: e.target.checked })}
+                    />
+                    {t('citypes.unique')}
+                  </label>
+                  {checkboxError('unique')}
+                  {draft.flags.unique ? (
+                    <Select
+                      label={t('citypes.uniqueScope')}
+                      options={[
+                        { value: 'org', label: t('citypes.uniqueScopeOrg') },
+                        { value: 'client', label: t('citypes.uniqueScopeClient') },
+                      ]}
+                      value={draft.flags.unique_scope}
+                      onChange={(e) =>
+                        setFlags({
+                          unique_scope: e.target.value as AttributeIndexFlags['unique_scope'],
+                        })
+                      }
+                      error={errors.unique_scope}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </fieldset>
+
+            {scope === 'global' ? (
+              <fieldset className="space-y-3">
+                <legend className={legendClass}>{t('citypes.editor.groups.applicability')}</legend>
+                <AppliesToInputs
+                  draft={draft}
+                  set={set}
+                  errors={errors}
+                  types={types}
+                  typeLabel={typeLabel}
+                  t={t}
+                />
+              </fieldset>
+            ) : null}
+          </div>
+        </div>
         {error ? (
           <p role="alert" className={fieldErrorClass}>
             {editing
@@ -497,7 +518,7 @@ export function AttributeEditor({
               : t('citypes.flagErrors.fieldNotSaved', { reason: describeFlagRefusal(error, t) })}
           </p>
         ) : null}
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-end gap-2 border-t border-line pt-4">
           <Button type="button" variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
@@ -552,10 +573,8 @@ function AppliesToInputs({
           className="space-y-1"
           aria-describedby={typesError ? 'attribute-editor-applies_to_type_ids-error' : undefined}
         >
-          <legend className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            {t('citypes.appliesTo.types')}
-          </legend>
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-gray-700">
+          <legend className="text-sm font-medium text-fg">{t('citypes.appliesTo.types')}</legend>
+          <div className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-line p-2 scroll-thin">
             {types.map((ty) => (
               <label key={ty.id} className={checkboxLabel}>
                 <input

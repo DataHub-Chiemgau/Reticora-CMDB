@@ -31,7 +31,7 @@
     "security": "Sicherheit",
     "map": "Karte",
     "roomplan": "Raumplan",
-    "consumables": "Lager",
+    "consumables": "Verbrauchsmaterial",
     "orders": "Bestellungen",
     "maintenance": "Wartung",
     "disposal": "Entsorgung",
@@ -40,7 +40,7 @@
     "desks": "Arbeitsplätze",
     "agents": "Agents",
     "findings": "Befunde",
-    "inventory": "Inventar",
+    "inventory": "Lagerbestand",
     "saved-views": "Ansichten",
     "locations": "Standorte",
     "ci-types": "CI-Typen",
@@ -70,7 +70,10 @@
     "name": "Name",
     "title": "Titel",
     "location": "Standort",
-    "all": "Alle"
+    "all": "Alle",
+    "noResultsHint": "Passe Suche oder Filter an.",
+    "allStatuses": "Alle Status",
+    "allCategories": "Alle Kategorien"
   },
   "commandPalette": {
     "title": "Befehlsmenü",
@@ -110,7 +113,11 @@
       "phone": "Telefon",
       "role": "Rolle",
       "back": "Zurück zur Suche"
-    }
+    },
+    "openPage": "{{page}} öffnen",
+    "hintNavigate": "navigieren",
+    "hintOpen": "öffnen",
+    "hintClose": "schließen"
   },
   "dashboard": {
     "summary": "Schneller Überblick über Ihre Konfigurationsdaten.",
@@ -151,7 +158,12 @@
       "openTickets": "Offene Tickets",
       "criticalTickets": "Kritische Tickets"
     },
-    "customize": "Widgets ein-/ausblenden"
+    "customize": "Widgets ein-/ausblenden",
+    "sections": {
+      "infrastructure": "Infrastruktur",
+      "attention": "Braucht Aufmerksamkeit",
+      "operations": "Betrieb und Bestand"
+    }
   },
   "toast": {
     "undo": "Rückgängig",
@@ -301,7 +313,8 @@
       "maintenance": "Wartung",
       "decommissioned": "Außer Betrieb",
       "unknown": "Unbekannt"
-    }
+    },
+    "timeline": "Zeitverlauf"
   },
   "form": {
     "createCI": "CI erstellen",
@@ -471,6 +484,10 @@
         "forbidden": "Ihnen fehlt das Recht dazu (discovery:manage).",
         "notFound": "Der Scope existiert nicht mehr.",
         "reason": "{{detail}}"
+      },
+      "columns": {
+        "schedule": "Zeitplan",
+        "status": "Status"
       }
     },
     "suggestions": {
@@ -480,7 +497,9 @@
       "accept": "Als Scope übernehmen",
       "dismiss": "Verwerfen",
       "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
-    }
+    },
+    "empty": "Noch kein Collector verbunden",
+    "emptyHint": "Verbinden Sie einen Collector im Kundennetz. Seine Subnetze erscheinen hier als Vorschläge, die Sie bestätigen."
   },
   "webhook": {
     "title": "Webhooks",
@@ -527,7 +546,11 @@
       "delivered": "zugestellt",
       "failed": "fehlgeschlagen",
       "dead": "aufgegeben"
-    }
+    },
+    "createHint": "Wählen Sie die Ereignisse, die Ihre URL aufrufen; die Anfragen werden mit dem Geheimnis signiert.",
+    "subscriptionsHint": "Jedes Abonnement sendet die gewählten Ereignisse an seine URL.",
+    "deliveriesHint": "Die letzten Zustellversuche für dieses Abonnement.",
+    "deadLettersHint": "Zustellungen, die nach allen Versuchen endgültig fehlgeschlagen sind."
   },
   "accessibility": {
     "closeModal": "Modal schließen",
@@ -586,7 +609,10 @@
       "cloud_resource": "Cloud-Ressource",
       "accessory": "Zubehör",
       "other": "Sonstiges"
-    }
+    },
+    "summary": "Assets mit Kategorie, Status und Standort verwalten.",
+    "emptyTitle": "Noch keine Assets",
+    "emptyHint": "Lege das erste Asset an, um Bestand, Status und Standort zu verfolgen."
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -621,7 +647,10 @@
       "returned": "Zurückgegeben",
       "transferred": "Transferiert",
       "overdue": "Überfällig"
-    }
+    },
+    "summary": "Zuweisung, Rückgabe und Übertragung von Assets nachverfolgen.",
+    "emptyTitle": "Noch keine Zuweisungen",
+    "emptyHint": "Weise ein Asset einer Person oder einem Team zu, um es hier zu verfolgen."
   },
   "pickers": {
     "kind": "Art",
@@ -667,7 +696,10 @@
       "certificate": "Zertifikat",
       "policy": "Richtlinie",
       "other": "Sonstiges"
-    }
+    },
+    "summary": "Verträge, Rechnungen und Handbücher als Dokumente verwalten.",
+    "emptyTitle": "Noch keine Dokumente",
+    "emptyHint": "Lege ein Dokument an, um Verträge, Rechnungen und Handbücher zu sammeln."
   },
   "stocktake": {
     "title": "Inventur",
@@ -690,7 +722,10 @@
       "site": "Standort",
       "room": "Raum",
       "rack": "Rack"
-    }
+    },
+    "summary": "Inventuren starten und Fortschritt und Fehlbestände verfolgen.",
+    "emptyTitle": "Noch keine Inventuren",
+    "emptyHint": "Starte eine Inventur, um Bestände mit dem Soll abzugleichen."
   },
   "ticket": {
     "title": "Tickets",
@@ -714,7 +749,14 @@
       "problem": "Problem",
       "change": "Änderung",
       "task": "Aufgabe"
-    }
+    },
+    "priorities": {
+      "low": "Niedrig",
+      "medium": "Mittel",
+      "high": "Hoch",
+      "critical": "Kritisch"
+    },
+    "allPriorities": "Alle Prioritäten"
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -752,7 +794,12 @@
       "forbidden": "Sie haben keine Berechtigung, {{name}} zu ändern.",
       "unavailable": "{{name}} wurde nicht geändert: Die Sitzungen des Benutzers konnten nicht widerrufen werden. Versuchen Sie es später erneut.",
       "failed": "Die Aktion für {{name}} ist fehlgeschlagen (HTTP {{status}})."
-    }
+    },
+    "subtitle": "Verwalten Sie, wer sich anmelden darf, zu welchen Teams die Personen gehören und was sie tun dürfen.",
+    "usersHint": "Alle Konten dieser Organisation; Deaktivieren sperrt die Anmeldung und behält die Datensätze.",
+    "teamsHint": "Teams fassen Benutzer zusammen, damit Arbeit gemeinsam zugewiesen werden kann.",
+    "rolesHint": "Rollen bündeln Berechtigungen, die Benutzern in einem Geltungsbereich gewährt werden.",
+    "loadError": "Die Liste konnte nicht geladen werden"
   },
   "invitations": {
     "title": "Einladungen",
@@ -799,7 +846,9 @@
       "mailFailed": "Die Einladungs-E-Mail konnte nicht versendet werden, es wurde nichts gespeichert oder geändert. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Betrieb.",
       "rejected": "Der Server hat die Einladung abgelehnt: {{detail}}",
       "failed": "Die Aktion ist fehlgeschlagen: {{detail}}"
-    }
+    },
+    "inviteHint": "Senden Sie einen Link, mit dem eine Person der Organisation mit einer Rolle und einem Geltungsbereich beitritt.",
+    "listHint": "Offene Einladungen lassen sich erneuern oder widerrufen, bis sie angenommen sind."
   },
   "invitationAccept": {
     "title": "Einladung annehmen",
@@ -909,7 +958,9 @@
       "subnet": "Subnetz (aus IPAM projiziert)",
       "vlan": "VLAN (aus IPAM projiziert)",
       "spof": "Single Point of Failure eines Services"
-    }
+    },
+    "filters": "Filter",
+    "counts": "{{nodes}} Knoten, {{edges}} Beziehungen"
   },
   "rack": {
     "title": "Racks",
@@ -941,7 +992,8 @@
     "action": "Aktion",
     "effective": "Effektiv",
     "granted": "Gewährt",
-    "notGranted": "Nicht gewährt"
+    "notGranted": "Nicht gewährt",
+    "catalogueHint": "Alle Berechtigungen des Systems und ob Ihr Konto sie hält."
   },
   "sla": {
     "title": "SLA-Richtlinien",
@@ -958,7 +1010,11 @@
     "breaches": "Verletzungen",
     "breached": "Verletzt",
     "noBreaches": "Keine Verletzungen",
-    "noBreachesHint": "Aktuell sind keine Tickets außerhalb ihrer SLA-Ziele."
+    "noBreachesHint": "Aktuell sind keine Tickets außerhalb ihrer SLA-Ziele.",
+    "responseDue": "Reaktion fällig",
+    "resolutionDue": "Lösung fällig",
+    "ticket": "Ticket",
+    "status": "Status"
   },
   "forms": {
     "title": "Formulare",
@@ -993,7 +1049,9 @@
       "succeeded": "Erfolgreich",
       "failed": "Fehlgeschlagen",
       "cancelled": "Abgebrochen"
-    }
+    },
+    "trigger": "Auslöser",
+    "steps": "Schritte"
   },
   "compliance": {
     "title": "Compliance",
@@ -1023,7 +1081,10 @@
     "categories": {
       "security": "Sicherheit",
       "hygiene": "Datenpflege"
-    }
+    },
+    "severity": "Schweregrad",
+    "ci": "CI",
+    "details": "Details"
   },
   "iga": {
     "loading": "Identity Governance wird geladen",
@@ -1085,7 +1146,11 @@
       "medium": "Mittel",
       "high": "Hoch",
       "critical": "Kritisch"
-    }
+    },
+    "action": "Aktion",
+    "entitlement": "Berechtigung",
+    "status": "Status",
+    "due": "Fällig"
   },
   "assistant": {
     "title": "KI-Assistent",
@@ -1100,7 +1165,10 @@
     "placeholder": "Welche kritischen Tickets betreffen Router?",
     "ask": "Fragen",
     "answer": "Antwort",
-    "citations": "Quellen"
+    "citations": "Quellen",
+    "newConversation": "Neue Unterhaltung",
+    "thinking": "Antwort wird erstellt…",
+    "sendHint": "Enter sendet, Umschalt+Enter fügt eine Zeile ein."
   },
   "export": {
     "omittedFields": "{{count}} Felder nicht enthalten",
@@ -1124,7 +1192,9 @@
     "status_running": "Läuft",
     "status_completed": "Abgeschlossen",
     "status_failed": "Fehlgeschlagen",
-    "status_expired": "Abgelaufen"
+    "status_expired": "Abgelaufen",
+    "startHint": "Wählen Sie ein Format; die Datei steht zum Download bereit, sobald der Auftrag abgeschlossen ist.",
+    "jobsHint": "Fertige Exporte bleiben 24 Stunden verfügbar."
   },
   "monitoring": {
     "title": "Monitoring",
@@ -1210,7 +1280,8 @@
     "keyRotationConfirm": "Schlüssel jetzt rotieren? Alle Credentials bleiben anschließend entschlüsselbar.",
     "rotateKeys": "Schlüssel jetzt rotieren",
     "keyRotationResult": "Rotation abgeschlossen: Schlüsselversion {{version}}, {{rotated}} Credentials neu verschlüsselt.",
-    "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen"
+    "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen",
+    "rule": "Regel"
   },
   "map": {
     "summary": "Standorte auf der Karte. Marker öffnen den Standort.",
@@ -1219,7 +1290,9 @@
     "worldAria": "Weltkarte mit Standortmarkern",
     "hint": "Wählen Sie einen Marker, um Details zu sehen.",
     "openSite": "Standort-CIs anzeigen",
-    "noCoords": "Ohne Koordinaten"
+    "noCoords": "Ohne Koordinaten",
+    "empty": "Noch keine Standorte",
+    "emptyHint": "Legen Sie einen Standort mit Koordinaten an, um ihn auf der Karte zu sehen."
   },
   "roomplan": {
     "summary": "Objekte auf dem Raumplan per Drag & Drop, Pfeiltasten oder Koordinaten positionieren.",
@@ -1241,7 +1314,8 @@
     "conflict": "Der Raumplan wurde zwischenzeitlich von anderer Seite geändert und neu geladen. Bitte prüfen Sie die Position und verschieben Sie das Objekt erneut.",
     "rangeError": "Position nicht gespeichert: Die Koordinaten müssen zwischen 0 und 100 % liegen.",
     "saveError": "Position nicht gespeichert: {{message}}",
-    "staleObject": "Position nicht gespeichert: Ein Objekt ist diesem Raum nicht mehr zugeordnet. Der Raumplan wurde neu geladen; bitte verschieben Sie das Objekt erneut."
+    "staleObject": "Position nicht gespeichert: Ein Objekt ist diesem Raum nicht mehr zugeordnet. Der Raumplan wurde neu geladen; bitte verschieben Sie das Objekt erneut.",
+    "count": "{{count}} Objekte"
   },
   "consumables": {
     "summary": "Verbrauchsmaterial mit Bestand und Mindestbestand.",
@@ -1249,7 +1323,10 @@
     "lowStockOnly": "Nur Mindestbestand unterschritten",
     "low": "niedrig",
     "ok": "OK",
-    "minLevel": "Mindestbestand"
+    "minLevel": "Mindestbestand",
+    "stock": "Bestand",
+    "emptyTitle": "Noch keine Artikel",
+    "emptyHint": "Lege einen Artikel an, um Bestand und Mindestbestand zu überwachen."
   },
   "orders": {
     "summary": "Interne Bestellungen mit Genehmigungs-Workflow.",
@@ -1269,7 +1346,10 @@
       "received": "Geliefert",
       "closed": "Abgeschlossen",
       "cancelled": "Storniert"
-    }
+    },
+    "number": "Nummer",
+    "emptyTitle": "Noch keine Bestellungen",
+    "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen."
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
@@ -1308,7 +1388,11 @@
       "pending": "ausstehend",
       "sent": "versendet",
       "failed": "fehlgeschlagen"
-    }
+    },
+    "period": "Zeitraum",
+    "affected": "Betroffene CIs",
+    "emptyTitle": "Keine Wartungen geplant",
+    "emptyHint": "Plane eine Wartung, um betroffene Kunden rechtzeitig zu informieren."
   },
   "disposal": {
     "summary": "Revisionssichere Entsorgungsdokumentation (append-only, BSI/ISO).",
@@ -1318,7 +1402,9 @@
     "selectAsset": "Asset wählen",
     "certificate": "Zertifikats-Referenz",
     "dataCarrier": "Datenträger-Vernichtung",
-    "performedAt": "Durchgeführt"
+    "performedAt": "Durchgeführt",
+    "emptyTitle": "Noch keine Entsorgungen dokumentiert",
+    "emptyHint": "Dokumentiere die erste Entsorgung, um sie revisionssicher nachzuweisen."
   },
   "keys": {
     "summary": "Physische und digitale Schlüssel mit Ausgabe/Rückgabe.",
@@ -1337,7 +1423,9 @@
       "issued": "Ausgegeben",
       "lost": "Verloren",
       "retired": "Ausgemustert"
-    }
+    },
+    "emptyTitle": "Noch keine Schlüssel",
+    "emptyHint": "Lege einen Schlüssel an, um Ausgabe und Rückgabe zu verfolgen."
   },
   "trainings": {
     "summary": "Kurse mit Zuweisung, Fälligkeit und Nachweis.",
@@ -1346,7 +1434,9 @@
     "validity": "Gültigkeit",
     "months": "Monate",
     "validityMonths": "Gültigkeit (Monate)",
-    "general": "Allgemein"
+    "general": "Allgemein",
+    "emptyTitle": "Noch keine Kurse",
+    "emptyHint": "Lege einen Kurs an, um Fälligkeit und Nachweise zu verfolgen."
   },
   "desks": {
     "summary": "Wechselnde Arbeitsplätze buchen.",
@@ -1359,7 +1449,9 @@
       "available": "Frei",
       "occupied": "Belegt",
       "maintenance": "In Wartung"
-    }
+    },
+    "emptyTitle": "Noch keine Arbeitsplätze",
+    "emptyHint": "Lege einen Arbeitsplatz an, damit er gebucht werden kann."
   },
   "agents": {
     "summary": "Registrierte Endpoint-Agents mit Policy und Kill-Switch.",
@@ -1375,7 +1467,10 @@
       "online": "Online",
       "offline": "Offline",
       "disabled": "Deaktiviert"
-    }
+    },
+    "emptyTitle": "Keine Agents registriert",
+    "emptyHint": "Endpoint-Agents erscheinen hier, sobald sie sich bei dieser Organisation anmelden.",
+    "platform": "Plattform"
   },
   "findings": {
     "summary": "Patch-Posture und Schwachstellen je CI.",
@@ -1392,7 +1487,12 @@
       "medium": "Mittel",
       "high": "Hoch",
       "critical": "Kritisch"
-    }
+    },
+    "package": "Paket",
+    "fixedVersion": "Behoben in",
+    "reference": "Referenz",
+    "emptyTitle": "Keine Befunde",
+    "emptyHint": "Für diesen Statusfilter liegen keine Sicherheitsbefunde vor."
   },
   "citypes": {
     "create": "Typ anlegen",
@@ -1616,6 +1716,14 @@
         "choosePlaceholder": "Set auswählen",
         "add": "Zuordnen"
       }
+    },
+    "editor": {
+      "groups": {
+        "naming": "Bezeichnung",
+        "data": "Daten",
+        "constraints": "Einschränkungen",
+        "applicability": "Geltungsbereich"
+      }
     }
   },
   "inventory": {
@@ -1643,7 +1751,18 @@
     "available": "Verfügbar",
     "subtitle": "Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit.",
     "objectKind": "Objektart",
-    "kindAsset": "Asset (serialisiert)"
+    "kindAsset": "Asset (serialisiert)",
+    "occurredAt": "Zeitpunkt",
+    "project": "Projekt",
+    "expiresAt": "Gültig bis",
+    "emptyMovementsTitle": "Noch keine Bewegungen",
+    "emptyMovementsHint": "Erfasse eine Bewegung, um Zu- und Abgänge nachzuvollziehen.",
+    "emptyItemsTitle": "Noch keine Mengenartikel",
+    "emptyItemsHint": "Mengenartikel erscheinen hier, sobald sie angelegt sind.",
+    "emptyReservationsTitle": "Keine aktiven Reservierungen",
+    "emptyReservationsHint": "Reservierte Assets und Artikel erscheinen hier, bis sie freigegeben werden.",
+    "emptyAvailabilityTitle": "Noch keine Verfügbarkeit",
+    "emptyAvailabilityHint": "Sobald Bestand gebucht ist, zeigt diese Übersicht, was verfügbar, reserviert und zugewiesen ist."
   },
   "impact": {
     "affectedList": "Betroffen:",
@@ -1694,7 +1813,7 @@
     "name": "Name",
     "type": "Typ",
     "subtitle": "Einheitliche Hierarchie: Standort → Gebäude → Raum → Rack und Standort → Lager → Zone → Regal → Fach.",
-    "addChild": "Unterpunkt",
+    "addChild": "Unterpunkt hinzufügen",
     "createRoot": "Standort anlegen",
     "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
     "nodeNotFound": "Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.",
@@ -1863,7 +1982,8 @@
     "moreClients": "Weitere Kunden laden",
     "moreSites": "Weitere Standorte laden",
     "outsideCI": "Dieses CI liegt außerhalb des gewählten Bereichs ({{scope}}).",
-    "switchToObject": "Bereich wechseln"
+    "switchToObject": "Bereich wechseln",
+    "reset": "Bereich zurücksetzen"
   },
   "reviews": {
     "title": "Review-Inbox",
@@ -1908,7 +2028,8 @@
       "action": "Aktion",
       "choose": "Aktion wählen",
       "run": "Ausführen",
-      "result": "{{resolved}} erledigt, {{failed}} fehlgeschlagen."
+      "result": "{{resolved}} erledigt, {{failed}} fehlgeschlagen.",
+      "clear": "Auswahl aufheben"
     },
     "actions": {
       "merge": "Zusammenführen",
@@ -1940,7 +2061,11 @@
     "openCI": "CI öffnen",
     "loadError": "Die Review-Items konnten nicht geladen werden",
     "empty": "Keine Review-Items",
-    "emptyHint": "Der Abgleich hat nichts zu entscheiden."
+    "emptyHint": "Der Abgleich hat nichts zu entscheiden.",
+    "object": "Objekt",
+    "age": "Alter",
+    "selectTitle": "Eintrag auswählen",
+    "selectHint": "Vergleichen Sie die Beobachtung mit dem CI und entscheiden Sie hier."
   },
   "notifications": {
     "title": "Benachrichtigungen",
@@ -2013,7 +2138,8 @@
       "template": {
         "migrate": "Template-Migration"
       }
-    }
+    },
+    "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet."
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
@@ -2107,7 +2233,8 @@
       "title": "Fertig",
       "text": "{{count}} CIs sind bereits in Ihrer CMDB.",
       "open": "Zur CMDB"
-    }
+    },
+    "stepDone": "Erledigt:"
   },
   "language": {
     "label": "Sprache",
@@ -2253,7 +2380,10 @@
       "openCI": "CI {{id}} öffnen",
       "violationCount": "{{shown}} von {{total}} Verstößen",
       "truncated": "Gespeichert sind höchstens 10000 Verstöße.",
-      "more": "Weitere laden"
+      "more": "Weitere laden",
+      "count": "Drafts: {{count}}",
+      "createdAt": "Angelegt {{at}}",
+      "versionLabel": "Version {{version}}"
     },
     "problem": {
       "detail": "Fehler {{status}}: {{detail}}",
@@ -2517,6 +2647,29 @@
         "not-imported": "Nicht importiert",
         "field-permissions-skipped": "Feldrechte übersprungen"
       }
-    }
+    },
+    "count": "Templates: {{count}}",
+    "currentVersion": "Aktuelle Version"
+  },
+  "navGroup": {
+    "infrastructure": "Infrastruktur",
+    "capture": "Erfassung",
+    "operations": "Betrieb",
+    "assets": "Assets",
+    "stock": "Lager & Beschaffung",
+    "workplace": "Arbeitsplatz",
+    "governance": "Governance",
+    "admin": "Administration"
+  },
+  "shell": {
+    "search": "Seiten, Objekte und Befehle suchen …",
+    "searchShort": "Suche und Befehle öffnen",
+    "openNavigation": "Navigation öffnen",
+    "closeNavigation": "Navigation schließen",
+    "collapseSidebar": "Seitenleiste einklappen",
+    "expandSidebar": "Seitenleiste ausklappen",
+    "account": "Konto",
+    "accountMenu": "Kontomenü von {{name}}",
+    "openCount": "{{count}} offen"
   }
 }

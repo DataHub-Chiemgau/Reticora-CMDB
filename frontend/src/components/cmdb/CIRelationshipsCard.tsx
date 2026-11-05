@@ -20,6 +20,7 @@
  * again (F-273).
  */
 import { useRef, useState } from 'react';
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, GitFork, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -149,36 +150,39 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
   const relationships = showAll ? allRelationships : allRelationships.filter((r) => !isOutside(r));
 
   return (
-    <Card title={t('ci.relationships')}>
-      <div className="mb-3 flex justify-end">
+    <Card
+      title={t('ci.relationships')}
+      actions={
         <Button
           size="sm"
           variant="secondary"
+          icon={<Plus />}
           onClick={() => {
             createRelationship.reset();
             setShowCreate(true);
           }}
         >
-          + {t('relationship.add', 'Beziehung hinzufügen')}
+          {t('relationship.add', 'Beziehung hinzufügen')}
         </Button>
-      </div>
-
+      }
+    >
       {mutationError ? (
-        <p role="alert" className="mb-3 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mb-3 text-sm text-danger">
           {mutationError.message}
         </p>
       ) : null}
 
       {hiddenCount > 0 ? (
-        <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+        <p className="mb-3 flex flex-wrap items-center gap-x-2 text-sm text-fg-muted">
           <span>{t('relationshipCard.hiddenOutside', { count: hiddenCount })}</span>
-          <button
-            type="button"
-            className="text-primary hover:underline"
+          <Button
+            size="sm"
+            variant="ghost"
+            className="-mx-1 px-2 text-accent hover:text-accent"
             onClick={() => setShowAll((v) => !v)}
           >
             {showAll ? t('relationshipCard.showInScope') : t('relationshipCard.showAll')}
-          </button>
+          </Button>
         </p>
       ) : null}
 
@@ -191,9 +195,9 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
           onRetry={() => void relationshipsQuery.refetch()}
         />
       ) : relationships.length === 0 ? (
-        <EmptyState title={t('ci.noRelationships')} />
+        <EmptyState title={t('ci.noRelationships')} icon={<GitFork />} className="py-8" />
       ) : (
-        <ul className="space-y-2 text-sm" aria-label={t('ci.relationships')}>
+        <ul className="-my-2 divide-y divide-line text-sm" aria-label={t('ci.relationships')}>
           {relationships.map((relationship) => {
             const isOutgoing = relationship.source_ci_id === ciId;
             const otherId = isOutgoing ? relationship.target_ci_id : relationship.source_ci_id;
@@ -201,19 +205,23 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
             return (
               <li
                 key={relationship.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+                className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2.5"
               >
                 <span className="flex flex-wrap items-center gap-2">
                   <Badge variant="neutral">{relationship.rel_type}</Badge>
-                  <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
+                  {isOutgoing ? (
+                    <ArrowRight aria-hidden="true" className="h-4 w-4 text-fg-subtle" />
+                  ) : (
+                    <ArrowLeft aria-hidden="true" className="h-4 w-4 text-fg-subtle" />
+                  )}
                   {relationship.target_location_id ? (
-                    <span className="text-xs">
+                    <span className="text-sm text-fg">
                       {locations.path(relationship.target_location_id)}
                     </span>
                   ) : (
                     <Link
                       to={`/cmdb/${otherId}`}
-                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                      className="rounded font-mono text-xs text-accent underline-offset-2 [overflow-wrap:anywhere] hover:underline"
                     >
                       {otherId}
                     </Link>
@@ -225,16 +233,18 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                     <Badge variant="warning">{t('relationshipCard.outsideScope')}</Badge>
                   ) : null}
                 </span>
-                <span className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                  <span className="mr-1 text-xs text-fg-muted">
                     {relationship.source_system || relationship.source}
                   </span>
                   {relationship.projected ? (
                     <Badge variant="info">{t('relationship.projected')}</Badge>
                   ) : null}
                   {!relationship.projected && state !== 'verified' ? (
-                    <button
-                      className="text-xs text-primary hover:underline"
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="px-2 text-accent hover:text-accent"
                       disabled={updateRelationship.isPending}
                       onClick={() =>
                         updateRelationship.mutate({
@@ -244,18 +254,22 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                       }
                     >
                       {t('relationship.verify', 'Bestätigen')}
-                    </button>
+                    </Button>
                   ) : null}
                   {relationship.projected ? null : (
                     <>
-                      <button
-                        className="text-xs text-primary hover:underline"
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="px-2 text-accent hover:text-accent"
                         onClick={() => setEditing(relationship)}
                       >
                         {t('common.edit', 'Bearbeiten')}
-                      </button>
-                      <button
-                        className="text-xs text-red-600 hover:underline dark:text-red-400"
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="px-2 text-danger hover:text-danger"
                         disabled={deleteRelationship.isPending}
                         title={
                           relationship.source === 'discovery'
@@ -275,7 +289,7 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
                         {relationship.source === 'discovery'
                           ? t('relationshipCard.suppress')
                           : t('common.delete', 'Löschen')}
-                      </button>
+                      </Button>
                     </>
                   )}
                 </span>
@@ -285,17 +299,19 @@ export function CIRelationshipsCard({ ciId }: { ciId: string }) {
         </ul>
       )}
 
-      <div className="mt-4 border-t border-gray-100 pt-3 dark:border-gray-800">
-        <button
-          type="button"
-          className="text-xs text-primary hover:underline"
+      <div className="mt-4 border-t border-line pt-3">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="-ml-2 text-accent hover:text-accent"
+          icon={showSuppressions ? <ChevronDown /> : <ChevronRight />}
           aria-expanded={showSuppressions}
           onClick={() => setShowSuppressions((v) => !v)}
         >
           {showSuppressions
             ? t('relationshipCard.hideSuppressions')
             : t('relationshipCard.showSuppressions')}
-        </button>
+        </Button>
         {showSuppressions ? <SuppressionList ciId={ciId} /> : null}
       </div>
 
@@ -367,56 +383,62 @@ function SuppressionList({ ciId }: { ciId: string }) {
   return (
     <div className="mt-2">
       {liftSuppression.error ? (
-        <p role="alert" className="mb-2 text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="mb-2 text-sm text-danger">
           {(liftSuppression.error as Error).message}
         </p>
       ) : null}
       {suppressions.length === 0 ? (
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {t('relationshipCard.noSuppressions')}
-        </p>
+        <p className="text-xs text-fg-muted">{t('relationshipCard.noSuppressions')}</p>
       ) : (
-        <ul className="space-y-2 text-sm" aria-label={t('relationshipCard.suppressions')}>
+        <ul
+          className="divide-y divide-line text-sm"
+          aria-label={t('relationshipCard.suppressions')}
+        >
           {suppressions.map((suppression) => {
             const isOutgoing = suppression.source_ci_id === ciId;
             const otherId = isOutgoing ? suppression.target_ci_id : suppression.source_ci_id;
             return (
               <li
                 key={suppression.id}
-                className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-100 pb-2 last:border-0 dark:border-gray-800"
+                className="flex flex-wrap items-start justify-between gap-2 py-2.5"
               >
                 <span className="flex flex-col gap-1">
                   <span className="flex flex-wrap items-center gap-2">
                     <Badge variant="neutral">{suppression.rel_type}</Badge>
-                    <span aria-hidden="true">{isOutgoing ? '→' : '←'}</span>
+                    {isOutgoing ? (
+                      <ArrowRight aria-hidden="true" className="h-4 w-4 text-fg-subtle" />
+                    ) : (
+                      <ArrowLeft aria-hidden="true" className="h-4 w-4 text-fg-subtle" />
+                    )}
                     <Link
                       to={`/cmdb/${otherId}`}
-                      className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+                      className="rounded font-mono text-xs text-accent underline-offset-2 [overflow-wrap:anywhere] hover:underline"
                     >
                       {otherId}
                     </Link>
                   </span>
-                  <span className="text-xs text-gray-700 dark:text-gray-200">
+                  <span className="text-xs text-fg">
                     {suppression.reason
                       ? t('relationshipCard.suppressionReason', { reason: suppression.reason })
                       : t('relationshipCard.noReason')}
                   </span>
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                  <span className="text-xs text-fg-muted">
                     {t('relationshipCard.suppressedBy', {
                       actor: suppression.created_by ?? t('relationshipCard.unknownActor'),
                       date: new Date(suppression.created_at).toLocaleString(i18n.language),
                     })}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:underline"
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="px-2 text-accent hover:text-accent"
                   title={t('relationshipCard.liftHint')}
                   disabled={liftSuppression.isPending}
                   onClick={() => liftSuppression.mutate(suppression.id)}
                 >
                   {t('relationshipCard.lift')}
-                </button>
+                </Button>
               </li>
             );
           })}
@@ -494,7 +516,7 @@ function SuppressRelationshipModal({
           error={violations.reason ? t('relationshipCard.suppressReasonInvalid') : undefined}
         />
         {error && Object.keys(violations).length === 0 ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {error.message}
           </p>
         ) : null}
@@ -614,7 +636,7 @@ function CreateRelationshipModal({
           error={violations.notes}
         />
         {error && Object.keys(violations).length === 0 ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {error.message}
           </p>
         ) : null}
@@ -677,7 +699,7 @@ function EditRelationshipModal({
           onSubmit(relationship.id, { verification_state: state, notes: notes.trim() }, onClose);
         }}
       >
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+        <p className="text-xs text-fg-muted">
           {t(
             'relationship.editHint',
             'Endpunkte und Typ sind unveränderlich — zum Umhängen die Beziehung löschen und neu anlegen.',
@@ -700,7 +722,7 @@ function EditRelationshipModal({
           error={violations.notes}
         />
         {error && Object.keys(violations).length === 0 ? (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="text-sm text-danger">
             {error.message}
           </p>
         ) : null}
