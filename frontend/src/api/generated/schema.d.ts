@@ -807,6 +807,45 @@ export interface paths {
     patch: operations['updateRelationship'];
     trace?: never;
   };
+  '/api/v1/relationships/{id}/changes': {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the change history of a relationship
+     * @description The history of a stored relationship (REL-09, AUD-07, WP-296), newest first (observed_at, then id): one row per creation (POST, a new discovery edge), change (PATCH with a changed value: updated, or verification_changed when verification_state changed), removal and suppression (DELETE with force of a discovery edge), written in the transaction of the mutation. before and after hold the whole edge (before null for created, after null for removed and suppressed); personal values are resolved, a deleted vault entry is null (SEC-05). The fields of before, after and changed_fields follow the field permissions of the relationship type and both endpoints (RBA-07): an unreadable attribute key, notes or confidence is left out. The rows stay after the edge is deleted and are visible like the edge was: both endpoints in the caller's client and site scope or org-wide (IMP-07).
+     */
+    get: operations['listRelationshipChanges'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/relationship-suppressions': {
     parameters: {
       query?: never;
@@ -1402,7 +1441,7 @@ export interface paths {
     };
     /**
      * Get an asset
-     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id).
+     * @description Always the schema Asset (WP-740). With a primary CI, primary_ci carries its read-only technical identity (field permissions of the CI apply; it is left out when the caller cannot read primary_ci_id). With an active reservation, active_reservation carries it (API-06, E-38, WP-750); it replaces GET /api/v1/inventory/availability for assets.
      */
     get: operations['getAsset'];
     put?: never;
@@ -2432,7 +2471,10 @@ export interface paths {
     /** List stocktakes */
     get: operations['listStocktakes'];
     put?: never;
-    /** Create a stocktake */
+    /**
+     * Create a stocktake
+     * @description Creates a planned stocktake. location_id names its area, a node of the location tree whose subtree (bins included) is counted (WP-848); client_id and site_id follow the node. status and the totals are not writable (400).
+     */
     post: operations['createStocktake'];
     delete?: never;
     options?: never;
@@ -2458,7 +2500,10 @@ export interface paths {
     delete: operations['deleteStocktake'];
     options?: never;
     head?: never;
-    /** Update a stocktake */
+    /**
+     * Update a stocktake
+     * @description Changes title, description, due_date and, while the stocktake is planned, its area location_id (WP-848). status and the totals are not writable (400); start and cancel are the transitions.
+     */
     patch: operations['updateStocktake'];
     trace?: never;
   };
@@ -8180,29 +8225,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/relationships/{id}/changes': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /**
-     * List the change history of a relationship
-     * @description Planned (E-38); WP-296 implements the operation.
-     */
-    get: operations['listRelationshipChanges'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/assets/bulk': {
     parameters: {
       query?: never;
@@ -8634,7 +8656,7 @@ export interface paths {
     put?: never;
     /**
      * Start a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description Moves a planned stocktake to in_progress and freezes the expected stock of its area in the same transaction (INV-01, WP-848): one item per asset whose location_id lies in the subtree of the area (expected quantity 1) and one per stock of a consumable in a bin of the subtree (expected quantity on_hand). Assets with a free-text location only are not part of it; the snapshot holds the objects the caller sees and does not follow later movements. started_at, started_by and total_expected (the number of items) are set. The operation has no request body.
      */
     post: operations['startStocktake'];
     delete?: never;
@@ -8655,7 +8677,7 @@ export interface paths {
     };
     /**
      * List the expected items of a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description The expected stock frozen by POST …/start (INV-01, WP-848), ordered by id; empty before the start.
      */
     get: operations['listStocktakeItems'];
     put?: never;
@@ -8703,7 +8725,7 @@ export interface paths {
     put?: never;
     /**
      * Cancel a stocktake
-     * @description Planned (E-38); WP-287 implements the operation.
+     * @description Moves a planned or in-progress stocktake to cancelled (WP-848); the frozen expected stock stays. The operation has no request body.
      */
     post: operations['cancelStocktake'];
     delete?: never;
@@ -11059,10 +11081,10 @@ export interface components {
       /** Format: date-time */
       created_at: string;
       /**
-       * @description The trail of the entry (CI and location history only).
+       * @description The trail of the entry (CI, location and relationship history only): relationship_change for an entry of the history of a relationship (WP-296).
        * @enum {string}
        */
-      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change';
+      source?: 'ci_change' | 'entity_change' | 'audit' | 'location_change' | 'relationship_change';
       /**
        * Format: uuid
        * @description The site of the CI when the change was made (ci_change), or the site of the moved location (location_change).
@@ -11877,6 +11899,67 @@ export interface components {
       comment?: string;
       /** Format: date-time */
       created_at: string;
+    };
+    /** @description One row of the history of a relationship (WP-296). */
+    RelationshipChange: {
+      /** Format: uuid */
+      id: string;
+      /**
+       * Format: uuid
+       * @description The relationship; it may be deleted.
+       */
+      relationship_id: string;
+      /** Format: uuid */
+      source_ci_id: string;
+      /** Format: uuid */
+      target_ci_id: string;
+      rel_type: string;
+      /** @enum {string} */
+      change_kind:
+        | 'created'
+        | 'updated'
+        | 'verification_changed'
+        | 'refreshed'
+        | 'removed'
+        | 'suppressed'
+        | 'rewired'
+        | 'restored';
+      /** @description The fields whose values the change changed (empty for created, removed and suppressed). */
+      changed_fields: (
+        'attributes' | 'confidence' | 'verification_state' | 'source_system' | 'notes'
+      )[];
+      /** @description The relationship before the change; null for created. */
+      before: components['schemas']['RelationshipChangeEdge'] | null;
+      /** @description The relationship after the change; null for removed and suppressed. */
+      after: components['schemas']['RelationshipChangeEdge'] | null;
+      /**
+       * Format: uuid
+       * @description The user who made the change; absent without one.
+       */
+      actor_id?: string;
+      /** @enum {string} */
+      actor_type: 'user' | 'api_key' | 'system';
+      /**
+       * @description The source of the change as in the audit log; without a request (the discovery ingest) collector for a discovery or agent edge, system otherwise.
+       * @enum {string}
+       */
+      source: 'ui' | 'api' | 'collector' | 'import' | 'system';
+      /**
+       * @description Why the system changed the relationship; absent for a change through the API.
+       * @enum {string}
+       */
+      reason?: 'stale' | 'suppressed' | 'merge' | 'unmerge' | 'interface_removed';
+      request_id?: string;
+      correlation_id?: string;
+      /** Format: date-time */
+      observed_at: string;
+    };
+    /** @description A relationship as stored at the change, in the form of Relationship (endpoints, interfaces, rel_type, attributes with provenance, confidence, verification_state, verified_by/verified_at, source, source_system, notes, first_seen_at, last_seen_at, last_confirmed_at), without the fields the caller may not read. */
+    RelationshipChangeEdge: {
+      [key: string]: unknown;
+    };
+    RelationshipChangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['RelationshipChange'][];
     };
     CIChangeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['CIChange'][];
@@ -12740,6 +12823,24 @@ export interface components {
       readonly version?: number;
       /** @description Read-only technical identity of the primary CI; only in GET /api/v1/assets/{id}, left out when the caller cannot read primary_ci_id. Under restricted CI field permissions only id, name and status. */
       readonly primary_ci?: components['schemas']['CIRef'];
+      /** @description The active reservation of the asset (API-06, E-38, WP-750); only in GET /api/v1/assets/{id} and absent without one. Under restricted asset field permissions it is left out (no grantable field key, fail-closed). */
+      readonly active_reservation?: components['schemas']['AssetActiveReservation'];
+    };
+    /** @description The active reservation of an asset in GET /api/v1/assets/{id} (WP-750): for a user (assignee_id) or a project (project_ref). */
+    AssetActiveReservation: {
+      /** Format: uuid */
+      id: string;
+      /** Format: date-time */
+      reserved_until?: string;
+      /** Format: date-time */
+      expires_at?: string;
+      /**
+       * Format: uuid
+       * @description The user the asset is reserved for.
+       */
+      assignee_id?: string;
+      /** @description The project the asset is reserved for. */
+      project_ref?: string;
     };
     /** @description The read-only technical identity of a CI linked to an asset (spec §4, WP-740); the CI stays the source of truth. */
     CIRef: {
@@ -13015,8 +13116,28 @@ export interface components {
       organization_id: string;
       title: string;
       description?: string;
-      status: string;
+      /** @enum {string} */
+      status: 'planned' | 'in_progress' | 'completed' | 'cancelled';
+      /**
+       * @deprecated
+       * @description Free-text scope of earlier releases; location_id names the area (WP-848).
+       */
       scope: string;
+      /**
+       * Format: uuid
+       * @description The area, a node of the location tree whose subtree (bins included) is counted; absent for an organization-wide stocktake of an earlier release.
+       */
+      location_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the area, derived from location_id.
+       */
+      client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the area, derived from location_id.
+       */
+      site_id?: string;
       started_by?: string;
       /** Format: date-time */
       started_at?: string;
@@ -13036,18 +13157,63 @@ export interface components {
     CreateStocktakeRequest: {
       title: string;
       description?: string;
+      /**
+       * @deprecated
+       * @description Free-text scope of earlier releases; location_id names the area (WP-848).
+       */
       scope?: string;
+      /**
+       * Format: uuid
+       * @description The area, a node of the location tree (WP-848).
+       */
+      location_id?: string;
       /** Format: date-time */
       due_date?: string;
-      total_expected?: number;
     };
     UpdateStocktakeRequest: {
       title?: string;
       description?: string;
-      status?: string;
+      /** @description The area, a node of the location tree; only while the stocktake is planned (409 otherwise), an empty value removes it (WP-848). */
+      location_id?: string;
       /** Format: date-time */
       due_date?: string;
-      total_expected?: number;
+    };
+    StocktakeItem: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      stocktake_id: string;
+      /** @enum {string} */
+      item_kind: 'asset' | 'consumable';
+      /**
+       * Format: uuid
+       * @description Set for item_kind asset.
+       */
+      asset_id?: string;
+      /**
+       * Format: uuid
+       * @description Set for item_kind consumable.
+       */
+      consumable_id?: string;
+      /**
+       * Format: uuid
+       * @description The location of the asset or the bin of the stock at the start.
+       */
+      location_id: string;
+      /** @description 1 for an asset, on_hand of the bin at the start for a consumable. */
+      expected_quantity: number;
+      /** @description Set when the stocktake is completed (WP-287). */
+      counted_quantity?: number;
+      /**
+       * @description Set when the stocktake is completed (WP-287).
+       * @enum {string}
+       */
+      classification?: 'found' | 'missing' | 'unexpected';
+      /** Format: date-time */
+      created_at: string;
+    };
+    StocktakeItemListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['StocktakeItem'][];
     };
     StocktakeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Stocktake'][];
@@ -13297,7 +13463,7 @@ export interface components {
       unit: string;
       /**
        * @deprecated
-       * @description Sum of on_hand over the bins of the consumable the caller sees (stock_level per bin: GET /api/v1/consumables/{id}/stock). Kept as a computed field until WP-320 (WP-283).
+       * @description Total stock: the sum of on_hand over all bins of the consumable, also those outside the caller's scope (consumable.on_hand_total, E-128 (a)); the stock per bin within the scope is GET /api/v1/consumables/{id}/stock. The consumable is below its minimum level when stock_level < min_level (event stock.below_minimum, WP-285). Kept as a read-only field until WP-320 (WP-283).
        */
       readonly stock_level: number;
       min_level: number;
@@ -13498,6 +13664,16 @@ export interface components {
       asset_id?: string;
       /** Format: uuid */
       quantity_item_id?: string;
+      /**
+       * Format: uuid
+       * @description Client of the asset or quantity item, derived by the database (WP-750); absent for an org-wide item.
+       */
+      readonly client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the asset or quantity item, derived by the database (WP-750); absent without a location.
+       */
+      readonly site_id?: string;
       quantity: number;
       state: components['schemas']['ReservationState'];
       /** Format: date-time */
@@ -14776,7 +14952,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -14794,6 +14970,9 @@ export interface components {
         | 'agent_enrollment_token'
         | 'collector_enrollment_code'
         | 'ci_merge'
+        | 'stocktake'
+        | 'stocktake_item'
+        | 'stock_scan'
       )[];
     };
     /** @enum {string} */
@@ -18739,6 +18918,57 @@ export interface operations {
       };
     };
   };
+  listRelationshipChanges: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RelationshipChangeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      /** @description The caller sees neither the relationship nor a row of its history: an unknown or malformed id, a projected structural relationship (contains, mounted_in, located_in), or an endpoint outside the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
   listRelationshipSuppressions: {
     parameters: {
       query?: {
@@ -21989,7 +22219,7 @@ export interface operations {
         search?: components['parameters']['Search'];
         category?: string;
         client_id?: string;
-        /** @description When true, only items at or below their minimum level. */
+        /** @description When true, only consumables below their minimum level: the total stock over all bins (stock_level) is less than min_level. A total equal to min_level is not below it, and min_level 0 never is (WP-285). */
         low_stock?: boolean;
       };
       header?: never;
@@ -22289,6 +22519,15 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description location_id is no UUID or names no node of the location tree visible to the caller (unknown, of another organization or outside the scope alike); `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -22337,7 +22576,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may delete it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -22376,7 +22615,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may change it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -22386,6 +22625,24 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description location_id changes while the stocktake is not planned. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description location_id is no UUID or names no node of the location tree visible to the caller; `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeScans: {
@@ -22526,7 +22783,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      /** @description The principal is restricted in the client or site scope: a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: such a stocktake belongs to the whole organization, so only a principal with an organization-wide scope may complete it (E-09). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -35735,7 +35992,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). */
+      /** @description The change history of an entity, newest first. For a CI it is the unified history of CI-06: its ci_change changes with the site at the time, one entry per change set with change_kind and field_changes (AUD-03; a row written before the change sets is an entry of its own), entity_change rows, audit entries and the location_change rows of its location and the location's ancestors. For a location it is its entity_change rows and the location_change rows of the location (also after its deletion) and of its ancestors. A location_change entry has change_type location_change, field_name parent_id, and old_value/new_value objects with location_id, location_name, parent_id and path. Without audit:read the audit entries are left out (audit_included false). For a relationship it is the history of the edge (relationship_change, WP-296), the rows of GET /api/v1/relationships/{id}/changes: change_type is the change kind (created, updated, verification_changed, removed, suppressed), old_value/new_value the edge before and after the change with the fields the caller may read (relationship grant of the type, RBA-07), created_at and observed_at the time of the change, change_source its source, request_id and correlation_id those of its request, source relationship_change. A relationship the caller sees neither as edge nor in its history has an empty history. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -38590,42 +38847,6 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
-  listRelationshipChanges: {
-    parameters: {
-      query?: {
-        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
-        limit?: components['parameters']['Limit'];
-        /**
-         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
-         *     are HMAC-signed by the server (API-02); a forged or altered cursor
-         *     yields 400. Keyset cursors are bound to the sort order they were
-         *     issued for; sending one with a different `sort_by`/`sort_dir`
-         *     combination yields 400.
-         */
-        cursor?: components['parameters']['Cursor'];
-      };
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description List the change history of a relationship. The page follows the cursor contract (API-02); the item schema comes with WP-296. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-    };
-  };
   bulkAssets: {
     parameters: {
       query?: never;
@@ -39309,18 +39530,53 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-287. */
+      /** @description The started stocktake. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: only a principal with an organization-wide scope may start it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The stocktake is not planned. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The stocktake has no area; `field` is location_id. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Profile --no-db: the in-memory repository reaches neither the location tree nor the stock of the bins. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeItems: {
@@ -39346,17 +39602,27 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the expected items of a stocktake. The page follows the cursor contract (API-02); the item schema comes with WP-287. */
+      /** @description A page of the expected items (cursor contract, API-02). */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['StocktakeItemListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      /** @description Profile --no-db: the in-memory repository freezes no expected stock. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   listStocktakeDifferences: {
@@ -39407,18 +39673,35 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. The request and response schemas come with WP-287. */
+      /** @description The cancelled stocktake. */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Stocktake'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description The stocktake has no area and the principal is restricted in the client or site scope: only a principal with an organization-wide scope may cancel it (E-09). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The stocktake is completed or cancelled already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getDocumentUsage: {

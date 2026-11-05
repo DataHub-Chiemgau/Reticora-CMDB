@@ -115,10 +115,12 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 		add(fmt.Sprintf("%s.warranty_until IS NOT NULL AND %s.warranty_until <= CURRENT_DATE + (%s || ' days')::interval", table, table, p), fmt.Sprintf("%d", f.WarrantyWithinDays))
 	}
 	if f.HasOwner != nil && table == "asset" {
+		// The holder cache of the asset (WP-745, kept by the assignment
+		// service; WP-747): a user or a team holds it.
 		if *f.HasOwner {
-			add(`EXISTS (SELECT 1 FROM assignment a WHERE a.asset_id = asset.id AND a.status = 'active')`)
+			add(`(asset.assigned_user_id IS NOT NULL OR asset.assigned_team_id IS NOT NULL)`)
 		} else {
-			add(`NOT EXISTS (SELECT 1 FROM assignment a WHERE a.asset_id = asset.id AND a.status = 'active')`)
+			add(`(asset.assigned_user_id IS NULL AND asset.assigned_team_id IS NULL)`)
 		}
 	}
 	if f.Reserved != nil {
@@ -625,7 +627,7 @@ type astField struct{ expr, kind string }
 // deprecated aliases of inventory_no, purchase_price and warranty_until
 // (AST-01, WP-738) and read the new columns. The owner of a CI
 // (owner_user_id, owner_team_id; WP-752) is the basis of "my devices"
-// (WP-307); has_owner of the spec stays the assignment of an asset.
+// (WP-307); has_owner of the spec is the holder of an asset (holder cache).
 var astFields = map[string]map[string]astField{
 	"ci": {
 		"name": {"%s.name", kindText}, "status": {"%s.status", kindText}, "hostname": {"%s.hostname", kindText},

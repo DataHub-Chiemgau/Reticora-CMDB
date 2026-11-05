@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/graphqlbff"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -192,6 +193,24 @@ func (l ciLookup) GetByID(ctx context.Context, orgID, id string) (*asset.CIRef, 
 		OSVersion:       item.OSVersion,
 		DiscoverySource: item.DiscoverySource,
 	}, nil
+}
+
+// reservationLookup adapts reservation.Repository to the
+// asset.ReservationLookup port (API-06, E-38, WP-750): the active
+// reservation of an asset in GET /api/v1/assets/{id}, under the caller's
+// scope; a serial asset has at most one (idx_reservation_one_active_per_asset).
+type reservationLookup struct {
+	repo reservation.Repository
+}
+
+func (l reservationLookup) ActiveReservation(ctx context.Context, orgID, assetID string) (*asset.ReservationRef, error) {
+	active, err := l.repo.ActiveForItem(ctx, orgID, "asset", assetID)
+	if err != nil || len(active) == 0 {
+		return nil, err
+	}
+	res := &active[0]
+	return &asset.ReservationRef{ID: res.ID, ReservedUntil: res.ReservedUntil, ExpiresAt: res.ExpiresAt,
+		AssigneeID: res.AssigneeID, ProjectRef: res.ProjectRef}, nil
 }
 
 // ciParentAssetLookup adapts asset.Repository to the ci.ParentAssetLookup

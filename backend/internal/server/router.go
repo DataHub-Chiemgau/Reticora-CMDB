@@ -758,6 +758,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate),
 		asset.NewHandler(repos.Asset).
 			WithCIs(ciLookup{repo: repos.CI}).
+			// The active reservation in GET /assets/{id} (API-06, WP-750).
+			WithReservations(reservationLookup{repo: repos.Reservation}).
 			// Links write ci.asset_id through the CI service (WP-272).
 			WithCILinks(opts.CIService),
 		assignment.NewHandler(repos.Assignment).WithService(repos.AssignmentService),

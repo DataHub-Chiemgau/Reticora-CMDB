@@ -264,6 +264,7 @@ GET /api/v1/relationship-suppressions relationship:read
 GET /api/v1/relationship-types relationship:read
 GET /api/v1/relationship-types/{key} relationship:read
 GET /api/v1/relationships relationship:read
+GET /api/v1/relationships/{id}/changes relationship:read
 GET /api/v1/reservations reservation:read
 GET /api/v1/reservations/{id} reservation:read
 GET /api/v1/review-items discovery:read
@@ -295,6 +296,7 @@ GET /api/v1/stock-movements asset:read
 GET /api/v1/stocktakes stocktake:read
 GET /api/v1/stocktakes/{id} stocktake:read
 GET /api/v1/stocktakes/{id}/difference stocktake:read
+GET /api/v1/stocktakes/{id}/items stocktake:read
 GET /api/v1/stocktakes/{id}/scans stocktake:read
 GET /api/v1/subnets ipam:read
 GET /api/v1/subnets/{id} ipam:read
@@ -565,8 +567,10 @@ POST /api/v1/sites location:write
 POST /api/v1/slas sla:write
 POST /api/v1/stock-movements stock:write
 POST /api/v1/stocktakes stocktake:write
+POST /api/v1/stocktakes/{id}/cancel stocktake:write
 POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write
+POST /api/v1/stocktakes/{id}/start stocktake:write
 POST /api/v1/subnets ipam:write
 POST /api/v1/subnets/{id}/reservations ipam:write
 POST /api/v1/suppliers contract:write

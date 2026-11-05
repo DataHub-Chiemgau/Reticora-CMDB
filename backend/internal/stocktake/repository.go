@@ -22,6 +22,25 @@ var (
 	// ErrAlreadyCompleted is returned when a stocktake that is already in a
 	// terminal state (completed or cancelled) is completed again.
 	ErrAlreadyCompleted = errors.New("stocktake already completed or cancelled")
+	// ErrInvalidTransition is returned when the status of the stocktake does
+	// not allow the transition or the change (409, WP-848): start needs
+	// planned, cancel planned or in_progress, a new area planned.
+	ErrInvalidTransition = errors.New("the status of the stocktake does not allow this transition")
+	// ErrNoArea is returned by Start for a stocktake without location_id
+	// (422 on location_id, WP-848).
+	ErrNoArea = errors.New("stocktake has no area")
+	// ErrSnapshotUnavailable is returned by the in-memory repository for
+	// start and items: it reaches neither the location tree nor the stock
+	// of the bins (501, WP-848).
+	ErrSnapshotUnavailable = errors.New("the expected stock needs the location tree and the stock of the bins")
+)
+
+// Status values of a stocktake (stocktake_status_check, 000012).
+const (
+	StatusPlanned    = "planned"
+	StatusInProgress = "in_progress"
+	StatusCompleted  = "completed"
+	StatusCancelled  = "cancelled"
 )
 
 // deviatingResults are the scan results that make up the difference list.
@@ -56,6 +75,16 @@ type Repository interface {
 	// Completing an already completed or cancelled stocktake fails with
 	// ErrAlreadyCompleted.
 	Complete(ctx context.Context, orgID, id string, applyCorrections bool) (*Completion, error)
+	// Start moves a planned stocktake with an area to in_progress and
+	// freezes the expected stock of the area in one transaction (WP-848).
+	// It fails with ErrInvalidTransition for another status and with
+	// ErrNoArea without location_id.
+	Start(ctx context.Context, orgID, id, userID string) (*Stocktake, error)
+	// Cancel moves a planned or in-progress stocktake to cancelled;
+	// another status fails with ErrInvalidTransition.
+	Cancel(ctx context.Context, orgID, id string) (*Stocktake, error)
+	// ListItems returns a page of the frozen expected stock, ordered by id.
+	ListItems(ctx context.Context, orgID, id string, page api.PaginationParams) ([]Item, int, error)
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -178,29 +207,74 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 		return nil, ErrNotFound
 	}
 
+	if req.LocationID != nil {
+		if s.Status != StatusPlanned {
+			return nil, ErrInvalidTransition
+		}
+		s.LocationID = *req.LocationID
+	}
 	if req.Title != nil {
 		s.Title = *req.Title
 	}
 	if req.Description != nil {
 		s.Description = *req.Description
 	}
-	if req.Status != nil {
-		s.Status = *req.Status
-		if *req.Status == "in_progress" && s.StartedAt == "" {
-			s.StartedAt = time.Now().UTC().Format(time.RFC3339)
-		}
-		if *req.Status == "completed" {
-			s.CompletedAt = time.Now().UTC().Format(time.RFC3339)
-		}
-	}
 	if req.DueDate != nil {
 		s.DueDate = *req.DueDate
 	}
-	if req.TotalExpected != nil {
-		s.TotalExpected = *req.TotalExpected
-	}
 	s.UpdatedAt = time.Now().UTC()
 	return s, nil
+}
+
+// Start follows the status and area rules of the PostgreSQL repository and
+// then fails with ErrSnapshotUnavailable: the in-memory repository reaches
+// neither the location tree nor the stock of the bins.
+func (r *MemoryRepository) Start(_ context.Context, orgID, id, _ string) (*Stocktake, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	s, ok := r.stocktakes[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if s.Status != StatusPlanned {
+		return nil, ErrInvalidTransition
+	}
+	if s.LocationID == "" {
+		return nil, ErrNoArea
+	}
+	return nil, ErrSnapshotUnavailable
+}
+
+// Cancel moves a planned or in-progress stocktake to cancelled.
+func (r *MemoryRepository) Cancel(_ context.Context, orgID, id string) (*Stocktake, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s, ok := r.stocktakes[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if s.Status != StatusPlanned && s.Status != StatusInProgress {
+		return nil, ErrInvalidTransition
+	}
+	s.Status = StatusCancelled
+	s.UpdatedAt = time.Now().UTC()
+	out := *s
+	return &out, nil
+}
+
+// ListItems fails with ErrSnapshotUnavailable for a known stocktake: the
+// in-memory repository freezes no expected stock.
+func (r *MemoryRepository) ListItems(_ context.Context, orgID, id string, _ api.PaginationParams) ([]Item, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	s, ok := r.stocktakes[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, 0, ErrNotFound
+	}
+	return nil, 0, ErrSnapshotUnavailable
 }
 
 func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {

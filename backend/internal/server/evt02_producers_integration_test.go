@@ -3,7 +3,8 @@
 //   - TestEveryEVT02TypeHasAProducer – EVT-01, EVT-02, NTF-05: for every
 //     type of events.Types (the 16 of EVT-02, the NTF-05 types
 //     entitlement.expired, invitation.created, webhook.dead and
-//     certificate.expiring, and apikey.creator_deactivated of TLC-04/E-64)
+//     certificate.expiring, and apikey.creator_deactivated of TLC-04/E-64;
+//     of phase 2 stock.below_minimum, NTF-05 [P2], WP-285)
 //     its production action – a request through the complete router or the
 //     scheduler run that owns the type, on the PostgreSQL repositories –
 //     writes exactly one event of the type. The envelope names the
@@ -245,6 +246,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		certCollector                      string
 		expiringContract, expiringAsset    string
 		creator                            string
+		stockBin, stockItem                string
 		exportWorker                       = export.NewJobWorker(e.Repos.ExportJobs, e.Repos.CI, blobs)
 		exportJobs                         = export.NewPGJobRepository(f.App)
 		unclassifiedSerial, unclassifiedIP = "EVT02-UNCL-1", "10.55.1.1"
@@ -713,6 +715,51 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				return creator
 			},
 			data: sameID("user_id")},
+		// A retrieval through POST /stock-movements takes the total stock
+		// of a consumable from 6 below its min_level 5 (WP-285); refused,
+		// neither movement nor on_hand_total remain.
+		{typ: events.StockBelowMinimum,
+			setup: func(t *testing.T) {
+				parent := ""
+				for _, kind := range []string{"site", "warehouse", "zone", "shelf", "bin"} {
+					body := fmt.Sprintf(`{"kind":%q,"name":"evt02-%s","parent_id":%q}`, kind, kind, parent)
+					if kind == "site" {
+						body = `{"kind":"site","name":"evt02-site","client_id":"` + f.Client1 + `"}`
+					}
+					r := call(t, admin, http.MethodPost, "/api/v1/locations", body)
+					if r.Code != http.StatusCreated {
+						t.Fatalf("POST /locations %s = %d %s", kind, r.Code, t6Short(r.Body))
+					}
+					parent = t6ID(r.Body)
+				}
+				stockBin = parent
+				r := call(t, admin, http.MethodPost, "/api/v1/consumables", `{"name":"evt02-toner","sku":"evt02-toner","min_level":5}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("POST /consumables = %d %s", r.Code, t6Short(r.Body))
+				}
+				stockItem = t6ID(r.Body)
+				r = call(t, admin, http.MethodPost, "/api/v1/stock-movements",
+					`{"movement_type":"receipt","consumable_id":"`+stockItem+`","to_location_id":"`+stockBin+`","quantity":6}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("receipt = %d %s", r.Code, t6Short(r.Body))
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/stock-movements",
+					`{"movement_type":"retrieval","consumable_id":"`+stockItem+`","from_location_id":"`+stockBin+`","quantity":2}`)
+				answered(t, "POST /stock-movements", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "on_hand_total", scalar(t, `SELECT on_hand_total::text FROM consumable WHERE id = $1`, stockItem), "6.00")
+					unchanged(t, "movements", count(t, `stock_movement WHERE consumable_id = $1`, stockItem), "1")
+				}
+				return stockItem
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				t.Helper()
+				if data["id"] != entity || data["on_hand_total"] != 4.0 || data["min_level"] != 5.0 || data["sku"] != "evt02-toner" {
+					t.Errorf("data %v, want id %s, on_hand_total 4, min_level 5 and sku evt02-toner", data, entity)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in

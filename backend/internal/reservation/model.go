@@ -36,6 +36,11 @@ type Reservation struct {
 	CreatedBy      string     `json:"created_by,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
+	// ClientID and SiteID are the client and site of the asset or quantity
+	// item, derived by the trigger reservation_scope (000258, WP-750); a
+	// writer cannot choose them.
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
 }
 
 // CreateRequest is the payload for creating a reservation.

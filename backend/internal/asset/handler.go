@@ -41,10 +41,18 @@ type CIRef struct {
 	DiscoverySource string `json:"discovery_source,omitempty"`
 }
 
+// ReservationLookup resolves the active reservation of an asset under the
+// caller's scope (API-06, WP-750); nil without one. The reservation
+// package provides it through an adapter, so asset does not import it.
+type ReservationLookup interface {
+	ActiveReservation(ctx context.Context, orgID, assetID string) (*ReservationRef, error)
+}
+
 // Handler provides HTTP handlers for asset endpoints.
 type Handler struct {
-	repo Repository
-	cis  CILookup
+	repo         Repository
+	cis          CILookup
+	reservations ReservationLookup
 	// links writes the asset↔CI links through the CI domain (WP-272).
 	links CILinker
 }
@@ -58,6 +66,13 @@ func NewHandler(repo Repository) *Handler {
 // CI's read-only technical identity (spec §4).
 func (h *Handler) WithCIs(lookup CILookup) *Handler {
 	h.cis = lookup
+	return h
+}
+
+// WithReservations attaches the lookup of the active reservation that GET
+// /api/v1/assets/{id} answers in active_reservation (API-06, E-38).
+func (h *Handler) WithReservations(lookup ReservationLookup) *Handler {
+	h.reservations = lookup
 	return h
 }
 
@@ -253,6 +268,19 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		if ref, lookupErr := h.cis.GetByID(r.Context(), orgID, item.CIID); lookupErr == nil {
 			linked = ref
 		}
+	}
+	// The reservation state of the asset (API-06, E-38): its active
+	// reservation, under the asset field policy like every member without
+	// a grantable field key (fail-closed, convention 11).
+	if h.reservations != nil {
+		active, lookupErr := h.reservations.ActiveReservation(r.Context(), orgID, item.ID)
+		if lookupErr != nil {
+			writeAssetError(w, r, lookupErr)
+			return
+		}
+		withReservation := *item
+		withReservation.ActiveReservation = active
+		item = &withReservation
 	}
 	body, err := projectWithCI(policy, item, linked)
 	if err != nil {

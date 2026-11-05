@@ -32,16 +32,72 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/stocktakes/{id}/scans", h.ListScans)
 	r.Get("/api/v1/stocktakes/{id}/difference", h.Difference)
 	r.Post("/api/v1/stocktakes/{id}/complete", h.Complete)
+	r.Post("/api/v1/stocktakes/{id}/start", h.Start)
+	r.Get("/api/v1/stocktakes/{id}/items", h.ListItems)
+	r.Post("/api/v1/stocktakes/{id}/cancel", h.Cancel)
 }
 
 // orgWideOrForbidden answers 403 and reports false when the request's
-// principal is restricted in the client or site scope (F-365): a stocktake is
-// a row of the whole organization, so only an org-wide principal changes,
-// completes or deletes it (E-09); the repository refuses the write as well.
-// Without a tenant scope the repository fails closed.
+// principal is restricted in the client or site scope (F-365): a stocktake
+// without area is a row of the whole organization, so only an org-wide
+// principal changes, starts, cancels, completes or deletes it (E-09); the
+// repository refuses the write as well. Without a tenant scope the
+// repository fails closed.
 func orgWideOrForbidden(w http.ResponseWriter, r *http.Request) bool {
 	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && (!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "only a principal with an organization-wide scope may change a stocktake")
+		return false
+	}
+	return true
+}
+
+// writable reads the stocktake id before a write and reports whether the
+// write may go on (WP-848): a stocktake the principal cannot see answers
+// 404; one without area answers 403 to a principal restricted in the client
+// or site scope (orgWideOrForbidden). A stocktake with area is left to the
+// repository and the restrictive policies of its client and site.
+func (h *Handler) writable(w http.ResponseWriter, r *http.Request, orgID, id string) bool {
+	st, err := h.repo.GetByID(r.Context(), orgID, id)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return false
+	}
+	if st.LocationID == "" {
+		return orgWideOrForbidden(w, r)
+	}
+	return true
+}
+
+// writeStocktakeError answers the sentinel errors of the repository with
+// their status and any other error through api.WriteRepoError.
+func writeStocktakeError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
+	case errors.Is(err, ErrInvalidTransition):
+		api.WriteError(w, http.StatusConflict, "Conflict", "the status of the stocktake does not allow this transition")
+	case errors.Is(err, ErrAlreadyCompleted):
+		api.WriteError(w, http.StatusConflict, "Conflict", "stocktake already completed or cancelled")
+	case errors.Is(err, ErrNoArea):
+		api.WriteFieldError(w, &api.FieldError{Field: "location_id", Message: "the stocktake has no area to start",
+			Status: http.StatusUnprocessableEntity})
+	case errors.Is(err, ErrSnapshotUnavailable):
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the expected stock is not available without PostgreSQL")
+	case errors.Is(err, api.ErrInvalidCursor):
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// checkLocation answers 422 on location_id and reports false when value is
+// set and no UUID.
+func checkLocation(w http.ResponseWriter, value string) bool {
+	if value == "" {
+		return true
+	}
+	if err := api.RequireUUID("location_id", value); err != nil {
+		api.WriteFieldError(w, err)
 		return false
 	}
 	return true
@@ -133,6 +189,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !checkLocation(w, req.LocationID) {
+		return
+	}
 	scope := req.Scope
 	if scope == "" {
 		scope = "full"
@@ -142,11 +201,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		OrganizationID: t.OrganizationID,
 		Title:          req.Title,
 		Description:    req.Description,
-		Status:         "planned",
+		Status:         StatusPlanned,
 		Scope:          scope,
-		StartedBy:      t.UserID,
+		LocationID:     req.LocationID,
 		DueDate:        req.DueDate,
-		TotalExpected:  req.TotalExpected,
 	}
 
 	if err := h.repo.Create(r.Context(), s); err != nil {
@@ -165,23 +223,22 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !orgWideOrForbidden(w, r) {
+	id := chi.URLParam(r, "id")
+	if !h.writable(w, r, t.OrganizationID, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	var req UpdateRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if req.LocationID != nil && !checkLocation(w, *req.LocationID) {
+		return
+	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
-			return
-		}
-		api.WriteRepoError(w, err)
+		writeStocktakeError(w, err)
 		return
 	}
 
@@ -196,10 +253,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !orgWideOrForbidden(w, r) {
+	id := chi.URLParam(r, "id")
+	if !h.writable(w, r, t.OrganizationID, id) {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, id); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "stocktake not found")
@@ -331,10 +388,10 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !orgWideOrForbidden(w, r) {
+	stocktakeID := chi.URLParam(r, "id")
+	if !h.writable(w, r, t.OrganizationID, stocktakeID) {
 		return
 	}
-	stocktakeID := chi.URLParam(r, "id")
 	applyCorrections := true
 	if r.Body != nil && r.ContentLength != 0 {
 		var req CompleteRequest
@@ -362,4 +419,78 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	api.WriteJSON(w, http.StatusOK, completion)
+}
+
+// Start handles POST /api/v1/stocktakes/{id}/start (planned → in_progress,
+// WP-848): it freezes the expected stock of the area. Without area it
+// answers 422 on location_id, for another status 409; the in-memory
+// repository answers 501.
+func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	if !h.writable(w, r, t.OrganizationID, id) {
+		return
+	}
+	item, err := h.repo.Start(r.Context(), t.OrganizationID, id, t.UserID)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// Cancel handles POST /api/v1/stocktakes/{id}/cancel (planned or
+// in_progress → cancelled, WP-848); for another status it answers 409.
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	if !h.writable(w, r, t.OrganizationID, id) {
+		return
+	}
+	item, err := h.repo.Cancel(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// ListItems handles GET /api/v1/stocktakes/{id}/items, the frozen expected
+// stock (WP-848), cursor-paginated by id.
+func (h *Handler) ListItems(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+
+	page := api.ParsePagination(r)
+	if page.CursorError != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid cursor")
+		return
+	}
+	items, total, err := h.repo.ListItems(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeStocktakeError(w, err)
+		return
+	}
+	next := ItemsNextCursor(items, page.Limit)
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Item]{
+		Data:       items,
+		Total:      total,
+		Limit:      page.Limit,
+		Offset:     page.Offset,
+		HasMore:    next != "",
+		NextCursor: next,
+	})
 }

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -118,25 +119,52 @@ func fieldError(field, message string) error {
 	return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
 }
 
+// lockedConsumable is the consumable as lockConsumable read it under its
+// row lock: the fields of the event stock.below_minimum and whether it is
+// below its minimum level (on_hand_total < min_level, compared in numeric).
+type lockedConsumable struct {
+	id, client, sku, name, unit string
+	total, minLevel             float64
+	below                       bool
+}
+
 // lockConsumable locks the consumable (SELECT … FOR UPDATE, which applies
 // its select and update policies, like lockObject of the movement service)
-// and returns its client. A consumable that is unknown, of another
-// organization or outside the caller's scope is ErrNotFound; so is an
-// article without client for a client-scoped principal (E-128 (b)).
-func lockConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) (string, error) {
+// and returns it. A consumable that is unknown, of another organization or
+// outside the caller's scope is ErrNotFound; so is an article without
+// client for a client-scoped principal (E-128 (b)). on_hand_total and the
+// stock per bin change only under this lock, so the edge of the minimum
+// level is seen exactly once, also by parallel bookings on different bins
+// (WP-285).
+func lockConsumable(ctx context.Context, tx pgx.Tx, orgID, id string) (*lockedConsumable, error) {
 	if !api.IsUUID(id) {
-		return "", ErrNotFound
+		return nil, ErrNotFound
 	}
-	var client string
-	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM consumable
-		WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&client)
+	c := &lockedConsumable{id: id}
+	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(sku, ''), name, unit,
+		on_hand_total::float8, min_level::float8, on_hand_total < min_level
+		FROM consumable WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).
+		Scan(&c.client, &c.sku, &c.name, &c.unit, &c.total, &c.minLevel, &c.below)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
+		return nil, ErrNotFound
 	}
 	if err != nil {
-		return "", fmt.Errorf("lock consumable: %w", err)
+		return nil, fmt.Errorf("lock consumable: %w", err)
 	}
-	return client, nil
+	return c, nil
+}
+
+// appendBelowMinimum writes stock.below_minimum about c in tx, as the last
+// write of the booking or the change of min_level that took c from "not
+// below" to "below" its minimum level (K20). A refused event fails the
+// operation, which then rolls back with it.
+func appendBelowMinimum(ctx context.Context, tx pgx.Tx, orgID string, c *lockedConsumable) error {
+	if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.StockBelowMinimum, EntityID: c.id,
+		Data: events.StockBelowMinimumData{ID: c.id, ClientID: c.client, SKU: c.sku, Name: c.name, Unit: c.unit,
+			OnHandTotal: c.total, MinLevel: c.minLevel}}); err != nil {
+		return fmt.Errorf("stock below minimum event: %w", err)
+	}
+	return nil
 }
 
 // checkBin fails with a 422 field error when id names no location visible
@@ -173,19 +201,24 @@ func checkBin(ctx context.Context, tx pgx.Tx, orgID, field, id, client string) e
 // receipt target gets its row by upsert, and the affected rows are locked
 // in the order of their location id (FOR UPDATE), so opposite transfers do
 // not deadlock. A take beyond on_hand − reserved is ErrInsufficientStock
-// (409); the CHECK of stock_level stays the last guard.
+// (409); the CHECK of stock_level stays the last guard. Last, the balance
+// goes into consumable.on_hand_total and the edge of the minimum level is
+// checked (bookTotal, WP-285). ApplyBooking is the only writer of on_hand
+// and on_hand_total; a caller that locks stock_level or reservation rows
+// before the booking locks the consumable row first, one booking several
+// consumables in ascending id.
 func ApplyBooking(ctx context.Context, tx pgx.Tx, b *Booking) error {
 	deltas, err := bookingDeltas(b)
 	if err != nil {
 		return err
 	}
-	client, err := lockConsumable(ctx, tx, b.OrganizationID, b.ConsumableID)
+	item, err := lockConsumable(ctx, tx, b.OrganizationID, b.ConsumableID)
 	if err != nil {
 		return err
 	}
 	ids := make([]string, 0, len(deltas))
 	for _, d := range deltas {
-		if binErr := checkBin(ctx, tx, b.OrganizationID, d.field, d.locationID, client); binErr != nil {
+		if binErr := checkBin(ctx, tx, b.OrganizationID, d.field, d.locationID, item.client); binErr != nil {
 			return binErr
 		}
 		ids = append(ids, d.locationID)
@@ -237,7 +270,35 @@ func ApplyBooking(ctx context.Context, tx pgx.Tx, b *Booking) error {
 			return fmt.Errorf("book stock: %w", err)
 		}
 	}
-	return nil
+	return bookTotal(ctx, tx, b, deltas, item)
+}
+
+// bookTotal carries the balance of the booking (receipt +, retrieval −,
+// correction ±, transfer 0) into on_hand_total of the locked consumable,
+// so on_hand_total stays the sum of on_hand over all bins whatever the
+// caller's scope (E-128 (a)). When the total thereby falls from "not
+// below" to "below" the minimum level (on_hand_total < min_level),
+// stock.below_minimum is the last write (WP-285); further takes below the
+// threshold and transfers write none.
+func bookTotal(ctx context.Context, tx pgx.Tx, b *Booking, deltas []binDelta, locked *lockedConsumable) error {
+	var balance float64
+	for _, d := range deltas {
+		balance += d.delta
+	}
+	if balance == 0 {
+		return nil
+	}
+	var below bool
+	if err := tx.QueryRow(ctx, `UPDATE consumable SET on_hand_total = on_hand_total + $3
+		WHERE id = $1 AND organization_id = $2
+		RETURNING on_hand_total::float8, on_hand_total < min_level`,
+		b.ConsumableID, b.OrganizationID, balance).Scan(&locked.total, &below); err != nil {
+		return fmt.Errorf("book total stock: %w", err)
+	}
+	if locked.below || !below {
+		return nil
+	}
+	return appendBelowMinimum(ctx, tx, b.OrganizationID, locked)
 }
 
 // OnlyBin returns, in tx, the bin of the only stock_level row of the

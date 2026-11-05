@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000256_quantity_item_merge
+Stand: Migration 000261_relationship_change
 
 ## Prüfung
 
@@ -366,6 +366,26 @@ unter der RLS des Schreibenden an seine CIs. Behält danach ein CI des Assets
 weil der Schreibende es nicht sieht oder nicht ändern darf, lehnt der
 Trigger die Änderung mit 42501 (`asset_location_ci_scope`) ab (Migration
 000181, F-380); Asset und CIs weichen nicht still voneinander ab.
+
+### Scope von Reservierungen (WP-750)
+
+`reservation` trägt `client_id` und `site_id` (Migration 000258, TEN-02,
+E-40) mit Fremdschlüsseln samt Organisation (K19):
+`reservation_client_id_fkey` auf `client (id, organization_id)` und
+`reservation_site_id_fkey` auf `site (id, organization_id)`, beide ohne
+Löschaktion. Der Trigger `reservation_scope` (`derive_reservation_scope`)
+leitet beide bei INSERT und bei einer Änderung von Objekt, Client oder
+Standort aus dem Asset ab, sonst aus dem Mengenartikel (`quantity_item`),
+und überschreibt geschriebene Werte; er liest unter der RLS des Schreibenden,
+ein Objekt außerhalb des Scopes ergibt NULL und scheitert für gescopte
+Prinzipale an WITH CHECK (E-09). Ändert ein Asset oder Mengenartikel Client
+oder Standort, leitet `propagate_reservation_scope` dessen Reservierungen mit
+erweitertem Scope (`app_scope_widen`) neu ab. Die Policies folgen `asset`
+(000151) mit den restriktiven UPDATE- und DELETE-Policies; die Unterabfrage
+`reservationVisible` des Repositorys entfällt. Ein gelöschter Standort mit
+Reservierungen meldet die Abhängigkeit `asset` (`locations.DeleteError`). Die
+Migration setzt `expires_at = reserved_until` für aktive Reservierungen ohne
+`expires_at` (Regel aus WP-277); die Down-Migration lässt diese Werte stehen.
 
 ### Standort von Räumen und Racks (WP-393)
 
@@ -1569,6 +1589,100 @@ mit Fremdschlüssel und Index ist entfernt, `derive_stock_movement_scope()`
 kennt nur noch `asset` und `consumable`. `quantity_item` selbst bleibt
 unverändert bis WP-758.
 
+Zuweisungen als Projektion des Ledgers (AST-02, AST-07, WP-747, E-26,
+Migration 000257): Index `idx_stock_movement_holder` auf `stock_movement`
+(`organization_id`, `asset_id`, `movement_type`, `occurred_at`). Jede Zeile
+von `assignment` ohne Bewegung gleicher ID ist ID-gleich als
+`assignment`-Bewegung übernommen (`occurred_at` = `assigned_at`,
+`assignee_user_id` = `assigned_to`, `actor_id` = `assigned_by`, `notes`,
+`due_at` = Tagesende von `due_date` in `organization.timezone`), geschlossene
+Zeilen mit einer `return`-Bewegung mit Halter (`returned`: `returned_at`,
+`reason` = `return_condition`; `transferred`: Zeitpunkt der Folgezuweisung,
+sonst `updated_at`; `cancelled`: `updated_at`, `reason` `cancelled`).
+Best-effort-Bewegungen ohne Halter (unter 60 s) und die Kopien aus 000242
+(`notes` `assignment:<id>`) sind bei ausgesetztem
+`stock_movement_append_only` durch die vollständige Bewegung ersetzt,
+`document_link`-Zeilen (`stock_movement`) umgehängt; mehrere offene
+Zuweisungen eines Assets sind bis auf die jüngste (die des Halter-Caches
+zuerst) mit `return` (`reason` `migration: superseded`) geschlossen. Zeilen
+ohne Asset der Organisation (`assignment_without_asset`) oder mit Nutzer
+einer anderen Organisation (`assignment_foreign_user`) stehen ohne Signaturen
+in `migration_quarantine` (Migration `000257`) und bleiben in `assignment`.
+View `assignment_projection` (`security_invoker = true`, RLS von
+`stock_movement` gilt für den Aufrufer): je `assignment`-Bewegung eines
+Assets `id`, `organization_id`, `asset_id`, `assigned_to`,
+`assigned_team_id`, `assigned_by` (`actor_id`), `assignment_type`
+(`transfer` bei gleichzeitiger Rückgabe, sonst `assignment`), `status`
+(`transferred`, `returned`, `overdue`, `active`), `assigned_at`, `due_at`,
+`due_date`, `returned_at`, `return_condition` (erste `return`-Bewegung
+desselben Assets und Halters danach), `notes`, `created_at`, `updated_at`.
+Die Tabelle `assignment` bleibt unverändert bis WP-843; Down entfernt View,
+Index und Quarantäne-Einträge, die Bewegungen bleiben.
+Gesamtbestand von Mengenartikeln (STK-01, NTF-05, WP-285, E-128, Migration
+000259): `consumable` erhält `on_hand_total` (`numeric(12,2)` NOT NULL
+DEFAULT 0) mit `consumable_on_hand_total_check` (`on_hand_total >= 0`),
+befüllt mit Σ `stock_level.on_hand` je Artikel über alle Bins. Fortgeschrieben
+wird die Spalte nur von `consumable.ApplyBooking` unter der Zeilensperre des
+Artikels; Tabelle, Indizes und RLS bleiben unverändert. Down entfernt Spalte
+und Constraint.
+Inventurbereich und Soll-Snapshot (INV-01, API-06, WP-848, Migration
+000260): `stocktake` erhält `stocktake_id_organization_key` (`id`,
+`organization_id`), den Bereich `location_id` mit
+`stocktake_location_fkey` (`location_id`, `organization_id`) → `location`
+ON DELETE RESTRICT sowie `client_id` und `site_id` ohne Fremdschlüssel,
+Indizes `idx_stocktake_location` und `idx_stocktake_client`.
+`stocktake_derive_location` (BEFORE INSERT OR UPDATE OF `location_id`,
+`client_id`, `site_id`) setzt Client und Standort des Knotens; ein nicht
+sichtbarer Knoten ergibt 23503 auf `stocktake_location_fkey`, ohne Bereich
+bleiben beide NULL (Altinventuren). `location_refresh_stocktake` (AFTER
+UPDATE ON `location` bei geändertem `site_id`/`client_id`, erweiterter
+Scope) leitet nach. `stocktake_item` (`id`, `organization_id`,
+`client_id`/`site_id` NOT NULL, `stocktake_id`, `item_kind`
+`asset|consumable`, `asset_id`, `consumable_id`, `location_id`,
+`expected_quantity`, `counted_quantity`, `classification`
+`found|missing|unexpected`, `created_at`) mit `stocktake_item_object_check`,
+den Teil-UNIQUE-Indizes `stocktake_item_asset_key` (`stocktake_id`,
+`asset_id`) und `stocktake_item_consumable_key` (`stocktake_id`,
+`consumable_id`, `location_id`), `stocktake_item_stocktake_fkey` → `stocktake`
+ON DELETE CASCADE und `stocktake_item_asset_fkey`,
+`stocktake_item_consumable_fkey`, `stocktake_item_location_fkey` (jeweils mit
+`organization_id`, ON DELETE RESTRICT); `stocktake_item_derive_scope`
+übernimmt Client und Standort der Inventur, `stocktake_refresh_items` folgt
+ihrer Änderung. `stock_scan.location_id` (Fundort) mit
+`stock_scan_location_fkey` (ON DELETE RESTRICT) und
+`idx_stock_scan_location`. RLS: `stocktake_isolation` (Org-, Client- und
+Site-Prädikat, NULL lesbar) mit den restriktiven `stocktake_scoped_update`
+und `stocktake_scoped_delete`; `stocktake_item` mit ENABLE/FORCE,
+TRUNCATE-Schutz `reticora_truncate_guard` und `stocktake_item_isolation`.
+Kantenhistorie (REL-09, EVT-03, AUD-07, WP-296, Migration 000261):
+`relationship_change` (`id`, `organization_id` → `organization` ON DELETE
+CASCADE, `relationship_id` UUID NOT NULL ohne Fremdschlüssel, `source_ci_id`,
+`target_ci_id`, `rel_type` TEXT NOT NULL, `change_kind` TEXT NOT NULL,
+`changed_fields` TEXT[] NOT NULL DEFAULT `'{}'`, `before` und `after` JSONB,
+`actor_id` UUID ohne Fremdschlüssel, `actor_type` und `source` TEXT NOT
+NULL, `reason`, `request_id`, `correlation_id` TEXT, `observed_at`
+TIMESTAMPTZ NOT NULL, `created_at` DEFAULT now() sowie die Scope-Spalten
+`source_client_id`, `source_site_id`, `target_client_id`, `target_site_id`)
+mit `relationship_change_source_tenant_fkey` und
+`relationship_change_target_tenant_fkey` (je (`…_ci_id`,
+`organization_id`) → `ci` (`id`, `organization_id`) ON DELETE CASCADE, K19),
+CHECK `chk_relationship_change_kind` (`created`, `updated`,
+`verification_changed`, `refreshed`, `removed`, `suppressed`, `rewired`,
+`restored`), `chk_relationship_change_source` (`ui`, `api`, `collector`,
+`import`, `system`) und `chk_relationship_change_reason` (NULL, `stale`,
+`suppressed`, `merge`, `unmerge`, `interface_removed`) sowie den Indizes
+`idx_relationship_change_relationship`, `idx_relationship_change_source`
+und `idx_relationship_change_target` (`organization_id`, `relationship_id`
+bzw. `source_ci_id` bzw. `target_ci_id`, `observed_at` DESC). Trigger
+`relationship_change_scope` (BEFORE INSERT OR UPDATE, `derive_edge_scope()`)
+setzt den Scope beider Endpunkte; `relationship_change_scope_propagation`
+(AFTER UPDATE ON `ci` bei geändertem `client_id` oder `site_id`, Funktion
+`propagate_relationship_change_scope()` mit erweitertem Scope) leitet nach.
+RLS mit ENABLE/FORCE, TRUNCATE-Schutz `reticora_truncate_guard`,
+`relationship_change_isolation` (USING wie `ci_relationship_isolation`,
+WITH CHECK mit dem Schreibprädikat aus 000142) und die restriktiven
+`relationship_change_scoped_update` und `relationship_change_scoped_delete`.
+
 ## Tabellen, RLS und Policies
 
 Spalten: Tabellenname, RLS aktiviert, RLS erzwungen (`FORCE ROW LEVEL
@@ -1691,9 +1805,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `quantity_item` | ja | ja | quantity_item_isolation (ALL), quantity_item_scoped_delete (DELETE), quantity_item_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
+| `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |
 | `relationship_suppression` | ja | ja | relationship_suppression_scoped_delete (DELETE), relationship_suppression_scoped_update (UPDATE), suppression_isolation (ALL) |
 | `relationship_type` | ja | ja | relationship_type_isolation_delete (DELETE), relationship_type_isolation_insert (INSERT), relationship_type_isolation_select (SELECT), relationship_type_isolation_update (UPDATE) |
-| `reservation` | ja | ja | reservation_isolation (ALL) |
+| `reservation` | ja | ja | reservation_isolation (ALL), reservation_scoped_delete (DELETE), reservation_scoped_update (UPDATE) |
 | `review_item` | ja | ja | review_item_isolation (ALL), review_item_scoped_delete (DELETE), review_item_scoped_select (SELECT), review_item_scoped_update (UPDATE) |
 | `role` | ja | ja | role_isolation (ALL) |
 | `role_assignment` | ja | ja | role_assignment_isolation (ALL) |
@@ -1714,7 +1829,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_tenant_isolation (ALL) |
-| `stocktake` | ja | ja | stocktake_tenant_isolation (ALL) |
+| `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
+| `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
 | `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |

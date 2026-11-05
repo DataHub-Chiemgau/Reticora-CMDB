@@ -418,7 +418,7 @@ func TestConsumableStockPerBin(t *testing.T) {
 	t.Run("low stock over the sum", func(t *testing.T) {
 		repo := consumable.NewPGRepository(f.App)
 		low := newConsumable(t, f, f.Client1, "stk-low")
-		minLevel := 4.0
+		minLevel := 5.0
 		if _, err := repo.Update(orgCtx, f.OrgA, low, consumable.UpdateConsumableRequest{MinLevel: &minLevel}); err != nil {
 			t.Fatal(err)
 		}
@@ -436,13 +436,13 @@ func TestConsumableStockPerBin(t *testing.T) {
 			}
 		}
 		if !lowListed() {
-			t.Error("2 + 2 <= 4: the consumable is not low on stock")
+			t.Error("2 + 2 < 5: the consumable is not low on stock")
 		}
 		if err := book(orgCtx, f, &consumable.Booking{OrganizationID: f.OrgA, ConsumableID: low, MovementType: "receipt", ToLocationID: b1.bin, Quantity: 1}); err != nil {
 			t.Fatal(err)
 		}
 		if lowListed() {
-			t.Error("3 + 2 > 4: the consumable is still low on stock")
+			t.Error("3 + 2 = 5 is not below 5 (WP-285): the consumable is still low on stock")
 		}
 		if c, err := repo.GetByID(orgCtx, f.OrgA, low); err != nil || c.StockLevel != 5 {
 			t.Errorf("stock_level %+v (%v), want the sum 5", c, err)

@@ -13,10 +13,13 @@ type Signature struct {
 	Method      string `json:"method,omitempty"` // touchscreen | drawn | typed
 }
 
-// Assignment is the assignment of an asset (or CI) to a user or team. The
+// Assignment is the assignment of an asset to a user or team. The
 // assignment service (WP-275) answers it with the id of the assignment
 // movement; assigned_to names a user holder, assigned_team_id a team
 // holder, due_at the due date (due_date its day in organization.timezone).
+// Since WP-747 the reads come from the projection of the ledger: ci_id and
+// the signatures stay empty (the signatures of the table assignment are
+// secured by WP-843, the new ones are documents with WP-276).
 type Assignment struct {
 	ID                string     `json:"id"`
 	OrganizationID    string     `json:"organization_id"`
@@ -37,10 +40,6 @@ type Assignment struct {
 	ReturnSignature   *Signature `json:"return_signature,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
-
-	// checkoutSigner and returnSigner are the vault surrogates of the
-	// signer names the table keeps (SEC-05); the API shows the names.
-	checkoutSigner, returnSigner string
 }
 
 // FilterParams holds filter parameters for listing assignments.

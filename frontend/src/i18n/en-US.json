@@ -1696,7 +1696,10 @@
       "discovery_scope": "discovery scopes",
       "agent_enrollment_token": "valid agent enrollment tokens",
       "collector_enrollment_code": "valid collector enrollment codes",
-      "ci_merge": "CI merges (tombstones)"
+      "ci_merge": "CI merges (tombstones)",
+      "stocktake": "stocktakes (area)",
+      "stocktake_item": "expected stock of stocktakes",
+      "stock_scan": "stocktake scans (place found)"
     }
   },
   "savedviews": {

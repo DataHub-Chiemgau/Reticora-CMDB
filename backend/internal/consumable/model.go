@@ -6,8 +6,10 @@ package consumable
 import "time"
 
 // Consumable is a stock item (cable, SFP, toner, ...). Its stock lies in
-// bins (Stock, table stock_level); StockLevel is the sum of on_hand over
-// the bins the caller sees, kept read-only and deprecated until WP-320.
+// bins (Stock, table stock_level); StockLevel is the total stock
+// (consumable.on_hand_total), the sum of on_hand over all bins whatever the
+// caller's scope (E-128 (a), WP-285), kept read-only and deprecated until
+// WP-320.
 type Consumable struct {
 	ID             string    `json:"id"`
 	OrganizationID string    `json:"organization_id"`
@@ -25,9 +27,11 @@ type Consumable struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// LowStock reports whether the stock (sum over the bins) is at or below the
-// minimum.
-func (c *Consumable) LowStock() bool { return c.StockLevel <= c.MinLevel }
+// LowStock reports whether the consumable is below its minimum level, the
+// one threshold rule of the event stock.below_minimum, the filter low_stock
+// and the badge (WP-285): total stock < min_level. A total equal to the
+// minimum is not below it, and with min_level 0 nothing ever is.
+func (c *Consumable) LowStock() bool { return c.StockLevel < c.MinLevel }
 
 // Movement is one stock in/out event.
 type Movement struct {

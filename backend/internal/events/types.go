@@ -146,11 +146,18 @@ type LifecycleChangedData struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// RelationshipChangedData is the data of relationship.changed (WP-296).
+// RelationshipChangedData is the data of relationship.changed (WP-296): the
+// edge, its source (the edge source: manual, discovery, …), the change kind
+// (updated, verification_changed) and the changed fields, no attribute
+// value.
 type RelationshipChangedData struct {
-	ID         string `json:"id"`
-	SourceCIID string `json:"source_ci_id"`
-	TargetCIID string `json:"target_ci_id"`
+	ID            string   `json:"id"`
+	SourceCIID    string   `json:"source_ci_id"`
+	TargetCIID    string   `json:"target_ci_id"`
+	RelType       string   `json:"rel_type"`
+	Source        string   `json:"source"`
+	ChangeKind    string   `json:"change_kind"`
+	ChangedFields []string `json:"changed_fields"`
 }
 
 // AssetData is the data of asset.created, asset.changed and asset.deleted
@@ -232,11 +239,19 @@ type StockMovementData struct {
 }
 
 // StockBelowMinimumData is the data of stock.below_minimum, about a
-// quantity item (WP-285).
+// consumable whose total stock fell below its minimum level (WP-285):
+// on_hand_total (sum over all bins, independent of the scope) after the
+// booking or the change of min_level, with the article's SKU, name and
+// unit. client_id is absent for an article without client; a consumable
+// has no site (its bins have one each), so the frame carries none.
 type StockBelowMinimumData struct {
-	ID       string `json:"id"`
-	ClientID string `json:"client_id,omitempty"`
-	SiteID   string `json:"site_id,omitempty"`
+	ID          string  `json:"id"`
+	ClientID    string  `json:"client_id,omitempty"`
+	SKU         string  `json:"sku,omitempty"`
+	Name        string  `json:"name"`
+	Unit        string  `json:"unit"`
+	OnHandTotal float64 `json:"on_hand_total"`
+	MinLevel    float64 `json:"min_level"`
 }
 
 // ReservationData is the data of the reservation types (WP-277, WP-284):

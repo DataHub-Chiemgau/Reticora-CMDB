@@ -600,9 +600,9 @@
       ]
     },
     "relationship.changed": {
-      "description": "Data frame of relationship.changed. entity_id: the relationship. Origin: EVT-03. Producer: WP-296. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data of relationship.changed: a PATCH of a stored relationship that changed a value. entity_id: the relationship. Origin: EVT-03. Producer: WP-296. The data names the changed fields, never their values (no attribute value); the history of the relationship (GET /api/v1/relationships/{id}/changes) holds the values.",
       "type": "object",
-      "required": ["id", "source_ci_id", "target_ci_id"],
+      "required": ["id", "source_ci_id", "target_ci_id", "rel_type", "source", "change_kind", "changed_fields"],
       "additionalProperties": true,
       "properties": {
         "id": {
@@ -619,13 +619,38 @@
           "type": "string",
           "format": "uuid",
           "description": "Target CI."
+        },
+        "rel_type": {
+          "type": "string",
+          "description": "Relationship type key."
+        },
+        "source": {
+          "type": "string",
+          "description": "Source of the relationship (manual, discovery, …)."
+        },
+        "change_kind": {
+          "type": "string",
+          "enum": ["updated", "verification_changed"],
+          "description": "verification_changed when the change set verification_state, updated otherwise."
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["attributes", "confidence", "verification_state", "source_system", "notes"]
+          },
+          "description": "The fields whose values changed."
         }
       },
       "examples": [
         {
           "id": "66666666-6666-4666-8666-666666666666",
           "source_ci_id": "11111111-1111-4111-8111-111111111111",
-          "target_ci_id": "77777777-7777-4777-8777-777777777777"
+          "target_ci_id": "77777777-7777-4777-8777-777777777777",
+          "rel_type": "depends_on",
+          "source": "manual",
+          "change_kind": "verification_changed",
+          "changed_fields": ["verification_state", "notes"]
         }
       ]
     },
@@ -992,31 +1017,52 @@
       ]
     },
     "stock.below_minimum": {
-      "description": "Data frame of stock.below_minimum. entity_id: the quantity item. Origin: NTF-05 [P2]. Producer: WP-285. The producer adds its fields to this definition (additionalProperties).",
+      "description": "Data frame of stock.below_minimum. entity_id: the consumable whose total stock (on_hand_total, the sum over all its bins regardless of scope) fell below its minimum level (on_hand_total < min_level), reported once per crossing by a booking or a raised min_level. Origin: NTF-05 [P2]. Producer: WP-285. The producer adds its fields to this definition (additionalProperties).",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "name", "unit", "on_hand_total", "min_level"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
-          "description": "The quantity item."
+          "description": "The consumable (equal to entity_id)."
         },
         "client_id": {
           "type": "string",
           "format": "uuid",
-          "description": "Client of the object; absent without client."
+          "description": "Client of the consumable; absent without client."
         },
-        "site_id": {
+        "sku": {
           "type": "string",
-          "format": "uuid",
-          "description": "Site of the object; absent without site."
+          "description": "SKU of the consumable; absent without SKU."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the consumable."
+        },
+        "unit": {
+          "type": "string",
+          "description": "Unit of the quantities."
+        },
+        "on_hand_total": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Total stock over all bins after the booking or the change of min_level."
+        },
+        "min_level": {
+          "type": "number",
+          "description": "Minimum level of the consumable."
         }
       },
       "examples": [
         {
           "id": "55555555-5555-4555-8555-555555555555",
-          "site_id": "44444444-4444-4444-8444-444444444444"
+          "client_id": "77777777-7777-4777-8777-777777777777",
+          "sku": "SFP-10G-LR",
+          "name": "SFP+ 10G LR",
+          "unit": "pcs",
+          "on_hand_total": 3,
+          "min_level": 5
         }
       ]
     },

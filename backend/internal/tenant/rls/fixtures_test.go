@@ -116,6 +116,9 @@ var matrixOverrides = map[string]map[string]string{
 	// A ticket link has exactly one target column, the one of its
 	// entity_type (ticket_link_target_check, WP-764).
 	"ticket_link": {"entity_type": "ci", "ci_id": "@uuid"},
+	// A snapshot row names exactly the object of its item_kind, the first
+	// kind is asset (stocktake_item_object_check, WP-848).
+	"stocktake_item": {"asset_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)
