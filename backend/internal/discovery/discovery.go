@@ -800,6 +800,14 @@ func (h *Handler) recordDiscovered(ctx context.Context, orgID, ciID, fieldName s
 	if h.provenance == nil || ciID == "" || fieldName == ci.LegacyTagsKey {
 		return nil
 	}
+	// The store that records several fields at once records this one
+	// without reading back the effective value, which is not used here.
+	if many, ok := h.provenance.(manyProvenance); ok {
+		if err := many.RecordDiscoveredMany(ctx, orgID, ciID, map[string]any{fieldName: value}, source, observedAt); err != nil && database.TxFailed(ctx) {
+			return err
+		}
+		return nil
+	}
 	if _, err := h.provenance.RecordDiscovered(ctx, orgID, ciID, fieldName, value, source, observedAt); err != nil && database.TxFailed(ctx) {
 		return err
 	}
