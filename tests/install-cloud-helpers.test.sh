@@ -334,6 +334,71 @@ test_issuer_troubleshooting_documented() {
     grep -q "OIDC issuer check failed" "$REPO_ROOT/docs/troubleshooting-installation.md"
 }
 
+# With a TLS domain nginx redirects http:// to https://: an issuer on
+# http://<domain> got the redirect page from curl -f and was reported as
+# announcing '<none>'. The check names the redirect and the issuer of the
+# TLS domain.
+# shellcheck disable=SC2034,SC2317 # variables and stub used by the installer functions
+test_issuer_host_redirect_named() {
+    RETICORA_OIDC_ISSUER_URL="http://dev.reticora.cloud/realms/reticora"
+    RETICORA_TLS_DOMAIN="dev.reticora.cloud"
+    RETICORA_ISSUER_RETRY_DELAY=0
+    curl() {
+        case " $* " in
+            *" -w "*) printf 'https://dev.reticora.cloud/realms/reticora/.well-known/openid-configuration' ;;
+            *) printf '<html>\n<head><title>301 Moved Permanently</title></head>\n</html>\n' ;;
+        esac
+    }
+    local out
+    out="$( (check_issuer_from_host) 2>&1)" && { echo "a redirect passed"; return 1; }
+    grep -qF "The OIDC issuer http://dev.reticora.cloud/realms/reticora redirects to https://dev.reticora.cloud/realms/reticora/.well-known/openid-configuration" <<< "$out" &&
+        grep -qF "with the TLS domain https://dev.reticora.cloud/realms/reticora" <<< "$out" &&
+        ! grep -qF "'<none>'" <<< "$out" || { printf '%s\n' "$out"; return 1; }
+}
+
+# tls_domain_url moves http:// URLs of the TLS domain to https:// (port
+# dropped, RETICORA_HTTPS_PORT kept); other URLs stay.
+test_tls_domain_url() {
+    RETICORA_TLS_DOMAIN="dev.reticora.cloud"
+    ENV_FILE="$TMP_ROOT/tls-domain-url.env"
+    rm -f "$ENV_FILE"
+    local c in want
+    for c in "http://dev.reticora.cloud|https://dev.reticora.cloud" \
+        "http://dev.reticora.cloud/realms/reticora|https://dev.reticora.cloud/realms/reticora" \
+        "http://Dev.Reticora.Cloud:3000/auth/callback|https://dev.reticora.cloud/auth/callback" \
+        "https://dev.reticora.cloud/realms/reticora|https://dev.reticora.cloud/realms/reticora" \
+        "http://other.example.com/realms/reticora|http://other.example.com/realms/reticora" \
+        "http://192.0.2.10:8180/realms/reticora|http://192.0.2.10:8180/realms/reticora"; do
+        in="${c%%|*}" want="${c#*|}"
+        [ "$(tls_domain_url "$in")" = "$want" ] || { echo "$in: $(tls_domain_url "$in"), want $want"; return 1; }
+    done
+    printf 'RETICORA_HTTPS_PORT=8443\n' > "$ENV_FILE"
+    [ "$(tls_domain_url http://dev.reticora.cloud/x)" = https://dev.reticora.cloud:8443/x ]
+}
+
+# The reported run: base URL http://dev.reticora.cloud (issuer and redirect
+# derived from it) with the TLS domain dev.reticora.cloud. All three follow
+# to https://, and the run says so; without a TLS domain nothing changes.
+# shellcheck disable=SC2034 # variables used by the installer functions
+test_urls_follow_tls_domain() {
+    write_legacy_env urls-tls
+    printf '%s\n' "RETICORA_PUBLIC_BASE_URL=http://dev.reticora.cloud" "RETICORA_OIDC_ISSUER_URL=http://dev.reticora.cloud/realms/reticora" \
+        "RETICORA_OIDC_REDIRECT_URL=http://dev.reticora.cloud/auth/callback" "RETICORA_TLS_DOMAIN=dev.reticora.cloud" >> "$ENV_FILE"
+    local out
+    out="$(collect_config 2>&1)" || { tail -n 2 <<< "$out"; return 1; }
+    collect_config >/dev/null 2>&1
+    [ "$RETICORA_PUBLIC_BASE_URL" = https://dev.reticora.cloud ] &&
+        [ "$RETICORA_OIDC_ISSUER_URL" = https://dev.reticora.cloud/realms/reticora ] &&
+        [ "$RETICORA_OIDC_REDIRECT_URL" = https://dev.reticora.cloud/auth/callback ] &&
+        grep -qF "HTTPS for dev.reticora.cloud: http://dev.reticora.cloud only redirects to HTTPS, so RETICORA_PUBLIC_BASE_URL=https://dev.reticora.cloud" <<< "$out" \
+        || { echo "$RETICORA_PUBLIC_BASE_URL $RETICORA_OIDC_ISSUER_URL $RETICORA_OIDC_REDIRECT_URL"; return 1; }
+    write_legacy_env urls-no-tls
+    out="$(collect_config 2>&1)" || { tail -n 2 <<< "$out"; return 1; }
+    collect_config >/dev/null 2>&1
+    [ "$RETICORA_PUBLIC_BASE_URL" = http://192.0.2.10:3000 ] && [ "$RETICORA_OIDC_ISSUER_URL" = http://192.0.2.10:8180/realms/reticora ] &&
+        ! grep -qF "only redirects to HTTPS" <<< "$out"
+}
+
 run_test   "issuer: discovery from the host announces the configured issuer" test_issuer_host_matches
 run_test   "issuer: another announced issuer is refused with a hint"         test_issuer_host_other_issuer
 run_test   "issuer: an unreachable issuer is refused with a hint"            test_issuer_host_unreachable
@@ -342,6 +407,8 @@ run_test   "issuer: unreachable from the container is refused with a hint"   tes
 run_test   "issuer: a localhost issuer is refused, the host IP suggested"    test_issuer_loopback_refused
 run_test   "issuer: host IP and loopback detection"                          test_host_primary_ip
 run_test   "issuer: the troubleshooting guide covers the check"              test_issuer_troubleshooting_documented
+run_test   "issuer: a redirect (http:// with a TLS domain) is named, not '<none>'" test_issuer_host_redirect_named
+run_test   "issuer: tls_domain_url moves http:// URLs of the TLS domain to https"  test_tls_domain_url
 
 # ─── issuer checks after the frontend start (WP-385, INS-02, F-035) ──────────
 
@@ -3144,6 +3211,7 @@ run_test    "urls: valid_url accepts what the server accepts, refuses https://ht
 run_test    "urls: the hint repairs a missing //, a doubled scheme and a missing scheme"   test_url_hint_repairs_typos
 run_test    "urls: prompts repair https:host and a broken .env value; domain from a URL"   test_url_and_domain_prompts_repair_input
 run_test    "urls: a broken URL in .env stops a non-interactive run before anything"       test_url_broken_in_env_stops_noninteractive
+run_test    "urls: base URL, issuer and redirect follow a TLS domain to https"             test_urls_follow_tls_domain
 
 # ─── documentation of the signup and collector failure modes ─────────────────
 test_signup_and_collector_documented() {

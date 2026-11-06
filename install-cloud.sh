@@ -579,6 +579,25 @@ url_host() {
     printf '%s' "${rest,,}"
 }
 
+# tls_domain_url <url> — <url> on https:// when it is an http:// URL of
+# RETICORA_TLS_DOMAIN (its port dropped: HTTPS is on RETICORA_HTTPS_PORT,
+# default 443); any other URL unchanged.
+tls_domain_url() {
+    local url="$1" rest path="" port
+    if [[ "$url" != http://* ]] || [ "$(url_host "$url")" != "${RETICORA_TLS_DOMAIN,,}" ]; then
+        printf '%s' "$url"
+        return 0
+    fi
+    rest="${url#http://}"
+    [[ "$rest" != */* ]] || path="/${rest#*/}"
+    port="$(env_get RETICORA_HTTPS_PORT || true)"
+    case "$port" in
+        ''|443) port="" ;;
+        *) port=":$port" ;;
+    esac
+    printf 'https://%s%s%s' "$RETICORA_TLS_DOMAIN" "$port" "$path"
+}
+
 # SMTP settings (TEC-13). The SMTP server is reached from the server and the
 # Keycloak containers: a loopback name would be the container itself.
 valid_optional_smtp_host() { [ -z "$1" ] || { valid_host "$1" && ! host_is_loopback "$1"; }; }
@@ -1037,6 +1056,23 @@ collect_config() {
         RETICORA_TLS_DOMAIN="$def_tls_domain"
     else
         RETICORA_TLS_DOMAIN=""
+    fi
+    # With a TLS domain nginx serves the UI only at https://<domain>; port 80
+    # redirects everything but the ACME challenge there, and Keycloak behind
+    # the /realms/ proxy announces https://<domain>/realms/reticora (KC_PROXY
+    # edge). An http:// URL of that host never answers itself (the issuer
+    # check failed with "announces itself as '<none>'"): base URL, OIDC issuer
+    # and redirect URL follow to https://.
+    if [ -n "$RETICORA_TLS_DOMAIN" ]; then
+        local var url moved=()
+        for var in RETICORA_PUBLIC_BASE_URL RETICORA_OIDC_ISSUER_URL RETICORA_OIDC_REDIRECT_URL; do
+            url="$(tls_domain_url "${!var}")"
+            [ "$url" = "${!var}" ] && continue
+            printf -v "$var" '%s' "$url"
+            moved+=("$var=$url")
+        done
+        [ "${#moved[@]}" -eq 0 ] \
+            || info "HTTPS for $RETICORA_TLS_DOMAIN: http://$RETICORA_TLS_DOMAIN only redirects to HTTPS, so ${moved[*]}"
     fi
 
     local def_cert_email
@@ -2128,6 +2164,14 @@ check_issuer_from_host() {
         issuer_check_failed "The OIDC issuer $issuer is not reachable from this host (no discovery document at $issuer/.well-known/openid-configuration). Check DNS, firewall and RETICORA_OIDC_ISSUER_URL ($ISSUER_TROUBLESHOOTING)."
     fi
     announced="$(printf '%s' "$doc" | discovery_issuer)"
+    if [ -z "$announced" ]; then
+        # curl -f takes a redirect as an answer: name its target instead of
+        # an issuer '<none>'.
+        local redirect
+        redirect="$(curl -sS -o /dev/null --max-time 5 "${ca_args[@]}" -w '%{redirect_url}' "$issuer/.well-known/openid-configuration" 2>/dev/null || true)"
+        [ -z "$redirect" ] \
+            || issuer_check_failed "The OIDC issuer $issuer redirects to $redirect instead of serving its discovery document. Keycloak announces the address it is reached at, so RETICORA_OIDC_ISSUER_URL must be that address${RETICORA_TLS_DOMAIN:+ — with the TLS domain https://$RETICORA_TLS_DOMAIN/realms/reticora} ($ISSUER_TROUBLESHOOTING)."
+    fi
     if [ "${announced%/}" != "$issuer" ]; then
         issuer_check_failed "The OIDC issuer $issuer announces itself as '${announced:-<none>}' — tokens would not match the configured issuer. Align RETICORA_OIDC_ISSUER_URL with the address Keycloak is published under ($ISSUER_TROUBLESHOOTING)."
     fi
