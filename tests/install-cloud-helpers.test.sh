@@ -3047,6 +3047,104 @@ run_test    "edge hosts: previous names kept, environment overrides, invalid ref
 run_test    "edge hosts: base host with trailing dot, underscore or IDN does not stop" test_edge_hosts_base_host_not_a_cert_name
 run_test    "edge hosts: written to .env, rendered by compose, old .env keeps default" test_edge_hosts_written_and_rendered
 
+# ─── public URLs and the HTTPS domain at the prompt ───────────────────────────
+
+# valid_url accepts what the server accepts (config.absoluteHTTPURL, Go's
+# url.Parse): "https:host" and "https://https:host" (host "https", port
+# "host") passed the former pattern check and stopped the server at its
+# start ("RETICORA_SIGNUP_VERIFY_URL must be an absolute http or https URL").
+# Base URLs earlier releases installed with stay valid (trailing dot,
+# underscore, IDN).
+test_url_validation_matches_server() {
+    local u
+    for u in https://dev.reticora.cloud http://localhost:3000 http://192.0.2.10:3000 "http://[2001:db8::1]:3000/ui" \
+        https://cmdb.example.com./ https://CMDB.example.com.:8443/ui http://cmdb_prod:3000 "https://cmdb.bücher.de" \
+        https://dev.reticora.cloud/realms/reticora "https://cmdb.example.com/auth/callback?x=1"; do
+        valid_url "$u" || { echo "refused $u"; return 1; }
+    done
+    for u in https:dev.reticora.cloud https:/dev.reticora.cloud https://https:dev.reticora.cloud \
+        https://https:dev.reticora.cloud/realms/reticora https://https://dev.reticora.cloud https://user@cmdb.example.com \
+        "https://" "https:///ui" "https://cmdb.example.com:abc" "https://cmdb.example.com:" "ftp://cmdb.example.com" \
+        dev.reticora.cloud "https://cmdb example.com" 'https://cmdb.example.com%2f' 'https://cmdb.example.com\x' \
+        'https://cmdb.example.com|x' 'https://cmdb.example.com{x}'; do
+        ! valid_url "$u" || { echo "accepted $u"; return 1; }
+    done
+}
+
+# The hint repairs the typos to a URL valid_url accepts: a missing "//", the
+# scheme typed twice (also the value of an .env a run with the former check
+# wrote), a missing scheme.
+test_url_hint_repairs_typos() {
+    local c in want got
+    for c in "https:dev.reticora.cloud|https://dev.reticora.cloud" "https:/dev.reticora.cloud|https://dev.reticora.cloud" \
+        "http:cmdb.example.com:3000|http://cmdb.example.com:3000" \
+        "https://https:dev.reticora.cloud|https://dev.reticora.cloud" \
+        "https://https:dev.reticora.cloud/realms/reticora|https://dev.reticora.cloud/realms/reticora" \
+        "https://https://dev.reticora.cloud/auth/callback|https://dev.reticora.cloud/auth/callback" \
+        "dev.reticora.cloud|https://dev.reticora.cloud"; do
+        in="${c%%|*}" want="${c#*|}" got=""
+        explain_url_error "$in" got 2>/dev/null
+        [ "$got" = "$want" ] && valid_url "$got" || { echo "$in: suggested '$got', want '$want'"; return 1; }
+    done
+    got=""
+    explain_url_error https://user@cmdb.example.com got 2>/dev/null
+    [ -z "$got" ] || { echo "suggested '$got' for a URL with user info"; return 1; }
+}
+
+# ask_answers <answers> <ask_validated argument…> — ask_validated at a
+# terminal with these answers; prints the value. A prompt that keeps asking
+# at the end of the answers would loop: the run has a deadline.
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+ask_answers() {
+    local answers="$1" out="$TMP_ROOT/ask-answers.out" pid
+    shift
+    is_tty() { return 0; }
+    ( ask_validated ASKED "$@" <<< "$answers"; printf 'RESULT %s\n' "$ASKED" ) > "$out" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+    if kill -0 "$pid" 2>/dev/null; then kill "$pid"; echo "still asking: $(tail -n 2 "$out")" >&2; return 1; fi
+    wait "$pid" || { tail -n 3 "$out" >&2; return 1; }
+    sed -n 's/^RESULT //p' "$out"
+}
+
+# The answers of the reported run: "https:dev.reticora.cloud" offers
+# https://dev.reticora.cloud (formerly https://https:dev.reticora.cloud,
+# which was then accepted); a broken value of .env as default is repaired
+# the same way; a URL entered as HTTPS domain offers its host name.
+test_url_and_domain_prompts_repair_input() {
+    local got
+    got="$(ask_answers $'https:dev.reticora.cloud\n\n' "Public base URL of the web UI" "http://localhost:3000" valid_url explain_url_error)" &&
+        [ "$got" = https://dev.reticora.cloud ] || { echo "base URL: '$got'"; return 1; }
+    got="$(ask_answers $'\n\n' "OIDC issuer URL" "https://https:dev.reticora.cloud/realms/reticora" valid_url explain_url_error)" &&
+        [ "$got" = https://dev.reticora.cloud/realms/reticora ] || { echo "issuer from .env: '$got'"; return 1; }
+    got="$(ask_answers $'https://dev.reticora.cloud\n\n' "Public domain for HTTPS (empty = no TLS, optional)" "" \
+        valid_optional_domain explain_domain_error)" && [ "$got" = dev.reticora.cloud ] || { echo "domain: '$got'"; return 1; }
+    grep -qF "enter the domain name only, without scheme, port or path, e.g. dev.reticora.cloud" "$TMP_ROOT/ask-answers.out" || return 1
+    got="$(ask_answers $'https\ndev.reticora.cloud\n' "Public domain for HTTPS (empty = no TLS, optional)" "" valid_optional_domain explain_domain_error)" &&
+        [ "$got" = dev.reticora.cloud ] && grep -qF "enter a public DNS name such as cmdb.example.com" "$TMP_ROOT/ask-answers.out" \
+        || { echo "single label: '$got'"; return 1; }
+}
+
+# A non-interactive run stops on a broken URL of .env before anything is
+# written, instead of building and starting everything and ending in
+# "Reticora server or frontend failed to start".
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+test_url_broken_in_env_stops_noninteractive() {
+    write_legacy_env url-broken
+    printf 'RETICORA_PUBLIC_BASE_URL=https://https:dev.reticora.cloud\n' >> "$ENV_FILE"
+    smtp_relay_reachable() { return 0; }
+    local out
+    cp "$ENV_FILE" "$TMP_ROOT/url-broken-before"
+    if out="$(collect_config 2>&1)"; then echo "a broken base URL was accepted"; return 1; fi
+    grep -qF "Invalid value for Public base URL of the web UI (e.g. https://cmdb.example.com): 'https://https:dev.reticora.cloud'" <<< "$out" &&
+        cmp -s "$ENV_FILE" "$TMP_ROOT/url-broken-before" || { tail -n 2 <<< "$out"; return 1; }
+}
+
+run_test    "urls: valid_url accepts what the server accepts, refuses https://https:host"  test_url_validation_matches_server
+run_test    "urls: the hint repairs a missing //, a doubled scheme and a missing scheme"   test_url_hint_repairs_typos
+run_test    "urls: prompts repair https:host and a broken .env value; domain from a URL"   test_url_and_domain_prompts_repair_input
+run_test    "urls: a broken URL in .env stops a non-interactive run before anything"       test_url_broken_in_env_stops_noninteractive
+
 # ─── documentation of the signup and collector failure modes ─────────────────
 test_signup_and_collector_documented() {
     local ts="$REPO_ROOT/docs/troubleshooting-installation.md"
