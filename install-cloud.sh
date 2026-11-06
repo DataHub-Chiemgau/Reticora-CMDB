@@ -442,23 +442,45 @@ valid_port() {
     [ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
 
+# valid_url <url> — an http(s) URL the server accepts (config.Validate,
+# absoluteHTTPURL: Go's url.Parse): a host, a port only of digits, no user
+# info. "https://https:host" (host "https", port "host") passed the former
+# pattern check and stopped the server at its start.
+URL_AUTHORITY_RE='^(\[[0-9A-Fa-f:.]+\]|[^][/@:%\^`{|}[:space:][:cntrl:]]+)(:[0-9]+)?$'
 valid_url() {
+    local authority
     case "$1" in
-        http://*/*|https://*/*|http://?*|https://?*) return 0 ;;
+        http://?*|https://?*) ;;
+        *) return 1 ;;
     esac
-    return 1
+    authority="${1#*://}"
+    authority="${authority%%[/?#]*}"
+    [[ "$authority" =~ $URL_AUTHORITY_RE ]]
 }
 
 # explain_url_error <value> <suggestion-nameref> — warns why a URL was
-# rejected and, for a missing scheme, suggests the corrected value via the
-# nameref.
+# rejected and suggests the corrected value via the nameref: a missing
+# scheme, a missing "//" ("https:host") or the scheme typed twice
+# ("https://https:host", "https://https://host").
 explain_url_error() {
     local -n _suggest="$2"
+    local rest
     case "$1" in
+        http://http:*|http://https:*|https://http:*|https://https:*)
+            rest="${1#*://}"
+            rest="${rest#*:}"
+            while [[ "$rest" == /* ]]; do rest="${rest#/}"; done
+            _suggest="${1%%://*}://$rest"
+            warn "Invalid input — the scheme is in the URL twice, e.g. $_suggest" ;;
         http://*|https://*)
-            warn "Invalid input — the URL must contain a host (e.g. https://cmdb.example.com)." ;;
+            warn "Invalid input — the URL needs a host, optionally ':' and a port number, and no user@ (e.g. https://cmdb.example.com)." ;;
         *"://"*)
             warn "Invalid input — only http:// and https:// URLs are supported." ;;
+        http:*|https:*)
+            rest="${1#*:}"
+            while [[ "$rest" == /* ]]; do rest="${rest#/}"; done
+            _suggest="${1%%:*}://$rest"
+            warn "Invalid input — the URL must start with ${1%%:*}:// (two slashes), e.g. $_suggest" ;;
         *)
             _suggest="https://$1"
             warn "Invalid input — the URL must start with http:// or https://, e.g. $_suggest" ;;
@@ -493,6 +515,20 @@ valid_initial_admin_email() {
 # Optional variants: empty input keeps the feature disabled.
 valid_optional_domain() { [ -z "$1" ] || valid_domain "$1"; }
 valid_optional_email()  { [ -z "$1" ] || valid_email "$1"; }
+
+# explain_domain_error <value> <suggestion-nameref> — a URL or host:port in
+# place of the domain suggests its host name.
+explain_domain_error() {
+    local -n _suggest="$2"
+    local host
+    host="$(url_host "$1")"
+    if [ "$host" != "${1,,}" ] && valid_domain "$host"; then
+        _suggest="$host"
+        warn "Invalid input — enter the domain name only, without scheme, port or path, e.g. $host"
+    else
+        warn "Invalid input — enter a public DNS name such as cmdb.example.com (no IP address, no localhost)."
+    fi
+}
 
 # valid_optional_acme_server <url> — empty, or the https:// directory URL of
 # an ACME server. It is written to .env and reaches certbot's command line,
@@ -982,12 +1018,10 @@ collect_config() {
     local def_tls_domain
     def_tls_domain="$(env_get RETICORA_TLS_DOMAIN || true)"
     if [ -z "$def_tls_domain" ]; then
-        # Derive a suggestion from the public base URL when it is not a
-        # localhost/literal-IP address (Let's Encrypt requires a public DNS name).
+        # Derive a suggestion from the public base URL when its host is a
+        # DNS name (Let's Encrypt requires one: no localhost, no literal IP).
         def_tls_domain="$(printf '%s' "$RETICORA_PUBLIC_BASE_URL" | sed -E 's|^https?://||; s|[:/].*$||')"
-        case "$def_tls_domain" in
-            localhost|127.*|0.0.0.0|[0-9]*.[0-9]*.[0-9]*.[0-9]*) def_tls_domain="" ;;
-        esac
+        valid_domain "$def_tls_domain" || def_tls_domain=""
     fi
     if is_tty; then
         echo
@@ -995,7 +1029,8 @@ collect_config() {
         echo "automatically obtain a free Let's Encrypt certificate (requires ports"
         echo "80/443 reachable from the internet; the UI is then served at"
         echo "https://<domain> on port 443). Leave empty to keep plain HTTP."
-        ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain
+        ask_validated RETICORA_TLS_DOMAIN "Public domain for HTTPS (empty = no TLS, optional)" "$def_tls_domain" valid_optional_domain \
+            explain_domain_error
     elif [ -n "$def_tls_domain" ] && valid_domain "$def_tls_domain"; then
         # Non-interactive run: reuse the configured domain (from .env, or
         # derived above from an https:// public base URL with a DNS name).
