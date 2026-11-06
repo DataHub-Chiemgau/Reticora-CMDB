@@ -181,6 +181,7 @@ frontend started (`✔ All services are up`) and before the summary, with one of
 
 - `The OIDC issuer … is not reachable from this host`
 - `The OIDC issuer … announces itself as '…'`
+- `The OIDC issuer … redirects to … instead of serving its discovery document`
 - `The backend container cannot reach the OIDC issuer …`
 
 **Cause:** The issuer must be one and the same URL for the users' browsers,
@@ -209,6 +210,14 @@ the document to announce exactly the configured issuer.
 
 - *Not reachable from this host:* check DNS for the issuer's hostname, the
   firewall for the Keycloak port (default 8180) and the reverse proxy.
+- *Redirects:* with a TLS domain nginx answers `http://<domain>` only with a
+  redirect to HTTPS, and Keycloak behind the `/realms/` proxy announces
+  `https://<domain>/realms/reticora`. Since this check names the redirect,
+  the installer also moves an `http://` base URL, issuer or redirect URL of
+  the TLS domain to `https://` when it collects the settings ("HTTPS for
+  <domain>: … only redirects to HTTPS, so …"); a run before that wrote
+  `http://<domain>` URLs to `.env`, which a re-run corrects. Earlier
+  installers reported this case as `announces itself as '<none>'`.
 - *Announces another issuer:* Keycloak names itself after the address it is
   called under. Use the address it is published under (behind the reverse
   proxy `https://<domain>/realms/reticora`, else
