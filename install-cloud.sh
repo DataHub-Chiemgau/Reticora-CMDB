@@ -1289,8 +1289,16 @@ collect_smtp_config() {
         [ -n "$RETICORA_SMTP_HOST" ] || return 0
         validate_smtp_config
         smtp_relay_check && return 0
-        is_tty || die "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is not reachable from this host (TCP connect, ${RETICORA_SMTP_CHECK_TIMEOUT:-5} s). With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it, so the installation would end in 'Reticora server did not become healthy'. Check host, port and the outbound firewall, or install without e-mail: remove RETICORA_SMTP_HOST from the environment and from $ENV_FILE ($SMTP_TROUBLESHOOTING)."
-        warn "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is not reachable from this host (TCP connect, ${RETICORA_SMTP_CHECK_TIMEOUT:-5} s). With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it: the installation would end in 'Reticora server did not become healthy'."
+        if [ "$SMTP_CHECK_PHASE" = auth ]; then
+            # /readyz does not log in: the server starts, the e-mails fail.
+            warn "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT $SMTP_CHECK_PROBLEM. The server still starts (/readyz does not log in), but every e-mail fails until RETICORA_SMTP_USERNAME and RETICORA_SMTP_PASSWORD are correct ($SMTP_TROUBLESHOOTING)."
+            if is_tty && confirm "Enter the SMTP settings again?" "yes"; then
+                continue
+            fi
+            return 0
+        fi
+        is_tty || die "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT $SMTP_CHECK_PROBLEM. With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it, so the installation would end in 'Reticora server did not become healthy'. Check host, port, TLS mode and the outbound firewall, or install without e-mail: remove RETICORA_SMTP_HOST from the environment and from $ENV_FILE ($SMTP_TROUBLESHOOTING)."
+        warn "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT $SMTP_CHECK_PROBLEM. With RETICORA_SMTP_HOST set the server's readiness (/readyz) depends on it: the installation would end in 'Reticora server did not become healthy'."
         if confirm "Continue without e-mail? (self-signup and e-mail notifications stay off until a re-run sets a reachable SMTP server)" "yes"; then
             RETICORA_SMTP_HOST=""
             warn "Continuing without SMTP: self-signup is disabled; re-run the installer and enter a reachable SMTP server to enable it."
@@ -1327,28 +1335,145 @@ validate_smtp_config() {
         || die "RETICORA_SMTP_FROM ('$RETICORA_SMTP_FROM') must be an e-mail address or 'Name <address>' that the server accepts (Go net/mail): no , ; : @ [ ] ( ) < > in the name (e.g. 'Reticora Inc.', not 'Reticora, Inc.'), no leading, trailing or double dot in the address, and no quotes, '\$', '#' or '\\' ($SMTP_TROUBLESHOOTING)."
 }
 
-# smtp_relay_reachable <host> <port> — a TCP connection to the SMTP server
-# opens within RETICORA_SMTP_CHECK_TIMEOUT seconds (default 5).
-# shellcheck disable=SC2016 # expanded by the inner shell
+# Result of smtp_relay_reachable: on failure the phase (dns, tcp, smtp, tls
+# or auth) and the text that completes "The SMTP server <host>:<port> …", on
+# success the address the session connected to.
+SMTP_CHECK_PHASE=""
+SMTP_CHECK_PROBLEM=""
+SMTP_CHECK_VIA=""
+
+# smtp_relay_reachable <host> <port> [tls-mode] [user] [password] [curl-option…]
+# — opens one SMTP session the way the server's /readyz does
+# (server.SMTPReadiness): a TCP connection to one of the addresses <host>
+# resolves to (curl tries all of them, IPv6 and IPv4, and falls back between
+# them; a single connect with one deadline for the whole list never reached
+# the second address when the first one dropped the packets), the 220
+# greeting, EHLO, STARTTLS for starttls or implicit TLS for tls with the
+# certificate verified for <host> against the system CAs, then NOOP and QUIT:
+# no mail is sent. With a user name it also logs in with AUTH PLAIN like the
+# server's sender (/readyz itself does not log in); the password reaches curl
+# on stdin only, never its command line, and is never printed. Each attempt
+# may take RETICORA_SMTP_CHECK_TIMEOUT seconds (default 10; glibc's resolver
+# alone waits 5 s for a lost answer) to connect and twice that in all.
+# Transient failures (a timeout before the server answered, a refused or
+# unreachable connection, a connection lost during the session) are tried up
+# to RETICORA_SMTP_CHECK_ATTEMPTS times (default 3),
+# RETICORA_SMTP_CHECK_RETRY_DELAY seconds apart (default 2); an unknown host
+# name, TLS, certificate, STARTTLS and login failures are not repeated.
 smtp_relay_reachable() {
-    local t="${RETICORA_SMTP_CHECK_TIMEOUT:-5}"
-    if have_cmd timeout; then
-        timeout "$t" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null
-    else
-        bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$1" "$2" 2>/dev/null
-    fi
+    local host="$1" port="$2" mode="${3:-starttls}" user="${4:-}" pw="${5:-}"
+    shift "$(( $# < 5 ? $# : 5 ))"
+    local t="${RETICORA_SMTP_CHECK_TIMEOUT:-10}" attempts="${RETICORA_SMTP_CHECK_ATTEMPTS:-3}"
+    local delay="${RETICORA_SMTP_CHECK_RETRY_DELAY:-2}" url=smtp attempt=1 rc out ip err transient
+    [[ "$t" =~ ^[1-9][0-9]*$ ]] || t=10
+    [[ "$attempts" =~ ^[1-9][0-9]*$ ]] || attempts=3
+    [[ "$delay" =~ ^[0-9]+$ ]] || delay=2
+    # -q first: no ~/.curlrc (e.g. 'insecure'); no proxy: the server
+    # connects directly.
+    local -a opts=(-q --silent --globoff --noproxy '*' --connect-timeout "$t" --max-time "$((2 * t))"
+        --request NOOP --output /dev/null --write-out '%{remote_ip}|%{errormsg}' --config -)
+    case "$mode" in
+        tls) url=smtps ;;
+        starttls) opts+=(--ssl-reqd) ;;
+    esac
+    [ -z "$user" ] || opts+=(--login-options AUTH=PLAIN)
+    if [[ "$host" == *:* ]]; then url+="://[$host]:$port"; else url+="://$host:$port"; fi
+    SMTP_CHECK_VIA=""
+    while true; do
+        rc=0
+        out="$({ [ -z "$user" ] || printf 'user = "%s:%s"\n' "$user" "$pw"; } | curl "${opts[@]}" "$@" "$url" 2>/dev/null)" || rc=$?
+        ip="${out%%|*}"
+        err="${out#*|}"
+        if [ "$rc" -eq 0 ]; then
+            SMTP_CHECK_VIA="$ip"
+            return 0
+        fi
+        err="${err:-curl exit code $rc}"
+        transient=0
+        case "$rc" in
+            6) SMTP_CHECK_PHASE=dns ;;
+            7) SMTP_CHECK_PHASE=tcp transient=1 ;;
+            # Connected (remote_ip set) but no answer in time: a wrong TLS
+            # mode for the port, not a passing outage.
+            28) if [ -n "$ip" ]; then SMTP_CHECK_PHASE=smtp
+                elif [[ "$err" == Resolv* ]]; then SMTP_CHECK_PHASE=dns transient=1
+                else SMTP_CHECK_PHASE=tcp transient=1; fi ;;
+            52|55|56) SMTP_CHECK_PHASE=smtp transient=1 ;;
+            35|51|53|54|58|59|60|64|66|77|80|82|83|90|91|98) SMTP_CHECK_PHASE=tls ;;
+            67|94) SMTP_CHECK_PHASE=auth ;;
+            *) SMTP_CHECK_PHASE=smtp ;;
+        esac
+        if [ "$transient" -eq 0 ] || [ "$attempt" -ge "$attempts" ]; then
+            break
+        fi
+        info "SMTP check, attempt $attempt of $attempts: $err — trying again in $delay s …"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+    case "$SMTP_CHECK_PHASE" in
+        dns) SMTP_CHECK_PROBLEM="is not reachable from this host: its name does not resolve here ($err)" ;;
+        tcp) info "Connecting to every address of $host on its own for the diagnosis …"
+            SMTP_CHECK_PROBLEM="is not reachable from this host: no TCP connection after $attempt attempt(s) ($err; addresses: $(smtp_address_report "$host" "$port"))" ;;
+        smtp) SMTP_CHECK_PROBLEM="accepts the TCP connection${ip:+ ($ip)} but does not complete the SMTP session in TLS mode $mode ($err) — starttls and none expect a plain-text greeting (usually port 587 or 25), tls implicit TLS (usually port 465)" ;;
+        tls) SMTP_CHECK_PROBLEM="fails in TLS mode $mode ($err)"
+            case "$rc" in
+                64) SMTP_CHECK_PROBLEM+=": it offers no STARTTLS on port $port; for implicit TLS (usually port 465) use the TLS mode tls" ;;
+                35) SMTP_CHECK_PROBLEM+=": no TLS handshake — implicit TLS (tls) on a STARTTLS port or the other way round, or a server below TLS 1.2" ;;
+                *) SMTP_CHECK_PROBLEM+=": the certificate must be valid for $host and issued by a trusted CA — the server verifies it the same way" ;;
+            esac ;;
+        auth) SMTP_CHECK_PROBLEM="refuses the login of '$user' (AUTH PLAIN: $err)" ;;
+    esac
+    return 1
+}
+
+# smtp_resolve <host> — the addresses <host> resolves to on this host, IPv6
+# and IPv4 in the order of the resolver, one per line.
+smtp_resolve() {
+    timeout "${RETICORA_SMTP_CHECK_TIMEOUT:-10}" getent ahosts "$1" 2>/dev/null | awk '$2 == "STREAM" && !seen[$1]++ { print $1 }'
+}
+
+# smtp_address_report <host> <port> — every address of <host> with the result
+# of its own TCP connection (at most 5 s each), e.g. "2001:db8::25 timeout
+# after 5 s, 192.0.2.25 connected": shows which address family or address
+# fails.
+# shellcheck disable=SC2016 # expanded by the inner shell
+smtp_address_report() {
+    local t="${RETICORA_SMTP_CHECK_TIMEOUT:-10}" addr err rc report=""
+    [[ "$t" =~ ^[1-9][0-9]*$ ]] && [ "$t" -lt 5 ] || t=5
+    for addr in $(smtp_resolve "$1"); do
+        rc=0
+        err="$(timeout "$t" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$addr" "$2" 2>&1)" || rc=$?
+        case "$rc" in
+            0) err=connected ;;
+            124) err="timeout after $t s" ;;
+            *) err="${err##*: }" ;;
+        esac
+        report+="${report:+, }$addr $err"
+    done
+    printf '%s' "${report:-none resolved}"
 }
 
 # smtp_relay_check — the pre-check of the SMTP server before anything starts:
-# with RETICORA_SMTP_HOST set, /readyz of the server connects to it, and an
-# unreachable relay would only surface as an unhealthy server.
+# with RETICORA_SMTP_HOST set, /readyz of the server opens an SMTP session to
+# it in the configured TLS mode, and a relay it cannot use would only surface
+# as an unhealthy server. The login is checked as well; /readyz does not log
+# in, so a refused login (SMTP_CHECK_PHASE auth) does not stop the server.
 smtp_relay_check() {
-    info "Checking the SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT …"
-    if smtp_relay_reachable "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_PORT"; then
-        success "SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT is reachable (TLS mode $RETICORA_SMTP_TLS)"
-        return 0
+    local via
+    info "Checking the SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT (TLS mode $RETICORA_SMTP_TLS${RETICORA_SMTP_USERNAME:+, login as $RETICORA_SMTP_USERNAME}) …"
+    SMTP_CHECK_PHASE=tcp
+    SMTP_CHECK_PROBLEM="is not reachable from this host"
+    smtp_relay_reachable "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_PORT" "$RETICORA_SMTP_TLS" \
+        "$RETICORA_SMTP_USERNAME" "$RETICORA_SMTP_PASSWORD" || return 1
+    via="$SMTP_CHECK_VIA"
+    success "SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT works in TLS mode $RETICORA_SMTP_TLS${via:+ (connected to $via)}${RETICORA_SMTP_USERNAME:+, login accepted}"
+    # The server container uses IPv4 unless IPv6 is enabled for Docker's
+    # networks: a relay reached over IPv6 here must answer over IPv4 too.
+    if [[ "$via" == *:* ]] && [[ "$RETICORA_SMTP_HOST" != *:* ]] &&
+        ! RETICORA_SMTP_CHECK_ATTEMPTS=1 smtp_relay_reachable "$RETICORA_SMTP_HOST" "$RETICORA_SMTP_PORT" "$RETICORA_SMTP_TLS" "" "" --ipv4; then
+        warn "The SMTP server $RETICORA_SMTP_HOST:$RETICORA_SMTP_PORT works over IPv6 ($via) but over IPv4 it $SMTP_CHECK_PROBLEM. The server container connects over IPv4 unless IPv6 is enabled for Docker's networks, so its /readyz may fail ('Reticora server did not become healthy'); check the IPv4 route and firewall ($SMTP_TROUBLESHOOTING)."
     fi
-    return 1
+    return 0
 }
 
 # ─── Session signing key ──────────────────────────────────────────────────────
