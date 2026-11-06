@@ -46,7 +46,7 @@ healthy".
 | Database password mismatch | `logs postgres` / `logs server` show `SQLSTATE 28P01` (password authentication failed) | Re-run the installer — `sync_db_password` probes both databases (CMDB and Keycloak) over TCP and resets a stale role password to the value in `.env` using a temporary trust-auth instance. **Manual alternative (data loss):** `docker compose down -v` removes the stale volume. |
 | Migrations not applied | `logs server` shows missing tables/columns | Re-run the installer; migrations run before the server starts. |
 | DDL event trigger disabled | `logs server` shows `database is not ready … event trigger reticora_restrict_app_ddl is not enabled` (or `is missing`); `/readyz` answers `"database":"unavailable"` | An aborted TimescaleDB update left it disabled — see [TimescaleDB extension update failed](#timescaledb-extension-update-failed). Re-run the installer; the update step enables it again. |
-| SMTP server unreachable | `logs server` shows `"msg":"readiness check failed","check":"smtp","address":"<host>:<port>"` with the cause (e.g. `connection refused`, `smtp server offers no STARTTLS`, `x509: …`); `/readyz` answers 503 with `"smtp":"unavailable"` | With `RETICORA_SMTP_HOST` set, the SMTP server is a dependency of the server: `/readyz` connects, waits for the 220 greeting and sends EHLO in the TLS mode of `RETICORA_SMTP_TLS` (no mail, no login). An installation whose configured mail server is unreachable therefore fails in `wait_for_service server` ("Reticora server did not become healthy"); `install-cloud.sh` probes `RETICORA_SMTP_HOST:RETICORA_SMTP_PORT` over TCP before anything starts and stops a non-interactive run (an interactive one offers to continue without e-mail). Make the server reachable from the container with the configured port and TLS mode (`starttls` needs an offered STARTTLS, `tls` implicit TLS, both a certificate for the host name the server trusts), or empty `RETICORA_SMTP_HOST` in `deploy/docker-compose/.env` (and in the environment of the installer run) until the relay exists; self-signup and `central_smtp` notifications stay off without it. Then re-run the installer. See [Self-signup answers 503](#self-signup-answers-503-self-signup-is-not-available). |
+| SMTP server unreachable | `logs server` shows `"msg":"readiness check failed","check":"smtp","address":"<host>:<port>"` with the cause (e.g. `connection refused`, `smtp server offers no STARTTLS`, `x509: …`); `/readyz` answers 503 with `"smtp":"unavailable"` | With `RETICORA_SMTP_HOST` set, the SMTP server is a dependency of the server: `/readyz` connects, waits for the 220 greeting and sends EHLO in the TLS mode of `RETICORA_SMTP_TLS` (no mail, no login). An installation whose configured mail server is unreachable therefore fails in `wait_for_service server` ("Reticora server did not become healthy"); `install-cloud.sh` opens the same SMTP session from the host before anything starts (`smtp_relay_reachable`: every address of the name, IPv6 and IPv4, greeting, EHLO, STARTTLS or implicit TLS with the certificate verified, and the login when a user name is set; no mail) and stops a non-interactive run with the failing phase — name resolution, TCP (with the result of every address), SMTP greeting, TLS/certificate — (an interactive one offers to continue without e-mail). Make the server reachable from the container with the configured port and TLS mode (`starttls` needs an offered STARTTLS, `tls` implicit TLS, both a certificate for the host name the server trusts), or empty `RETICORA_SMTP_HOST` in `deploy/docker-compose/.env` (and in the environment of the installer run) until the relay exists; self-signup and `central_smtp` notifications stay off without it. Then re-run the installer. See [Self-signup answers 503](#self-signup-answers-503-self-signup-is-not-available). |
 | Object storage unreachable | `logs server` shows `"msg":"readiness check failed","check":"object_storage","address":"<host>:<port>"`; `/readyz` answers `"object_storage":"unavailable"` | The address is the one the S3 client uses for `RETICORA_S3_ENDPOINT`: the scheme of a URL is removed, and an endpoint without port gets 443 (`https://` or `RETICORA_S3_USE_SSL=true`) or 80. Check that MinIO or the managed S3 answers on that address. |
 
 Every readiness check that turns unavailable writes exactly one log line
@@ -609,7 +609,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Keycloak admin password | A changed `KEYCLOAK_ADMIN_PASSWORD` is set through the admin CLI: login with the password of `.env.previous`, then with the new one; afterwards the old password no longer works. |
 | OIDC client `reticora-app` | Secret (`RETICORA_OIDC_CLIENT_SECRET`), redirect URIs and web origins (from `RETICORA_OIDC_REDIRECT_URL` and `RETICORA_OIDC_ISSUER_URL`) and the post-logout redirect URIs (`post.logout.redirect.uris`, `+`: the valid redirect URIs, needed for the sign-out's return to `/login`, see [deploy/keycloak/README.md](../deploy/keycloak/README.md), "Sign-out") of the rendered realm file are compared with the running realm; each differing value is applied with one `kcadm update clients/<id>` (the attribute update names only this attribute; Keycloak keeps the others). |
 | Server admin client `reticora-server-admin` | `RETICORA_KEYCLOAK_ADMIN_CLIENT_ID`/`_SECRET` are generated once (`.env`, never asked for). `ensure_admin_client` creates the confidential client with its service account (realm-management `manage-users`, `view-users`, `query-users`) before the server starts, repairs drifted settings and missing roles, and sets a secret that differs from `.env` (logged by name only); an unchanged client is not written. |
-| SMTP server | `RETICORA_SMTP_*` from the environment, `.env` or the prompt; checked over TCP before the start. With a host, `apply_realm_smtp` sets the same server as `smtpServer` of the realm `reticora` (password only on stdin). |
+| SMTP server | `RETICORA_SMTP_*` from the environment, `.env` or the prompt; checked before the start with the SMTP session `/readyz` opens (TLS mode, certificate) and the login. With a host, `apply_realm_smtp` sets the same server as `smtpServer` of the realm `reticora` (password only on stdin). |
 | Collector endpoint names | `RETICORA_NATS_EDGE_HOSTS` is derived on every run (TLS domain, host of `RETICORA_PUBLIC_BASE_URL`, host IP of an IP or localhost installation) and merged with the names already in `.env`; the server reissues the nats-edge certificate when the names change. |
 | Frontend | A frontend that started before the server's current start is restarted after the server became healthy: its nginx resolves the server's address only at its start (otherwise `/api/` could answer 502 after the server was recreated). |
 | TLS bootstrap cert | Reused; regenerated when SAN-less or expiring within a day (a running frontend reloads it before the issuer checks). |
@@ -911,11 +911,27 @@ user name and password (optional, not asked with `none`), sender (`noreply@examp
 (or write them into `deploy/docker-compose/.env`) and run
 `./install-cloud.sh --non-interactive`. The run
 
-1. checks that `RETICORA_SMTP_HOST:RETICORA_SMTP_PORT` accepts a TCP
-   connection: with `RETICORA_SMTP_HOST` set the server's `/readyz` depends
-   on the relay (see the table in section 1), so an unreachable one stops a
+1. checks the relay from the host with the SMTP session the server's
+   `/readyz` opens: a TCP connection to one of the addresses the name
+   resolves to (IPv6 and IPv4, with fallback between them), greeting, EHLO,
+   STARTTLS (`starttls`) or implicit TLS (`tls`) with the certificate
+   verified for the host name, NOOP — no mail is sent. With a user name it
+   also logs in (AUTH PLAIN, like the server; the password goes to `curl` on
+   stdin only). With `RETICORA_SMTP_HOST` set `/readyz` depends on the relay
+   (see the table in section 1), so a relay it cannot use stops a
    non-interactive run with `The SMTP server … is not reachable from this
-   host`, and an interactive run offers to continue without e-mail;
+   host: …` (name resolution or TCP, with the result of every address),
+   `… does not complete the SMTP session …` or `… fails in TLS mode …`, and
+   an interactive run offers to continue without e-mail. A refused login
+   (`… refuses the login of …`) is a warning: `/readyz` does not log in, the
+   server starts, but no e-mail goes out until user name and password are
+   right. Timeouts and refused or lost connections are tried
+   `RETICORA_SMTP_CHECK_ATTEMPTS` times (default 3,
+   `RETICORA_SMTP_CHECK_RETRY_DELAY` 2 s apart), each with
+   `RETICORA_SMTP_CHECK_TIMEOUT` seconds (default 10) to connect; name,
+   certificate, TLS and login failures are not repeated. The server
+   container connects over IPv4 unless Docker's networks have IPv6: when the
+   host reached the relay over IPv6 only, the installer warns;
 2. creates or updates the admin client and sets the same SMTP server for the
    realm `reticora` (Keycloak's own e-mails);
 3. recreates the server, restarts the frontend (its nginx resolves the

@@ -2334,27 +2334,244 @@ test_smtp_unreachable_aborts() {
         cmp -s "$ENV_FILE" "$TMP_ROOT/smtp-unreachable-before"
 }
 
-# The probe itself: a TCP connection that opens (a listener on 127.0.0.1)
-# and one that is refused.
-test_smtp_relay_probe() {
-    command -v python3 >/dev/null || { echo "python3 missing: TCP probe not checked"; return 0; }
-    local portfile="$TMP_ROOT/smtp-listener-port" pid port=""
-    rm -f "$portfile"
-    python3 -c 'import socket, sys, time
-s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(4)
-open(sys.argv[1] + ".tmp", "w").write(str(s.getsockname()[1])); __import__("os").rename(sys.argv[1] + ".tmp", sys.argv[1])
-time.sleep(20)' "$portfile" &
-    pid=$!
-    for _ in $(seq 1 50); do [ -s "$portfile" ] && break; sleep 0.1; done
-    port="$(cat "$portfile" 2>/dev/null || true)"
-    [ -n "$port" ] || { kill "$pid" 2>/dev/null; return 1; }
+# A refused login does not stop the server (/readyz does not log in): a
+# non-interactive run warns and keeps the settings, without the password.
+# shellcheck disable=SC2317 # the stub is called by the installer functions
+test_smtp_login_refused_warns() {
+    smtp_env smtp-auth "RETICORA_SMTP_HOST=smtp.example.test" "RETICORA_SMTP_USERNAME=mailer" "RETICORA_SMTP_PASSWORD=$SMTP_PW" \
+        "RETICORA_SMTP_FROM=noreply@example.test"
+    smtp_relay_reachable() { SMTP_CHECK_PHASE=auth; SMTP_CHECK_PROBLEM="refuses the login of 'mailer' (AUTH PLAIN: Login denied)"; return 1; }
+    local out
+    out="$(collect_config 2>&1)" || { echo "a refused login stopped the run: $(tail -n 1 <<< "$out")"; return 1; }
+    grep -qF "The SMTP server smtp.example.test:587 refuses the login of 'mailer' (AUTH PLAIN: Login denied)" <<< "$out" &&
+        grep -qF "/readyz does not log in" <<< "$out" && ! grep -qF "$SMTP_PW" <<< "$out" || return 1
+    collect_config >/dev/null 2>&1
+    [ "$RETICORA_SMTP_HOST" = smtp.example.test ] && [ "$RETICORA_SMTP_USERNAME" = mailer ]
+}
+
+# ─── The SMTP pre-check against a local SMTP server ───────────────────────────
+# tests/fixtures/smtp/fake-smtp.py on 127.0.0.1 with a test CA: no network and
+# no real relay. States a local server cannot produce (a dropped packet, an
+# IPv6 path) are covered with a curl stub.
+SMTP_FAKE="$REPO_ROOT/tests/fixtures/smtp/fake-smtp.py"
+SMTP_TEST_USER="noreply@example.test"
+SMTP_TEST_PW="smtp-test-Pw+4711"
+
+# smtp_probe_tools — python3, openssl and curl for the local SMTP server.
+smtp_probe_tools() {
+    command -v python3 >/dev/null && command -v openssl >/dev/null && command -v curl >/dev/null
+}
+
+# smtp_test_pki — a test CA and a server certificate for localhost,
+# 127.0.0.1 and ::1 in $TMP_ROOT/smtp-pki.
+smtp_test_pki() {
+    local d="$TMP_ROOT/smtp-pki"
+    [ -s "$d/server.pem" ] && return 0
+    mkdir -p "$d"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=Reticora test SMTP CA" \
+        -keyout "$d/ca.key" -out "$d/ca.pem" 2>/dev/null &&
+        openssl req -newkey rsa:2048 -nodes -subj "/CN=localhost" -keyout "$d/server.key" -out "$d/server.csr" 2>/dev/null &&
+        printf 'subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1\n' > "$d/san.ext" &&
+        openssl x509 -req -in "$d/server.csr" -CA "$d/ca.pem" -CAkey "$d/ca.key" -CAcreateserial -days 2 \
+            -extfile "$d/san.ext" -out "$d/server.pem" 2>/dev/null
+}
+
+# smtp_fake <name> <fake-smtp.py option…> — starts the local SMTP server on
+# 127.0.0.1 and prints its port; its events go to $TMP_ROOT/smtp-<name>.log.
+# It ends itself after 30 s; smtp_fake_stop ends it earlier.
+smtp_fake() {
+    local name="$1" pf="$TMP_ROOT/smtp-$1.port"
+    shift
+    rm -f "$pf" "$TMP_ROOT/smtp-$name.log"
+    touch "$TMP_ROOT/smtp-$name.log"
+    python3 "$SMTP_FAKE" --port-file "$pf" --log "$TMP_ROOT/smtp-$name.log" --lifetime 30 "$@" >/dev/null 2>&1 &
+    printf '%s\n' "$!" >> "$TMP_ROOT/smtp-pids"
+    for _ in $(seq 1 50); do [ -s "$pf" ] && break; sleep 0.1; done
+    cat "$pf"
+}
+
+smtp_fake_stop() { xargs -r kill < "$TMP_ROOT/smtp-pids" 2>/dev/null || true; rm -f "$TMP_ROOT/smtp-pids"; }
+
+# smtp_events <name> <event> — how often the server <name> logged <event>.
+smtp_events() { grep -cx "$2" "$TMP_ROOT/smtp-$1.log" || true; }
+
+# The pre-check opens the session /readyz opens: STARTTLS with the
+# certificate verified for the host name, implicit TLS and plain; with a user
+# name it logs in once. "localhost" resolves to ::1 and 127.0.0.1 where IPv6
+# is available, and the server listens on 127.0.0.1 only: the check falls
+# back from the refused IPv6 address to the IPv4 one.
+test_smtp_probe_session_passes() {
+    smtp_probe_tools || { echo "python3, openssl or curl missing: SMTP probe not checked"; return 0; }
+    smtp_test_pki
+    export CURL_CA_BUNDLE="$TMP_ROOT/smtp-pki/ca.pem"
+    local pki="$TMP_ROOT/smtp-pki" starttls tls plain
+    starttls="$(smtp_fake ok-starttls --mode starttls --cert "$pki/server.pem" --key "$pki/server.key" \
+        --user "$SMTP_TEST_USER" --password "$SMTP_TEST_PW")"
+    tls="$(smtp_fake ok-tls --mode tls --cert "$pki/server.pem" --key "$pki/server.key")"
+    plain="$(smtp_fake ok-plain --mode none)"
+    smtp_relay_reachable localhost "$starttls" starttls "$SMTP_TEST_USER" "$SMTP_TEST_PW" >/dev/null \
+        || { echo "starttls: $SMTP_CHECK_PROBLEM"; return 1; }
+    [ "$SMTP_CHECK_VIA" = 127.0.0.1 ] && [ "$(smtp_events ok-starttls auth-ok)" -eq 1 ] &&
+        [ "$(smtp_events ok-starttls connect)" -eq 1 ] || { echo "starttls: via '$SMTP_CHECK_VIA', $(cat "$TMP_ROOT/smtp-ok-starttls.log")"; return 1; }
+    smtp_relay_reachable localhost "$tls" tls >/dev/null || { echo "tls: $SMTP_CHECK_PROBLEM"; return 1; }
+    smtp_relay_reachable 127.0.0.1 "$plain" none >/dev/null || { echo "none: $SMTP_CHECK_PROBLEM"; return 1; }
+    smtp_fake_stop
+}
+
+# A refused login is an auth failure, tried once (no lockout through
+# retries); the password reaches curl on stdin only: never on its command
+# line, never in the output.
+# shellcheck disable=SC2034,SC2317 # variables and wrapper used by the installer functions
+test_smtp_probe_login_refused() {
+    smtp_probe_tools || { echo "python3, openssl or curl missing: SMTP probe not checked"; return 0; }
+    smtp_test_pki
+    export CURL_CA_BUNDLE="$TMP_ROOT/smtp-pki/ca.pem"
+    local pki="$TMP_ROOT/smtp-pki" port args="$TMP_ROOT/smtp-curl-args" out="$TMP_ROOT/smtp-auth.out"
+    port="$(smtp_fake auth --mode starttls --cert "$pki/server.pem" --key "$pki/server.key" \
+        --user "$SMTP_TEST_USER" --password "$SMTP_TEST_PW")"
+    : > "$args"
+    curl() { printf '%s\n' "$*" >> "$args"; command curl "$@"; }
+    RETICORA_SMTP_CHECK_RETRY_DELAY=0
+    if smtp_relay_reachable localhost "$port" starttls "$SMTP_TEST_USER" wrong-Pw-0815 > "$out" 2>&1; then
+        echo "a wrong password was accepted"; return 1
+    fi
+    [ "$SMTP_CHECK_PHASE" = auth ] && [ "$(smtp_events auth auth-fail)" -eq 1 ] && [ "$(smtp_events auth connect)" -eq 1 ] &&
+        grep -qF "refuses the login of '$SMTP_TEST_USER' (AUTH PLAIN: Login denied)" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "phase $SMTP_CHECK_PHASE: $SMTP_CHECK_PROBLEM; $(tr '\n' ' ' < "$TMP_ROOT/smtp-auth.log")"; return 1; }
+    smtp_relay_reachable localhost "$port" starttls "$SMTP_TEST_USER" "$SMTP_TEST_PW" >> "$out" 2>&1 \
+        || { echo "the right password was refused: $SMTP_CHECK_PROBLEM"; return 1; }
+    [ "$(wc -l < "$args")" -eq 2 ] && grep -qF -- "--login-options AUTH=PLAIN" "$args" || return 1
+    ! grep -qF -e wrong-Pw-0815 -e "$SMTP_TEST_PW" "$args" "$out" - <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "the password appeared on curl's command line or in the output"; return 1; }
+    smtp_fake_stop
+}
+
+# TLS failures are reported as such and not repeated: an untrusted
+# certificate (the system CAs do not know the test CA), a server without
+# STARTTLS for starttls, implicit TLS against a STARTTLS port.
+# shellcheck disable=SC2034 # variables used by the installer functions
+test_smtp_probe_tls_failures() {
+    smtp_probe_tools || { echo "python3, openssl or curl missing: SMTP probe not checked"; return 0; }
+    smtp_test_pki
+    local pki="$TMP_ROOT/smtp-pki" starttls plain
+    starttls="$(smtp_fake tls-fail --mode starttls --cert "$pki/server.pem" --key "$pki/server.key")"
+    plain="$(smtp_fake tls-plain --mode none)"
+    RETICORA_SMTP_CHECK_RETRY_DELAY=0
+    unset CURL_CA_BUNDLE
+    ! smtp_relay_reachable localhost "$starttls" starttls >/dev/null 2>&1 && [ "$SMTP_CHECK_PHASE" = tls ] &&
+        grep -qF "the certificate must be valid for localhost and issued by a trusted CA" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "untrusted certificate: $SMTP_CHECK_PHASE $SMTP_CHECK_PROBLEM"; return 1; }
+    export CURL_CA_BUNDLE="$pki/ca.pem"
+    ! smtp_relay_reachable localhost "$plain" starttls >/dev/null 2>&1 && [ "$SMTP_CHECK_PHASE" = tls ] &&
+        grep -qF "it offers no STARTTLS on port $plain" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "no STARTTLS: $SMTP_CHECK_PHASE $SMTP_CHECK_PROBLEM"; return 1; }
+    ! smtp_relay_reachable localhost "$starttls" tls >/dev/null 2>&1 && [ "$SMTP_CHECK_PHASE" = tls ] &&
+        grep -qF "no TLS handshake" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "implicit TLS on a STARTTLS port: $SMTP_CHECK_PHASE $SMTP_CHECK_PROBLEM"; return 1; }
+    [ "$(smtp_events tls-fail connect)" -eq 2 ] && [ "$(smtp_events tls-plain connect)" -eq 1 ] \
+        || { echo "TLS failures were repeated"; return 1; }
+    smtp_fake_stop
+}
+
+# A closed port is retried a bounded number of times and then reported with
+# the result of every address the name resolves to; a server that is down
+# for a moment passes on a later attempt; a server that accepts the
+# connection but never greets fails within the timeout, once.
+# shellcheck disable=SC2034,SC2317 # variables and stub used by the installer functions
+test_smtp_probe_unreachable_and_transient() {
+    smtp_probe_tools || { echo "python3, openssl or curl missing: SMTP probe not checked"; return 0; }
+    local closed listening report later silent out="$TMP_ROOT/smtp-unreachable.out" start
+    export LC_ALL=C
+    closed="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+    RETICORA_SMTP_CHECK_RETRY_DELAY=0
+    RETICORA_SMTP_CHECK_ATTEMPTS=3
+    if smtp_relay_reachable 127.0.0.1 "$closed" none > "$out" 2>&1; then echo "a closed port passed"; return 1; fi
+    [ "$SMTP_CHECK_PHASE" = tcp ] && grep -qF "is not reachable from this host: no TCP connection after 3 attempt(s)" <<< "$SMTP_CHECK_PROBLEM" &&
+        grep -qF "addresses: 127.0.0.1 Connection refused" <<< "$SMTP_CHECK_PROBLEM" &&
+        [ "$(grep -c 'SMTP check, attempt [12] of 3' "$out")" -eq 2 ] || { echo "closed port: $SMTP_CHECK_PROBLEM"; cat "$out"; return 1; }
+    # Every address with its own result: 127.0.0.2 refuses, the server
+    # listens on 127.0.0.1 only.
+    listening="$(smtp_fake report --mode none)"
+    report="$(smtp_resolve() { printf '127.0.0.2\n127.0.0.1\n'; }; smtp_address_report relay.example.test "$listening")"
+    [ "$report" = "127.0.0.2 Connection refused, 127.0.0.1 connected" ] || { echo "address report: $report"; return 1; }
+    # Down for a moment (bound, not yet listening): the third attempt passes.
+    later="$(smtp_fake later --mode none --listen-after 1.5)"
+    RETICORA_SMTP_CHECK_RETRY_DELAY=1
+    smtp_relay_reachable 127.0.0.1 "$later" none > "$out" 2>&1 || { echo "transient outage: $SMTP_CHECK_PROBLEM"; return 1; }
+    grep -qF "SMTP check, attempt 1 of 3" "$out" && [ "$(smtp_events later connect)" -eq 1 ] || { cat "$out"; return 1; }
+    # Connected, but no greeting: a session failure within the timeout, not
+    # repeated.
+    silent="$(smtp_fake silent --mode silent)"
+    RETICORA_SMTP_CHECK_TIMEOUT=1
+    start=$SECONDS
+    ! smtp_relay_reachable 127.0.0.1 "$silent" starttls >/dev/null 2>&1 && [ "$SMTP_CHECK_PHASE" = smtp ] &&
+        grep -qF "accepts the TCP connection (127.0.0.1) but does not complete the SMTP session in TLS mode starttls" <<< "$SMTP_CHECK_PROBLEM" &&
+        [ "$(smtp_events silent connect)" -eq 1 ] && [ $((SECONDS - start)) -le 4 ] \
+        || { echo "silent server: $SMTP_CHECK_PHASE $SMTP_CHECK_PROBLEM ($((SECONDS - start)) s)"; return 1; }
+    # A name that does not resolve (RFC 6761 .invalid) is a DNS failure.
     RETICORA_SMTP_CHECK_TIMEOUT=3
-    local ok=0
-    smtp_relay_reachable 127.0.0.1 "$port" || ok=1
-    kill "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null || true
-    [ "$ok" -eq 0 ] || { echo "listener on $port not reached"; return 1; }
-    ! smtp_relay_reachable 127.0.0.1 "$port"
+    RETICORA_SMTP_CHECK_ATTEMPTS=1
+    ! smtp_relay_reachable smtp.reticora-check.invalid 587 starttls >/dev/null 2>&1 && [ "$SMTP_CHECK_PHASE" = dns ] &&
+        grep -qF "is not reachable from this host: its name does not resolve here" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "unknown host: $SMTP_CHECK_PHASE $SMTP_CHECK_PROBLEM"; return 1; }
+    smtp_fake_stop
+}
+
+# States a local server cannot produce, with a curl stub: a connect timeout
+# on every address is retried RETICORA_SMTP_CHECK_ATTEMPTS times, a resolver
+# timeout is a DNS failure that is retried, an unknown name is not retried,
+# a connection lost during the session is retried.
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by the installer functions
+test_smtp_probe_retry_classes() {
+    local calls="$TMP_ROOT/smtp-stub-calls"
+    sleep() { :; }
+    smtp_address_report() { printf '2001:db8::25 timeout after 10 s, 192.0.2.25 timeout after 10 s'; }
+    RETICORA_SMTP_CHECK_ATTEMPTS=3
+    # smtp_stub <exit code> <remote ip> <message>
+    smtp_stub() { STUB_RC="$1" STUB_OUT="$2|$3"; : > "$calls"; }
+    curl() { cat > /dev/null; echo call >> "$calls"; printf '%s' "$STUB_OUT"; return "$STUB_RC"; }
+    smtp_stub 28 "" "Connection timed out after 10001 milliseconds"
+    ! smtp_relay_reachable relay.example.test 587 starttls >/dev/null && [ "$SMTP_CHECK_PHASE" = tcp ] && [ "$(wc -l < "$calls")" -eq 3 ] &&
+        grep -qF "no TCP connection after 3 attempt(s) (Connection timed out after 10001 milliseconds; addresses: 2001:db8::25 timeout after 10 s, 192.0.2.25 timeout after 10 s)" <<< "$SMTP_CHECK_PROBLEM" \
+        || { echo "connect timeout: $SMTP_CHECK_PHASE $(wc -l < "$calls") $SMTP_CHECK_PROBLEM"; return 1; }
+    smtp_stub 28 "" "Resolving timed out after 10000 milliseconds"
+    ! smtp_relay_reachable relay.example.test 587 starttls >/dev/null && [ "$SMTP_CHECK_PHASE" = dns ] && [ "$(wc -l < "$calls")" -eq 3 ] \
+        || { echo "resolver timeout: $SMTP_CHECK_PHASE $(wc -l < "$calls")"; return 1; }
+    smtp_stub 6 "" "Could not resolve host: relay.example.test"
+    ! smtp_relay_reachable relay.example.test 587 starttls >/dev/null && [ "$SMTP_CHECK_PHASE" = dns ] && [ "$(wc -l < "$calls")" -eq 1 ] \
+        || { echo "unknown name: $SMTP_CHECK_PHASE $(wc -l < "$calls")"; return 1; }
+    smtp_stub 56 192.0.2.25 "Recv failure: Connection reset by peer"
+    ! smtp_relay_reachable relay.example.test 587 starttls >/dev/null && [ "$SMTP_CHECK_PHASE" = smtp ] && [ "$(wc -l < "$calls")" -eq 3 ] \
+        || { echo "reset: $SMTP_CHECK_PHASE $(wc -l < "$calls")"; return 1; }
+    smtp_stub 60 192.0.2.25 "SSL certificate problem: unable to get local issuer certificate"
+    ! smtp_relay_reachable relay.example.test 587 starttls >/dev/null && [ "$SMTP_CHECK_PHASE" = tls ] && [ "$(wc -l < "$calls")" -eq 1 ] \
+        || { echo "certificate: $SMTP_CHECK_PHASE $(wc -l < "$calls")"; return 1; }
+}
+
+# The server container reaches the relay over IPv4 unless Docker's networks
+# have IPv6: a check that connected over IPv6 warns when IPv4 fails, and
+# says nothing when it works.
+# shellcheck disable=SC2034,SC2317 # variables and stubs used by the installer functions
+test_smtp_check_ipv4_path() {
+    RETICORA_SMTP_HOST=mail.example.test RETICORA_SMTP_PORT=587 RETICORA_SMTP_TLS=starttls
+    RETICORA_SMTP_USERNAME="" RETICORA_SMTP_PASSWORD=""
+    sleep() { :; }
+    smtp_address_report() { printf '192.0.2.25 Network is unreachable'; }
+    curl() {
+        cat > /dev/null
+        case " $* " in
+            *" --ipv4 "*) if [ -n "$IPV4_ANSWER" ]; then printf '|%s' "$IPV4_ANSWER"; return 7; fi; printf '192.0.2.25|'; return 0 ;;
+        esac
+        printf '2001:db8::25|'
+    }
+    local out
+    IPV4_ANSWER="Failed to connect to mail.example.test port 587 after 3 ms: Network is unreachable"
+    out="$(smtp_relay_check 2>&1)" || { echo "the check failed: $out"; return 1; }
+    grep -qF "SMTP server mail.example.test:587 works in TLS mode starttls (connected to 2001:db8::25)" <<< "$out" &&
+        grep -qF "works over IPv6 (2001:db8::25) but over IPv4 it is not reachable from this host: no TCP connection after 1 attempt(s)" <<< "$out" ||
+        { printf '%s\n' "$out"; return 1; }
+    IPV4_ANSWER=""
+    out="$(smtp_relay_check 2>&1)" && ! grep -qF "over IPv4" <<< "$out" || { printf '%s\n' "$out"; return 1; }
 }
 
 # The signup state after the start: the probe of GET
@@ -2452,7 +2669,13 @@ run_test    "smtp: the port follows the TLS mode (465 for tls after a run withou
 run_test    "smtp: interactive tls offers 465; a sender net/mail refuses is asked again"      test_smtp_interactive_port_and_from
 run_test    "smtp: TLS mode none without login; interactive none asks for no user name"     test_smtp_tls_none_without_login
 run_test    "smtp: an unreachable SMTP server stops a non-interactive run before .env"     test_smtp_unreachable_aborts
-run_test    "smtp: the TCP pre-check reaches a listener and detects a refused port"          test_smtp_relay_probe
+run_test    "smtp: a refused login warns, keeps the settings and never prints the password"  test_smtp_login_refused_warns
+run_test    "smtp probe: STARTTLS, implicit TLS and plain sessions pass; IPv6 to IPv4 fallback" test_smtp_probe_session_passes
+run_test    "smtp probe: a refused login is tried once; the password is never on curl's argv" test_smtp_probe_login_refused
+run_test    "smtp probe: untrusted certificate, missing STARTTLS, wrong TLS mode, not repeated" test_smtp_probe_tls_failures
+run_test    "smtp probe: refused port retried with per-address report; outage; no greeting; DNS" test_smtp_probe_unreachable_and_transient
+run_test    "smtp probe: timeouts and resets retried, unknown names and TLS errors are not"  test_smtp_probe_retry_classes
+run_test    "smtp check: a session over IPv6 warns when IPv4 (the container's path) fails"   test_smtp_check_ipv4_path
 run_test    "signup: state after the start probed and reported in the summary"               test_signup_state_reported
 run_test    "summary: collector endpoint, port 4222 and the collector flow"                  test_summary_collector_flow
 run_test    "summary: the configuration before the start names collector endpoint and SMTP" test_config_shows_collector_endpoint
