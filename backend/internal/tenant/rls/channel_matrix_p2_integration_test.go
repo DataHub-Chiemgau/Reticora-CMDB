@@ -923,11 +923,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	})
 	extend("job", func(p *channelPrincipal) []matrixProbe {
 		// The job model shows a job where its snapshot lies in the scope
-		// (WP-404), the import job as well: unlike GET /imports/{id}, which
-		// shows a run over rows to its starter only, the other user with
-		// an org-wide scope reads it (see the finding in the commit of
-		// WP-828).
-		objs := []object{{s.importJob.id, seenBy("org", "other-user", "client")}, s.bulkJob}
+		// (WP-404); an import job like GET /imports/{id} (WP-828): a run
+		// over rows to its starter only, not to the other user with an
+		// org-wide scope (404 like an unknown job).
+		objs := []object{s.importJob, s.bulkJob}
 		return append([]matrixProbe{list(p, "/api/v1/jobs?limit=200", objs...)}, details(p, "/api/v1/jobs/", "", objs...)...)
 	})
 }

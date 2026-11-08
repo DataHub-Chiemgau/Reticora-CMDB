@@ -1240,7 +1240,8 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 	// Jobs (WP-404, F-163): list, detail and the result with the data of a
 	// client-1 job; cancelling needs the job in the scope and its creator
 	// or the permission of its kind (none for this kind: 403); a job that
-	// is not revertible is 409, after the scope check.
+	// is not revertible is 409, after the scope check and the right (403,
+	// WP-829).
 	snapshots := []struct {
 		org, creator, clients, sites, teams string
 		seen                                seen
@@ -1276,8 +1277,14 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 					after: m.count(want != http.StatusOK, `SELECT count(*) FROM job WHERE id = $1 AND status = 'queued'`, id)})
 			}
 			for _, j := range jobsAll[:6] {
-				out = append(out, matrixProbe{method: http.MethodPost, path: "/api/v1/jobs/" + j.id + "/revert", body: map[string]any{},
-					want: j.seen.status(p, http.StatusConflict)})
+				// The right (creator, the kind has no permission) before
+				// the state: 403 also for a job that is not revertible
+				// (WP-829).
+				want := j.seen.status(p, http.StatusConflict)
+				if creator := m.scalar(t, `SELECT COALESCE(created_by::text, '') FROM job WHERE id = $1`, j.id); want == http.StatusConflict && (creator == "" || !strings.EqualFold(p.user, creator)) {
+					want = http.StatusForbidden
+				}
+				out = append(out, matrixProbe{method: http.MethodPost, path: "/api/v1/jobs/" + j.id + "/revert", body: map[string]any{}, want: want})
 			}
 			return append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/jobs/" + unknownID, want: http.StatusNotFound})
 		},

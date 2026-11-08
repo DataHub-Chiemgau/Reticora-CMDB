@@ -450,13 +450,13 @@ func TestJobAPIHidesJobsOutsideTheScope(t *testing.T) {
 			}
 		}
 	}
-	// Visible jobs keep the order 403 before the cancel, 409 before 403 on
-	// a revert the kind does not define.
+	// Visible jobs keep the order 403 before the cancel and 403 before the
+	// 409 of a revert the kind does not define (WP-829).
 	if w := f.callIn(&orgWide, "DELETE", "/api/v1/jobs/"+bulk.ID, "carol"); w.Code != http.StatusForbidden {
 		t.Errorf("org-wide stranger cancels: %d, want 403", w.Code)
 	}
-	if w := f.callIn(&orgWide, "POST", "/api/v1/jobs/"+bulk.ID+"/revert", "carol"); w.Code != http.StatusConflict {
-		t.Errorf("org-wide stranger reverts a bulk job: %d, want 409", w.Code)
+	if w := f.callIn(&orgWide, "POST", "/api/v1/jobs/"+bulk.ID+"/revert", "carol"); w.Code != http.StatusForbidden {
+		t.Errorf("org-wide stranger reverts a bulk job: %d, want 403", w.Code)
 	}
 	if w := f.callIn(client1, "DELETE", "/api/v1/jobs/"+bulk.ID, "alice"); w.Code != http.StatusOK {
 		t.Errorf("creator cancels: %d %s", w.Code, w.Body.String())

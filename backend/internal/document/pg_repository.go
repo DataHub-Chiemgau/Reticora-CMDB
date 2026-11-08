@@ -81,6 +81,12 @@ var (
 // soft-deleted" (WP-732).
 const documentNotDeleted = "document.deleted_at IS NULL"
 
+// VisibleSQL is the SQL condition of GetByID on the table document (not
+// soft-deleted, unlinked or linked to a visible target) under the
+// transaction's tenant scope: the import runs of a document are read under
+// it in the job API (importer.JobReadSQL, WP-828).
+func VisibleSQL() string { return documentVisible }
+
 // requireVisible fails with "not found" when the written row of table does not
 // satisfy visible, i.e. when a write pointed it at an object outside the
 // tenant scope; the transaction is then rolled back.

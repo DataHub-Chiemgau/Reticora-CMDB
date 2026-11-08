@@ -699,6 +699,21 @@ func TestBulkRevertNegativeCasesAgainstPostgres(t *testing.T) {
 			if w := post(creator, bulkJobID, key+"-2"); w.Code != http.StatusConflict {
 				t.Errorf("second revert with a new key: %d %s, want 409", w.Code, w.Body.String())
 			}
+
+			// Without the right of the original operation and reverted
+			// already: 403 like before the revert, never 409 (WP-829); the
+			// other organization still 404.
+			for _, k := range []string{"", key + "-stranger"} {
+				if w := post(stranger, bulkJobID, k); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), jobs.ErrAlreadyReverted.Error()) {
+					t.Errorf("revert of the reverted job without %s (key %q): %d %s, want 403", c.write, k, w.Code, w.Body.String())
+				}
+			}
+			if w := post(foreign, bulkJobID, ""); w.Code != http.StatusNotFound || w.Body.String() != unknown.Body.String() {
+				t.Errorf("revert of the reverted job by organization B: %d %s, want 404 %s", w.Code, w.Body.String(), unknown.Body.String())
+			}
+			if n := revertJobs(bulkJobID); n != 1 {
+				t.Errorf("revert jobs of the bulk after the refused reverts: %d, want 1", n)
+			}
 		})
 	}
 }

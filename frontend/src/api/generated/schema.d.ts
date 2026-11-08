@@ -1185,7 +1185,7 @@ export interface paths {
     };
     /**
      * List the jobs of the organization (API-09, JOB-03)
-     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read.
+     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read. Lists the jobs whose scope snapshot lies in the caller's scope (TEN-09); an export job only to its creator, an import job (import.run) only where GET /imports/{id} shows it: a run over JSON rows to its starter, a run of a document while the document is visible, and a label batch job (labels.batch) only to its creator like its download (WP-828). The same rule holds on every /jobs/{id} route, with 404 for any other job.
      */
     get: operations['listJobs'];
     put?: never;
@@ -1206,7 +1206,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** A job with its status, progress and result */
+    /**
+     * A job with its status, progress and result
+     * @description Visible under the rule of GET /jobs (scope snapshot, export job to its creator, import job like GET /imports/{id}, label batch job to its creator, WP-828); 404 for any other job, like an unknown id.
+     */
     get: operations['getJob'];
     put?: never;
     post?: never;
@@ -20327,7 +20330,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind (for a bulk kind only a holder of its permission, ci:write for ci.bulk), a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
+      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind (for a bulk kind only a holder of its permission, ci:write for ci.bulk), a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). The right is checked before every state of the job: without it the answer is 403 also for a job that is not revertible, expired or reverted already (WP-829). */
       403: {
         headers: {
           [name: string]: unknown;

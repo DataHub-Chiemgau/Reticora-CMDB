@@ -633,6 +633,22 @@ func (h *ImportHandler) loadRun(w http.ResponseWriter, r *http.Request, orgID st
 	return job, &params, true
 }
 
+// JobReadSQL is runReadable as SQL condition on the table job, for the
+// job API (jobs.PGRepository.WithReadCondition, WP-828): GET /jobs and
+// /jobs/{id} with result, cancel and revert show an import job to the
+// principals GET /imports/{id} shows it to, and answer 404 to every other.
+// A run over JSON rows needs the user of the transaction (app.user_id) to
+// be its creator, a run of a document the document visible under the
+// transaction's tenant scope (document.VisibleSQL, the condition of
+// GetByID).
+func JobReadSQL() string {
+	return `CASE WHEN job.params->>'import_source' = '` + SourceAPI + `'` +
+		` THEN ` + jobs.CreatorReadSQL +
+		` ELSE EXISTS (SELECT 1 FROM document WHERE document.organization_id = job.organization_id` +
+		` AND document.id = (CASE WHEN job.params->>'document_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'` +
+		` THEN (job.params->>'document_id')::uuid END) AND ` + document.VisibleSQL() + `) END`
+}
+
 // runReadable reports whether the caller may read the run: a run of a
 // document while the document lies in their scope; a run over JSON rows
 // (source api, WP-303), which has no document, only for the principal who

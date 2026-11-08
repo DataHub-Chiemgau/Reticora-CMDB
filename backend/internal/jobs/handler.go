@@ -18,8 +18,9 @@ import (
 // Generic job API (API-09, JOB-03): GET /jobs, GET /jobs/{id} with the
 // result, DELETE /jobs/{id} (cancel) and POST /jobs/{id}/revert where the
 // kind defines a revert (E-25). Reading needs job:read and covers the jobs
-// whose scope snapshot lies in the caller's scope (TEN-09); every route
-// answers 404 for any other job. Cancelling and reverting a job needs the
+// whose scope snapshot lies in the caller's scope (TEN-09), an import job
+// only where GET /imports/{id} shows it (PGRepository.WithReadCondition,
+// WP-828); every route answers 404 for any other job. Cancelling and reverting a job needs the
 // permission of its kind, or being its creator; reverting a job of a bulk
 // kind needs the permission of the kind (WithBulkKind, WP-305).
 
@@ -263,8 +264,10 @@ type revertResponse struct {
 	RevertedBy string     `json:"reverted_by,omitempty"`
 }
 
-// Revert handles POST /api/v1/jobs/{id}/revert: only for kinds with a
-// defined revert (E-25) and succeeded jobs; otherwise 409. A synchronous
+// Revert handles POST /api/v1/jobs/{id}/revert: 404 for a job outside the
+// caller's scope and 403 without the right to revert it, both before any
+// state of the job (WP-829); then only for kinds with a defined revert
+// (E-25) and succeeded jobs, otherwise 409. A synchronous
 // revert is recorded on the job (reverted_at, reverted_by) and answers 200;
 // a job reverted already is 409 (F-329). The revert of a bulk kind is 409
 // revert-expired after RevertWindow; otherwise its reverter queues the
@@ -280,9 +283,19 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		return
 	}
-	control := h.mayControl(r, job, true)
-	if control == http.StatusNotFound {
+	// Visibility (404) and the right (403) come before every state of the
+	// job (409): a caller without the right learns neither whether the job
+	// can be reverted nor whether it was reverted already (WP-829).
+	switch h.mayControl(r, job, true) {
+	case http.StatusNotFound:
 		notFound(w)
+		return
+	case http.StatusForbidden:
+		msg := "only the creator or a holder of the permission of the job kind may revert it"
+		if h.bulkKinds[job.Kind] {
+			msg = "only a holder of the permission of the job kind may revert it"
+		}
+		api.WriteError(w, http.StatusForbidden, "Forbidden", msg)
 		return
 	}
 	revert, defined := h.reverters[job.Kind]
@@ -292,14 +305,6 @@ func (h *APIHandler) Revert(w http.ResponseWriter, r *http.Request) {
 	}
 	if job.RevertedAt != nil {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyReverted.Error())
-		return
-	}
-	if control == http.StatusForbidden {
-		msg := "only the creator or a holder of the permission of the job kind may revert it"
-		if h.bulkKinds[job.Kind] {
-			msg = "only a holder of the permission of the job kind may revert it"
-		}
-		api.WriteError(w, http.StatusForbidden, "Forbidden", msg)
 		return
 	}
 	if h.bulkKinds[job.Kind] && RevertExpired(job.FinishedAt, h.now()) {

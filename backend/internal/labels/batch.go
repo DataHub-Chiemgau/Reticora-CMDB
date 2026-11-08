@@ -59,6 +59,12 @@ var (
 	errBatchStore    = errors.New("the label batch has no blob storage or object source")
 )
 
+// JobReadSQL is the rule of Download as SQL condition on the table job, for
+// the job API (jobs.PGRepository.WithReadCondition, WP-828): GET /jobs and
+// /jobs/{id} with result, cancel and revert show a label batch job to its
+// creator only and answer 404 to every other principal.
+const JobReadSQL = jobs.CreatorReadSQL
+
 // BatchRequest is the body of POST /api/v1/labels/batch and the parameters
 // of its job: the template (default a4_24), the kind of the objects and
 // either their ids or the location whose subtree is the inventory area.
