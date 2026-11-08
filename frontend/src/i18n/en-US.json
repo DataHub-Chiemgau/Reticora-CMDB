@@ -2211,8 +2211,19 @@
         "naming": "Naming",
         "data": "Data",
         "constraints": "Constraints",
-        "applicability": "Applicability"
+        "applicability": "Applicability",
+        "expression": "Expression"
       }
+    },
+    "computedChoice": "Computed attribute (value from an expression; cannot be switched after creation)",
+    "ruleSummary": {
+      "validation": "Value rule:",
+      "conditional": "Conditional:",
+      "visible_when": "visible when",
+      "required_when": "required when",
+      "read_only_when": "read-only when",
+      "allowed_values_when": "allowed values {{values}} when {{when}}",
+      "openCatalog": "Rules of {{key}} in the rule catalog"
     }
   },
   "inventory": {
@@ -3403,7 +3414,8 @@
       "loadError": "The saved filter cannot be loaded: {{message}}",
       "conditionLabel": "Condition",
       "validationLabel": "Value rule",
-      "conditionEmpty": "No condition – the rule always applies."
+      "conditionEmpty": "No condition – the rule always applies.",
+      "expressionLabel": "Expression"
     },
     "junctions": {
       "and": "AND",
@@ -3451,7 +3463,8 @@
       "no_pattern": "Enter a pattern.",
       "bad_pattern": "The pattern is invalid (no lookarounds or backreferences).",
       "no_bound": "Enter a minimum or a maximum.",
-      "min_above_max": "The minimum is above the maximum."
+      "min_above_max": "The minimum is above the maximum.",
+      "field_not_allowed": "The expression cannot read this field (a computed attribute or the attribute itself)."
     },
     "exists": {
       "true": "is set",
@@ -3533,7 +3546,54 @@
       "notHolds": "The condition does not hold – the rule does not apply.",
       "noRule": "No value rule yet.",
       "valid": "The value passes the rule.",
-      "violations": "Violations"
+      "violations": "Violations",
+      "expressionTitle": "Preview with sample values",
+      "noInputs": "The expression reads no field yet.",
+      "result": "Result:",
+      "resultEmpty": "Result: empty (missing input, wrong kind, division by 0 or no date).",
+      "today": "Today: {{date}} (time zone {{zone}})"
+    },
+    "exprOps": {
+      "field": "Field",
+      "literal": "Fixed value",
+      "add": "Sum (+)",
+      "sub": "Difference (−)",
+      "mul": "Product (×)",
+      "div": "Quotient (÷)",
+      "today": "Today's date",
+      "days_between": "Days between",
+      "concat": "Concatenate",
+      "lower": "Lower case",
+      "upper": "Upper case",
+      "coalesce": "First value set"
+    },
+    "literalTypes": {
+      "string": "Text",
+      "number": "Number",
+      "boolean": "Yes/No"
+    },
+    "resultTypes": {
+      "number": "a number",
+      "string": "a text",
+      "date": "a date",
+      "boolean": "yes/no",
+      "any": "any value"
+    },
+    "expression": {
+      "kind": "Kind of expression",
+      "operandKind": "Operand {{position}}",
+      "rootName": "Expression: {{kind}}",
+      "operandName": "Operand {{position}}: {{kind}}",
+      "field": "Field",
+      "unavailableField": "{{name}} (not available)",
+      "literalType": "Kind of fixed value",
+      "literalValue": "Fixed value",
+      "todayHint": "Today's date in the time zone {{zone}}.",
+      "addOperand": "Add operand",
+      "typeError": "Invalid expression: {{message}}",
+      "loadError": "The stored expression cannot be loaded: {{message}}",
+      "typeMismatch": "The expression yields {{result}}, which does not fit the data type {{dataType}}. The server checks this and refuses it.",
+      "notComputable": "The data type {{dataType}} cannot be computed (integer, decimal, text, multiline text, date, yes/no)."
     }
   },
   "movement": {

@@ -36,11 +36,15 @@ import {
   CONDITION_COLUMNS,
   CONDITION_JUNCTIONS,
   CONDITION_MODE,
+  EXPRESSION_MODE,
+  EXPR_ISSUES,
+  EXPR_NODE_KINDS,
   FILTER_ENTITY_KINDS,
   FILTER_FIELDS,
   FILTER_MODE,
   FILTER_NODE_KINDS,
   GROUP_JUNCTIONS,
+  LITERAL_TYPES,
   NODE_ISSUES,
   RANGE_OF,
   RELATED_DIRECTIONS,
@@ -50,6 +54,7 @@ import {
 } from '../rules/builderModes';
 import { filterOps } from '../rules/filter';
 import { compareOps } from '../rules/rules';
+import { EXPR_ASSET_FIELDS, EXPR_OPS, EXPR_RESULT_TYPES } from '../rules/expr';
 import { RULE_TARGETS } from '../pages/RulesPage';
 import { IMPORT_STEPS } from '../pages/ImportPage';
 import {
@@ -317,6 +322,16 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['rules.validation.add', VALIDATION_NODE_KINDS],
   ['rules.rangeOf', RANGE_OF],
   ['rules.issues', VALIDATION_ISSUES],
+  // WP-802: the operators of the expression mode ($defs/expr), the kinds
+  // of a literal, the result types, the issues and the asset fields an
+  // expression reads.
+  ['rules.exprOps', EXPRESSION_MODE.nodeKinds],
+  ['rules.exprOps', EXPR_NODE_KINDS],
+  ['rules.exprOps', EXPR_OPS],
+  ['rules.literalTypes', LITERAL_TYPES],
+  ['rules.resultTypes', EXPR_RESULT_TYPES],
+  ['rules.issues', EXPR_ISSUES],
+  ['savedviews.fields', Object.keys(EXPR_ASSET_FIELDS)],
   ['savedviews.fields', CONDITION_COLUMNS],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
@@ -565,6 +580,23 @@ describe('i18n catalog', () => {
       ]),
     );
     expect(Object.keys(ruleSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('offers exactly the operators of $defs/expr in the expression mode (WP-802)', () => {
+    const ops = [
+      ...specEnum('expr_field', 'op'),
+      ...specEnum('expr_literal', 'op'),
+      ...specEnum('expr_arithmetic', 'op'),
+      ...specEnum('expr_today', 'op'),
+      ...specEnum('expr_days_between', 'op'),
+      ...specEnum('expr_concat', 'op'),
+      ...specEnum('expr_case', 'op'),
+      ...specEnum('expr_coalesce', 'op'),
+    ];
+    expect([...EXPR_OPS].sort()).toEqual(ops.sort());
+    expect(lookup(deDE, 'rules.exprOps.days_between')).toBe('Tage zwischen');
+    expect(lookup(enUS, 'rules.exprOps.days_between')).toBe('Days between');
+    expect(Object.keys(ruleSources)).toContain('../components/rules/ComputedEditor.tsx');
   });
 
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {

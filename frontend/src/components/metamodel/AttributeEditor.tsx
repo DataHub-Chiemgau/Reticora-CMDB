@@ -6,12 +6,19 @@
  * type, required, group, order, values, searchable/unique/unique_scope,
  * inheritable (definitions of a type) and the applicability of a global
  * definition (applies_to, WP-255). A computed definition (WP-258) offers
- * neither required nor unique. Refusals of the server show at the field
- * they name (`field`, `violations`) and as a reason in the dialog. A set
+ * neither required nor unique nor a default; its expression is edited in
+ * the ComputedEditor (WP-802): a new attribute of a type becomes computed
+ * by its expression in the POST (computed), an existing one changes it by
+ * PATCH; whether an attribute is computed is fixed once it exists. The
+ * 422 on computed shows at the expression. Refusals of the server show at
+ * the field they name (`field`, `violations`) and as a reason in the dialog. A set
  * attribute (WP-797) is created with its attribute_set_id; the 422 of the
  * composition check (WP-709) shows at the key.
  */
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
+import { ComputedEditor } from '../rules/ComputedEditor';
+import { COMPUTED_DATA_TYPES, type Expr } from '../../rules/expr';
+import type { ExprCheck } from '../../rules/builderModes';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {
@@ -139,6 +146,8 @@ interface Draft {
   applies_to: AttributeAppliesTo;
   categories: string;
   type_ids: string[];
+  /** computed: the new attribute takes its value from an expression (create only). */
+  computed: boolean;
 }
 
 const splitList = (value: string) =>
@@ -164,6 +173,7 @@ function draftOf(target: AttributeEditorTarget): Draft {
       applies_to: 'all',
       categories: '',
       type_ids: [],
+      computed: false,
     };
   }
   const d = target.definition;
@@ -182,6 +192,7 @@ function draftOf(target: AttributeEditorTarget): Draft {
     applies_to: d.applies_to ?? 'all',
     categories: (d.applies_to_categories ?? []).join(', '),
     type_ids: d.applies_to_type_ids ?? [],
+    computed: !!d.computed,
   };
 }
 
@@ -193,8 +204,13 @@ function patchOf(
   d: AttributeDefinition,
   draft: Draft,
   computed: boolean,
+  expr: Expr | undefined,
 ): AttributeDefinitionPatch {
   const patch: AttributeDefinitionPatch = {};
+  // The expression travels only when it changed (it stays computed, WP-258).
+  if (computed && expr && JSON.stringify(expr) !== JSON.stringify(d.computed)) {
+    patch.computed = expr;
+  }
   const before = draftOf({ mode: 'edit', definition: d });
   if (draft.de !== before.de || draft.en !== before.en) {
     patch.display_name = {
@@ -239,15 +255,23 @@ function patchOf(
   return patch;
 }
 
-function createOf(target: AttributeEditorTarget & { mode: 'create' }, draft: Draft) {
+function createOf(
+  target: AttributeEditorTarget & { mode: 'create' },
+  draft: Draft,
+  expr: Expr | undefined,
+) {
+  const computed = target.scope === 'type' && draft.computed && !!expr;
   const body: AttributeDefinitionCreate = {
     key: draft.key.trim(),
     data_type: draft.data_type,
     group: draft.group,
     searchable: draft.flags.searchable,
-    unique: draft.flags.unique,
+    unique: computed ? false : draft.flags.unique,
     unique_scope: draft.flags.unique_scope,
   };
+  // A computed attribute (WP-258, WP-802) is created with its expression;
+  // it is neither required nor unique and has no default.
+  if (computed) body.computed = expr;
   if (draft.de || draft.en) {
     body.display_name = {
       ...(draft.de ? { de: draft.de } : {}),
@@ -262,7 +286,7 @@ function createOf(target: AttributeEditorTarget & { mode: 'create' }, draft: Dra
     // set take it like their own (subtypes the inheritable ones).
     if (target.scope === 'type') body.ci_type_id = target.ciTypeId;
     else body.attribute_set_id = target.attributeSetId;
-    body.required = draft.required;
+    if (!computed) body.required = draft.required;
     body.inheritable = draft.inheritable;
   } else {
     // A global attribute stays optional here: it applies to CIs of many types
@@ -301,7 +325,19 @@ export function AttributeEditor({
   const update = useUpdateAttributeDefinition();
   const editing = target.mode === 'edit' ? target.definition : undefined;
   const scope = editing ? editing.scope : target.mode === 'create' ? target.scope : 'type';
-  const computed = !!editing?.computed;
+  // Computed or entered is fixed once the attribute exists; a new attribute
+  // of a type chooses it (WP-802).
+  const canChooseComputed = target.mode === 'create' && target.scope === 'type';
+  const computed = editing ? !!editing.computed : canChooseComputed && draft.computed;
+  const [exprCheck, setExprCheck] = useState<ExprCheck | undefined>(undefined);
+  const [showExprIssues, setShowExprIssues] = useState(false);
+  // The check of the stored expression as loaded: an edit of other
+  // properties does not depend on it (the server keeps the expression).
+  const loadedCheck = useRef<string | undefined>(undefined);
+  const onExprChange = (check: ExprCheck) => {
+    if (loadedCheck.current === undefined) loadedCheck.current = JSON.stringify(check);
+    setExprCheck(check);
+  };
   const error = editing ? update.error : create.error;
   const errors = fieldErrors(error);
   const saving = create.isPending || update.isPending;
@@ -319,11 +355,18 @@ export function AttributeEditor({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (target.mode === 'create') {
-      create.mutate(createOf(target, draft), { onSuccess: onClose });
+    // Only an expression that passes parseExpr goes out.
+    const untouched = !!editing && JSON.stringify(exprCheck) === loadedCheck.current;
+    if (computed && !exprCheck?.ok && !untouched) {
+      setShowExprIssues(true);
       return;
     }
-    const patch = patchOf(target.definition, draft, computed);
+    const expr = computed && exprCheck?.ok ? exprCheck.expr : undefined;
+    if (target.mode === 'create') {
+      create.mutate(createOf(target, draft, expr), { onSuccess: onClose });
+      return;
+    }
+    const patch = patchOf(target.definition, draft, computed, expr);
     if (Object.keys(patch).length === 0) {
       onClose();
       return;
@@ -331,9 +374,9 @@ export function AttributeEditor({
     update.mutate({ id: target.definition.id, patch }, { onSuccess: onClose });
   };
 
-  const dataTypes = FIELD_TYPES.includes(draft.data_type)
-    ? FIELD_TYPES
-    : [...FIELD_TYPES, draft.data_type];
+  // A computed attribute takes the data types an expression can yield.
+  const offered = computed && !editing ? COMPUTED_DATA_TYPES : FIELD_TYPES;
+  const dataTypes = offered.includes(draft.data_type) ? offered : [...offered, draft.data_type];
   const errorId = (field: string) => `attribute-editor-${field}-error`;
   const checkboxError = (field: string) =>
     errors[field] ? (
@@ -422,6 +465,23 @@ export function AttributeEditor({
 
             <fieldset className="space-y-2.5">
               <legend className={legendClass}>{t('citypes.editor.groups.constraints')}</legend>
+              {canChooseComputed ? (
+                <label className={checkboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={draft.computed}
+                    onChange={(e) =>
+                      set({
+                        computed: e.target.checked,
+                        ...(e.target.checked && !COMPUTED_DATA_TYPES.includes(draft.data_type)
+                          ? { data_type: 'text' }
+                          : {}),
+                      })
+                    }
+                  />
+                  {t('citypes.computedChoice')}
+                </label>
+              ) : null}
               {computed ? (
                 <p className="text-sm text-fg-muted">{t('citypes.computedHint')}</p>
               ) : null}
@@ -511,6 +571,27 @@ export function AttributeEditor({
             ) : null}
           </div>
         </div>
+        {computed ? (
+          <fieldset className="min-w-0 space-y-3 border-t border-line pt-4">
+            <legend className={legendClass}>{t('citypes.editor.groups.expression')}</legend>
+            <ComputedEditor
+              ciTypeId={
+                editing
+                  ? (editing.ci_type_id ?? undefined)
+                  : target.mode === 'create' && target.scope === 'type'
+                    ? target.ciTypeId
+                    : undefined
+              }
+              types={types}
+              attributeKey={draft.key}
+              dataType={draft.data_type}
+              initialValue={editing?.computed ?? null}
+              onChange={onExprChange}
+              serverError={errors.computed}
+              showIssues={showExprIssues}
+            />
+          </fieldset>
+        ) : null}
         {error ? (
           <p role="alert" className={fieldErrorClass}>
             {editing
