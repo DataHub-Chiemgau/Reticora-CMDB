@@ -16,12 +16,16 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Bulk operations on assets (API-08, BLK-01, BLK-02; WP-781): POST
@@ -44,6 +48,14 @@ import (
 // transaction (E-132 (a)). The movements, assignments, transitions and the
 // export are reached through the ports of BulkDelegates, which the server
 // wires (server/report_adapters.go).
+//
+// Undo (BLK-02, WP-784): with a job service every bulk is a job asset.bulk,
+// below 100 ids one of the request (runSyncJob) whose id the 200 report
+// names (bulk_job_id). The writes of the run record the change set of the
+// job in their transactions (jobs.WithChangeSet): the fields in
+// PGRepository.Update, the tags in ReplaceTags, location and holder in the
+// movement of the ledger (movement.PGRepository), the lifecycle state in
+// the transition (lifecycle.Service). BulkRevert undoes it.
 
 // Bulk limits and the job kind of the asset bulk.
 const (
@@ -646,8 +658,10 @@ func (h *Handler) RunBulk(ctx context.Context, orgID string, req *BulkRequest) (
 		}
 		return nil, &jobs.Job{ID: exp.ID, OrganizationID: orgID, Kind: ci.BulkExportJobKind, Status: jobs.Status(exp.Status),
 			RefTable: "export_job", RefID: exp.ID}, nil
+	case len(req.IDs) < BulkJobFromIDs && h.bulk.jobs != nil:
+		return h.runSyncJob(ctx, orgID, req)
 	case len(req.IDs) < BulkJobFromIDs || (h.bulk.jobs == nil && h.bulk.queue == nil):
-		return h.runBulk(ctx, orgID, req, nil), nil, nil
+		return h.runBulk(ctx, orgID, "", req, nil), nil, nil
 	case h.bulk.queue != nil:
 		job, _, err := h.bulk.queue.Submit(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: user})
 		if err != nil {
@@ -665,6 +679,40 @@ func (h *Handler) RunBulk(ctx context.Context, orgID string, req *BulkRequest) (
 	return nil, job, nil
 }
 
+// runSyncJob runs a bulk below BulkJobFromIDs ids as a job asset.bulk in
+// the request (WP-784, like ci.Service.runSyncJob of WP-305): it enqueues
+// the job, claims it, runs the bulk under the job's change set and ends
+// the job with the report, which names the job (bulk_job_id). A job a
+// worker of the queue claimed first runs there: the request answers with
+// the job like from 100 ids on.
+func (h *Handler) runSyncJob(ctx context.Context, orgID string, req *BulkRequest) (*ci.BulkResult, *jobs.Job, error) {
+	job, _, err := h.bulk.jobs.Enqueue(ctx, orgID, BulkJobKind, req, jobs.EnqueueOptions{CreatedBy: tenant.FromContext(ctx).UserID})
+	if err != nil {
+		return nil, nil, fmt.Errorf("enqueue asset bulk job: %w", err)
+	}
+	claimed, err := h.bulk.jobs.ClaimJob(ctx, orgID, job.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("claim asset bulk job: %w", err)
+	}
+	if claimed == nil {
+		return nil, job, nil
+	}
+	// The report is recorded also when the client goes away.
+	jobCtx := context.WithoutCancel(ctx)
+	result := h.runBulk(ctx, orgID, job.ID, req, cancelCheck(jobCtx, h.bulk.jobs, orgID, job.ID))
+	result.BulkJobID = job.ID
+	if keepCancelled(jobCtx, h.bulk.jobs, orgID, job.ID, result) {
+		return result, nil, nil
+	}
+	if _, err = h.bulk.jobs.Succeed(jobCtx, orgID, job.ID, result); err != nil {
+		if errors.Is(err, jobs.ErrTransition) && keepCancelled(jobCtx, h.bulk.jobs, orgID, job.ID, result) {
+			return result, nil, nil
+		}
+		slog.ErrorContext(ctx, "record asset bulk job", "job", job.ID, "error", err)
+	}
+	return result, nil, nil
+}
+
 // runBulkJob claims the in-process job, runs the bulk and records the
 // report; a job cancelled while it ran keeps the partial report.
 func (h *Handler) runBulkJob(ctx context.Context, orgID, jobID string, req *BulkRequest) {
@@ -673,7 +721,7 @@ func (h *Handler) runBulkJob(ctx context.Context, orgID, jobID string, req *Bulk
 		slog.ErrorContext(ctx, "claim asset bulk job", "job", jobID, "error", err)
 		return
 	}
-	result := h.runBulk(ctx, orgID, req, cancelCheck(ctx, h.bulk.jobs, orgID, jobID))
+	result := h.runBulk(ctx, orgID, jobID, req, cancelCheck(ctx, h.bulk.jobs, orgID, jobID))
 	if keepCancelled(ctx, h.bulk.jobs, orgID, jobID, result) {
 		return
 	}
@@ -715,7 +763,7 @@ func (h *Handler) RunBulkJob(ctx context.Context, job *jobs.Job) (any, error) {
 		cancels = h.bulk.jobs
 	}
 	jobCtx := context.WithoutCancel(ctx)
-	result := h.runBulk(runCtx, job.OrganizationID, &req, cancelCheck(jobCtx, cancels, job.OrganizationID, job.ID))
+	result := h.runBulk(runCtx, job.OrganizationID, job.ID, &req, cancelCheck(jobCtx, cancels, job.OrganizationID, job.ID))
 	if cancels != nil && keepCancelled(jobCtx, cancels, job.OrganizationID, job.ID, result) {
 		return nil, nil
 	}
@@ -760,11 +808,16 @@ type bulkOp struct {
 }
 
 // runBulk applies the action to every id, bulkWorkers at a time, and
-// reports each in the order of the ids. cancelled (nil: none) is asked
-// before every bulkCancelEvery-th id; after a cancel the remaining ids are
-// skipped.
-func (h *Handler) runBulk(ctx context.Context, orgID string, req *BulkRequest, cancelled func() bool) *ci.BulkResult {
+// reports each in the order of the ids. jobID names the job of the run
+// ("" without one): its writes record the change set of the job and their
+// audit entries carry the job as correlation id (WP-784). cancelled (nil:
+// none) is asked before every bulkCancelEvery-th id; after a cancel the
+// remaining ids are skipped.
+func (h *Handler) runBulk(ctx context.Context, orgID, jobID string, req *BulkRequest, cancelled func() bool) *ci.BulkResult {
 	result := &ci.BulkResult{Action: req.Action, Total: len(req.IDs), Items: make([]ci.BulkItemResult, len(req.IDs))}
+	if jobID != "" {
+		ctx = audit.WithCorrelationID(jobs.WithChangeSet(ctx, jobID), jobID)
+	}
 	op := &bulkOp{orgID: orgID, req: req, actor: actorOf(ctx)}
 	policy, policyErr := permission.PolicyFrom(ctx)
 	op.policy = policy
@@ -1040,4 +1093,534 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.WriteJSON(w, http.StatusOK, result)
 	}
+}
+
+// ─── Revert (BLK-02, WP-784) ─────────────────────────────────────────────────
+
+// The undo of the asset bulk: POST /jobs/{id}/revert of a job asset.bulk
+// (asset:write, also from its creator, within jobs.RevertWindow) queues the
+// job bulk.revert of WP-305 (BulkRevert.Revert). Per asset it checks the
+// right of the original action (set_location asset:move, assign
+// assignment:write, lifecycle_transition and archive lifecycle:transition;
+// without it the asset is skipped with 403) and runs the inverse
+// operations of its rows in one transaction, each through the path of its
+// single operation, which writes the trail, the audit and the event:
+//
+//   - set_status/set_fields: the old values through applyUpdate (field
+//     permissions, If-Match "*"); PGRepository.Update leaves every field
+//     changed since the bulk (skipped).
+//   - set_location: the transfer back to the former location as a movement;
+//     an asset moved since is skipped (409 location_id).
+//   - assign: the return movement, with a former holder the transfer back
+//     to it; an asset assigned otherwise since is skipped (409 holder).
+//   - add_tags/remove_tags: the inverse operation on asset_tag_link
+//     (ReplaceTags decides per key on the locked row).
+//   - lifecycle_transition and archive: the transition back with the guards
+//     of the model and the system guards (WP-279, through the port of
+//     WP-783) and, for archive, the tag archived removed.
+//
+// A refused inverse operation (403, 404, 409, 422) rolls the asset back and
+// marks its rows skipped; export has no revert (E-25).
+
+// revertPermissions are the rights of the original action the revert of an
+// asset needs beyond asset:write (WP-781).
+var revertPermissions = map[string]identity.Permission{
+	BulkSetLocation:         identity.PermAssetMove,
+	BulkAssign:              identity.PermAssignmentWrite,
+	BulkLifecycleTransition: identity.PermLifecycleTransition,
+	BulkArchive:             identity.PermLifecycleTransition,
+}
+
+// revertibleActions are the actions of a job asset.bulk with a revert;
+// export runs as an export job, which has none (E-25).
+var revertibleActions = map[string]bool{
+	BulkSetStatus: true, BulkSetFields: true, BulkSetLocation: true, BulkAssign: true, BulkAddTags: true,
+	BulkRemoveTags: true, BulkLifecycleTransition: true, BulkArchive: true,
+}
+
+// revertReason is the reason of the inverse transitions and movements.
+const revertReason = "bulk.revert"
+
+// revertField reports whether the change set row field belongs to the
+// action: a bulk job has one action, a row of another field (e.g. of a
+// movement a transition booked) is not reverted with it.
+func revertField(action, field string) bool {
+	switch action {
+	case BulkSetStatus, BulkSetFields:
+		return field != fieldTags && field != movement.ChangeFieldLocation && field != movement.ChangeFieldHolder &&
+			field != ci.ChangeFieldLifecycle
+	case BulkSetLocation:
+		return field == movement.ChangeFieldLocation
+	case BulkAssign:
+		return field == movement.ChangeFieldHolder
+	case BulkAddTags, BulkRemoveTags:
+		return field == fieldTags
+	case BulkLifecycleTransition:
+		return field == ci.ChangeFieldLifecycle
+	case BulkArchive:
+		return field == fieldTags || field == ci.ChangeFieldLifecycle
+	}
+	return false
+}
+
+// BulkAssignmentReverter is the revert part of the port BulkAssignments
+// (server/report_adapters.go): the return of the asset from holder, the
+// holder the bulk assigned, and the transfer from holder back to the
+// holder before the bulk, through the assignment service (WP-275). A
+// holder other than holder is a *ci.BulkItemError 409.
+type BulkAssignmentReverter interface {
+	ReturnAsset(ctx context.Context, orgID, assetID, holder string) error
+	Reassign(ctx context.Context, orgID, assetID, holder string, to *BulkAssignment) error
+}
+
+// BulkRevert reverts the bulk jobs asset.bulk (the reverter of the kind and
+// the handler of its jobs bulk.revert).
+type BulkRevert struct {
+	h     *Handler
+	jobs  ci.RevertJobs
+	store jobs.ChangeSetStore
+	queue ci.RevertQueue
+	now   func() time.Time
+}
+
+// NewBulkRevert creates the bulk revert of the asset handler h on the job
+// service and the change set store.
+func NewBulkRevert(h *Handler, js ci.RevertJobs, store jobs.ChangeSetStore) *BulkRevert {
+	return &BulkRevert{h: h, jobs: js, store: store, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithQueue submits the revert jobs to the job queue (TEC-14).
+func (b *BulkRevert) WithQueue(q ci.RevertQueue) *BulkRevert {
+	b.queue = q
+	return b
+}
+
+// RevertEntity is the entity of the parameters of a bulk.revert job of
+// assets; the CI revert has none.
+const RevertEntity = jobs.EntityAsset
+
+// revertParams are the parameters of a bulk.revert job of assets: the
+// bulk job, its action, the entity and the request facts of the trigger.
+type revertParams struct {
+	BulkJobID string `json:"bulk_job_id"`
+	Entity    string `json:"entity"`
+	Action    string `json:"action"`
+	jobs.ScopeParams
+}
+
+// IsRevertJob reports whether the bulk.revert job reverts an asset bulk.
+func IsRevertJob(job *jobs.Job) bool {
+	var p revertParams
+	return json.Unmarshal(job.Params, &p) == nil && p.Entity == RevertEntity
+}
+
+// Revert is the reverter of asset.bulk (jobs.Reverter): a bulk job with
+// change set rows of assets the caller sees, finished within
+// jobs.RevertWindow, gets a revert job bulk.revert with the idempotency key
+// revert:<job_id> and the caller as creator, on the job queue when there
+// is one, otherwise run in this process with the caller's tenant, scope
+// and rights. A repeated call returns the same revert job.
+func (b *BulkRevert) Revert(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
+	if jobs.RevertExpired(job.FinishedAt, b.now()) {
+		return nil, jobs.ErrRevertExpired
+	}
+	var params struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(job.Params, &params); err != nil {
+		return nil, &jobs.RevertRefusedError{Reason: ci.ErrBulkActionNotRevertible}
+	}
+	if params.Action == "" {
+		params.Action = BulkSetStatus
+	}
+	if !revertibleActions[params.Action] {
+		return nil, &jobs.RevertRefusedError{Reason: ci.ErrBulkActionNotRevertible}
+	}
+	rows, err := b.store.ChangeSet(ctx, job.OrganizationID, job.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(rows, func(c jobs.Change) bool { return c.EntityType == jobs.EntityAsset }) {
+		return nil, &jobs.RevertRefusedError{Reason: ci.ErrBulkNothingToRevert}
+	}
+	opts := jobs.EnqueueOptions{IdempotencyKey: "revert:" + job.ID, CreatedBy: tenant.FromContext(ctx).UserID}
+	p := revertParams{BulkJobID: job.ID, Entity: RevertEntity, Action: params.Action, ScopeParams: jobs.CaptureScope(ctx)}
+	if b.queue != nil {
+		revertJob, _, submitErr := b.queue.Submit(ctx, job.OrganizationID, jobs.RevertKind, p, opts)
+		if submitErr != nil {
+			return nil, fmt.Errorf("submit asset bulk revert job: %w", submitErr)
+		}
+		return revertJob, nil
+	}
+	revertJob, created, err := b.jobs.Enqueue(ctx, job.OrganizationID, jobs.RevertKind, p, opts)
+	if err != nil {
+		return nil, fmt.Errorf("enqueue asset bulk revert job: %w", err)
+	}
+	if created {
+		// The revert runs with the caller's tenant, scope and rights, after
+		// the request.
+		go b.runLocal(context.WithoutCancel(ctx), revertJob, &p)
+	}
+	return revertJob, nil
+}
+
+// runLocal claims the revert job, runs it and records its report.
+func (b *BulkRevert) runLocal(ctx context.Context, revertJob *jobs.Job, p *revertParams) {
+	claimed, err := b.jobs.ClaimJob(ctx, revertJob.OrganizationID, revertJob.ID)
+	if err != nil || claimed == nil {
+		slog.ErrorContext(ctx, "claim asset bulk revert job", "job", revertJob.ID, "error", err)
+		return
+	}
+	result, err := b.run(ctx, claimed, p)
+	if err != nil {
+		if _, failErr := b.jobs.Fail(ctx, claimed.OrganizationID, claimed.ID, err); failErr != nil {
+			slog.ErrorContext(ctx, "record failed asset bulk revert job", "job", claimed.ID, "error", failErr)
+		}
+		return
+	}
+	if _, err = b.jobs.Succeed(ctx, claimed.OrganizationID, claimed.ID, result); err != nil {
+		slog.ErrorContext(ctx, "record asset bulk revert job", "job", claimed.ID, "error", err)
+	}
+}
+
+// RunJob runs a revert job of assets of the job queue (handler of
+// bulk.revert for IsRevertJob): with the tenant and scope of its creator
+// and the policy of the creator at the time of the run (WithCreatorPolicy,
+// fail-closed like RunBulkJob).
+func (b *BulkRevert) RunJob(ctx context.Context, job *jobs.Job) (any, error) {
+	var p revertParams
+	if err := json.Unmarshal(job.Params, &p); err != nil {
+		return nil, fmt.Errorf("decode asset bulk revert job parameters: %w", err)
+	}
+	runCtx, err := p.Context(ctx, job)
+	if err != nil {
+		return nil, err
+	}
+	if b.h.bulk.creatorPolicy == nil {
+		return nil, ci.ErrNoCreatorPolicy
+	}
+	policy, err := b.h.bulk.creatorPolicy(runCtx, job)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ci.ErrNoCreatorPolicy, err)
+	}
+	return b.run(permission.WithPolicy(runCtx, policy), job, &p)
+}
+
+// revertOp is one revert run: the organization, the action of the bulk,
+// the actor and the reason of the inverse operations and the field policy.
+type revertOp struct {
+	orgID, action, actor, reason string
+	policy                       *permission.FieldPolicy
+}
+
+// run reverts the change set rows of the bulk job that ctx sees, per asset
+// in the order of the change set and bulkWorkers at once, and records the
+// revert on the bulk job (reverted_at, reverted_by: the creator of the
+// revert job).
+func (b *BulkRevert) run(ctx context.Context, revertJob *jobs.Job, p *revertParams) (*ci.BulkRevertResult, error) {
+	orgID := revertJob.OrganizationID
+	rows, err := b.store.ChangeSet(ctx, orgID, p.BulkJobID)
+	if err != nil {
+		return nil, err
+	}
+	action := p.Action
+	if action == "" {
+		action = BulkSetStatus
+	}
+	var order []string
+	byAsset := map[string][]jobs.Change{}
+	for i := range rows {
+		row := &rows[i]
+		if row.EntityType != jobs.EntityAsset || row.RevertedAt != nil || !revertField(action, row.FieldName) {
+			continue
+		}
+		if _, seen := byAsset[row.EntityID]; !seen {
+			order = append(order, row.EntityID)
+		}
+		byAsset[row.EntityID] = append(byAsset[row.EntityID], *row)
+	}
+	result := &ci.BulkRevertResult{BulkJobID: p.BulkJobID, Total: len(order), Items: make([]ci.BulkRevertItem, len(order))}
+	op := &revertOp{orgID: orgID, action: action, actor: revertJob.CreatedBy, reason: revertReason + ":" + p.BulkJobID}
+	policy, policyErr := permission.PolicyFrom(ctx)
+	if policyErr != nil {
+		return nil, policyErr
+	}
+	op.policy = policy
+	itemCtx := context.WithoutCancel(ctx)
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, bulkWorkers)
+	for i, id := range order {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func(i int, id string) {
+			defer func() { <-slots; wg.Done() }()
+			result.Items[i] = b.revertAsset(itemCtx, op, id, byAsset[id])
+		}(i, id)
+	}
+	wg.Wait()
+	for i := range result.Items {
+		switch result.Items[i].Result {
+		case jobs.OutcomeReverted:
+			result.Reverted++
+		case jobs.OutcomeSkipped:
+			result.Skipped++
+		default:
+			result.Failed++
+		}
+	}
+	if _, markErr := b.jobs.MarkReverted(ctx, orgID, p.BulkJobID, revertJob.CreatedBy); markErr != nil && !errors.Is(markErr, jobs.ErrAlreadyReverted) {
+		return nil, fmt.Errorf("record the revert of the asset bulk job: %w", markErr)
+	}
+	return result, nil
+}
+
+// assetRevert collects the outcome of the inverse operations of one asset:
+// whether one went back and the fields left (changed since the bulk).
+type assetRevert struct {
+	reverted bool
+	skipped  []string
+}
+
+func (r *assetRevert) add(reverted bool, skipped ...string) {
+	r.reverted = r.reverted || reverted
+	for _, field := range skipped {
+		if !slices.Contains(r.skipped, field) {
+			r.skipped = append(r.skipped, field)
+		}
+	}
+}
+
+// revertAsset reverts the rows of one asset in one transaction and reports
+// it: reverted when an operation went back (Fields: the fields left),
+// skipped when none did (409 with the fields changed since) or an inverse
+// operation was refused (its code; the rows are marked skipped), error
+// otherwise (the rows stay for another revert).
+func (b *BulkRevert) revertAsset(ctx context.Context, op *revertOp, id string, rows []jobs.Change) ci.BulkRevertItem {
+	current, err := b.h.repo.GetByID(ctx, op.orgID, id)
+	if err == nil {
+		err = revertAllowed(ctx, revertPermissions[op.action], current)
+	}
+	if err != nil {
+		return b.refusal(ctx, op.orgID, id, rows, err)
+	}
+	var out assetRevert
+	apply := func(ctx context.Context) error {
+		out = assetRevert{}
+		return b.revertRows(ctx, op, id, rows, &out)
+	}
+	if runner, ok := b.h.repo.(txRunner); ok {
+		err = runner.RunInTx(ctx, op.orgID, apply)
+	} else {
+		err = apply(ctx)
+	}
+	if err != nil {
+		return b.refusal(ctx, op.orgID, id, rows, err)
+	}
+	if !out.reverted {
+		return ci.BulkRevertItem{ID: id, Result: jobs.OutcomeSkipped, Code: http.StatusConflict,
+			Error: "the asset changed since the bulk", Type: problemType(nil, http.StatusConflict), Fields: out.skipped}
+	}
+	return ci.BulkRevertItem{ID: id, Result: jobs.OutcomeReverted, Code: http.StatusOK, Fields: out.skipped}
+}
+
+// revertRows runs the inverse operations of the rows of one asset in the
+// transaction of ctx: the lifecycle state first, then the tags, the
+// fields, the location and the holder.
+func (b *BulkRevert) revertRows(ctx context.Context, op *revertOp, id string, rows []jobs.Change, out *assetRevert) error {
+	var fields, tags []jobs.Change
+	for i := range rows {
+		row := &rows[i]
+		var err error
+		switch row.FieldName {
+		case ci.ChangeFieldLifecycle:
+			err = b.revertTransition(ctx, op, id, row)
+			out.add(err == nil)
+		case movement.ChangeFieldLocation:
+			err = b.revertLocation(ctx, op, id, row)
+			out.add(err == nil)
+		case movement.ChangeFieldHolder:
+			err = b.revertHolder(ctx, op, id, row)
+			out.add(err == nil)
+		case fieldTags:
+			tags = append(tags, *row)
+		default:
+			fields = append(fields, *row)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if len(tags) > 0 {
+		store, ok := b.h.repo.(TagStore)
+		if !ok {
+			return ci.ErrBulkActionUnavailable
+		}
+		e := &tagRevert{rows: tags}
+		if _, err := store.ReplaceTags(withTagRevert(ctx, e), op.orgID, id, []string{}, ptrTo(api.IfMatchAny)); err != nil {
+			return err
+		}
+		out.add(len(e.reverted) > 0, e.skipped...)
+	}
+	if len(fields) > 0 {
+		e := &fieldRevert{rows: fields}
+		req := &UpdateRequest{IfMatch: ptrTo(api.IfMatchAny)}
+		for i := range fields {
+			var value any
+			if len(fields[i].OldValue) > 0 {
+				if err := json.Unmarshal(fields[i].OldValue, &value); err != nil {
+					return fmt.Errorf("decode bulk change set: %w", err)
+				}
+			}
+			setRequestField(req, fields[i].FieldName, value)
+		}
+		if _, err := b.h.applyUpdate(withFieldRevert(ctx, e), op.orgID, id, op.policy, req); err != nil {
+			return err
+		}
+		out.add(len(e.reverted) > 0, e.skipped...)
+	}
+	return nil
+}
+
+func ptrTo[T any](v T) *T { return &v }
+
+// revertTransition takes the asset back to the lifecycle state before the
+// bulk (old_value) from the state the bulk set (from_state = new_value),
+// with the guards of its model and the system guards, through the port of
+// WP-783 which marks the row in its transaction. An asset that had no
+// state is refused (409).
+func (b *BulkRevert) revertTransition(ctx context.Context, op *revertOp, id string, row *jobs.Change) error {
+	rev, ok := b.h.bulk.delegates.Lifecycle.(ci.BulkLifecycleReverter)
+	if !ok {
+		return ci.ErrBulkActionUnavailable
+	}
+	var from, to string
+	_ = json.Unmarshal(row.NewValue, &from)
+	if len(row.OldValue) > 0 {
+		_ = json.Unmarshal(row.OldValue, &to)
+	}
+	if to == "" {
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: "the asset had no lifecycle state before the bulk",
+			Fields: []string{ci.ChangeFieldLifecycle}}
+	}
+	return rev.RevertTransition(ctx, op.orgID, id, &ci.BulkTransition{ToState: to, FromState: &from, Reason: op.reason},
+		[]jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeReverted}})
+}
+
+// decodeMovementChange decodes the old and new value of a movement row.
+func decodeMovementChange(row *jobs.Change) (before, after movement.ChangeValue, err error) {
+	if len(row.OldValue) > 0 {
+		if err = json.Unmarshal(row.OldValue, &before); err != nil {
+			return before, after, fmt.Errorf("decode bulk change set: %w", err)
+		}
+	}
+	if err = json.Unmarshal(row.NewValue, &after); err != nil {
+		return before, after, fmt.Errorf("decode bulk change set: %w", err)
+	}
+	return before, after, nil
+}
+
+// revertLocation transfers the asset back to its location before the bulk
+// as a movement; the movement checks that the asset is still where the
+// bulk put it and marks the row. An asset without a former location is
+// refused (409 location_id).
+func (b *BulkRevert) revertLocation(ctx context.Context, op *revertOp, id string, row *jobs.Change) error {
+	if b.h.bulk.delegates.Movements == nil {
+		return ci.ErrBulkActionUnavailable
+	}
+	before, after, err := decodeMovementChange(row)
+	if err != nil {
+		return err
+	}
+	if before.LocationID == "" {
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: "the asset had no location before the bulk",
+			Fields: []string{movement.ChangeFieldLocation}}
+	}
+	ctx = movement.WithRevert(ctx, &movement.Revert{Field: movement.ChangeFieldLocation, Expected: after,
+		Marks: []jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeReverted}}})
+	return b.h.bulk.delegates.Movements.Transfer(ctx, op.orgID, id, before.LocationID, op.actor)
+}
+
+// revertHolder returns the asset from the holder the bulk assigned
+// (movement return) or, with a holder before the bulk, transfers it back
+// to that holder; the movements check that the asset is still assigned to
+// the bulk's holder and mark the row.
+func (b *BulkRevert) revertHolder(ctx context.Context, op *revertOp, id string, row *jobs.Change) error {
+	rev, ok := b.h.bulk.delegates.Assignments.(BulkAssignmentReverter)
+	if !ok {
+		return ci.ErrBulkActionUnavailable
+	}
+	before, after, err := decodeMovementChange(row)
+	if err != nil {
+		return err
+	}
+	holder := after.UserID
+	if holder == "" {
+		holder = after.TeamID
+	}
+	if holder == "" {
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: "the bulk assigned no holder",
+			Fields: []string{movement.ChangeFieldHolder}}
+	}
+	ctx = movement.WithRevert(ctx, &movement.Revert{Field: movement.ChangeFieldHolder, Expected: after,
+		Marks: []jobs.ChangeMark{{ID: row.ID, Outcome: jobs.OutcomeReverted}}})
+	if before.UserID == "" && before.TeamID == "" {
+		return rev.ReturnAsset(ctx, op.orgID, id, holder)
+	}
+	return rev.Reassign(ctx, op.orgID, id, holder, &BulkAssignment{UserID: before.UserID, TeamID: before.TeamID, Notes: op.reason})
+}
+
+// revertAllowed checks the right perm of the original action on the asset
+// like the bulk did (WP-781): the principal of the request must hold it,
+// and the action grants of the policy (a queue job: the creator's rights
+// at run time) must allow it on the asset's type and scope. No right
+// beyond asset:write passes.
+func revertAllowed(ctx context.Context, perm identity.Permission, a *Asset) error {
+	if perm == "" {
+		return nil
+	}
+	if p, ok := identity.PrincipalFromContext(ctx); ok && !p.Has(perm) {
+		return &api.FieldForbiddenError{Action: string(perm)}
+	}
+	return permission.CheckActionOn(ctx, permission.KindAsset, perm, func(context.Context) ([]permission.ActionTarget, error) {
+		return []permission.ActionTarget{{TypeID: a.AssetTypeID, Ref: assetRef(a)}}, nil
+	})
+}
+
+// refusal reports an asset whose revert failed with err: a refusal of the
+// object (403, 404, 409, 422) is skipped and its rows are marked skipped,
+// anything else is an error that leaves them for another revert.
+func (b *BulkRevert) refusal(ctx context.Context, orgID, id string, rows []jobs.Change, err error) ci.BulkRevertItem {
+	code, msg, fields := bulkError(err)
+	item := ci.BulkRevertItem{ID: id, Result: "error", Code: code, Error: msg, Type: problemType(err, code), Fields: fields}
+	switch code {
+	case http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity:
+	default:
+		return item
+	}
+	item.Result = jobs.OutcomeSkipped
+	marks := make([]jobs.ChangeMark, len(rows))
+	for i := range rows {
+		marks[i] = jobs.ChangeMark{ID: rows[i].ID, Outcome: jobs.OutcomeSkipped}
+	}
+	if markErr := b.markSkipped(ctx, orgID, marks); markErr != nil {
+		slog.ErrorContext(ctx, "mark skipped asset bulk change set rows", "asset", id, "error", markErr)
+	}
+	return item
+}
+
+// markSkipped records marks in a transaction of the repository of its own.
+func (b *BulkRevert) markSkipped(ctx context.Context, orgID string, marks []jobs.ChangeMark) error {
+	runner, ok := b.h.repo.(txRunner)
+	if !ok {
+		return nil
+	}
+	return runner.RunInTx(ctx, orgID, func(ctx context.Context) error {
+		if !database.InTx(ctx) {
+			return nil
+		}
+		// The repository's transaction of ctx is joined; no pool is needed.
+		return database.WithRequestTenant(ctx, nil, orgID, func(ctx context.Context, tx pgx.Tx) error {
+			return jobs.MarkChangeTx(ctx, tx, orgID, marks)
+		})
+	})
 }

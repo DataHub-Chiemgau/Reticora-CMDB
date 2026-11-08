@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -501,6 +502,9 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 		if err != nil {
 			return err
 		}
+		// The inverse write of a bulk revert keeps on the locked row only
+		// the fields still at the value the bulk wrote (WP-784).
+		applyFieldRevert(ctx, current, req)
 		if req.Check != nil {
 			if checkErr := req.Check(current); checkErr != nil {
 				return checkErr
@@ -576,7 +580,7 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 
 		if len(setClauses) == 0 {
 			asset = current
-			return nil
+			return markFieldRevert(ctx, tx, orgID)
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
@@ -594,10 +598,218 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req *Update
 			}
 			return fmt.Errorf("update asset: %w", assetFieldDBError(err, fields))
 		}
+		if csErr := recordFieldChanges(ctx, tx, orgID, current, asset, req); csErr != nil {
+			return csErr
+		}
+		if markErr := markFieldRevert(ctx, tx, orgID); markErr != nil {
+			return markErr
+		}
 		return r.recordUpdate(ctx, tx, orgID, current, asset)
 	})
 
 	return asset, err
+}
+
+// The change set of the asset write path (BLK-02, WP-784): under a bulk
+// job (jobs.WithChangeSet, set by runBulk) Update records in its
+// transaction one row op set per field of the request whose value
+// changed, named like the DTO (custom_fields.<key> for a custom field),
+// with the value on the locked row before and the stored value after;
+// client and site are the asset's after the write. One INSERT per asset
+// (jobs.RecordChangeTx).
+//
+// The inverse write of a revert carries a fieldRevert in its context
+// (withFieldRevert): on the locked row Update keeps every field still at
+// the value the bulk wrote (new_value), leaves every other one and marks
+// the rows reverted or skipped in the same transaction.
+
+// requestStringFields maps the DTO name of each *string member of
+// UpdateRequest onto its index; assetStringFields the same for the string
+// members of Asset.
+var (
+	requestStringFields = stringFieldIndex(reflect.TypeOf(UpdateRequest{}), true)
+	assetStringFields   = stringFieldIndex(reflect.TypeOf(Asset{}), false)
+)
+
+// stringFieldIndex returns the JSON names of the string members (pointer:
+// *string members) of t with their index.
+func stringFieldIndex(t reflect.Type, pointer bool) map[string]int {
+	out := map[string]int{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		typ := f.Type
+		if pointer {
+			if typ.Kind() != reflect.Pointer {
+				continue
+			}
+			typ = typ.Elem()
+		}
+		if typ.Kind() == reflect.String {
+			out[name] = i
+		}
+	}
+	return out
+}
+
+// requestFieldNames are the DTO names of the fields req writes, sorted:
+// the string members it sets and custom_fields.<key> for its custom fields.
+func requestFieldNames(req *UpdateRequest) []string {
+	v := reflect.ValueOf(req).Elem()
+	var out []string
+	for name, i := range requestStringFields {
+		if !v.Field(i).IsNil() {
+			out = append(out, name)
+		}
+	}
+	for key := range req.CustomFields {
+		out = append(out, customFieldsPrefix+key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// assetFieldValue is the value of the DTO field name of a: the string of a
+// column ("" when empty) or the custom field (nil when missing).
+func assetFieldValue(a *Asset, name string) any {
+	if key, custom := strings.CutPrefix(name, customFieldsPrefix); custom {
+		return a.CustomFields[key]
+	}
+	if i, ok := assetStringFields[name]; ok {
+		return reflect.ValueOf(a).Elem().Field(i).String()
+	}
+	return nil
+}
+
+// setRequestField writes value into the member of req named name: a
+// string column takes a string ("" for null), a custom field any value.
+func setRequestField(req *UpdateRequest, name string, value any) {
+	if key, custom := strings.CutPrefix(name, customFieldsPrefix); custom {
+		if req.CustomFields == nil {
+			req.CustomFields = map[string]any{}
+		}
+		req.CustomFields[key] = value
+		return
+	}
+	i, ok := requestStringFields[name]
+	if !ok {
+		return
+	}
+	text, _ := value.(string)
+	reflect.ValueOf(req).Elem().Field(i).Set(reflect.ValueOf(&text))
+}
+
+// clearRequestField removes the member name from req.
+func clearRequestField(req *UpdateRequest, name string) {
+	if key, custom := strings.CutPrefix(name, customFieldsPrefix); custom {
+		delete(req.CustomFields, key)
+		if len(req.CustomFields) == 0 {
+			req.CustomFields = nil
+		}
+		return
+	}
+	if i, ok := requestStringFields[name]; ok {
+		f := reflect.ValueOf(req).Elem().Field(i)
+		f.Set(reflect.Zero(f.Type()))
+	}
+}
+
+// sameFieldValue reports whether value encodes to the JSON raw holds.
+func sameFieldValue(value any, raw json.RawMessage) bool {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return false
+	}
+	var x, y any
+	if json.Unmarshal(encoded, &x) != nil || json.Unmarshal(raw, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// recordFieldChanges writes the change set rows of an update from before
+// to after under a bulk job (see above); nothing outside one.
+func recordFieldChanges(ctx context.Context, tx pgx.Tx, orgID string, before, after *Asset, req *UpdateRequest) error {
+	jobID, ok := jobs.ChangeSetFrom(ctx)
+	if !ok {
+		return nil
+	}
+	var changes []jobs.Change
+	for _, name := range requestFieldNames(req) {
+		oldValue, newValue := assetFieldValue(before, name), assetFieldValue(after, name)
+		if reflect.DeepEqual(oldValue, newValue) {
+			continue
+		}
+		oldRaw, err := json.Marshal(oldValue)
+		if err != nil {
+			return fmt.Errorf("encode bulk change set: %w", err)
+		}
+		newRaw, err := json.Marshal(newValue)
+		if err != nil {
+			return fmt.Errorf("encode bulk change set: %w", err)
+		}
+		changes = append(changes, jobs.Change{JobID: jobID, EntityType: jobs.EntityAsset, EntityID: after.ID, Op: jobs.OpSet,
+			FieldName: name, OldValue: oldRaw, NewValue: newRaw, ClientID: after.ClientID, SiteID: after.SiteID})
+	}
+	return jobs.RecordChangeTx(ctx, tx, orgID, changes)
+}
+
+// fieldRevert is what the inverse write of one asset expects: the change
+// set rows of its fields not reverted yet. applyFieldRevert decides on the
+// locked row which it writes (marks, reverted, skipped).
+type fieldRevert struct {
+	rows     []jobs.Change
+	marks    []jobs.ChangeMark
+	reverted []string
+	skipped  []string
+}
+
+type fieldRevertKey struct{}
+
+// withFieldRevert returns ctx whose asset update is the inverse write of
+// the rows of e.
+func withFieldRevert(ctx context.Context, e *fieldRevert) context.Context {
+	return context.WithValue(ctx, fieldRevertKey{}, e)
+}
+
+func fieldRevertFrom(ctx context.Context) *fieldRevert {
+	e, _ := ctx.Value(fieldRevertKey{}).(*fieldRevert)
+	return e
+}
+
+// applyFieldRevert leaves every field of req whose value on the locked row
+// current differs from the value the bulk wrote (new_value) and marks its
+// row skipped, the others reverted; nothing without an expectation in ctx.
+func applyFieldRevert(ctx context.Context, current *Asset, req *UpdateRequest) {
+	e := fieldRevertFrom(ctx)
+	if e == nil {
+		return
+	}
+	e.marks, e.reverted, e.skipped = nil, nil, nil
+	for i := range e.rows {
+		row := &e.rows[i]
+		if sameFieldValue(assetFieldValue(current, row.FieldName), row.NewValue) {
+			e.marks = append(e.marks, jobs.ChangeMark{ID: row.ID, Outcome: jobs.OutcomeReverted})
+			e.reverted = append(e.reverted, row.FieldName)
+			continue
+		}
+		e.marks = append(e.marks, jobs.ChangeMark{ID: row.ID, Outcome: jobs.OutcomeSkipped})
+		e.skipped = append(e.skipped, row.FieldName)
+		clearRequestField(req, row.FieldName)
+	}
+}
+
+// markFieldRevert records the outcome of the rows of the expectation in
+// ctx in tx; nothing without one.
+func markFieldRevert(ctx context.Context, tx pgx.Tx, orgID string) error {
+	e := fieldRevertFrom(ctx)
+	if e == nil {
+		return nil
+	}
+	return jobs.MarkChangeTx(ctx, tx, orgID, e.marks)
 }
 
 // UnknownTags implements TagCatalog (POST /api/v1/assets/bulk, WP-781):

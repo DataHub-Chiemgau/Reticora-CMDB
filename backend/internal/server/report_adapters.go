@@ -693,6 +693,39 @@ func (a assetAssignments) Assign(ctx context.Context, orgID, assetID string, in 
 	return err
 }
 
+// ReturnAsset implements asset.BulkAssignmentReverter (WP-784): the return
+// like POST /api/v1/assets/{id}/return with expected_holder holder; another
+// holder or none is 409 with the problem type of the single route.
+func (a assetAssignments) ReturnAsset(ctx context.Context, orgID, assetID, holder string) error {
+	_, err := a.svc.Return(ctx, orgID, &assignment.ReturnInput{AssetID: assetID, ExpectedHolder: holder, Notes: "bulk.revert"})
+	return assignmentRevertOutcome(err)
+}
+
+// Reassign implements asset.BulkAssignmentReverter (WP-784): the transfer
+// like POST /api/v1/assets/{id}/transfer from holder to the holder before
+// the bulk; errors as ReturnAsset.
+func (a assetAssignments) Reassign(ctx context.Context, orgID, assetID, holder string, to *asset.BulkAssignment) error {
+	_, err := a.svc.Transfer(ctx, orgID, &assignment.TransferInput{AssetID: assetID, ExpectedHolder: holder,
+		Holder: assignment.Holder{UserID: to.UserID, TeamID: to.TeamID}, DueAt: to.DueAt, Notes: to.Notes})
+	return assignmentRevertOutcome(err)
+}
+
+// assignmentRevertOutcome maps a refused return or transfer of a revert
+// onto the outcome of the asset.
+func assignmentRevertOutcome(err error) error {
+	switch {
+	case errors.Is(err, assignment.ErrHolderMismatch):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: "the asset was assigned otherwise since the bulk",
+			Problem: assignment.ProblemHolderMismatch, Fields: []string{movement.ChangeFieldHolder}}
+	case errors.Is(err, assignment.ErrNotAssigned):
+		return &ci.BulkItemError{Status: http.StatusConflict, Detail: "the asset was returned since the bulk",
+			Problem: assignment.ProblemAssetNotAssigned, Fields: []string{movement.ChangeFieldHolder}}
+	case errors.Is(err, assignment.ErrAssetNotFound), errors.Is(err, movement.ErrAssetNotFound):
+		return asset.ErrNotFound
+	}
+	return err
+}
+
 // assetLifecycle adapts the lifecycle service to asset.BulkLifecycle: the
 // effective model of the asset and the transition, both in the
 // transaction of ctx when it carries one (archive).
@@ -719,4 +752,12 @@ func (a assetLifecycle) Transition(ctx context.Context, orgID, assetID string, r
 		return out
 	}
 	return asset.ErrNotFound
+}
+
+// RevertTransition implements ci.BulkLifecycleReverter for assets
+// (WP-784): the transition back runs like Transition, with the guards of
+// the model and the system guards (WP-279), and marks the change set rows
+// in its transaction.
+func (a assetLifecycle) RevertTransition(ctx context.Context, orgID, assetID string, req *ci.BulkTransition, marks []jobs.ChangeMark) error {
+	return a.Transition(lifecycle.WithRevertMarks(ctx, marks), orgID, assetID, req)
 }

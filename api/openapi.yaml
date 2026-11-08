@@ -2983,7 +2983,24 @@ paths:
         urn:reticora:problem:lifecycle-guard); change_template restores the
         template list and removes the defaults the migration filled unless
         they changed since. export is not revertible: its export job has no
-        revert. Every other kind (bulk.revert and export among them), a bulk
+        revert. The bulk kind asset.bulk (WP-784; every asset bulk is a job,
+        below 100 ids one of the request whose id the 200 report names as
+        bulk_job_id) is reverted the same way with asset:write, also from
+        the creator, and only while the module inventory is on (otherwise
+        409, kind without revert); each asset needs the right of the
+        original action (set_location asset:move, assign assignment:write,
+        lifecycle_transition and archive lifecycle:transition), otherwise it
+        is skipped with 403. The revert per asset bulk action:
+        set_status and set_fields write the old values back through the
+        path of PATCH /assets/{id} (a field changed since is skipped);
+        set_location books the transfer back to the former location as a
+        movement; assign books the return movement, with a former holder
+        the transfer back to it (an asset moved or assigned otherwise since
+        is skipped with 409); add_tags and remove_tags take back each tag
+        the bulk changed on asset_tag_link; lifecycle_transition and archive
+        run the transition back with the guards of the model and the system
+        guards (archive also removes the tag archived); export is not
+        revertible. Every other kind (bulk.revert and export among them), a bulk
         job without change set rows the caller sees and a job that did not
         succeed are 409. A revert is recorded on the job (reverted_at, reverted_by); a
         further revert is 409 "the job is already reverted" (F-329). The
@@ -3006,9 +3023,9 @@ paths:
         '202':
           description: >-
             The revert of a bulk job runs as the job bulk.revert; its result
-            reports each CI as reverted, skipped (with the fields changed
-            since the bulk, or 404/403 for a CI no longer visible or
-            refused) or error, each with its RFC 7807 code.
+            reports each CI or asset as reverted, skipped (with the fields
+            changed since the bulk, or 404/403 for an object no longer
+            visible or refused) or error, each with its RFC 7807 code.
           headers:
             Location:
               description: The revert job, /api/v1/jobs/{revert_id}.
@@ -24998,9 +25015,10 @@ components:
         bulk_job_id:
           type: string
           description: >-
-            The job ci.bulk of a bulk on CIs that ran in the request (below
-            100 ids, WP-305); POST /jobs/{id}/revert undoes it within 24
-            hours. Absent without a job service.
+            The job ci.bulk of a bulk on CIs (WP-305) or asset.bulk of a
+            bulk on assets (WP-784) that ran in the request (below 100 ids);
+            POST /jobs/{id}/revert undoes it within 24 hours. Absent without
+            a job service.
         action: { type: string }
         total: { type: integer }
         succeeded: { type: integer }

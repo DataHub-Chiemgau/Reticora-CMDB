@@ -2,6 +2,7 @@ package movement
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -257,6 +259,10 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 	if err := lockAndCheck(ctx, tx, m); err != nil {
 		return err
 	}
+	bulk, err := prepareBulkChange(ctx, tx, m)
+	if err != nil {
+		return err
+	}
 	for _, ref := range []struct{ table, field, id string }{
 		{"ticket", "ticket_id", m.TicketID},
 		{"internal_order", "order_id", m.OrderID},
@@ -279,7 +285,7 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 		occurredAt = &at
 	}
 	var clientID, siteID *string
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO stock_movement (
 			id, occurred_at, organization_id, item_kind, asset_id, consumable_id,
 			movement_type, from_location_id, to_location_id, quantity,
@@ -320,12 +326,187 @@ func recordTx(ctx context.Context, tx pgx.Tx, outbox *events.Outbox, m *Movement
 			return ErrAssetNotFound
 		}
 	}
+	if recErr := bulk.record(ctx, tx, m); recErr != nil {
+		return recErr
+	}
 	if _, err = outbox.Append(ctx, tx, &events.Event{OrgID: m.OrganizationID, Type: events.StockMovement, EntityID: entity,
 		Data: events.StockMovementData{ID: m.ID, ItemKind: m.ItemKind, AssetID: m.AssetID,
 			MovementType: m.MovementType, Quantity: m.Quantity, ClientID: m.ClientID, SiteID: m.SiteID}}); err != nil {
 		return fmt.Errorf("record movement event: %w", err)
 	}
 	return nil
+}
+
+// The change set of asset movements (BLK-02, WP-784): under a bulk job
+// (jobs.WithChangeSet) a transfer of an asset records in the transaction of
+// the movement one row op set, field location_id, and an assignment or a
+// return one row, field holder, each with the state of the locked asset
+// before and the state after with the id of the movement (ChangeValue).
+// The revert of a bulk passes the state the bulk left and the rows it
+// reverts (WithRevert): the inverse movement checks on the locked asset
+// that the asset still has that location or holder and has not moved or
+// been assigned since the bulk's movement (409 on the field otherwise;
+// the movements of its own transaction, such as the return before the
+// assignment of a transfer, do not count) and marks the rows reverted in
+// its transaction. Other movement types record nothing.
+
+// Field names of the change set rows of movements.
+const (
+	ChangeFieldLocation = "location_id"
+	ChangeFieldHolder   = "holder"
+)
+
+// ChangeValue is the old or new value of a change set row of a movement:
+// the location or the holder of the asset, and after the change the
+// movement that made it.
+type ChangeValue struct {
+	LocationID string `json:"location_id,omitempty"`
+	UserID     string `json:"user_id,omitempty"`
+	TeamID     string `json:"team_id,omitempty"`
+	MovementID string `json:"movement_id,omitempty"`
+}
+
+// sameAs reports whether v names the location or the holder of state.
+func (v *ChangeValue) sameAs(field string, state *ChangeValue) bool {
+	if field == ChangeFieldLocation {
+		return strings.EqualFold(v.LocationID, state.LocationID)
+	}
+	return strings.EqualFold(v.UserID, state.UserID) && strings.EqualFold(v.TeamID, state.TeamID)
+}
+
+// Revert is the inverse movement of a bulk: the field of its rows, the
+// state the bulk left (new_value with its movement) and the rows the
+// movement marks reverted.
+type Revert struct {
+	Field    string
+	Expected ChangeValue
+	Marks    []jobs.ChangeMark
+}
+
+type revertKey struct{}
+
+// WithRevert returns ctx whose movement of field r.Field is the inverse
+// movement r describes.
+func WithRevert(ctx context.Context, r *Revert) context.Context {
+	return context.WithValue(ctx, revertKey{}, r)
+}
+
+// changeField is the field of the change set row of m: location_id for a
+// transfer of an asset, holder for an assignment or a return; "" else.
+func changeField(m *Movement) string {
+	switch {
+	case m.ItemKind != "asset":
+		return ""
+	case m.MovementType == "transfer" && m.ToLocationID != "":
+		return ChangeFieldLocation
+	case m.MovementType == "assignment" || m.MovementType == "return":
+		return ChangeFieldHolder
+	}
+	return ""
+}
+
+// bulkChange is the change set work of one movement: the row to record
+// under a bulk job (jobID) and the marks of a revert.
+type bulkChange struct {
+	field  string
+	jobID  string
+	before ChangeValue
+	client string
+	revert *Revert
+}
+
+// prepareBulkChange reads the state of the locked asset of m before the
+// movement when a bulk job records it or a revert expects it, and checks
+// the expectation of a revert; nil when neither applies.
+func prepareBulkChange(ctx context.Context, tx pgx.Tx, m *Movement) (*bulkChange, error) {
+	field := changeField(m)
+	if field == "" {
+		return nil, nil
+	}
+	jobID, capture := jobs.ChangeSetFrom(ctx)
+	rev, _ := ctx.Value(revertKey{}).(*Revert)
+	if rev != nil && rev.Field != field {
+		rev = nil
+	}
+	if !capture && rev == nil {
+		return nil, nil
+	}
+	b := &bulkChange{field: field, jobID: jobID, revert: rev}
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(location_id::text, ''), COALESCE(assigned_user_id::text, ''),
+			COALESCE(assigned_team_id::text, ''), COALESCE(client_id::text, '')
+		FROM asset WHERE id = $1 AND organization_id = $2`, m.AssetID, m.OrganizationID).
+		Scan(&b.before.LocationID, &b.before.UserID, &b.before.TeamID, &b.client); err != nil {
+		return nil, fmt.Errorf("read the asset of the bulk change set: %w", err)
+	}
+	if rev == nil {
+		return b, nil
+	}
+	conflict := &api.FieldError{Field: field, Status: http.StatusConflict, Message: "the asset moved since the bulk"}
+	if field == ChangeFieldHolder {
+		conflict.Message = "the asset was assigned otherwise since the bulk"
+	}
+	if !rev.Expected.sameAs(field, &b.before) {
+		return nil, conflict
+	}
+	if rev.Expected.MovementID == "" {
+		return b, nil
+	}
+	category := "s.to_location_id IS NOT NULL"
+	if field == ChangeFieldHolder {
+		category = "s.movement_type IN ('assignment', 'return')"
+	}
+	var later bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_movement s JOIN stock_movement b ON b.id = $3
+		WHERE s.organization_id = $2 AND s.asset_id = $1 AND s.id <> b.id
+			AND (s.occurred_at, s.created_at) > (b.occurred_at, b.created_at) AND s.created_at < now() AND `+category+`)`,
+		m.AssetID, m.OrganizationID, rev.Expected.MovementID).Scan(&later); err != nil {
+		return nil, fmt.Errorf("check movements since the bulk: %w", err)
+	}
+	if later {
+		return nil, conflict
+	}
+	return b, nil
+}
+
+// record writes the change set row of the booked movement m under a bulk
+// job and the marks of a revert in tx; nothing for nil.
+func (b *bulkChange) record(ctx context.Context, tx pgx.Tx, m *Movement) error {
+	if b == nil {
+		return nil
+	}
+	if b.revert != nil {
+		if err := jobs.MarkChangeTx(ctx, tx, m.OrganizationID, b.revert.Marks); err != nil {
+			return err
+		}
+	}
+	if b.jobID == "" {
+		return nil
+	}
+	before, after := b.before, ChangeValue{MovementID: m.ID}
+	if b.field == ChangeFieldLocation {
+		before.UserID, before.TeamID = "", ""
+		after.LocationID = m.ToLocationID
+	} else {
+		before.LocationID = ""
+		if m.MovementType == "assignment" {
+			after.UserID, after.TeamID = m.AssigneeUserID, m.AssigneeTeamID
+		}
+	}
+	oldRaw, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("encode bulk change set: %w", err)
+	}
+	newRaw, err := json.Marshal(after)
+	if err != nil {
+		return fmt.Errorf("encode bulk change set: %w", err)
+	}
+	var site string
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(site_id::text, '') FROM asset WHERE id = $1 AND organization_id = $2`,
+		m.AssetID, m.OrganizationID).Scan(&site); err != nil {
+		return fmt.Errorf("read the asset of the bulk change set: %w", err)
+	}
+	return jobs.RecordChangeTx(ctx, tx, m.OrganizationID, []jobs.Change{{JobID: b.jobID, EntityType: jobs.EntityAsset,
+		EntityID: m.AssetID, Op: jobs.OpSet, FieldName: b.field, OldValue: oldRaw, NewValue: newRaw, ClientID: b.client, SiteID: site}})
 }
 
 // The movement lists sort newest first on (occurred_at, id); the keyset
