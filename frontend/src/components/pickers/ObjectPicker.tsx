@@ -334,7 +334,7 @@ export function ObjectPicker({
       kind: 'ci',
       id: ci.id,
       name: ci.name,
-      code: ci.asset?.asset_tag ?? ci.serial_number,
+      code: ci.asset?.inventory_no ?? ci.serial_number,
     }));
   } else if (kind === 'asset') {
     hits = (assets.data?.data ?? []).map((asset) => ({

@@ -292,6 +292,10 @@
     "discovered": "Discovery",
     "assetCanonical": "Asset (kanonische Daten)",
     "assetCanonicalHint": "Seriennummer, Standort, physischer Lebenszyklus und Inventardaten stammen aus dem Asset und sind hier schreibgeschützt.",
+    "assetFromParent": "vom übergeordneten CI",
+    "assetReadOnly": "schreibgeschützt",
+    "openAsset": "Asset öffnen",
+    "parentCi": "Übergeordnetes CI",
     "observedSerialNumber": "Beobachtete Seriennummer",
     "assetTag": "Inventarnummer",
     "physicalLifecycle": "Physischer Lebenszyklus",
@@ -2687,16 +2691,6 @@
       "physical": "Physisch"
     },
     "truncated": "Die Analyse hat die Knotengrenze erreicht: Die Zahlen sind Untergrenzen, die Liste kann unvollständig sein."
-  },
-  "composition": {
-    "inheritedHint": "Geteilte Inventardaten (Seriennummer, Kauf, Garantie, Standort) stammen vom Parent-Asset.",
-    "title": "Komponenten (Parent/Child)",
-    "serialized": "eigen serialisiert",
-    "none": "Keine Komponenten. Dieses Asset ist eigenständig.",
-    "locatable": "eigen lokalisierbar",
-    "configOnly": "nur Konfiguration",
-    "parentTitle": "Übergeordnetes Asset",
-    "readOnly": "schreibgeschützt"
   },
   "locations": {
     "createChild": "Unterpunkt in {{name}}",

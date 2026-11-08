@@ -292,6 +292,10 @@
     "discovered": "Discovered",
     "assetCanonical": "Asset (canonical data)",
     "assetCanonicalHint": "Serial number, location, physical lifecycle and inventory data come from the asset and are read-only here.",
+    "assetFromParent": "from the parent CI",
+    "assetReadOnly": "read-only",
+    "openAsset": "Open asset",
+    "parentCi": "Parent CI",
     "observedSerialNumber": "Observed serial number",
     "assetTag": "Asset tag",
     "physicalLifecycle": "Physical lifecycle",
@@ -2687,16 +2691,6 @@
       "physical": "Physical"
     },
     "truncated": "The analysis reached the node limit: the counts are lower bounds and the list may be incomplete."
-  },
-  "composition": {
-    "inheritedHint": "Shared inventory data (serial, purchase, warranty, location) comes from the parent asset.",
-    "title": "Components (parent/child)",
-    "serialized": "independently serialized",
-    "none": "No components. This asset is standalone.",
-    "locatable": "independently locatable",
-    "configOnly": "configuration only",
-    "parentTitle": "Parent asset",
-    "readOnly": "read-only"
   },
   "locations": {
     "createChild": "Create child in {{name}}",

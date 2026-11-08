@@ -4,11 +4,12 @@ import type { TFunction } from 'i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
-import type { CI, TopologyGraphData } from '../api/client';
+import type { CI, CIAssetFacts, TopologyGraphData } from '../api/client';
 import {
   useCI,
   useCINeighbors,
   useHasPermission,
+  useSupplier,
   useTeam,
   useUpdateCI,
   useUser,
@@ -38,7 +39,6 @@ import {
   useLocationNames,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
-import { CIParentAssetCard } from '../components/cmdb/CIParentAssetCard';
 import { ScopeBanner } from '../components/ScopeBanner';
 import { CITemplatesSection } from '../components/metamodel/CITemplatesSection';
 
@@ -272,34 +272,9 @@ export function CIDetailPage() {
             </div>
           </Card>
 
-          {ci.asset && (
-            <Card title={t('ci.assetCanonical')}>
-              <p className="mb-3 max-w-[68ch] text-sm text-fg-muted">
-                {t('ci.assetCanonicalHint')}
-              </p>
-              <dl>
-                {/* Every canonical field of the asset, read-only (DB-05, AST-04, F-238). */}
-                <DetailRow label={t('ci.assetTag')} value={ci.asset.asset_tag} mono />
-                <DetailRow label={t('ci.serialNumber')} value={ci.asset.serial_number} mono />
-                <DetailRow label={t('ci.location')} value={locations.path(ci.asset.location_id)} />
-                <DetailRow label={t('ci.physicalLifecycle')} value={ci.asset.lifecycle_state} />
-                <DetailRow label={t('ci.rfidTag')} value={ci.asset.rfid_tag} mono />
-                <DetailRow label={t('ci.barcode')} value={ci.asset.barcode} mono />
-                <DetailRow
-                  label={t('ci.purchaseDate')}
-                  value={formatDate(ci.asset.purchase_date, i18n.language)}
-                />
-                <DetailRow
-                  label={t('ci.warrantyEnd')}
-                  value={formatDate(ci.asset.warranty_end, i18n.language)}
-                />
-                <DetailRow label={t('ci.supplier')} value={ci.asset.supplier} />
-                <DetailRow label={t('ci.invoiceNumber')} value={ci.asset.invoice_number} mono />
-              </dl>
-            </Card>
-          )}
-
-          <CIParentAssetCard ciId={ci.id} />
+          {/* The one asset display of the CI (UI-14, WP-810): its own asset or,
+              for a configuration child, the asset of the CI it derives it from. */}
+          {ci.asset && <CIAssetCard ci={ci} asset={ci.asset} locationPath={locations.path} />}
 
           <CIRelationshipsCard ciId={ci.id} />
         </div>
@@ -405,6 +380,77 @@ export function CIDetailPage() {
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />
     </div>
+  );
+}
+
+/**
+ * CIAssetCard shows the asset data of a CI read-only (DB-05, AST-04, F-238)
+ * by its child contract (AST-05, WP-273, WP-810): a configuration child shows
+ * the asset of the CI it derives it from (asset_source_ci_id), marked as
+ * such; a standalone child or a CI without parent its own asset, a child with
+ * a link to its parent CI. The supplier is named from GET /suppliers/{id}; a
+ * refused or unknown supplier (403, 404, e.g. module inventory off) shows a
+ * dash. The deprecated fields asset_tag, warranty_end and supplier are not read.
+ */
+function CIAssetCard({
+  ci,
+  asset,
+  locationPath,
+}: {
+  ci: CI;
+  asset: CIAssetFacts;
+  locationPath: (id?: string) => string | undefined;
+}) {
+  const { t, i18n } = useTranslation();
+  const supplier = useSupplier(asset.supplier_id);
+  const supplierName =
+    asset.supplier_id && supplier.data?.id === asset.supplier_id ? supplier.data.name : undefined;
+  const inherited = ci.child_mode === 'configuration';
+  const linkClass =
+    'rounded font-medium text-accent underline-offset-2 [overflow-wrap:anywhere] hover:underline';
+  return (
+    <Card
+      title={t('ci.assetCanonical')}
+      actions={
+        <Link to={`/assets/${asset.id}`} className={`text-sm ${linkClass}`}>
+          {t('ci.openAsset')}
+        </Link>
+      }
+    >
+      <p className="mb-3 max-w-[68ch] text-sm text-fg-muted">{t('ci.assetCanonicalHint')}</p>
+      {inherited && ci.asset_source_ci_id ? (
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <Link to={`/cmdb/${ci.asset_source_ci_id}`} className={linkClass}>
+            {t('ci.assetFromParent')}
+          </Link>
+          <Badge variant="neutral">{t('ci.assetReadOnly')}</Badge>
+        </p>
+      ) : ci.parent_ci_id ? (
+        <p className="mb-3 text-sm">
+          <Link to={`/cmdb/${ci.parent_ci_id}`} className={linkClass}>
+            {t('ci.parentCi')}
+          </Link>
+        </p>
+      ) : null}
+      <dl>
+        <DetailRow label={t('ci.assetTag')} value={asset.inventory_no} mono />
+        <DetailRow label={t('ci.serialNumber')} value={asset.serial_number} mono />
+        <DetailRow label={t('ci.location')} value={locationPath(asset.location_id)} />
+        <DetailRow label={t('ci.physicalLifecycle')} value={asset.lifecycle_state} />
+        <DetailRow label={t('ci.rfidTag')} value={asset.rfid_tag} mono />
+        <DetailRow label={t('ci.barcode')} value={asset.barcode} mono />
+        <DetailRow
+          label={t('ci.purchaseDate')}
+          value={formatDate(asset.purchase_date, i18n.language)}
+        />
+        <DetailRow
+          label={t('ci.warrantyEnd')}
+          value={formatDate(asset.warranty_until, i18n.language)}
+        />
+        <DetailRow label={t('ci.supplier')} value={supplierName} />
+        <DetailRow label={t('ci.invoiceNumber')} value={asset.invoice_number} mono />
+      </dl>
+    </Card>
   );
 }
 

@@ -785,7 +785,7 @@ describe('CIFormModal for a CI linked to an asset (DB-05, AST-04, F-238)', () =>
     asset_id: ASSET,
     asset: {
       id: ASSET,
-      asset_tag: 'INV-0042',
+      inventory_no: 'INV-0042',
       name: 'srv-linked-01 hardware',
       status: 'assigned',
       serial_number: 'SN-ASSET-42',
@@ -956,7 +956,7 @@ describe('CIFormModal owner (CI-07, WP-805)', () => {
       asset_id: ASSET,
       asset: {
         id: ASSET,
-        asset_tag: 'INV-0043',
+        inventory_no: 'INV-0043',
         name: 'hardware',
         status: 'assigned',
         owner_user_id: USER_A,

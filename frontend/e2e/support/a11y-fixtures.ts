@@ -827,7 +827,6 @@ export const A11Y_HANDLERS: Handler[] = [
   { path: `/cis/${CI_ID}`, reply: fixed(ci) },
   { path: `/cis/${CI_PEER}`, reply: fixed(ciPeer) },
   { path: /^\/cis\/[^/]+\/relationships$/, reply: fixed(list([relationship])) },
-  { path: /^\/cis\/[^/]+\/parent$/, reply: () => ({ status: 404, body: { status: 404 } }) },
   {
     path: /^\/cis\/[^/]+\/fields$/,
     reply: fixed({

@@ -26,6 +26,9 @@ const BUILDING = '10c00000-0000-4000-8000-000000000002';
 const ROOM = '10c00000-0000-4000-8000-000000000003';
 const RACK = '10c00000-0000-4000-8000-000000000004';
 const ASSET = 'a55e7000-0000-4000-8000-000000000001';
+const SUPPLIER = '5a990000-0000-4000-8000-000000000001';
+const PARENT_CI = 'c1000000-0000-4000-8000-000000000001';
+const SOURCE_CI = 'c1000000-0000-4000-8000-000000000002';
 
 function node(
   id: string,
@@ -252,6 +255,7 @@ describe('CIDetailPage', () => {
   it('shows the full asset card read-only with names and formatted dates (DB-05, AST-04, F-238)', async () => {
     stubFetchRoutes({
       '/locations/tree': { data: [locationTree] },
+      [`/suppliers/${SUPPLIER}`]: { id: SUPPLIER, name: 'Acme Distribution' },
       '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
       '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
       '/cis/ci-1': {
@@ -263,7 +267,7 @@ describe('CIDetailPage', () => {
         asset_id: ASSET,
         asset: {
           id: ASSET,
-          asset_tag: 'INV-0042',
+          inventory_no: 'INV-0042',
           name: 'core-sw-01 hardware',
           status: 'assigned',
           serial_number: 'SN-ASSET-42',
@@ -272,8 +276,8 @@ describe('CIDetailPage', () => {
           rfid_tag: 'RFID-E200-42',
           barcode: 'BC-4711',
           purchase_date: '2025-03-15',
-          warranty_end: '2028-03-14',
-          supplier: 'Acme Distribution',
+          warranty_until: '2028-03-14',
+          supplier_id: SUPPLIER,
           invoice_number: 'RE-2025-0815',
         },
       },
@@ -294,7 +298,7 @@ describe('CIDetailPage', () => {
     expect(value('Barcode')).toHaveTextContent('BC-4711');
     expect(value('Kaufdatum')).toHaveTextContent(/^15\.03\.2025$/);
     expect(value('Garantieende')).toHaveTextContent(/^14\.03\.2028$/);
-    expect(value('Lieferant')).toHaveTextContent('Acme Distribution');
+    await waitFor(() => expect(value('Lieferant')).toHaveTextContent('Acme Distribution'));
     expect(value('Rechnungsnummer')).toHaveTextContent('RE-2025-0815');
     // Read-only: the card has no input and no action.
     expect(within(card).queryAllByRole('textbox')).toHaveLength(0);
@@ -311,6 +315,193 @@ describe('CIDetailPage', () => {
     expect(value('Invoice number')).toHaveTextContent('RE-2025-0815');
     await act(async () => {
       await i18n.changeLanguage('de-DE');
+    });
+  });
+
+  // UI-14, WP-810: the asset card is the one asset display of the CI and
+  // follows its child contract (AST-05, WP-273); the deprecated parent path
+  // GET /cis/{id}/parent is no longer read.
+  describe('asset card by child_mode (UI-14, WP-810)', () => {
+    const asset = {
+      id: ASSET,
+      inventory_no: 'INV-0042',
+      name: 'chassis hardware',
+      status: 'assigned',
+      serial_number: 'SN-CHASSIS-42',
+      warranty_until: '2028-03-14',
+      supplier_id: SUPPLIER,
+    };
+    const routes = (detail: unknown, extra: Record<string, unknown> = {}) => ({
+      ...extra,
+      '/cis/ci-1/relationships': { data: [], total: 0, limit: 25, offset: 0, has_more: false },
+      '/topology/cis/ci-1/neighbors': { nodes: [], edges: [] },
+      '/cis/ci-1': detail,
+    });
+    const parentCalls = (fetchMock: ReturnType<typeof stubFetchRoutes>) =>
+      fetchMock.mock.calls.filter(([url]) => /\/cis\/[^/?]+\/parent/.test(String(url)));
+
+    it('shows the inherited asset of a configuration child with the hint and both links', async () => {
+      const fetchMock = stubFetchRoutes(
+        routes(
+          {
+            ...ci,
+            parent_ci_id: PARENT_CI,
+            child_mode: 'configuration',
+            asset_source_ci_id: SOURCE_CI,
+            asset,
+          },
+          { [`/suppliers/${SUPPLIER}`]: { id: SUPPLIER, name: 'Acme Distribution' } },
+        ),
+      );
+
+      renderDetail();
+
+      const card = assetCard(await screen.findByText('Asset (kanonische Daten)'));
+      const value = (label: string) =>
+        within(card).getByText(label, { selector: 'dt' }).nextElementSibling as HTMLElement;
+      expect(value('Inventarnummer')).toHaveTextContent('INV-0042');
+      expect(value('Seriennummer')).toHaveTextContent('SN-CHASSIS-42');
+      expect(value('Garantieende')).toHaveTextContent(/^14\.03\.2028$/);
+      await waitFor(() => expect(value('Lieferant')).toHaveTextContent('Acme Distribution'));
+      expect(within(card).getByRole('link', { name: 'vom übergeordneten CI' })).toHaveAttribute(
+        'href',
+        `/cmdb/${SOURCE_CI}`,
+      );
+      expect(within(card).getByText('schreibgeschützt')).toBeInTheDocument();
+      expect(within(card).getByRole('link', { name: 'Asset öffnen' })).toHaveAttribute(
+        'href',
+        `/assets/${ASSET}`,
+      );
+      expect(within(card).queryByRole('link', { name: 'Übergeordnetes CI' })).toBeNull();
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes(`/suppliers/${SUPPLIER}`)),
+      ).toBe(true);
+      expect(parentCalls(fetchMock)).toHaveLength(0);
+      // The card is the only asset display of the CI.
+      expect(screen.getAllByText('Asset (kanonische Daten)')).toHaveLength(1);
+    });
+
+    it('shows a dash for the supplier when GET /suppliers/{id} answers 404', async () => {
+      const fetchMock = stubFetchRoutes(
+        routes({
+          ...ci,
+          parent_ci_id: PARENT_CI,
+          child_mode: 'configuration',
+          asset_source_ci_id: SOURCE_CI,
+          asset,
+        }),
+      );
+
+      renderDetail();
+
+      const card = assetCard(await screen.findByText('Asset (kanonische Daten)'));
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some(([url]) => String(url).includes(`/suppliers/${SUPPLIER}`)),
+        ).toBe(true),
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      const supplier = within(card).getByText('Lieferant', { selector: 'dt' })
+        .nextElementSibling as HTMLElement;
+      expect(supplier).toHaveTextContent(/^—$/);
+      expect(parentCalls(fetchMock)).toHaveLength(0);
+    });
+
+    it('shows a dash for the supplier when GET /suppliers/{id} answers 403', async () => {
+      stubFetchRoutes(
+        routes(
+          { ...ci, asset_id: ASSET, asset },
+          {
+            [`/suppliers/${SUPPLIER}`]: new Response(JSON.stringify({ status: 403 }), {
+              status: 403,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          },
+        ),
+      );
+
+      renderDetail();
+
+      const card = assetCard(await screen.findByText('Asset (kanonische Daten)'));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      const supplier = within(card).getByText('Lieferant', { selector: 'dt' })
+        .nextElementSibling as HTMLElement;
+      expect(supplier).toHaveTextContent(/^—$/);
+      // A CI without parent shows neither the hint nor a parent link.
+      expect(within(card).queryByText('vom übergeordneten CI')).toBeNull();
+      expect(within(card).queryByRole('link', { name: 'Übergeordnetes CI' })).toBeNull();
+    });
+
+    it('shows the own asset of a standalone child with a link to its parent CI', async () => {
+      stubFetchRoutes(
+        routes({
+          ...ci,
+          parent_ci_id: PARENT_CI,
+          child_mode: 'standalone',
+          asset_id: ASSET,
+          asset: { ...asset, supplier_id: undefined },
+        }),
+      );
+
+      renderDetail();
+
+      const card = assetCard(await screen.findByText('Asset (kanonische Daten)'));
+      expect(within(card).getByRole('link', { name: 'Übergeordnetes CI' })).toHaveAttribute(
+        'href',
+        `/cmdb/${PARENT_CI}`,
+      );
+      expect(within(card).queryByText('vom übergeordneten CI')).toBeNull();
+      expect(within(card).queryByText('schreibgeschützt')).toBeNull();
+      expect(within(card).getByRole('link', { name: 'Asset öffnen' })).toHaveAttribute(
+        'href',
+        `/assets/${ASSET}`,
+      );
+    });
+
+    it('shows no asset card for a CI without asset and reads no parent', async () => {
+      const fetchMock = stubFetchRoutes(
+        routes({ ...ci, parent_ci_id: PARENT_CI, child_mode: 'standalone' }),
+      );
+
+      renderDetail();
+
+      expect(await screen.findByRole('heading', { name: 'core-sw-01' })).toBeInTheDocument();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(screen.queryByText('Asset (kanonische Daten)')).toBeNull();
+      expect(parentCalls(fetchMock)).toHaveLength(0);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/suppliers/'))).toBe(false);
+    });
+
+    it('labels the hints in English', async () => {
+      stubFetchRoutes(
+        routes({
+          ...ci,
+          parent_ci_id: PARENT_CI,
+          child_mode: 'configuration',
+          asset_source_ci_id: SOURCE_CI,
+          asset: { ...asset, supplier_id: undefined },
+        }),
+      );
+      await act(async () => {
+        await i18n.changeLanguage('en-US');
+      });
+      try {
+        renderDetail();
+        const card = assetCard(await screen.findByText('Asset (canonical data)'));
+        expect(within(card).getByRole('link', { name: 'from the parent CI' })).toBeInTheDocument();
+        expect(within(card).getByText('read-only')).toBeInTheDocument();
+        expect(within(card).getByRole('link', { name: 'Open asset' })).toBeInTheDocument();
+      } finally {
+        await act(async () => {
+          await i18n.changeLanguage('de-DE');
+        });
+      }
     });
   });
 
