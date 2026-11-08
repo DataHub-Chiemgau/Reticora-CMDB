@@ -209,8 +209,10 @@ export function LocationPicker({ label, value, onChange, kinds }: LocationPicker
             // Named by its own name and kind, not by the text of its subtree.
             aria-labelledby={`${itemId(item.id)}-name ${itemId(item.id)}-kind`}
             aria-expanded={item.hasChildren ? open : undefined}
+            // A node that cannot be chosen carries no aria-selected. It is no
+            // aria-disabled: that would disable the nodes of its subtree too
+            // (WAI-ARIA), the bins below a warehouse included (WP-324).
             aria-selected={item.selectable ? item.id === value : undefined}
-            aria-disabled={item.selectable ? undefined : true}
             tabIndex={index === focusIndex ? 0 : -1}
             onFocus={(event) => {
               if (event.target === event.currentTarget) setFocused(item.id);

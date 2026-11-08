@@ -206,7 +206,7 @@ export function LayoutEditor({
     );
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
       <section
         aria-labelledby={`${statusId}-palette`}
         className="space-y-3 rounded-xl border border-line bg-panel p-4"

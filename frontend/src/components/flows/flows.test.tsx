@@ -248,9 +248,8 @@ describe('stock flows', () => {
     const dialog = await openFlow('Empfangen');
     // Only bins can be chosen; the site is the path.
     const picker = await within(dialog).findByRole('tree', { name: 'Ziel-Fach' });
-    expect(within(picker).getByRole('treeitem', { name: /Werk Nord/ })).toHaveAttribute(
-      'aria-disabled',
-      'true',
+    expect(within(picker).getByRole('treeitem', { name: /Werk Nord/ })).not.toHaveAttribute(
+      'aria-selected',
     );
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abbrechen' }));
     await receiveToner();

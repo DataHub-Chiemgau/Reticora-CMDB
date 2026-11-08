@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { AT, ORG_ID, expect, list, mockBackend, signIn, test } from './support/backend';
 import type { Handler } from './support/backend';
+import { IMPORT_PROFILE, mePermissions } from './support/phase2';
 
 // TST-03 (WP-322), UI-11, UI-14: the import assistant. A CSV file is
 // uploaded as a document (POST /documents, PUT /documents/{id}/content),
@@ -8,9 +9,11 @@ import type { Handler } from './support/backend';
 // mapped in a new profile (POST /import-profiles), checked in a dry run and
 // imported (POST /imports, GET /jobs/{id}, GET /imports/{id}) with the
 // report of each run and its row errors page by page (GET
-// /imports/{id}/errors); an infected file aborts the assistant. Every request
-// and answer follows api/openapi.yaml (WP-530). Reusing a profile and the
-// report download follow with WP-324.
+// /imports/{id}/errors); an infected file aborts the assistant. WP-324: a
+// saved profile is changed (PATCH /import-profiles/{id}) and reused for the
+// next file after a reload, and the report with the row errors is
+// downloaded through its signed link (GET /imports/{id}/report). Every
+// request and answer follows api/openapi.yaml (WP-530).
 
 test.use({ locale: 'de-DE' });
 
@@ -96,15 +99,11 @@ function run(id: string, dryRun: boolean) {
 
 /** importHandlers answer the assistant; scan is the status of the uploaded version. */
 function importHandlers(scan: string): Handler[] {
-  const profiles: Record<string, unknown>[] = [];
+  // The stored profile of support/phase2.ts and those the assistant saves.
+  const profiles: Record<string, unknown>[] = [IMPORT_PROFILE];
   let starts = 0;
   return [
-    {
-      path: '/me/permissions',
-      reply: () => ({
-        body: { user_id: USER_ID, permissions: ['ci:read', 'import:run', 'import:manage'] },
-      }),
-    },
+    mePermissions(['ci:read', 'import:run', 'import:manage']),
     {
       method: 'POST',
       path: '/documents',
@@ -150,6 +149,27 @@ function importHandlers(scan: string): Handler[] {
         profiles.push(profile);
         return { status: 201, body: profile };
       },
+    },
+    {
+      method: 'PATCH',
+      path: `/import-profiles/${PROFILE_ID}`,
+      reply: (request) => {
+        const index = profiles.findIndex((p) => p.id === PROFILE_ID);
+        const profile = {
+          ...profiles[index]!,
+          ...(request.postDataJSON() as Record<string, unknown>),
+        };
+        profiles[index] = profile;
+        return { body: profile };
+      },
+    },
+    {
+      path: new RegExp(`^/imports/(${DRY_JOB}|${RUN_JOB})/report$`),
+      reply: (request, url) => ({
+        body: {
+          download_url: `${new URL(request.url()).origin}/e2e-downloads${url.pathname.replace('/api/v1', '')}.csv?signature=e2e`,
+        },
+      }),
     },
     { path: '/relationship-types', reply: () => ({ body: list([]) }) },
     {
@@ -274,4 +294,87 @@ test('aborts the assistant when the file is infected', async ({ page }) => {
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Weiter zur Zuordnung' })).toHaveCount(0);
   expect(calls.some((c) => c.path === '/imports/preview')).toBe(false);
+});
+
+test('saves a profile, reuses it for the next file and downloads the error report', async ({
+  page,
+}) => {
+  const calls = await mockBackend(page, importHandlers('clean'));
+  // The signed link of the report: the browser opens it in a new tab.
+  await page.context().route('**/e2e-downloads/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/plain; charset=utf-8',
+      body: 'Zeile;Feld;Code;Meldung\n;Typ;column_missing;Typ is missing\n4;serial_number;invalid_value;is required\n',
+    }),
+  );
+  await signIn(page);
+  await page.goto('/imports');
+
+  // Save a new profile, then change and save it again.
+  await upload(page);
+  await page.getByRole('button', { name: 'Weiter zur Zuordnung' }).click();
+  const profile = page.getByLabel('Profil', { exact: true });
+  await expect(profile.locator('option')).toHaveText([
+    'Neues Profil',
+    `${IMPORT_PROFILE.name} (Assets)`,
+  ]);
+  await page.getByLabel('Name des Profils').fill('Server-Import');
+  await page.getByLabel('Ziel von Hostname').selectOption('name');
+  await page.getByRole('button', { name: 'Profil anlegen' }).click();
+  await expect(page.getByText('Profil „Server-Import“ gespeichert.')).toBeVisible();
+  await page.getByLabel('Ziel von Seriennummer').selectOption('serial_number');
+  await page.getByRole('checkbox', { name: 'Seriennummer' }).check();
+  await expect(
+    page.getByText('Ungespeicherte Änderungen: vor dem Prüfen speichern.'),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Weiter zum Prüfen' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Profil speichern' }).click();
+  await expect(page.getByText('Profil „Server-Import“ gespeichert.')).toBeVisible();
+  expect(
+    calls.find((c) => c.method === 'PATCH' && c.path === `/import-profiles/${PROFILE_ID}`)?.body,
+  ).toMatchObject({
+    name: 'Server-Import',
+    mapping: {
+      columns: {
+        Hostname: { target: 'name' },
+        Seriennummer: { target: 'serial_number' },
+      },
+    },
+    identity_keys: ['serial_number'],
+  });
+
+  // The next file in a new session of the assistant takes the saved profile.
+  await page.reload();
+  await upload(page);
+  await page.getByRole('button', { name: 'Weiter zur Zuordnung' }).click();
+  await expect(profile.locator('option')).toHaveText([
+    'Neues Profil',
+    `${IMPORT_PROFILE.name} (Assets)`,
+    'Server-Import (CIs)',
+  ]);
+  await profile.selectOption({ label: 'Server-Import (CIs)' });
+  await expect(page.getByLabel('Name des Profils')).toHaveValue('Server-Import');
+  await expect(page.getByLabel('Ziel von Hostname')).toHaveValue('name');
+  await expect(page.getByLabel('Ziel von Seriennummer')).toHaveValue('serial_number');
+  await expect(page.getByRole('checkbox', { name: 'Seriennummer' })).toBeChecked();
+  await page.getByRole('button', { name: 'Weiter zum Prüfen' }).click();
+  await page.getByRole('button', { name: 'Dry Run starten' }).click();
+  const report = page.getByRole('region', { name: 'Bericht' });
+  await expect(report.getByText('Teilerfolg: 1 von 3 Zeilen fehlerhaft')).toBeVisible();
+
+  // The report with the row errors opens through its signed link.
+  const opened = page.waitForEvent('popup');
+  await report.getByRole('button', { name: 'Bericht herunterladen' }).click();
+  const tab = await opened;
+  await expect(tab.locator('body')).toContainText('Zeile;Feld;Code;Meldung');
+  await expect(tab.locator('body')).toContainText('4;serial_number;invalid_value;is required');
+  expect(tab.url()).toContain(`/e2e-downloads/imports/${DRY_JOB}/report.csv?signature=e2e`);
+  await tab.close();
+
+  expect(calls.filter((c) => c.method === 'POST' && c.path === '/import-profiles')).toHaveLength(1);
+  expect(
+    calls.filter((c) => c.method === 'POST' && c.path === '/imports').map((c) => c.body),
+  ).toEqual([{ document_id: DOCUMENT_ID, profile_id: PROFILE_ID, mode: 'both', dry_run: true }]);
+  expect(calls.filter((c) => c.path === `/imports/${DRY_JOB}/report`)).toHaveLength(1);
 });

@@ -1561,3 +1561,5 @@ UI-14;[P2–P4, A];C;frontend/src/pages/OrderListPage.test.tsx;WP-812
 UI-14;[P2–P4, A];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
 AST-04;[P2];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
 UI-14;[P2–P4, A];C;frontend/src/pages/CIDetailPage.test.tsx;WP-810
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/form-builder.spec.ts;WP-324
+UI-14;[P2–P4, A];C;frontend/e2e/a11y.spec.ts;WP-324
