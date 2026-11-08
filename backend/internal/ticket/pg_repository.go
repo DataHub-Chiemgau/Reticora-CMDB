@@ -162,9 +162,17 @@ func (r *PGRepository) recordEvent(ctx context.Context, tx pgx.Tx, orgID string,
 // (000065). ticketVisible additionally requires the related CI and asset to
 // be visible under the transaction's tenant scope, whose policies filter the
 // subqueries; comments follow their ticket.
+//
+// The checks are scalar subqueries on the primary key, not EXISTS: the
+// planner turns an EXISTS under OR into a hashed subplan sized for the whole
+// ticket scan, which read every CI and asset of the organization for a page
+// of 20 tickets (finding of WP-824). A scalar subquery is evaluated per
+// ticket that reaches the filter, one lookup in ci_pkey and asset_pkey; the
+// id is unique and never NULL, so IS NOT NULL holds exactly when the row is
+// visible, as EXISTS did.
 const (
-	ticketVisible = `(ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
-	AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))`
+	ticketVisible = `(ticket.related_ci_id IS NULL OR (SELECT ci.id FROM ci WHERE ci.id = ticket.related_ci_id) IS NOT NULL)
+	AND (ticket.related_asset_id IS NULL OR (SELECT asset.id FROM asset WHERE asset.id = ticket.related_asset_id) IS NOT NULL)`
 	commentVisible = "EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_comment.ticket_id AND " + ticketVisible + ")"
 )
 

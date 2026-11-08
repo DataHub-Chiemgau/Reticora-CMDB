@@ -30,10 +30,11 @@ import (
 //     most 1 % of the organization's tickets. Without the index the check
 //     names it (negative case, dropped with its constraint in a transaction
 //     that is rolled back).
-//   - Known gap: the EXISTS checks of ticketVisible on ci.id and asset.id
-//     do not look the related CI and asset up by id but read every CI and
-//     asset of the organization (hashed subplans); the rows are logged,
-//     the finding goes to a follow-up of WP-290 (visibleBudget).
+//   - The checks of ticketVisible look the related CI and asset of each
+//     ticket of the page up by id (ci_pkey, asset_pkey) and the whole
+//     statement reads at most 1 % of the organization's tickets, CIs and
+//     assets (visibleBudget; until the WP-824 finding was fixed they read
+//     every CI and asset of the organization through hashed subplans).
 //
 // Both run with organization A alone and again with 5,000 tickets of
 // organization B. The default sort (created_at), the COUNT(*) of the whole
@@ -140,7 +141,7 @@ func TestTicketQueryBudget(t *testing.T) {
 
 	// The page of 20 tickets sorted by number, the first ones of the
 	// organization: their related CIs and assets are read through the
-	// EXISTS checks of ticketVisible.
+	// checks of ticketVisible.
 	const page = 20
 	byNumber := func() ([]int, error) {
 		items, _, err := repo.List(ctx, f.OrgA, &ticket.FilterParams{SortBy: "ticket_number", SortDir: "asc"}, api.PaginationParams{Limit: page})
@@ -166,19 +167,14 @@ func TestTicketQueryBudget(t *testing.T) {
 	// The page reads the tickets from the index of their numbers.
 	byNumberBudget := &scopetest.QueryBudget{Tables: []string{"ticket"},
 		Indexes: [][]string{{"ticket_organization_number_key"}}, MaxRows: orgTickets / 100}
-	// Known gap (finding of WP-824 for a follow-up of WP-290): the EXISTS
-	// checks of ticketVisible ("related_ci_id IS NULL OR EXISTS (...)") are
-	// planned as hashed subplans that read every CI and every asset of the
-	// organization once per page (10,000 rows each through a sequential
-	// scan or idx_ci_org/idx_asset_org) instead of one lookup by id per
-	// ticket of the page: the planner sizes the subplan for the whole
-	// ticket scan, not for the LIMIT. The check logs the rows read and
-	// requires a single scan of ticket. Once the checks read the CIs and
-	// assets by id, the budget becomes Tables ticket, ci and asset,
-	// Indexes {ci_pkey, ci_id_organization_key} and {asset_pkey,
-	// asset_id_organization_key}, MaxRows orgTickets / 100.
+	// The checks of ticketVisible look the related CI and asset of every
+	// ticket of the page up by id (scalar subqueries on the primary key;
+	// as EXISTS under OR they were hashed subplans that read every CI and
+	// asset of the organization, finding of WP-824). Without the primary
+	// key the planner falls back to ci_id_organization_key and
+	// asset_id_organization_key, so each group holds both.
 	visibleBudget := &scopetest.QueryBudget{Tables: []string{"ticket", "ci", "asset"},
-		Gap: "WP-824 finding for WP-290: the EXISTS checks of ticketVisible read every CI and asset of the organization (hashed subplan)"}
+		Indexes: [][]string{{"ci_pkey", "ci_id_organization_key"}, {"asset_pkey", "asset_id_organization_key"}}, MaxRows: orgTickets / 100}
 	orgWide := database.OrgWideScope(f.OrgA, f.User)
 	check := func(state string) {
 		t.Helper()
@@ -196,7 +192,7 @@ func TestTicketQueryBudget(t *testing.T) {
 		}
 		stmt := scopetest.Statement(t, stmts, " ORDER BY ticket_number ")
 		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, "page by ticket_number", stmt, byNumberBudget)
-		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, "EXISTS checks of ticketVisible on ci.id and asset.id", stmt, visibleBudget)
+		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, "checks of ticketVisible on ci.id and asset.id", stmt, visibleBudget)
 		scopetest.TimeBudget(t, state+", page by ticket_number", 5, 500*time.Millisecond, func() error {
 			_, lerr := byNumber()
 			return lerr
