@@ -153,6 +153,9 @@ interface BackendOptions {
   tree?: unknown[];
   /** Answer of GET /ci-fields/global (organization-wide fields, MET-13). */
   globals?: FieldDefinition[];
+  /** Users and teams of GET /users, /teams and /{id} (owner, WP-805). */
+  users?: Array<{ id: string; display_name: string }>;
+  teams?: Array<{ id: string; name: string }>;
 }
 
 /** Answers by exact API path; records the requests and the POST/PATCH bodies. */
@@ -163,6 +166,8 @@ function stubBackend({
   post,
   tree,
   globals = [],
+  users = [],
+  teams = [],
 }: BackendOptions = {}) {
   const posted: Array<Record<string, unknown>> = [];
   const patched: Array<Record<string, unknown>> = [];
@@ -199,6 +204,16 @@ function stubBackend({
     }
     if (method === 'GET' && path === '/ci-fields/global') {
       return json({ data: globals });
+    }
+    if (method === 'GET' && (path === '/users' || path === '/teams')) {
+      const data = path === '/users' ? users : teams;
+      return json({ data, total: data.length, limit: 20, offset: 0, has_more: false });
+    }
+    const person =
+      users.find((user) => path === `/users/${user.id}`) ??
+      teams.find((team) => path === `/teams/${team.id}`);
+    if (method === 'GET' && person) {
+      return json(person);
     }
     if (method === 'GET' && path === '/locations/tree') {
       return json({ data: tree ?? [] });
@@ -841,5 +856,144 @@ describe('CIFormModal for a CI linked to an asset (DB-05, AST-04, F-238)', () =>
 
     await waitFor(() => expect(patched).toHaveLength(1));
     expect(patched[0]).toEqual({ serial_number: 'SN-NEW' });
+  });
+});
+
+describe('CIFormModal owner (CI-07, WP-805)', () => {
+  const USER_A = '0a000000-0000-4000-8000-0000000000a1';
+  const USER_B = '0a000000-0000-4000-8000-0000000000b1';
+  const TEAM_A = '0e000000-0000-4000-8000-0000000000a1';
+  const users = [
+    { id: USER_A, display_name: 'Erika Muster' },
+    { id: USER_B, display_name: 'Max Beispiel' },
+  ];
+  const teams = [{ id: TEAM_A, name: 'Netzbetrieb' }];
+  const ownedCI: CI = {
+    ...storedCI,
+    ci_type_id: SERVER_TYPE_ID,
+    name: 'srv-owned-01',
+    version: 5,
+    owner_user_id: USER_A,
+    owner_team_id: TEAM_A,
+    attributes: {},
+  };
+
+  async function openEditor(ci: CI) {
+    const backend = stubBackend({ types: [serverType], users, teams });
+    renderWithProviders(<CIFormModal open onOpenChange={vi.fn()} ci={ci} />);
+    await waitFor(() => expect(typeSelect().value).toBe(ci.ci_type_id));
+    return backend;
+  }
+
+  function patchHeaders() {
+    const call = vi
+      .mocked(fetch)
+      .mock.calls.find(([, init]) => (init?.method ?? 'GET').toUpperCase() === 'PATCH');
+    return new Headers(call?.[1]?.headers);
+  }
+
+  async function pickUser(query: string, name: RegExp) {
+    fireEvent.change(screen.getByRole('combobox', { name: 'Verantwortlicher Nutzer' }), {
+      target: { value: query },
+    });
+    fireEvent.click(await screen.findByRole('option', { name }, { timeout: 2000 }));
+  }
+
+  it('shows the stored owner by name and changes the user with If-Match', async () => {
+    const { patched } = await openEditor(ownedCI);
+    const group = screen.getByRole('group', { name: 'Verantwortlich' });
+    expect(await within(group).findByText('Erika Muster')).toBeInTheDocument();
+    expect(await within(group).findByText('Netzbetrieb')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Erika Muster entfernen' }));
+    await pickUser('max', /Max Beispiel/);
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ owner_user_id: USER_B });
+    expect(patchHeaders().get('If-Match')).toBe('"5"');
+  });
+
+  it('sends "" when the owner is removed', async () => {
+    const { patched } = await openEditor(ownedCI);
+    fireEvent.click(await screen.findByRole('button', { name: 'Netzbetrieb entfernen' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Erika Muster entfernen' }));
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ owner_user_id: '', owner_team_id: '' });
+  });
+
+  it('sends no owner when it stays unchanged', async () => {
+    const { patched } = await openEditor(ownedCI);
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'Vendor' } });
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ manufacturer: 'Vendor' });
+  });
+
+  it('sets an owner on a CI without one', async () => {
+    const { patched } = await openEditor({
+      ...ownedCI,
+      owner_user_id: undefined,
+      owner_team_id: undefined,
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Verantwortliches Team' }), {
+      target: { value: 'netz' },
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Netzbetrieb/ }, { timeout: 2000 }));
+    fireEvent.click(submitButton());
+
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ owner_team_id: TEAM_A });
+  });
+
+  it('shows the owner of a CI with an asset read-only with the hint and never sends it', async () => {
+    const ASSET = 'a55e7000-0000-4000-8000-000000000002';
+    const { patched } = await openEditor({
+      ...ownedCI,
+      asset_id: ASSET,
+      asset: {
+        id: ASSET,
+        asset_tag: 'INV-0043',
+        name: 'hardware',
+        status: 'assigned',
+        owner_user_id: USER_A,
+        owner_team_id: TEAM_A,
+      },
+    });
+
+    const user = screen.getByLabelText('Verantwortlicher Nutzer');
+    expect(user).toBeDisabled();
+    await waitFor(() => expect(user).toHaveValue('Erika Muster'));
+    expect(user).toHaveAccessibleDescription('vom Asset übernommen');
+    const team = screen.getByLabelText('Verantwortliches Team');
+    expect(team).toBeDisabled();
+    await waitFor(() => expect(team).toHaveValue('Netzbetrieb'));
+    expect(screen.queryByRole('combobox', { name: 'Verantwortlicher Nutzer' })).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Hersteller'), { target: { value: 'Vendor' } });
+    fireEvent.click(submitButton());
+    await waitFor(() => expect(patched).toHaveLength(1));
+    expect(patched[0]).toEqual({ manufacturer: 'Vendor' });
+  });
+
+  it('shows a 422 of the owner at its field', async () => {
+    await openEditor(ownedCI);
+    const fetchMock = vi.mocked(fetch);
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) =>
+      (init?.method ?? 'GET').toUpperCase() === 'PATCH'
+        ? violations({ field: 'owner_user_id', detail: 'unknown user' })
+        : original(input, init),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Erika Muster entfernen' }));
+    await pickUser('max', /Max Beispiel/);
+    fireEvent.click(submitButton());
+
+    const group = screen.getByRole('group', { name: 'Verantwortlich' });
+    expect(await within(group).findByText('unknown user')).toBeInTheDocument();
+    expect(screen.getByText('Bitte korrigieren Sie die markierten Felder.')).toBeInTheDocument();
   });
 });

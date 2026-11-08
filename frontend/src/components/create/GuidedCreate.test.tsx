@@ -42,6 +42,7 @@ const TEMPLATE_B = '7e000000-0000-4000-8000-0000000000a2';
 const LOCATION = '10c00000-0000-4000-8000-000000000001';
 const HOST_CI = '11111111-1111-4111-8111-000000000001';
 const USER = '00000000-0000-4000-8000-0000000000f1';
+const TEAM = '00000000-0000-4000-8000-0000000000e1';
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -179,9 +180,18 @@ interface Backend {
   /** The CIs GET /cis answers for the suggestions and the picker. */
   cis?: Array<Record<string, unknown>>;
   post?: (body: Record<string, unknown>) => Response;
+  /** The teams GET /teams answers (owner picker, WP-805). */
+  teams?: Array<Record<string, unknown>>;
 }
 
-function stubBackend({ forms = {}, templates = {}, modules, cis = [], post }: Backend = {}) {
+function stubBackend({
+  forms = {},
+  templates = {},
+  modules,
+  cis = [],
+  post,
+  teams = [],
+}: Backend = {}) {
   const requests: URL[] = [];
   const posted: Array<Record<string, unknown>> = [];
   vi.stubGlobal(
@@ -260,7 +270,7 @@ function stubBackend({ forms = {}, templates = {}, modules, cis = [], post }: Ba
         });
       }
       if (path === '/teams') {
-        return json({ data: [], total: 0, limit: 20, offset: 0, has_more: false });
+        return json({ data: teams, total: teams.length, limit: 20, offset: 0, has_more: false });
       }
       if (path === '/entitlements') return json({ data: [] });
       return json({ detail: `unexpected request: ${method} ${path}` }, 404);
@@ -830,6 +840,104 @@ describe('GuidedCreate fields of the resolved form', () => {
     expect(screen.getByRole('button', { name: 'Switch' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Weiter' })).toBeDisabled();
     await waitFor(() => expect(typeReads()).toBeGreaterThan(before));
+  });
+});
+
+describe('GuidedCreate owner (CI-07, WP-805)', () => {
+  const teams = [{ id: TEAM, name: 'Netzbetrieb', member_count: 3 }];
+
+  /** Opens the creation of a switch and chooses user and team as owner. */
+  async function chooseOwner() {
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch' }));
+    next();
+    next();
+    fireEvent.change(await screen.findByLabelText('Name *'), { target: { value: 'sw-06' } });
+    expect(screen.getByRole('group', { name: 'Verantwortlich' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Verantwortlicher Nutzer' }), {
+      target: { value: 'erika' },
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Erika Muster/ }, { timeout: 2000 }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Verantwortliches Team' }), {
+      target: { value: 'netz' },
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Netzbetrieb/ }, { timeout: 2000 }));
+    fireEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
+  }
+
+  it('sends the chosen user and team as owner_user_id and owner_team_id', async () => {
+    const { posted } = stubBackend({ forms: { [SWITCH]: SWITCH_FORM }, teams });
+    await chooseOwner();
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).toMatchObject({ owner_user_id: USER, owner_team_id: TEAM });
+  });
+
+  it('sends no owner when none is chosen', async () => {
+    const { posted } = stubBackend({ forms: { [SWITCH]: SWITCH_FORM } });
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch' }));
+    next();
+    next();
+    fireEvent.change(await screen.findByLabelText('Name *'), { target: { value: 'sw-07' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0]).not.toHaveProperty('owner_user_id');
+    expect(posted[0]).not.toHaveProperty('owner_team_id');
+  });
+
+  it('shows a 403 of the team scope at the team field (TEN-05, E-11)', async () => {
+    stubBackend({
+      forms: { [SWITCH]: SWITCH_FORM },
+      teams,
+      post: () =>
+        json(
+          {
+            type: 'about:blank',
+            title: 'Forbidden',
+            status: 403,
+            detail: 'the team is outside the team scope',
+          },
+          403,
+        ),
+    });
+    await chooseOwner();
+
+    const group = screen.getByRole('group', { name: 'Verantwortlich' });
+    expect(
+      await within(group).findByText('Dieses Team liegt außerhalb Ihres Team-Bereichs.'),
+    ).toBeInTheDocument();
+    // The server's words stay in the banner: a 403 without fields may be a missing right.
+    expect(screen.getByText('the team is outside the team scope')).toBeInTheDocument();
+  });
+
+  it('shows 422 violations of the owner at their fields', async () => {
+    stubBackend({
+      forms: { [SWITCH]: SWITCH_FORM },
+      teams,
+      post: () =>
+        json(
+          {
+            type: 'https://reticora.io/problems/422',
+            title: 'Unprocessable Entity',
+            status: 422,
+            detail: 'invalid',
+            violations: [
+              { field: 'owner_user_id', detail: 'unknown user' },
+              { field: 'owner_team_id', detail: 'unknown team' },
+            ],
+          },
+          422,
+        ),
+    });
+    await chooseOwner();
+
+    const group = screen.getByRole('group', { name: 'Verantwortlich' });
+    expect(await within(group).findByText('unknown user')).toBeInTheDocument();
+    expect(within(group).getByText('unknown team')).toBeInTheDocument();
+    expect(screen.getByText('Bitte korrigieren Sie die markierten Felder.')).toBeInTheDocument();
+    expect(screen.queryByText(/owner_user_id/)).not.toBeInTheDocument();
   });
 });
 

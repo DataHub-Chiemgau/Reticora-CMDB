@@ -336,6 +336,19 @@
       "invalid": "Unbekannte Tags: {{detail}}",
       "forbidden": "Ihnen fehlt das Recht, das CI zu ändern.",
       "reason": "Die Tags konnten nicht gespeichert werden: {{detail}}"
+    },
+    "owner": {
+      "title": "Verantwortlich",
+      "user": "Nutzer",
+      "team": "Team",
+      "userLabel": "Verantwortlicher Nutzer",
+      "teamLabel": "Verantwortliches Team",
+      "named": "{{kind}}: {{name}}",
+      "fromAsset": "vom Asset übernommen",
+      "fromAssetMark": "{{value}} (vom Asset)",
+      "hint": "Nutzer oder Team, das im System für das CI verantwortlich ist; nicht der Kontakt mit der Rolle ‚Owner‘.",
+      "teamForbidden": "Dieses Team liegt außerhalb Ihres Team-Bereichs.",
+      "forbidden": "Keine Berechtigung, den Verantwortlichen zu setzen."
     }
   },
   "form": {

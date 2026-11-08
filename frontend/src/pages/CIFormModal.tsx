@@ -5,15 +5,17 @@ import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { localizedText } from '../api/cmdb';
 import { useAllCITypes, useCIType, useGlobalFields } from '../api/cmdbHooks';
-import { useCreateCI, useUpdateCI } from '../api/hooks';
+import { useCreateCI, useTeam, useUpdateCI, useUser } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
 import {
   CI_TYPED_COLUMNS,
   GuidedCreate,
+  ownerFieldErrors,
   type CreateType,
   type GuidedCreateDraft,
 } from '../components/create/GuidedCreate';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
+import { UserTeamPicker, type PickedHolder } from '../components/pickers/UserTeamPicker';
 import { Button } from '../components/ui/Button';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
@@ -94,6 +96,8 @@ export function createRequest(draft: GuidedCreateDraft): CICreateRequest {
     ci_type_id: draft.typeId,
     status: draft.status,
     ...(draft.locationId ? { location_id: draft.locationId } : {}),
+    ...(draft.ownerUserId ? { owner_user_id: draft.ownerUserId } : {}),
+    ...(draft.ownerTeamId ? { owner_team_id: draft.ownerTeamId } : {}),
     ...(Object.keys(draft.attributes).length > 0 ? { attributes: draft.attributes } : {}),
     ...(draft.templateId ? { templates: [{ template_id: draft.templateId }] } : {}),
     discovery_source: 'manual',
@@ -170,10 +174,18 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
   const assetLocation = ci?.asset?.location_id || ci?.location_id;
   const locations = useLocationNames(open && assetManaged && !!assetLocation);
   const assetHintId = useId();
+  const ownerGroupId = useId();
   const [values, setValues] = useState<CIFormValues>(() => toFormValues(ci));
   const [errors, setErrors] = useState<Partial<Record<keyof CIFormValues, string>>>({});
   const [attributes, setAttributes] = useState<Record<string, unknown>>(() => ci?.attributes ?? {});
   const [attributeErrors, setAttributeErrors] = useState<Record<string, FieldError | null>>({});
+  // The owner (CI-07, WP-805): undefined keeps the stored one, null removes
+  // it. The stored owner is shown by its name where the user may read it
+  // (user:read); otherwise by its kind.
+  const [ownerUser, setOwnerUser] = useState<PickedHolder | null | undefined>(undefined);
+  const [ownerTeam, setOwnerTeam] = useState<PickedHolder | null | undefined>(undefined);
+  const storedUser = useUser(ci?.owner_user_id, { enabled: open });
+  const storedTeam = useTeam(ci?.owner_team_id, { enabled: open });
 
   useEffect(() => {
     if (open) {
@@ -181,8 +193,22 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
       setErrors({});
       setAttributes(ci?.attributes ?? {});
       setAttributeErrors({});
+      setOwnerUser(undefined);
+      setOwnerTeam(undefined);
     }
   }, [ci, open]);
+
+  const userName =
+    storedUser.data?.id === ci?.owner_user_id ? storedUser.data?.display_name : undefined;
+  const teamName = storedTeam.data?.id === ci?.owner_team_id ? storedTeam.data?.name : undefined;
+  const storedUserHolder: PickedHolder | null = ci?.owner_user_id
+    ? { kind: 'user', id: ci.owner_user_id, name: userName || t('ci.owner.user') }
+    : null;
+  const storedTeamHolder: PickedHolder | null = ci?.owner_team_id
+    ? { kind: 'team', id: ci.owner_team_id, name: teamName || t('ci.owner.team') }
+    : null;
+  const shownUser = ownerUser === undefined ? storedUserHolder : ownerUser;
+  const shownTeam = ownerTeam === undefined ? storedTeamHolder : ownerTeam;
 
   // The type is shown read-only (WP-804); the list labels it (all pages,
   // WP-804) and the stored type is added when it was deactivated.
@@ -252,9 +278,12 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
   const attributeFieldErrors: Record<string, FieldError | null> = { ...attributeErrors };
   const attributeNames = new Set(typeFields.map((field) => field.name));
   const unmappedViolations: string[] = [];
+  const ownerError = ownerFieldErrors(serverError, !!shownTeam, t);
   for (const [field, detail] of Object.entries(serverViolations)) {
     const attribute = field.startsWith('attributes.') ? field.slice('attributes.'.length) : field;
-    if (field in values) {
+    if (field === 'owner_user_id' || field === 'owner_team_id') {
+      // Shown at the owner field (ownerError).
+    } else if (field in values) {
       const key = field as keyof CIFormValues;
       if (!fieldErrors[key]) fieldErrors[key] = detail;
     } else if (attributeNames.has(attribute)) {
@@ -267,7 +296,7 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
   const bannerMessage = serverError
     ? unmappedViolations.length > 0
       ? unmappedViolations.join('; ')
-      : Object.keys(serverViolations).length > 0
+      : Object.keys(serverViolations).length > 0 || ownerError.mapped
         ? t('form.validation.serverRejected', 'Bitte korrigieren Sie die markierten Felder.')
         : serverError.message
     : null;
@@ -321,6 +350,14 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
     }
     const attrs = attributePayload();
     if (attrs) payload.attributes = attrs;
+    // The owner of a CI with an asset is the asset's (DB-05): never sent,
+    // the server refuses it (422 ci_owner_from_asset). Removing sends "".
+    if (!assetManaged) {
+      const nextUser = shownUser?.id ?? '';
+      if (nextUser !== (ci?.owner_user_id ?? '')) payload.owner_user_id = nextUser;
+      const nextTeam = shownTeam?.id ?? '';
+      if (nextTeam !== (ci?.owner_team_id ?? '')) payload.owner_team_id = nextTeam;
+    }
     return payload;
   }
 
@@ -479,6 +516,68 @@ function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
               </p>
             </div>
           ) : null}
+        </div>
+
+        {/* The owner (CI-07, WP-805); taken from the asset when linked. */}
+        <div className="border-t border-line pt-5">
+          <div role="group" aria-labelledby={`${ownerGroupId}-title`} className="min-w-0 space-y-3">
+            <h3 id={`${ownerGroupId}-title`} className="text-sm font-semibold text-fg">
+              {t('ci.owner.title')}
+            </h3>
+            <p className="text-xs text-fg-muted">{t('ci.owner.hint')}</p>
+            {assetManaged ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Input
+                    label={t('ci.owner.userLabel')}
+                    value={storedUserHolder?.name ?? ''}
+                    disabled
+                    aria-describedby={`${assetHintId}-owner`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Input
+                    label={t('ci.owner.teamLabel')}
+                    value={storedTeamHolder?.name ?? ''}
+                    disabled
+                    aria-describedby={`${assetHintId}-owner`}
+                  />
+                </div>
+                <p id={`${assetHintId}-owner`} className="text-xs text-fg-muted sm:col-span-2">
+                  {t('ci.owner.fromAsset')}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <UserTeamPicker
+                    label={t('ci.owner.userLabel')}
+                    kinds={['user']}
+                    value={shownUser}
+                    onChange={setOwnerUser}
+                  />
+                  {ownerError.owner_user_id ? (
+                    <p role="alert" className="mt-1 text-sm text-danger">
+                      {ownerError.owner_user_id}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <UserTeamPicker
+                    label={t('ci.owner.teamLabel')}
+                    kinds={['team']}
+                    value={shownTeam}
+                    onChange={setOwnerTeam}
+                  />
+                  {ownerError.owner_team_id ? (
+                    <p role="alert" className="mt-1 text-sm text-danger">
+                      {ownerError.owner_team_id}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {typeFields.length > 0 ? (

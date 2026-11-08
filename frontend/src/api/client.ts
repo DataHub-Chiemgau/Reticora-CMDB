@@ -54,6 +54,13 @@ export interface CI {
    * tags. Read-only here: PUT /cis/{id}/tags (ciApi.setTags) writes them.
    */
   tags: string[];
+  /**
+   * Owner of the CI (CI-07, WP-280): the responsible user (app_user.id) and
+   * team. With asset_id both mirror the asset's owner and cannot be written
+   * (422 ci_owner_from_asset, DB-05). Not the contact role owner.
+   */
+  owner_user_id?: string;
+  owner_team_id?: string;
   discovery_source?: string;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -75,6 +82,9 @@ export interface CIAssetFacts {
   warranty_end?: string;
   supplier?: string;
   invoice_number?: string;
+  /** Owning user and team of the asset (WP-271); the CI mirrors them. */
+  owner_user_id?: string;
+  owner_team_id?: string;
 }
 
 export interface CICreateRequest {
@@ -100,6 +110,10 @@ export interface CICreateRequest {
   discovery_source?: string;
   /** Templates assigned with the CI in this order (MET-16, WP-710). */
   templates?: Array<{ template_id: string; version?: number }>;
+  /** Owning user (WP-280); 422 on owner_user_id for an unknown user. */
+  owner_user_id?: string;
+  /** Owning team (WP-280); outside the team scope 403 (TEN-05, E-11). */
+  owner_team_id?: string;
 }
 
 /**
@@ -115,6 +129,10 @@ export interface CIUpdateRequest {
   management_ip?: string | null;
   firmware_version?: string | null;
   attributes?: Record<string, unknown>;
+  /** Owning user; "" clears it (WP-280). Not with asset_id (422). */
+  owner_user_id?: string | null;
+  /** Owning team; "" clears it (WP-280). Not with asset_id (422). */
+  owner_team_id?: string | null;
   discovery_source?: string;
   last_seen_at?: string;
 }

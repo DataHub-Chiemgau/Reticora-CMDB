@@ -336,6 +336,19 @@
       "invalid": "Unknown tags: {{detail}}",
       "forbidden": "You lack the permission to change the CI.",
       "reason": "The tags could not be saved: {{detail}}"
+    },
+    "owner": {
+      "title": "Responsible",
+      "user": "User",
+      "team": "Team",
+      "userLabel": "Responsible user",
+      "teamLabel": "Responsible team",
+      "named": "{{kind}}: {{name}}",
+      "fromAsset": "taken from the asset",
+      "fromAssetMark": "{{value}} (from the asset)",
+      "hint": "User or team responsible for the CI in the system; not the contact with the role owner.",
+      "teamForbidden": "This team is outside your team scope.",
+      "forbidden": "You may not set the responsible owner."
     }
   },
   "form": {

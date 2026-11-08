@@ -1219,6 +1219,30 @@ export function useDeleteUser() {
   });
 }
 
+/**
+ * useUser reads one user (GET /users/{id}, user:read) to show its name, e.g.
+ * the owner of a CI (CI-07, WP-805). A refusal (403 without user:read) or an
+ * unknown id is not retried: the caller shows the kind without a name.
+ */
+export function useUser(id: string | undefined, { enabled = true }: ListQueryOptions = {}) {
+  return useQuery({
+    queryKey: ['user', id],
+    queryFn: () => userApi.get(id!),
+    enabled: enabled && !!id,
+    retry: false,
+  });
+}
+
+/** useTeam reads one team (GET /teams/{id}, user:read) like useUser (WP-805). */
+export function useTeam(id: string | undefined, { enabled = true }: ListQueryOptions = {}) {
+  return useQuery({
+    queryKey: ['team', id],
+    queryFn: () => teamApi.get(id!),
+    enabled: enabled && !!id,
+    retry: false,
+  });
+}
+
 export function useTeamList(params: UserListParams, { enabled = true }: ListQueryOptions = {}) {
   return useQuery({
     queryKey: ['teams', params],

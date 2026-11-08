@@ -11,9 +11,10 @@
  * categories and the submit callback as props, so the asset creation can
  * use it as well (WP-319).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { ApiError, isTypeInactive } from '../../api/client';
 import { localizedText, type ResolvedForm } from '../../api/cmdb';
 import { useCIValueSuggestions, useResolvedTypeForm, useTemplates } from '../../api/cmdbHooks';
@@ -29,6 +30,7 @@ import {
 } from '../../rules/rules';
 import { DynamicForm, validateAll, type DynamicFormSection } from '../form/DynamicForm';
 import { LocationPicker } from '../pickers/LocationPicker';
+import { UserTeamPicker, type PickedHolder } from '../pickers/UserTeamPicker';
 import { useDebouncedValue } from '../pickers/ObjectPicker';
 import { Button } from '../ui/Button';
 import { ErrorState } from '../ui/ErrorState';
@@ -112,6 +114,9 @@ export interface GuidedCreateDraft {
   name: string;
   status: string;
   locationId?: string;
+  /** ownerUserId and ownerTeamId are the responsible user and team (CI-07, WP-805). */
+  ownerUserId?: string;
+  ownerTeamId?: string;
   /** columns are the filled typed columns (manufacturer and model included). */
   columns: Record<string, string>;
   /** attributes are the filled visible fields that are no typed column. */
@@ -267,6 +272,7 @@ export function GuidedCreate({
   const { t, i18n } = useTranslation();
   const { isModuleEnabled } = useModules();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const ownerGroupId = useId();
 
   const [step, setStep] = useState<CreateStep>('type');
   const shownStep = useRef<CreateStep>(step);
@@ -278,6 +284,8 @@ export function GuidedCreate({
   const [name, setName] = useState('');
   const [status, setStatus] = useState(statusOptions[0]?.value ?? '');
   const [locationId, setLocationId] = useState<string | null>(null);
+  const [ownerUser, setOwnerUser] = useState<PickedHolder | null>(null);
+  const [ownerTeam, setOwnerTeam] = useState<PickedHolder | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [prefilled, setPrefilled] = useState<Set<string>>(() => new Set());
   const [clientErrors, setClientErrors] = useState<Record<string, FieldError | null>>({});
@@ -479,9 +487,16 @@ export function GuidedCreate({
     manufacturer: t('create.fields.manufacturer'),
     model: t('create.fields.model'),
   };
+  // The owner (CI-07, WP-805): a 422 names owner_user_id or owner_team_id
+  // (violations or the field of a field problem); a 403 refuses a team
+  // outside the team scope (TEN-05, E-11) or a field the principal may not
+  // write (RBA-07). Both appear at the owner field.
+  const ownerError = ownerFieldErrors(submitError, !!ownerTeam, t);
   for (const [field, detail] of Object.entries(serverViolations)) {
     const attribute = field.startsWith('attributes.') ? field.slice('attributes.'.length) : field;
-    if (field === 'name' || field === 'status' || field === 'location_id') {
+    if (OWNER_FIELDS.includes(field)) {
+      // Shown through ownerError.
+    } else if (field === 'name' || field === 'status' || field === 'location_id') {
       masterFieldErrors[field] ??= detail;
     } else if (renderedNames.has(attribute)) {
       fieldErrors[attribute] ??= detail;
@@ -494,7 +509,8 @@ export function GuidedCreate({
   let banner: string | null = null;
   if (submitError) {
     if (unmapped.length > 0) banner = unmapped.join('; ');
-    else if (Object.keys(serverViolations).length > 0) banner = t('create.serverRejected');
+    else if (Object.keys(serverViolations).length > 0 || ownerError.mapped)
+      banner = t('create.serverRejected');
     else banner = submitError instanceof Error ? submitError.message : String(submitError);
   }
 
@@ -570,6 +586,8 @@ export function GuidedCreate({
       name: name.trim(),
       status,
       locationId: locationId ?? undefined,
+      ownerUserId: ownerUser?.id,
+      ownerTeamId: ownerTeam?.id,
       columns,
       attributes,
     };
@@ -744,6 +762,52 @@ export function GuidedCreate({
                 <p className="mt-1 text-sm text-danger">{masterFieldErrors.location_id}</p>
               ) : null}
             </div>
+            {resource === 'ci' ? (
+              <div
+                role="group"
+                aria-labelledby={`${ownerGroupId}-title`}
+                className="min-w-0 space-y-3 sm:col-span-2"
+              >
+                <h4 id={`${ownerGroupId}-title`} className="text-sm font-medium text-fg">
+                  {t('ci.owner.title')}
+                </h4>
+                <p className="text-xs text-fg-muted">{t('ci.owner.hint')}</p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <UserTeamPicker
+                      label={t('ci.owner.userLabel')}
+                      kinds={['user']}
+                      value={ownerUser}
+                      onChange={(picked) => {
+                        setOwnerUser(picked);
+                        setSubmitError(null);
+                      }}
+                    />
+                    {ownerError.owner_user_id ? (
+                      <p role="alert" className="mt-1 text-sm text-danger">
+                        {ownerError.owner_user_id}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div>
+                    <UserTeamPicker
+                      label={t('ci.owner.teamLabel')}
+                      kinds={['team']}
+                      value={ownerTeam}
+                      onChange={(picked) => {
+                        setOwnerTeam(picked);
+                        setSubmitError(null);
+                      }}
+                    />
+                    {ownerError.owner_team_id ? (
+                      <p role="alert" className="mt-1 text-sm text-danger">
+                        {ownerError.owner_team_id}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {form.isLoading ? (
@@ -798,6 +862,55 @@ export function GuidedCreate({
       </div>
     </form>
   );
+}
+
+/** OWNER_FIELDS are the request fields of the owner (WP-280). */
+const OWNER_FIELDS: readonly string[] = ['owner_user_id', 'owner_team_id'];
+
+export interface OwnerFieldErrors {
+  owner_user_id?: string;
+  owner_team_id?: string;
+  /** mapped tells that the refusal is fully shown at an owner field. */
+  mapped: boolean;
+}
+
+/**
+ * ownerFieldErrors places a refusal of the owner at its field (CI-07,
+ * WP-805): 422 with violations or the field of a field problem naming
+ * owner_user_id or owner_team_id; 403 with the refused fields (RBA-07); a
+ * 403 without fields while a team is chosen is the team scope (TEN-05,
+ * E-11: a team-scoped principal creates only with a team of its scope).
+ */
+export function ownerFieldErrors(error: unknown, teamChosen: boolean, t: TFunction) {
+  const out: OwnerFieldErrors = { mapped: false };
+  if (!(error instanceof ApiError)) return out;
+  if (error.status === 403) {
+    const refused = error.conflictFields.filter((field) => OWNER_FIELDS.includes(field));
+    if (refused.length > 0) {
+      for (const field of refused) {
+        out[field as 'owner_user_id' | 'owner_team_id'] =
+          field === 'owner_team_id' && teamChosen
+            ? t('ci.owner.teamForbidden')
+            : t('ci.owner.forbidden');
+      }
+      out.mapped = true;
+    } else if (teamChosen && error.conflictFields.length === 0) {
+      // The server's own words stay in the banner: a 403 without fields
+      // may also be a missing right.
+      out.owner_team_id = t('ci.owner.teamForbidden');
+    }
+  } else {
+    const byField = error.violationsByField();
+    if (error.field && !(error.field in byField)) byField[error.field] = error.detail ?? '';
+    for (const field of OWNER_FIELDS) {
+      const detail = byField[field];
+      if (detail !== undefined) {
+        out[field as 'owner_user_id' | 'owner_team_id'] = detail || error.message;
+        out.mapped = true;
+      }
+    }
+  }
+  return out;
 }
 
 interface SuggestedInputProps {
