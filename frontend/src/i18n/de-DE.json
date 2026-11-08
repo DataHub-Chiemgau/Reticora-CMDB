@@ -44,6 +44,7 @@
     "saved-views": "Ansichten",
     "locations": "Standorte",
     "ci-types": "CI-Typen",
+    "relationship-types": "Beziehungstypen",
     "reviews": "Reviews",
     "jobs": "Jobs"
   },
@@ -1956,8 +1957,8 @@
     "outgoing": "Dieses CI → Ziel",
     "incoming": "Quelle → dieses CI",
     "type": "Beziehungstyp",
-    "targetCi": "CI-ID der Gegenstelle",
-    "ciNotFound": "Kein CI mit dieser ID gefunden.",
+    "targetCi": "Gegenstelle",
+    "ciNotFound": "Die Gegenstelle wurde nicht gefunden oder ist nicht sichtbar.",
     "notes": "Notiz",
     "verificationState": "Prüfstatus",
     "state": {
@@ -1966,7 +1967,47 @@
       "disputed": "Widersprochen",
       "stale": "Veraltet"
     },
-    "projected": "projiziert (Struktur)"
+    "projected": "projiziert (Struktur)",
+    "typePairRefused": "Der Beziehungstyp erlaubt diese Kombination von CI-Typen nicht.",
+    "cardinalityRefused": "Die Kante würde die Kardinalität des Beziehungstyps überschreiten.",
+    "noTypes": "Kein Beziehungstyp passt zu diesem CI und dieser Richtung.",
+    "attributes": "Attribute",
+    "history": {
+      "title": "Kantenhistorie",
+      "empty": "Keine Änderungen erfasst.",
+      "loadError": "Die Historie der Beziehung konnte nicht geladen werden.",
+      "fields": "Geändert: {{fields}}",
+      "by": "Von {{actor}} über {{source}}"
+    },
+    "changeKinds": {
+      "created": "Angelegt",
+      "updated": "Geändert",
+      "verification_changed": "Prüfstatus geändert",
+      "refreshed": "Aufgefrischt",
+      "removed": "Entfernt",
+      "suppressed": "Unterdrückt",
+      "rewired": "Umgehängt",
+      "restored": "Wiederhergestellt"
+    },
+    "changedFields": {
+      "attributes": "Attribute",
+      "confidence": "Konfidenz",
+      "verification_state": "Prüfstatus",
+      "source_system": "Quellsystem",
+      "notes": "Notiz"
+    },
+    "actorTypes": {
+      "user": "Benutzer",
+      "api_key": "API-Schlüssel",
+      "system": "System"
+    },
+    "changeSources": {
+      "ui": "Oberfläche",
+      "api": "API",
+      "collector": "Collector",
+      "import": "Import",
+      "system": "System"
+    }
   },
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
@@ -1990,6 +2031,94 @@
     "noReason": "Kein Grund angegeben",
     "lift": "Aufheben",
     "liftHint": "Die Discovery legt die Kante im nächsten Zyklus wieder an."
+  },
+  "relationshipTypes": {
+    "title": "Beziehungstypen",
+    "subtitle": "System- und eigene Beziehungstypen mit Richtung, Auswirkung und Attributschema.",
+    "add": "Beziehungstyp anlegen",
+    "editNamed": "{{name}} bearbeiten",
+    "deleteNamed": "{{name}} löschen",
+    "deleteTitle": "Beziehungstyp löschen",
+    "deleteConfirm": "Der Beziehungstyp {{name}} wird gelöscht.",
+    "keyFixed": "Schlüssel: {{key}} (unveränderlich)",
+    "loadError": "Die Beziehungstypen konnten nicht geladen werden.",
+    "empty": "Keine Beziehungstypen vorhanden.",
+    "system": "System",
+    "own": "Eigener Typ",
+    "columns": {
+      "name": "Name (Gegenrichtung)",
+      "key": "Schlüssel",
+      "category": "Kategorie",
+      "impact": "Auswirkung",
+      "cardinality": "Kardinalität",
+      "origin": "Herkunft"
+    },
+    "groups": {
+      "naming": "Benennung",
+      "behaviour": "Verhalten"
+    },
+    "fields": {
+      "key": "Schlüssel",
+      "displayName": "Name (ausgehend)",
+      "reverseName": "Name der Gegenrichtung (eingehend)",
+      "description": "Beschreibung",
+      "category": "Kategorie",
+      "impactDirection": "Auswirkungsrichtung",
+      "cardinality": "Kardinalität",
+      "directed": "Gerichtet",
+      "redundant": "Redundant (Auswirkung erst, wenn alle Kanten ausfallen)",
+      "allowedSource": "Erlaubte Quelltypen",
+      "allowedTarget": "Erlaubte Zieltypen",
+      "allowedHint": "Keine Auswahl erlaubt alle CI-Typen; Untertypen sind eingeschlossen."
+    },
+    "categories": {
+      "network": "Netzwerk",
+      "power": "Strom",
+      "hosting": "Hosting",
+      "logical": "Logisch",
+      "physical": "Physisch"
+    },
+    "impactDirections": {
+      "source_depends_on_target": "Quelle hängt vom Ziel ab",
+      "target_depends_on_source": "Ziel hängt von der Quelle ab",
+      "none": "Keine Auswirkung",
+      "undirected": "Ungerichtet (beidseitig, heuristisch)"
+    },
+    "cardinalities": {
+      "many_to_many": "Viele zu vielen",
+      "one_to_one": "Eins zu eins",
+      "one_to_many": "Eins zu vielen",
+      "many_to_one": "Viele zu eins"
+    },
+    "schema": {
+      "title": "Attributschema der Kanten",
+      "empty": "Kanten dieses Typs haben keine Attribute.",
+      "add": "Attribut hinzufügen",
+      "attribute": "Attribut {{number}}",
+      "remove": "Attribut {{number}} entfernen",
+      "key": "Schlüssel",
+      "labelDe": "Bezeichnung (Deutsch)",
+      "labelEn": "Bezeichnung (Englisch)",
+      "dataType": "Datentyp",
+      "required": "Pflichtfeld",
+      "default": "Vorgabewert",
+      "enumValues": "Erlaubte Werte (kommagetrennt)",
+      "min": "Minimum",
+      "max": "Maximum",
+      "minLength": "Mindestlänge",
+      "maxLength": "Höchstlänge",
+      "pattern": "Muster (regulärer Ausdruck)"
+    },
+    "errors": {
+      "keyTaken": "Ein Beziehungstyp mit diesem Schlüssel existiert bereits.",
+      "systemKey": "Der Schlüssel gehört einem Systemtyp und kann nicht verwendet werden.",
+      "inUse": "Der Beziehungstyp wird von Beziehungen oder Unterdrückungen verwendet und kann nicht gelöscht werden.",
+      "invalid": "Ungültige Definition: {{detail}}",
+      "forbidden": "Keine Berechtigung: Für Beziehungstypen ist das Recht relationship_type:manage nötig.",
+      "forbiddenList": "Keine Berechtigung, die Beziehungstypen zu lesen.",
+      "notFound": "Der Beziehungstyp wurde nicht gefunden oder ist geschützt.",
+      "reason": "Die Änderung wurde abgelehnt: {{detail}}"
+    }
   },
   "scope": {
     "label": "Arbeitsbereich",

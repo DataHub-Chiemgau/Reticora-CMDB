@@ -13,7 +13,7 @@ import {
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
 } from './support/a11y-fixtures';
-import { EMPTY_LIST, mockBackend, signIn } from './support/backend';
+import { AT, EMPTY_LIST, ORG_ID, list, mockBackend, signIn } from './support/backend';
 import type { Handler } from './support/backend';
 
 // UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
@@ -79,6 +79,54 @@ interface A11yRoute {
 // violation is a new finding with its own WP (plan convention 16), not a mark.
 
 const text = (value: string) => (page: Page) => page.getByText(value, { exact: false }).first();
+
+// WP-323: a system and an organization type of the relationship type
+// administration, the organization type with an attribute schema.
+const relationshipType = (key: string, extra: Record<string, unknown>) => ({
+  id: `a11y-rt-${key}`,
+  key,
+  display_name: key,
+  reverse_name: key,
+  directed: true,
+  category: 'logical',
+  impact_direction: 'source_depends_on_target',
+  redundant: false,
+  allowed_source_types: [],
+  allowed_target_types: [],
+  cardinality: 'many_to_many',
+  is_system: true,
+  metadata_schema: [],
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+const RELATIONSHIP_TYPES: Handler = {
+  path: '/relationship-types',
+  reply: () => ({
+    body: list([
+      relationshipType('a11y_depends_on', {
+        display_name: 'a11y depends on',
+        reverse_name: 'a11y required by',
+      }),
+      relationshipType('a11y_backs_up', {
+        organization_id: ORG_ID,
+        is_system: false,
+        display_name: 'a11y backs up',
+        reverse_name: 'a11y backed up by',
+        category: 'hosting',
+        cardinality: 'one_to_many',
+        metadata_schema: [
+          {
+            key: 'a11y_schedule',
+            display_name: { de: 'Zeitplan', en: 'Schedule' },
+            data_type: 'text',
+            required: true,
+          },
+        ],
+      }),
+    ]),
+  }),
+};
 
 // One entry per route of src/App.tsx; the parity test below fails when a
 // route is added there without an entry here.
@@ -176,6 +224,14 @@ const ROUTES: A11yRoute[] = [
       await expect(editor.getByText('a11y_set_speed')).toBeVisible();
     },
     ready: (page) => page.locator('#main-content li').filter({ hasText: 'a11y_inventory' }),
+  },
+  {
+    // WP-323: a system type (read-only) and an organization type with its
+    // edit and delete actions.
+    path: '/relationship-types',
+    url: '/relationship-types',
+    handlers: [RELATIONSHIP_TYPES],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y backs up' }),
   },
   {
     // WP-314: own and system template, with the rights to edit and publish.

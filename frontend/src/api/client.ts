@@ -136,6 +136,21 @@ export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'
 
 export type VerificationState = (typeof verificationStates)[number];
 
+/** One row of the history of a relationship (REL-09, WP-296), derived from the schema (K27). */
+export type RelationshipChange = components['schemas']['RelationshipChange'];
+
+/** The kinds of a change of a relationship (WP-296), as change_kind names them. */
+export const relationshipChangeKinds = [
+  'created',
+  'updated',
+  'verification_changed',
+  'refreshed',
+  'removed',
+  'suppressed',
+  'rewired',
+  'restored',
+] as const satisfies readonly RelationshipChange['change_kind'][];
+
 export interface RelationshipCreateRequest {
   source_ci_id: string;
   target_ci_id: string;
@@ -781,6 +796,14 @@ export const relationshipApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  },
+
+  /**
+   * The history of an edge, newest first (GET /relationships/{id}/changes,
+   * WP-296); the rows stay after the edge is deleted.
+   */
+  changes(id: string): Promise<PaginatedResponse<RelationshipChange>> {
+    return fetchAPI(`/relationships/${id}/changes?limit=100`);
   },
 
   /**

@@ -119,6 +119,8 @@ function useRelationshipInvalidation(ciId: string) {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: ['ci-relationships', ciId] });
+    // Every edge mutation writes a history row (WP-296).
+    void queryClient.invalidateQueries({ queryKey: ['relationship-changes'] });
     void queryClient.invalidateQueries({ queryKey: ['topology-neighbors', ciId] });
     void queryClient.invalidateQueries({ queryKey: ['topology'] });
   };
@@ -166,6 +168,18 @@ export function useDeleteRelationship(ciId: string) {
       invalidate();
       void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
     },
+  });
+}
+
+/**
+ * The history of an edge (WP-296), newest first; every edge mutation
+ * invalidates it (useRelationshipInvalidation).
+ */
+export function useRelationshipChanges(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['relationship-changes', id],
+    queryFn: () => relationshipApi.changes(id!),
+    enabled: !!id && enabled,
   });
 }
 

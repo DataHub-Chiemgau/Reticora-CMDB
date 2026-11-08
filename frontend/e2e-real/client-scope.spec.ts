@@ -432,7 +432,7 @@ test.describe('client- and site-scoped users (TEN-04, TEN-06, TEN-09, EXP-01)', 
     );
   });
 
-  test('CS02 the relationship form with the id of the C2 CI shows the 422 field error and stores no edge', async () => {
+  test('CS02 the relationship form does not find the C2 CI, its id is 422 and no edge is stored', async () => {
     const page = w.session1.page;
     expect(edgeRows(), 'no edge before').toEqual([]);
     await page.goto(`/cmdb/${w.ci1.id}`);
@@ -441,24 +441,34 @@ test.describe('client- and site-scoped users (TEN-04, TEN-06, TEN-09, EXP-01)', 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await dialog.getByLabel('Beziehungstyp').selectOption('depends_on');
-    const target = dialog.getByLabel('CI-ID der Gegenstelle');
-    await target.fill(w.ci2.id);
-    const sent = waitForPath(page, '/relationships', 'POST');
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
-    const res = await sent;
-    const problem = (await res.json()) as { violations?: { field: string }[] };
-    expect(
-      `${res.status()} ${(problem.violations ?? []).map((v) => v.field).join(',')}`,
-      `POST /relationships to the C2 CI: ${JSON.stringify(problem)}`,
-    ).toBe('422 target_ci_id');
-    expectNoTraceOfC2('the refusal', JSON.stringify(problem).split(w.ci2.id).join(''));
+    // WP-323: the other end is searched by name (ObjectPicker, GET /cis);
+    // the C2 CI is no hit for the C1 user, so the form cannot be sent.
+    const searched = page.waitForResponse((r) => {
+      const url = new URL(r.url());
+      return url.pathname === '/api/v1/cis' && url.searchParams.get('search') === w.ci2.name;
+    });
+    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(w.ci2.name);
+    const search = await searched;
+    expect(search.status(), 'search of the C1 user').toBe(200);
+    expect(rows((await search.json()) as List<CI>).map((c) => c.id)).not.toContain(w.ci2.id);
+    await expect(dialog.getByText('Keine Treffer')).toBeVisible();
+    await expect(dialog.getByRole('option')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Anlegen' })).toBeDisabled();
+    expectNoTraceOfC2('relationship form', await bodyText(page));
 
-    // The dialog stays open and names the error at the field, in the UI language.
-    await expect(dialog).toBeVisible();
-    await expect(target).toHaveAttribute('aria-invalid', 'true');
-    await expect(dialog.getByText('Kein CI mit dieser ID gefunden.')).toBeVisible();
-    await expect(dialog.getByText(/target CI not found/i)).toHaveCount(0);
-    expectNoTraceOfC2('relationship form', (await bodyText(page)).split(w.ci2.id).join(''));
+    // The id of the C2 CI sent directly is 422 on target_ci_id (F-145).
+    const res = await api<{ violations?: { field: string }[] }>(
+      w.rq,
+      w.session1.token,
+      'POST',
+      '/relationships',
+      { source_ci_id: w.ci1.id, target_ci_id: w.ci2.id, rel_type: 'depends_on', source: 'manual' },
+    );
+    expect(
+      `${res.status} ${(res.body?.violations ?? []).map((v) => v.field).join(',')}`,
+      `POST /relationships to the C2 CI: ${JSON.stringify(res.body)}`,
+    ).toBe('422 target_ci_id');
+    expectNoTraceOfC2('the refusal', JSON.stringify(res.body).split(w.ci2.id).join(''));
     await dialog.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByText('Keine Beziehungen vorhanden')).toBeVisible();

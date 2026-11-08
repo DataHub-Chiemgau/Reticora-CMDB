@@ -44,6 +44,7 @@
     "saved-views": "Saved views",
     "locations": "Locations",
     "ci-types": "CI Types",
+    "relationship-types": "Relationship types",
     "reviews": "Reviews",
     "jobs": "Jobs"
   },
@@ -1956,8 +1957,8 @@
     "outgoing": "This CI → target",
     "incoming": "Source → this CI",
     "type": "Relationship type",
-    "targetCi": "CI ID of the other end",
-    "ciNotFound": "No CI with this ID was found.",
+    "targetCi": "Other end",
+    "ciNotFound": "The other end was not found or is not visible.",
     "notes": "Note",
     "verificationState": "Verification state",
     "state": {
@@ -1966,7 +1967,47 @@
       "disputed": "Disputed",
       "stale": "Stale"
     },
-    "projected": "projected (structure)"
+    "projected": "projected (structure)",
+    "typePairRefused": "The relationship type does not allow this combination of CI types.",
+    "cardinalityRefused": "The edge would exceed the cardinality of the relationship type.",
+    "noTypes": "No relationship type fits this CI and this direction.",
+    "attributes": "Attributes",
+    "history": {
+      "title": "Edge history",
+      "empty": "No changes recorded.",
+      "loadError": "The history of the relationship could not be loaded.",
+      "fields": "Changed: {{fields}}",
+      "by": "By {{actor}} via {{source}}"
+    },
+    "changeKinds": {
+      "created": "Created",
+      "updated": "Updated",
+      "verification_changed": "Verification state changed",
+      "refreshed": "Refreshed",
+      "removed": "Removed",
+      "suppressed": "Suppressed",
+      "rewired": "Rewired",
+      "restored": "Restored"
+    },
+    "changedFields": {
+      "attributes": "Attributes",
+      "confidence": "Confidence",
+      "verification_state": "Verification state",
+      "source_system": "Source system",
+      "notes": "Note"
+    },
+    "actorTypes": {
+      "user": "User",
+      "api_key": "API key",
+      "system": "System"
+    },
+    "changeSources": {
+      "ui": "User interface",
+      "api": "API",
+      "collector": "Collector",
+      "import": "Import",
+      "system": "System"
+    }
   },
   "relationshipCard": {
     "suppress": "Remove and suppress",
@@ -1990,6 +2031,94 @@
     "noReason": "No reason given",
     "lift": "Lift",
     "liftHint": "Discovery creates the edge again in its next cycle."
+  },
+  "relationshipTypes": {
+    "title": "Relationship types",
+    "subtitle": "System and own relationship types with direction, impact and attribute schema.",
+    "add": "Create relationship type",
+    "editNamed": "Edit {{name}}",
+    "deleteNamed": "Delete {{name}}",
+    "deleteTitle": "Delete relationship type",
+    "deleteConfirm": "The relationship type {{name}} will be deleted.",
+    "keyFixed": "Key: {{key}} (immutable)",
+    "loadError": "The relationship types could not be loaded.",
+    "empty": "No relationship types.",
+    "system": "System",
+    "own": "Own type",
+    "columns": {
+      "name": "Name (reverse)",
+      "key": "Key",
+      "category": "Category",
+      "impact": "Impact",
+      "cardinality": "Cardinality",
+      "origin": "Origin"
+    },
+    "groups": {
+      "naming": "Naming",
+      "behaviour": "Behaviour"
+    },
+    "fields": {
+      "key": "Key",
+      "displayName": "Name (outgoing)",
+      "reverseName": "Reverse name (incoming)",
+      "description": "Description",
+      "category": "Category",
+      "impactDirection": "Impact direction",
+      "cardinality": "Cardinality",
+      "directed": "Directed",
+      "redundant": "Redundant (impact only when all edges fail)",
+      "allowedSource": "Allowed source types",
+      "allowedTarget": "Allowed target types",
+      "allowedHint": "No selection allows every CI type; subtypes are included."
+    },
+    "categories": {
+      "network": "Network",
+      "power": "Power",
+      "hosting": "Hosting",
+      "logical": "Logical",
+      "physical": "Physical"
+    },
+    "impactDirections": {
+      "source_depends_on_target": "Source depends on target",
+      "target_depends_on_source": "Target depends on source",
+      "none": "No impact",
+      "undirected": "Undirected (both ways, heuristic)"
+    },
+    "cardinalities": {
+      "many_to_many": "Many to many",
+      "one_to_one": "One to one",
+      "one_to_many": "One to many",
+      "many_to_one": "Many to one"
+    },
+    "schema": {
+      "title": "Attribute schema of the edges",
+      "empty": "Edges of this type have no attributes.",
+      "add": "Add attribute",
+      "attribute": "Attribute {{number}}",
+      "remove": "Remove attribute {{number}}",
+      "key": "Key",
+      "labelDe": "Label (German)",
+      "labelEn": "Label (English)",
+      "dataType": "Data type",
+      "required": "Required",
+      "default": "Default value",
+      "enumValues": "Allowed values (comma separated)",
+      "min": "Minimum",
+      "max": "Maximum",
+      "minLength": "Minimum length",
+      "maxLength": "Maximum length",
+      "pattern": "Pattern (regular expression)"
+    },
+    "errors": {
+      "keyTaken": "A relationship type with this key already exists.",
+      "systemKey": "The key belongs to a system type and cannot be used.",
+      "inUse": "The relationship type is used by relationships or suppressions and cannot be deleted.",
+      "invalid": "Invalid definition: {{detail}}",
+      "forbidden": "No permission: relationship types need the permission relationship_type:manage.",
+      "forbiddenList": "No permission to read the relationship types.",
+      "notFound": "The relationship type was not found or is protected.",
+      "reason": "The change was refused: {{detail}}"
+    }
   },
   "scope": {
     "label": "Scope",

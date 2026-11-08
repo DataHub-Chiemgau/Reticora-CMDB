@@ -111,6 +111,9 @@ function relType(key: string, impact: RelationshipType['impact_direction']): Rel
     allowed_target_types: [],
     cardinality: 'many_to_many',
     is_system: true,
+    metadata_schema: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
   };
 }
 

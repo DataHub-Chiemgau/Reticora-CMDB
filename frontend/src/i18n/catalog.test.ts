@@ -19,7 +19,13 @@ import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
-import { NODE_KINDS } from '../api/client';
+import { NODE_KINDS, relationshipChangeKinds } from '../api/client';
+import {
+  CARDINALITIES,
+  IMPACT_DIRECTIONS,
+  RELATIONSHIP_ATTRIBUTE_TYPES,
+  RELATIONSHIP_CATEGORIES,
+} from '../pages/RelationshipTypesPage';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -52,6 +58,13 @@ const metamodelSources = import.meta.glob(
   ['../components/metamodel/**/*.tsx', '!../components/metamodel/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
+
+// WP-323: the edge dialog of the CI detail page.
+const cardSources = import.meta.glob('../components/cmdb/CIRelationshipsCard.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
 
 const COLLECTOR_STATUSES = ['pending', 'active', 'offline', 'disabled', 'paused'];
 
@@ -193,6 +206,18 @@ const enumerations: Array<[string, readonly string[]]> = [
   // reasons of stale items of a refused publication (metamodel.StaleItem).
   ['jobs.kinds.metamodel', ['test']],
   ['metamodelDrafts.page.staleReasons', ['changed', 'missing']],
+  // WP-323: category, impact direction and cardinality of a relationship
+  // type, the kinds of a change of an edge and the parts of a history row.
+  ['relationshipTypes.categories', RELATIONSHIP_CATEGORIES],
+  ['relationshipTypes.categories', specEnum('RelationshipTypeCategory')],
+  ['relationshipTypes.impactDirections', IMPACT_DIRECTIONS],
+  ['relationshipTypes.impactDirections', specEnum('RelationshipImpactDirection')],
+  ['relationshipTypes.cardinalities', CARDINALITIES],
+  ['relationshipTypes.cardinalities', specEnum('RelationshipTypeCardinality')],
+  ['relationship.changeKinds', relationshipChangeKinds],
+  ['relationship.changeKinds', specEnum('RelationshipChange', 'change_kind')],
+  ['relationship.changeSources', specEnum('RelationshipChange', 'source')],
+  ['relationship.actorTypes', specEnum('RelationshipChange', 'actor_type')],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
@@ -308,6 +333,24 @@ describe('i18n catalog', () => {
     expect([...DRAFT_STATUSES]).toEqual(specEnum('MetamodelDraft', 'status'));
   });
 
+  it('offers exactly the relationship enums of the OpenAPI types (WP-323)', () => {
+    expect([...RELATIONSHIP_CATEGORIES]).toEqual(specEnum('RelationshipTypeCategory'));
+    expect([...IMPACT_DIRECTIONS]).toEqual(specEnum('RelationshipImpactDirection'));
+    expect([...CARDINALITIES].sort()).toEqual(specEnum('RelationshipTypeCardinality').sort());
+    expect([...relationshipChangeKinds]).toEqual(specEnum('RelationshipChange', 'change_kind'));
+    // The attribute types are the values of FIELD_TYPES that WP-295 accepts:
+    // no json, file or reference type.
+    expect([...RELATIONSHIP_ATTRIBUTE_TYPES]).toEqual(
+      specEnum('RelationshipAttributeDefinition', 'data_type'),
+    );
+    expect(FIELD_TYPES).toEqual(expect.arrayContaining([...RELATIONSHIP_ATTRIBUTE_TYPES]));
+  });
+
+  it('labels the relationship type page in the navigation (WP-323)', () => {
+    expect(lookup(deDE, 'nav.relationship-types')).toBe('Beziehungstypen');
+    expect(lookup(enUS, 'nav.relationship-types')).toBe('Relationship types');
+  });
+
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
@@ -336,10 +379,14 @@ describe('i18n catalog', () => {
     '../pages/MetamodelDraftsPage.tsx',
     // WP-318: the assignment page, the pickers and the flow dialogs.
     '../pages/AssignmentListPage.tsx',
+    // WP-323: the relationship type administration and the edge dialog.
+    '../pages/RelationshipTypesPage.tsx',
+    '../components/cmdb/CIRelationshipsCard.tsx',
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
   ])('%s has no literal option labels', (file) => {
-    const source = pageSources[file] ?? metamodelSources[file] ?? flowSources[file];
+    const source =
+      pageSources[file] ?? metamodelSources[file] ?? flowSources[file] ?? cardSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

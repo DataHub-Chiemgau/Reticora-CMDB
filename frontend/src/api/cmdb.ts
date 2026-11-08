@@ -12,7 +12,7 @@ import {
   type CI,
   type PaginatedResponse,
 } from './client';
-import type { FieldDefinition } from '../lib/fieldmeta';
+import type { FieldDefinition, ValidationRules } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
 // ─── Metamodel drafts (MET-53, WP-260, WP-720, WP-798) ──────────────────────
@@ -572,21 +572,107 @@ export const ciFieldApi = {
 
 // ─── Relationship types (§11) ────────────────────────────────────────────────
 
-/** Relationship type metadata (REL-01, CH27). */
-export interface RelationshipType {
-  id: string;
-  key: string;
-  display_name: string;
-  reverse_name: string;
-  directed: boolean;
-  category: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
-  impact_direction: 'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
-  redundant: boolean;
-  allowed_source_types: string[];
-  allowed_target_types: string[];
-  cardinality: string;
-  is_system: boolean;
-  description?: string;
+/**
+ * Relationship type metadata (REL-01, CH27) with the attribute schema of its
+ * edges (REL-07, WP-295); derived from the OpenAPI schema (K27), so it
+ * carries organization_id (empty for a system type) and metadata_schema.
+ */
+export type RelationshipType = components['schemas']['RelationshipTypeDefinition'];
+/** One definition of the attribute schema of a relationship type (WP-295). */
+export type RelationshipAttributeDefinition =
+  components['schemas']['RelationshipAttributeDefinition'];
+/** The body of POST and PATCH /relationship-types. */
+export type RelationshipTypeUpsert = components['schemas']['RelationshipTypeUpsert'];
+export type RelationshipTypeCategory = components['schemas']['RelationshipTypeCategory'];
+export type RelationshipImpactDirection = components['schemas']['RelationshipImpactDirection'];
+export type RelationshipTypeCardinality = components['schemas']['RelationshipTypeCardinality'];
+
+/**
+ * validationRulesOf turns the validation of an attribute definition (the
+ * rule AST of MET-45 the server returns, or the legacy form) into the
+ * ValidationRules of a form field, as fieldmeta.ValidationFromRule does on
+ * the server: pattern, range of value (min, max) and of length
+ * (min_length, max_length) and enum (options). required is a flag of the
+ * definition and not repeated here.
+ */
+export function validationRulesOf(validation: unknown): ValidationRules | undefined {
+  if (typeof validation !== 'object' || validation === null) return undefined;
+  const v = validation as Record<string, unknown>;
+  if (typeof v.op !== 'string') {
+    // The legacy form is already the structure of a form field.
+    const legacy = v as ValidationRules;
+    return Object.keys(legacy).length > 0 ? legacy : undefined;
+  }
+  const out: ValidationRules = {};
+  const patterns: string[] = [];
+  const visit = (rule: Record<string, unknown>) => {
+    switch (rule.op) {
+      case 'all':
+        for (const child of (rule.rules as unknown[]) ?? []) {
+          if (typeof child === 'object' && child !== null) visit(child as Record<string, unknown>);
+        }
+        return;
+      case 'pattern':
+        if (typeof rule.pattern === 'string') patterns.push(rule.pattern);
+        return;
+      case 'range': {
+        const length = rule.of === 'length';
+        if (typeof rule.min === 'number') out[length ? 'min_length' : 'min'] = rule.min;
+        if (typeof rule.max === 'number') out[length ? 'max_length' : 'max'] = rule.max;
+        return;
+      }
+      case 'enum':
+        if (Array.isArray(rule.values)) out.options = rule.values.map(String);
+        return;
+      default:
+    }
+  };
+  visit(v);
+  if (patterns.length > 0) out.pattern = patterns[0];
+  if (patterns.length > 1) out.patterns = patterns.slice(1);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * relationshipAttributeFields maps the attribute schema of a relationship
+ * type onto the field definitions of DynamicForm (WP-323): key → name,
+ * display_name in the UI language → label, default → default_value; the
+ * validation as ValidationRules, conditional as it is.
+ */
+export function relationshipAttributeFields(
+  schema: readonly RelationshipAttributeDefinition[] | undefined,
+  language: string,
+): FieldDefinition[] {
+  return (schema ?? []).map((def, index) => ({
+    name: def.key,
+    label: localizedText(def.display_name, language) || def.key,
+    data_type: def.data_type,
+    required: def.required ?? false,
+    default_value:
+      def.default === undefined || def.default === null
+        ? undefined
+        : typeof def.default === 'string'
+          ? def.default
+          : JSON.stringify(def.default),
+    enum_values: def.enum_values,
+    validation: validationRulesOf(def.validation),
+    conditional: def.conditional as FieldDefinition['conditional'],
+    sort_order: index,
+  }));
+}
+
+/**
+ * relationshipAttributeDefaults are the values a new edge starts with: the
+ * default of each definition that has one (the server does not set it).
+ */
+export function relationshipAttributeDefaults(
+  schema: readonly RelationshipAttributeDefinition[] | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const def of schema ?? []) {
+    if (def.default !== undefined && def.default !== null) out[def.key] = def.default;
+  }
+  return out;
 }
 
 export const relationshipTypeApi = {
@@ -597,11 +683,11 @@ export const relationshipTypeApi = {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`);
   },
   create(
-    data: Partial<RelationshipType> & { key: string; display_name: string; reverse_name: string },
-  ) {
+    data: RelationshipTypeUpsert & { key: string; display_name: string; reverse_name: string },
+  ): Promise<RelationshipType> {
     return fetchAPI('/relationship-types', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(key: string, data: Partial<RelationshipType>) {
+  update(key: string, data: RelationshipTypeUpsert): Promise<RelationshipType> {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`, {
       method: 'PATCH',
       body: JSON.stringify(data),

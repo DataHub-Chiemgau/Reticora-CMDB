@@ -82,6 +82,10 @@ const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderList
 const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
 const CITypeAdminPage = lazyPage(() => import('./pages/CITypeAdminPage'), 'CITypeAdminPage');
+const RelationshipTypesPage = lazyPage(
+  () => import('./pages/RelationshipTypesPage'),
+  'RelationshipTypesPage',
+);
 const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
 const MetamodelDraftsPage = lazyPage(
   () => import('./pages/MetamodelDraftsPage'),
@@ -219,6 +223,7 @@ function App() {
           <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
           <Route path="/ci-types/drafts" element={<MetamodelDraftsPage />} />
           <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
+          <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
           <Route path="/documents" element={<DocumentListPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />

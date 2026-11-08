@@ -63,6 +63,9 @@ export default tseslint.config(
       'src/pages/AssignmentListPage.tsx',
       'src/components/pickers/**/*.tsx',
       'src/components/flows/**/*.tsx',
+      // WP-323: the relationship type administration and the edge dialog.
+      'src/pages/RelationshipTypesPage.tsx',
+      'src/components/cmdb/CIRelationshipsCard.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',

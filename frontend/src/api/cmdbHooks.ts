@@ -34,6 +34,7 @@ import {
   templateApi,
   templateMigrationApi,
   type AttributeDefinition,
+  type RelationshipTypeUpsert,
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
   type AttributeDefinitionPatch,
@@ -693,6 +694,35 @@ export function useRelationshipTypes(enabled = true) {
     queryKey: ['relationship-types'],
     queryFn: () => relationshipTypeApi.list({ limit: 100 }),
     enabled,
+  });
+}
+
+// The writes of the relationship type administration (WP-323); each
+// invalidates the catalog, which the edge dialog and the topology read.
+export function useCreateRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      data: RelationshipTypeUpsert & { key: string; display_name: string; reverse_name: string },
+    ) => relationshipTypeApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
+  });
+}
+
+export function useUpdateRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, data }: { key: string; data: RelationshipTypeUpsert }) =>
+      relationshipTypeApi.update(key, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
+  });
+}
+
+export function useDeleteRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => relationshipTypeApi.delete(key),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
   });
 }
 

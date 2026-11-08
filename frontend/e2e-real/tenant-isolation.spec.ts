@@ -481,7 +481,9 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     await page.getByRole('button', { name: /Beziehung hinzufügen/ }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Beziehungstyp').selectOption('depends_on');
-    await dialog.getByLabel('CI-ID der Gegenstelle').fill(w.ci3.id);
+    // WP-323: the other end is chosen by name with the ObjectPicker.
+    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(w.ci3.name);
+    await dialog.getByRole('option', { name: w.ci3.name }).click();
     const created = waitForApi(page, '/relationships', 'POST');
     await dialog.getByRole('button', { name: 'Anlegen' }).click();
     const res = await created;
@@ -1009,23 +1011,34 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     }
   });
 
-  test('T11 B’s relationship form rejects A’s CI id and stores nothing', async () => {
+  test('T11 B’s relationship form does not find A’s CI, the API refuses its id and nothing is stored', async () => {
     const pageB = w.b.page;
     await pageB.goto(`/cmdb/${w.bOwn.id}`);
     await expect(pageB.getByRole('heading', { name: w.bOwn.name })).toBeVisible();
     await pageB.getByRole('button', { name: /Beziehung hinzufügen/ }).click();
     const dialog = pageB.getByRole('dialog');
-    await dialog.getByLabel('CI-ID der Gegenstelle').fill(w.ci1.id);
-    const sent = waitForApi(pageB, '/relationships', 'POST');
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
-    const res = await sent;
-    expect(res.status(), 'relationship to A’s CI').toBeGreaterThanOrEqual(400);
-    // The form stays open and reports the refusal.
-    await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByRole('alert').or(dialog.locator('[aria-invalid="true"]')).first(),
-    ).toBeVisible();
+    // WP-323: the other end is searched by name (ObjectPicker, GET /cis);
+    // A's CI is no hit, so the form cannot be sent.
+    const searched = pageB.waitForResponse((r) => {
+      const url = new URL(r.url());
+      return url.pathname === '/api/v1/cis' && url.searchParams.get('search') === w.ci1.name;
+    });
+    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(w.ci1.name);
+    const search = await searched;
+    expect(search.status(), 'search of B').toBe(200);
+    expect(rows((await search.json()) as List<CI>).map((c) => c.id)).not.toContain(w.ci1.id);
+    await expect(dialog.getByText('Keine Treffer')).toBeVisible();
+    await expect(dialog.getByRole('option')).toHaveCount(0);
+    await expect(dialog.getByRole('button', { name: 'Anlegen' })).toBeDisabled();
     expectNoTraceOfA('B’s relationship form', await bodyText(pageB), [w.ci1.id]);
+    // The id of A's CI sent directly is refused as well.
+    const res = await api(w.rq, w.b.token, 'POST', '/relationships', {
+      source_ci_id: w.bOwn.id,
+      target_ci_id: w.ci1.id,
+      rel_type: 'depends_on',
+      source: 'manual',
+    });
+    expect(res.status, 'relationship to A’s CI').toBeGreaterThanOrEqual(400);
     await dialog.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(pageB.getByText('Keine Beziehungen vorhanden')).toBeVisible();
     const relsB = await api<List<Relationship>>(

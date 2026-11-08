@@ -1026,7 +1026,9 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Richtung').selectOption({ label: 'Dieses CI → Ziel' });
     await dialog.getByLabel('Beziehungstyp').selectOption('depends_on');
-    await dialog.getByLabel('CI-ID der Gegenstelle').fill(db.id);
+    // WP-323: the other end is chosen by name with the ObjectPicker.
+    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(db.name);
+    await dialog.getByRole('option', { name: db.name }).click();
     page.on('request', onRequest);
     page.on('response', onResponse);
     await page.route('**/api/v1/relationships', holdRepeat);
