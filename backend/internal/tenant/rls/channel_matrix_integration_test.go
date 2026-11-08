@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -16,9 +15,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -91,6 +92,12 @@ func newChannelEnvWithBlobs(t *testing.T, f *scopetest.Fixture, blobs blob.Store
 			Preferences: notify.NewPGPreferences(f.App),
 			Deliveries:  notify.NewPGDeliveryStore(f.App),
 		},
+		// As in cmd/server, for the P2 handlers (WP-828): the application
+		// pool for the document scans and the audit, the outbox for the
+		// events of imports and bookings, the upload limits of documents.
+		AuditPool: f.App,
+		Events:    events.NewPGEmitter(f.App),
+		Documents: config.DocumentSettings{MaxUploadMB: 10, UploadConcurrency: 4, UploadTimeout: time.Minute},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -361,9 +368,9 @@ type channelMatrix struct {
 	refTypeB, ciRefB, siteB string
 	seq                     int
 
-	// assets are the assets of the GraphQL aggregate (WP-311): one of
-	// client 1, one of client 2, one of organization B; tag = name.
-	assets map[string]string
+	// p2 is the scenario of the phase-2 channels
+	// (channel_matrix_p2_integration_test.go, WP-828).
+	p2 *p2Scenario
 }
 
 func newChannelMatrix(t *testing.T) *channelMatrix {
@@ -452,12 +459,6 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 	m.ciB = object{newCI(m.orgB, "chmci-b-a", "", "", ""), m.onlyB}
 	m.ciB2 = object{newCI(m.orgB, "chmci-b-b", "", "", ""), m.onlyB}
 	m.ciT2 = object{newCI(m.org, "chmci-t2-a", f.Client1, m.site1, m.team2), m.one.without("team")}
-	m.assets = map[string]string{}
-	for _, a := range []struct{ org, client, tag string }{
-		{f.OrgA, f.Client1, "chmas-c1"}, {f.OrgA, f.Client2, "chmas-c2"}, {f.OrgB, m.clientB, "chmas-b"},
-	} {
-		m.assets[f.Asset(t, a.org, a.client, a.tag)] = a.tag
-	}
 	edge := func(p *channelPrincipal, src, dst object) object {
 		return object{m.create(t, p, "/api/v1/relationships", map[string]any{"source_ci_id": src.id, "target_ci_id": dst.id, "rel_type": "depends_on"}),
 			src.seen.and(dst.seen)}
@@ -590,6 +591,9 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 	m.refTypeB, m.siteB = refType.ID, siteB
 	m.ciRefB = m.create(t, m.orgB, "/api/v1/cis", map[string]any{"ci_type_id": m.refTypeB, "name": "chm-ref-b",
 		"attributes": map[string]any{"chm_ref_ci": m.ciB.id, "chm_ref_location": siteB, "chm_ref_user": m.userB}})
+
+	// The objects of the phase-2 channels (WP-828).
+	m.p2 = newP2Scenario(t, m, blobs)
 	return m
 }
 
@@ -1533,26 +1537,6 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		show, hide := listed(p, jobsAll...)
 		return []matrixProbe{gql("jobs", `{ jobs(first: 100) { id kind status } }`, show, append(hide, `"errors"`))}
 	}}
-	rows["graphql-asset"] = matrixRow{read: func(p *channelPrincipal) []matrixProbe {
-		// The aggregate sees exactly the assets REST shows the principal
-		// (GET /assets/{id} as the oracle); every other asset is null and
-		// leaks neither id nor name.
-		var out []matrixProbe
-		ids := append(slices.Sorted(maps.Keys(m.assets)), unknownID)
-		for _, id := range ids {
-			q := fmt.Sprintf(`{ asset(id: %q) { id name } }`, id)
-			if code, _ := m.env.call(p, http.MethodGet, "/api/v1/assets/"+id, nil); code == http.StatusOK {
-				out = append(out, gql("asset", q, []string{id, m.assets[id]}, []string{`"errors"`}))
-				continue
-			}
-			var hide []string
-			if name, ok := m.assets[id]; ok {
-				hide = []string{id, name}
-			}
-			out = append(out, gql("asset", q, []string{`"asset":null`}, hide))
-		}
-		return out
-	}}
 	// The CI aggregates (WP-792): a CI outside the scope has no form and
 	// no history (null) and no series (empty); no answer names a CI the
 	// principal does not see (the values of the relationship changes
@@ -1597,6 +1581,9 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 		}
 		return out
 	}}
+	// The rows of the phase-2 channels and their objects in the channels
+	// review, notification and job (WP-828).
+	m.p2Rows(rows)
 	return rows
 }
 

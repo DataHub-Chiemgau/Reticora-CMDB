@@ -73,6 +73,32 @@ var Channels = []Channel{
 	{Name: "graphql-ci-form", Read: "POST /bff/graphql { ciForm(id) }", GraphQL: "ciForm"},
 	{Name: "graphql-ci-history", Read: "POST /bff/graphql { ciHistory(id) }", GraphQL: "ciHistory"},
 	{Name: "graphql-ci-metrics", Read: "POST /bff/graphql { ciMetrics(id) }", GraphQL: "ciMetrics"},
+
+	// The channels of phase 2 (WP-828); their rows and scenario are in
+	// channel_matrix_p2_integration_test.go. The P2 objects of the channels
+	// review (serial_mismatch), notification (contract expiry, minimum
+	// stock) and job (import, bulk) are read there as well.
+	{Name: "asset", Read: "GET /api/v1/assets?limit=200, GET /api/v1/assets/{id}, GET /api/v1/assets/{id}/movements",
+		Write: "POST /api/v1/assets, PATCH /api/v1/assets/{id}"},
+	{Name: "reservation", Read: "GET /api/v1/reservations?limit=200, GET /api/v1/reservations/{id}",
+		Write: "POST /api/v1/reservations, POST /api/v1/assets/{id}/reserve"},
+	{Name: "assignment", Read: "GET /api/v1/assignments?limit=200, GET /api/v1/assignments/{id}",
+		Write: "POST /api/v1/assets/{id}/assign"},
+	{Name: "supplier", Read: "GET /api/v1/suppliers?limit=200, GET /api/v1/suppliers/{id}"},
+	{Name: "contract", Read: "GET /api/v1/contracts?limit=200, GET /api/v1/contracts/{id}"},
+	{Name: "document", Read: "GET /api/v1/documents?limit=200, GET /api/v1/documents/{id}, GET /api/v1/documents/{id}/content",
+		Write: "POST /api/v1/documents/{id}/links"},
+	{Name: "consumable", Read: "GET /api/v1/consumables?limit=200, GET /api/v1/consumables/{id}, GET /api/v1/consumables/{id}/stock"},
+	{Name: "stock-movement", Read: "GET /api/v1/stock-movements?limit=200",
+		Write: "POST /api/v1/stock-movements (receipt of an article, transfer of an asset)"},
+	{Name: "order", Read: "GET /api/v1/orders?limit=200, GET /api/v1/orders/{id}", Write: "POST /api/v1/orders"},
+	{Name: "stocktake", Read: "GET /api/v1/stocktakes?limit=200, GET /api/v1/stocktakes/{id}"},
+	{Name: "ticket", Read: "GET /api/v1/tickets?limit=200, GET /api/v1/tickets/{id}", Write: "POST /api/v1/tickets"},
+	{Name: "import", Read: "GET /api/v1/imports/{id}", Write: "POST /api/v1/imports (rows of every client, report)"},
+	{Name: "bulk", Write: "POST /api/v1/cis/bulk, POST /api/v1/assets/bulk (partial failure report), POST /api/v1/jobs/{id}/revert"},
+	{Name: "label-lookup", Read: "GET /api/v1/labels/lookup?code=… (inventory number, barcode, URN)"},
+	{Name: "search-p2", Read: "GET /api/v1/search?q=<inventory number>"},
+	{Name: "datev-export", Read: "POST /api/v1/exports {format: datev} (file of the own export), GET /api/v1/exports/{id}"},
 }
 
 // ScopeKinds are the principal scopes of the matrix (TEN-04): the whole

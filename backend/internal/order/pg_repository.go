@@ -302,8 +302,8 @@ func (r *PGRepository) Create(ctx context.Context, o *Order) error {
 			}
 		}
 		if o.OrderNumber == "" {
-			if err = tx.QueryRow(ctx, "SELECT 'ORD-' || LPAD((COUNT(*)+1)::text, 6, '0') FROM internal_order WHERE organization_id = $1", o.OrganizationID).Scan(&o.OrderNumber); err != nil {
-				return fmt.Errorf("assign order number: %w", err)
+			if o.OrderNumber, err = nextOrderNumber(ctx, tx, o.OrganizationID); err != nil {
+				return err
 			}
 		}
 		created, err := scanOrder(tx.QueryRow(ctx, `
@@ -317,6 +317,29 @@ func (r *PGRepository) Create(ctx context.Context, o *Order) error {
 		*o = *created
 		return nil
 	})
+}
+
+// nextOrderNumber numbers a new order after all orders of the
+// organization. Counted under the caller's scope, a principal restricted to
+// clients repeated the number of an order of another client and failed on
+// the unique number (409; found by the channel matrix, WP-828). The count
+// runs with the client, site and team scope widened (app_scope_widen,
+// migration 000139), which is restored before the insert; only the number
+// leaves the widened statement.
+func nextOrderNumber(ctx context.Context, tx pgx.Tx, orgID string) (string, error) {
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT app_scope_widen()::text`).Scan(&previous); err != nil {
+		return "", fmt.Errorf("assign order number: widen scope: %w", err)
+	}
+	var number string
+	err := tx.QueryRow(ctx, "SELECT 'ORD-' || LPAD((COUNT(*)+1)::text, 6, '0') FROM internal_order WHERE organization_id = $1", orgID).Scan(&number)
+	if _, restoreErr := tx.Exec(ctx, `SELECT app_scope_restore($1::text[])`, previous); restoreErr != nil && err == nil {
+		err = restoreErr
+	}
+	if err != nil {
+		return "", fmt.Errorf("assign order number: %w", err)
+	}
+	return number, nil
 }
 
 func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateOrderRequest) (*Order, error) {

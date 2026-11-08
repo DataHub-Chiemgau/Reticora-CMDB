@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000271_search_users_tags
+Stand: Migration 000272_ticket_asset_site
 
 ## Prüfung
 
@@ -254,6 +254,13 @@ die Propagationstrigger zu. Bewusste Abweichungen von WP-028 AK1:
   löschen sie nur, wenn jeder Link in ihrem Schreib-Scope liegt (Migrationen
   000139 und 000146; ein Link auf ein org-weites Objekt zählt nicht, E-09),
   und legen keine unverlinkten an (WP-341).
+
+Ein Ticket ohne CI übernimmt seit Migration 000272 (WP-828) Client und
+Standort seines Assets (`derive_ticket_scope`, vorher nur den Client):
+Ohne Standort blieb das Ticket eines Assets für jeden Standort-Scope lesbar
+(E-09), auch im Suchindex. Der Backfill leitet die Tickets eines Assets ohne
+Standort neu ab, `updated_at` bleibt; die Down-Migration stellt die Funktion
+wieder her und lässt die Werte stehen.
 
 ### Entsorgungsnachweis nach E-55 (WP-751)
 
