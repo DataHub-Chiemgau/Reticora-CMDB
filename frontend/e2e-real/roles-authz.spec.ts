@@ -11,6 +11,7 @@ import {
   signupTenant,
   stamp,
   uiLogin,
+  withScopeControl,
   type ApiResult,
 } from './support/stack';
 import {
@@ -619,11 +620,12 @@ test('05b the admin invites in the UI; the mailed link opens the accept page, cr
     /\/(dashboard|onboarding)/,
   );
   await invitee.goto('/permissions');
-  const scopeClient = invitee
-    .getByRole('group', { name: 'Arbeitsbereich' })
-    .getByRole('combobox', { name: 'Kunde', exact: true });
-  await expect(scopeClient).toBeEnabled();
-  await expect(scopeClient.locator('option')).toHaveText(['Alle Kunden', clientName]);
+  // On a small screen the scope control sits in the navigation drawer (withScopeControl).
+  await withScopeControl(invitee, async (scope) => {
+    const scopeClient = scope.getByRole('combobox', { name: 'Kunde', exact: true });
+    await expect(scopeClient).toBeEnabled();
+    await expect(scopeClient.locator('option')).toHaveText(['Alle Kunden', clientName]);
+  });
   const permissionRow = (key: string) =>
     invitee.getByRole('row', { name: new RegExp(`^${key.replace(':', '\\:')}\\b`) });
   await expect(permissionRow('ci:read')).toContainText('Gewährt');

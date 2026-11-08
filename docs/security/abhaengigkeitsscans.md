@@ -123,8 +123,8 @@ reproduzierbar und integritätsgeprüft:
     Build prüft, dass `gosu postgres` als postgres läuft.
   - `timescaledb-parallel-copy` nutzen weder der Entrypoint noch die
     Init-Skripte noch Reticora; es wird entfernt.
-- `libexpat` des Basisimages wird per `apk upgrade` auf den Stand mit Fix
-  gehoben.
+- `libexpat`, Python 3 und `musl` (CVE-2026-107891, behoben in 1.2.5-r24)
+  des Basisimages werden per `apk upgrade` auf den Stand mit Fix gehoben.
 - Der pgBackRest-Quell-Tarball wird gegen `PGBACKREST_SHA256` geprüft, bevor
   er entpackt wird; eine andere `PGBACKREST_VERSION` ohne neue Prüfsumme
   bricht den Build ab.

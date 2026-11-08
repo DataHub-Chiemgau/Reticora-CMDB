@@ -4,7 +4,13 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
+import {
+  expect,
+  type APIRequestContext,
+  type Browser,
+  type Locator,
+  type Page,
+} from '@playwright/test';
 import { keycloakOtp } from '../../e2e/support/totp';
 
 // Shared helpers of the real-stack specs (Phase-1 acceptance audit). They
@@ -271,6 +277,42 @@ export async function uiLogin(
   await page.getByRole('button', { name: /anmelden|sign in/i }).click();
   await keycloakLogin(page, account, landing);
   return sessionToken(page);
+}
+
+/**
+ * withScopeControl runs `action` against the scope control (the group "Arbeitsbereich")
+ * and returns its result. On a large screen the control sits in the header and the
+ * action runs there. Below 1024 px (mobile-chrome, mobile-safari) the app shell renders
+ * it only in the navigation drawer, a modal dialog (PR #137): the helper opens the
+ * drawer with "Navigation öffnen", runs the action inside it and closes the drawer
+ * again if it is still open. So assertions on #main-content always run after the call,
+ * with the drawer closed. The control only exists while the drawer is open, so every
+ * read of it belongs inside `action`.
+ */
+export async function withScopeControl<T>(
+  page: Page,
+  action: (scope: Locator) => Promise<T>,
+): Promise<T> {
+  const openNav = page.getByRole('button', { name: 'Navigation öffnen', exact: true });
+  const headerScope = page.getByRole('group', { name: 'Arbeitsbereich', exact: true });
+  // Wait for the shell: either the header control (large) or the menu button (small).
+  await expect(openNav.or(headerScope).first()).toBeVisible();
+  if (!(await openNav.isVisible())) {
+    return action(headerScope);
+  }
+
+  await openNav.click();
+  const closeNav = page.getByRole('button', { name: 'Navigation schließen', exact: true });
+  const drawer = page.getByRole('dialog').filter({ has: closeNav });
+  await expect(drawer).toBeVisible();
+  const scope = drawer.getByRole('group', { name: 'Arbeitsbereich', exact: true });
+  await expect(scope).toBeVisible();
+  const result = await action(scope);
+  if (await drawer.isVisible()) {
+    await closeNav.click();
+  }
+  await expect(drawer).toHaveCount(0);
+  return result;
 }
 
 /** verificationLink waits for the signup e-mail to `email` and returns its link. */

@@ -12,6 +12,7 @@ import {
   signupTenant,
   stamp,
   uiLogin,
+  withScopeControl,
   BASE,
   type ScopedUser,
 } from './support/stack';
@@ -94,10 +95,9 @@ async function ok<T>(method: 'GET' | 'POST', path: string, data?: unknown): Prom
   return res.body;
 }
 
-function clientSelect(page: Page) {
-  return page
-    .getByRole('group', { name: 'Arbeitsbereich' })
-    .getByRole('combobox', { name: 'Kunde' });
+/** clientSelect is the client select of the scope control handed in by withScopeControl. */
+function clientSelect(scope: Locator) {
+  return scope.getByRole('combobox', { name: 'Kunde' });
 }
 
 function banner(page: Page) {
@@ -113,10 +113,12 @@ function relationshipsCard(page: Page) {
 /** openB1 chooses the client in the scope control and opens b1 by URL. */
 async function openB1(page: Page, clientId: string): Promise<void> {
   await page.goto('/cmdb');
-  const select = clientSelect(page);
-  await expect(select.getByRole('option', { name: w.clientA.name })).toBeAttached();
-  await select.selectOption(clientId);
-  await expect(select).toHaveValue(clientId);
+  await withScopeControl(page, async (scope) => {
+    const select = clientSelect(scope);
+    await expect(select.getByRole('option', { name: w.clientA.name })).toBeAttached();
+    await select.selectOption(clientId);
+    await expect(select).toHaveValue(clientId);
+  });
   await page.goto(`/cmdb/${w.b1.id}`);
   await expect(page.getByRole('heading', { name: w.b1.name })).toBeVisible();
 }
@@ -202,8 +204,10 @@ test.describe('CI detail under the chosen client scope (F-169)', () => {
     await banner(page).getByRole('button', { name: 'Bereich wechseln' }).click();
 
     await expect(banner(page)).toHaveCount(0);
-    await expect(clientSelect(page)).toHaveValue(w.clientB.id);
-    await expect(clientSelect(page).locator('option:checked')).toHaveText(w.clientB.name);
+    await withScopeControl(page, async (scope) => {
+      await expect(clientSelect(scope)).toHaveValue(w.clientB.id);
+      await expect(clientSelect(scope).locator('option:checked')).toHaveText(w.clientB.name);
+    });
     const card = relationshipsCard(page);
     await expect(card.getByRole('link', { name: w.b2.id })).toBeVisible();
     await expect(card.getByRole('link', { name: w.a1.id })).toHaveCount(0);
@@ -212,7 +216,9 @@ test.describe('CI detail under the chosen client scope (F-169)', () => {
     // The choice holds after a reload.
     await page.reload();
     await expect(page.getByRole('heading', { name: w.b1.name })).toBeVisible();
-    await expect(clientSelect(page)).toHaveValue(w.clientB.id);
+    await withScopeControl(page, async (scope) => {
+      await expect(clientSelect(scope)).toHaveValue(w.clientB.id);
+    });
     await expect(banner(page)).toHaveCount(0);
   });
 
@@ -224,7 +230,9 @@ test.describe('CI detail under the chosen client scope (F-169)', () => {
     await banner(page).getByRole('button', { name: 'Alle Kunden' }).click();
 
     await expect(banner(page)).toHaveCount(0);
-    await expect(clientSelect(page)).toHaveValue('');
+    await withScopeControl(page, async (scope) => {
+      await expect(clientSelect(scope)).toHaveValue('');
+    });
     const card = relationshipsCard(page);
     await expect(card.getByRole('link', { name: w.a1.id })).toBeVisible();
     await expect(card.getByRole('link', { name: w.b2.id })).toBeVisible();
@@ -272,10 +280,9 @@ async function adminOk<T>(method: 'GET' | 'POST', path: string, data?: unknown):
   return res.body;
 }
 
-function siteSelect(page: Page) {
-  return page
-    .getByRole('group', { name: 'Arbeitsbereich' })
-    .getByRole('combobox', { name: 'Standort' });
+/** siteSelect is the site select of the scope control handed in by withScopeControl. */
+function siteSelect(scope: Locator) {
+  return scope.getByRole('combobox', { name: 'Standort' });
 }
 
 /** optionValues reads the values of the options of a select, sorted. */
@@ -299,8 +306,10 @@ function cisRequest(page: Page, match: (query: URLSearchParams) => boolean) {
 /** openList opens /cmdb with the scope control loaded for the user. */
 async function openList(page: Page): Promise<void> {
   await page.goto('/cmdb');
-  await expect(clientSelect(page)).toBeEnabled();
-  await expect(clientSelect(page).getByRole('option', { name: l.clientA.name })).toBeAttached();
+  await withScopeControl(page, async (scope) => {
+    await expect(clientSelect(scope)).toBeEnabled();
+    await expect(clientSelect(scope).getByRole('option', { name: l.clientA.name })).toBeAttached();
+  });
 }
 
 test.describe('scope control lists of a client-restricted user (WP-556, WP-191)', () => {
@@ -397,9 +406,13 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
     await openList(page);
 
     const expected = ['', l.clientA.id, l.clientB.id].sort();
-    await expect.poll(() => optionValues(clientSelect(page))).toEqual(expected);
-    await expect(clientSelect(page).getByRole('option', { name: l.clientC.name })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Weitere Kunden laden' })).toHaveCount(0);
+    await withScopeControl(page, async (scope) => {
+      await expect.poll(() => optionValues(clientSelect(scope))).toEqual(expected);
+      await expect(clientSelect(scope).getByRole('option', { name: l.clientC.name })).toHaveCount(
+        0,
+      );
+      await expect(scope.getByRole('button', { name: 'Weitere Kunden laden' })).toHaveCount(0);
+    });
 
     // The same clients as the API returns to his session.
     const own = await api<ListOf<Named>>(l.rq, l.token, 'GET', '/clients?limit=200');
@@ -412,7 +425,7 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
     await openList(page);
 
     const listed = cisRequest(page, (q) => q.get('client_id') === l.clientA.id);
-    await clientSelect(page).selectOption(l.clientA.id);
+    await withScopeControl(page, (scope) => clientSelect(scope).selectOption(l.clientA.id));
     const res = await listed;
     expect(res.status(), 'CMDB list under client A').toBe(200);
     const body = (await res.json()) as ListOf<CIRow>;
@@ -443,25 +456,31 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
   test('L3 changing the client resets the site', async () => {
     const page = l.page;
     await openList(page);
-    await clientSelect(page).selectOption(l.clientA.id);
-    await expect(siteSelect(page).getByRole('option', { name: l.siteA.name })).toBeAttached();
-    await expect.poll(() => optionValues(siteSelect(page))).toEqual(['', l.siteA.id].sort());
+    const res = await withScopeControl(page, async (scope) => {
+      await clientSelect(scope).selectOption(l.clientA.id);
+      await expect(siteSelect(scope).getByRole('option', { name: l.siteA.name })).toBeAttached();
+      await expect.poll(() => optionValues(siteSelect(scope))).toEqual(['', l.siteA.id].sort());
 
-    const withSite = cisRequest(
-      page,
-      (q) => q.get('client_id') === l.clientA.id && q.get('site_id') === l.siteA.id,
-    );
-    await siteSelect(page).selectOption(l.siteA.id);
-    expect((await withSite).status()).toBe(200);
+      const withSite = cisRequest(
+        page,
+        (q) => q.get('client_id') === l.clientA.id && q.get('site_id') === l.siteA.id,
+      );
+      await siteSelect(scope).selectOption(l.siteA.id);
+      expect((await withSite).status()).toBe(200);
 
-    const afterChange = cisRequest(page, (q) => q.get('client_id') === l.clientB.id);
-    await clientSelect(page).selectOption(l.clientB.id);
-    const res = await afterChange;
-    expect(res.status()).toBe(200);
-    expect(new URL(res.url()).searchParams.get('site_id'), 'no site after the change').toBeNull();
-    await expect(siteSelect(page)).toHaveValue('');
-    await expect(siteSelect(page).locator('option:checked')).toHaveText('Alle Standorte');
-    await expect.poll(() => optionValues(siteSelect(page))).toEqual(['', l.siteB.id].sort());
+      const afterChange = cisRequest(page, (q) => q.get('client_id') === l.clientB.id);
+      await clientSelect(scope).selectOption(l.clientB.id);
+      const changed = await afterChange;
+      expect(changed.status()).toBe(200);
+      expect(
+        new URL(changed.url()).searchParams.get('site_id'),
+        'no site after the change',
+      ).toBeNull();
+      await expect(siteSelect(scope)).toHaveValue('');
+      await expect(siteSelect(scope).locator('option:checked')).toHaveText('Alle Standorte');
+      await expect.poll(() => optionValues(siteSelect(scope))).toEqual(['', l.siteB.id].sort());
+      return changed;
+    });
     const body = (await res.json()) as ListOf<CIRow>;
     expect((body.data ?? []).map((c) => c.id)).toEqual([l.b1.id]);
   });
@@ -469,15 +488,17 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
   test('L4 the selection holds after a reload', async () => {
     const page = l.page;
     await openList(page);
-    await clientSelect(page).selectOption(l.clientB.id);
-    await expect(siteSelect(page).getByRole('option', { name: l.siteB.name })).toBeAttached();
-    const withSite = cisRequest(
-      page,
-      (q) => q.get('client_id') === l.clientB.id && q.get('site_id') === l.siteB.id,
-    );
-    await siteSelect(page).selectOption(l.siteB.id);
-    expect((await withSite).status()).toBe(200);
-    await expect(siteSelect(page)).toHaveValue(l.siteB.id);
+    await withScopeControl(page, async (scope) => {
+      await clientSelect(scope).selectOption(l.clientB.id);
+      await expect(siteSelect(scope).getByRole('option', { name: l.siteB.name })).toBeAttached();
+      const withSite = cisRequest(
+        page,
+        (q) => q.get('client_id') === l.clientB.id && q.get('site_id') === l.siteB.id,
+      );
+      await siteSelect(scope).selectOption(l.siteB.id);
+      expect((await withSite).status()).toBe(200);
+      await expect(siteSelect(scope)).toHaveValue(l.siteB.id);
+    });
 
     // Registered after the answer above, so only a request of the reloaded page matches.
     const afterReload = cisRequest(
@@ -486,9 +507,11 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
     );
     await page.reload();
     expect((await afterReload).status()).toBe(200);
-    await expect(clientSelect(page)).toHaveValue(l.clientB.id);
-    await expect(clientSelect(page).locator('option:checked')).toHaveText(l.clientB.name);
-    await expect(siteSelect(page)).toHaveValue(l.siteB.id);
-    await expect(siteSelect(page).locator('option:checked')).toHaveText(l.siteB.name);
+    await withScopeControl(page, async (scope) => {
+      await expect(clientSelect(scope)).toHaveValue(l.clientB.id);
+      await expect(clientSelect(scope).locator('option:checked')).toHaveText(l.clientB.name);
+      await expect(siteSelect(scope)).toHaveValue(l.siteB.id);
+      await expect(siteSelect(scope).locator('option:checked')).toHaveText(l.siteB.name);
+    });
   });
 });
