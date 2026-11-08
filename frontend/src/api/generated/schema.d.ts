@@ -2432,7 +2432,8 @@ export interface paths {
     put?: never;
     /**
      * Record a stock in/out movement and adjust the level atomically
-     * @description The successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval (E-38, WP-756); this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The deprecation follows with WP-846.
+     * @deprecated
+     * @description Deprecated (E-38, WP-756, WP-846): the successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval; this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     post: operations['addConsumableMovement'];
     delete?: never;
@@ -7302,13 +7303,15 @@ export interface paths {
     };
     /**
      * Manage quantity-based inventory items
-     * @description Alias of GET /api/v1/consumables (E-38, E-40, WP-757): the consumables in the form of a quantity item, stock_level the sum of on_hand over the bins the caller sees, location_id the bin when the article lies in exactly one, attributes empty. The successor is GET /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757, WP-846): alias of GET /api/v1/consumables, the consumables in the form of a quantity item, stock_level the sum of on_hand over the bins the caller sees, location_id the bin when the article lies in exactly one, attributes empty. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     get: operations['listInventoryItems'];
     put?: never;
     /**
      * Manage quantity-based inventory items
-     * @description Alias of POST /api/v1/consumables (E-38, E-40, WP-757): creates a consumable; a stock_level > 0 is booked as a receipt into the bin location_id through the movement service in the same transaction. The successor is POST /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757, WP-846): alias of POST /api/v1/consumables, creates a consumable; a stock_level > 0 is booked as a receipt into the bin location_id through the movement service in the same transaction. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     post: operations['createInventoryItems'];
     delete?: never;
