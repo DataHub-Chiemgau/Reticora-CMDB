@@ -23,6 +23,7 @@ import {
   contractApi,
   contactApi,
   consumableApi,
+  orderApi,
   documentApi,
   importApi,
   fetchAPI,
@@ -67,6 +68,10 @@ import type {
   ListParams,
   AssetCreateRequest,
   ConsumableAvailabilityList,
+  CreateOrderRequest,
+  CreateOrderItemRequest,
+  ReceiveOrderRequest,
+  UpdateOrderRequest,
   AssetUpdateRequest,
   AssetListParams,
   AssignAssetRequest,
@@ -965,6 +970,72 @@ export function useImportErrors(id: string, cursor: string | undefined, enabled:
 }
 
 // --- Stocktakes ---
+
+// --- Orders (UI-14, WP-812) ---
+
+export type OrderListQuery = ListParams & { status?: string };
+
+export function useOrderList(params: OrderListQuery, { enabled = true }: ListQueryOptions = {}) {
+  return useQuery({
+    queryKey: ['orders', params],
+    queryFn: () => orderApi.list(params),
+    enabled,
+  });
+}
+
+/** useOrder reads one order with its positions (GET /orders/{id}). */
+export function useOrder(id: string | undefined) {
+  return useQuery({
+    queryKey: ['orders', 'detail', id],
+    queryFn: () => orderApi.get(id as string),
+    enabled: !!id,
+  });
+}
+
+/** useOrderMutation runs an order request and reloads every order query afterwards. */
+function useOrderMutation<V>(mutationFn: (vars: V) => Promise<unknown>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  });
+}
+
+export function useCreateOrder() {
+  return useOrderMutation((data: CreateOrderRequest) => orderApi.create(data));
+}
+
+export function useUpdateOrder() {
+  return useOrderMutation(({ id, data }: { id: string; data: UpdateOrderRequest }) =>
+    orderApi.update(id, data),
+  );
+}
+
+export function useDeleteOrder() {
+  return useOrderMutation((id: string) => orderApi.delete(id));
+}
+
+export function useAddOrderItem() {
+  return useOrderMutation(({ id, data }: { id: string; data: CreateOrderItemRequest }) =>
+    orderApi.addItem(id, data),
+  );
+}
+
+/** OrderTransition is an action of the order state machine without a body. */
+export type OrderTransition = 'submit' | 'approve' | 'reject' | 'place' | 'cancel' | 'close';
+
+export function useOrderTransition() {
+  return useOrderMutation(({ id, action }: { id: string; action: OrderTransition }) =>
+    orderApi[action](id),
+  );
+}
+
+export function useReceiveOrder() {
+  return useOrderMutation(
+    ({ id, data, key }: { id: string; data: ReceiveOrderRequest; key: string }) =>
+      orderApi.receive(id, data, key),
+  );
+}
 
 export function useStocktakeList(params: StocktakeListParams) {
   return useQuery({

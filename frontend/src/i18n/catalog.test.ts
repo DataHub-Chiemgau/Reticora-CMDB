@@ -9,6 +9,7 @@ import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
 import { SCAN_METHODS, SCAN_RESULTS } from '../pages/StocktakeDetailPage';
+import { ORDER_STATUSES } from '../pages/OrderListPage';
 import { LABEL_KINDS, LABEL_TEMPLATES } from '../components/flows/LabelPrintDialog';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
@@ -316,6 +317,8 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['topology.nodeKinds', specEnum('TopologyNode', 'node_kind')],
   ['impact.categories', specEnum('RelationshipTypeCategory')],
   ['dashboard.roles', DASHBOARD_ROLES],
+  // WP-812: the order states of the state machine (WP-286, WP-760).
+  ['orders.statuses', ORDER_STATUSES],
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
   // WP-813: the scan results and methods of the stocktake (StockScan of
@@ -495,6 +498,7 @@ describe('i18n catalog', () => {
   });
 
   it('reads the status enums from the OpenAPI types', () => {
+    expect([...ORDER_STATUSES]).toEqual(specEnum('Order', 'status'));
     expect(specEnum('Order', 'status')).toEqual([
       'draft',
       'submitted',
@@ -799,6 +803,8 @@ describe('i18n catalog', () => {
     '../pages/SLAPage.tsx',
     '../pages/DisposalListPage.tsx',
     ...Object.keys(slaSources),
+    // WP-812: the orders.
+    '../pages/OrderListPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??

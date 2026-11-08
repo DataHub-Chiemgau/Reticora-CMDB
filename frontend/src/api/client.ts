@@ -3194,40 +3194,69 @@ export const consumableApi = {
   },
 };
 
-export interface Order {
-  id: string;
-  organization_id: string;
-  order_number: string;
-  title: string;
-  status: string;
-  supplier?: string;
-  total_cost?: number;
-  currency?: string;
-  items?: { id: string; description: string; quantity: number; unit_price?: number }[];
-  created_at: string;
-}
+/**
+ * Order is an internal order with its state machine of nine states, the
+ * supplier record (supplier_id, supplier_name, E-41), the target bin of the
+ * goods receipt and its positions (WP-286, WP-760) as the OpenAPI types
+ * describe it (K27). The deprecated free-text supplier is no longer sent.
+ */
+export type Order = components['schemas']['Order'];
+/** OrderItem is a position: a consumable (consumable_id) or an asset description. */
+export type OrderItem = components['schemas']['OrderItem'];
+export type OrderStatus = Order['status'];
+export type CreateOrderRequest = Omit<components['schemas']['CreateOrderRequest'], 'supplier'>;
+export type UpdateOrderRequest = Omit<components['schemas']['UpdateOrderRequest'], 'supplier'>;
+export type CreateOrderItemRequest = components['schemas']['CreateOrderItemRequest'];
+/** ReceiveOrderRequest is the goods receipt: items[{item_id, quantity, location_id, asset_ids}]. */
+export type ReceiveOrderRequest = components['schemas']['ReceiveOrderRequest'];
 
 export const orderApi = {
   list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<Order>> {
     return fetchAPI(`/orders${buildQuery(params)}`);
   },
-  create(data: { title: string; supplier?: string; notes?: string }): Promise<Order> {
+  get(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}`);
+  },
+  create(data: CreateOrderRequest): Promise<Order> {
     return fetchAPI('/orders', { method: 'POST', body: JSON.stringify(data) });
   },
-  addItem(
-    id: string,
-    data: { description: string; quantity: number; unit_price?: number },
-  ): Promise<Order> {
+  /** update changes an order in status draft (PATCH /orders/{id}; 409 otherwise). */
+  update(id: string, data: UpdateOrderRequest): Promise<Order> {
+    return fetchAPI(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  addItem(id: string, data: CreateOrderItemRequest): Promise<Order> {
     return fetchAPI(`/orders/${id}/items`, { method: 'POST', body: JSON.stringify(data) });
   },
   submit(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/submit`, { method: 'POST', body: '{}' });
   },
+  /** approve and reject need order:approve and another user than the requester (403). */
   approve(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/approve`, { method: 'POST', body: '{}' });
   },
   reject(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/reject`, { method: 'POST', body: '{}' });
+  },
+  place(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/place`, { method: 'POST', body: '{}' });
+  },
+  cancel(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/cancel`, { method: 'POST', body: '{}' });
+  },
+  close(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/close`, { method: 'POST', body: '{}' });
+  },
+  /**
+   * receive books a goods receipt (POST /orders/{id}/receive, WP-760). The
+   * idempotencyKey is created once per dialog, so a repeated send of the
+   * same receipt is answered from the stored result.
+   */
+  receive(id: string, data: ReceiveOrderRequest, idempotencyKey: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/receive`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/orders/${id}`, { method: 'DELETE' });

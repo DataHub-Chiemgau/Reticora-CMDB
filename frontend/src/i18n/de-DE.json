@@ -2061,7 +2061,58 @@
     },
     "number": "Nummer",
     "emptyTitle": "Noch keine Bestellungen",
-    "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen."
+    "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen.",
+    "filterStatus": "Status filtern",
+    "editTitle": "Bestellung bearbeiten",
+    "client": "Mandant",
+    "orgWide": "Ohne Mandant (organisationsweit)",
+    "noSupplier": "Kein Lieferant",
+    "targetBin": "Ziel-Fach",
+    "actions": {
+      "submit": "Einreichen",
+      "items": "Positionen",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "approve": "Genehmigen",
+      "reject": "Ablehnen",
+      "place": "Bestellen",
+      "receive": "Wareneingang",
+      "close": "Abschließen",
+      "cancel": "Stornieren"
+    },
+    "items": {
+      "title": "Positionen von {{number}}",
+      "add": "Position hinzufügen",
+      "kind": "Art",
+      "kinds": {
+        "consumable": "Mengenartikel",
+        "asset": "Asset"
+      },
+      "consumable": "Mengenartikel",
+      "quantity": "Menge",
+      "unitPrice": "Einzelpreis",
+      "received": "Geliefert",
+      "none": "Noch keine Positionen."
+    },
+    "receive": {
+      "title": "Wareneingang zu {{number}}",
+      "remaining": "offen: {{count}}",
+      "quantity": "Gelieferte Menge ({{name}})",
+      "bin": "Ziel-Fach ({{name}})",
+      "assets": "Gelieferte Assets ({{name}})",
+      "submit": "Wareneingang buchen",
+      "tooMany": "Höchstens {{count}} offen – Überlieferung ist nicht möglich.",
+      "invalidQuantity": "Ganze Zahl ab 0 eingeben.",
+      "binRequired": "Ziel-Fach wählen.",
+      "assetsMismatch": "Genau {{count}} Assets wählen.",
+      "nothingOpen": "Alle Positionen sind vollständig geliefert."
+    },
+    "confirm": {
+      "cancelTitle": "Bestellung {{number}} stornieren?",
+      "cancelBody": "„{{title}}“ wird storniert. Bereits gebuchte Teillieferungen bleiben im Lager.",
+      "deleteTitle": "Bestellung {{number}} löschen?",
+      "deleteBody": "Der Entwurf „{{title}}“ wird mit seinen Positionen gelöscht."
+    }
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",

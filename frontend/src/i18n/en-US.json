@@ -2061,7 +2061,58 @@
     },
     "number": "Number",
     "emptyTitle": "No orders yet",
-    "emptyHint": "Create an order to follow procurement and approval."
+    "emptyHint": "Create an order to follow procurement and approval.",
+    "filterStatus": "Filter by status",
+    "editTitle": "Edit order",
+    "client": "Client",
+    "orgWide": "No client (organization-wide)",
+    "noSupplier": "No supplier",
+    "targetBin": "Target bin",
+    "actions": {
+      "submit": "Submit",
+      "items": "Items",
+      "edit": "Edit",
+      "delete": "Delete",
+      "approve": "Approve",
+      "reject": "Reject",
+      "place": "Place order",
+      "receive": "Goods receipt",
+      "close": "Close",
+      "cancel": "Cancel order"
+    },
+    "items": {
+      "title": "Items of {{number}}",
+      "add": "Add item",
+      "kind": "Kind",
+      "kinds": {
+        "consumable": "Consumable",
+        "asset": "Asset"
+      },
+      "consumable": "Consumable",
+      "quantity": "Quantity",
+      "unitPrice": "Unit price",
+      "received": "Received",
+      "none": "No items yet."
+    },
+    "receive": {
+      "title": "Goods receipt for {{number}}",
+      "remaining": "open: {{count}}",
+      "quantity": "Received quantity ({{name}})",
+      "bin": "Target bin ({{name}})",
+      "assets": "Received assets ({{name}})",
+      "submit": "Book goods receipt",
+      "tooMany": "At most {{count}} open – over-delivery is not possible.",
+      "invalidQuantity": "Enter a whole number from 0.",
+      "binRequired": "Choose a target bin.",
+      "assetsMismatch": "Choose exactly {{count}} assets.",
+      "nothingOpen": "All items have been received in full."
+    },
+    "confirm": {
+      "cancelTitle": "Cancel order {{number}}?",
+      "cancelBody": "“{{title}}” will be cancelled. Partial deliveries already booked stay in stock.",
+      "deleteTitle": "Delete order {{number}}?",
+      "deleteBody": "The draft “{{title}}” and its items will be deleted."
+    }
   },
   "maintenance": {
     "summary": "Schedule maintenance and notify affected customers.",
