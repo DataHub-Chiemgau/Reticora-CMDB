@@ -457,11 +457,15 @@ test.describe('Job center: cancel only where possible, partial report, rights an
       `Teilbericht: ${report.body.succeeded} von 500 erfolgreich, ${report.body.failed} fehlgeschlagen, ${report.body.skipped} übersprungen`,
     );
 
-    // The partial report in the UI.
+    // The partial report in the UI: a table per CI, not JSON (WP-816).
     await row.getByRole('button', { name: 'Teilbericht' }).click();
     const dialog = tech1.page.getByRole('dialog', { name: 'Teilbericht' });
-    await expect(dialog).toContainText('"cancelled": true');
-    await expect(dialog).toContainText(`"skipped": ${report.body.skipped}`);
+    await expect(dialog).toContainText(
+      `${report.body.succeeded} von 500 erfolgreich, ${report.body.failed} fehlgeschlagen, ${report.body.skipped} übersprungen`,
+    );
+    await expect(dialog.getByRole('table', { name: 'Bericht je CI' }).getByRole('row')).toHaveCount(
+      BULK_IDS + 1,
+    );
     await tech1.page.keyboard.press('Escape');
 
     // A finished job cannot be cancelled again (409).

@@ -239,7 +239,9 @@ test('job center: "Abbrechen" and "Ergebnis" of a job row are clickable', async 
   await expectNoSidewaysScroll(page);
 
   await main.locator(`tr[data-job-id="${DONE}"]`).getByRole('button', { name: 'Ergebnis' }).click();
-  await expect(page.getByRole('dialog')).toContainText('"succeeded": 98');
+  await expect(page.getByRole('dialog')).toContainText(
+    '98 von 100 erfolgreich, 2 fehlgeschlagen, 0 übersprungen',
+  );
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toBeHidden();
 

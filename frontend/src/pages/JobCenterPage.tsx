@@ -4,13 +4,16 @@
  * (queued, or running of a cancellable kind) for its creator or a holder of
  * the kind's permission, and the result of a job that has one (a cancelled
  * job's partial report, F-347). The list refreshes while a job is active and
- * after a cancel until the partial report is there.
+ * after a cancel until the partial report is there. "Rückgängig" reverts a
+ * succeeded job of a kind with revert within its window (E-25, WP-816); the
+ * results of the bulk kinds and their revert appear as a table.
  */
 import { ListChecks } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { BulkReportTable, bulkReportOf, type BulkEntity } from '../components/bulk/BulkBar';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -24,7 +27,6 @@ import { Toolbar, ToolbarEnd } from '../components/ui/Toolbar';
 import {
   tableClasses,
   tdClasses,
-  tdMonoClasses,
   theadClasses,
   thClasses,
   trClasses,
@@ -33,9 +35,12 @@ import { cn } from '../components/ui/utils';
 import {
   JOB_STATUSES,
   isCancellable,
+  isRevertible,
+  revertibleUntil,
   useCancelJob,
   useJobs,
   useMayControlJob,
+  useRevertJob,
   type Job,
   type JobStatus,
 } from '../hooks/useJobs';
@@ -71,6 +76,19 @@ function reportCounts(result: unknown): ReportCounts | undefined {
   };
 }
 
+/**
+ * BULK_RESULT_KINDS are the kinds whose result is a report per id
+ * (BulkResult, BulkRevertResult): shown as a table, the others as JSON.
+ */
+const BULK_RESULT_KINDS: Readonly<Record<string, BulkEntity>> = {
+  'ci.bulk': 'ci',
+  'asset.bulk': 'asset',
+  'bulk.revert': 'ci',
+};
+
+/** The names of the report table: the job center knows only the ids. */
+const NO_NAMES = new Map<string, string>();
+
 /** hasResult reports whether the job carries a result (GET /jobs/{id}/result answers 200). */
 function hasResult(job: Job): boolean {
   return job.result !== undefined && job.result !== null;
@@ -84,6 +102,7 @@ export function JobCenterPage() {
   const [awaiting, setAwaiting] = useState<string | null>(null);
   const { data, isLoading, error, refetch } = useJobs({ status }, { follow: awaiting !== null });
   const cancel = useCancelJob();
+  const revert = useRevertJob();
   const mayControl = useMayControlJob();
   const jobs = data?.data ?? [];
   const shown = jobs.find((job) => job.id === resultId);
@@ -98,12 +117,15 @@ export function JobCenterPage() {
     if (awaited && hasResult(awaited)) setAwaiting(null);
   }, [awaited]);
 
-  const cancelJob = (job: Job) =>
+  const kindLabel = (kind: string) => t(`jobs.kinds.${kind}`, kind);
+  const cancelJob = (job: Job) => {
+    revert.reset();
     cancel.mutate(job.id, {
       onSuccess: () => {
         if (job.status === 'running') setAwaiting(job.id);
       },
     });
+  };
   const cancelStatus = cancel.error instanceof ApiError ? cancel.error.status : undefined;
   const cancelError = !cancel.error
     ? null
@@ -116,6 +138,29 @@ export function JobCenterPage() {
           : t('jobs.cancelFailed', {
               error: cancel.error instanceof Error ? cancel.error.message : String(cancel.error),
             });
+
+  const revertJob = (job: Job) => {
+    cancel.reset();
+    revert.mutate(job.id);
+  };
+  const revertStatus = revert.error instanceof ApiError ? revert.error.status : undefined;
+  const revertError = !revert.error
+    ? null
+    : revertStatus === 403
+      ? t('jobs.revertForbidden')
+      : revertStatus === 409
+        ? t('jobs.revertConflict', {
+            detail:
+              revert.error instanceof ApiError
+                ? revert.error.detail || revert.error.title
+                : String(revert.error),
+          })
+        : t('jobs.revertFailed', {
+            error: revert.error instanceof Error ? revert.error.message : String(revert.error),
+          });
+  const now = Date.now();
+  const shownReport =
+    shown && BULK_RESULT_KINDS[shown.kind] ? bulkReportOf(shown.result) : undefined;
 
   return (
     <div className="space-y-4">
@@ -163,6 +208,16 @@ export function JobCenterPage() {
           {t('jobs.cancelDone')}
         </p>
       ) : null}
+      {revertError ? <ErrorState title={revertError} /> : null}
+      {revert.isSuccess ? (
+        <p role="status" className="text-sm text-fg-muted">
+          {revert.data.kind === 'job'
+            ? t('jobs.revertQueued', {
+                kind: t(`jobs.kinds.${revert.data.job.kind}`, revert.data.job.kind),
+              })
+            : t('jobs.revertDone')}
+        </p>
+      ) : null}
 
       {jobs.length > 0 ? (
         <Card className="overflow-hidden p-0">
@@ -192,14 +247,25 @@ export function JobCenterPage() {
                   const counts = job.status === 'cancelled' ? reportCounts(job.result) : undefined;
                   return (
                     <tr key={job.id} data-job-id={job.id} className={trClasses}>
-                      <td className={`${tdMonoClasses} font-medium`}>
-                        {t(`jobs.kinds.${job.kind}`, job.kind)}
+                      <td className={`${tdClasses} font-medium`}>
+                        {kindLabel(job.kind)}
+                        {kindLabel(job.kind) !== job.kind ? (
+                          <span
+                            className="block font-mono text-xs font-normal text-fg-muted"
+                            title={t('jobs.kindKey', { kind: job.kind })}
+                          >
+                            {job.kind}
+                          </span>
+                        ) : null}
                       </td>
                       <td className={tdClasses}>
                         <Badge variant={statusVariant[job.status] ?? 'neutral'}>
                           {t(`jobs.statuses.${job.status}`, job.status)}
                         </Badge>
                         {job.error ? <p className="mt-1 text-xs text-danger">{job.error}</p> : null}
+                        {job.reverted_at ? (
+                          <p className="mt-1 text-xs text-fg-muted">{t('jobs.reverted')}</p>
+                        ) : null}
                         {counts ? (
                           <p className="mt-1 text-xs text-fg-muted">
                             {t('jobs.partialReportSummary', { ...counts })}
@@ -248,6 +314,19 @@ export function JobCenterPage() {
                               {t('jobs.cancel')}
                             </Button>
                           ) : null}
+                          {isRevertible(job, now) && mayControl(job) ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              disabled={revert.isPending}
+                              title={t('jobs.revertUntil', {
+                                until: revertibleUntil(job)?.toLocaleString(i18n.language),
+                              })}
+                              onClick={() => revertJob(job)}
+                            >
+                              {t('jobs.revert')}
+                            </Button>
+                          ) : null}
                           {hasResult(job) ? (
                             <Button size="sm" variant="ghost" onClick={() => setResultId(job.id)}>
                               {t(job.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
@@ -271,9 +350,27 @@ export function JobCenterPage() {
         }}
         title={t(shown?.status === 'cancelled' ? 'jobs.partialReport' : 'jobs.result')}
       >
-        <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-fg">
-          {JSON.stringify(shown?.result, null, 2)}
-        </pre>
+        {shown && shownReport ? (
+          <div className="space-y-3 text-sm">
+            <p role="status" className="font-medium text-fg">
+              {t('jobs.resultSummary', {
+                succeeded: shownReport.succeeded,
+                total: shownReport.total,
+                failed: shownReport.failed,
+                skipped: shownReport.skipped,
+              })}
+            </p>
+            <BulkReportTable
+              entity={BULK_RESULT_KINDS[shown.kind] ?? 'ci'}
+              report={shownReport}
+              names={NO_NAMES}
+            />
+          </div>
+        ) : (
+          <pre className="max-h-96 overflow-auto rounded-lg border border-line bg-canvas p-3 font-mono text-xs text-fg">
+            {JSON.stringify(shown?.result, null, 2)}
+          </pre>
+        )}
       </Modal>
     </div>
   );

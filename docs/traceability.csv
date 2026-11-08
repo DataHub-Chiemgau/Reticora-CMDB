@@ -1552,3 +1552,4 @@ CI-07;[P2];C;frontend/src/pages/CIDetailPage.test.tsx;WP-805
 ABN-02;[Q];G2;tests/load/writes.js;WP-823
 NFR-03;[B], Teilumfang [P5];G2;tests/load/writes.js;WP-823
 UI-14;[P2–P4, A];C;frontend/src/pages/ContractsPage.test.tsx;WP-808
+UI-14;[P2–P4, A];C;frontend/src/components/bulk/BulkBar.test.tsx;WP-816

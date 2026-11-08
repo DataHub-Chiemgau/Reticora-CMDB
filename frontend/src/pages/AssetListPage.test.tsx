@@ -194,10 +194,33 @@ describe('AssetListPage', () => {
     expect(lastList(calls).get('cursor')).toBe('c-2');
   });
 
-  it('has no status bulk bar and sends no PATCH with status', async () => {
-    const { calls } = await renderList();
+  it('sets the status of selected assets over POST /assets/bulk, never by PATCH (WP-816)', async () => {
+    const routes = baseRoutes();
+    routes['POST /assets/bulk'] = {
+      action: 'set_status',
+      total: 1,
+      succeeded: 1,
+      failed: 0,
+      bulk_job_id: 'job-a',
+      items: [{ id: 'asset-1', result: 'ok', code: 200 }],
+    };
+    const { calls } = await renderList(routes);
+    // Without a selection there is no bulk toolbar.
     expect(screen.queryByRole('toolbar', { name: 'Massenbearbeitung' })).toBeNull();
-    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Laptop 1 auswählen' }));
+    const toolbar = await screen.findByRole('toolbar', { name: 'Massenbearbeitung' });
+    expect(toolbar).toHaveTextContent('1 ausgewählt');
+    fireEvent.change(within(toolbar).getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'retired' },
+    });
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Anwenden' }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'POST' && c.url.pathname === '/api/v1/assets/bulk'),
+      ).toBeTruthy(),
+    );
+    const bulk = calls.find((c) => c.method === 'POST' && c.url.pathname === '/api/v1/assets/bulk');
+    expect(bulk?.body).toEqual({ action: 'set_status', ids: ['asset-1'], status: 'retired' });
     expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
   });
 

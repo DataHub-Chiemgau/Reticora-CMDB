@@ -263,9 +263,12 @@
       "results": {
         "ok": "OK",
         "error": "Error",
-        "skipped": "Skipped"
+        "skipped": "Skipped",
+        "reverted": "Reverted"
       },
-      "closeReport": "Close report"
+      "closeReport": "Close report",
+      "queuedOther": "Bulk change for {{count}} CIs runs as a job",
+      "successOther": "{{count}} CIs changed"
     },
     "overrideReason": "Reason",
     "addInstanceField": "Add instance field",
@@ -753,6 +756,49 @@
       "more": "More details",
       "less": "Fewer details",
       "submitError": "The asset could not be created."
+    },
+    "bulk": {
+      "selected": "{{count}} selected",
+      "setStatus": "Set status…",
+      "apply": "Apply",
+      "clearSelection": "Clear selection",
+      "selectAll": "Select all visible assets",
+      "selectRow": "Select {{name}}",
+      "toolbarLabel": "Bulk edit",
+      "queued": "Status change for {{count}} assets runs as a job",
+      "queuedOther": "Bulk change for {{count}} assets runs as a job",
+      "partial": "{{succeeded}} assets updated, {{failed}} failed",
+      "failures": "Failed assets",
+      "success": "Updated status of {{count}} assets",
+      "successOther": "{{count}} assets changed",
+      "error": "The bulk change could not be fully applied",
+      "selectAllMatches": "Select all {{count}} matches of the filter",
+      "selectFirstMatches": "Select the first {{count}} matches of the filter",
+      "collectError": "The matches of the filter could not be loaded",
+      "capped": "A bulk change covers at most {{max}} assets: the filter has {{total}} matches, the first {{max}} are selected.",
+      "tooMany": "A bulk change covers at most {{max}} assets; {{count}} are selected.",
+      "jobHint": "From {{count}} assets on the change runs as a job; its report appears here.",
+      "jobTitle": "Bulk change as a job",
+      "jobProgress": "Progress of the bulk change",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job finished: {{succeeded}} of {{total}} assets updated, {{failed}} failed",
+      "jobCancelled": "Job cancelled: {{succeeded}} of {{total}} assets updated, {{failed}} failed, {{skipped}} skipped",
+      "jobFailed": "The job failed: {{error}}",
+      "jobLoadError": "The job could not be read",
+      "report": "Report per asset",
+      "reportCI": "Asset",
+      "reportResult": "Result",
+      "reportCode": "HTTP status",
+      "reportError": "Error",
+      "closeReport": "Close report",
+      "statuses": {
+        "in_stock": "In stock",
+        "assigned": "Assigned",
+        "maintenance": "In maintenance",
+        "retired": "Retired",
+        "disposed": "Disposed",
+        "lost": "Lost"
+      }
     }
   },
   "assignment": {
@@ -2966,7 +3012,10 @@
     "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped",
     "kinds": {
       "attribute": {
-        "index": "Attribute index"
+        "index": "Attribute index",
+        "index.rebuild": "Attribute index rebuild",
+        "index.key": "Attribute index by key",
+        "computed_backfill": "Backfill of computed attributes"
       },
       "metamodel": {
         "test": "Metamodel test"
@@ -2976,9 +3025,42 @@
       },
       "import": {
         "run": "Import run"
+      },
+      "ci": {
+        "bulk": "Bulk change of CIs",
+        "merge": "CI merge"
+      },
+      "asset": {
+        "bulk": "Bulk change of assets"
+      },
+      "bulk": {
+        "revert": "Undo of a bulk change"
+      },
+      "export": "Export",
+      "history": {
+        "snapshot": "State snapshot"
+      },
+      "document": {
+        "scan": "Document malware scan"
+      },
+      "search": {
+        "reindex": "Search index rebuild"
+      },
+      "labels": {
+        "batch": "Label printing"
       }
     },
-    "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts."
+    "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts.",
+    "kindKey": "Technical key: {{kind}}",
+    "revert": "Undo",
+    "revertUntil": "Undo until {{until}}",
+    "revertDone": "The job was undone.",
+    "revertQueued": "The undo runs as job {{kind}}.",
+    "revertConflict": "The job cannot be undone: {{detail}}",
+    "revertForbidden": "You may not undo this job.",
+    "revertFailed": "The job could not be undone: {{error}}",
+    "reverted": "Undone",
+    "resultSummary": "{{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped"
   },
   "provenance": {
     "show": "Provenance of {{field}}",
@@ -4239,5 +4321,82 @@
       "notFound": "The supplier no longer exists.",
       "reason": "Error: {{detail}}"
     }
+  },
+  "bulk": {
+    "operation": "Action",
+    "operations": {
+      "set_status": "Set status",
+      "set_fields": "Set field",
+      "set_location": "Set location",
+      "add_tags": "Add tags",
+      "remove_tags": "Remove tags",
+      "change_template": "Change template",
+      "add_relationship": "Add relationship",
+      "remove_relationship": "Remove relationship",
+      "assign": "Assign",
+      "lifecycle_transition": "Lifecycle transition",
+      "archive": "Archive",
+      "export": "Export"
+    },
+    "choose": "Please choose…",
+    "field": "Field",
+    "value": "New value",
+    "valueHint": "Empty clears the field",
+    "ciFields": {
+      "name": "Name",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "serial_number": "Serial number",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "management_ip": "Management IP",
+      "os_name": "Operating system",
+      "os_version": "OS version",
+      "firmware_version": "Firmware version"
+    },
+    "location": "New location",
+    "tags": "Tags",
+    "noTags": "The tag catalog is empty.",
+    "template": "Template",
+    "templateVersion": "Target version",
+    "currentVersion": "Current version",
+    "version": "Version {{version}}",
+    "relType": "Relationship type",
+    "direction": "Direction",
+    "directions": {
+      "outgoing": "Outgoing (CI → target)",
+      "incoming": "Incoming (target → CI)"
+    },
+    "target": "Target CI",
+    "owner": "Owner (user or team)",
+    "holder": "Assign to (user or team)",
+    "toState": "Target state",
+    "reason": "Reason (optional)",
+    "archiveHint": "Sets the status inactive and the tag archived.",
+    "format": "Format",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON"
+    },
+    "exportQueued": "Export of {{count}} objects started; the file appears under Export.",
+    "invalid": "The bulk change was refused: {{detail}}",
+    "forbidden": "You lack the permission for this action.",
+    "jobFinished": "Bulk change finished.",
+    "undo": "Undo",
+    "undoDone": "The change was undone.",
+    "undoQueued": "The undo runs as a job.",
+    "undoConflict": "Undo not possible: {{detail}}",
+    "undoForbidden": "You may not undo this change.",
+    "undoFailed": "The change could not be undone.",
+    "revertTitle": "Undo as a job",
+    "revertQueued": "Undo for {{count}} objects runs as a job",
+    "revertDone": "Undo finished: {{succeeded}} of {{total}} reverted, {{skipped}} skipped, {{failed}} failed",
+    "selectByFilter": "Select by filter…",
+    "filterTitle": "Select by filter",
+    "filterHint": "The matches of the filter are selected, at most {{max}}.",
+    "filterApply": "Select matches",
+    "filterError": "The matches of the filter could not be loaded.",
+    "filterEmpty": "The filter has no matches.",
+    "filterCapped": "The filter has {{total}} matches; a bulk change covers at most {{max}}, the first {{max}} are selected. Narrow the filter or use the export."
   }
 }

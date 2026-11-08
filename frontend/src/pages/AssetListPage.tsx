@@ -5,21 +5,32 @@
  * saved views (entity_kind asset) for columns, sort and these filters. The
  * creation is guided (UI-12): a tile per category, then the required fields
  * and the details on demand. Lifecycle changes, the CI link, supplier,
- * contract and owner live on the detail page (WP-809).
+ * contract and owner live on the detail page (WP-809). Rows are selected
+ * one by one, per page or by filter; the BulkBar applies the operations of
+ * POST /assets/bulk to them, set_status among them, with report and undo
+ * (WP-781, WP-784, WP-816).
  */
 import { ArrowDown, ArrowUp, ChevronDown, Columns3, Package, Plus, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { ApiError, type Asset, type AssetCreateRequest, type FieldErrorInfo } from '../api/client';
+import {
+  ApiError,
+  assetApi,
+  type Asset,
+  type AssetCreateRequest,
+  type AssetListParams,
+  type FieldErrorInfo,
+} from '../api/client';
 import type { SavedView, SavedViewSortKey } from '../api/cmdb';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { lifecycleApi } from '../api/cmdb';
 import { useSavedViews, useSaveView } from '../api/cmdbHooks';
 import { useAssetList, useCreateAsset, useDeleteAsset } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/ObjectHistory';
 import { TypeTiles, type TileType } from '../components/create/TypeTiles';
+import { BulkBar, type CollectedMatches } from '../components/bulk/BulkBar';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -42,6 +53,7 @@ import {
 import { cn } from '../components/ui/utils';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useToastStore } from '../stores/toast';
+import { useScopeStore } from '../stores/scope';
 import { ScrollRegion } from '../components/ScrollRegion';
 import { TableEmptyRow } from './ListParts';
 
@@ -156,6 +168,41 @@ function sortKeys(sort: string): SavedViewSortKey[] {
     : [{ field: sort, dir: 'asc' }];
 }
 
+/** The page size of collectAssets: the largest page the asset list answers (API-02). */
+const COLLECT_PAGE_SIZE = 200;
+
+/**
+ * collectAssets gathers the ids and names of the assets of the filtered list
+ * over next_cursor up to `max` (the selection of all matches, WP-816).
+ */
+export async function collectAssets(
+  params: Pick<AssetListParams, 'search' | 'category' | 'filter'>,
+  max: number,
+): Promise<CollectedMatches> {
+  const seen = new Set<string>();
+  const items: CollectedMatches['items'] = [];
+  let total = 0;
+  let cursor: string | undefined;
+  do {
+    const page = await assetApi.list({
+      ...params,
+      fields: ['inventory_no', 'name'],
+      limit: COLLECT_PAGE_SIZE,
+      cursor,
+    });
+    const rows = page.data ?? [];
+    total = page.total ?? total;
+    for (const asset of rows) {
+      if (items.length < max && !seen.has(asset.id)) {
+        seen.add(asset.id);
+        items.push({ id: asset.id, name: asset.name ?? asset.inventory_no ?? asset.id });
+      }
+    }
+    cursor = rows.length > 0 ? (page.next_cursor ?? undefined) : undefined;
+  } while (cursor && items.length < max);
+  return { items, total: Math.max(total, items.length) };
+}
+
 function lifecycleVariant(state: string) {
   switch (state) {
     case 'in_stock':
@@ -204,13 +251,23 @@ export function AssetListPage() {
   const [showSaveView, setShowSaveView] = useState(false);
   const pushToast = useToastStore((state) => state.push);
   const { scheduleDelete } = useUndoableDelete();
+  const queryClient = useQueryClient();
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Names of the assets the list showed or collected, for the bulk reports.
+  const names = useRef(new Map<string, string>()).current;
+  const scopeClientId = useScopeStore((state) => state.clientId);
+  const scopeSiteId = useScopeStore((state) => state.siteId);
+  const listFilter = useMemo(
+    () => (lifecycle ? [{ field: 'lifecycle_state', value: lifecycle }] : []),
+    [lifecycle],
+  );
 
   const cursor = cursors.length > 0 ? cursors[cursors.length - 1] : undefined;
   const { data, isLoading, error, refetch } = useAssetList(
     {
       search,
       category,
-      filter: lifecycle ? [{ field: 'lifecycle_state', value: lifecycle }] : [],
+      filter: listFilter,
       fields: columns,
       sort: sort || undefined,
       cursor,
@@ -243,6 +300,37 @@ export function AssetListPage() {
     }
     return labels;
   }, [models]);
+
+  useEffect(() => {
+    for (const asset of assetList) {
+      names.set(asset.id, asset.name ?? asset.inventory_no ?? asset.id);
+    }
+  }, [assetList, names]);
+
+  // The selection belongs to the filtered list: it survives paging, a
+  // change of the filters or the scope drops it (as in the CI list).
+  const filterKey = [search, lifecycle, category, scopeClientId, scopeSiteId].join('\u0000');
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [filterKey]);
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const allVisibleSelected =
+    assetList.length > 0 && assetList.every((asset) => selectedSet.has(asset.id));
+
+  function toggleSelect(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+    );
+  }
+
+  function toggleSelectAll() {
+    const visible = assetList.map((asset) => asset.id);
+    setSelectedIds((current) =>
+      allVisibleSelected
+        ? current.filter((id) => !visible.includes(id))
+        : [...current, ...visible.filter((id) => !current.includes(id))],
+    );
+  }
 
   function resetPages() {
     setCursors([]);
@@ -426,12 +514,32 @@ export function AssetListPage() {
         />
       ) : null}
 
+      <BulkBar
+        entity="asset"
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        total={data?.total}
+        collectMatches={(max) => collectAssets({ search, category, filter: listFilter }, max)}
+        filterKey={filterKey}
+        names={names}
+        onChanged={() => void queryClient.invalidateQueries({ queryKey: ['assets'] })}
+      />
+
       {data ? (
         <Card className="p-0 overflow-hidden">
           <ScrollRegion label={t('asset.title')}>
             <table className={tableClasses}>
               <thead className={theadClasses}>
                 <tr>
+                  <th scope="col" className={cn(thClasses, 'w-10')}>
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAll}
+                      disabled={assetList.length === 0}
+                      aria-label={t('asset.bulk.selectAll')}
+                    />
+                  </th>
                   {columns.map((column) => (
                     <ColumnHeader
                       key={column}
@@ -448,6 +556,16 @@ export function AssetListPage() {
               <tbody>
                 {assetList.map((asset) => (
                   <tr key={asset.id} className={trClasses}>
+                    <td className={tdClasses}>
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(asset.id)}
+                        onChange={() => toggleSelect(asset.id)}
+                        aria-label={t('asset.bulk.selectRow', {
+                          name: asset.name ?? asset.inventory_no ?? asset.id,
+                        })}
+                      />
+                    </td>
                     {columns.map((column) => (
                       <td key={column} className={cellClass(column)}>
                         {renderCell(asset, column)}
@@ -462,7 +580,7 @@ export function AssetListPage() {
                 ))}
                 {assetList.length === 0 ? (
                   <TableEmptyRow
-                    colSpan={columns.length + 1}
+                    colSpan={columns.length + 2}
                     icon={<Package />}
                     title={filtered ? t('common.noResults') : t('asset.emptyTitle')}
                     description={filtered ? t('common.noResultsHint') : t('asset.emptyHint')}

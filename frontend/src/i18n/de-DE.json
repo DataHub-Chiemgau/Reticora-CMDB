@@ -263,9 +263,12 @@
       "results": {
         "ok": "OK",
         "error": "Fehler",
-        "skipped": "Übersprungen"
+        "skipped": "Übersprungen",
+        "reverted": "Zurückgesetzt"
       },
-      "closeReport": "Bericht schließen"
+      "closeReport": "Bericht schließen",
+      "queuedOther": "Massenänderung für {{count}} CIs läuft als Job",
+      "successOther": "{{count}} CIs geändert"
     },
     "overrideReason": "Begründung",
     "addInstanceField": "Instanzfeld hinzufügen",
@@ -753,6 +756,49 @@
       "more": "Weitere Angaben",
       "less": "Weniger Angaben",
       "submitError": "Das Asset konnte nicht angelegt werden."
+    },
+    "bulk": {
+      "selected": "{{count}} ausgewählt",
+      "setStatus": "Status setzen…",
+      "apply": "Anwenden",
+      "clearSelection": "Auswahl aufheben",
+      "selectAll": "Alle sichtbaren Assets auswählen",
+      "selectRow": "{{name}} auswählen",
+      "toolbarLabel": "Massenbearbeitung",
+      "queued": "Statusänderung für {{count}} Assets läuft als Job",
+      "queuedOther": "Massenänderung für {{count}} Assets läuft als Job",
+      "partial": "{{succeeded}} Assets aktualisiert, {{failed}} fehlgeschlagen",
+      "failures": "Fehlgeschlagene Assets",
+      "success": "Status von {{count}} Assets aktualisiert",
+      "successOther": "{{count}} Assets geändert",
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden",
+      "selectAllMatches": "Alle {{count}} Treffer des Filters auswählen",
+      "selectFirstMatches": "Die ersten {{count}} Treffer des Filters auswählen",
+      "collectError": "Die Treffer des Filters konnten nicht geladen werden",
+      "capped": "Eine Massenänderung umfasst höchstens {{max}} Assets: der Filter hat {{total}} Treffer, die ersten {{max}} sind ausgewählt.",
+      "tooMany": "Eine Massenänderung umfasst höchstens {{max}} Assets; {{count}} sind ausgewählt.",
+      "jobHint": "Ab {{count}} Assets läuft die Änderung als Job; sein Bericht erscheint hier.",
+      "jobTitle": "Massenänderung als Job",
+      "jobProgress": "Fortschritt der Massenänderung",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job abgeschlossen: {{succeeded}} von {{total}} Assets aktualisiert, {{failed}} fehlgeschlagen",
+      "jobCancelled": "Job abgebrochen: {{succeeded}} von {{total}} Assets aktualisiert, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
+      "jobFailed": "Der Job ist fehlgeschlagen: {{error}}",
+      "jobLoadError": "Der Job konnte nicht gelesen werden",
+      "report": "Bericht je Asset",
+      "reportCI": "Asset",
+      "reportResult": "Ergebnis",
+      "reportCode": "HTTP-Status",
+      "reportError": "Fehler",
+      "closeReport": "Bericht schließen",
+      "statuses": {
+        "in_stock": "Auf Lager",
+        "assigned": "Zugewiesen",
+        "maintenance": "In Wartung",
+        "retired": "Ausgemustert",
+        "disposed": "Entsorgt",
+        "lost": "Verloren"
+      }
     }
   },
   "assignment": {
@@ -2966,7 +3012,10 @@
     "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
     "kinds": {
       "attribute": {
-        "index": "Attributindex"
+        "index": "Attributindex",
+        "index.rebuild": "Neuaufbau Attributindex",
+        "index.key": "Attributindex über Schlüssel",
+        "computed_backfill": "Nachberechnung berechneter Attribute"
       },
       "metamodel": {
         "test": "Metamodell-Test"
@@ -2976,9 +3025,42 @@
       },
       "import": {
         "run": "Import-Lauf"
+      },
+      "ci": {
+        "bulk": "Massenänderung CIs",
+        "merge": "CI-Zusammenführung"
+      },
+      "asset": {
+        "bulk": "Massenänderung Assets"
+      },
+      "bulk": {
+        "revert": "Rückgängig einer Massenänderung"
+      },
+      "export": "Export",
+      "history": {
+        "snapshot": "Zustands-Snapshot"
+      },
+      "document": {
+        "scan": "Malware-Prüfung Dokument"
+      },
+      "search": {
+        "reindex": "Neuaufbau Suchindex"
+      },
+      "labels": {
+        "batch": "Etikettendruck"
       }
     },
-    "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet."
+    "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet.",
+    "kindKey": "Technischer Schlüssel: {{kind}}",
+    "revert": "Rückgängig",
+    "revertUntil": "Rückgängig bis {{until}}",
+    "revertDone": "Der Job wurde rückgängig gemacht.",
+    "revertQueued": "Das Rückgängigmachen läuft als Job {{kind}}.",
+    "revertConflict": "Der Job lässt sich nicht rückgängig machen: {{detail}}",
+    "revertForbidden": "Sie dürfen diesen Job nicht rückgängig machen.",
+    "revertFailed": "Der Job konnte nicht rückgängig gemacht werden: {{error}}",
+    "reverted": "Rückgängig gemacht",
+    "resultSummary": "{{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
@@ -4239,5 +4321,82 @@
       "notFound": "Der Lieferant existiert nicht mehr.",
       "reason": "Fehler: {{detail}}"
     }
+  },
+  "bulk": {
+    "operation": "Aktion",
+    "operations": {
+      "set_status": "Status setzen",
+      "set_fields": "Feld setzen",
+      "set_location": "Standort setzen",
+      "add_tags": "Tags hinzufügen",
+      "remove_tags": "Tags entfernen",
+      "change_template": "Template wechseln",
+      "add_relationship": "Beziehung anlegen",
+      "remove_relationship": "Beziehung entfernen",
+      "assign": "Zuweisen",
+      "lifecycle_transition": "Lebenszyklus-Übergang",
+      "archive": "Archivieren",
+      "export": "Exportieren"
+    },
+    "choose": "Bitte wählen…",
+    "field": "Feld",
+    "value": "Neuer Wert",
+    "valueHint": "Leer leert das Feld",
+    "ciFields": {
+      "name": "Name",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serial_number": "Seriennummer",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "management_ip": "Management-IP",
+      "os_name": "Betriebssystem",
+      "os_version": "OS-Version",
+      "firmware_version": "Firmware-Version"
+    },
+    "location": "Neuer Standort",
+    "tags": "Tags",
+    "noTags": "Der Tag-Katalog ist leer.",
+    "template": "Template",
+    "templateVersion": "Zielversion",
+    "currentVersion": "Aktuelle Version",
+    "version": "Version {{version}}",
+    "relType": "Beziehungstyp",
+    "direction": "Richtung",
+    "directions": {
+      "outgoing": "Ausgehend (CI → Ziel)",
+      "incoming": "Eingehend (Ziel → CI)"
+    },
+    "target": "Ziel-CI",
+    "owner": "Verantwortlich (Benutzer oder Team)",
+    "holder": "Zuweisen an (Benutzer oder Team)",
+    "toState": "Zielzustand",
+    "reason": "Begründung (optional)",
+    "archiveHint": "Setzt den Status inaktiv und das Tag archived.",
+    "format": "Format",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON"
+    },
+    "exportQueued": "Export von {{count}} Objekten gestartet; die Datei erscheint unter Export.",
+    "invalid": "Die Massenänderung wurde abgelehnt: {{detail}}",
+    "forbidden": "Ihnen fehlt das Recht für diese Aktion.",
+    "jobFinished": "Massenänderung abgeschlossen.",
+    "undo": "Rückgängig",
+    "undoDone": "Die Änderung wurde rückgängig gemacht.",
+    "undoQueued": "Das Rückgängigmachen läuft als Job.",
+    "undoConflict": "Rückgängig nicht möglich: {{detail}}",
+    "undoForbidden": "Sie dürfen diese Änderung nicht rückgängig machen.",
+    "undoFailed": "Die Änderung konnte nicht rückgängig gemacht werden.",
+    "revertTitle": "Rückgängig als Job",
+    "revertQueued": "Rückgängigmachen für {{count}} Objekte läuft als Job",
+    "revertDone": "Rückgängig abgeschlossen: {{succeeded}} von {{total}} zurückgesetzt, {{skipped}} übersprungen, {{failed}} fehlgeschlagen",
+    "selectByFilter": "Auswahl per Filter…",
+    "filterTitle": "Auswahl per Filter",
+    "filterHint": "Die Treffer des Filters werden ausgewählt, höchstens {{max}}.",
+    "filterApply": "Treffer auswählen",
+    "filterError": "Die Treffer des Filters konnten nicht geladen werden.",
+    "filterEmpty": "Der Filter hat keine Treffer.",
+    "filterCapped": "Der Filter hat {{total}} Treffer; eine Massenänderung umfasst höchstens {{max}}, die ersten {{max}} sind ausgewählt. Schränken Sie den Filter ein oder nutzen Sie den Export."
   }
 }

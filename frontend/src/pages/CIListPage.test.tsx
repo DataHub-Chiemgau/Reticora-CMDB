@@ -575,6 +575,68 @@ describe('CIListPage bulk beyond the visible page', () => {
     });
   });
 
+  it('offers the undo of the bulk job in the toast of the BulkBar (WP-816)', async () => {
+    const calls = stubList(makeCIs(3), ({ url, init }) => {
+      if (url.endsWith('/api/v1/cis/bulk') && init?.method === 'POST') {
+        return json({
+          action: 'set_status',
+          total: 1,
+          succeeded: 1,
+          failed: 0,
+          bulk_job_id: 'job-sync',
+          items: [{ id: 'ci-001', result: 'ok', code: 200 }],
+        });
+      }
+      if (url.endsWith('/api/v1/jobs/job-sync/revert') && init?.method === 'POST') {
+        return json(
+          {
+            id: 'rev-1',
+            kind: 'bulk.revert',
+            status: 'succeeded',
+            progress: 100,
+            attempts: 1,
+            max_attempts: 1,
+            created_at: '2026-01-01T00:00:00Z',
+            result: { total: 1, reverted: 1, skipped: 0, failed: 0, items: [] },
+          },
+          202,
+        );
+      }
+      if (url.endsWith('/api/v1/jobs/rev-1')) {
+        return json({
+          id: 'rev-1',
+          kind: 'bulk.revert',
+          status: 'succeeded',
+          progress: 100,
+          attempts: 1,
+          max_attempts: 1,
+          created_at: '2026-01-01T00:00:00Z',
+          result: { total: 1, reverted: 1, skipped: 0, failed: 0, items: [] },
+        });
+      }
+      return undefined;
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'srv-001 auswählen' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Status setzen…' }), {
+      target: { value: 'inactive' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Anwenden' }));
+    expect(await screen.findByText('Status von 1 CIs aktualisiert')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(
+      await screen.findByText(
+        'Rückgängig abgeschlossen: 1 von 1 zurückgesetzt, 0 übersprungen, 0 fehlgeschlagen',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      calls.some(
+        (c) => c.url.endsWith('/api/v1/jobs/job-sync/revert') && c.init?.method === 'POST',
+      ),
+    ).toBe(true);
+  });
+
   it('drops the selection when the filter changes', async () => {
     stubList(makeCIs(30));
     renderPage();

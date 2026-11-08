@@ -100,6 +100,9 @@ export default tseslint.config(
       // WP-808: the contract and the supplier pages.
       'src/pages/ContractsPage.tsx',
       'src/pages/SuppliersPage.tsx',
+      // WP-816: the bulk bar of the CI and the asset list and the job center.
+      'src/components/bulk/**/*.tsx',
+      'src/pages/JobCenterPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
@@ -110,6 +113,7 @@ export default tseslint.config(
       'src/components/documents/**/*.test.tsx',
       'src/components/import/**/*.test.tsx',
       'src/components/create/**/*.test.tsx',
+      'src/components/bulk/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

@@ -15,7 +15,14 @@ import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
 import { DRAFT_ITEM_KINDS, DRAFT_OPS } from '../stores/metamodelDraft';
 import { DRAFT_STATUSES } from '../pages/MetamodelDraftsPage';
-import { JOB_STATUSES } from '../hooks/useJobs';
+import { JOB_KINDS, JOB_STATUSES } from '../hooks/useJobs';
+import {
+  BULK_DIRECTIONS,
+  BULK_EXPORT_FORMATS,
+  BULK_FIELDS,
+  BULK_OPERATIONS,
+  BULK_STATUSES,
+} from '../components/bulk/BulkBar';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_LIFECYCLE_STATES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
@@ -94,6 +101,30 @@ const flowSources = import.meta.glob(
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
+
+// WP-816: the bulk bar, without tests.
+const bulkSources = import.meta.glob(
+  ['../components/bulk/**/*.tsx', '!../components/bulk/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+/**
+ * resolve looks a key up like i18next (ResourceStore with
+ * ignoreJSONStructure): nested first, else a member whose name holds the
+ * separator, as jobs.kinds.attribute["index.rebuild"] beside the string
+ * jobs.kinds.attribute.index.
+ */
+function resolve(node: unknown, parts: string[]): unknown {
+  if (parts.length === 0) return node;
+  if (typeof node !== 'object' || node === null) return undefined;
+  for (let n = parts.length; n >= 1; n--) {
+    const value = (node as Catalog)[parts.slice(0, n).join('.')];
+    if (value === undefined) continue;
+    const found = resolve(value, parts.slice(n));
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
 
 // WP-315: the components of the click builder, without tests.
 const ruleSources = import.meta.glob(
@@ -386,6 +417,16 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['import.formats', specEnum('ImportPreview', 'format')],
   ['import.steps', IMPORT_STEPS],
   ['jobs.kinds.import', ['run']],
+  // WP-816: the operations, status values, fields, directions and export
+  // formats of the bulk bar.
+  ['bulk.operations', BULK_OPERATIONS.ci],
+  ['bulk.operations', BULK_OPERATIONS.asset],
+  ['ci.statuses', BULK_STATUSES.ci],
+  ['asset.bulk.statuses', BULK_STATUSES.asset],
+  ['bulk.ciFields', BULK_FIELDS.ci],
+  ['asset.columns', BULK_FIELDS.asset],
+  ['bulk.directions', BULK_DIRECTIONS],
+  ['bulk.formats', BULK_EXPORT_FORMATS],
   // WP-317: the tile categories (citype.Templates() and other) and the
   // field groups of the guided creation.
   ['create.categories', TYPE_CATEGORIES],
@@ -409,6 +450,21 @@ describe('i18n catalog', () => {
           true,
         );
       }
+    }
+  });
+
+  // WP-816: the job kinds hold a dot, so the lower-case check below does not
+  // apply; each has a label of its own in both catalogs.
+  it.each(JOB_KINDS)('labels the job kind %s under jobs.kinds in both languages', (kind) => {
+    for (const [lang, catalog] of [
+      ['de-DE', deDE],
+      ['en-US', enUS],
+    ] as const) {
+      const label = resolve(catalog, `jobs.kinds.${kind}`.split('.'));
+      expect(typeof label === 'string' && label.length > 0, `${lang} jobs.kinds.${kind}`).toBe(
+        true,
+      );
+      expect(label, `${lang} ${kind}`).not.toBe(kind);
     }
   });
 
@@ -706,6 +762,9 @@ describe('i18n catalog', () => {
     // WP-808: the contract and the supplier pages.
     '../pages/ContractsPage.tsx',
     '../pages/SuppliersPage.tsx',
+    // WP-816: the bulk bar and the job center.
+    ...Object.keys(bulkSources),
+    '../pages/JobCenterPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
@@ -715,7 +774,8 @@ describe('i18n catalog', () => {
       ruleSources[file] ??
       documentSources[file] ??
       importSources[file] ??
-      createSources[file];
+      createSources[file] ??
+      bulkSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

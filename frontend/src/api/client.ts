@@ -864,23 +864,49 @@ export function buildQuery(params: object) {
 
 export interface CIBulkItemResult {
   id: string;
-  result: 'ok' | 'error';
+  result: 'ok' | 'error' | 'skipped';
   code: number;
   error?: string;
+  /** Problem type of an error (RFC 7807). */
+  type?: string;
+  /** Fields the error names. */
+  fields?: string[];
 }
 
+/** The partial failure report of a bulk on CIs or assets (BulkResult, API-08). */
 export interface CIBulkResult {
   action: string;
   total: number;
   succeeded: number;
   failed: number;
+  skipped?: number;
+  cancelled?: boolean;
+  /**
+   * The job ci.bulk or asset.bulk the change ran in within the request
+   * (below 100 ids, WP-305, WP-784); POST /jobs/{id}/revert undoes it.
+   */
+  bulk_job_id?: string;
   items: CIBulkItemResult[];
 }
 
+/** The 202 of a bulk: the bulk job (from 100 ids on) or, for export, the export job. */
 export interface CIBulkJob {
   job_id: string;
   status: string;
   kind: string;
+}
+
+/**
+ * A bulk request (BLK-02): POST /cis/bulk (CIBulkRequest, WP-304, WP-780)
+ * or POST /assets/bulk (AssetBulkRequest and AssetBulkExport, WP-781). The
+ * BLK-01 form {action: 'set_status', ids, status} stays valid; every other
+ * action carries its parameters in params.
+ */
+export interface BulkRequest {
+  action: string;
+  ids: string[];
+  status?: string;
+  params?: Record<string, unknown>;
 }
 
 export const ciApi = {
@@ -931,14 +957,16 @@ export const ciApi = {
   },
 
   /**
-   * bulk changes the status of up to 500 CIs (API-08): below 100 ids the
-   * answer is the report per id, from 100 ids on the job that produces it.
+   * bulk applies one action to up to 500 CIs (API-08, BLK-02): below 100 ids
+   * the answer is the report per id (with the bulk_job_id to revert it),
+   * from 100 ids on the job that produces it; export answers its export
+   * job. bulk(ids, status) is the BLK-01 status change.
    */
-  bulk(ids: string[], status: string): Promise<CIBulkResult | CIBulkJob> {
-    return fetchAPI('/cis/bulk', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'set_status', ids, status }),
-    });
+  bulk(request: string[] | BulkRequest, status?: string): Promise<CIBulkResult | CIBulkJob> {
+    const body: BulkRequest = Array.isArray(request)
+      ? { action: 'set_status', ids: request, status }
+      : request;
+    return fetchAPI('/cis/bulk', { method: 'POST', body: JSON.stringify(body) });
   },
 
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
@@ -1280,6 +1308,15 @@ export function assetListQuery(params: AssetListParams): string {
 export const assetApi = {
   list(params: AssetListParams = {}): Promise<PaginatedResponse<Asset>> {
     return fetchAPI(`/assets${assetListQuery(params)}`);
+  },
+  /**
+   * bulk applies one action to up to 500 assets (POST /assets/bulk, WP-781):
+   * set_status among them instead of parallel PATCHes. Every asset bulk is
+   * a job asset.bulk; below 100 ids it runs in the request and the report
+   * names it as bulk_job_id, from 100 ids on the answer is 202 with it.
+   */
+  bulk(request: BulkRequest): Promise<CIBulkResult | CIBulkJob> {
+    return fetchAPI('/assets/bulk', { method: 'POST', body: JSON.stringify(request) });
   },
   get(id: string): Promise<Asset> {
     return fetchAPI(`/assets/${id}`);
