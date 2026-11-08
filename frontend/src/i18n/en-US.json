@@ -685,7 +685,7 @@
     "category": "Category",
     "size": "Size",
     "version": "Version",
-    "upload": "Create Document",
+    "upload": "Upload document",
     "categories": {
       "general": "General",
       "contract": "Contract",
@@ -698,7 +698,89 @@
     },
     "summary": "Manage contracts, invoices and manuals as documents.",
     "emptyTitle": "No documents yet",
-    "emptyHint": "Create a document to collect contracts, invoices and manuals."
+    "emptyHint": "Upload a document to collect contracts, invoices and manuals.",
+    "scanStatus": "Scan status",
+    "scanStatuses": {
+      "pending_scan": "Scanning",
+      "clean": "Clean",
+      "infected": "Infected",
+      "scan_failed": "Scan failed"
+    },
+    "scan": {
+      "none": "No content",
+      "pending": "The content is being scanned for malware. Download is locked until the scan has finished.",
+      "quarantined": "Quarantine: malware was found in the content. Download and new links are locked.",
+      "failed": "Locked, will be scanned again."
+    },
+    "versionLabel": "v{{version}}",
+    "download": "Download",
+    "downloadNamed": "Download {{name}}",
+    "downloadVersion": "Download version {{version}}",
+    "downloadLocked": "Locked",
+    "add": "Add document",
+    "linkExisting": "Link existing",
+    "searchDocument": "Search document",
+    "noLinkedDocuments": "No documents linked yet.",
+    "usage": {
+      "title": "Storage usage",
+      "ofLimit": "{{used}} of {{limit}} ({{percent}} %)",
+      "unlimited": "{{used}} used",
+      "nearLimit": "The storage of the organization is almost full.",
+      "limitReached": "The storage limit of the organization has been reached. Delete documents or extend the plan."
+    },
+    "metadata": "Metadata",
+    "description": "Description",
+    "saved": "Saved.",
+    "versions": "Versions",
+    "newVersion": "New version",
+    "newVersionFile": "File of the new version",
+    "mimeType": "File type",
+    "checksum": "Checksum (SHA-256)",
+    "uploadedAt": "Uploaded at",
+    "noChecksum": "None",
+    "noVersions": "No content uploaded yet.",
+    "moreVersions": "Load more versions",
+    "links": "Links",
+    "addLink": "Add link",
+    "noLinks": "No links yet.",
+    "linkTypes": {
+      "ci": "CI",
+      "asset": "Asset",
+      "ticket": "Ticket",
+      "location": "Location",
+      "disposal_record": "Disposal",
+      "stocktake": "Stocktake",
+      "contract": "Contract",
+      "stock_movement": "Stock movement"
+    },
+    "unlink": "Remove link ({{type}})",
+    "linkTarget": "Target",
+    "linkKinds": {
+      "object": "CI or asset",
+      "location": "Location"
+    },
+    "linkObject": "Object",
+    "link": "Link"
+  },
+  "upload": {
+    "label": "Upload file",
+    "hint": "Drag a file here or choose one, at most {{max}}.",
+    "choose": "Choose file",
+    "percent": "{{percent}} %",
+    "progress": "Upload of {{name}}",
+    "done": "{{name}} uploaded.",
+    "retry": "Upload again",
+    "discard": "Discard",
+    "errors": {
+      "tooLarge": "The file is too large for the upload limit of the server.",
+      "tooLargeLocal": "The file is too large (at most {{max}}).",
+      "unsupportedType": "This file type is not allowed.",
+      "mimeMismatch": "The content does not match the file type.",
+      "storageLimit": "The storage limit of the organization has been reached.",
+      "unavailable": "Uploading is not possible right now. Please try again later.",
+      "network": "The connection was interrupted. Please try again.",
+      "withTrace": "{{detail}} (trace ID: {{traceId}})"
+    }
   },
   "stocktake": {
     "title": "Stocktake",

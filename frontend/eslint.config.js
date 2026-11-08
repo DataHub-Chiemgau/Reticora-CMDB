@@ -72,12 +72,19 @@ export default tseslint.config(
       // WP-806: the inventory page and the object history.
       'src/pages/InventoryPage.tsx',
       'src/components/cmdb/ObjectHistory.tsx',
+      // WP-321: the document pages, the upload and the document components.
+      'src/pages/DocumentListPage.tsx',
+      'src/pages/DocumentDetailPage.tsx',
+      'src/components/upload/**/*.tsx',
+      'src/components/documents/**/*.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
       'src/components/pickers/**/*.test.tsx',
       'src/components/flows/**/*.test.tsx',
       'src/components/rules/**/*.test.tsx',
+      'src/components/upload/**/*.test.tsx',
+      'src/components/documents/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

@@ -1205,32 +1205,34 @@ export const assignmentApi = {
 
 // --- Phase 2: Document Management ---
 
-export interface Document {
-  id: string;
-  organization_id: string;
-  title: string;
-  description?: string;
-  file_name: string;
-  file_size: number;
-  mime_type: string;
-  storage_key: string;
-  version: number;
-  category: string;
-  tags: string[];
-  uploaded_by: string;
-  created_at: string;
-  updated_at: string;
-}
+/** A document with the scan status of its current version (WP-731, WP-733), from the schema (K27). */
+export type Document = components['schemas']['Document'];
 
-export interface DocumentCreateRequest {
-  title: string;
-  description?: string;
-  file_name: string;
-  file_size: number;
-  mime_type?: string;
-  category?: string;
-  tags?: string[];
-}
+/** One stored version of a document's content (WP-731). */
+export type DocumentVersion = components['schemas']['DocumentVersion'];
+
+/** The stored bytes of the organization and its limit max_storage_mb (WP-731). */
+export type DocumentUsage = components['schemas']['DocumentUsage'];
+
+/** The malware scan status of a document version (SEC-09, WP-733). */
+export type ScanStatus = DocumentVersion['scan_status'];
+
+/** The scan states of a version; only clean is downloadable (E-42). */
+export const SCAN_STATUSES = [
+  'pending_scan',
+  'clean',
+  'infected',
+  'scan_failed',
+] as const satisfies readonly ScanStatus[];
+
+/** The problem type of a 409 for a download of a version whose scan is pending or failed. */
+export const PROBLEM_DOCUMENT_PENDING_SCAN = 'https://reticora.io/problems/document-pending-scan';
+/** The problem type of a 409 for a download or link of a quarantined (infected) document. */
+export const PROBLEM_DOCUMENT_QUARANTINED = 'https://reticora.io/problems/document-quarantined';
+/** The problem type of a 422 for content that does not match its declared type (WP-268). */
+export const PROBLEM_MIME_MISMATCH = 'https://reticora.io/problems/mime-mismatch';
+
+export type DocumentCreateRequest = components['schemas']['CreateDocumentRequest'];
 
 export interface DocumentListParams {
   limit?: number;
@@ -1238,14 +1240,85 @@ export interface DocumentListParams {
   cursor?: string;
   category?: string;
   search?: string;
+  /** Only documents linked to this target (WP-811); requires entity_id. */
+  entity_type?: string;
+  entity_id?: string;
 }
 
-export interface DocumentLink {
-  id: string;
-  document_id: string;
-  entity_type: string;
-  entity_id: string;
-  created_at: string;
+export type DocumentLink = components['schemas']['DocumentLink'];
+
+/** The target of a document link (CreateDocumentLinkRequest). */
+export type DocumentLinkTarget = components['schemas']['CreateDocumentLinkRequest'];
+
+/** UploadOptions follow the transfer of a document's content. */
+export interface UploadOptions {
+  /** onProgress receives the sent and the total bytes of the body. */
+  onProgress?: (loaded: number, total: number) => void;
+  /** signal aborts the transfer. */
+  signal?: AbortSignal;
+}
+
+/** parseBody reads the JSON body of an XMLHttpRequest; anything else is null. */
+function parseBody(xhr: XMLHttpRequest): unknown {
+  try {
+    return xhr.responseText ? (JSON.parse(xhr.responseText) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * sendFile sends a file as the raw body of a request per XMLHttpRequest,
+ * because fetch reports no upload progress: Content-Type is the type of the
+ * file, the session token goes as Bearer. A 401 refreshes the session once
+ * and repeats the transfer, as fetchResponse does (WP-526); a failure is an
+ * ApiError from the problem body (with type and traceId).
+ */
+async function sendFile<T>(
+  method: 'PUT' | 'POST',
+  path: string,
+  file: Blob,
+  options: UploadOptions = {},
+): Promise<T> {
+  const url = apiURL(path, method);
+  const send = (token: string | null) =>
+    new Promise<XMLHttpRequest>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      if (token) xhr.setRequestHeader('Authorization', ['Bearer', token].join(' '));
+      xhr.upload.onprogress = (event) => {
+        options.onProgress?.(event.loaded, event.lengthComputable ? event.total : file.size);
+      };
+      xhr.onload = () => resolve(xhr);
+      xhr.onerror = () => reject(new ApiError(0, 'Network error'));
+      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
+      if (options.signal) {
+        if (options.signal.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(file);
+    });
+
+  const token = getSessionToken();
+  let xhr = await send(token);
+  if (xhr.status === 401) {
+    const current = getSessionToken();
+    const renewed = (current !== null && current !== token) || (await refreshSession());
+    if (renewed) {
+      xhr = await send(getSessionToken());
+      if (xhr.status === 401) {
+        clearSession();
+      }
+    }
+  }
+  if (xhr.status < 200 || xhr.status >= 300) {
+    throw ApiError.fromProblem(xhr.status, xhr.statusText, parseBody(xhr));
+  }
+  return parseBody(xhr) as T;
 }
 
 export const documentApi = {
@@ -1258,20 +1331,41 @@ export const documentApi = {
   create(data: DocumentCreateRequest): Promise<Document> {
     return fetchAPI('/documents', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(
-    id: string,
-    data: { title?: string; description?: string; category?: string; tags?: string[] },
-  ): Promise<Document> {
+  update(id: string, data: components['schemas']['UpdateDocumentRequest']): Promise<Document> {
     return fetchAPI(`/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/documents/${id}`, { method: 'DELETE' });
   },
-  link(id: string, data: { entity_type: string; entity_id: string }): Promise<DocumentLink> {
+  /** PUT /documents/{id}/content: the first content of a new document (WP-268). */
+  uploadContent(id: string, file: Blob, options?: UploadOptions): Promise<Document> {
+    return sendFile('PUT', `/documents/${id}/content`, file, options);
+  },
+  /** POST /documents/{id}/versions: a new version of a document (WP-731). */
+  createVersion(id: string, file: Blob, options?: UploadOptions): Promise<DocumentVersion> {
+    return sendFile('POST', `/documents/${id}/versions`, file, options);
+  },
+  /** One page of the versions of a document, newest first (WP-731). */
+  listVersions(id: string, cursor?: string): Promise<PaginatedResponse<DocumentVersion>> {
+    return fetchAPI(`/documents/${id}/versions${buildQuery({ cursor })}`);
+  },
+  /** The presigned download URL of a version (default the current one); 409 unless clean. */
+  contentUrl(id: string, version?: number): Promise<{ download_url: string }> {
+    return fetchAPI(`/documents/${id}/content${buildQuery({ version })}`);
+  },
+  link(id: string, data: DocumentLinkTarget): Promise<DocumentLink> {
     return fetchAPI(`/documents/${id}/links`, { method: 'POST', body: JSON.stringify(data) });
   },
   getLinks(id: string): Promise<DocumentLink[]> {
     return fetchAllPages(`/documents/${id}/links`);
+  },
+  /** DELETE /documents/{id}/links/{link_id} (WP-267). */
+  unlink(id: string, linkId: string): Promise<void> {
+    return fetchAPI(`/documents/${id}/links/${linkId}`, { method: 'DELETE' });
+  },
+  /** The storage usage of the organization (WP-731). */
+  usage(): Promise<DocumentUsage> {
+    return fetchAPI('/documents/usage');
   },
 };
 

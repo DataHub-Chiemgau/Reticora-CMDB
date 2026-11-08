@@ -55,6 +55,10 @@ const CIListPage = lazyPage(() => import('./pages/CIListPage'), 'CIListPage');
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage');
 const DiscoveryPage = lazyPage(() => import('./pages/DiscoveryPage'), 'DiscoveryPage');
 const DocumentListPage = lazyPage(() => import('./pages/DocumentListPage'), 'DocumentListPage');
+const DocumentDetailPage = lazyPage(
+  () => import('./pages/DocumentDetailPage'),
+  'DocumentDetailPage',
+);
 const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
@@ -226,6 +230,7 @@ function App() {
           <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
           <Route path="/documents" element={<DocumentListPage />} />
+          <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />
           <Route path="/consumables" element={<ConsumableListPage />} />
           <Route path="/orders" element={<OrderListPage />} />

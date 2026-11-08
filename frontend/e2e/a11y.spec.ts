@@ -100,6 +100,71 @@ const relationshipType = (key: string, extra: Record<string, unknown>) => ({
   updated_at: AT,
   ...extra,
 });
+// WP-321: the document of the fixtures with a clean and an infected
+// version, a link to the fixture CI and the storage usage of the
+// organization near its limit (warning from 90 %).
+const DOCUMENT_ID = 'da000000-0000-4000-8000-000000000001';
+const documentVersion = (version: number, scan: string) => ({
+  id: `da100000-0000-4000-8000-00000000000${version}`,
+  organization_id: ORG_ID,
+  document_id: DOCUMENT_ID,
+  version,
+  size: 102400 * version,
+  mime_type: 'application/pdf',
+  checksum_sha256: `${version}`.repeat(64),
+  scan_status: scan,
+  ...(scan === 'pending_scan' ? {} : { scanned_at: AT }),
+  created_at: AT,
+});
+const DOCUMENT_HANDLERS: Handler[] = [
+  {
+    path: '/documents/usage',
+    reply: () => ({ body: { storage_bytes: 950 * 1024 * 1024, limit_mb: 1024 } }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}`,
+    reply: () => ({
+      body: {
+        id: DOCUMENT_ID,
+        organization_id: ORG_ID,
+        title: M.document,
+        description: 'a11y Betrieb',
+        file_name: 'handbuch.pdf',
+        file_size: 204800,
+        mime_type: 'application/pdf',
+        storage_key: `org/${ORG_ID}/documents/${DOCUMENT_ID}/2`,
+        version: 2,
+        category: 'manual',
+        tags: ['betrieb'],
+        uploaded_by: '00000000-0000-0000-0000-000000000001',
+        created_at: AT,
+        updated_at: AT,
+        scan_status: 'clean',
+        scanned_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}/versions`,
+    reply: () => ({ body: list([documentVersion(2, 'clean'), documentVersion(1, 'infected')]) }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}/links`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'da200000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          document_id: DOCUMENT_ID,
+          entity_type: 'ci',
+          entity_id: CI_ID,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
 const RELATIONSHIP_TYPES: Handler = {
   path: '/relationship-types',
   reply: () => ({
@@ -272,7 +337,22 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content').getByText('a11y value required'),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
-  { path: '/documents', url: '/documents', ready: text(M.document) },
+  {
+    path: '/documents',
+    url: '/documents',
+    handlers: DOCUMENT_HANDLERS,
+    ready: text(M.document),
+  },
+  {
+    // WP-321: metadata, versions with scan status and download, the links.
+    path: '/documents/:id',
+    url: `/documents/${DOCUMENT_ID}`,
+    handlers: DOCUMENT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content table').getByText('v1')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content').getByRole('link', { name: M.ci }),
+  },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
   { path: '/consumables', url: '/consumables', ready: text(M.consumable) },
   { path: '/orders', url: '/orders', ready: text(M.order) },
@@ -317,11 +397,11 @@ const ROUTES: A11yRoute[] = [
 
 // The list pages of F-172 whose empty state had too little contrast: they are
 // checked with an empty list as well.
-const EMPTY_PAGES: { url: string; endpoint: string }[] = [
+const EMPTY_PAGES: { url: string; endpoint: string; handlers?: Handler[] }[] = [
   { url: '/assets', endpoint: '/assets' },
   { url: '/stocktake', endpoint: '/stocktakes' },
   { url: '/assignments', endpoint: '/assignments' },
-  { url: '/documents', endpoint: '/documents' },
+  { url: '/documents', endpoint: '/documents', handlers: DOCUMENT_HANDLERS },
   { url: '/tickets', endpoint: '/tickets' },
 ];
 
@@ -697,14 +777,14 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
         });
       }
 
-      for (const { url, endpoint } of EMPTY_PAGES) {
+      for (const { url, endpoint, handlers = [] } of EMPTY_PAGES) {
         for (const theme of THEMES) {
           test(`empty state ${url} (${themeName(theme)})`, async ({ page }) => {
             await checkPage(
               page,
               {
                 url,
-                handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }],
+                handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }, ...handlers],
                 ready: (p) => p.locator('#main-content td[colspan]'),
               },
               theme,

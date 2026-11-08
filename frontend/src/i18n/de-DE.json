@@ -685,7 +685,7 @@
     "category": "Kategorie",
     "size": "Größe",
     "version": "Version",
-    "upload": "Dokument anlegen",
+    "upload": "Dokument hochladen",
     "categories": {
       "general": "Allgemein",
       "contract": "Vertrag",
@@ -698,7 +698,89 @@
     },
     "summary": "Verträge, Rechnungen und Handbücher als Dokumente verwalten.",
     "emptyTitle": "Noch keine Dokumente",
-    "emptyHint": "Lege ein Dokument an, um Verträge, Rechnungen und Handbücher zu sammeln."
+    "emptyHint": "Lade ein Dokument hoch, um Verträge, Rechnungen und Handbücher zu sammeln.",
+    "scanStatus": "Scanstatus",
+    "scanStatuses": {
+      "pending_scan": "Wird geprüft",
+      "clean": "Sauber",
+      "infected": "Infiziert",
+      "scan_failed": "Prüfung fehlgeschlagen"
+    },
+    "scan": {
+      "none": "Ohne Inhalt",
+      "pending": "Der Inhalt wird auf Schadsoftware geprüft. Der Download ist bis zum Abschluss der Prüfung gesperrt.",
+      "quarantined": "Quarantäne: Im Inhalt wurde Schadsoftware gefunden. Download und neue Verknüpfungen sind gesperrt.",
+      "failed": "Gesperrt, wird erneut geprüft."
+    },
+    "versionLabel": "v{{version}}",
+    "download": "Herunterladen",
+    "downloadNamed": "{{name}} herunterladen",
+    "downloadVersion": "Version {{version}} herunterladen",
+    "downloadLocked": "Gesperrt",
+    "add": "Dokument hinzufügen",
+    "linkExisting": "Vorhandenes verknüpfen",
+    "searchDocument": "Dokument suchen",
+    "noLinkedDocuments": "Noch keine Dokumente verknüpft.",
+    "usage": {
+      "title": "Speicherverbrauch",
+      "ofLimit": "{{used}} von {{limit}} ({{percent}} %)",
+      "unlimited": "{{used}} belegt",
+      "nearLimit": "Der Speicher der Organisation ist fast voll.",
+      "limitReached": "Das Speicherlimit der Organisation ist erreicht. Lösche Dokumente oder erweitere das Paket."
+    },
+    "metadata": "Metadaten",
+    "description": "Beschreibung",
+    "saved": "Gespeichert.",
+    "versions": "Versionen",
+    "newVersion": "Neue Version",
+    "newVersionFile": "Datei der neuen Version",
+    "mimeType": "Dateityp",
+    "checksum": "Prüfsumme (SHA-256)",
+    "uploadedAt": "Hochgeladen am",
+    "noChecksum": "Keine",
+    "noVersions": "Noch kein Inhalt hochgeladen.",
+    "moreVersions": "Weitere Versionen laden",
+    "links": "Verknüpfungen",
+    "addLink": "Verknüpfung hinzufügen",
+    "noLinks": "Noch keine Verknüpfungen.",
+    "linkTypes": {
+      "ci": "CI",
+      "asset": "Asset",
+      "ticket": "Ticket",
+      "location": "Standort",
+      "disposal_record": "Entsorgung",
+      "stocktake": "Inventur",
+      "contract": "Vertrag",
+      "stock_movement": "Lagerbewegung"
+    },
+    "unlink": "Verknüpfung ({{type}}) lösen",
+    "linkTarget": "Ziel",
+    "linkKinds": {
+      "object": "CI oder Asset",
+      "location": "Standort"
+    },
+    "linkObject": "Objekt",
+    "link": "Verknüpfen"
+  },
+  "upload": {
+    "label": "Datei hochladen",
+    "hint": "Datei hierher ziehen oder auswählen, höchstens {{max}}.",
+    "choose": "Datei auswählen",
+    "percent": "{{percent}} %",
+    "progress": "Upload von {{name}}",
+    "done": "{{name}} hochgeladen.",
+    "retry": "Erneut hochladen",
+    "discard": "Verwerfen",
+    "errors": {
+      "tooLarge": "Die Datei ist zu groß für das Upload-Limit des Servers.",
+      "tooLargeLocal": "Die Datei ist zu groß (höchstens {{max}}).",
+      "unsupportedType": "Dieser Dateityp ist nicht erlaubt.",
+      "mimeMismatch": "Der Inhalt passt nicht zum Dateityp.",
+      "storageLimit": "Das Speicherlimit der Organisation ist erreicht.",
+      "unavailable": "Der Upload ist gerade nicht möglich. Bitte später erneut versuchen.",
+      "network": "Die Verbindung wurde unterbrochen. Bitte erneut versuchen.",
+      "withTrace": "{{detail}} (Trace-ID: {{traceId}})"
+    }
   },
   "stocktake": {
     "title": "Inventur",

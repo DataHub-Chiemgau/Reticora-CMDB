@@ -19,8 +19,9 @@ import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
+import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
 import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
-import { NODE_KINDS, relationshipChangeKinds } from '../api/client';
+import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
 import {
   CARDINALITIES,
   IMPACT_DIRECTIONS,
@@ -82,6 +83,17 @@ const cardSources = import.meta.glob('../components/cmdb/CIRelationshipsCard.tsx
   import: 'default',
   eager: true,
 }) as Record<string, string>;
+
+// WP-321: the upload component and the document components.
+const documentSources = import.meta.glob(
+  [
+    '../components/upload/**/*.tsx',
+    '../components/documents/**/*.tsx',
+    '!../components/upload/**/*.test.tsx',
+    '!../components/documents/**/*.test.tsx',
+  ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
 
 const COLLECTOR_STATUSES = ['pending', 'active', 'offline', 'disabled', 'paused'];
 
@@ -250,6 +262,10 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['rules.entityKinds', specEnum('SavedView', 'entity_kind')],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
+  // WP-321: the scan states of a document version (WP-733) and the link targets (WP-267).
+  ['document.scanStatuses', SCAN_STATUSES],
+  ['document.scanStatuses', specEnum('DocumentVersion', 'scan_status')],
+  ['document.linkTypes', LINK_ENTITY_TYPES],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   // WP-806: the movement types of the ledger (STK-04, WP-274).
   ['movement.types', MOVEMENT_TYPES],
@@ -364,6 +380,17 @@ describe('i18n catalog', () => {
     expect(lookup(enUS, 'inventory.movementTypes')).toBeUndefined();
   });
 
+  it('offers exactly the scan states of the OpenAPI types and lists the document components (WP-321)', () => {
+    expect([...SCAN_STATUSES]).toEqual(specEnum('DocumentVersion', 'scan_status'));
+    expect(Object.keys(documentSources)).toEqual(
+      expect.arrayContaining([
+        '../components/upload/FileUpload.tsx',
+        '../components/documents/LinkedDocuments.tsx',
+      ]),
+    );
+    expect(Object.keys(documentSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
   it('offers exactly the template version states of the OpenAPI types (WP-314)', () => {
     expect([...TEMPLATE_VERSION_STATUSES]).toEqual(specEnum('TemplateVersion', 'status'));
     expect(Object.keys(metamodelSources)).toContain('../components/metamodel/MetamodelDiff.tsx');
@@ -446,13 +473,18 @@ describe('i18n catalog', () => {
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
     ...Object.keys(ruleSources),
+    // WP-321: the document pages, the upload and the document components.
+    '../pages/DocumentListPage.tsx',
+    '../pages/DocumentDetailPage.tsx',
+    ...Object.keys(documentSources),
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
       metamodelSources[file] ??
       flowSources[file] ??
       cardSources[file] ??
-      ruleSources[file];
+      ruleSources[file] ??
+      documentSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

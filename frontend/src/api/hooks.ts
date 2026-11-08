@@ -1,4 +1,10 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   ciApi,
   relationshipApi,
@@ -52,8 +58,11 @@ import type {
   ReturnAssetRequest,
   TransferAssetRequest,
   AssignmentListParams,
+  Document,
   DocumentCreateRequest,
+  DocumentLinkTarget,
   DocumentListParams,
+  DocumentVersion,
   StocktakeCreateRequest,
   StocktakeListParams,
   TicketCreateRequest,
@@ -529,10 +538,14 @@ export function useTransferAssignment() {
 
 // --- Documents ---
 
-export function useDocumentList(params: DocumentListParams) {
+export function useDocumentList(
+  params: DocumentListParams,
+  { enabled = true }: ListQueryOptions = {},
+) {
   return useQuery({
     queryKey: ['documents', params],
     queryFn: () => documentApi.list(params),
+    enabled,
   });
 }
 
@@ -553,6 +566,93 @@ export function useDeleteDocument() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['documents'] });
     },
+  });
+}
+
+/** SCAN_POLL_MS is the interval at which a pending scan is read again (WP-321). */
+export const SCAN_POLL_MS = 5000;
+
+const pendingScan = (status: string | undefined) => status === 'pending_scan';
+
+/** useDocument reads a document; while its current version is pending_scan every 5 s. */
+export function useDocument(id: string) {
+  return useQuery({
+    queryKey: ['documents', 'detail', id],
+    queryFn: () => documentApi.get(id),
+    enabled: !!id,
+    refetchInterval: (query) =>
+      pendingScan((query.state.data as Document | undefined)?.scan_status) ? SCAN_POLL_MS : false,
+  });
+}
+
+/**
+ * useDocumentVersions reads the versions of a document page by page over
+ * next_cursor; while a loaded version is pending_scan every 5 s.
+ */
+export function useDocumentVersions(id: string) {
+  return useInfiniteQuery({
+    queryKey: ['documents', 'versions', id],
+    queryFn: ({ pageParam }) => documentApi.listVersions(id, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: PaginatedResponse<DocumentVersion>) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!id,
+    refetchInterval: (query) =>
+      (query.state.data?.pages ?? []).some((page) =>
+        page.data.some((version) => pendingScan(version.scan_status)),
+      )
+        ? SCAN_POLL_MS
+        : false,
+  });
+}
+
+export function useUpdateDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { title?: string; description?: string; category?: string }) =>
+      documentApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+export function useDocumentLinks(id: string) {
+  return useQuery({
+    queryKey: ['documents', 'links', id],
+    queryFn: () => documentApi.getLinks(id),
+    enabled: !!id,
+  });
+}
+
+/** useLinkDocument links a document to a target (POST /documents/{id}/links, WP-267). */
+export function useLinkDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, target }: { id: string; target: DocumentLinkTarget }) =>
+      documentApi.link(id, target),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+/** useUnlinkDocument removes a link (DELETE /documents/{id}/links/{link_id}, WP-267). */
+export function useUnlinkDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, linkId }: { id: string; linkId: string }) => documentApi.unlink(id, linkId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+/** useDocumentUsage reads the storage usage of the organization (WP-731). */
+export function useDocumentUsage() {
+  return useQuery({
+    queryKey: ['documents', 'usage'],
+    queryFn: () => documentApi.usage(),
   });
 }
 
