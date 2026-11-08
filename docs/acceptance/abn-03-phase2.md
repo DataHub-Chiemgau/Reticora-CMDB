@@ -30,6 +30,8 @@ nach jedem Lastjob aus.
 | Entnahme bis 0 | `TestPhase2ConcurrencyMatrix`, Fall 3: `on_hand` nie < 0, unterlegene Buchung 409 `insufficient-stock` ohne Ledger-Eintrag; außerdem `TestStockBookingThroughMovementService` | WP-328, WP-756 |
 | Discovery während Bearbeitung | `TestDiscoveryConcurrency` (`backend/internal/discovery/concurrency_integration_test.go`), `TestAutomatedWriteKeepsOverride` (`backend/internal/ci/concurrency_integration_test.go`) | WP-207 |
 | Doppelter Ingest | `TestDiscoveryConcurrency`, auch über Spuren (WP-334, E-56) | WP-207 |
+| Discovery während Bearbeitung, Phase 2: automatisierte Schreiber gegen manuelle Änderung | `TestPhase2AutomatedWriters`, Fälle 1–4 (`backend/internal/tenant/integrity/writers_integration_test.go`): Import (Job `import.run` aus einer Datei und `POST /api/v1/imports` mit `rows`) behält manuellen Wert und Override und meldet `override_kept` mit offenem `override_conflict`; `template.migrate` behält Override und manuellen Wert, Defaults nur in leere Felder; `attribute.computed_refresh` lässt die manuelle Änderung eines Eingabefelds (Ausdruck mit `today` und `asset.warranty_end`) stehen, danach gilt der Ausdruck über die committeten Eingaben; Bulk `set_fields` und manuelle Änderung: Wert und Override des zuletzt committeten Schreibers, beide Änderungen in `ci_change`, andere Felder bleiben. Je Fall deterministisch (der Schreiber hat seinen Wert vor dem Commit der offen gehaltenen manuellen Änderung und schreibt danach) und parallel über mehrere Runden | WP-826 |
+| Doppelter Ingest, Phase 2: Import, Serial-Verknüpfung und `max_cis` | `TestPhase2AutomatedWriters`, Fälle 5–7: Import und Ingest (zwei Instanzen mit `WithIngestLanes(4)`) desselben neuen Geräts ergeben genau ein aktives CI je Seriennummer, MAC und IP; doppelter Ingest mit vorhandenem Asset gleicher Seriennummer ergibt ein CI, eine Verknüpfung `ci.asset_id`, kein neues Asset, höchstens ein offenes `serial_mismatch`; Import, Ingest über Spuren und `AdoptUnlicensed` überschreiten `max_cis` nie, überzählige Records werden `unlicensed_ci`, überzählige Importzeilen stehen mit `entitlement-limit` im Fehlerbericht. Je Fall nacheinander in beiden Reihenfolgen und parallel | WP-826 |
 | Paralleler Merge | `TestParallelMerge` (`backend/internal/ci/concurrency_integration_test.go`) | WP-207 |
 | ETag-Konkurrenz | `TestOptimisticConcurrency` (`backend/internal/ci/concurrency_integration_test.go`) | WP-207 |
 
@@ -107,7 +109,6 @@ bleiben `TestLocationTreeMoveAndCycle` und die Skriptzeile
 
 | Teil | WP |
 |---|---|
-| Automatisierte Schreiber (Import, Bulk, Template-Migration, `attribute.computed_refresh`) gegen manuelle Änderung, Ingest und `max_cis` | WP-826 |
 | Cross-Tenant-Referenzen aller P2-Schreibpfade, Datenbank-Fremdschlüssel und Prüfskript | WP-827 |
 | Kanalmatrix nach TEN-09 | WP-828 |
 
