@@ -34,6 +34,8 @@ import {
   invitationApi,
   permissionApi,
   slaApi,
+  businessCalendarApi,
+  disposalApi,
   formApi,
   workflowApi,
   complianceApi,
@@ -50,6 +52,11 @@ import {
   ApiError,
 } from '../api/client';
 import type {
+  BusinessCalendar,
+  CreateBusinessCalendarRequest,
+  CreateDisposalRecordRequest,
+  DisposalListParams,
+  UpdateBusinessCalendarRequest,
   DiscoveryScopeInput,
   DiscoveryScopePatch,
   CICreateRequest,
@@ -1490,6 +1497,87 @@ export function useCreateSLA() {
     mutationFn: (data: SLAPolicyRequest) => slaApi.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slas'] });
+    },
+  });
+}
+
+// --- Business calendars (TKT-02, WP-768, WP-815) ---
+
+/**
+ * useBusinessCalendarPages reads the business calendars page by page over
+ * next_cursor (API-02); the calendar section of the SLA page loads more on
+ * request.
+ */
+export function useBusinessCalendarPages() {
+  return useInfiniteQuery({
+    queryKey: ['business-calendars', 'pages'],
+    queryFn: ({ pageParam }) => businessCalendarApi.list({ cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: { has_more: boolean; next_cursor?: string }) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+  });
+}
+
+/** useAllBusinessCalendars reads every visible calendar for the calendar choice of a policy. */
+export function useAllBusinessCalendars() {
+  return useQuery({
+    queryKey: ['business-calendars', 'all'],
+    queryFn: () => businessCalendarApi.listAll(),
+  });
+}
+
+export function useCreateBusinessCalendar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateBusinessCalendarRequest) => businessCalendarApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['business-calendars'] });
+    },
+  });
+}
+
+/** useUpdateBusinessCalendar sends the changes of a calendar; never client_id. */
+export function useUpdateBusinessCalendar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateBusinessCalendarRequest }) =>
+      businessCalendarApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['business-calendars'] });
+    },
+  });
+}
+
+export function useDeleteBusinessCalendar() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (calendar: Pick<BusinessCalendar, 'id'>) => businessCalendarApi.delete(calendar.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['business-calendars'] });
+      // Policies naming the calendar fall back to the calendar chain.
+      queryClient.invalidateQueries({ queryKey: ['slas'] });
+    },
+  });
+}
+
+// --- Disposal (E-55, WP-751, WP-815) ---
+
+export function useDisposalRecords(params: DisposalListParams = {}) {
+  return useQuery({
+    queryKey: ['disposal-records', params],
+    queryFn: () => disposalApi.list(params),
+  });
+}
+
+/** useCreateDisposalRecord appends a record; the asset or CI changes its lifecycle state. */
+export function useCreateDisposalRecord() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateDisposalRecordRequest) => disposalApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['disposal-records'] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['cis'] });
     },
   });
 }

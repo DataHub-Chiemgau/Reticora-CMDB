@@ -103,6 +103,10 @@ export default tseslint.config(
       // WP-816: the bulk bar of the CI and the asset list and the job center.
       'src/components/bulk/**/*.tsx',
       'src/pages/JobCenterPage.tsx',
+      // WP-815: the SLA page with the business calendars and the disposal page.
+      'src/pages/SLAPage.tsx',
+      'src/pages/DisposalListPage.tsx',
+      'src/components/sla/**/*.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
@@ -114,6 +118,7 @@ export default tseslint.config(
       'src/components/import/**/*.test.tsx',
       'src/components/create/**/*.test.tsx',
       'src/components/bulk/**/*.test.tsx',
+      'src/components/sla/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

@@ -1,7 +1,16 @@
 import { Plus, Timer } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCreateSLA, useSLABreaches, useSLAList } from '../api/hooks';
+import { ApiError } from '../api/client';
+import {
+  useAllBusinessCalendars,
+  useCreateSLA,
+  useHasPermission,
+  useSLABreaches,
+  useSLAList,
+} from '../api/hooks';
+import { useClients } from '../api/cmdbHooks';
+import { BusinessCalendarSection } from '../components/sla/BusinessCalendarSection';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -23,7 +32,8 @@ import {
 } from '../components/ui/table';
 import { ScrollRegion } from '../components/ScrollRegion';
 
-const priorities = ['low', 'medium', 'high', 'critical'] as const;
+/** SLA_PRIORITIES are the priorities of a policy (WP-290), labelled as ticket.priorities. */
+export const SLA_PRIORITIES = ['low', 'medium', 'high', 'critical'] as const;
 
 const priorityVariant = {
   low: 'success',
@@ -37,18 +47,60 @@ export function SLAPage() {
   const policies = useSLAList();
   const breaches = useSLABreaches({ status: 'breached' });
   const createSLA = useCreateSLA();
+  const calendars = useAllBusinessCalendars();
+  const clients = useClients();
+  const canWrite = useHasPermission('sla:write') === true;
+  const businessHoursId = useId();
   const [form, setForm] = useState({
     name: '',
+    client_id: '',
     priority: 'medium',
     response_target_minutes: 60,
     resolution_target_minutes: 480,
+    calendar_id: '',
+    business_calendar: true,
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | undefined>(undefined);
+
+  // A policy may name a calendar without client or of its own client
+  // (TKT-02); empty lets the calendar chain decide (WP-292).
+  const selectableCalendars = (calendars.data ?? []).filter(
+    (calendar) => calendar.client_id === null || calendar.client_id === form.client_id,
+  );
+  const calendarName = (id: string | null | undefined) =>
+    id ? (calendars.data?.find((calendar) => calendar.id === id)?.name ?? id) : undefined;
 
   const submit = () => {
     if (!form.name) return;
+    setFieldErrors({});
+    setFormError(undefined);
     createSLA.mutate(
-      { ...form, business_calendar: false },
-      { onSuccess: () => setForm({ ...form, name: '' }) },
+      {
+        name: form.name,
+        priority: form.priority,
+        response_target_minutes: form.response_target_minutes,
+        resolution_target_minutes: form.resolution_target_minutes,
+        business_calendar: form.business_calendar,
+        calendar_id: form.calendar_id || null,
+        ...(form.client_id ? { client_id: form.client_id } : {}),
+      },
+      {
+        onSuccess: () => setForm({ ...form, name: '' }),
+        onError: (error) => {
+          if (error instanceof ApiError) {
+            const errors = Object.fromEntries(
+              Object.entries(error.fieldErrors()).map(([field, info]) => [field, info.message]),
+            );
+            setFieldErrors(errors);
+            if (Object.keys(errors).length === 0) {
+              setFormError(error.detail ?? error.title ?? error.message);
+            }
+          } else {
+            setFormError(error.message);
+          }
+        },
+      },
     );
   };
 
@@ -83,48 +135,110 @@ export function SLAPage() {
     <div className="space-y-6">
       {header}
 
-      <Card title={t('sla.createPolicy')}>
-        <div className="grid gap-4 md:grid-cols-5 md:items-end">
-          <Input
-            label={t('sla.name')}
-            value={form.name}
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
-          />
-          <Select
-            label={t('ticket.priority')}
-            value={form.priority}
-            options={priorities.map((value) => ({
-              value,
-              label: t(`ticket.priorities.${value}`),
-            }))}
-            onChange={(event) => setForm({ ...form, priority: event.target.value })}
-          />
-          <Input
-            label={t('sla.responseMinutes')}
-            type="number"
-            value={form.response_target_minutes}
-            onChange={(event) =>
-              setForm({ ...form, response_target_minutes: Number(event.target.value) })
-            }
-          />
-          <Input
-            label={t('sla.resolutionMinutes')}
-            type="number"
-            value={form.resolution_target_minutes}
-            onChange={(event) =>
-              setForm({ ...form, resolution_target_minutes: Number(event.target.value) })
-            }
-          />
-          <Button
-            icon={<Plus />}
-            onClick={submit}
-            loading={createSLA.isPending}
-            disabled={!form.name}
-          >
-            {t('common.save')}
-          </Button>
-        </div>
-      </Card>
+      {canWrite ? (
+        <Card title={t('sla.createPolicy')}>
+          <div className="grid gap-4 md:grid-cols-4 md:items-start">
+            <Input
+              label={t('sla.name')}
+              value={form.name}
+              error={fieldErrors.name}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+            />
+            <Select
+              label={t('sla.client')}
+              value={form.client_id}
+              error={fieldErrors.client_id}
+              options={[
+                { value: '', label: t('sla.noClient') },
+                ...(clients.data?.data ?? []).map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                })),
+              ]}
+              onChange={(event) => {
+                const clientId = event.target.value;
+                const chosen = calendars.data?.find((c) => c.id === form.calendar_id);
+                const keep = chosen && (chosen.client_id === null || chosen.client_id === clientId);
+                setForm({
+                  ...form,
+                  client_id: clientId,
+                  calendar_id: keep ? form.calendar_id : '',
+                });
+              }}
+            />
+            <Select
+              label={t('ticket.priority')}
+              value={form.priority}
+              error={fieldErrors.priority}
+              options={SLA_PRIORITIES.map((value) => ({
+                value,
+                label: t(`ticket.priorities.${value}`),
+              }))}
+              onChange={(event) => setForm({ ...form, priority: event.target.value })}
+            />
+            <Select
+              label={t('sla.calendarField')}
+              value={form.calendar_id}
+              error={fieldErrors.calendar_id}
+              options={[
+                { value: '', label: t('sla.calendarChain') },
+                ...selectableCalendars.map((calendar) => ({
+                  value: calendar.id,
+                  label: calendar.name,
+                })),
+              ]}
+              onChange={(event) => setForm({ ...form, calendar_id: event.target.value })}
+            />
+            <Input
+              label={t('sla.responseMinutes')}
+              type="number"
+              min={1}
+              value={form.response_target_minutes}
+              error={fieldErrors.response_target_minutes}
+              onChange={(event) =>
+                setForm({ ...form, response_target_minutes: Number(event.target.value) })
+              }
+            />
+            <Input
+              label={t('sla.resolutionMinutes')}
+              type="number"
+              min={1}
+              value={form.resolution_target_minutes}
+              error={fieldErrors.resolution_target_minutes}
+              onChange={(event) =>
+                setForm({ ...form, resolution_target_minutes: Number(event.target.value) })
+              }
+            />
+            <label
+              htmlFor={businessHoursId}
+              className="flex items-center gap-2 text-sm text-fg md:mt-8"
+            >
+              <input
+                id={businessHoursId}
+                type="checkbox"
+                checked={form.business_calendar}
+                onChange={(event) => setForm({ ...form, business_calendar: event.target.checked })}
+              />
+              {t('sla.businessHours')}
+            </label>
+            <div className="md:mt-6">
+              <Button
+                icon={<Plus />}
+                onClick={submit}
+                loading={createSLA.isPending}
+                disabled={!form.name}
+              >
+                {t('common.save')}
+              </Button>
+            </div>
+          </div>
+          {formError ? (
+            <p className="mt-3 text-sm text-danger" role="alert">
+              {formError}
+            </p>
+          ) : null}
+        </Card>
+      ) : null}
 
       <section className="space-y-3" aria-labelledby="sla-policies">
         <h2 id="sla-policies" className="text-base font-semibold text-fg">
@@ -149,6 +263,9 @@ export function SLAPage() {
                     <th scope="col" className={`${thClasses} text-right`}>
                       {t('sla.resolutionMinutes')}
                     </th>
+                    <th scope="col" className={thClasses}>
+                      {t('sla.calendarField')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -167,6 +284,11 @@ export function SLAPage() {
                       </td>
                       <td className={tdNumericClasses}>{policy.response_target_minutes}</td>
                       <td className={tdNumericClasses}>{policy.resolution_target_minutes}</td>
+                      <td className={tdClasses}>
+                        {policy.business_calendar
+                          ? (calendarName(policy.calendar_id) ?? t('sla.calendarChain'))
+                          : t('sla.elapsedTime')}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -181,6 +303,8 @@ export function SLAPage() {
           />
         )}
       </section>
+
+      <BusinessCalendarSection />
 
       <section className="space-y-3" aria-labelledby="sla-breaches">
         <h2 id="sla-breaches" className="text-base font-semibold text-fg">

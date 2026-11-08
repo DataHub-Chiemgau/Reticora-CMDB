@@ -74,6 +74,9 @@ import {
 } from '../components/import/MappingEditor';
 import { TYPE_CATEGORIES } from '../components/create/TypeTiles';
 import { FORM_GROUPS } from '../components/create/GuidedCreate';
+import { WEEKDAYS, WEEKDAY_NUMBERS } from '../components/sla/BusinessCalendarSection';
+import { SLA_PRIORITIES } from '../pages/SLAPage';
+import { DISPOSAL_METHODS, DISPOSAL_REQUIRED_FIELDS } from '../pages/DisposalListPage';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -158,6 +161,12 @@ const documentSources = import.meta.glob(
 // WP-322: the components of the import assistant, without tests.
 const importSources = import.meta.glob(
   ['../components/import/**/*.tsx', '!../components/import/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-815: the business calendar section of the SLA page, without tests.
+const slaSources = import.meta.glob(
+  ['../components/sla/**/*.tsx', '!../components/sla/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -431,6 +440,14 @@ const enumerations: Array<[string, readonly string[]]> = [
   // field groups of the guided creation.
   ['create.categories', TYPE_CATEGORIES],
   ['create.groups', FORM_GROUPS],
+  // WP-815: the disposal methods (E-55), the SLA priorities and the
+  // weekdays of the business calendars.
+  ['disposal.methods', DISPOSAL_METHODS],
+  ['disposal.methods', specEnum('CreateDisposalRecordRequest', 'method')],
+  ['ticket.priorities', SLA_PRIORITIES],
+  ['ticket.priorities', specEnum('CreateSLAPolicyRequest', 'priority')],
+  ['sla.calendar.weekdays', WEEKDAYS],
+  ['sla.calendar.weekdaysShort', WEEKDAYS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
     'savedviews.fields',
     targets,
@@ -575,6 +592,19 @@ describe('i18n catalog', () => {
       ]),
     );
     expect(Object.keys(createSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('mirrors the disposal methods, priorities and weekdays (WP-815)', () => {
+    expect([...DISPOSAL_METHODS]).toEqual(specEnum('CreateDisposalRecordRequest', 'method'));
+    expect(Object.keys(DISPOSAL_REQUIRED_FIELDS).sort()).toEqual([...DISPOSAL_METHODS].sort());
+    expect([...SLA_PRIORITIES]).toEqual(specEnum('CreateSLAPolicyRequest', 'priority'));
+    // weekday of weekly_hours: 1 (Monday) to 7 (Sunday), backend/internal/sla/calendar.go.
+    expect(WEEKDAYS.map((day) => WEEKDAY_NUMBERS[day])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(lookup(deDE, 'sla.calendar.weekdays.mon')).toBe('Montag');
+    expect(lookup(enUS, 'sla.calendar.weekdays.sun')).toBe('Sunday');
+    expect(lookup(deDE, 'disposal.methods.secure_erasure')).toBe('Sichere Löschung');
+    expect(lookup(enUS, 'disposal.methods.physical_destruction')).toBe('Physical destruction');
+    expect(Object.keys(slaSources)).toEqual(['../components/sla/BusinessCalendarSection.tsx']);
   });
 
   it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
@@ -765,6 +795,10 @@ describe('i18n catalog', () => {
     // WP-816: the bulk bar and the job center.
     ...Object.keys(bulkSources),
     '../pages/JobCenterPage.tsx',
+    // WP-815: the SLA page with the business calendars and the disposal page.
+    '../pages/SLAPage.tsx',
+    '../pages/DisposalListPage.tsx',
+    ...Object.keys(slaSources),
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
@@ -775,7 +809,8 @@ describe('i18n catalog', () => {
       documentSources[file] ??
       importSources[file] ??
       createSources[file] ??
-      bulkSources[file];
+      bulkSources[file] ??
+      slaSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

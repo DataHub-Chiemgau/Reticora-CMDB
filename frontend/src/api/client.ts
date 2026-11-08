@@ -2289,6 +2289,8 @@ export interface SLAPolicy {
   response_target_minutes: number;
   resolution_target_minutes: number;
   business_calendar: boolean;
+  /** The business calendar of the policy (TKT-02); null lets the calendar chain decide (WP-292). */
+  calendar_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2322,7 +2324,13 @@ export interface SLAPolicyRequest {
   priority: string;
   response_target_minutes: number;
   resolution_target_minutes: number;
+  /** business_calendar applies business hours (switch of the form, WP-815). */
   business_calendar?: boolean;
+  /**
+   * calendar_id names a business calendar without client or of the policy's
+   * client (TKT-02); null or absent lets the calendar chain decide (WP-292).
+   */
+  calendar_id?: string | null;
 }
 
 export interface SLAListParams extends ListParams {
@@ -2358,6 +2366,48 @@ export const slaApi = {
       method: 'POST',
       body: JSON.stringify({ sla_id }),
     });
+  },
+};
+
+// --- Business calendars (TKT-02, E-38, WP-768) ---
+
+// The business calendars come from the OpenAPI contract (K27). The list
+// takes client_id, but follows no scope switcher: the calendar choice of a
+// policy needs the org-wide calendars (client_id null) too, so
+// SCOPED_LISTS stays unchanged (WP-815).
+export type BusinessCalendar = components['schemas']['BusinessCalendar'];
+export type BusinessCalendarWindow = components['schemas']['BusinessCalendarWindow'];
+export type BusinessCalendarHoliday = components['schemas']['BusinessCalendarHoliday'];
+export type CreateBusinessCalendarRequest = components['schemas']['CreateBusinessCalendarRequest'];
+export type UpdateBusinessCalendarRequest = components['schemas']['UpdateBusinessCalendarRequest'];
+
+export interface BusinessCalendarListParams {
+  limit?: number;
+  cursor?: string;
+  client_id?: string;
+}
+
+export const businessCalendarApi = {
+  /** One page of the calendars sorted by name; the next one over next_cursor (API-02). */
+  list(params: BusinessCalendarListParams = {}): Promise<PaginatedResponse<BusinessCalendar>> {
+    return fetchAPI(`/business-calendars${buildQuery(params)}`);
+  },
+  /** listAll reads every calendar visible under the scope (calendar choice of a policy). */
+  listAll(): Promise<BusinessCalendar[]> {
+    return fetchAllPages('/business-calendars');
+  },
+  get(id: string): Promise<BusinessCalendar> {
+    return fetchAPI(`/business-calendars/${id}`);
+  },
+  create(data: CreateBusinessCalendarRequest): Promise<BusinessCalendar> {
+    return fetchAPI('/business-calendars', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** PATCH sends the changed fields; client_id cannot change (400 on client_id). */
+  update(id: string, data: UpdateBusinessCalendarRequest): Promise<BusinessCalendar> {
+    return fetchAPI(`/business-calendars/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/business-calendars/${id}`, { method: 'DELETE' });
   },
 };
 
@@ -3247,31 +3297,33 @@ export const maintenanceApi = {
   },
 };
 
-export interface DisposalRecord {
-  id: string;
-  organization_id: string;
+/**
+ * A revision-safe disposal record after E-55 (WP-751) from the schema
+ * (K27): append-only, with the DIN 66399 fields, the evidence document and
+ * record_hash set by the database.
+ */
+export type DisposalRecord = components['schemas']['DisposalRecord'];
+
+/** The payload of POST /disposal-records; the required fields depend on the method. */
+export type CreateDisposalRecordRequest = components['schemas']['CreateDisposalRecordRequest'];
+
+export type DisposalMethod = CreateDisposalRecordRequest['method'];
+
+export interface DisposalListParams extends ListParams {
+  method?: string;
   asset_id?: string;
   ci_id?: string;
-  method: string;
-  certificate_ref?: string;
-  data_carrier?: string;
-  performed_by?: string;
-  performed_at: string;
-  created_at: string;
 }
 
 export const disposalApi = {
-  list(params: ListParams & { method?: string } = {}): Promise<PaginatedResponse<DisposalRecord>> {
+  list(params: DisposalListParams = {}): Promise<PaginatedResponse<DisposalRecord>> {
     return fetchAPI(`/disposal-records${buildQuery(params)}`);
   },
-  create(data: {
-    method: string;
-    asset_id?: string;
-    ci_id?: string;
-    certificate_ref?: string;
-    data_carrier?: string;
-    notes?: string;
-  }): Promise<DisposalRecord> {
+  get(id: string): Promise<DisposalRecord> {
+    return fetchAPI(`/disposal-records/${id}`);
+  },
+  /** 400 names the missing or invalid field, 422 a refused lifecycle source state. */
+  create(data: CreateDisposalRecordRequest): Promise<DisposalRecord> {
     return fetchAPI('/disposal-records', { method: 'POST', body: JSON.stringify(data) });
   },
 };

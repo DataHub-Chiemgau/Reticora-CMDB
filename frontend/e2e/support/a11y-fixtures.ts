@@ -811,6 +811,10 @@ export const A11Y_HANDLERS: Handler[] = [
         'saved_view:write',
         'ci_attribute:manage',
         'ticket:write',
+        // WP-815: the policy form and the calendar actions of /slas, the
+        // disposal form of /disposal.
+        'sla:write',
+        'disposal:write',
         'user:manage',
         'user:read',
         'webhook:manage',
@@ -1598,6 +1602,26 @@ export const A11Y_HANDLERS: Handler[] = [
           resolution_due_at: LATER,
           response_breached: true,
           resolution_breached: false,
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  // WP-815: the business calendars of the SLA page (calendar choice and section).
+  {
+    path: '/business-calendars',
+    reply: fixed(
+      list([
+        {
+          id: 'ed000000-0000-4000-8000-000000000003',
+          organization_id: ORG,
+          client_id: null,
+          name: 'a11y Bürozeiten',
+          timezone: 'Europe/Berlin',
+          weekly_hours: [{ weekday: 1, start: '08:00', end: '18:00' }],
+          holidays: [{ date: '2026-12-24', name: 'Heiligabend' }],
+          is_default: true,
           created_at: AT,
           updated_at: AT,
         },
