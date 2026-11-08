@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -208,7 +208,7 @@ func (s *Service) matches(ctx context.Context, orgID string, sv *signedVersion) 
 		return false, nil
 	}
 	rc, err := s.signatures.blobs.Get(ctx, document.Bucket, sv.key)
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, blob.ErrNotFound) {
 		return false, nil
 	}
 	if err != nil {

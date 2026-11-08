@@ -1603,7 +1603,7 @@
       "allFailed": "Alle Zeilen fehlerhaft",
       "dryRun": "Dry Run",
       "dryRunNote": "Im Dry Run wurde nichts geschrieben; die Zahlen zeigen, was der Import tun würde.",
-      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Zeile, Feld, Code und Meldung jeder Zeile stehen im Bericht.",
+      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Die Fehlerliste zeigt Zeile, Feld, Code und Meldung; der Bericht enthält zusätzlich das Ergebnis jeder Zeile.",
       "failed": "Der Import ist fehlgeschlagen.",
       "cancelled": "Der Import wurde abgebrochen; es gibt keinen Bericht.",
       "download": "Bericht herunterladen",
@@ -1615,6 +1615,20 @@
         "updated": "Aktualisiert",
         "skipped": "Übersprungen",
         "failed": "Fehlerhaft"
+      },
+      "errorList": {
+        "title": "Fehlerliste",
+        "table": "Fehler je Zeile",
+        "loading": "Fehlerliste wird geladen …",
+        "empty": "Der Bericht enthält keine Fehler.",
+        "line": "Zeile",
+        "field": "Feld",
+        "code": "Code",
+        "message": "Meldung",
+        "wholeFile": "Datei",
+        "range": "{{from}}–{{to}} von {{total}} Fehlern",
+        "previous": "Zurück",
+        "next": "Weiter"
       }
     },
     "errors": {

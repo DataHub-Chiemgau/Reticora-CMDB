@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"time"
 
@@ -301,7 +300,7 @@ func (r *Retention) deleteBlobs(ctx context.Context, orgID string, d *expiredDoc
 		return false
 	}
 	for _, key := range d.keys {
-		if err := r.blobs.Delete(ctx, documentBucket, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := r.blobs.Delete(ctx, documentBucket, key); err != nil && !errors.Is(err, blob.ErrNotFound) {
 			slog.Warn("retention: delete document content", "organization_id", orgID, "document_id", d.id, "error", err)
 			return false
 		}

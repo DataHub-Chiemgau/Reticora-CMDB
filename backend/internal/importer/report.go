@@ -3,6 +3,8 @@ package importer
 import (
 	"bytes"
 	"encoding/csv"
+	"errors"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -129,4 +131,70 @@ func neutralize(cell string) string {
 		return "'" + cell
 	}
 	return cell
+}
+
+// restore undoes neutralize for a cell read back from the report: the
+// apostrophe before a formula trigger is dropped.
+func restore(cell string) string {
+	if len(cell) > 1 && cell[0] == '\'' && strings.IndexByte(formulaTriggers, cell[1]) >= 0 {
+		return cell[1:]
+	}
+	return cell
+}
+
+// RowError is one error of a run (GET /api/v1/imports/{id}/errors): an
+// Issue of the report that is no outcome line (created, updated, skipped).
+// Line is nil for an error of the file as a whole.
+type RowError struct {
+	Line    *int   `json:"line"`
+	Field   string `json:"field"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// MaxReportBytes caps how much of a stored report the error list reads.
+const MaxReportBytes = 64 << 20
+
+var errReportMalformed = errors.New("the import report is malformed")
+
+// readErrors reads the stored CSV report (the issues the run wrote with
+// addIssue) and returns its error lines in the order of the report.
+func readErrors(r io.Reader) ([]RowError, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxReportBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > MaxReportBytes {
+		return nil, errReportMalformed
+	}
+	cr := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte(reportBOM))))
+	cr.Comma = ';'
+	cr.FieldsPerRecord = len(reportHeader)
+	head, err := cr.Read()
+	if err != nil || strings.Join(head, ";") != strings.Join(reportHeader, ";") {
+		return nil, errReportMalformed
+	}
+	out := []RowError{}
+	for {
+		rec, rerr := cr.Read()
+		if errors.Is(rerr, io.EOF) {
+			return out, nil
+		}
+		if rerr != nil {
+			return nil, errReportMalformed
+		}
+		switch Outcome(rec[2]) {
+		case OutcomeCreated, OutcomeUpdated, OutcomeSkipped:
+			continue
+		}
+		e := RowError{Field: restore(rec[1]), Code: rec[2], Message: restore(rec[3])}
+		if rec[0] != "" {
+			n, cerr := strconv.Atoi(rec[0])
+			if cerr != nil {
+				return nil, errReportMalformed
+			}
+			e.Line = &n
+		}
+		out = append(out, e)
+	}
 }

@@ -21551,8 +21551,9 @@ paths:
         the error of the row). While the run is queued or running 409
         import-report-not-ready; a cancelled run has no report (404). Like
         the projection of the run, the document of the run must lie in the
-        caller's scope (404). Without job service or blob storage 503.
-        Requires import:run.
+        caller's scope (404). A run whose report is not stored is 404 as
+        well; a blob storage that cannot be asked is 503. Without job
+        service or blob storage 503. Requires import:run.
       responses:
         '200':
           description: Download link of the report
@@ -21560,6 +21561,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImportReportLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/imports/{id}/errors:
+    x-phase: P2
+    x-feature: import
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listImportErrors
+      tags: [Import]
+      summary: List the row errors of an import run
+      description: >-
+        The errors of a finished run as JSON (line, field, code, message):
+        every line of its report (GET /api/v1/imports/{id}/report) except
+        the outcome lines of the rows written or skipped (codes created,
+        updated, skipped), in the order of the report. A line of null is an
+        error of the file as a whole (a mapped column missing in the
+        header, a limit of the file). Notes of a written row (e.g.
+        read_only_field) are listed as well, so total counts errors, not
+        failed rows (rows_failed of the run). The list is read from the
+        stored report, there is no import table. Paged by limit and the
+        signed cursor of next_cursor. Visibility and answers follow the
+        report: 409 import-report-not-ready while the run is queued or
+        running, 404 for a cancelled run, a run without stored report, a
+        job of another kind and a run the caller does not see (document
+        outside the scope; a run over JSON rows for everyone but its
+        starter). A report that cannot be read is 503, never a partial
+        list. Without job service or blob storage 503. Requires import:run.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of the errors of the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportErrorListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -31504,6 +31554,40 @@ components:
       properties:
         download_url:
           type: string
+
+    ImportError:
+      type: object
+      description: One error of an import run, a line of its report.
+      required: [line, field, code, message]
+      properties:
+        line:
+          type: [integer, 'null']
+          description: >-
+            Line of the file (the header is line 1) or number of the JSON row
+            of an API run (from 1), as in the report; null for an error of
+            the file as a whole.
+        field:
+          type: string
+          description: Target of the mapping or column of the file; empty when the error concerns the whole row.
+        code:
+          type: string
+          description: >-
+            Code of the error, e.g. transform_failed, invalid_value,
+            out_of_scope, location_not_found or a parser code
+            (import-row-malformed).
+        message:
+          type: string
+
+    ImportErrorListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ImportError'
 
     LabelLookupResult:
       type: object

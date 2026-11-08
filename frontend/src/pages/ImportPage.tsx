@@ -24,6 +24,7 @@ import {
   useDeleteImportProfile,
   useDocument,
   useHasPermission,
+  useImportErrors,
   useImportPreview,
   useImportProfiles,
   useImportRun,
@@ -183,11 +184,114 @@ function PermissionHint({ allowed, text }: { allowed: boolean | undefined; text:
 }
 
 /**
+ * ImportErrorList shows the row errors of a finished run page by page (GET
+ * /imports/{id}/errors): line, field, code and message, the next page over
+ * next_cursor, the previous one from the cursors already read.
+ */
+function ImportErrorList({ jobId }: { jobId: string }) {
+  const { t } = useTranslation();
+  // cursors[i] is the cursor of page i (undefined: the first page).
+  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
+  const pageIndex = cursors.length - 1;
+  const errors = useImportErrors(jobId, cursors[pageIndex], true);
+
+  if (errors.isError) {
+    return (
+      <p role="alert" className="text-sm text-danger">
+        {importErrorMessage(errors.error, t)}
+      </p>
+    );
+  }
+  const page = errors.data;
+  if (!page) {
+    return (
+      <p role="status" className="text-sm text-fg-muted">
+        {t('import.report.errorList.loading')}
+      </p>
+    );
+  }
+  if (page.total === 0) {
+    return <p className="text-sm text-fg-muted">{t('import.report.errorList.empty')}</p>;
+  }
+  const next = page.has_more ? page.next_cursor : undefined;
+  const from = page.offset + 1;
+  const to = page.offset + page.data.length;
+  return (
+    <section
+      className="space-y-2"
+      aria-label={t('import.report.errorList.title')}
+      data-testid="import-errors"
+    >
+      <h3 className="text-sm font-semibold text-fg">{t('import.report.errorList.title')}</h3>
+      <ScrollRegion label={t('import.report.errorList.table')}>
+        <table className={tableClasses}>
+          <thead className={theadClasses}>
+            <tr>
+              <th scope="col" className={thClasses}>
+                {t('import.report.errorList.line')}
+              </th>
+              <th scope="col" className={thClasses}>
+                {t('import.report.errorList.field')}
+              </th>
+              <th scope="col" className={thClasses}>
+                {t('import.report.errorList.code')}
+              </th>
+              <th scope="col" className={thClasses}>
+                {t('import.report.errorList.message')}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {page.data.map((error, index) => (
+              <tr key={`${page.offset + index}`} className={trClasses}>
+                <td className={cn(tdClasses, 'tabular-nums')}>
+                  {error.line ?? t('import.report.errorList.wholeFile')}
+                </td>
+                <td className={tdClasses}>{error.field || '—'}</td>
+                <td className={tdClasses}>
+                  <code className="text-xs">{error.code}</code>
+                </td>
+                <td className={tdClasses}>{error.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-fg-muted" aria-live="polite">
+          {t('import.report.errorList.range', { from, to, total: page.total })}
+        </p>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArrowLeft />}
+          disabled={pageIndex === 0 || errors.isFetching}
+          onClick={() => setCursors((list) => list.slice(0, -1))}
+        >
+          {t('import.report.errorList.previous')}
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<ArrowRight />}
+          disabled={!next || errors.isFetching}
+          loading={errors.isFetching && errors.isPlaceholderData}
+          onClick={() => setCursors((list) => [...list, next])}
+        >
+          {t('import.report.errorList.next')}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+/**
  * ImportReport follows a run (useImportRun) and shows its report: progress
  * while it runs, then the counters (total, created, updated, skipped,
  * failed) with a partial failure marked as such, the error code of a
- * failed run and the CSV report for download, which lists every row with
- * its outcome or error (Zeile;Feld;Code;Meldung).
+ * failed run, its row errors page by page (ImportErrorList) and the CSV
+ * report for download, which lists every row with its outcome or error
+ * (Zeile;Feld;Code;Meldung).
  */
 function ImportReport({ jobId, dryRun }: { jobId: string; dryRun: boolean }) {
   const { t } = useTranslation();
@@ -318,6 +422,7 @@ function ImportReport({ jobId, dryRun }: { jobId: string; dryRun: boolean }) {
           ) : null}
         </>
       ) : null}
+      {status === 'succeeded' || status === 'failed' ? <ImportErrorList jobId={jobId} /> : null}
       {status !== 'cancelled' ? (
         <div className="space-y-1">
           <Button

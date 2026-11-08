@@ -116,6 +116,7 @@ func (h *ImportHandler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/imports/preview", h.Preview)
 	r.Get("/api/v1/imports/{id}", h.Get)
 	r.Get("/api/v1/imports/{id}/report", h.Report)
+	r.Get("/api/v1/imports/{id}/errors", h.Errors)
 }
 
 // Problem types of the import routes beside the parser codes.
@@ -706,6 +707,85 @@ type ReportLink struct {
 	DownloadURL string `json:"download_url"`
 }
 
+// finishedRun returns the import job of the path when its report can be
+// read: 409 import-report-not-ready while it is queued or running, 404 for
+// a cancelled run, 404 for every run the caller does not see (loadRun).
+func (h *ImportHandler) finishedRun(w http.ResponseWriter, r *http.Request, orgID string) (*jobs.Job, bool) {
+	job, _, found := h.loadRun(w, r, orgID)
+	if !found {
+		return nil, false
+	}
+	switch job.Status {
+	case jobs.StatusQueued, jobs.StatusRunning:
+		api.WriteProblem(w, http.StatusConflict, problemReportNotReady, "Import Report Not Ready",
+			"the import is "+string(job.Status)+"; its report follows when it ends")
+		return nil, false
+	case jobs.StatusCancelled:
+		api.WriteError(w, http.StatusNotFound, "Not Found", "a cancelled import has no report")
+		return nil, false
+	}
+	return job, true
+}
+
+// Errors handles GET /api/v1/imports/{id}/errors: the errors of a finished
+// run (line, field, code, message). There is no import table (WP-301,
+// WP-775): the list is read from the stored report, without the outcome
+// lines of the rows written or skipped, in the order of the report and
+// paged by limit and an offset cursor (API-02). Visibility and the answers
+// for queued, running and cancelled runs follow the report route.
+func (h *ImportHandler) Errors(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	if h.jobs == nil || h.blobs == nil {
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "import errors require the job service and blob storage")
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	job, found := h.finishedRun(w, r, t.OrganizationID)
+	if !found {
+		return
+	}
+	ctx := r.Context()
+	rc, err := h.blobs.Get(ctx, export.ExportBucket, ReportKey(t.OrganizationID, job.ID))
+	if err != nil {
+		if errors.Is(err, blob.ErrNotFound) {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "the import has no stored report")
+			return
+		}
+		slog.WarnContext(ctx, "import: read report", "job", job.ID, "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the import report cannot be read")
+		return
+	}
+	defer func() { _ = rc.Close() }()
+	list, err := readErrors(rc)
+	if err != nil {
+		slog.WarnContext(ctx, "import: parse report", "job", job.ID, "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the import report cannot be read")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.Page(list, page))
+}
+
+// reportStored reports whether the report of the job is stored; a missing
+// report (blob.ErrNotFound) is answered 404, an unreachable store 503.
+func (h *ImportHandler) reportStored(w http.ResponseWriter, r *http.Request, orgID, jobID string) bool {
+	ok, err := blob.Exists(r.Context(), h.blobs, export.ExportBucket, ReportKey(orgID, jobID))
+	if err != nil {
+		slog.WarnContext(r.Context(), "import: check report", "job", jobID, "error", err)
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "the import report cannot be read")
+		return false
+	}
+	if !ok {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "the import has no stored report")
+	}
+	return ok
+}
+
 // Report handles GET /api/v1/imports/{id}/report: a presigned URL of the
 // report of a finished run; 409 import-report-not-ready while the job is
 // queued or running, 404 for a cancelled run.
@@ -718,17 +798,11 @@ func (h *ImportHandler) Report(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "import reports require the job service and blob storage")
 		return
 	}
-	job, _, found := h.loadRun(w, r, t.OrganizationID)
+	job, found := h.finishedRun(w, r, t.OrganizationID)
 	if !found {
 		return
 	}
-	switch job.Status {
-	case jobs.StatusQueued, jobs.StatusRunning:
-		api.WriteProblem(w, http.StatusConflict, problemReportNotReady, "Import Report Not Ready",
-			"the import is "+string(job.Status)+"; its report follows when it ends")
-		return
-	case jobs.StatusCancelled:
-		api.WriteError(w, http.StatusNotFound, "Not Found", "a cancelled import has no report")
+	if !h.reportStored(w, r, t.OrganizationID, job.ID) {
 		return
 	}
 	url, err := h.blobs.PresignedGetURL(r.Context(), export.ExportBucket, ReportKey(t.OrganizationID, job.ID),

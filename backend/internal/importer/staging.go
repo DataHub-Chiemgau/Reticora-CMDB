@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"strings"
 	"time"
@@ -100,7 +99,7 @@ func dropStaged(ctx context.Context, store blob.Store, orgID, key string) error 
 	if !ownsStagingKey(orgID, key) {
 		return blob.ErrForeignKey
 	}
-	if err := store.Delete(ctx, export.ExportBucket, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := store.Delete(ctx, export.ExportBucket, key); err != nil && !errors.Is(err, blob.ErrNotFound) {
 		return err
 	}
 	return nil

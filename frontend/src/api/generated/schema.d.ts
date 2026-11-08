@@ -9066,9 +9066,32 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). A run whose report is not stored is 404 as well; a blob storage that cannot be asked is 503. Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/imports/{id}/errors': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the row errors of an import run
+     * @description The errors of a finished run as JSON (line, field, code, message): every line of its report (GET /api/v1/imports/{id}/report) except the outcome lines of the rows written or skipped (codes created, updated, skipped), in the order of the report. A line of null is an error of the file as a whole (a mapped column missing in the header, a limit of the file). Notes of a written row (e.g. read_only_field) are listed as well, so total counts errors, not failed rows (rows_failed of the run). The list is read from the stored report, there is no import table. Paged by limit and the signed cursor of next_cursor. Visibility and answers follow the report: 409 import-report-not-ready while the run is queued or running, 404 for a cancelled run, a run without stored report, a job of another kind and a run the caller does not see (document outside the scope; a run over JSON rows for everyone but its starter). A report that cannot be read is 503, never a partial list. Without job service or blob storage 503. Requires import:run.
+     */
+    get: operations['listImportErrors'];
     put?: never;
     post?: never;
     delete?: never;
@@ -15033,6 +15056,19 @@ export interface components {
     };
     ImportReportLink: {
       download_url: string;
+    };
+    /** @description One error of an import run, a line of its report. */
+    ImportError: {
+      /** @description Line of the file (the header is line 1) or number of the JSON row of an API run (from 1), as in the report; null for an error of the file as a whole. */
+      line: number | null;
+      /** @description Target of the mapping or column of the file; empty when the error concerns the whole row. */
+      field: string;
+      /** @description Code of the error, e.g. transform_failed, invalid_value, out_of_scope, location_not_found or a parser code (import-row-malformed). */
+      code: string;
+      message: string;
+    };
+    ImportErrorListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ImportError'][];
     };
     /** @description The object a scanned code names (INV-03, WP-762). */
     LabelLookupResult: {
@@ -41312,6 +41348,46 @@ export interface operations {
           'application/json': components['schemas']['ImportReportLink'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listImportErrors: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description A page of the errors of the run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportErrorListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

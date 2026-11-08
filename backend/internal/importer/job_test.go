@@ -671,6 +671,7 @@ func TestImportRoutesWithoutJobsOrBlobs(t *testing.T) {
 		for _, op := range []struct{ method, path, body string }{
 			{http.MethodPost, "/api/v1/imports", `{"document_id":"d","profile_id":"p"}`},
 			{http.MethodGet, "/api/v1/imports/x/report", ""},
+			{http.MethodGet, "/api/v1/imports/x/errors", ""},
 		} {
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, httptest.NewRequest(op.method, op.path, strings.NewReader(op.body)).WithContext(ctx))
@@ -774,6 +775,7 @@ func TestImportDocumentOutsideClientScopePostgres(t *testing.T) {
 	}
 	wantProblem(t, call(http.MethodGet, "/api/v1/imports/"+job.ID, ""), http.StatusNotFound, "")
 	wantProblem(t, call(http.MethodGet, "/api/v1/imports/"+job.ID+"/report", ""), http.StatusNotFound, "")
+	wantProblem(t, call(http.MethodGet, "/api/v1/imports/"+job.ID+"/errors", ""), http.StatusNotFound, "")
 
 	// The own document runs through under the scope of client 1.
 	w := call(http.MethodPost, "/api/v1/imports", startBody(ownDoc, profile.ID))
@@ -803,5 +805,8 @@ func TestImportDocumentOutsideClientScopePostgres(t *testing.T) {
 	}
 	if w = call(http.MethodGet, "/api/v1/imports/"+accepted.JobID+"/report", ""); w.Code != http.StatusOK {
 		t.Fatalf("report: %d %s", w.Code, w.Body.String())
+	}
+	if w = call(http.MethodGet, "/api/v1/imports/"+accepted.JobID+"/errors", ""); w.Code != http.StatusOK {
+		t.Fatalf("errors: %d %s", w.Code, w.Body.String())
 	}
 }

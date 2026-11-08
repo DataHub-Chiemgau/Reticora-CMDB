@@ -241,6 +241,21 @@ function stubApi(options: Options = {}) {
       if (method === 'GET' && reportMatch?.[1]) {
         return json({ download_url: `https://blob.example/${reportMatch[1]}.csv` });
       }
+      const errorsMatch = /^\/imports\/(job-\d)\/errors$/.exec(path);
+      if (method === 'GET' && errorsMatch?.[1]) {
+        // Two pages: the file error of a missing column, then row 3.
+        const second = url.searchParams.get('cursor') === 'page-2';
+        return json({
+          data: second
+            ? [{ line: 3, field: 'serial_number', code: 'invalid_value', message: 'is required' }]
+            : [{ line: null, field: 'Typ', code: 'column_missing', message: 'Typ is missing' }],
+          total: 2,
+          limit: 50,
+          offset: second ? 1 : 0,
+          has_more: !second,
+          ...(second ? {} : { next_cursor: 'page-2' }),
+        });
+      }
       return json({ status: 404, title: 'Not Found', detail: `unexpected ${route}` }, 404);
     }),
   );
@@ -378,6 +393,39 @@ describe('ImportPage', () => {
     await waitFor(() =>
       expect(opened).toHaveBeenCalledWith('https://blob.example/job-2.csv', '_blank', 'noopener'),
     );
+  });
+
+  it('lists the row errors of the report page by page over next_cursor', async () => {
+    const calls = stubApi({ profiles: [profile()] });
+    renderWithProviders(<ImportPage />);
+    await toMapping();
+    fireEvent.change(await screen.findByLabelText('Profil'), { target: { value: 'prof-1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Weiter zum Prüfen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dry Run starten' }));
+    const list = await screen.findByRole('region', { name: 'Fehlerliste' });
+    const header = within(list)
+      .getAllByRole('columnheader')
+      .map((h) => h.textContent);
+    expect(header).toEqual(['Zeile', 'Feld', 'Code', 'Meldung']);
+    expect(within(list).getByText('Datei')).toBeInTheDocument();
+    expect(within(list).getByText('column_missing')).toBeInTheDocument();
+    expect(within(list).getByText('1–1 von 2 Fehlern')).toBeInTheDocument();
+    const first = calls.find((c) => c.path === '/imports/job-1/errors');
+    expect(first?.search.get('limit')).toBe('50');
+    expect(first?.search.has('cursor')).toBe(false);
+    expect(within(list).getByRole('button', { name: 'Zurück' })).toBeDisabled();
+
+    fireEvent.click(within(list).getByRole('button', { name: 'Weiter' }));
+    await within(list).findByText('invalid_value');
+    expect(within(list).getByText('3')).toBeInTheDocument();
+    expect(within(list).getByText('2–2 von 2 Fehlern')).toBeInTheDocument();
+    expect(
+      calls.filter((c) => c.path === '/imports/job-1/errors').map((c) => c.search.get('cursor')),
+    ).toEqual([null, 'page-2']);
+    expect(within(list).getByRole('button', { name: 'Weiter' })).toBeDisabled();
+
+    fireEvent.click(within(list).getByRole('button', { name: 'Zurück' }));
+    await within(list).findByText('column_missing');
   });
 
   it('follows a running job with its progress', async () => {

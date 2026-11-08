@@ -1603,7 +1603,7 @@
       "allFailed": "All rows failed",
       "dryRun": "Dry run",
       "dryRunNote": "The dry run wrote nothing; the numbers show what the import would do.",
-      "rowErrors": "Rows with errors: {{count}}. Row, field, code and message of every row are in the report.",
+      "rowErrors": "Rows with errors: {{count}}. The error list shows line, field, code and message; the report also lists the outcome of every row.",
       "failed": "The import failed.",
       "cancelled": "The import was cancelled; there is no report.",
       "download": "Download report",
@@ -1615,6 +1615,20 @@
         "updated": "Updated",
         "skipped": "Skipped",
         "failed": "Failed"
+      },
+      "errorList": {
+        "title": "Error list",
+        "table": "Errors per row",
+        "loading": "Loading error list …",
+        "empty": "The report lists no errors.",
+        "line": "Line",
+        "field": "Field",
+        "code": "Code",
+        "message": "Message",
+        "wholeFile": "File",
+        "range": "{{from}}–{{to}} of {{total}} errors",
+        "previous": "Previous",
+        "next": "Next"
       }
     },
     "errors": {

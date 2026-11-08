@@ -94,7 +94,7 @@ var Channels = []Channel{
 	{Name: "order", Read: "GET /api/v1/orders?limit=200, GET /api/v1/orders/{id}", Write: "POST /api/v1/orders"},
 	{Name: "stocktake", Read: "GET /api/v1/stocktakes?limit=200, GET /api/v1/stocktakes/{id}"},
 	{Name: "ticket", Read: "GET /api/v1/tickets?limit=200, GET /api/v1/tickets/{id}", Write: "POST /api/v1/tickets"},
-	{Name: "import", Read: "GET /api/v1/imports/{id}", Write: "POST /api/v1/imports (rows of every client, report)"},
+	{Name: "import", Read: "GET /api/v1/imports/{id}, GET /api/v1/imports/{id}/report, GET /api/v1/imports/{id}/errors", Write: "POST /api/v1/imports (rows of every client, report)"},
 	{Name: "bulk", Write: "POST /api/v1/cis/bulk, POST /api/v1/assets/bulk (partial failure report), POST /api/v1/jobs/{id}/revert"},
 	{Name: "label-lookup", Read: "GET /api/v1/labels/lookup?code=… (inventory number, barcode, URN)"},
 	{Name: "search-p2", Read: "GET /api/v1/search?q=<inventory number>"},

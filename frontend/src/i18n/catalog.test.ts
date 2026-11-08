@@ -533,6 +533,24 @@ describe('i18n catalog', () => {
     expect(lookup(deDE, 'jobs.kinds.import.run')).toBe('Import-Lauf');
     expect(lookup(enUS, 'jobs.kinds.import.run')).toBe('Import run');
     expect(Object.keys(importSources)).toEqual(['../components/import/MappingEditor.tsx']);
+    // The row errors of GET /imports/{id}/errors (finding of WP-322): the
+    // columns follow the report (Zeile;Feld;Code;Meldung).
+    const lines = spec.split('\n');
+    const start = lines.findIndex((l) => /^ {4}ImportError:/.test(l));
+    const end = lines.findIndex((l, i) => i > start && /^ {4}};/.test(l));
+    const props = lines
+      .slice(start + 1, end)
+      .map((l) => /^ {6}(\w+)\??:/.exec(l)?.[1])
+      .filter(Boolean);
+    expect(props).toEqual(['line', 'field', 'code', 'message']);
+    expect(
+      ['line', 'field', 'code', 'message'].map((k) => lookup(deDE, `import.report.errorList.${k}`)),
+    ).toEqual(['Zeile', 'Feld', 'Code', 'Meldung']);
+    expect(
+      ['line', 'field', 'code', 'message'].map((k) => lookup(enUS, `import.report.errorList.${k}`)),
+    ).toEqual(['Line', 'Field', 'Code', 'Message']);
+    expect(lookup(deDE, 'import.report.errorList.next')).toBe('Weiter');
+    expect(lookup(enUS, 'import.report.errorList.next')).toBe('Next');
   });
 
   it('offers exactly the operators, directions and entity kinds of FilterExpr (WP-315)', () => {

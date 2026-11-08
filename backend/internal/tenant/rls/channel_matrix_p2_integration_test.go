@@ -733,9 +733,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	// nothing.
 	rows["import"] = matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
-			// The run and its report (a presigned URL), 404 like an unknown
+			// The run, its report (a presigned URL) and its row errors, 404 like an unknown
 			// id for every other principal.
-			return append(details(p, "/api/v1/imports/", "", s.importJob), details(p, "/api/v1/imports/", "/report", s.importJob)...)
+			out := append(details(p, "/api/v1/imports/", "", s.importJob), details(p, "/api/v1/imports/", "/report", s.importJob)...)
+			return append(out, details(p, "/api/v1/imports/", "/errors", s.importJob)...)
 		},
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 			profile := s.profiles[0]

@@ -112,6 +112,9 @@ func (s *FileStore) Get(_ context.Context, bucket, key string) (io.ReadCloser, e
 		return nil, err
 	}
 	file, err := os.Open(objectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		err = ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("blob: open file %q: %w", objectPath, err)
 	}
@@ -124,7 +127,11 @@ func (s *FileStore) Delete(_ context.Context, bucket, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(objectPath); err != nil {
+	err = os.Remove(objectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		err = ErrNotFound
+	}
+	if err != nil {
 		return fmt.Errorf("blob: delete file %q: %w", objectPath, err)
 	}
 	return nil
@@ -450,7 +457,7 @@ func (s *S3Store) doRequest(ctx context.Context, method, bucket, key string, bod
 
 	defer resp.Body.Close()
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	return nil, fmt.Errorf("blob: %s %s returned %s: %s", method, objectURL.String(), resp.Status, strings.TrimSpace(string(bodyBytes)))
+	return nil, statusError(method, objectURL.String(), resp, strings.TrimSpace(string(bodyBytes)))
 }
 
 func (s *S3Store) signRequest(req *http.Request, payloadHash string) error {
