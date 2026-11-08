@@ -10,13 +10,13 @@ require (
 	github.com/nats-io/jwt/v2 v2.7.4
 	github.com/nats-io/nats.go v1.54.0
 	github.com/nats-io/nkeys v0.4.16
-	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.60.0
+	golang.org/x/crypto v0.58.0
+	golang.org/x/net v0.62.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/klauspost/compress v1.20.0 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )
