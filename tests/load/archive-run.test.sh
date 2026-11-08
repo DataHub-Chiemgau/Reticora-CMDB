@@ -7,8 +7,12 @@
 # names the run, every k6 threshold with its measured value and result
 # (time, rate, counter and gauge thresholds), the measures without a
 # threshold, the failed requests by name and status (F-388), a red and a
-# missing job; SHA256SUMS verifies; a complete green run says so; wrong
-# arguments fail before anything is written.
+# missing job; a write job of writes.js (WP-823) keeps the summary,
+# output and failed requests of the ingest beside it and the size of the
+# organization at its end, and ergebnis.md lists the thresholds and
+# measures of both runs and the measures of the write job; SHA256SUMS
+# verifies; a complete green run says so; wrong arguments fail before
+# anything is written.
 #
 # Usage: ./tests/load/archive-run.test.sh
 # shellcheck disable=SC2016 # the backticks of the Markdown code spans are literal
@@ -160,13 +164,49 @@ cat >"$ART/load-results-ingest-rediscover/ingest-rediscover.json" <<'EOF'
 }}
 EOF
 
+# A write job (WP-823): writes.js with the ingest beside it.
+job "$ART" import success writes.js import
+cat >"$ART/load-results-import/import.json" <<'EOF'
+{"metrics": {
+  "import_10000_duration": {"avg": 78340, "p(95)": 78340, "max": 78340, "count": 1},
+  "import_update_duration": {"avg": 110556, "p(95)": 110556, "max": 110556, "count": 1},
+  "import_jobs_succeeded": {"count": 4, "rate": 0.02, "thresholds": {"count==4": false}},
+  "http_req_failed{scenario:import}": {"passes": 0, "fails": 371, "value": 0, "thresholds": {"rate==0": false}},
+  "checks": {"passes": 20, "fails": 0, "value": 1, "thresholds": {"rate==1": false}},
+  "http_reqs": {"count": 372, "rate": 2},
+  "http_req_failed": {"passes": 0, "fails": 372, "value": 0, "thresholds": {"rate==0": false}}
+}}
+EOF
+cat >"$ART/load-results-import/import-ingest.json" <<'EOF'
+{"metrics": {
+  "ingest_visible_delay": {"avg": 4000, "p(95)": 9100, "max": 12034.5, "count": 26, "thresholds": {"max<30000": false}},
+  "ingest_records_missing": {"count": 0, "rate": 0, "thresholds": {"count==0": false}},
+  "ingest_records_accepted": {"count": 24000, "rate": 150},
+  "ingest_drain_records_per_s": {"value": 410.26, "min": 410.26, "max": 410.26},
+  "checks": {"passes": 1300, "fails": 0, "value": 1, "thresholds": {"rate>0.99": false}},
+  "http_reqs": {"count": 1400, "rate": 9},
+  "http_req_failed": {"passes": 0, "fails": 1400, "value": 0, "thresholds": {"rate==0": false}}
+}}
+EOF
+cat >"$ART/load-results-import/import-ingest.txt" <<'EOF'
+     scenarios: (100.00%) 2 scenarios, 51 max VUs, 17m0s max duration (incl. graceful stop):
+
+running (0m01.0s), 02/11 VUs, 9 complete and 0 interrupted iterations
+ingest   [   1% ] 01/10 VUs  0m01.0s/2m0s  10.00 iters/s
+
+     ✓ ingest_visible_delay...........: avg=4s min=1s med=3s max=12.03s (ingest)
+EOF
+printf 'Fehlgeschlagene Anfragen: keine.\n' >"$ART/load-results-import/failed-import-ingest.txt"
+printf 'CIs of demo|44000\nassets of demo|10000\nobjects of demo (CIs and assets)|54000\n' >"$ART/load-results-import/size-import.txt"
+printf 'console\n' >"$ART/load-results-import/console-import-ingest.log"
+
 export GITHUB_RUN_ID=40257485919 GITHUB_RUN_ATTEMPT=1 GITHUB_SHA=0f6b3220000000000000000000000000000000aa
 export GITHUB_REF_NAME=main GITHUB_EVENT_NAME=workflow_dispatch SERVER_SHA=0f6b3220000000000000000000000000000000aa
 export RUN_URL=https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/40257485919
 export INPUT_OBJECTS=10000 INPUT_DURATION=2m INPUT_SCENARIOS=all INPUT_SERVER_REF=
 
 OUT="$TMP_ROOT/lasttest/40257485919"
-log="$("$SCRIPT" "$ART" "$OUT" api,ingest-spool,ingest-rediscover,nfr01-volume 2>&1)"
+log="$("$SCRIPT" "$ART" "$OUT" api,ingest-spool,ingest-rediscover,nfr01-volume,import 2>&1)"
 check "a red and a missing job still give an archive" "$log" 'missing: 1, not green: 1\)$'
 res="$(cat "$OUT/ergebnis.md" 2>/dev/null)"
 check "the run with its link and attempt" "$res" '^\| Lauf \| https://github.com/.*/runs/40257485919 \(Versuch 1, Ereignis workflow_dispatch, Branch main\) \|$'
@@ -215,6 +255,23 @@ GREEN="$TMP_ROOT/green/1"
 res="$(cat "$GREEN/ergebnis.md" 2>/dev/null)"
 check "a complete run" "$res" '^\| Vollständig \| ja: jeder Job hat ein Artefakt \|$'
 check "a green run" "$res" '^\| Ergebnis \| alle Jobs grün \|$'
+
+# The write job (WP-823) of the first archive.
+res="$(cat "$OUT/ergebnis.md" 2>/dev/null)"
+check "write job: its threshold of succeeded jobs" "$res" '^\| `import_jobs_succeeded` \| `count==4` \| 4 \| eingehalten \|$'
+check "write job: the import duration as a measure" "$res" '^\| `import_10000_duration` \| p\(95\) 78340, max 78340, count 1 \|$'
+check "write job: the update duration as a measure" "$res" '^\| `import_update_duration` \| p\(95\) 110556, max 110556, count 1 \|$'
+check "write job: the ingest beside it" "$res" '^Paralleler Ingest \(`import-ingest\.json`\):$'
+check "write job: the NFR-03 threshold of the ingest" "$res" '^\| `ingest_visible_delay` \| `max<30000` \| 12034\.5 ms \| eingehalten \|$'
+check "write job: the records of the ingest" "$res" '^\| `ingest_records_accepted` \| count 24000 \|$'
+check "write job: the failed requests of the ingest" "$res" '^\| Fehlgeschlagene Anfragen des Ingest \| keine\. \|$'
+check "write job: the size of the organization at its end" "$res" '^\| Größe am Jobende \| CIs of demo 44000, assets of demo 10000, objects of demo \(CIs and assets\) 54000 \|$'
+check "write job: the ingest summary archived" "$files" '^\./import/import-ingest\.json$'
+check "write job: its failed requests and size archived" "$(grep -cE '^\./import/(failed-import-ingest|size-import)\.txt$' <<<"$files")" '^2$'
+ingestout="$(cat "$OUT/import/import-ingest.txt" 2>/dev/null)"
+check "write job: the ingest output keeps its summary" "$ingestout" '^     ✓ ingest_visible_delay'
+refute "write job: but not its progress lines" "$ingestout" '^running \(|\[ +[0-9]+% \]'
+refute "write job: no console log of the ingest" "$files" 'console-import-ingest'
 
 status "usage" 2 "$SCRIPT" "$ART" "$TMP_ROOT/x"
 status "no artifact directory" 2 "$SCRIPT" "$TMP_ROOT/none" "$TMP_ROOT/y" api

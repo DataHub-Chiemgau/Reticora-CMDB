@@ -30,7 +30,10 @@ Laufs wächst damit um etwa ein Fünftel (32 auf 38 VUs).
 Der Job `nfr01-volume` von `load.yml` führt `api.js` mit denselben
 Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
 Die Listen, Suche, Filter, Beziehungssuche und Bulk-Operationen der Phase 2
-misst `phase2.js` im Job `phase2` (Abschnitt „Phase 2“).
+misst `phase2.js` im Job `phase2` (Abschnitt „Phase 2“), die
+Massen-Schreibjobs der Phase 2 parallel zum Ingest `writes.js` in den Jobs
+`import`, `template` und `computed` (Abschnitt „Massen-Schreibjobs parallel
+zum Ingest“).
 
 **Fehlgeschlagene Anfragen (F-388, WP-659):** Kein Lauf ist mit einer
 fehlgeschlagenen Anfrage grün. Jedes Skript hat `http_req_failed: rate==0`
@@ -245,14 +248,77 @@ Mengenartikel) lieferten `setup()` und jede Szenariofunktion nur
 200/201/202, kein Check scheiterte; die Messung selbst ist der Job
 `phase2`.
 
+### Massen-Schreibjobs parallel zum Ingest (WP-823, ABN-02, NFR-03)
+
+`writes.js` misst die Massen-Schreibjobs der Phase 2, während `ingest.js`
+(`SCENARIO=load`, 200 Records/s) parallel läuft. Das Szenario wählt
+`SCENARIO` wie in `ingest.js`; je Lauf gibt es genau ein k6-Szenario. Die
+Vorbereitung ist ein eigener k6-Lauf mit `PHASE=prepare` (nicht gemessen,
+vor dem Start des Ingest), die Messung der Lauf ohne `PHASE` (`measure`).
+Die Dauern sind Messwerte ohne Budget (Bericht von WP-327); eine Dauer
+zählt nur, wenn alle Jobs des Laufs gelungen sind.
+
+| Skript | Prüft | Messwert |
+|---|---|---|
+| `writes.js` `import` | Vorbereitung: Importprofil `load-writes` (`POST /import-profiles`, Entität `ci`, Format `json`, Identität `serial_number`). Gemessen: `IMPORT_ROWS` (10.000) neue Server-Zeilen über `POST /imports` mit `rows` und `profile_id` in Aufrufen zu höchstens 5.000 Zeilen (E-49), Modus `create_missing`, bis beide Jobs geendet haben (`GET /jobs/{id}`); danach dieselben Zeilen (Identität über die Seriennummer, anderes `model`, damit jedes CI geschrieben wird) mit neuem `Idempotency-Key` und `mode=update_existing` ohne manuelles `ANALYZE` (Punkt 8 von `lasttest-g1.md`). Checks: jeder Job `succeeded`, `GET /imports/{id}` meldet jede Zeile gelesen und keine fehlerhaft; `import_jobs_succeeded` `count==4` | `import_10000_duration` (Ziel < 5 min), `import_update_duration` |
+| `writes.js` `template` | Vorbereitung: globales Attribut `load_template_tier`, Template `load_writes` des Typs `server` mit Version 1 (das Attribut) und Version 2 (das Attribut mit Default `migrated`), beide veröffentlicht, und Version 1 auf jedem Server des Seeds (`srv-*`, `PUT /cis/{id}/templates`, `ASSIGN_PARALLEL` gleichzeitig). Gemessen: `POST /templates/{id}/migrations` von Version 1 auf 2 mit `where` auf diese CIs bis Job-Ende; `totals.migrated` aus `GET /jobs/{id}/result` muss jeder Server des Seeds sein (`template_migrated`); `template_jobs_succeeded` `count==1` | `template_migrate_duration` |
+| `writes.js` `computed` | Gemessen: `POST /attribute-definitions` legt das globale berechnete Attribut `load_asset_age_days` an (Tage vom Kaufdatum des verknüpften Assets bis heute, wie `warranty_days_left`), danach läuft der Job `attribute.computed_backfill` über alle CIs bis Job-Ende (`GET /jobs?kind=attribute.computed_backfill`, der Job der Definition); `computed_jobs_succeeded` `count==1`. Die Vorbereitung prüft nur, dass das Attribut noch nicht existiert | `computed_backfill_duration` |
+
+Abweichend vom Plan ordnet die Vorbereitung von `template` die Templates mit
+`PUT /cis/{id}/templates` zu: `POST /cis/bulk` mit `change_template`
+(WP-780) migriert oder ersetzt nur Templates, die ein CI schon hält, und die
+Templates des Seeds gehören zu den abgeleiteten Typen `blade_chassis` und
+`blade_server`, außerhalb der Typkette von `server`. Der Typ `server` ist
+ein Systemtyp ohne Attribute der Organisation, das Attribut des Templates
+ist daher global. Der Dateiimport (CSV/XLSX) über Dokumente bräuchte clamd
+und wird nicht gemessen; der Import über JSON-Zeilen legt die Zeilen im
+Objektspeicher ab (WP-303), die Jobs starten deshalb MinIO.
+
+Wie in den anderen Skripten gilt `http_req_failed: rate==0` für den Lauf
+und das Szenario, dazu `checks: rate==1`. Der parallele Ingest behält die
+Schwellen von `ingest.js` (`ingest_visible_delay` < 30 s,
+`ingest_records_missing` = 0, NFR-03); der Job scheitert, wenn einer der
+beiden Läufe scheitert. Jeder Ingest-Record legt ein neues CI an: 120 s
+ergeben 24.000 CIs, mit Seed und Import etwa 44.000 CIs (300 s ergäben mit
+Seed, Import und Assets mehr als 80.000 Objekte, weit über dem Headroom von
+50.000 nach NFR-01). Dauert der Schreibjob länger als der Ingest, steht das
+als Messwert im Bericht von WP-327.
+
+Parameter: `SCENARIO` (`import`, `template`, `computed`), `PHASE`
+(`prepare` oder `measure`), `OBJECTS` (CIs des Seeds; Server sind CI 5 bis
+`OBJECTS`), `IMPORT_ROWS` (10.000), `ASSIGN_PARALLEL` (20), `WAIT_S`
+(1.800, Wartezeit je Job), `RUN_ID` (Präfix der Importzeilen), `API_KEY`.
+
+Ablauf (Schritte 1 bis 3 oben mit dem Phase-2-Last-Seed, `RETICORA_MODULES=P2`
+und Objektspeicher, z. B. MinIO mit `RETICORA_S3_ENDPOINT=localhost:9000`,
+`RETICORA_S3_ACCESS_KEY` und `RETICORA_S3_SECRET_KEY`), je Szenario mit
+frischer Datenbank:
+
+```sh
+k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e OBJECTS=10000 \
+  -e SCENARIO=import -e PHASE=prepare tests/load/writes.js
+k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e OBJECTS=10000 \
+  -e SCENARIO=load -e DURATION_S=120 --summary-export import-ingest.json tests/load/ingest.js &
+k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) -e OBJECTS=10000 \
+  -e SCENARIO=import --summary-export import.json tests/load/writes.js
+wait
+psql "$DATABASE_URL" -At -F '|' -f tests/integrity-check.sql
+```
+
+Gegen einen lokalen Server (ohne TimescaleDB und NATS, Objektspeicher als
+S3-Attrappe, 3.000 CIs, 1.000 Assets) liefen Vorbereitung und Messung jedes
+Szenarios über eine k6-Attrappe (curl) ohne fehlgeschlagene Anfrage oder
+Check, `import` auch mit parallelem Ingest; die Messung selbst sind die Jobs
+`import`, `template` und `computed`.
+
 ### Workflow
 
 `.github/workflows/load.yml` (manuell und nächtlich) führt diese Schritte aus:
 `api.js`, `ingest.js` (`load`), `ingest.js` (`spool`), `ingest.js`
-(`rediscover`), `api.js` auf den NFR-01-Volumina und `phase2.js` als
-getrennte Jobs einer Matrix (`api`, `ingest`, `ingest-spool`,
+(`rediscover`), `api.js` auf den NFR-01-Volumina, `phase2.js` und
+`writes.js` als getrennte Jobs einer Matrix (`api`, `ingest`, `ingest-spool`,
 `ingest-rediscover`, `nfr01-volume`, `api-large-28000`, `api-large-50000`,
-`phase2`), jeder mit frischer Datenbank, Seed, neu aufgebautem Suchindex
+`phase2`, `import`, `template`, `computed`), jeder mit frischer Datenbank, Seed, neu aufgebautem Suchindex
 (der Schritt wartet, bis der Job `search.reindex` gelungen ist),
 `ANALYZE` und einem Server mit 4 Spuren (Standard) und
 `RETICORA_MODULES=P2` (Release-Konfiguration G2: alle Module der Phase P2
@@ -268,7 +334,13 @@ viewer` und übergibt diesen Schlüssel als `API_KEY_RESTRICTED`. Der Schritt
 Beziehungen der Demo-Organisation, die Organisationen und die Assets,
 Tickets und Mengenartikel der Demo-Organisation (`volumes-<job>.txt`); im
 Job `nfr01-volume` scheitert er unter 10.000, 50.000, 200.000, 100.000 bzw.
-500. Nach dem k6-Lauf prüft ein eigener
+500. Die Jobs `import`, `template` und `computed` (WP-823) starten zusätzlich
+MinIO und den Server mit `RETICORA_S3_*`, führen im k6-Schritt erst die
+Vorbereitung (`PHASE=prepare`) und dann `ingest.js` (`load`,
+`INGEST_DURATION_S` = 120 s) im Hintergrund neben `writes.js` aus; der
+Schritt scheitert, wenn einer der Läufe scheitert. Danach zählt „Size of the
+organization at the end“ CIs und Assets der Demo-Organisation
+(`size-<job>.txt`). Nach dem k6-Lauf prüft ein eigener
 Schritt die Daten mit `tests/integrity-check.sql`; eine Verletzung lässt den
 Job scheitern (ABN-03, F-281). Eingaben:
 
@@ -296,7 +368,8 @@ Jeder Job lädt seine Ergebnisse als eigenes Artefakt hoch
 (`load-results-api`, `load-results-ingest`, `load-results-ingest-spool`,
 `load-results-ingest-rediscover`, `load-results-nfr01-volume`,
 `load-results-api-large-28000`, `load-results-api-large-50000`,
-`load-results-phase2`); der Job `archive` übernimmt jeden ausgewählten Job
+`load-results-phase2`, `load-results-import`, `load-results-template`,
+`load-results-computed`); der Job `archive` übernimmt jeden ausgewählten Job
 ins Archiv. Die Artefakte enthalten die
 k6-Zusammenfassung (`<job>.json`, `<job>.txt`), die Integritätsprüfung
 (`integrity-<job>.txt`), die Datenbankkosten (`statements-<job>.txt`), die
@@ -310,7 +383,13 @@ k6, Go, PostgreSQL und TimescaleDB, Container-Images, vollständiges `lscpu`,
 (`console-<job>.log`) und die fehlgeschlagenen Anfragen je Name und Status
 (`failed-<job>.txt`, auch in der Zusammenfassung des Jobs); die `api.js`-Jobs
 zusätzlich die Pläne langsamer Statements und das CPU-Profil des Servers
-(siehe Ursachenanalyse NFR-02). Das Ergebnis des G1-Laufs steht in
+(siehe Ursachenanalyse NFR-02), die Jobs von `writes.js` zusätzlich die
+Zusammenfassung, Ausgabe, Konsole und fehlgeschlagenen Anfragen des
+parallelen Ingest (`<job>-ingest.json`, `<job>-ingest.txt`,
+`console-<job>-ingest.log`, `failed-<job>-ingest.txt`), Ausgabe und Konsole
+der Vorbereitung (`<job>-prepare.txt`, `console-<job>-prepare.log`; deren
+fehlgeschlagene Anfragen zählen in `failed-<job>.txt` mit) und die Größe der
+Organisation am Jobende (`size-<job>.txt`). Das Ergebnis des G1-Laufs steht in
 `docs/acceptance/lasttest-g1.md`.
 
 ### Archiv eines Laufs (WP-439, E-58)
@@ -326,8 +405,10 @@ wird:
   `--summary-export`), `<job>.txt` (k6-Ausgabe ohne die Fortschrittszeilen),
   `run-<job>.txt`, `result-<job>.txt`, `seed-<job>.txt`, `volumes-<job>.txt`,
   `integrity-<job>.txt`, `statements-<job>.txt` und, soweit vorhanden,
-  `slow-plans-<job>.txt`, `cpu-<job>.txt`, `readyz-<job>.json` und
-  `failed-<job>.txt`. Server-
+  `slow-plans-<job>.txt`, `cpu-<job>.txt`, `readyz-<job>.json`,
+  `failed-<job>.txt` und für die Jobs von `writes.js` `<job>-ingest.json`,
+  `<job>-ingest.txt` (ohne Fortschrittszeilen), `failed-<job>-ingest.txt`
+  und `size-<job>.txt` (WP-823). Server-
   und PostgreSQL-Logs und das binäre CPU-Profil bleiben in den
   Job-Artefakten des Laufs.
 - `<Lauf-ID>/ergebnis.md`: Lauf (Link, Versuch, Ereignis, Branch), Lauf- und
@@ -335,7 +416,9 @@ wird:
   („Vollständig“) und ob alle grün sind, je Job Status (Seed, Volumina, k6,
   Integritätsprüfung), CPU, RAM, Konfiguration, Datenbestand, die
   fehlgeschlagenen Anfragen je Name und Status und jede k6-Schwelle mit
-  Messwert und Ergebnis. Dieselbe Übersicht steht in der
+  Messwert und Ergebnis; für die Jobs von `writes.js` auch die
+  fehlgeschlagenen Anfragen, Schwellen und Messgrößen des parallelen Ingest
+  und die Größe am Jobende. Dieselbe Übersicht steht in der
   Zusammenfassung des Laufs auf GitHub.
 - `<Lauf-ID>/SHA256SUMS`: Prüfsummen aller Dateien des Verzeichnisses.
 

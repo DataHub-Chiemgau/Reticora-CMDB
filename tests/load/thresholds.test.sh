@@ -14,6 +14,12 @@
 #     p95 < 30 s, the counters of the succeeded bulk jobs count==3 with
 #     three iterations and checks rate==1 of the scenarios bulk_assets and
 #     bulk_cis_ops.
+#   - k6 inspect: writes.js (jobs import, template and computed, WP-823)
+#     with SCENARIO import, template and computed and with PHASE=prepare
+#     has the same rule for its one scenario and checks rate==1; the
+#     measured runs count the jobs that succeeded (import_jobs_succeeded
+#     count==4, template_jobs_succeeded and computed_jobs_succeeded
+#     count==1).
 #   - k6 run of api.js (2 s) against a stub of the API (python3): every
 #     answer as expected → no threshold crossed (the latency budgets aside,
 #     which the stub on a busy host may miss), three bulk jobs with their
@@ -29,6 +35,11 @@
 #   - load.yml has the job phase2, starts every server with
 #     RETICORA_MODULES=P2, seeds the Phase-2 volumes and issues the key of
 #     the role user viewer for API_KEY_RESTRICTED (WP-822).
+#   - load.yml has the jobs import, template and computed: the preparation
+#     as a k6 run of its own, ingest.js load for INGEST_DURATION_S = 120 s
+#     in the background beside writes.js, its summary <job>-ingest.json,
+#     the job fails with either run, MinIO and RETICORA_S3_* for the
+#     server; archive-run.sh keeps <job>-ingest.json (WP-823).
 #
 # Needs k6 (K6, default k6; load.yml pins 0.54.0), python3 and jq.
 #
@@ -93,7 +104,9 @@ inspect() {
 FAILED_RULE='(.thresholds.http_req_failed // [] | any(. == "rate==0"))
 	and (.thresholds as $t | .scenarios | keys | all(. as $s | $t["http_req_failed{scenario:\($s)}"] // [] | any(. == "rate==0")))'
 for args in "tests/load/api.js" "-e SCENARIO=load tests/load/ingest.js" "-e SCENARIO=spool tests/load/ingest.js" \
-	"-e SCENARIO=rediscover tests/load/ingest.js" "tests/load/phase2.js"; do
+	"-e SCENARIO=rediscover tests/load/ingest.js" "tests/load/phase2.js" "-e SCENARIO=import tests/load/writes.js" \
+	"-e SCENARIO=template tests/load/writes.js" "-e SCENARIO=computed tests/load/writes.js" \
+	"-e SCENARIO=import -e PHASE=prepare tests/load/writes.js" "-e SCENARIO=template -e PHASE=prepare tests/load/writes.js"; do
 	# shellcheck disable=SC2086 # the arguments are split on purpose
 	opts="$(inspect $args)"
 	expect "k6 inspect $args: http_req_failed rate==0 for the run and every scenario" "$opts" \
@@ -114,6 +127,19 @@ expect "phase2.js: bulk of 500 ids p(95)<30000, every bulk job succeeds (count==
 		and ($o.thresholds["\($b)_jobs_succeeded"] // [] | any(. == "count==3"))
 		and ($o.thresholds["checks{scenario:\($b)}"] // [] | any(. == "rate==1"))
 		and $o.scenarios[$b].iterations == 3)' '{thresholds, scenarios: (.scenarios | with_entries(select(.key | startswith("bulk_"))))}'
+# writes.js (WP-823): one scenario per run, every job of it succeeds.
+for want in import:4 template:1 computed:1; do
+	scenario="${want%%:*}" jobs="${want#*:}"
+	opts="$(inspect -e SCENARIO="$scenario" tests/load/writes.js)"
+	expect "writes.js $scenario: the scenario $scenario, ${scenario}_jobs_succeeded count==$jobs, checks rate==1" "$opts" \
+		"(.scenarios | keys) == [\"$scenario\"] and .scenarios.$scenario.iterations == 1
+		and (.thresholds[\"${scenario}_jobs_succeeded\"] // [] | any(. == \"count==$jobs\"))
+		and (.thresholds.checks // [] | any(. == \"rate==1\"))" '.'
+done
+opts="$(inspect -e SCENARIO=template -e PHASE=prepare tests/load/writes.js)"
+expect "writes.js PHASE=prepare: the scenario prepare, checks rate==1" "$opts" \
+	'(.scenarios | keys) == ["prepare"] and .scenarios.prepare.exec == "prepareTemplate"
+	and (.thresholds.checks // [] | any(. == "rate==1"))' '.'
 
 # 2. api.js against a stub of the API. MODE: ok, bulk429, bulkfailed,
 # rack503 (the first rack layout 503).
@@ -307,6 +333,21 @@ has "load.yml: ... as RETICORA_MODULES" "$WF" 'RETICORA_MODULES="\$MODULES"'
 has "load.yml: the seed issues the key of the role user viewer" "$WF" '-api-key-role viewer -api-key-file "\$RUNNER_TEMP/load-restricted\.key"'
 has "load.yml: phase2.js gets it as API_KEY_RESTRICTED" "$WF" 'API_KEY_RESTRICTED="\$\(cat "\$RUNNER_TEMP/load-restricted\.key"\)"'
 has "load.yml: the seed takes the Phase-2 volumes" "$WF" 'volume\+=\(-assets "\$ASSETS" -tickets "\$TICKETS" -consumables "\$CONSUMABLES"\)'
+# 5. load.yml: the write jobs beside the ingest (WP-823).
+for scenario in import template computed; do
+	has "load.yml: the job $scenario runs writes.js" "$WF" "\\{\"scenario\":\"$scenario\",\"script\":\"writes\\.js\",\"k6_scenario\":\"$scenario\","
+done
+has "load.yml: the preparation is a k6 run of its own" "$WF" 'k6 run "\$\{args\[@\]\}" -e PHASE=prepare '
+has "load.yml: the ingest runs 120 s" "$WF" '^      INGEST_DURATION_S: "120"$'
+has "load.yml: ... as ingest.js load in the background" "$WF" '-e DURATION_S="\$INGEST_DURATION_S" -e OBJECTS="\$OBJECTS" \\$'
+has "load.yml: ... with the summary <job>-ingest.json" "$WF" '--summary-export "load-results/\$SCENARIO_NAME-ingest\.json"'
+has "load.yml: ... started with SCENARIO=load" "$WF" '-e SCENARIO=load \\$'
+has "load.yml: the job waits for the ingest" "$WF" 'wait "\$ingest" \|\| ingest_status=\$\?'
+has "load.yml: a failed ingest fails the job" "$WF" '\[ "\$status" -ne 0 \] \|\| status=\$ingest_status'
+has "load.yml: the write jobs start MinIO" "$WF" "if: matrix\\.script == 'writes\\.js'"
+has "load.yml: ... and the server with the object storage" "$WF" 'export RETICORA_S3_ENDPOINT=localhost:9000 '
+has "load.yml: the size of the organization at the end" "$WF" 'tee "load-results/size-\$SCENARIO_NAME\.txt"'
+has "archive-run.sh keeps <job>-ingest.json" "$(cat tests/load/archive-run.sh)" ' %s-ingest\.json '
 
 echo
 echo "$PASS passed, $FAIL failed"
