@@ -55,20 +55,58 @@ Skriptzeile. Eine Prüfung ohne Fall lässt ihn scheitern.
 | Keine negativen Bestände | neu `stock: negative on_hand`, `stock: reserved below zero or above on_hand`, `stock: reserved other than the active quantity reservations` (WP-284) | CHECKs `stock_level_on_hand_check`, `stock_level_reserved_check` (WP-283); Fälle 2, 3 und 5 der Matrix | WP-328 |
 | Reservierung und Zuweisung konsistent | neu `reservation: active reservation of an asset held by another holder` (WP-277), `assignment: holder cache other than the assignment and return movements` (WP-275, WP-274) | Fälle 1 und 4 der Matrix | WP-328 |
 | Keine Cross-Tenant-Referenzen | `cross-tenant: …` (Beziehungen, Rack-Montage, Schnittstellen, IP-Adressen, Feldwerte, Client, Location, Site, Raum, Typ, Rack-Raum) | Zusammengesetzte Fremdschlüssel mit Organisation (WP-838, u. a. `ci_asset_id_fkey`, 000088); Katalogtest `TestTenantReferencesCarryOrganization` | WP-437, WP-838 |
-| Keine Typzyklen | `cycle: CI type lineage` (`cloned_from_id`), neu `cycle: CI type inheritance` (`parent_type_id`, WP-248) | Advisory-Lock `ci_type_tree` (WP-248) | WP-437, WP-328 |
-| Keine Location-Zyklen | `cycle: location tree` | Phase-1-Nachweis: `TestLocationTreeMoveAndCycle` (`backend/internal/locations/pg_repository_integration_test.go`), Advisory-Lock `location_tree`, `location_no_cycle` und Elternmatrix `location_parent_kind` in 000062 (WP-026) | WP-207 |
-| Keine Kompositionszyklen | `cycle: composition` | Kein Konfigurationskind mit eigenem Asset: CHECK `ci_configuration_child_asset` (WP-273) | WP-437 |
+| Keine Typzyklen | `cycle: CI type lineage` (`cloned_from_id`), neu `cycle: CI type inheritance` (`parent_type_id`, WP-248) | Advisory-Lock `ci_type_tree` (WP-248); `TestCycles`, Fälle `type sequential` und `type parallel` (`backend/internal/tenant/integrity/cycles_integration_test.go`) | WP-437, WP-328, WP-825 |
+| Keine Location-Zyklen | `cycle: location tree` | Phase-1-Nachweis: `TestLocationTreeMoveAndCycle` (`backend/internal/locations/pg_repository_integration_test.go`), Advisory-Lock `location_tree`, `location_no_cycle` und Elternmatrix `location_parent_kind` in 000062 (WP-026); kein neuer Fall in Phase 2 (siehe unten) | WP-207 |
+| Keine Kompositionszyklen | `cycle: composition` | Trigger `trg_ci_parent_cycle` mit Advisory-Lock `ci_parent_tree` (000273); `TestCycles`, Fälle `composition sequential`, `composition parallel` und `composition three parties deterministic`; kein Konfigurationskind mit eigenem Asset: CHECK `ci_configuration_child_asset` (WP-273) | WP-437, WP-825 |
 
 Das Skript prüft nur, was das Schema nicht schon verhindert (F-281). Die
 Zeilen zu negativen Beständen sind trotz der CHECKs aus WP-283 enthalten, als
 ausdrücklicher Nachweis für ABN-03. Der Selbsttest entfernt die CHECKs dafür
 in seiner zurückgerollten Transaktion.
 
+## Typ- und Kompositionszyklen (WP-825)
+
+Schreibweise: A→B heißt „A hat den Elternteil B“. `TestCycles`
+(`backend/internal/tenant/integrity/cycles_integration_test.go`) ändert
+Typ-Elternteile über `PATCH /api/v1/ci-types/{id}` (WP-248) und
+CI-Elternteile über `ci.PGRepository.Update` (WP-273). Jede Änderung läuft in
+einer Request-Transaktion und wartet nach dem Schreiben und vor dem Commit an
+der Barriere der Matrix (150 ms).
+
+| Fall | Ablauf | Erwartung |
+|---|---|---|
+| Typ sequenziell | (a) A→B, dann B→A; (b) A→B, B→C, dann C→A | Die schließende Änderung endet mit 409 auf `parent_type_id` |
+| Typ parallel, drei Runden | (a) A→B ∥ B→A; (b) bei bestehendem A→B parallel B→C ∥ C→A | Höchstens eine Änderung wird angenommen, die andere endet mit 409 (Typzyklus oder Konflikt), nie mit 5xx; gespeichert ist genau die angenommene |
+| Komposition sequenziell | (a) und (b) wie oben auf `parent_ci_id` | Die schließende Änderung endet mit 422 auf `parent_ci_id` |
+| Komposition parallel, drei Runden | (a) und (b) wie oben auf `parent_ci_id` | Höchstens eine Änderung wird angenommen, die andere endet mit 422 (`parent_ci_id`) oder 409 (40P01/40001), nie mit 5xx |
+| Komposition, deterministischer Dreierfall | Bei bestehendem A→B setzt T2 C→A und hält die Transaktion offen (`database.WithTenant` auf `scopetest.Fixture.App`); T1 setzt danach B→C; T2 committet | T1 wartet auf die Advisory-Sperre und endet nach dem Commit von T2 mit `23514` (`ci_parent_cycle`); gespeichert ist C→A, B ohne Elternteil |
+
+Nach jedem Fall meldet `scopetest.IntegrityViolations` keine Zeile
+`cycle: composition`, `cycle: CI type inheritance` oder
+`cycle: CI type lineage` und keinen anderen Verstoß.
+
+Typänderungen serialisiert seit WP-248 der Advisory-Lock `ci_type_tree`
+(000197). `ci_check_parent_cycle` (000089) las den Elternpfad dagegen ohne
+Sperre: Ohne Migration 000273 committen im deterministischen Dreierfall
+beide Transaktionen, und der Zyklus A→B→C→A entsteht; auch der parallele
+Fall (b) nimmt dann beide Änderungen an (lokal gegen den Stand 000272
+ausgeführt). Migration 000273 (`ci_parent_cycle_lock`) nimmt bei INSERT mit
+`parent_ci_id` und bei geändertem `parent_ci_id` vor der rekursiven Prüfung
+`pg_advisory_xact_lock(hashtextextended('ci_parent_tree:' || organization_id, 0))`
+und liest den Pfad danach mit frischem Snapshot (READ COMMITTED). SQLSTATE
+`23514` und Constraint `ci_parent_cycle` bleiben. Der Ingest schreibt
+`parent_ci_id` nicht, NFR-03 bleibt unberührt.
+
+Location-Zyklen bekommen keinen neuen Fall: Die Elternmatrix
+`location_parent_kind` (000062) weist jeder Art genau eine andere Elternart
+zu, und der Advisory-Lock `location_tree` serialisiert Umzüge. Nachweis
+bleiben `TestLocationTreeMoveAndCycle` und die Skriptzeile
+`cycle: location tree`.
+
 ## Offene Teile anderer WPs
 
 | Teil | WP |
 |---|---|
-| Typ- und Kompositionszyklen sequenziell und parallel, Serialisierung von `ci_check_parent_cycle` | WP-825 |
 | Automatisierte Schreiber (Import, Bulk, Template-Migration, `attribute.computed_refresh`) gegen manuelle Änderung, Ingest und `max_cis` | WP-826 |
 | Cross-Tenant-Referenzen aller P2-Schreibpfade, Datenbank-Fremdschlüssel und Prüfskript | WP-827 |
 | Kanalmatrix nach TEN-09 | WP-828 |
