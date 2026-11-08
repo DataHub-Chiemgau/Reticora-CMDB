@@ -503,6 +503,93 @@ const CATALOG_RULES = [
 /** GET /rules: one page of the catalog without a next page. */
 export const RULE_HANDLERS: Handler[] = [{ path: '/rules', reply: fixed({ data: CATALOG_RULES }) }];
 
+// The form builder of WP-316 (MET-50): the child type with an own layout
+// for the role of the fixtures and the resolved form without a role,
+// inherited from the layout of the parent type. The editor shows the copy
+// with its sections, fields, widths and the catalog rules for visible_when.
+export const FORM_TYPE_ID = CHILD_TYPE.id;
+const FORM_LAYOUT_ID = '1a000000-0000-4000-8000-000000000001';
+const PARENT_LAYOUT_ID = '1a000000-0000-4000-8000-000000000002';
+function formLayout(id: string, typeId: string, key: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    organization_id: ORG,
+    key,
+    ci_type_id: typeId,
+    priority: 0,
+    version: 2,
+    is_active: true,
+    layout: {
+      sections: [
+        {
+          key: 'a11y_main',
+          title: { de: 'a11y Allgemein', en: 'a11y General' },
+          visible_when: [M.rule],
+          fields: [
+            { name: 'a11y_vendor', width: 6 },
+            { name: 'a11y_cost_center', width: 6 },
+          ],
+        },
+      ],
+    },
+    created_at: AT,
+    updated_at: AT,
+    ...extra,
+  };
+}
+const FORM_LAYOUTS = [
+  formLayout(FORM_LAYOUT_ID, CHILD_TYPE.id, 'a11y_child_role', { role_id: ROLE }),
+  formLayout(PARENT_LAYOUT_ID, ORG_TYPE.id, 'a11y_parent'),
+];
+const resolvedField = (name: string, width: number, required = false) => ({
+  name,
+  width,
+  definition: { name, label: name, data_type: 'text', required, sort_order: 0 },
+  state: { visible: true, required, read_only: false },
+});
+const RESOLVED_FORM = {
+  ci_type_id: CHILD_TYPE.id,
+  layout_id: PARENT_LAYOUT_ID,
+  source: 'layout',
+  sections: [
+    {
+      key: 'a11y_main',
+      title: { de: 'a11y Allgemein', en: 'a11y General' },
+      visible: true,
+      fields: [resolvedField('a11y_vendor', 6), resolvedField('a11y_serial', 6)],
+    },
+    { key: '_instance', title: { de: 'Instanz', en: 'Instance' }, visible: true, fields: [] },
+    {
+      key: '_required',
+      title: { de: 'Pflichtfelder', en: 'Required fields' },
+      visible: true,
+      fields: [resolvedField('a11y_plain', 12, true)],
+    },
+  ],
+  rules: [],
+};
+
+/** The reads of /ci-types/:id/form-builder: the type, its layouts and the resolved form. */
+export const FORM_BUILDER_HANDLERS: Handler[] = [
+  { path: `/ci-types/${CHILD_TYPE.id}`, reply: fixed(CHILD_TYPE) },
+  { path: `/ci-types/${CHILD_TYPE.id}/form`, reply: fixed(RESOLVED_FORM) },
+  {
+    path: '/layouts',
+    reply: (_request, url) => {
+      const typeId = url.searchParams.get('ci_type_id');
+      return {
+        body: { data: FORM_LAYOUTS.filter((l) => l.ci_type_id === typeId), has_more: false },
+      };
+    },
+  },
+  {
+    path: /^\/layouts\/[^/]+$/,
+    reply: (_request, url) => ({
+      body: FORM_LAYOUTS.find((l) => url.pathname.endsWith(l.id)) ?? FORM_LAYOUTS[1],
+    }),
+  },
+];
+
 /** GET /me/permissions of the template routes: the editor and the publish action are on. */
 export const TEMPLATE_PERMISSIONS: Handler = {
   path: '/me/permissions',

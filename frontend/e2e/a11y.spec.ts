@@ -9,6 +9,8 @@ import {
   CI_ID,
   DRAFT_HANDLERS,
   DRAFT_ID,
+  FORM_BUILDER_HANDLERS,
+  FORM_TYPE_ID,
   RULE_HANDLERS,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
@@ -729,6 +731,20 @@ const ROUTES: A11yRoute[] = [
       await expect(page.locator('#main-content').getByText('a11y_template').first()).toBeVisible();
     },
     ready: (page) => page.locator('#main-content').getByText('a11y value required'),
+  },
+  {
+    // WP-316: the form builder of the child type without a role: the copy of
+    // the resolved form, inherited from the layout of the parent, with the
+    // field palette, a section with its fields and widths and the catalog
+    // rules for visible_when.
+    path: '/ci-types/:id/form-builder',
+    url: `/ci-types/${FORM_TYPE_ID}/form-builder`,
+    handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS, ...FORM_BUILDER_HANDLERS],
+    prepare: async (page) => {
+      await expect(page.locator('[data-section-key="a11y_main"]')).toBeVisible();
+      await expect(page.locator('[data-field-name="a11y_serial"]')).toBeVisible();
+    },
+    ready: (page) => page.locator('[data-palette-field="a11y_cost_center"]'),
   },
   {
     // WP-801: the rule catalog with an own rule (condition, edit and delete),

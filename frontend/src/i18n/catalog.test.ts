@@ -586,6 +586,8 @@ describe('i18n catalog', () => {
     '../pages/SavedViewsPage.tsx',
     // WP-801: the rule catalog.
     '../pages/RulesPage.tsx',
+    // WP-316: the form builder (LayoutEditor is a metamodelSource).
+    '../pages/FormBuilderPage.tsx',
     // WP-806: the inventory page (the stock flow dialogs are flowSources).
     '../pages/InventoryPage.tsx',
     // WP-320: the list and the detail page of the quantity items.

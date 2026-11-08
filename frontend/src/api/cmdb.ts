@@ -298,6 +298,71 @@ export const ciTypeApi = {
   listFields(id: string): Promise<{ data: FieldDefinition[] }> {
     return fetchAPI(`/ci-types/${id}/fields`);
   },
+  /**
+   * The resolved form of the type (WP-719) for a target and a role: the
+   * template replaces the templates of the type, preview resolves as the
+   * role (citype:manage). Without role_id the server resolves with the
+   * roles of the caller (WP-316).
+   */
+  form(id: string, params: ResolvedFormParams = {}): Promise<ResolvedForm> {
+    return fetchAPI(`/ci-types/${id}/form${qs(params)}`);
+  },
+};
+
+/** The parameters of GET /ci-types/{id}/form (WP-719). */
+export interface ResolvedFormParams {
+  template_id?: string;
+  role_id?: string;
+  preview?: boolean;
+}
+
+// ─── Form layouts (MET-50, WP-259, WP-316) ───────────────────────────────────
+
+/** The layout of a form for one CI type or template and optionally one role. */
+export type FormLayout = components['schemas']['FormLayout'];
+export type FormLayoutDocument = components['schemas']['FormLayoutDocument'];
+export type FormLayoutSection = components['schemas']['FormLayoutSection'];
+export type FormLayoutField = components['schemas']['FormLayoutField'];
+export type FormLayoutCreate = components['schemas']['FormLayoutCreate'];
+export type FormLayoutPatch = components['schemas']['FormLayoutPatch'];
+/** A resolved form (WP-719): sections with fields, definitions and states. */
+export type ResolvedForm = components['schemas']['ResolvedForm'];
+export type ResolvedFormSection = components['schemas']['ResolvedFormSection'];
+
+/** The filters of GET /layouts: exactly one target, optionally a role. */
+export interface LayoutFilter {
+  ci_type_id?: string;
+  template_id?: string;
+  role_id?: string;
+}
+
+export const layoutApi = {
+  /** Every layout of the filter, all pages over next_cursor (API-02). */
+  async list(filter: LayoutFilter): Promise<{ data: FormLayout[] }> {
+    return { data: await fetchAllPages<FormLayout>('/layouts', filter) };
+  },
+  get(id: string): Promise<FormLayout> {
+    return fetchAPI(`/layouts/${id}`);
+  },
+  /** A new layout; with an active draft the answer is the draft item (202). */
+  create(data: FormLayoutCreate): Promise<Drafted<FormLayout>> {
+    return fetchAPI('/layouts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /**
+   * Changes a layout; version (form_layout.version) is sent as If-Match, so
+   * a change in between is refused with 412 (API-07).
+   */
+  update(id: string, data: FormLayoutPatch, version?: number): Promise<Drafted<FormLayout>> {
+    return fetchAPI(`/layouts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  /** 204, or the draft item (202) while a draft is active. */
+  remove(id: string, version?: number): Promise<MetamodelDraftItem | undefined> {
+    return fetchAPI(`/layouts/${id}`, { method: 'DELETE', headers: ifMatch(version) });
+  },
 };
 
 // Index flags of an attribute definition (MET-15, DB-04): a change queues

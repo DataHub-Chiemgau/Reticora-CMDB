@@ -1,9 +1,11 @@
 import { useCallback, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import type { TFunction } from 'i18next';
 import {
   Copy,
   Info,
+  LayoutDashboard,
   LayoutTemplate,
   ListTree,
   Pencil,
@@ -815,6 +817,10 @@ function CITypeDetail({
 }) {
   const cloneType = useCloneCIType();
   const setActive = useSetCITypeActive();
+  // The form builder (WP-316) belongs to the module metamodel (E-105); an
+  // unknown module key keeps it visible. Layouts are rows of the
+  // organization, so a system type offers it as well (WP-259).
+  const formBuilderOn = useModules().isModuleEnabled('metamodel');
   const deleteDefinition = useDeleteAttributeDefinition();
   const reindex = useReindexAttributeDefinition();
   const [lastAction, setLastAction] = useState<'clone' | 'deactivate' | 'activate'>('clone');
@@ -898,6 +904,14 @@ function CITypeDetail({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {formBuilderOn ? (
+              <Button asChild variant="secondary" size="sm">
+                <Link to={`/ci-types/${type.id}/form-builder`}>
+                  <LayoutDashboard aria-hidden="true" />
+                  {t('formBuilder.open')}
+                </Link>
+              </Button>
+            ) : null}
             {!readOnly ? (
               <Button variant="secondary" size="sm" icon={<Pencil />} onClick={onEdit}>
                 {t('citypes.editType')}

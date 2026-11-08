@@ -77,6 +77,8 @@ export default tseslint.config(
       'src/pages/TagsPage.tsx',
       // WP-801: the rule catalog.
       'src/pages/RulesPage.tsx',
+      // WP-316: the form builder (LayoutEditor is matched by src/components/metamodel/**).
+      'src/pages/FormBuilderPage.tsx',
       // WP-806: the inventory page and the object history.
       'src/pages/InventoryPage.tsx',
       'src/components/cmdb/ObjectHistory.tsx',

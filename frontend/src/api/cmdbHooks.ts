@@ -27,6 +27,7 @@ import {
   historyApi,
   impactApi,
   isDraftItem,
+  layoutApi,
   metamodelDraftApi,
   metamodelTransferApi,
   ruleApi,
@@ -47,6 +48,10 @@ import {
   type CITemplateRef,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
+  type FormLayoutCreate,
+  type FormLayoutPatch,
+  type LayoutFilter,
+  type ResolvedFormParams,
   type LocationUpdateRequest,
   type ConvertReservationRequest,
   type ReserveAssetRequest,
@@ -679,6 +684,91 @@ export function useDeleteRule() {
   return useMutation({
     mutationFn: (id: string) => ruleApi.delete(id),
     onSuccess: onRuleWrite(qc),
+  });
+}
+
+// ─── Form layouts and the resolved form (MET-50, WP-259, WP-719, WP-316) ────
+
+const LAYOUTS_KEY = ['layouts'];
+const RESOLVED_FORM_KEY = ['ci-type-form'];
+
+/**
+ * The layouts of one target (CI type or template); a 404 is the
+ * switched-off module metamodel (E-105), no retry.
+ */
+export function useLayouts(filter: LayoutFilter, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...LAYOUTS_KEY, 'list', filter],
+    queryFn: () => layoutApi.list(filter),
+    ...options,
+    enabled: (!!filter.ci_type_id || !!filter.template_id) && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/** One layout (GET /layouts/{id}), e.g. the source of an inherited form. */
+export function useLayout(id: string | undefined, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...LAYOUTS_KEY, id],
+    queryFn: () => layoutApi.get(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/** A save of the form builder: a new layout (POST) or a change with If-Match (PATCH). */
+export type LayoutSave =
+  | { mode: 'create'; data: FormLayoutCreate }
+  | { mode: 'update'; id: string; version: number; patch: FormLayoutPatch };
+
+/**
+ * A write of the layouts: a captured write (202 with the draft item)
+ * leaves the productive layouts as they are, so nothing is read again; the
+ * item list of the draft follows itemRevision (WP-798).
+ */
+function onLayoutWrite(qc: QueryClient) {
+  return (saved: unknown) => {
+    if (isDraftItem(saved)) return;
+    void qc.invalidateQueries({ queryKey: LAYOUTS_KEY });
+    void qc.invalidateQueries({ queryKey: RESOLVED_FORM_KEY });
+  };
+}
+
+/** POST /layouts or PATCH /layouts/{id} with If-Match (WP-316). */
+export function useSaveLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (save: LayoutSave) =>
+      save.mode === 'create'
+        ? layoutApi.create(save.data)
+        : layoutApi.update(save.id, save.patch, save.version),
+    onSuccess: onLayoutWrite(qc),
+  });
+}
+
+/** DELETE /layouts/{id} with If-Match: the target falls back to the inherited layout. */
+export function useDeleteLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version?: number }) =>
+      layoutApi.remove(id, version),
+    onSuccess: onLayoutWrite(qc),
+  });
+}
+
+/** The resolved form of a CI type for a template and a role (GET /ci-types/{id}/form). */
+export function useResolvedTypeForm(
+  ciTypeId: string | undefined,
+  params: ResolvedFormParams = {},
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: [...RESOLVED_FORM_KEY, ciTypeId, params],
+    queryFn: () => ciTypeApi.form(ciTypeId!, params),
+    ...options,
+    enabled: !!ciTypeId && (options.enabled ?? true),
+    retry: false,
   });
 }
 
