@@ -211,7 +211,8 @@ func (o *Options) orgSpecs() []orgSpec {
 // inserted only if missing, so a second run with the same options changes
 // nothing. After the seed transaction of an organization the Phase-2 steps
 // run in a transaction of their own through the services (phase2Steps,
-// WP-325), its CIs are indexed for the search (index) and the index of its
+// WP-325), then its assets and stock in a further one (stockSteps, WP-819),
+// its CIs are indexed for the search (index) and the index of its
 // searchable attribute is built (attributeIndex). At the end the statistics
 // of the grown tables are refreshed (database.AnalyzeAfterBulk).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
@@ -233,6 +234,9 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 		}
 		if err := o.phase2Steps(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("phase 2 %s: %w", slug, err)
+		}
+		if err := o.stockSteps(ctx, pool); err != nil {
+			return Summary{}, fmt.Errorf("assets and stock %s: %w", slug, err)
 		}
 		if err := o.index(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("index %s: %w", slug, err)

@@ -1497,3 +1497,4 @@ UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318
 IMP-IO-01;[P2];C;backend/internal/importer/api_integration_test.go;WP-303
 BLK-02;[P2];C;backend/internal/asset/bulk_integration_test.go;WP-781
 BLK-01;[B];C;backend/internal/asset/bulk_integration_test.go;WP-781
+SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-819

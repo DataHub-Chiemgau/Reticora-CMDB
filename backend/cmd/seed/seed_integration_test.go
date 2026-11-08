@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,23 +23,32 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
+// baseTypeOnly restricts a query on the CIs c to the [B] data set: the
+// system types switch, pdu and server without their subtypes, so the
+// Phase-2 CIs of the derived types (WP-819) do not count.
+const baseTypeOnly = `c.ci_type_id IN (SELECT t.id FROM ci_type t WHERE t.organization_id IS NULL
+	AND t.key IN ('switch', 'pdu', 'server'))`
+
 // counts reads the seeded rows of one organization through the maintenance
-// pool.
+// pool; the CIs and their locations and documents count over the [B] types
+// only (baseTypeOnly).
 func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	for table, query := range map[string]string{
-		"client":            `SELECT count(*) FROM client WHERE organization_id = $1`,
-		"rack":              `SELECT count(*) FROM rack WHERE organization_id = $1`,
-		"ci":                `SELECT count(*) FROM ci WHERE organization_id = $1`,
-		"ci_location":       `SELECT count(*) FROM ci WHERE organization_id = $1 AND location_id IS NOT NULL`,
-		"ci_site":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND site_id IS NOT NULL`,
-		"ci_room":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND room_id IS NOT NULL`,
-		"ci_document":       `SELECT count(*) FROM search_document WHERE organization_id = $1 AND entity_type = 'ci'`,
+		"client":      `SELECT count(*) FROM client WHERE organization_id = $1`,
+		"rack":        `SELECT count(*) FROM rack WHERE organization_id = $1`,
+		"ci":          `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly,
+		"ci_location": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.location_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_site":     `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.site_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_room":     `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.room_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_document": `SELECT count(*) FROM search_document d JOIN ci c ON c.id = d.entity_id
+			WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND ` + baseTypeOnly,
 		"ci_attribute":      `SELECT count(*) FROM ci WHERE organization_id = $1 AND attributes->>'` + AttributeKey + `' LIKE 'CC-___'`,
 		"rack_mount":        `SELECT count(*) FROM rack_mount WHERE organization_id = $1`,
 		"network_interface": `SELECT count(*) FROM network_interface WHERE organization_id = $1`,
@@ -388,12 +398,12 @@ func TestSeedNFR01Volumes(t *testing.T) {
 	// The spread of the rows in the demo organization; every query counts
 	// the rows that break a rule.
 	for name, query := range map[string]string{
-		"CIs without the interfaces eth0 to eth4": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND
+		"CIs without the interfaces eth0 to eth4": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + ` AND
 			(SELECT array_agg(n.name ORDER BY n.if_index) FROM network_interface n WHERE n.ci_id = c.id) IS DISTINCT FROM '{eth0,eth1,eth2,eth3,eth4}'`,
 		"management interfaces other than eth0": `SELECT count(*) FROM network_interface WHERE organization_id = $1 AND is_management <> (name = 'eth0')`,
 		"interfaces without four addresses": `SELECT count(*) FROM network_interface n WHERE n.organization_id = $1 AND
 			(SELECT count(*) FROM ip_address a WHERE a.interface_id = n.id) <> 4`,
-		"CIs whose eth0 lacks the management address": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND NOT EXISTS (
+		"CIs whose eth0 lacks the management address": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + ` AND NOT EXISTS (
 			SELECT 1 FROM network_interface n JOIN ip_address a ON a.interface_id = n.id
 			WHERE n.ci_id = c.id AND n.name = 'eth0' AND a.address = c.management_ip AND a.subnet_id = md5('seedvol-demo/subnet/management')::uuid)`,
 		"further addresses outside the server networks": `SELECT count(*) FROM ip_address a WHERE a.organization_id = $1
@@ -653,6 +663,24 @@ func phase2Counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]i
 // load-test-viewer active. A further run changes no count and writes no
 // metamodel audit entry.
 //
+// The assets and the stock (WP-819): demo holds 2 suppliers and 3
+// contracts (one ends within 30 days of the anchor, one has ended), 60
+// assets with the AST-01 fields, 40 of them linked to the mounted [B] CIs
+// and 2 to the blade chassis through the CI service (ci.asset_id, primary
+// CI, asset.linked, warranty_days_left), 18 in the bins; the chassis carry
+// 4 configuration blades each without asset. The storage branch warehouse
+// → zone → shelf → 10 bins lies below the site hq, the 20 consumables get
+// their stock from receipts only, stock_level is the sum of the bookings
+// per consumable and bin and one consumable is below its minimum. There is
+// an internal order in each of the nine states, requested by engineer and
+// approved by the administrator, the receipts of three of them booked with
+// order_id, and a running stocktake of the warehouse with its frozen
+// snapshot and three scans (two found, one unexpected). viewer sees neither
+// purchase price nor cost center of an asset. acme holds 10 assets (5
+// linked), a branch with one bin and 2 consumables with stock. No link
+// crosses an organization, no serial_mismatch review arises, the integrity
+// check stays empty and a further run books nothing.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSeedSIM01Phase2(t *testing.T) {
 	f := scopetest.Seed(t, "07")
@@ -685,9 +713,48 @@ func TestSeedSIM01Phase2(t *testing.T) {
 			"user": 2, "engineer": 0, "viewer": 1, "client_technician": 0,
 		},
 	}
+	// The assets and the stock (WP-819).
+	stockExpected := map[string]map[string]int{
+		demo: {
+			"supplier": 2, "contract": 3, "contract_ending": 1, "contract_ended": 1,
+			"asset": 60, "asset_ast01": 60, "asset_linked": 42, "ci_asset": 42, "asset_in_bin": 18, "asset_engineer": 15,
+			"chassis": 2, "chassis_asset": 2, "configuration_child": 8, "phase2_ci_network": 0,
+			"warranty_set": 42, "warranty_mismatch": 0, "warranty_expiring": 4, "serial_mismatch": 0,
+			"warehouse": 1, "zone": 1, "shelf": 1, "bin": 10, "bin_hq": 13,
+			"consumable": 20, "consumable_ast": 20, "below_min": 1, "stock_mismatch": 0, "cross_org": 0,
+			"other_movement": 0, "movement": 26, "order_receipt": 3, "order_receipt_quantity": 24,
+			"order": 9, "order_engineer": 9, "order_approved_by_admin": 6,
+			"order_draft": 1, "order_submitted": 1, "order_approved": 1, "order_rejected": 1, "order_ordered": 1,
+			"order_partially_received": 1, "order_received": 1, "order_closed": 1, "order_cancelled": 1,
+			"stocktake_running": 1, "stocktake_item_mismatch": 0, "stocktake_asset_item": 18,
+			"scan": 3, "scan_found": 2, "scan_unexpected": 1, "asset_grant_none": 2, "asset_link_audit": 42,
+		},
+		acme: {
+			"supplier": 0, "contract": 0, "contract_ending": 0, "contract_ended": 0,
+			"asset": 10, "asset_ast01": 0, "asset_linked": 5, "ci_asset": 5, "asset_in_bin": 5, "asset_engineer": 0,
+			"chassis": 0, "chassis_asset": 0, "configuration_child": 0, "phase2_ci_network": 0,
+			"warranty_set": 5, "warranty_mismatch": 0, "warranty_expiring": 4, "serial_mismatch": 0,
+			"warehouse": 1, "zone": 1, "shelf": 1, "bin": 1, "bin_hq": 4,
+			"consumable": 2, "consumable_ast": 0, "below_min": 0, "stock_mismatch": 0, "cross_org": 0,
+			"other_movement": 0, "movement": 2, "order_receipt": 0, "order_receipt_quantity": 0,
+			"order": 0, "order_engineer": 0, "order_approved_by_admin": 0,
+			"order_draft": 0, "order_submitted": 0, "order_approved": 0, "order_rejected": 0, "order_ordered": 0,
+			"order_partially_received": 0, "order_received": 0, "order_closed": 0, "order_cancelled": 0,
+			"stocktake_running": 0, "stocktake_item_mismatch": 0, "stocktake_asset_item": 0,
+			"scan": 0, "scan_found": 0, "scan_unexpected": 0, "asset_grant_none": 0, "asset_link_audit": 5,
+		},
+	}
 	audits := map[string]int{}
 	check := func(round string) {
 		t.Helper()
+		for org, want := range stockExpected {
+			got := stockCounts(t, f, org, opts.At)
+			for name, n := range want {
+				if got[name] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, name, got[name], n)
+				}
+			}
+		}
 		for org, want := range expected {
 			got := phase2Counts(t, f, org)
 			for name, n := range want {
@@ -714,6 +781,13 @@ func TestSeedSIM01Phase2(t *testing.T) {
 		}
 	}
 	check("first run")
+
+	// The Phase-2 data keep the integrity of the data model (ABN-03).
+	for _, org := range []string{demo, acme} {
+		if violations := integrityViolations(t, f, org); len(violations) > 0 {
+			t.Errorf("integrity check of org %s: %v", org, violations)
+		}
+	}
 
 	// The administrator publishes the versions and is the actor of the
 	// metamodel audit entries.
@@ -781,6 +855,138 @@ func TestSeedSIM01Phase2(t *testing.T) {
 		}
 	}
 	check("third run")
+}
+
+// stockCounts reads the asset and stock rows of one organization (WP-819)
+// through the maintenance pool; at is the anchor of the seed. The
+// mismatch, cross-organization and network queries count violations.
+func stockCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	queries := map[string]string{
+		"supplier":        `SELECT count(*) FROM supplier WHERE organization_id = $1`,
+		"contract":        `SELECT count(*) FROM contract WHERE organization_id = $1 AND start_date IS NOT NULL AND end_date IS NOT NULL`,
+		"contract_ending": `SELECT count(*) FROM contract WHERE organization_id = $1 AND end_date BETWEEN $2::date AND $2::date + 30`,
+		"contract_ended":  `SELECT count(*) FROM contract WHERE organization_id = $1 AND end_date < $2::date`,
+		"asset":           `SELECT count(*) FROM asset WHERE organization_id = $1`,
+		// The AST-01 fields of WP-271, supplier and contract included.
+		"asset_ast01": `SELECT count(*) FROM asset WHERE organization_id = $1 AND manufacturer IS NOT NULL AND model IS NOT NULL
+			AND cost_center IS NOT NULL AND supplier_id IS NOT NULL AND contract_id IS NOT NULL AND owner_user_id IS NOT NULL
+			AND purchase_price IS NOT NULL AND warranty_until IS NOT NULL AND purchase_date < $2::date`,
+		// Primary CI and ci.asset_id agree; the asset has the client, the
+		// serial number and the location of its CI.
+		"asset_linked": `SELECT count(*) FROM asset a JOIN ci c ON c.id = a.ci_id AND c.asset_id = a.id
+			WHERE a.organization_id = $1 AND a.client_id = c.client_id AND a.serial_number = c.serial_number
+			AND a.location_id = c.location_id`,
+		"ci_asset": `SELECT count(*) FROM ci WHERE organization_id = $1 AND asset_id IS NOT NULL`,
+		"asset_in_bin": `SELECT count(*) FROM asset a JOIN location l ON l.id = a.location_id
+			WHERE a.organization_id = $1 AND l.kind = 'bin' AND a.ci_id IS NULL`,
+		// The system view my_devices_asset of engineer (WP-307).
+		"asset_engineer": `SELECT count(*) FROM asset a JOIN app_user u ON u.id = a.owner_user_id
+			WHERE a.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		"chassis": `SELECT count(*) FROM ci c JOIN ci_type t ON t.id = c.ci_type_id
+			WHERE c.organization_id = $1 AND t.key = '` + ChassisTypeKey + `'`,
+		"chassis_asset": `SELECT count(*) FROM ci c JOIN ci_type t ON t.id = c.ci_type_id JOIN asset a ON a.id = c.asset_id
+			WHERE c.organization_id = $1 AND t.key = '` + ChassisTypeKey + `' AND a.client_id = c.client_id`,
+		"configuration_child": `SELECT count(*) FROM ci c JOIN ci p ON p.id = c.parent_ci_id JOIN ci_type t ON t.id = c.ci_type_id
+			WHERE c.organization_id = $1 AND c.child_mode = 'configuration' AND c.asset_id IS NULL AND t.key = '` + BladeTypeKey + `'
+			AND c.client_id = p.client_id AND c.location_id = p.location_id`,
+		"phase2_ci_network": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND NOT ` + baseTypeOnly + ` AND (
+				EXISTS (SELECT 1 FROM network_interface n WHERE n.ci_id = c.id)
+				OR EXISTS (SELECT 1 FROM ci_relationship r WHERE r.source_ci_id = c.id OR r.target_ci_id = c.id))`,
+		"warranty_set": `SELECT count(*) FROM ci WHERE organization_id = $1 AND asset_id IS NOT NULL
+			AND jsonb_typeof(attributes->'` + ComputedKey + `') = 'number'`,
+		// warranty_days_left is the days from today to the warranty end of
+		// the asset (WP-717, WP-718); the system view warranty_expiring
+		// (WP-307) finds the linked CIs whose warranty ends within its days
+		// after the anchor, and more as the anchor ages.
+		"warranty_mismatch": `SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id JOIN organization o ON o.id = c.organization_id
+			WHERE c.organization_id = $1
+			AND (c.attributes->>'` + ComputedKey + `')::int IS DISTINCT FROM a.warranty_until - (now() AT TIME ZONE o.timezone)::date`,
+		"warranty_expiring": `SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id
+			WHERE c.organization_id = $1 AND a.warranty_until BETWEEN $2::date AND $2::date + ` + fmt.Sprint(savedview.WarrantyExpiringDays) + `
+			AND (c.attributes->>'` + ComputedKey + `')::int <= ` + fmt.Sprint(savedview.WarrantyExpiringDays),
+		"serial_mismatch": `SELECT count(*) FROM review_item WHERE organization_id = $1 AND kind = 'serial_mismatch'`,
+		"warehouse":       `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'warehouse'`,
+		"zone":            `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'zone'`,
+		"shelf":           `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'shelf'`,
+		"bin":             `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'bin'`,
+		// The storage branch lies below the site hq.
+		"bin_hq": `SELECT count(*) FROM location l JOIN client c ON c.id = l.client_id JOIN site s ON s.id = l.site_id
+			WHERE l.organization_id = $1 AND l.kind IN ('warehouse', 'zone', 'shelf', 'bin') AND c.slug = 'hq'
+			AND s.client_id = c.id`,
+		"consumable":     `SELECT count(*) FROM consumable WHERE organization_id = $1 AND sku IS NOT NULL AND min_level > 0`,
+		"consumable_ast": `SELECT count(*) FROM consumable WHERE organization_id = $1 AND supplier_id IS NOT NULL`,
+		"below_min": `SELECT count(*) FROM consumable c WHERE c.organization_id = $1
+			AND (SELECT COALESCE(sum(s.on_hand), 0) FROM stock_level s WHERE s.consumable_id = c.id) < c.min_level`,
+		// stock_level.on_hand is the sum of the bookings per consumable and
+		// bin (WP-283).
+		"stock_mismatch": `SELECT count(*) FROM (
+				SELECT consumable_id, bin, sum(delta) AS booked FROM (
+					SELECT consumable_id, to_location_id AS bin, quantity AS delta FROM stock_movement
+					WHERE organization_id = $1 AND consumable_id IS NOT NULL AND to_location_id IS NOT NULL
+					UNION ALL
+					SELECT consumable_id, from_location_id, -quantity FROM stock_movement
+					WHERE organization_id = $1 AND consumable_id IS NOT NULL AND from_location_id IS NOT NULL) m
+				GROUP BY consumable_id, bin) b
+			FULL JOIN (SELECT consumable_id, location_id, on_hand FROM stock_level WHERE organization_id = $1) s
+				ON s.consumable_id = b.consumable_id AND s.location_id = b.bin
+			WHERE s.on_hand IS DISTINCT FROM b.booked`,
+		"cross_org": `SELECT (SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id
+				WHERE c.organization_id = $1 AND a.organization_id <> $1)
+			+ (SELECT count(*) FROM stock_level s LEFT JOIN consumable k ON k.id = s.consumable_id
+				LEFT JOIN location l ON l.id = s.location_id
+				WHERE s.organization_id = $1 AND (k.organization_id IS DISTINCT FROM $1 OR l.organization_id IS DISTINCT FROM $1))
+			+ (SELECT count(*) FROM stock_movement m LEFT JOIN consumable k ON k.id = m.consumable_id
+				LEFT JOIN asset a ON a.id = m.asset_id LEFT JOIN location l ON l.id = m.to_location_id
+				WHERE m.organization_id = $1 AND (k.organization_id <> $1 OR a.organization_id <> $1 OR l.organization_id <> $1))`,
+		"other_movement": `SELECT count(*) FROM stock_movement WHERE organization_id = $1
+			AND (movement_type <> 'receipt' OR item_kind <> 'consumable')`,
+		"movement":      `SELECT count(*) FROM stock_movement WHERE organization_id = $1`,
+		"order_receipt": `SELECT count(*) FROM stock_movement WHERE organization_id = $1 AND order_id IS NOT NULL`,
+		"order_receipt_quantity": `SELECT COALESCE(sum(quantity), 0)::int FROM stock_movement
+			WHERE organization_id = $1 AND order_id IS NOT NULL`,
+		"order": `SELECT count(*) FROM internal_order WHERE organization_id = $1 AND supplier_id IS NOT NULL
+			AND target_location_id IS NOT NULL`,
+		"order_engineer": `SELECT count(*) FROM internal_order o JOIN app_user u ON u.id = o.requested_by
+			WHERE o.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		// Four eyes: the administrator approves or rejects what engineer
+		// requested.
+		"order_approved_by_admin": `SELECT count(*) FROM internal_order o JOIN app_user u ON u.id = o.approved_by
+			WHERE o.organization_id = $1 AND u.email LIKE 'admin@%' AND o.approved_by <> o.requested_by`,
+		"stocktake_running": `SELECT count(*) FROM stocktake WHERE organization_id = $1 AND status = 'in_progress'
+			AND started_at IS NOT NULL AND location_id IS NOT NULL`,
+		// The frozen snapshot holds the stock assets and the stock of every
+		// bin of the branch.
+		"stocktake_item_mismatch": `SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM stocktake WHERE organization_id = $1) THEN 0 ELSE
+				(SELECT count(*) FROM stocktake_item WHERE organization_id = $1)
+				- (SELECT count(*) FROM asset a JOIN location l ON l.id = a.location_id WHERE a.organization_id = $1 AND l.kind = 'bin')
+				- (SELECT count(*) FROM stock_level WHERE organization_id = $1) END`,
+		"stocktake_asset_item": `SELECT count(*) FROM stocktake_item WHERE organization_id = $1 AND item_kind = 'asset'`,
+		"scan":                 `SELECT count(*) FROM stock_scan WHERE organization_id = $1`,
+		"scan_found":           `SELECT count(*) FROM stock_scan WHERE organization_id = $1 AND scan_result = 'found'`,
+		"scan_unexpected":      `SELECT count(*) FROM stock_scan WHERE organization_id = $1 AND scan_result = 'unexpected'`,
+		"asset_grant_none": `SELECT count(*) FROM field_grant g JOIN role r ON r.id = g.role_id
+			WHERE g.organization_id = $1 AND r.name = 'viewer' AND g.object_kind = 'asset' AND g.level = 'none'
+			AND g.field_key IN ('core.purchase_cost', 'core.cost_center')`,
+		"asset_link_audit": `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = 'asset.linked'`,
+	}
+	for _, status := range []string{"draft", "submitted", "approved", "rejected", "ordered", "partially_received", "received",
+		"closed", "cancelled"} {
+		queries["order_"+status] = `SELECT count(*) FROM internal_order WHERE organization_id = $1 AND status = '` + status + `'`
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
 }
 
 // sameKeys reports whether a and b hold the same keys.
