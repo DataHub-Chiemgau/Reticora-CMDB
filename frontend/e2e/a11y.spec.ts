@@ -1122,6 +1122,13 @@ const SCAN_DIALOGS: { name: string; prepare: (page: Page) => Promise<void> }[] =
       await expect(
         page.getByRole('dialog').getByLabel(/^(code \(handscanner|code \(handheld)/i),
       ).toBeVisible();
+      // The command palette closes while the scan dialog opens: the check
+      // waits until the palette is gone and every transition has ended, so
+      // axe does not measure the contrast of a half-faded dialog.
+      await expect(page.getByRole('dialog')).toHaveCount(1);
+      await page.waitForFunction(() =>
+        document.getAnimations().every((a) => a.playState !== 'running'),
+      );
     },
   },
   {
