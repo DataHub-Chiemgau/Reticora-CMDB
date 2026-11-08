@@ -50,6 +50,7 @@ import {
   privacyApi,
   credentialApi,
   vrfApi,
+  bffQueryPartial,
   ApiError,
 } from '../api/client';
 import type {
@@ -74,6 +75,8 @@ import type {
   UpdateOrderRequest,
   AssetUpdateRequest,
   AssetListParams,
+  BffPartialResult,
+  LinkAssetCIRequest,
   AssignAssetRequest,
   ReturnAssetRequest,
   TransferAssetRequest,
@@ -689,6 +692,120 @@ export function useUpdateAsset() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
     },
+  });
+}
+
+/** useAsset reads one asset with version, holder and active reservation (WP-809). */
+export function useAsset(id: string | undefined) {
+  return useQuery({
+    queryKey: ['assets', 'detail', id],
+    queryFn: () => assetApi.get(id!),
+    enabled: !!id,
+  });
+}
+
+/** AssetDetailCI is a CI of the asset aggregate: a linked CI or a child CI (AST-05). */
+export interface AssetDetailCI {
+  id: string;
+  name: string;
+  status: string;
+  lifecycleState?: string | null;
+  serialNumber?: string | null;
+  locationId?: string | null;
+  assetId?: string | null;
+  parentCiId?: string | null;
+  childMode?: 'configuration' | 'standalone' | null;
+}
+
+/** AssetDetailDocument is a document of the asset aggregate (GQL-03). */
+export interface AssetDetailDocument {
+  id: string;
+  title: string;
+  description?: string | null;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  version: number;
+  category: string;
+  tags: string[];
+  uploadedBy?: string | null;
+  scanStatus?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** AssetDetailAggregate holds the lists of the asset detail page; a refused list is null. */
+export interface AssetDetailAggregate {
+  asset: {
+    id: string;
+    primaryCiId?: string | null;
+    cis?: AssetDetailCI[] | null;
+    children?: AssetDetailCI[] | null;
+    documents?: AssetDetailDocument[] | null;
+  } | null;
+}
+
+const ASSET_DETAIL_CI_FIELDS =
+  'id name status lifecycleState serialNumber locationId assetId parentCiId childMode';
+
+/**
+ * ASSET_DETAIL_QUERY reads the CIs, the child CIs and the documents of an
+ * asset in one BFF request (GQL-03, WP-311); the writes go through REST.
+ */
+export const ASSET_DETAIL_QUERY = `query AssetDetail($id: ID!) {
+  asset(id: $id) {
+    id
+    primaryCiId
+    cis(first: 50) { ${ASSET_DETAIL_CI_FIELDS} }
+    children(first: 50) { ${ASSET_DETAIL_CI_FIELDS} }
+    documents(first: 50) {
+      id title description fileName fileSize mimeType version category tags uploadedBy scanStatus createdAt updatedAt
+    }
+  }
+}`;
+
+/** assetDetailQuery is the query of useAssetDetail, also for reads outside the hook. */
+export function assetDetailQuery(id: string) {
+  return {
+    queryKey: ['assets', 'detail', id, 'aggregate'] as const,
+    queryFn: (): Promise<BffPartialResult<AssetDetailAggregate>> =>
+      bffQueryPartial<AssetDetailAggregate>(ASSET_DETAIL_QUERY, { id }),
+  };
+}
+
+/**
+ * useAssetDetail reads the lists of the asset detail page in exactly one
+ * BFF query (WP-809); a field the server refuses comes back as an error of
+ * its path, the other lists stay.
+ */
+export function useAssetDetail(id: string | undefined) {
+  return useQuery({ ...assetDetailQuery(id ?? ''), enabled: !!id });
+}
+
+/** invalidateAsset reads an asset, its aggregate and the lists again. */
+function invalidateAsset(queryClient: ReturnType<typeof useQueryClient>) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: ['assets'] }),
+    queryClient.invalidateQueries({ queryKey: ['ci'] }),
+  ]);
+}
+
+/** useLinkAssetCI links a CI to an asset (POST /assets/{id}/cis, AST-04). */
+export function useLinkAssetCI() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: LinkAssetCIRequest }) =>
+      assetApi.linkCI(id, data),
+    onSuccess: () => invalidateAsset(queryClient),
+  });
+}
+
+/** useUnlinkAssetCI releases a CI from an asset (DELETE /assets/{id}/cis/{ci_id}). */
+export function useUnlinkAssetCI() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ciId }: { id: string; ciId: string }) => assetApi.unlinkCI(id, ciId),
+    onSuccess: () => invalidateAsset(queryClient),
   });
 }
 

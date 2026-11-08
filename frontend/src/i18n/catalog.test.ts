@@ -26,6 +26,8 @@ import {
 } from '../components/bulk/BulkBar';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_LIFECYCLE_STATES } from '../pages/AssetListPage';
+import { CHILD_MODES } from '../pages/AssetDetailPage';
+import { LIFECYCLE_GUARDS, LIFECYCLE_MISSING } from '../components/cmdb/CIDetailSections';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { CONTRACT_KINDS, CONTRACT_STATUSES } from '../pages/ContractsPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
@@ -278,6 +280,13 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   // assignment_type of the projection (000257): assignment or transfer.
   ['assignment.types', ['assignment', 'transfer']],
   ['document.categories', BACKEND_ENUMS.documentCategories],
+  // WP-809: the child contracts of a child CI (AST-05) and the system
+  // guards of an asset transition with their missing references (WP-279).
+  ['asset.childModes', CHILD_MODES],
+  ['asset.childModes', specEnum('CI', 'child_mode')],
+  ['lifecycle.guards', LIFECYCLE_GUARDS],
+  ['lifecycle.guards', specEnum('LifecycleGuardProblem', 'guard')],
+  ['lifecycle.missing', LIFECYCLE_MISSING],
   ['ticket.statuses', BACKEND_ENUMS.ticketStatuses],
   ['ticket.categories', BACKEND_ENUMS.ticketCategories],
   // WP-814: the ticket priorities (WP-290) and the targets of a ticket link (WP-764).
@@ -736,6 +745,16 @@ describe('i18n catalog', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
 
+  it('offers exactly the guards and missing references of the OpenAPI types (WP-809)', () => {
+    expect([...CHILD_MODES]).toEqual(specEnum('CI', 'child_mode'));
+    expect([...LIFECYCLE_GUARDS]).toEqual(specEnum('LifecycleGuardProblem', 'guard'));
+    // missing is an array of an enum: its union is read from the item type.
+    const missing = spec.match(/^ {6}missing\?: \(([^)]*)\)\[\];/m)?.[1] ?? '';
+    expect([...LIFECYCLE_MISSING]).toEqual([...missing.matchAll(/'([^']*)'/g)].map((m) => m[1]));
+    expect(lookup(deDE, 'lifecycle.invalidTransition')).toBe('Übergang nicht erlaubt.');
+    expect(lookup(enUS, 'lifecycle.invalidTransition')).toBe('Transition not allowed.');
+  });
+
   it('labels in_stock as "Auf Lager" in de and "In stock" in en', () => {
     expect(lookup(deDE, 'lifecycle.states.in_stock')).toBe('Auf Lager');
     expect(lookup(enUS, 'lifecycle.states.in_stock')).toBe('In stock');
@@ -805,6 +824,8 @@ describe('i18n catalog', () => {
     ...Object.keys(slaSources),
     // WP-812: the orders.
     '../pages/OrderListPage.tsx',
+    // WP-809: the asset detail page.
+    '../pages/AssetDetailPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??

@@ -799,6 +799,88 @@
         "disposed": "Disposed",
         "lost": "Lost"
       }
+    },
+    "childModes": {
+      "configuration": "Configuration",
+      "standalone": "Standalone"
+    },
+    "detail": {
+      "notFound": "The asset was not found or is not visible.",
+      "loadError": "The asset could not be loaded.",
+      "masterData": "Master data",
+      "locationReadOnly": "Location (via movements)",
+      "lifecycleReadOnly": "Lifecycle (via transitions)",
+      "notes": "Notes",
+      "history": "Movements and changes",
+      "listError": "The list could not be loaded.",
+      "fields": {
+        "name": "Name",
+        "inventory_no": "Inventory number",
+        "manufacturer": "Manufacturer",
+        "model": "Model",
+        "serial_number": "Serial number",
+        "barcode": "Barcode",
+        "rfid_tag": "RFID tag",
+        "purchase_date": "Purchase date",
+        "purchase_price": "Purchase price",
+        "currency": "Currency",
+        "warranty_until": "Warranty until",
+        "cost_center": "Cost center",
+        "invoice_number": "Invoice number",
+        "supplier_id": "Supplier",
+        "contract_id": "Contract"
+      },
+      "edit": {
+        "title": "Edit asset",
+        "conflict": "The asset was changed meanwhile ({{fields}}). Reload it and make the change again.",
+        "precondition": "The version of the asset you read is no longer valid. Please reload.",
+        "reload": "Reload",
+        "failed": "The asset could not be saved."
+      },
+      "warranty": {
+        "notice": "The warranty ends on {{date}} (in {{count}} days).",
+        "warning": "The warranty ends soon: on {{date}} (in {{count}} days).",
+        "expired": "Warranty expired (since {{date}})."
+      },
+      "contract": {
+        "title": "Contract and supplier",
+        "supplier": "Supplier",
+        "number": "Contract",
+        "term": "Term",
+        "noticeDate": "Notice by",
+        "unnamedSupplier": "Show supplier",
+        "unnamedContract": "Show contract"
+      },
+      "holder": {
+        "title": "Holder and reservation",
+        "current": "Holder",
+        "due": "Due back"
+      },
+      "reservation": {
+        "title": "Active reservation",
+        "until": "Reserved until",
+        "for": "Reserved for",
+        "release": "Release reservation"
+      },
+      "cis": {
+        "title": "Linked CIs",
+        "none": "No CI is linked to this asset.",
+        "primary": "Primary CI",
+        "provenance": "Show the fields of {{name}} derived from the asset",
+        "provenanceError": "The provenance of the fields could not be loaded.",
+        "noDerived": "No field of this CI comes from the asset.",
+        "unlink": "Unlink",
+        "unlinkNamed": "Unlink {{name}} from the asset",
+        "pick": "Link CI",
+        "makePrimary": "Set as primary CI",
+        "link": "Link",
+        "linkRefused": "The CI cannot be linked: {{detail}}"
+      },
+      "children": {
+        "title": "Children",
+        "none": "This asset has no children.",
+        "fromAsset": "(from the asset)"
+      }
     }
   },
   "assignment": {
@@ -2822,6 +2904,24 @@
       "repair": "Repair",
       "retired": "Retired",
       "disposed": "Disposed"
+    },
+    "invalidTransition": "Transition not allowed.",
+    "guards": {
+      "storage_location": "For \"In stock\" the asset must be at a storage location (warehouse, zone, shelf or bin).",
+      "operations_location_or_holder": "For \"Deployed\" the asset needs an operations location (site, building, room or rack) or a holder.",
+      "disposal_record": "For \"Disposed\" the asset needs a disposal record.",
+      "active_reservation": "For \"Reserved\" the asset needs an active reservation."
+    },
+    "missing": {
+      "location_id": "A matching location is missing: move the asset.",
+      "assignee": "A holder (person or team) is missing.",
+      "disposal_record": "A disposal record is missing.",
+      "reservation": "An active reservation is missing."
+    },
+    "actions": {
+      "assign": "Assign",
+      "reserve": "Reserve",
+      "disposal": "Go to disposal"
     }
   },
   "relationship": {

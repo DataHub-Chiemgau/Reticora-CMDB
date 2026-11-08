@@ -799,6 +799,88 @@
         "disposed": "Entsorgt",
         "lost": "Verloren"
       }
+    },
+    "childModes": {
+      "configuration": "Konfiguration",
+      "standalone": "Eigenständig"
+    },
+    "detail": {
+      "notFound": "Das Asset wurde nicht gefunden oder ist nicht sichtbar.",
+      "loadError": "Das Asset konnte nicht geladen werden.",
+      "masterData": "Stammdaten",
+      "locationReadOnly": "Standort (über Bewegungen)",
+      "lifecycleReadOnly": "Lebenszyklus (über Übergänge)",
+      "notes": "Notizen",
+      "history": "Bewegungen und Änderungen",
+      "listError": "Die Liste konnte nicht geladen werden.",
+      "fields": {
+        "name": "Name",
+        "inventory_no": "Inventarnummer",
+        "manufacturer": "Hersteller",
+        "model": "Modell",
+        "serial_number": "Seriennummer",
+        "barcode": "Barcode",
+        "rfid_tag": "RFID-Tag",
+        "purchase_date": "Kaufdatum",
+        "purchase_price": "Kaufpreis",
+        "currency": "Währung",
+        "warranty_until": "Garantie bis",
+        "cost_center": "Kostenstelle",
+        "invoice_number": "Rechnungsnummer",
+        "supplier_id": "Lieferant",
+        "contract_id": "Vertrag"
+      },
+      "edit": {
+        "title": "Asset bearbeiten",
+        "conflict": "Das Asset wurde zwischenzeitlich geändert ({{fields}}). Bitte neu laden und die Änderung erneut vornehmen.",
+        "precondition": "Die gelesene Version des Assets ist nicht mehr gültig. Bitte neu laden.",
+        "reload": "Neu laden",
+        "failed": "Das Asset konnte nicht gespeichert werden."
+      },
+      "warranty": {
+        "notice": "Die Garantie endet am {{date}} (in {{count}} Tagen).",
+        "warning": "Die Garantie endet bald: am {{date}} (in {{count}} Tagen).",
+        "expired": "Garantie abgelaufen (seit {{date}})."
+      },
+      "contract": {
+        "title": "Vertrag und Lieferant",
+        "supplier": "Lieferant",
+        "number": "Vertrag",
+        "term": "Laufzeit",
+        "noticeDate": "Kündigung bis",
+        "unnamedSupplier": "Lieferant anzeigen",
+        "unnamedContract": "Vertrag anzeigen"
+      },
+      "holder": {
+        "title": "Halter und Reservierung",
+        "current": "Halter",
+        "due": "Rückgabe bis"
+      },
+      "reservation": {
+        "title": "Aktive Reservierung",
+        "until": "Reserviert bis",
+        "for": "Reserviert für",
+        "release": "Reservierung freigeben"
+      },
+      "cis": {
+        "title": "Verknüpfte CIs",
+        "none": "Mit diesem Asset ist kein CI verknüpft.",
+        "primary": "Primär-CI",
+        "provenance": "Vom Asset abgeleitete Felder von {{name}} anzeigen",
+        "provenanceError": "Die Herkunft der Felder konnte nicht geladen werden.",
+        "noDerived": "Kein Feld dieses CI kommt vom Asset.",
+        "unlink": "Lösen",
+        "unlinkNamed": "{{name}} vom Asset lösen",
+        "pick": "CI verknüpfen",
+        "makePrimary": "Als Primär-CI setzen",
+        "link": "Verknüpfen",
+        "linkRefused": "Das CI kann nicht verknüpft werden: {{detail}}"
+      },
+      "children": {
+        "title": "Kinder",
+        "none": "Dieses Asset hat keine Kinder.",
+        "fromAsset": "(vom Asset)"
+      }
     }
   },
   "assignment": {
@@ -2822,6 +2904,24 @@
       "repair": "In Reparatur",
       "retired": "Ausgemustert",
       "disposed": "Entsorgt"
+    },
+    "invalidTransition": "Übergang nicht erlaubt.",
+    "guards": {
+      "storage_location": "Für „Auf Lager“ muss das Asset an einem Lagerort stehen (Lager, Zone, Regal oder Fach).",
+      "operations_location_or_holder": "Für „Im Einsatz“ braucht das Asset einen Betriebsstandort (Standort, Gebäude, Raum oder Rack) oder einen Halter.",
+      "disposal_record": "Für „Entsorgt“ braucht das Asset einen Entsorgungsnachweis.",
+      "active_reservation": "Für „Reserviert“ braucht das Asset eine aktive Reservierung."
+    },
+    "missing": {
+      "location_id": "Es fehlt ein passender Standort: das Asset verschieben.",
+      "assignee": "Es fehlt ein Halter (Person oder Team).",
+      "disposal_record": "Es fehlt ein Entsorgungsnachweis.",
+      "reservation": "Es fehlt eine aktive Reservierung."
+    },
+    "actions": {
+      "assign": "Zuweisen",
+      "reserve": "Reservieren",
+      "disposal": "Zur Entsorgung"
     }
   },
   "relationship": {

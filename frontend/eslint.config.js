@@ -109,6 +109,8 @@ export default tseslint.config(
       'src/components/sla/**/*.tsx',
       // WP-812: the orders with positions, approval and goods receipt.
       'src/pages/OrderListPage.tsx',
+      // WP-809: the asset detail page.
+      'src/pages/AssetDetailPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',

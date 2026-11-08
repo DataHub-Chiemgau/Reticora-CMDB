@@ -203,7 +203,8 @@ export async function collectAssets(
   return { items, total: Math.max(total, items.length) };
 }
 
-function lifecycleVariant(state: string) {
+/** lifecycleVariant is the badge colour of a lifecycle state (list and detail page). */
+export function lifecycleVariant(state: string) {
   switch (state) {
     case 'in_stock':
       return 'success' as const;
@@ -405,6 +406,16 @@ export function AssetListPage() {
         return <Badge variant={lifecycleVariant(value)}>{lifecycleLabel(value)}</Badge>;
       case 'location_id':
         return locations.name(value) ?? '—';
+      case 'name':
+        // The name opens the detail page of the asset (WP-809).
+        return (
+          <Link
+            to={`/assets/${asset.id}`}
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            {value}
+          </Link>
+        );
       default:
         return value;
     }

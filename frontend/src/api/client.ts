@@ -788,7 +788,22 @@ export const BFF_PATH = '/bff/graphql';
 
 interface GraphQLResult<T> {
   data?: T | null;
-  errors?: { message: string; extensions?: { code?: string } }[];
+  errors?: { message: string; path?: (string | number)[]; extensions?: { code?: string } }[];
+}
+
+/** BffFieldError is one GraphQL error of a partial answer: the field path and the code. */
+export interface BffFieldError {
+  message: string;
+  /** path is the field path of the error, e.g. ['asset', 'documents']; empty for the query. */
+  path: (string | number)[];
+  /** code is extensions.code, e.g. FORBIDDEN or UNAVAILABLE. */
+  code?: string;
+}
+
+/** BffPartialResult is the data of a BFF query with the errors of its fields. */
+export interface BffPartialResult<T> {
+  data: T | null;
+  errors: BffFieldError[];
 }
 
 /**
@@ -808,6 +823,31 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
     throw new Error(result.errors.map((error) => error.message).join('; '));
   }
   return result.data as T;
+}
+
+/**
+ * bffQueryPartial runs a read query like bffQuery, but a partial answer is
+ * not thrown (WP-809): the data comes back with the errors of the failed
+ * fields (path and extensions.code), so a page hides only the section whose
+ * field the server refused (FORBIDDEN) or left out (UNAVAILABLE, module
+ * off). A failed request (HTTP status) is still thrown as ApiError.
+ */
+export async function bffQueryPartial<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<BffPartialResult<T>> {
+  const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
+    method: 'POST',
+    body: JSON.stringify({ query, variables }),
+  });
+  return {
+    data: result.data ?? null,
+    errors: (result.errors ?? []).map((error) => ({
+      message: error.message,
+      path: error.path ?? [],
+      code: error.extensions?.code,
+    })),
+  };
 }
 
 /** The largest page a list endpoint answers (API-02, parameter Limit). */
@@ -1339,7 +1379,21 @@ export const assetApi = {
   delete(id: string): Promise<void> {
     return fetchAPI(`/assets/${id}`, { method: 'DELETE' });
   },
+  /**
+   * linkCI links a CI to the asset (AST-04, WP-272): primary true makes it
+   * the primary CI, false clears the primary CI when it is this one.
+   */
+  linkCI(id: string, data: LinkAssetCIRequest): Promise<AssetCILink> {
+    return fetchAPI(`/assets/${id}/cis`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** unlinkCI releases the CI from the asset (DELETE /assets/{id}/cis/{ci_id}). */
+  unlinkCI(id: string, ciId: string): Promise<void> {
+    return fetchAPI(`/assets/${id}/cis/${ciId}`, { method: 'DELETE' });
+  },
 };
+
+export type LinkAssetCIRequest = components['schemas']['LinkAssetCIRequest'];
+export type AssetCILink = components['schemas']['AssetCILink'];
 
 // --- Phase 2: Assignment Management ---
 

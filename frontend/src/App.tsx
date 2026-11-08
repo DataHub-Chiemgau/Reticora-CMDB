@@ -44,6 +44,7 @@ function lazyPage(loader: () => Promise<Record<string, unknown>>, name: string) 
 }
 
 const AssetListPage = lazyPage(() => import('./pages/AssetListPage'), 'AssetListPage');
+const AssetDetailPage = lazyPage(() => import('./pages/AssetDetailPage'), 'AssetDetailPage');
 const AssignmentListPage = lazyPage(
   () => import('./pages/AssignmentListPage'),
   'AssignmentListPage',
@@ -248,6 +249,7 @@ function App() {
           <Route path="/racks" element={<RackPage />} />
           <Route path="/discovery" element={<DiscoveryPage />} />
           <Route path="/assets" element={<AssetListPage />} />
+          <Route path="/assets/:id" element={<AssetDetailPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/locations" element={<LocationTreePage />} />
           <Route path="/saved-views" element={<SavedViewsPage />} />

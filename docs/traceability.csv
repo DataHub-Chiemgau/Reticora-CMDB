@@ -1558,3 +1558,5 @@ RBA-07;[P2];B;backend/internal/tenant/rls/fieldrights_matrix_integration_test.go
 MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-254
 UI-14;[P2–P4, A];C;frontend/src/pages/DisposalListPage.test.tsx;WP-815
 UI-14;[P2–P4, A];C;frontend/src/pages/OrderListPage.test.tsx;WP-812
+UI-14;[P2–P4, A];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
+AST-04;[P2];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
