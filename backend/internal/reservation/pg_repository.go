@@ -22,6 +22,15 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// referenceFields are the request fields of the composite foreign keys of
+// reservation on app_user, ticket and internal_order (000275, WP-827) by
+// constraint.
+var referenceFields = map[string]string{
+	"reservation_assignee_id_fkey": "assignee_id",
+	"reservation_ticket_id_fkey":   "ticket_id",
+	"reservation_order_id_fkey":    "order_id",
+}
+
 const selectColumns = `
 	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
 	COALESCE(consumable_id::text, ''), COALESCE(location_id::text, ''), COALESCE(client_id::text, ''),
@@ -380,6 +389,12 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 			switch {
 			case errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_reservation_one_active_per_asset":
 				return ErrConflict
+			case errors.As(err, &pgErr) && pgErr.Code == "23503" && referenceFields[pgErr.ConstraintName] != "":
+				// A holder, ticket or order that is unknown or of another
+				// organization (composite foreign keys of 000275, WP-827):
+				// 422 on the field, the same for both (no existence oracle).
+				field := referenceFields[pgErr.ConstraintName]
+				return &api.FieldError{Field: field, Message: field + " not found", Status: http.StatusUnprocessableEntity}
 			case errors.As(err, &pgErr) && pgErr.Code == "42501":
 				// WITH CHECK of reservation_isolation: the derived client
 				// or site lies outside the caller's write scope, e.g. an

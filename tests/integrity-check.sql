@@ -17,6 +17,22 @@
 -- inheritance (ci_type.parent_type_id, WP-248) and the normalized serial
 -- number of more than one asset of an organization that is not disposed
 -- (lower(btrim()) as review_serial_mismatch, 000088; AST-03).
+-- The cross-tenant references of phase 2 (WP-827) are checked where no
+-- composite foreign key with the organization guards them: the document of
+-- a document link (document_link_document_id_fkey has no organization) and
+-- its target (entity_type, entity_id: no foreign key; a target no table
+-- holds is an orphan), the values of the reference-typed and file
+-- attributes in ci.attributes (reference, ci_ref, asset_ref, contract_ref,
+-- user, team, location, file; definitions from attribute_definition; a
+-- value no table holds is an orphan), the asset type (ci_type holds global
+-- rows, so asset_asset_type_id_fkey has no organization) and, in one row,
+-- every other single-column foreign key between two tenant tables without
+-- the organization (rls.ReferencesWithoutOrganization, WP-838, among them
+-- ticket.team_id, ticket.assignee_id, document.uploaded_by and
+-- stocktake.started_by). The context of a stock movement (ticket_id,
+-- order_id, document_id, workflow_run_id) has no foreign key: the ledger is
+-- append-only and keeps the id of a deleted ticket or order, so only a
+-- context of another organization counts.
 --
 -- Only what the schema does not already prevent is checked (F-281): the
 -- exact duplicates of serial number, hardware UUID and primary MAC among
@@ -37,7 +53,14 @@
 -- location_id) (stock_level); no own asset of a configuration child (CHECK
 -- ci_configuration_child_asset, WP-273); the references with a composite
 -- foreign key that carries the organization (among others
--- ci_asset_id_fkey, 000088).
+-- ci_asset_id_fkey, 000088; since WP-838 and the P2 migrations the
+-- references of reservation to asset and, for quantity reservations,
+-- through (consumable_id, location_id, organization_id) to stock_level
+-- (WP-284), of stock_level to consumable and location (WP-283), of
+-- stock_movement to asset, consumable, locations, user and team, of asset
+-- to supplier, contract, client, location, site, holder, owner and CI, of
+-- ticket_link, internal_order, internal_order_item, stocktake and
+-- stocktake_item to their objects).
 --
 -- Run it as the owner (it reads every organization):
 --   psql "$DATABASE_URL" -f tests/integrity-check.sql
@@ -118,6 +141,100 @@ ledger_holder AS (
     WHERE m.asset_id IS NOT NULL AND m.movement_type IN ('assignment', 'return')
       AND (p.org IS NULL OR m.organization_id = p.org)
     ORDER BY m.asset_id, m.occurred_at DESC, (m.movement_type = 'assignment') DESC, m.created_at DESC, m.id DESC
+),
+scoped_link AS (
+    SELECT l.* FROM document_link l, params p WHERE p.org IS NULL OR l.organization_id = p.org
+),
+-- The organization of the target of each document link (entity_type,
+-- entity_id; no foreign key, 000011); NULL when no row of the target
+-- table has the id.
+link_target AS (
+    SELECT l.id, l.organization_id, CASE l.entity_type
+        WHEN 'ci' THEN (SELECT x.organization_id FROM ci x WHERE x.id = l.entity_id)
+        WHEN 'asset' THEN (SELECT x.organization_id FROM asset x WHERE x.id = l.entity_id)
+        WHEN 'ticket' THEN (SELECT x.organization_id FROM ticket x WHERE x.id = l.entity_id)
+        WHEN 'location' THEN (SELECT x.organization_id FROM location x WHERE x.id = l.entity_id)
+        WHEN 'disposal_record' THEN (SELECT x.organization_id FROM disposal_record x WHERE x.id = l.entity_id)
+        WHEN 'stocktake' THEN (SELECT x.organization_id FROM stocktake x WHERE x.id = l.entity_id)
+        WHEN 'contract' THEN (SELECT x.organization_id FROM contract x WHERE x.id = l.entity_id)
+        WHEN 'stock_movement' THEN (SELECT x.organization_id FROM stock_movement x WHERE x.id = l.entity_id)
+    END AS target_org
+    FROM scoped_link l
+),
+-- Every CI type of a CI with itself and its ancestors (parent_type_id,
+-- WP-248); the depth bounds a cycle.
+type_chain AS (
+    SELECT t.id AS type_id, t.id AS ancestor, 0 AS depth
+    FROM ci_type t WHERE t.id IN (SELECT ci_type_id FROM scoped_ci)
+    UNION ALL
+    SELECT c.type_id, t.parent_type_id, c.depth + 1
+    FROM type_chain c JOIN ci_type t ON t.id = c.ancestor
+    WHERE t.parent_type_id IS NOT NULL AND c.depth < 100
+),
+-- The values of the reference-typed and file attributes of the active CIs
+-- (WP-254, MET-12; no foreign key): the definitions of the CI's type and
+-- its ancestors, of their attribute sets and the global ones, with their
+-- target (reticora_reference_target, 000107; file: document). A value is
+-- an id or an array of ids.
+ref_value AS (
+    SELECT c.id AS ci_id, c.organization_id, d.target, v.value
+    FROM scoped_ci c
+    CROSS JOIN LATERAL (
+        SELECT DISTINCT a.key, CASE WHEN a.data_type = 'file' THEN 'document' ELSE reticora_reference_target(a) END AS target
+        FROM attribute_definition a
+        WHERE (a.organization_id IS NULL OR a.organization_id = c.organization_id)
+          AND (a.data_type = 'file' OR reticora_reference_target(a) <> '')
+          AND c.attributes ? a.key
+          AND (a.scope = 'global'
+            OR a.ci_type_id IN (SELECT w.ancestor FROM type_chain w WHERE w.type_id = c.ci_type_id)
+            OR a.attribute_set_id IN (SELECT s.attribute_set_id FROM ci_type_attribute_set s
+                                       WHERE s.ci_type_id IN (SELECT w.ancestor FROM type_chain w WHERE w.type_id = c.ci_type_id)))
+    ) d
+    CROSS JOIN LATERAL jsonb_array_elements_text(CASE jsonb_typeof(c.attributes -> d.key)
+        WHEN 'array' THEN c.attributes -> d.key
+        WHEN 'string' THEN jsonb_build_array(c.attributes -> d.key)
+        ELSE '[]'::jsonb END) v(value)
+    WHERE c.deleted_at IS NULL AND c.merged_into_id IS NULL
+      AND v.value ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+),
+-- The organization of the target of each reference value; NULL when no
+-- row of the target table has the id.
+ref_target AS (
+    SELECT r.organization_id, CASE r.target
+        WHEN 'ci' THEN (SELECT x.organization_id FROM ci x WHERE x.id = r.value::uuid)
+        WHEN 'asset' THEN (SELECT x.organization_id FROM asset x WHERE x.id = r.value::uuid)
+        WHEN 'contract' THEN (SELECT x.organization_id FROM contract x WHERE x.id = r.value::uuid)
+        WHEN 'user' THEN (SELECT x.organization_id FROM app_user x WHERE x.id = r.value::uuid)
+        WHEN 'team' THEN (SELECT x.organization_id FROM team x WHERE x.id = r.value::uuid)
+        WHEN 'location' THEN (SELECT x.organization_id FROM location x WHERE x.id = r.value::uuid)
+        WHEN 'document' THEN (SELECT x.organization_id FROM document x WHERE x.id = r.value::uuid)
+    END AS target_org
+    FROM ref_value r
+),
+-- The single-column foreign keys between two tenant tables that do not
+-- carry the organization (rls.ReferencesWithoutOrganization, WP-838): the
+-- referencing table has organization_id, the target holds no global rows.
+loose_fk AS (
+    SELECT c.conrelid::regclass::text AS src, a.attname AS col, c.confrelid::regclass::text AS dst, d.attname AS dst_col
+    FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+    JOIN pg_attribute d ON d.attrelid = c.confrelid AND d.attnum = c.confkey[1]
+    WHERE c.contype = 'f' AND c.conparentid = 0 AND cardinality(c.conkey) = 1
+      AND c.connamespace = 'public'::regnamespace AND a.attname <> 'organization_id'
+      AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.conrelid
+                    AND x.attname = 'organization_id' AND NOT x.attisdropped)
+      AND EXISTS (SELECT 1 FROM pg_attribute x WHERE x.attrelid = c.confrelid
+                    AND x.attname = 'organization_id' AND NOT x.attisdropped AND x.attnotnull)
+),
+-- Per such foreign key the rows whose target belongs to another
+-- organization (query_to_xml runs the query of each key in this one
+-- statement).
+loose_ref AS (
+    SELECT (xpath('/row/n/text()', query_to_xml(format(
+        'SELECT count(*) AS n FROM %s s JOIN %s t ON t.%I = s.%I WHERE t.organization_id <> s.organization_id%s',
+        f.src, f.dst, f.dst_col, f.col,
+        CASE WHEN p.org IS NULL THEN '' ELSE format(' AND s.organization_id = %L', p.org) END), false, true, '')))[1]::text::bigint AS n
+    FROM loose_fk f, params p
 ),
 composition_walk AS (
     SELECT c.id AS start, c.parent_ci_id AS next, 1 AS depth
@@ -206,6 +323,30 @@ UNION ALL
 SELECT 'cross-tenant: rack room', count(*)
 FROM rack k JOIN room r ON r.id = k.room_id, params p
 WHERE (p.org IS NULL OR k.organization_id = p.org) AND r.organization_id <> k.organization_id
+UNION ALL
+SELECT 'cross-tenant: asset type', count(*)
+FROM scoped_asset a JOIN ci_type t ON t.id = a.asset_type_id WHERE t.organization_id <> a.organization_id
+UNION ALL
+SELECT 'cross-tenant: document link document', count(*)
+FROM scoped_link l JOIN document d ON d.id = l.document_id WHERE d.organization_id <> l.organization_id
+UNION ALL
+SELECT 'cross-tenant: document link target', count(*) FROM link_target WHERE target_org <> organization_id
+UNION ALL
+SELECT 'orphan: document link without target', count(*) FROM link_target WHERE target_org IS NULL
+UNION ALL
+SELECT 'cross-tenant: CI reference attribute', count(*) FROM ref_target WHERE target_org <> organization_id
+UNION ALL
+SELECT 'orphan: CI reference attribute without target', count(*) FROM ref_target WHERE target_org IS NULL
+UNION ALL
+SELECT 'cross-tenant: reference without the organization', COALESCE(sum(n), 0)::bigint FROM loose_ref
+UNION ALL
+SELECT 'cross-tenant: stock movement context', count(*)
+FROM stock_movement m, params p
+WHERE (p.org IS NULL OR m.organization_id = p.org)
+  AND (EXISTS (SELECT 1 FROM ticket x WHERE x.id = m.ticket_id AND x.organization_id <> m.organization_id)
+    OR EXISTS (SELECT 1 FROM internal_order x WHERE x.id = m.order_id AND x.organization_id <> m.organization_id)
+    OR EXISTS (SELECT 1 FROM document x WHERE x.id = m.document_id AND x.organization_id <> m.organization_id)
+    OR EXISTS (SELECT 1 FROM workflow_run x WHERE x.id = m.workflow_run_id AND x.organization_id <> m.organization_id))
 UNION ALL
 SELECT 'cycle: CI type lineage', count(*) FROM type_walk WHERE next = start
 UNION ALL

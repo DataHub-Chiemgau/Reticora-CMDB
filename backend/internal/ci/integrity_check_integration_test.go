@@ -81,6 +81,14 @@ func sq(sql string, args ...any) stmt { return stmt{sql, args} }
 // asset and a holder change booked as return and assignment at one
 // occurred_at are spared.
 //
+// The cross-tenant references of WP-827 too: an asset of a CI type of
+// organization B, a document link to the document or to the target of
+// another organization and to a target no table holds, a reference
+// attribute value naming a CI of organization B and one naming no row, and
+// a single-column foreign key without the organization (the uploader of a
+// document) pointing at a user of organization B, and a stock movement with a
+// document of organization B.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 	f := scopetest.Seed(t, "ec")
@@ -147,6 +155,23 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 	scalar(`INSERT INTO reservation (organization_id, item_kind, asset_id, assignee_id, state)
 		VALUES ($1, 'asset', $2, $3, 'active') RETURNING id::text`, f.OrgA, reserved, user1)
 	free := f.Asset(t, f.OrgA, f.Client1, "ic-asset-free")
+
+	// Cross-tenant references of phase 2 (WP-827): a document of
+	// organization A linked to an asset, a CI of an own type with a ci_ref
+	// attribute referencing a CI of A; an asset and a document of
+	// organization B.
+	assetB := f.Asset(t, f.OrgB, clientB, "ic-asset-b")
+	userB := f.AppUser(t, f.OrgB, "ic-user-b")
+	docA := scalar(`INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+		VALUES ($1, 'ic-doc-a', 'ic-a.txt', '', $2) RETURNING id::text`, f.OrgA, user1)
+	docB := scalar(`INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+		VALUES ($1, 'ic-doc-b', 'ic-b.txt', '', $2) RETURNING id::text`, f.OrgB, userB)
+	linkA := scalar(`INSERT INTO document_link (organization_id, document_id, entity_type, entity_id)
+		VALUES ($1, $2, 'asset', $3) RETURNING id::text`, f.OrgA, docA, reserved)
+	scalar(`INSERT INTO attribute_definition (organization_id, ci_type_id, key, data_type, display_name)
+		VALUES ($1, $2, 'ic_ref', 'ci_ref', '{"de":"ic_ref"}') RETURNING id::text`, f.OrgA, typeA1)
+	refCI := scalar(`INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+		VALUES ($1, $2, $3, 'ic-ref', 'active', jsonb_build_object('ic_ref', $4::text)) RETURNING id::text`, f.OrgA, f.Client1, typeA1, b)
 
 	// inTx runs fn in a transaction of the owner that is rolled back.
 	inTx := func(t *testing.T, replica bool, fn func(tx pgx.Tx)) {
@@ -230,6 +255,20 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		{"cross-tenant: CI room", true, []stmt{sq(`UPDATE ci SET room_id = $2 WHERE id = $1`, a, roomB)}},
 		{"cross-tenant: CI type", true, []stmt{sq(`UPDATE ci SET ci_type_id = $2 WHERE id = $1`, a, typeB)}},
 		{"cross-tenant: rack room", true, []stmt{sq(`UPDATE rack SET room_id = $2 WHERE id = $1`, rackA, roomB)}},
+		// WP-827: references without a composite foreign key.
+		{"cross-tenant: asset type", true, []stmt{sq(`UPDATE asset SET asset_type_id = $2 WHERE id = $1`, free, typeB)}},
+		{"cross-tenant: document link document", true, []stmt{sq(`UPDATE document_link SET document_id = $2 WHERE id = $1`, linkA, docB)}},
+		{"cross-tenant: document link target", true, []stmt{sq(`UPDATE document_link SET entity_id = $2 WHERE id = $1`, linkA, assetB)}},
+		{"orphan: document link without target", true, []stmt{sq(`UPDATE document_link SET entity_id = gen_random_uuid() WHERE id = $1`, linkA)}},
+		{"cross-tenant: CI reference attribute", true, []stmt{sq(`UPDATE ci SET attributes = jsonb_build_object('ic_ref', $2::text)
+			WHERE id = $1`, refCI, foreign)}},
+		{"orphan: CI reference attribute without target", true, []stmt{sq(`UPDATE ci SET attributes = jsonb_build_object('ic_ref',
+			gen_random_uuid()::text) WHERE id = $1`, refCI)}},
+		// One row for every single-column foreign key between tenant tables
+		// without the organization (rls.ReferencesWithoutOrganization).
+		{"cross-tenant: reference without the organization", false, []stmt{sq(`UPDATE document SET uploaded_by = $2 WHERE id = $1`, docA, userB)}},
+		{"cross-tenant: stock movement context", true, []stmt{sq(`INSERT INTO stock_movement (organization_id, item_kind, asset_id,
+			movement_type, assignee_user_id, document_id) VALUES ($1, 'asset', $2, 'assignment', $3, $4)`, f.OrgA, free, user1, docB)}},
 		{"cycle: CI type inheritance", true, []stmt{sq(`UPDATE ci_type SET parent_type_id = $2 WHERE id = $1`, typeA1, typeA2),
 			sq(`UPDATE ci_type SET parent_type_id = $2 WHERE id = $1`, typeA2, typeA1)}},
 		{"cycle: CI type lineage", true, []stmt{sq(`UPDATE ci_type SET cloned_from_id = $2 WHERE id = $1`, typeA1, typeA2),
