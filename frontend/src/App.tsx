@@ -50,6 +50,7 @@ const AssignmentListPage = lazyPage(
 );
 const AssistantPage = lazyPage(() => import('./pages/AssistantPage'), 'AssistantPage');
 const CIFormModal = lazyPage(() => import('./pages/CIFormModal'), 'CIFormModal');
+const ScanDialog = lazyPage(() => import('./components/flows/ScanDialog'), 'ScanDialog');
 const CIDetailPage = lazyPage(() => import('./pages/CIDetailPage'), 'CIDetailPage');
 const CIListPage = lazyPage(() => import('./pages/CIListPage'), 'CIListPage');
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage');
@@ -130,6 +131,10 @@ function App() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isScanOpen, setIsScanOpen] = useState(false);
+  // The scan dialog loads with its first use and stays mounted afterwards:
+  // a handover it started waits out its undo window there.
+  const [scanLoaded, setScanLoaded] = useState(false);
   const mode = useThemeStore((state) => state.mode);
   const resolvedTheme = useThemeStore((state) => state.resolved);
   const osTheme = useThemeStore((state) => state.os);
@@ -138,7 +143,11 @@ function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
   // Both read only with a session (their queries are enabled by it).
   const { isEnabled } = useEntitlements();
-  const { isPageEnabled } = useModules();
+  const { isPageEnabled, isModuleEnabled } = useModules();
+  // Scanning needs the feature barcode and the module inventory that serves
+  // /api/v1/labels (E-44, E-105, WP-807); without them the palette has no
+  // "Scan" command.
+  const canScan = isEnabled('barcode') && isModuleEnabled('inventory');
 
   // The theme toggle (header and command palette) cycles relative to the OS
   // theme: system -> opposite of the OS -> OS theme -> system, so every click
@@ -170,6 +179,11 @@ function App() {
   function openCreateCI() {
     navigate('/cmdb');
     setIsCreateOpen(true);
+  }
+
+  function openScan() {
+    setScanLoaded(true);
+    setIsScanOpen(true);
   }
 
   // handleLogout ends the Reticora and the IdP session; the IdP returns to
@@ -292,10 +306,16 @@ function App() {
         themeToggleLabel={themeToggleLabel}
         isFeatureEnabled={isEnabled}
         isPageEnabled={isPageEnabled}
+        onScan={canScan ? openScan : undefined}
       />
       <Suspense fallback={null}>
         <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
       </Suspense>
+      {scanLoaded ? (
+        <Suspense fallback={null}>
+          <ScanDialog open={isScanOpen} onOpenChange={setIsScanOpen} />
+        </Suspense>
+      ) : null}
       <ToastViewport />
     </>
   );

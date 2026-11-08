@@ -110,7 +110,8 @@
       "map": "Karte öffnen",
       "roomplan": "Raumplan öffnen",
       "tags": "Tags öffnen",
-      "rules": "Regelkatalog öffnen"
+      "rules": "Regelkatalog öffnen",
+      "scan": "Scannen"
     },
     "contact": {
       "label": "Kontakt",
@@ -3312,5 +3313,63 @@
       "notFound": "Die Regel gibt es nicht mehr.",
       "reason": "Abgelehnt: {{detail}}"
     }
+  },
+  "scan": {
+    "title": "Code scannen",
+    "description": "Kamera, Handscanner oder Eingabe: Inventarnummer, Barcode oder Etikett.",
+    "scanFor": "{{field}} per Scan wählen",
+    "camera": "Kamerabild",
+    "codeLabel": "Code (Handscanner oder Eingabe)",
+    "resolve": "Übernehmen",
+    "close": "Schließen",
+    "manualMode": "Manuell eingeben",
+    "useCamera": "Kamera verwenden",
+    "starting": "Kamera wird gestartet …",
+    "scanning": "Code vor die Kamera halten oder mit dem Handscanner lesen.",
+    "reasons": {
+      "insecure": "Die Kamera steht nur über HTTPS oder localhost zur Verfügung. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "denied": "Der Zugriff auf die Kamera ist nicht freigegeben. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "noCamera": "Keine Kamera gefunden. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "error": "Die Kamera ließ sich nicht starten. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "chosen": "Manuelle Eingabe: Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen."
+    },
+    "resolving": "Code wird aufgelöst …",
+    "notFound": "„{{code}}“ nicht gefunden.",
+    "wrongKind": "Der Code bezeichnet {{kind}}; dieses Feld nimmt das nicht an.",
+    "kinds": {
+      "asset": "ein Asset",
+      "consumable": "einen Mengenartikel",
+      "location": "einen Standort, der hier nicht passt"
+    },
+    "kindLabels": {
+      "asset": "Asset",
+      "consumable": "Mengenartikel",
+      "location": "Standort"
+    },
+    "result": "Gescanntes Objekt",
+    "kind": "Art",
+    "name": "Name",
+    "inventoryNo": "Inventarnummer",
+    "code": "Code",
+    "path": "Pfad",
+    "actions": {
+      "assign": "Zuweisen",
+      "return": "Zurücknehmen",
+      "reserve": "Reservieren",
+      "receive": "Empfangen",
+      "move": "Verschieben",
+      "history": "Historie"
+    },
+    "notAssigned": "Das Asset ist niemandem zugewiesen.",
+    "scanAgain": "Weiter scannen"
+  },
+  "signature": {
+    "handover": "Unterschrift bei Übergabe",
+    "return": "Unterschrift bei Rückgabe",
+    "hint": "Mit Maus, Stift oder Finger im Feld unterschreiben. „Löschen“ leert das Feld. Ohne Unterschrift wird die Bewegung unsigniert gebucht.",
+    "signed": "Unterschrift erfasst. „Löschen“ leert das Feld.",
+    "clear": "Löschen",
+    "signer": "Name der unterschreibenden Person (optional; nötig, wenn ein Team hält)",
+    "tooLarge": "Die Unterschrift ist zu groß und wurde nicht gesendet. Bitte löschen und neu unterschreiben."
   }
 }

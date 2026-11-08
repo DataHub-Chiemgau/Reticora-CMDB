@@ -667,6 +667,57 @@ const FLOW_DIALOGS: { name: string; url: string; button: RegExp }[] = [
   { name: 'assignments assign', url: '/assignments', button: /^(zuweisen|assign)$/i },
 ];
 
+// WP-807 (UI-15, INV-03): the scan dialog in manual entry and the assign
+// dialog with the signature field. Both need the features barcode and
+// signature (E-44) besides those of the flows; the entitlements say so ahead
+// of A11Y_HANDLERS.
+const SCAN_HANDLERS: Handler[] = [
+  FLOW_HANDLERS[0]!,
+  {
+    path: '/entitlements',
+    reply: () => ({
+      body: list(
+        ['assets_basic', 'stock', 'barcode', 'signature'].map((feature_key) => ({
+          organization_id: ORG_ID,
+          feature_key,
+          plan: 'standard',
+          enabled: true,
+          limits: {},
+          source: 'manual',
+        })),
+      ),
+    }),
+  },
+];
+
+const SCAN_DIALOGS: { name: string; prepare: (page: Page) => Promise<void> }[] = [
+  {
+    name: 'scan (manual entry)',
+    prepare: async (page) => {
+      // No camera: the dialog reads codes from the text field only.
+      await page.evaluate(() =>
+        Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true }),
+      );
+      await expect(page.getByRole('button', { name: /^(zuweisen|assign)$/i })).toBeVisible();
+      await page.keyboard.press('Control+k');
+      await page.getByRole('combobox').fill('Scan');
+      await page.getByRole('option', { name: /^(scannen|scan)/i }).click();
+      await expect(
+        page.getByRole('dialog').getByLabel(/^(code \(handscanner|code \(handheld)/i),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: 'assignments assign with signature',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /^(zuweisen|assign)$/i }).click();
+      await expect(
+        page.getByRole('dialog').getByRole('img', { name: /^(unterschrift|signature)/i }),
+      ).toBeVisible();
+    },
+  },
+];
+
 test.describe('accessibility (WCAG 2.1 AA)', () => {
   test('every route of the router has a check', () => {
     const covered = ROUTES.map((route) => route.path).sort();
@@ -777,6 +828,25 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
                   await p.getByRole('button', { name: dialog.button }).click();
                   await expect(p.getByRole('dialog').getByRole('combobox').first()).toBeVisible();
                 },
+                ready: (p) => p.getByRole('dialog'),
+                include: '[role="dialog"]',
+              },
+              theme,
+              language,
+            );
+          });
+        }
+      }
+
+      for (const dialog of SCAN_DIALOGS) {
+        for (const theme of THEMES) {
+          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url: '/assignments',
+                handlers: SCAN_HANDLERS,
+                prepare: dialog.prepare,
                 ready: (p) => p.getByRole('dialog'),
                 include: '[role="dialog"]',
               },

@@ -128,6 +128,12 @@ interface CommandPaletteProps {
    * (WP-214). Defaults to always-true like isFeatureEnabled.
    */
   isPageEnabled?: (page: AppPage) => boolean;
+  /**
+   * onScan opens the scan dialog (INV-03, WP-807). The caller passes it only
+   * with the feature barcode and the module inventory; without it the
+   * palette has no "Scan" command.
+   */
+  onScan?: () => void;
 }
 
 interface CommandItem {
@@ -210,12 +216,12 @@ type FocusAfterClose = 'restore' | 'main' | 'none';
 /** The page's main landmark (App.tsx); a navigation command lands there. */
 const MAIN_CONTENT_ID = 'main-content';
 
-/** focusAfterCommand: navigation lands on the new page, create-ci opens a dialog. */
+/** focusAfterCommand: navigation lands on the new page, create-ci and scan open a dialog. */
 function focusAfterCommand(id: string): FocusAfterClose {
   if (id.startsWith('nav-')) {
     return 'main';
   }
-  if (id === 'create-ci') {
+  if (id === 'create-ci' || id === 'scan') {
     return 'none';
   }
   return 'restore';
@@ -253,6 +259,7 @@ export function CommandPalette({
   themeToggleLabel,
   isFeatureEnabled = () => true,
   isPageEnabled = () => true,
+  onScan,
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -314,6 +321,16 @@ export function CommandPalette({
         keywords: ['theme dark light system appearance farbschema hell dunkel'],
         action: onToggleDarkMode,
       },
+      ...(onScan
+        ? [
+            {
+              id: 'scan',
+              label: t('commandPalette.commands.scan'),
+              keywords: ['scan scannen barcode qr code etikett label kamera camera'],
+              action: onScan,
+            },
+          ]
+        : []),
       {
         id: 'nav-assets',
         label: t('commandPalette.commands.assets', 'Inventar öffnen'),
@@ -467,6 +484,7 @@ export function CommandPalette({
     });
   }, [
     onCreateCI,
+    onScan,
     onNavigate,
     onToggleDarkMode,
     themeToggleLabel,

@@ -1516,3 +1516,5 @@ UI-14;[P2–P4, A];C;frontend/src/pages/TagsPage.test.tsx;WP-817
 VIE-02;[P2];C;frontend/src/pages/SavedViewsPage.test.tsx;WP-817
 UI-11;[P2];C;frontend/src/pages/RulesPage.test.tsx;WP-801
 ABN-02;[Q];G2;backend/internal/asset/querybudget_integration_test.go;WP-824
+UI-15;[P2];C;frontend/src/components/flows/scan.test.tsx;WP-807
+INV-03;[P2], RFID/Direct-Access [P4];C;frontend/src/components/flows/scan.test.tsx;WP-807

@@ -6,7 +6,9 @@
  */
 import {
   ApiError,
+  assetApi,
   buildQuery as qs,
+  consumableApi,
   fetchAllPages,
   fetchAPI,
   type CI,
@@ -895,6 +897,85 @@ export const locationApi = {
     return fetchAPI(`/locations/${id}`, { method: 'DELETE' });
   },
 };
+
+// ─── Scanned codes (INV-03, E-52, WP-762, WP-807) ────────────────────────────
+
+/** LabelLookupResult is the object GET /labels/lookup names: kind, id and name. */
+export type LabelLookupResult = components['schemas']['LabelLookupResult'];
+
+/** ScanKind is the kind of object a label names (E-52). */
+export type ScanKind = LabelLookupResult['kind'];
+
+/**
+ * ScannedObject is the object a scanned code resolves to: kind, id and
+ * name, the inventory number of an asset or the SKU of a consumable as
+ * code, and for a location its node (kind and ltree path of ids).
+ */
+export interface ScannedObject {
+  kind: ScanKind;
+  id: string;
+  name: string;
+  code?: string;
+  location?: Location;
+}
+
+const OBJECT_URN =
+  /^urn:reticora:(asset|consumable|location):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/**
+ * parseObjectUrn splits the URN of a label,
+ * urn:reticora:<asset|consumable|location>:<uuid> (E-52, WP-289), into kind
+ * and id; any other code gives undefined.
+ */
+export function parseObjectUrn(code: string): { kind: ScanKind; id: string } | undefined {
+  const match = OBJECT_URN.exec(code.trim());
+  if (!match) return undefined;
+  return { kind: match[1]!.toLowerCase() as ScanKind, id: match[2]!.toLowerCase() };
+}
+
+export const labelApi = {
+  /**
+   * lookup resolves a code that is no object URN: a barcode or an
+   * inventory number (GET /labels/lookup?code=, WP-762). An unknown code
+   * and an object outside the caller's scope, rights or plan answer 404
+   * alike.
+   */
+  lookup(code: string) {
+    return fetchAPI<LabelLookupResult>(`/labels/lookup${qs({ code })}`);
+  },
+};
+
+/**
+ * resolveScannedCode turns a scanned code into its object. A URN is split
+ * locally and the object read through GET /assets/{id}, /consumables/{id}
+ * or /locations/{id}, without a lookup. Every other code goes to GET
+ * /labels/lookup; a location found there is read once more for its kind
+ * and path (a flow takes only bins).
+ */
+export async function resolveScannedCode(code: string): Promise<ScannedObject> {
+  const urn = parseObjectUrn(code);
+  if (urn?.kind === 'asset') {
+    const asset = await assetApi.get(urn.id);
+    return {
+      kind: 'asset',
+      id: asset.id,
+      name: asset.name,
+      code: asset.inventory_no ?? asset.asset_tag,
+    };
+  }
+  if (urn?.kind === 'consumable') {
+    const item = await consumableApi.get(urn.id);
+    return { kind: 'consumable', id: item.id, name: item.name, code: item.sku };
+  }
+  let locationId = urn?.id;
+  if (!locationId) {
+    const hit = await labelApi.lookup(code.trim());
+    if (hit.kind !== 'location') return { kind: hit.kind, id: hit.id, name: hit.name };
+    locationId = hit.id;
+  }
+  const location = await locationApi.get(locationId);
+  return { kind: 'location', id: location.id, name: location.name, location };
+}
 
 // ─── Movements + quantity items (§9, §6) ─────────────────────────────────────
 

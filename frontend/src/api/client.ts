@@ -2749,6 +2749,10 @@ export const consumableApi = {
   list(params: ListParams & { low_stock?: boolean } = {}): Promise<PaginatedResponse<Consumable>> {
     return fetchAPI(`/consumables${buildQuery(params)}`);
   },
+  /** get reads one consumable (GET /consumables/{id}), e.g. the object of a scanned URN (WP-807). */
+  get(id: string): Promise<Consumable> {
+    return fetchAPI(`/consumables/${id}`);
+  },
   create(data: Partial<Consumable> & { name: string }): Promise<Consumable> {
     return fetchAPI('/consumables', { method: 'POST', body: JSON.stringify(data) });
   },

@@ -1,9 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, type AssignAssetRequest } from '../../api/client';
+import type { components } from '../../api/generated/schema';
 import { useCreateAssignment, useReturnAssignment, useTransferAssignment } from '../../api/hooks';
+import { useEntitlements } from '../../hooks/useEntitlements';
 import { useUndoableSubmit } from '../../hooks/useUndoableSubmit';
+import { ScanButton, WithScan } from './ScanDialog';
+import { SignaturePad, signatureTooLarge } from './SignaturePad';
 import { ObjectPicker, accessErrorMessage, type PickedObject } from '../pickers/ObjectPicker';
 import { UserTeamPicker, type PickedHolder } from '../pickers/UserTeamPicker';
 import { Button } from '../ui/Button';
@@ -57,6 +61,60 @@ function assetLabel(asset: PickedObject) {
   return asset.code ? `${asset.name} (${asset.code})` : asset.name;
 }
 
+type SignatureInput = components['schemas']['SignatureInput'];
+
+/**
+ * useSignature holds the signature of a handover or return (AST-02, E-51,
+ * WP-807), offered only with the feature signature (from standard on,
+ * E-44). Without the feature there is no field and no signature is sent.
+ */
+function useSignature() {
+  const { isEnabled } = useEntitlements();
+  const offered = isEnabled('signature');
+  const [png, setPng] = useState<string | null>(null);
+  const [signer, setSigner] = useState('');
+  const input: SignatureInput | undefined =
+    offered && png
+      ? {
+          image_png_base64: png,
+          signer: signer.trim() ? { name: signer.trim() } : undefined,
+        }
+      : undefined;
+  const reset = () => {
+    setPng(null);
+    setSigner('');
+  };
+  return { offered, png, setPng, signer, setSigner, input, reset };
+}
+
+/**
+ * SignatureField is the pad of a dialog and, once signed, the optional name
+ * of the person who signs; without it the holder of the movement signs (a
+ * team holder needs a name, WP-276).
+ */
+function SignatureField({
+  signature,
+  label,
+}: {
+  signature: ReturnType<typeof useSignature>;
+  label: string;
+}) {
+  const { t } = useTranslation();
+  if (!signature.offered) return null;
+  return (
+    <div className="space-y-2">
+      <SignaturePad label={label} value={signature.png} onChange={signature.setPng} />
+      {signature.png ? (
+        <Input
+          label={t('signature.signer')}
+          value={signature.signer}
+          onChange={(event) => signature.setSigner(event.target.value)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -68,23 +126,40 @@ interface DialogProps {
  * note. The dialog closes at once; POST /assets/{id}/assign goes out after
  * the undo window (useUndoableSubmit), a failure then shows as error toast.
  * Keep the dialog mounted with the page: leaving the page sends a waiting
- * assignment at once.
+ * assignment at once. With the feature barcode the asset can be scanned,
+ * with the feature signature the handover is signed (WP-807): the PNG goes
+ * in the field signature, "Undo" drops it with the request.
  */
-export function AssignDialog({ open, onOpenChange }: DialogProps) {
+export function AssignDialog({
+  open,
+  onOpenChange,
+  initialAsset,
+}: DialogProps & {
+  /** initialAsset is the asset of a scan (WP-807); the dialog opens with it. */
+  initialAsset?: PickedObject;
+}) {
   const { t } = useTranslation();
   const assign = useCreateAssignment();
   const { scheduleSubmit } = useUndoableSubmit();
   const errorMessage = useFlowErrorMessage();
+  const signature = useSignature();
   const [asset, setAsset] = useState<PickedObject[]>([]);
   const [holder, setHolder] = useState<PickedHolder | null>(null);
   const [due, setDue] = useState('');
   const [notes, setNotes] = useState('');
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    if (open && initialAsset) setAsset([initialAsset]);
+  }, [open, initialAsset]);
 
   const reset = () => {
     setAsset([]);
     setHolder(null);
     setDue('');
     setNotes('');
+    setError(undefined);
+    signature.reset();
   };
 
   const chosen = asset[0];
@@ -95,7 +170,14 @@ export function AssignDialog({ open, onOpenChange }: DialogProps) {
       ...holderFields(holder),
       due_at: dueAt(due),
       notes: notes || undefined,
+      signature: signature.input,
     };
+    // Above the limit of the server or of the proxy nothing is sent.
+    if (signature.input && signatureTooLarge(signature.input.image_png_base64, data)) {
+      setError(t('signature.tooLarge'));
+      return;
+    }
+    // "Undo" in the window drops the handover with its image, no server call.
     scheduleSubmit({
       id: `assign:${chosen.id}`,
       message: t('assignment.assignPending', { asset: label, holder: holder.name }),
@@ -117,13 +199,23 @@ export function AssignDialog({ open, onOpenChange }: DialogProps) {
       title={t('assignment.assign')}
     >
       <div className="space-y-4">
-        <ObjectPicker
-          label={t('assignment.asset')}
-          kinds={['asset']}
-          value={asset}
-          onChange={setAsset}
-          required
-        />
+        <WithScan
+          scan={
+            <ScanButton
+              field={t('assignment.asset')}
+              accept={['asset']}
+              onObject={(object) => setAsset([object])}
+            />
+          }
+        >
+          <ObjectPicker
+            label={t('assignment.asset')}
+            kinds={['asset']}
+            value={asset}
+            onChange={setAsset}
+            required
+          />
+        </WithScan>
         <UserTeamPicker
           label={t('assignment.recipient')}
           value={holder}
@@ -141,6 +233,8 @@ export function AssignDialog({ open, onOpenChange }: DialogProps) {
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
         />
+        <SignatureField signature={signature} label={t('signature.handover')} />
+        <DialogError message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
@@ -188,6 +282,7 @@ export function ReturnDialog({ open, onOpenChange, target }: HeldDialogProps) {
   const returnAsset = useReturnAssignment();
   const errorMessage = useFlowErrorMessage();
   const refresh = useConflictRefresh();
+  const signature = useSignature();
   const [condition, setCondition] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string>();
@@ -197,6 +292,7 @@ export function ReturnDialog({ open, onOpenChange, target }: HeldDialogProps) {
       setCondition('');
       setNotes('');
       setError(undefined);
+      signature.reset();
     }
     onOpenChange(next);
   };
@@ -204,15 +300,18 @@ export function ReturnDialog({ open, onOpenChange, target }: HeldDialogProps) {
   const submit = () => {
     if (!target) return;
     setError(undefined);
+    const data = {
+      expected_holder: target.holder,
+      return_condition: condition || undefined,
+      notes: notes || undefined,
+      signature: signature.input,
+    };
+    if (signature.input && signatureTooLarge(signature.input.image_png_base64, data)) {
+      setError(t('signature.tooLarge'));
+      return;
+    }
     returnAsset.mutate(
-      {
-        assetId: target.assetId,
-        data: {
-          expected_holder: target.holder,
-          return_condition: condition || undefined,
-          notes: notes || undefined,
-        },
-      },
+      { assetId: target.assetId, data },
       {
         onSuccess: () => close(false),
         onError: (failure) => {
@@ -248,6 +347,7 @@ export function ReturnDialog({ open, onOpenChange, target }: HeldDialogProps) {
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
         />
+        <SignatureField signature={signature} label={t('signature.return')} />
         <DialogError message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => close(false)}>
@@ -272,6 +372,7 @@ export function TransferDialog({ open, onOpenChange, target }: HeldDialogProps) 
   const transfer = useTransferAssignment();
   const errorMessage = useFlowErrorMessage();
   const refresh = useConflictRefresh();
+  const signature = useSignature();
   const [holder, setHolder] = useState<PickedHolder | null>(null);
   const [due, setDue] = useState('');
   const [notes, setNotes] = useState('');
@@ -283,6 +384,7 @@ export function TransferDialog({ open, onOpenChange, target }: HeldDialogProps) 
       setDue('');
       setNotes('');
       setError(undefined);
+      signature.reset();
     }
     onOpenChange(next);
   };
@@ -290,16 +392,20 @@ export function TransferDialog({ open, onOpenChange, target }: HeldDialogProps) 
   const submit = () => {
     if (!target || !holder) return;
     setError(undefined);
+    // The new holder signs the handover (signature, WP-276).
+    const data = {
+      expected_holder: target.holder,
+      ...holderFields(holder),
+      due_at: dueAt(due),
+      notes: notes || undefined,
+      signature: signature.input,
+    };
+    if (signature.input && signatureTooLarge(signature.input.image_png_base64, data)) {
+      setError(t('signature.tooLarge'));
+      return;
+    }
     transfer.mutate(
-      {
-        assetId: target.assetId,
-        data: {
-          expected_holder: target.holder,
-          ...holderFields(holder),
-          due_at: dueAt(due),
-          notes: notes || undefined,
-        },
-      },
+      { assetId: target.assetId, data },
       {
         onSuccess: () => close(false),
         onError: (failure) => {
@@ -342,6 +448,7 @@ export function TransferDialog({ open, onOpenChange, target }: HeldDialogProps) 
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
         />
+        <SignatureField signature={signature} label={t('signature.handover')} />
         <DialogError message={error} />
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={() => close(false)}>

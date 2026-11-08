@@ -30,6 +30,7 @@ import {
   metamodelDraftApi,
   metamodelTransferApi,
   ruleApi,
+  resolveScannedCode,
   savedViewApi,
   sensitiveFieldApi,
   tagApi,
@@ -865,6 +866,16 @@ export function useLifecycleTransition(entityType: 'assets' | 'cis', id: string)
 // location, site and room of a CI only when it has one (CI-06, DB-05).
 export function useLocationTree({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree(), enabled });
+}
+
+/**
+ * useScanLookup resolves a scanned or typed code (INV-03, E-52, WP-807):
+ * an object URN locally through the GET of its kind, any other code through
+ * GET /labels/lookup (resolveScannedCode). Each scan is one call of mutate;
+ * a 404 is an unknown code.
+ */
+export function useScanLookup() {
+  return useMutation({ mutationFn: (code: string) => resolveScannedCode(code) });
 }
 
 export function useCreateLocation() {

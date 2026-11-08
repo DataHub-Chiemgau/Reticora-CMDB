@@ -9,9 +9,12 @@
  * message. Once sent, a booking is corrected only by a counter-booking
  * (Convention 14, WP-274). Keep the dialogs mounted with the page: leaving
  * the page sends a waiting request at once. The asset and consumable detail
- * pages (WP-809, WP-320) mount the same dialogs.
+ * pages (WP-809, WP-320) mount the same dialogs. With the feature barcode a
+ * scan button next to each picker takes the object or bin of a scanned code
+ * (ScanDialog, WP-807); the scan dialog opens the dialogs with the scanned
+ * object (initialItem, initialAsset).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { ApiError } from '../../api/client';
@@ -25,6 +28,7 @@ import { ObjectPicker, accessErrorMessage, type PickedObject } from '../pickers/
 import { LocationPicker, type PickedLocation } from '../pickers/LocationPicker';
 import { UserTeamPicker, type PickedHolder } from '../pickers/UserTeamPicker';
 import { dueAt } from './AssignDialogs';
+import { ScanButton, WithScan } from './ScanDialog';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Modal } from '../ui/Modal';
@@ -98,6 +102,40 @@ export interface StockFlowDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * useInitialObject puts the object of a scan into the picker when the
+ * dialog opens with one (WP-807).
+ */
+function useInitialObject(
+  open: boolean,
+  initial: PickedObject | undefined,
+  set: (value: PickedObject[]) => void,
+) {
+  useEffect(() => {
+    if (open && initial) set([initial]);
+  }, [open, initial, set]);
+}
+
+/** BinScan is the scan button of a bin picker: only bins are taken. */
+function BinScan({ field, onBin }: { field: string; onBin: (bin: PickedLocation) => void }) {
+  return (
+    <ScanButton field={field} accept={['location']} locationKinds={BIN_KINDS} onLocation={onBin} />
+  );
+}
+
+/** ObjectScan is the scan button of an object picker of one kind. */
+function ObjectScan({
+  field,
+  kind,
+  onObject,
+}: {
+  field: string;
+  kind: 'asset' | 'consumable';
+  onObject: (object: PickedObject) => void;
+}) {
+  return <ScanButton field={field} accept={[kind]} onObject={onObject} />;
+}
+
 /** quantityOf reads a quantity input; anything but a positive number is undefined. */
 function quantityOf(value: string): number | undefined {
   const quantity = Number(value);
@@ -134,7 +172,11 @@ function DialogActions({
  * to_location_id, quantity and reason (WP-756). The receipt of an order
  * (POST /orders/{id}/receive) stays with the order pages (WP-812).
  */
-export function ReceiveDialog({ open, onOpenChange }: StockFlowDialogProps) {
+export function ReceiveDialog({
+  open,
+  onOpenChange,
+  initialItem,
+}: StockFlowDialogProps & { initialItem?: PickedObject }) {
   const { t } = useTranslation();
   const booking = useStockBooking();
   const { scheduleSubmit } = useUndoableSubmit();
@@ -142,6 +184,7 @@ export function ReceiveDialog({ open, onOpenChange }: StockFlowDialogProps) {
   const [bin, setBin] = useState<PickedLocation | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
+  useInitialObject(open, initialItem, setItem);
 
   const reset = () => {
     setItem([]);
@@ -179,19 +222,31 @@ export function ReceiveDialog({ open, onOpenChange }: StockFlowDialogProps) {
   return (
     <Modal open={open} onOpenChange={close} title={t('stockFlow.receiveTitle')}>
       <div className="space-y-4">
-        <ObjectPicker
-          label={t('stockFlow.consumable')}
-          kinds={['consumable']}
-          value={item}
-          onChange={setItem}
-          required
-        />
-        <LocationPicker
-          label={t('stockFlow.toBin')}
-          kinds={BIN_KINDS}
-          value={bin?.id ?? null}
-          onChange={setBin}
-        />
+        <WithScan
+          scan={
+            <ObjectScan
+              field={t('stockFlow.consumable')}
+              kind="consumable"
+              onObject={(object) => setItem([object])}
+            />
+          }
+        >
+          <ObjectPicker
+            label={t('stockFlow.consumable')}
+            kinds={['consumable']}
+            value={item}
+            onChange={setItem}
+            required
+          />
+        </WithScan>
+        <WithScan scan={<BinScan field={t('stockFlow.toBin')} onBin={setBin} />}>
+          <LocationPicker
+            label={t('stockFlow.toBin')}
+            kinds={BIN_KINDS}
+            value={bin?.id ?? null}
+            onChange={setBin}
+          />
+        </WithScan>
         <Input
           type="number"
           min={0}
@@ -227,7 +282,11 @@ export function ReceiveDialog({ open, onOpenChange }: StockFlowDialogProps) {
  * /stock-movements with movement_type transfer, from_location_id and
  * to_location_id.
  */
-export function MoveStockDialog({ open, onOpenChange }: StockFlowDialogProps) {
+export function MoveStockDialog({
+  open,
+  onOpenChange,
+  initialItem,
+}: StockFlowDialogProps & { initialItem?: PickedObject }) {
   const { t } = useTranslation();
   const booking = useStockBooking();
   const { scheduleSubmit } = useUndoableSubmit();
@@ -236,6 +295,7 @@ export function MoveStockDialog({ open, onOpenChange }: StockFlowDialogProps) {
   const [to, setTo] = useState<PickedLocation | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
+  useInitialObject(open, initialItem, setItem);
 
   const chosen = item[0];
   const stock = useStockLevels(open ? chosen?.id : undefined);
@@ -297,16 +357,29 @@ export function MoveStockDialog({ open, onOpenChange }: StockFlowDialogProps) {
   return (
     <Modal open={open} onOpenChange={close} title={t('stockFlow.moveTitle')}>
       <div className="space-y-4">
-        <ObjectPicker
-          label={t('stockFlow.consumable')}
-          kinds={['consumable']}
-          value={item}
-          onChange={(next) => {
-            setItem(next);
-            setFrom('');
-          }}
-          required
-        />
+        <WithScan
+          scan={
+            <ObjectScan
+              field={t('stockFlow.consumable')}
+              kind="consumable"
+              onObject={(object) => {
+                setItem([object]);
+                setFrom('');
+              }}
+            />
+          }
+        >
+          <ObjectPicker
+            label={t('stockFlow.consumable')}
+            kinds={['consumable']}
+            value={item}
+            onChange={(next) => {
+              setItem(next);
+              setFrom('');
+            }}
+            required
+          />
+        </WithScan>
         {rows.length > 0 ? (
           <Select
             label={t('stockFlow.fromBin')}
@@ -330,12 +403,14 @@ export function MoveStockDialog({ open, onOpenChange }: StockFlowDialogProps) {
             {stockNotice}
           </p>
         ) : null}
-        <LocationPicker
-          label={t('stockFlow.toBin')}
-          kinds={BIN_KINDS}
-          value={to?.id ?? null}
-          onChange={setTo}
-        />
+        <WithScan scan={<BinScan field={t('stockFlow.toBin')} onBin={setTo} />}>
+          <LocationPicker
+            label={t('stockFlow.toBin')}
+            kinds={BIN_KINDS}
+            value={to?.id ?? null}
+            onChange={setTo}
+          />
+        </WithScan>
         {sameBin ? (
           <p role="alert" className="text-sm text-danger">
             {t('stockFlow.sameBin')}
@@ -415,14 +490,38 @@ export function MoveAssetDialog({ open, onOpenChange }: StockFlowDialogProps) {
   return (
     <Modal open={open} onOpenChange={close} title={t('stockFlow.moveAssetTitle')}>
       <div className="space-y-4">
-        <ObjectPicker
-          label={t('stockFlow.asset')}
-          kinds={['asset']}
-          value={asset}
-          onChange={setAsset}
-          required
-        />
-        <LocationPicker label={t('stockFlow.toLocation')} value={to?.id ?? null} onChange={setTo} />
+        <WithScan
+          scan={
+            <ObjectScan
+              field={t('stockFlow.asset')}
+              kind="asset"
+              onObject={(object) => setAsset([object])}
+            />
+          }
+        >
+          <ObjectPicker
+            label={t('stockFlow.asset')}
+            kinds={['asset']}
+            value={asset}
+            onChange={setAsset}
+            required
+          />
+        </WithScan>
+        <WithScan
+          scan={
+            <ScanButton
+              field={t('stockFlow.toLocation')}
+              accept={['location']}
+              onLocation={setTo}
+            />
+          }
+        >
+          <LocationPicker
+            label={t('stockFlow.toLocation')}
+            value={to?.id ?? null}
+            onChange={setTo}
+          />
+        </WithScan>
         <Input
           label={t('stockFlow.reason')}
           value={reason}
@@ -448,11 +547,16 @@ type ReserveFor = 'user' | 'project';
  * from the UserTeamPicker) or project_ref, and a reason. Quantity
  * reservations of consumables stay with POST /reservations (WP-759).
  */
-export function ReserveDialog({ open, onOpenChange }: StockFlowDialogProps) {
+export function ReserveDialog({
+  open,
+  onOpenChange,
+  initialAsset,
+}: StockFlowDialogProps & { initialAsset?: PickedObject }) {
   const { t } = useTranslation();
   const reserve = useReserveAsset();
   const { scheduleSubmit } = useUndoableSubmit();
   const [asset, setAsset] = useState<PickedObject[]>([]);
+  useInitialObject(open, initialAsset, setAsset);
   const [until, setUntil] = useState('');
   const [expires, setExpires] = useState('');
   const [reserveFor, setReserveFor] = useState<ReserveFor>('user');
@@ -501,13 +605,23 @@ export function ReserveDialog({ open, onOpenChange }: StockFlowDialogProps) {
   return (
     <Modal open={open} onOpenChange={close} title={t('stockFlow.reserveTitle')}>
       <div className="space-y-4">
-        <ObjectPicker
-          label={t('stockFlow.asset')}
-          kinds={['asset']}
-          value={asset}
-          onChange={setAsset}
-          required
-        />
+        <WithScan
+          scan={
+            <ObjectScan
+              field={t('stockFlow.asset')}
+              kind="asset"
+              onObject={(object) => setAsset([object])}
+            />
+          }
+        >
+          <ObjectPicker
+            label={t('stockFlow.asset')}
+            kinds={['asset']}
+            value={asset}
+            onChange={setAsset}
+            required
+          />
+        </WithScan>
         <Input
           type="date"
           label={t('stockFlow.reservedUntil')}

@@ -110,7 +110,8 @@
       "map": "Open map",
       "roomplan": "Open room plan",
       "tags": "Open tags",
-      "rules": "Open rule catalog"
+      "rules": "Open rule catalog",
+      "scan": "Scan"
     },
     "contact": {
       "label": "Contact",
@@ -3312,5 +3313,63 @@
       "notFound": "The rule no longer exists.",
       "reason": "Refused: {{detail}}"
     }
+  },
+  "scan": {
+    "title": "Scan code",
+    "description": "Camera, handheld scanner or typing: inventory number, barcode or label.",
+    "scanFor": "Choose {{field}} by scan",
+    "camera": "Camera image",
+    "codeLabel": "Code (handheld scanner or typing)",
+    "resolve": "Apply",
+    "close": "Close",
+    "manualMode": "Enter manually",
+    "useCamera": "Use camera",
+    "starting": "Starting camera …",
+    "scanning": "Hold the code in front of the camera or read it with the handheld scanner.",
+    "reasons": {
+      "insecure": "The camera is available over HTTPS or localhost only. Read the code with the handheld scanner or type it and press Enter.",
+      "denied": "Access to the camera is not allowed. Read the code with the handheld scanner or type it and press Enter.",
+      "noCamera": "No camera found. Read the code with the handheld scanner or type it and press Enter.",
+      "error": "The camera could not be started. Read the code with the handheld scanner or type it and press Enter.",
+      "chosen": "Manual entry: read the code with the handheld scanner or type it and press Enter."
+    },
+    "resolving": "Resolving code …",
+    "notFound": "“{{code}}” not found.",
+    "wrongKind": "The code names {{kind}}; this field does not take it.",
+    "kinds": {
+      "asset": "an asset",
+      "consumable": "a consumable",
+      "location": "a location that does not fit here"
+    },
+    "kindLabels": {
+      "asset": "Asset",
+      "consumable": "Consumable",
+      "location": "Location"
+    },
+    "result": "Scanned object",
+    "kind": "Kind",
+    "name": "Name",
+    "inventoryNo": "Inventory number",
+    "code": "Code",
+    "path": "Path",
+    "actions": {
+      "assign": "Assign",
+      "return": "Return",
+      "reserve": "Reserve",
+      "receive": "Receive",
+      "move": "Move",
+      "history": "History"
+    },
+    "notAssigned": "The asset is not assigned to anyone.",
+    "scanAgain": "Scan again"
+  },
+  "signature": {
+    "handover": "Signature on handover",
+    "return": "Signature on return",
+    "hint": "Sign in the field with mouse, pen or finger. “Clear” empties the field. Without a signature the movement is booked unsigned.",
+    "signed": "Signature captured. “Clear” empties the field.",
+    "clear": "Clear",
+    "signer": "Name of the person signing (optional; needed when a team holds the asset)",
+    "tooLarge": "The signature is too large and was not sent. Please clear it and sign again."
   }
 }
