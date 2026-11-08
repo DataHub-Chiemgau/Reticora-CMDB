@@ -168,12 +168,24 @@ test.describe('Saved views run by read-only roles: search:read and the entity re
     // The inventory module is a P2 module and switched off in G1 by default:
     // its routes answer 404 (WP-214), and since WP-309 a view or query of the
     // entity kind asset is refused with 403 feature-not-entitled. With the
-    // module on, the asset view carries the asset-kind permission check of S2.
-    const created = await api(w.rq, w.token, 'POST', '/assets', {
-      asset_tag: `sv-${s}`,
+    // module on but without the feature assets_basic for the organization, the
+    // org gate answers POST /assets with 403 feature-not-entitled as well
+    // (ENT-03); both cases run without assets. With the module and the feature,
+    // the asset view carries the asset-kind permission check of S2. The asset
+    // carries the AST-01 fields: inventory_no and name are required, asset_tag
+    // is no field of the asset since WP-739.
+    const created = await api<{ type?: string }>(w.rq, w.token, 'POST', '/assets', {
+      inventory_no: `sv-${s}`,
       name: w.assetName,
     });
-    expect([201, 404], `POST /assets: ${JSON.stringify(created.body)}`).toContain(created.status);
+    expect([201, 403, 404], `POST /assets: ${JSON.stringify(created.body)}`).toContain(
+      created.status,
+    );
+    if (created.status === 403) {
+      expect(created.body.type, 'POST /assets without assets_basic').toBe(
+        'https://reticora.io/problems/feature-not-entitled',
+      );
+    }
     w.assets = created.status === 201;
     await ok('POST', '/saved-views', {
       name: w.ciView,

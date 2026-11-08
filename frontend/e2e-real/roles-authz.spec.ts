@@ -24,6 +24,7 @@ import {
   saveState,
   type RunState,
 } from './support/roles-authz';
+import { createButton, startGuidedCreate } from './support/guided-create';
 
 /*
  * Role and permission boundaries on the REAL stack (Phase-1 acceptance audit).
@@ -1014,14 +1015,12 @@ test('08 viewer UI: CIs are visible; creating or editing a CI is not offered or 
   const uiName = `viewer-ui-ci-${run}`;
   const create = page.getByRole('button', { name: 'CI anlegen' }).first();
   if ((await create.isVisible()) && (await create.isEnabled())) {
-    await create.click();
-    const dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Name').fill(uiName);
-    await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
+    // The guided creation (WP-317): the tile of the type, then the name.
+    const dialog = await startGuidedCreate(page, 'Server', uiName);
     const post = page.waitForResponse(
       (r) => r.url().endsWith('/api/v1/cis') && r.request().method() === 'POST',
     );
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    await createButton(dialog).click();
     expect((await post).status()).toBe(403);
     await expect(dialog, 'the dialog stays open on refusal').toBeVisible();
     await expect(dialog.getByRole('alert')).toBeVisible();
@@ -1449,14 +1448,11 @@ test('12 after the upgrade the user creates a CI through the UI form (UI → API
   const { context, page } = await signIn(browser, viewer);
   const uiName = `engineer-ui-ci-${run}`;
   await page.goto('/cmdb');
-  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Name').fill(uiName);
-  await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
+  const dialog = await startGuidedCreate(page, 'Server', uiName);
   const post = page.waitForResponse(
     (r) => r.url().endsWith('/api/v1/cis') && r.request().method() === 'POST',
   );
-  await dialog.getByRole('button', { name: 'Anlegen' }).click();
+  await createButton(dialog).click();
   const response = await post;
   expect(
     response.status(),

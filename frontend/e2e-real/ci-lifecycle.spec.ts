@@ -19,6 +19,16 @@ import {
   DATABASE_URL,
   type Account,
 } from './support/stack';
+import {
+  chooseType,
+  createButton,
+  nameField,
+  nextButton,
+  openGuidedCreate,
+  startGuidedCreate,
+  statusField,
+  typeTile,
+} from './support/guided-create';
 
 /*
  * Phase-1 acceptance audit – the core CMDB process of a user, end to end on the real
@@ -52,6 +62,15 @@ import {
  *  L13b instance attributes save with require_if_match ........ WP-061 (API-07, API-03), WP-477 (F-082)
  *  L14  quotes / backslashes in names and fields are stored ... WP-117 (CI-03, MET-11), WP-120 (CI-01), WP-132 (AUD-04)
  *  L15  location by name, formatted times, read-only asset card  WP-577 (CI-06, DB-05, AST-04; F-237, F-238)
+ *
+ * Since WP-317 "CI anlegen" is the guided creation (support/guided-create.ts): type tile →
+ * manufacturer and model → the fields of the resolved form of the type. The system type
+ * Server declares no field of its own, so its form offers name, status, manufacturer and
+ * model. L01 and L02 therefore create their CIs with an organization type (beforeAll,
+ * "Netzwerkgerät") whose form declares serial number, management IP and firmware version,
+ * the typed columns the guided creation sends as master fields. The management IP is a
+ * text field of that type, so the browser leaves its format to the server, which checks
+ * the column type (MET-11) as it did behind the former fixed form.
  *
  * The UI offers no action to delete or restore a CI (useDeleteCI is not used by any page);
  * L11 therefore drives DELETE and restore through the REST API and checks the effect in the UI.
@@ -145,6 +164,9 @@ interface World {
   orgId: string;
   userId: string;
   serverType: string;
+  /** The organization type whose form declares the typed columns of L01 and L02. */
+  deviceType: string;
+  deviceLabel: string;
   s: string;
 }
 
@@ -383,12 +405,10 @@ async function openSession(
   return { ctx, page, token };
 }
 
+/** openCreateForm opens the guided creation of the CMDB page on its type step. */
 async function openCreateForm(page: Page) {
   await page.goto('/cmdb');
-  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
-  return dialog;
+  return openGuidedCreate(page);
 }
 
 test.describe('CI lifecycle: create, edit, history, audit, relations, search, export, delete', () => {
@@ -413,6 +433,8 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       orgId: c.org,
       userId: c.sub,
       serverType: '',
+      deviceType: '',
+      deviceLabel: '',
       s: stamp(),
     };
     const me = await ok<{ sub: string; org: string }>('GET', '/me');
@@ -421,6 +443,23 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const types = await ok<List<{ id: string; key: string }>>('GET', '/ci-types?limit=200');
     w.serverType = rows(types).find((t) => t.key === 'server')?.id ?? '';
     expect(w.serverType, 'catalog type server').not.toBe('');
+    // The type of L01 and L02: its form declares the typed columns serial number,
+    // management IP and firmware version (the guided creation sends them as columns).
+    w.deviceLabel = `Netzwerkgerät ${w.s}`;
+    const device = await ok<{ id: string; is_logical: boolean }>('POST', '/ci-types', {
+      key: `lc_device_${w.s}`,
+      name: `lc-device-${w.s}`,
+      display_name: { de: w.deviceLabel, en: `Network device ${w.s}` },
+      fields: [
+        { name: 'serial_number', label: 'Seriennummer', data_type: 'text' },
+        { name: 'management_ip', label: 'Management-IP', data_type: 'text' },
+        { name: 'firmware_version', label: 'Firmware-Version', data_type: 'text' },
+      ],
+    });
+    expect(device.is_logical, 'a physical type: the creation asks manufacturer and model').toBe(
+      false,
+    );
+    w.deviceType = device.id;
   });
 
   test.afterAll(async () => {
@@ -432,18 +471,26 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const page = w.page;
     const name = `lc-form-${w.s}`;
     const dialog = await openCreateForm(page);
-    await dialog.getByLabel('Name', { exact: true }).fill(name);
-    await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
-    await dialog.getByLabel('Status').selectOption({ label: 'Wartung' });
-    await dialog.getByLabel('Hersteller').fill(`Vendor ${w.s}`);
-    await dialog.getByLabel('Modell').fill('PowerEdge R740');
-    await dialog.getByLabel('Seriennummer').fill(`SN-LC-${w.s}`);
-    await dialog.getByLabel('Management-IP').fill('10.20.30.40');
-    await dialog.getByLabel('Firmware-Version').fill('2.1.0');
+    await chooseType(dialog, w.deviceLabel, {
+      manufacturer: `Vendor ${w.s}`,
+      model: 'PowerEdge R740',
+    });
+    await nameField(dialog).fill(name);
+    await statusField(dialog).selectOption({ label: 'Wartung' });
+    await dialog.getByLabel('Seriennummer', { exact: true }).fill(`SN-LC-${w.s}`);
+    await dialog.getByLabel('Management-IP', { exact: true }).fill('10.20.30.40');
+    await dialog.getByLabel('Firmware-Version', { exact: true }).fill('2.1.0');
     const created = waitForPath(page, '/cis', 'POST');
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    await createButton(dialog).click();
     const res = await created;
     expect(res.status(), `POST /cis sent by the CMDB form: ${await res.text()}`).toBe(201);
+    // The typed columns of the form are master fields of the request, not attributes.
+    expect(res.request().postDataJSON()).toMatchObject({
+      ci_type_id: w.deviceType,
+      serial_number: `SN-LC-${w.s}`,
+      management_ip: '10.20.30.40',
+      firmware_version: '2.1.0',
+    });
     const ci = (await res.json()) as CI;
     await expect(dialog).toBeHidden();
 
@@ -452,7 +499,7 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     const stored = await getCI(ci.id);
     expect(stored).toMatchObject({
       organization_id: w.orgId,
-      ci_type_id: w.serverType,
+      ci_type_id: w.deviceType,
       name,
       status: 'maintenance',
       manufacturer: `Vendor ${w.s}`,
@@ -489,9 +536,8 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
 
     // The SPA is loaded and the dialog has read the types before the new type exists.
     let dialog = await openCreateForm(page);
-    let typeSelect = dialog.getByLabel('CI-Typ');
-    await expect(typeSelect.locator('option', { hasText: 'Server' }).first()).toBeAttached();
-    await expect(typeSelect.locator('option', { hasText: label })).toHaveCount(0);
+    await expect(typeTile(dialog, 'Server')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: label })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Abbrechen' }).click();
     await expect(dialog).toBeHidden();
     await page.evaluate(() => {
@@ -516,16 +562,14 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
 
     // No reload, no release: the dialog offers the type, renders its attribute
     // and posts the type id (CI-03) with the attribute value.
-    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
-    dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
+    dialog = await openGuidedCreate(page);
+    await expect(typeTile(dialog, label)).toBeVisible();
     const name = `lc-runtime-ci-${w.s}`;
-    await dialog.getByLabel('Name', { exact: true }).fill(name);
-    typeSelect = dialog.getByLabel('CI-Typ');
-    await typeSelect.selectOption({ label });
+    await chooseType(dialog, label);
+    await nameField(dialog).fill(name);
     await dialog.getByLabel('Höheneinheiten').fill('2');
     const posted = waitForPath(page, '/cis', 'POST');
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    await createButton(dialog).click();
     const res = await posted;
     expect(res.status(), `POST /cis with the runtime type: ${await res.text()}`).toBe(201);
     expect(res.request().postDataJSON()).toMatchObject({
@@ -562,10 +606,9 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       expect(typesB.status).toBe(200);
       expect(rows(typesB.body).map((t) => t.id)).not.toContain(created.id);
       const dialogB = await openCreateForm(pageB);
-      const typeSelectB = dialogB.getByLabel('CI-Typ');
-      await expect(typeSelectB.locator('option', { hasText: 'Server' }).first()).toBeAttached();
-      await expect(typeSelectB.locator('option', { hasText: label })).toHaveCount(0);
-      await expect(typeSelectB.locator(`option[value="${created.id}"]`)).toHaveCount(0);
+      await expect(typeTile(dialogB, 'Server')).toBeVisible();
+      await expect(dialogB.getByRole('button', { name: label })).toHaveCount(0);
+      await expect(dialogB.getByRole('button', { name: `Runtime type ${w.s}` })).toHaveCount(0);
     } finally {
       await ctxB.close();
     }
@@ -581,11 +624,13 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     page.on('request', onRequest);
     try {
       const dialog = await openCreateForm(page);
-      const nameInput = dialog.getByLabel('Name', { exact: true });
-      const typeSelect = dialog.getByLabel('CI-Typ');
+      const nameInput = nameField(dialog);
 
-      // 1) Empty form: the user is told that name and type are required; no request.
-      await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      // 1) Empty form: the type is required (the type step does not go on without
+      //    a tile), then the name; no request.
+      await expect(nextButton(dialog), 'no type chosen: the form does not go on').toBeDisabled();
+      await chooseType(dialog, w.deviceLabel);
+      await createButton(dialog).click();
       await expect(dialog).toBeVisible();
       const requiredMessage = async (field: typeof nameInput, text: string): Promise<string> => {
         // Either the form's own message (aria-invalid + text) or the browser's
@@ -595,15 +640,11 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
         return field.evaluate((el) => (el as HTMLInputElement).validationMessage);
       };
       expect(await requiredMessage(nameInput, 'Name ist erforderlich.')).not.toBe('');
-      await nameInput.fill(name);
-      await dialog.getByRole('button', { name: 'Anlegen' }).click();
-      expect(await requiredMessage(typeSelect, 'CI-Typ ist erforderlich.')).not.toBe('');
       expect(posts, 'no POST /cis for an incomplete form').toHaveLength(0);
 
       // 2) A name of blanks only is no name.
       await nameInput.fill('   ');
-      await typeSelect.selectOption({ label: 'Server' });
-      await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      await createButton(dialog).click();
       await expect(dialog.getByText('Name ist erforderlich.', { exact: true })).toBeVisible();
       await expect(nameInput).toHaveAttribute('aria-invalid', 'true');
       expect(posts, 'no POST /cis for a blank name').toHaveLength(0);
@@ -611,10 +652,10 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       // 3) Format: an address that is no IP is refused by the server as a field
       //    violation (422, RFC 7807) and shown at the Management-IP field.
       await nameInput.fill(name);
-      const ipInput = dialog.getByLabel('Management-IP');
+      const ipInput = dialog.getByLabel('Management-IP', { exact: true });
       await ipInput.fill('300.1.2.3');
       const refused = waitForPath(page, '/cis', 'POST');
-      await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      await createButton(dialog).click();
       const res = await refused;
       const text = await res.text();
       expect(res.status(), `invalid management IP: ${text}`).toBe(422);
@@ -632,7 +673,7 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
       // 4) Format: an IP with letters, same rule.
       await ipInput.fill('10.0.0.x');
       const refused2 = waitForPath(page, '/cis', 'POST');
-      await dialog.getByRole('button', { name: 'Anlegen' }).click();
+      await createButton(dialog).click();
       expect((await refused2).status()).toBe(422);
       await expect(ipInput).toHaveAttribute('aria-invalid', 'true');
 
@@ -671,10 +712,9 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     };
     page.on('response', onResponse);
     try {
-      const dialog = await openCreateForm(page);
-      await dialog.getByLabel('Name', { exact: true }).fill(name);
-      await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
-      await dialog.getByRole('button', { name: 'Anlegen' }).dblclick();
+      await page.goto('/cmdb');
+      const dialog = await startGuidedCreate(page, 'Server', name);
+      await createButton(dialog).dblclick();
       await expect(dialog, 'the form closes after the create').toBeHidden({ timeout: 10_000 });
       await expect(
         page.locator('#main-content').getByRole('link', { name, exact: true }),

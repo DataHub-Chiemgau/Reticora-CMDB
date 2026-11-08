@@ -15,6 +15,7 @@ import {
   BASE,
   type Account,
 } from './support/stack';
+import { createButton, startGuidedCreate } from './support/guided-create';
 
 /*
  * Phase-1 acceptance audit – tenant isolation end-to-end (real stack, nothing mocked).
@@ -1228,12 +1229,10 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     const page = w.a.page;
     const name = `iso-a-form-${w.s}`;
     await page.goto('/cmdb');
-    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
-    const dialog = page.getByRole('dialog');
-    await dialog.getByLabel('Name', { exact: true }).fill(name);
-    await dialog.getByLabel('CI-Typ').selectOption({ label: 'Server' });
+    // The guided creation (WP-317): the tile of the type, then the name.
+    const dialog = await startGuidedCreate(page, 'Server', name);
     const created = waitForApi(page, '/cis', 'POST');
-    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    await createButton(dialog).click();
     const res = await created;
     expect(res.status(), `POST /cis sent by the CMDB form: ${await res.text()}`).toBe(201);
     const ci = (await res.json()) as CI;
