@@ -21,6 +21,15 @@
 // issues the load-test key of -api-key-file for the user of a standard role
 // (load-test for org_admin, load-test-<role> otherwise). It is never
 // deployed.
+//
+// Tickets and documents (WP-820): the demo organization gets a business
+// calendar in Europe/Berlin (the zone of the client hq too), an SLA per
+// priority bound to it, 10 tickets in the states of WP-290 whose due times
+// the SLA package computes, and 3 documents with two versions each, linked
+// to an asset, a contract and a ticket; acme gets 2 tickets and 1 document.
+// -document-content stores the contents in the object store of the server
+// (RETICORA_S3_*, bucket reticora-documents); without it only the metadata
+// is seeded.
 package main
 
 import (
@@ -30,7 +39,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
 func main() {
@@ -48,6 +60,8 @@ func main() {
 	keyFile := flag.String("api-key-file", "", "issue a load-test API key of the demo organization and write it to this file")
 	keyRole := flag.String("api-key-role", DefaultAPIKeyRole,
 		"standard role whose demo user owns the load-test key (org_admin: load-test, otherwise load-test-<role>)")
+	documentContent := flag.Bool("document-content", false,
+		"store the content of the seeded documents in the object store of RETICORA_S3_* (bucket "+document.Bucket+")")
 	flag.Parse()
 	if *dsn == "" {
 		fmt.Fprintln(os.Stderr, "seed: database URL is required")
@@ -64,6 +78,15 @@ func main() {
 	}
 
 	ctx := context.Background()
+	var blobs blob.Store
+	if *documentContent {
+		store, storeErr := documentStore(ctx)
+		if storeErr != nil {
+			fmt.Fprintf(os.Stderr, "seed: object store: %v\n", storeErr)
+			os.Exit(2)
+		}
+		blobs = store
+	}
 	pool, err := database.NewAdminPool(ctx, *dsn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: connect: %v\n", err)
@@ -74,7 +97,7 @@ func main() {
 	start := time.Now()
 	summary, err := Run(ctx, pool, Options{Prefix: *prefix, Objects: *objects, Metrics: *metrics,
 		InterfacesPerCI: *interfaces, IPsPerCI: *ips, RelationshipsPerCI: *relationships, Orgs: *orgs, At: anchor,
-		APIKey: *keyFile != "", APIKeyRole: *keyRole})
+		APIKey: *keyFile != "", APIKeyRole: *keyRole, Blobs: blobs})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)
 		os.Exit(1)
@@ -88,5 +111,27 @@ func main() {
 	for _, o := range summary.Orgs {
 		fmt.Printf("%s\t%s\t%s\n", o.Slug, o.ID, o.Admin)
 	}
+	if blobs == nil {
+		fmt.Fprintf(os.Stderr, "seed: %d document versions as metadata only, no content stored (without -document-content)\n",
+			summary.DocumentVersions)
+	} else {
+		fmt.Fprintf(os.Stderr, "seed: %d of %d document contents in bucket %s\n", summary.DocumentContents,
+			summary.DocumentVersions, document.Bucket)
+	}
 	fmt.Fprintf(os.Stderr, "seed: done in %s\n", time.Since(start).Round(time.Millisecond))
+}
+
+// documentStore creates the object store like the server (config.Load,
+// blob.NewS3Store with RETICORA_S3_*) and ensures the bucket of the
+// documents.
+func documentStore(ctx context.Context) (blob.Store, error) {
+	cfg := config.Load()
+	store, err := blob.NewS3Store(cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3UseSSL)
+	if err != nil {
+		return nil, err
+	}
+	if err = store.EnsureBucket(ctx, document.Bucket); err != nil {
+		return nil, err
+	}
+	return store, nil
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,6 +66,11 @@ type Options struct {
 	// org_admin and load-test-<role> for any other role, so the keys of
 	// several roles stay valid side by side (WP-822).
 	APIKeyRole string
+	// Blobs stores the content of the seeded documents (WP-820,
+	// -document-content) in the bucket of the documents, outside the
+	// database transaction (K20); nil seeds the metadata of the documents
+	// and their versions only.
+	Blobs blob.Store
 }
 
 // DefaultAPIKeyRole is the role of the load-test key without APIKeyRole.
@@ -130,6 +136,10 @@ type Org struct {
 // Summary reports what the seed holds.
 type Summary struct {
 	Orgs []Org
+	// DocumentVersions is the number of seeded document versions and
+	// DocumentContents the number of them whose content lies in
+	// Options.Blobs (0 without a store: metadata only, WP-820).
+	DocumentVersions, DocumentContents int
 }
 
 // ID derives the deterministic id of a seeded row; PostgreSQL computes the
@@ -212,6 +222,8 @@ func (o *Options) orgSpecs() []orgSpec {
 // nothing. After the seed transaction of an organization the Phase-2 steps
 // run in a transaction of their own through the services (phase2Steps,
 // WP-325), then its assets and stock in a further one (stockSteps, WP-819),
+// then its business calendar, SLA policies, tickets and documents in a
+// further one after storing the document contents (ticketDocSteps, WP-820),
 // its CIs are indexed for the search (index) and the index of its
 // searchable attribute is built (attributeIndex). At the end the statistics
 // of the grown tables are refreshed (database.AnalyzeAfterBulk).
@@ -238,6 +250,12 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 		if err := o.stockSteps(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("assets and stock %s: %w", slug, err)
 		}
+		stored, versions, docErr := o.ticketDocSteps(ctx, pool, opts.Blobs)
+		if docErr != nil {
+			return Summary{}, fmt.Errorf("tickets and documents %s: %w", slug, docErr)
+		}
+		summary.DocumentVersions += versions
+		summary.DocumentContents += stored
 		if err := o.index(ctx, pool); err != nil {
 			return Summary{}, fmt.Errorf("index %s: %w", slug, err)
 		}

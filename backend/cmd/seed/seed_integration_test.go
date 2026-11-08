@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -20,12 +22,16 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 )
 
 // baseTypeOnly restricts a query on the CIs c to the [B] data set: the
@@ -681,6 +687,19 @@ func phase2Counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]i
 // crosses an organization, no serial_mismatch review arises, the integrity
 // check stays empty and a further run books nothing.
 //
+// The tickets and documents (WP-820): demo holds the default business
+// calendar in Europe/Berlin with weekdays and two holidays relative to the
+// anchor, the client hq is in Europe/Berlin and every priority has a
+// policy bound to the calendar; acme has the policies without a calendar
+// (built-in standard in UTC). The 10 and 2 tickets relate to [B] CIs or
+// assets, demo's are assigned to engineer, and their due times are those
+// of the SLA package for their creation; at the anchor a ticket is overdue
+// in each organization. The 3 and 1 documents carry two versions each with
+// size and sha256 of their deterministic content, the storage key of the
+// upload path and the scan status clean, linked to an asset, a contract
+// and a ticket of their own organization; organization_usage is the sum of
+// the sizes and a further run creates no version.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSeedSIM01Phase2(t *testing.T) {
 	f := scopetest.Seed(t, "07")
@@ -744,9 +763,55 @@ func TestSeedSIM01Phase2(t *testing.T) {
 			"scan": 0, "scan_found": 0, "scan_unexpected": 0, "asset_grant_none": 0, "asset_link_audit": 5,
 		},
 	}
+	// The calendar, the policies, the tickets and the documents (WP-820).
+	ticketExpected := map[string]map[string]int{
+		demo: {
+			"calendar": 1, "client_hq_timezone": 1, "sla": 4, "sla_calendar": 4,
+			"ticket": 10, "ticket_new": 2, "ticket_open": 2, "ticket_in_progress": 2, "ticket_waiting": 1,
+			"ticket_resolved": 2, "ticket_closed": 1, "ticket_related": 10, "ticket_related_asset": 3, "ticket_engineer": 10,
+			"ticket_created_before_at": 10, "ticket_sla": 10, "ticket_sla_calendar": 10, "ticket_first_response": 6,
+			"ticket_resolution": 3, "ticket_cross_org": 0,
+			"document": 3, "document_version": 6, "version_clean": 6, "version_key_mismatch": 0, "document_mirror_mismatch": 0,
+			"link_asset": 1, "link_contract": 1, "link_ticket": 1, "link_cross_org": 0, "usage_mismatch": 0,
+		},
+		acme: {
+			"calendar": 0, "client_hq_timezone": 0, "sla": 4, "sla_calendar": 0,
+			"ticket": 2, "ticket_new": 1, "ticket_open": 0, "ticket_in_progress": 1, "ticket_waiting": 0,
+			"ticket_resolved": 0, "ticket_closed": 0, "ticket_related": 2, "ticket_related_asset": 1, "ticket_engineer": 0,
+			"ticket_created_before_at": 2, "ticket_sla": 2, "ticket_sla_calendar": 0, "ticket_first_response": 1,
+			"ticket_resolution": 0, "ticket_cross_org": 0,
+			"document": 1, "document_version": 2, "version_clean": 2, "version_key_mismatch": 0, "document_mirror_mismatch": 0,
+			"link_asset": 1, "link_contract": 0, "link_ticket": 0, "link_cross_org": 0, "usage_mismatch": 0,
+		},
+	}
+	slugs := map[string]string{demo: "seedp2-demo", acme: "seedp2-acme"}
+	usage := map[string]int64{}
 	audits := map[string]int{}
 	check := func(round string) {
 		t.Helper()
+		for org, want := range ticketExpected {
+			got := ticketDocCounts(t, f, org, opts.At)
+			for name, n := range want {
+				if got[name] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, name, got[name], n)
+				}
+			}
+			if got["ticket_overdue"] < 1 {
+				t.Errorf("%s, org %s: no ticket is overdue at the anchor", round, org)
+			}
+			checkDueTimes(t, f, org, opts.At, org == demo)
+			checkChecksums(t, f, org, slugs[org])
+			var stored int64
+			if usageErr := f.Admin.QueryRow(ctx, `SELECT storage_bytes FROM organization_usage WHERE organization_id = $1`, org).
+				Scan(&stored); usageErr != nil {
+				t.Fatalf("usage of org %s: %v", org, usageErr)
+			}
+			if before, ok := usage[org]; !ok {
+				usage[org] = stored
+			} else if stored != before {
+				t.Errorf("%s, org %s: storage_bytes = %d, %d after the first run", round, org, stored, before)
+			}
+		}
 		for org, want := range stockExpected {
 			got := stockCounts(t, f, org, opts.At)
 			for name, n := range want {
@@ -1007,4 +1072,277 @@ func sameKeys(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// ticketDocCounts reads the calendar, SLA, ticket and document rows of one
+// organization (WP-820) through the maintenance pool; at is the anchor of
+// the seed. The mismatch and cross-organization queries count violations.
+func ticketDocCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	queries := map[string]string{
+		"calendar": `SELECT count(*) FROM business_calendar WHERE organization_id = $1 AND client_id IS NULL AND is_default
+			AND timezone = '` + CalendarTimezone + `' AND jsonb_array_length(weekly_hours) = 5 AND jsonb_array_length(holidays) = 2`,
+		"client_hq_timezone": `SELECT count(*) FROM client WHERE organization_id = $1 AND slug = 'hq'
+			AND timezone = '` + CalendarTimezone + `'`,
+		"sla": `SELECT count(DISTINCT priority) FROM sla WHERE organization_id = $1 AND client_id IS NULL AND business_calendar
+			AND priority IN ('low', 'medium', 'high', 'critical')`,
+		"sla_calendar": `SELECT count(*) FROM sla s JOIN business_calendar b ON b.id = s.calendar_id
+			AND b.organization_id = s.organization_id WHERE s.organization_id = $1`,
+		"ticket": `SELECT count(*) FROM ticket WHERE organization_id = $1`,
+		"ticket_related": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND client_id IS NOT NULL
+			AND (related_ci_id IS NOT NULL OR related_asset_id IS NOT NULL)`,
+		"ticket_related_asset": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND related_asset_id IS NOT NULL`,
+		"ticket_engineer": `SELECT count(*) FROM ticket t JOIN app_user u ON u.id = t.assignee_id
+			WHERE t.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		"ticket_created_before_at": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND created_at < $2`,
+		"ticket_sla":               `SELECT count(*) FROM ticket_sla WHERE organization_id = $1`,
+		"ticket_sla_calendar":      `SELECT count(*) FROM ticket_sla WHERE organization_id = $1 AND calendar_id IS NOT NULL`,
+		"ticket_first_response":    `SELECT count(*) FROM ticket_sla WHERE organization_id = $1 AND first_response_at IS NOT NULL`,
+		"ticket_resolution": `SELECT count(*) FROM ticket_sla s JOIN ticket t ON t.id = s.ticket_id
+			WHERE s.organization_id = $1 AND s.resolved_at IS NOT NULL AND t.resolved_at = s.resolved_at`,
+		// At the anchor a response or a resolution is due and missing.
+		"ticket_overdue": `SELECT count(*) FROM ticket_sla WHERE organization_id = $1
+			AND ((first_response_at IS NULL AND response_due_at < $2) OR (resolved_at IS NULL AND resolution_due_at < $2))`,
+		"ticket_cross_org": `SELECT count(*) FROM ticket t LEFT JOIN ci c ON c.id = t.related_ci_id
+			LEFT JOIN asset a ON a.id = t.related_asset_id LEFT JOIN app_user u ON u.id = t.assignee_id
+			LEFT JOIN ticket_sla s ON s.ticket_id = t.id LEFT JOIN sla p ON p.id = s.sla_id
+			WHERE t.organization_id = $1 AND (c.organization_id <> $1 OR a.organization_id <> $1 OR u.organization_id <> $1
+				OR s.organization_id <> $1 OR p.organization_id <> $1)`,
+		"document":         `SELECT count(*) FROM document WHERE organization_id = $1`,
+		"document_version": `SELECT count(*) FROM document_version WHERE organization_id = $1`,
+		"version_clean": `SELECT count(*) FROM document_version WHERE organization_id = $1 AND scan_status = 'clean'
+			AND scanned_at IS NOT NULL AND checksum_sha256 ~ '^[0-9a-f]{64}$' AND size > 0`,
+		// The storage key of the upload path: org/<org>/documents/<document>/<version id>.
+		"version_key_mismatch": `SELECT count(*) FROM document_version WHERE organization_id = $1
+			AND storage_key <> 'org/' || organization_id || '/documents/' || document_id || '/' || id`,
+		// The document mirrors its highest version.
+		"document_mirror_mismatch": `SELECT count(*) FROM document d JOIN document_version v ON v.document_id = d.id
+			AND v.version = (SELECT max(version) FROM document_version WHERE document_id = d.id)
+			WHERE d.organization_id = $1 AND (d.version <> v.version OR d.storage_key <> v.storage_key
+				OR d.file_size <> v.size OR d.mime_type <> v.mime)`,
+		"link_asset":    `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'asset'`,
+		"link_contract": `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'contract'`,
+		"link_ticket":   `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'ticket'`,
+		"link_cross_org": `SELECT count(*) FROM document_link l JOIN document d ON d.id = l.document_id
+			LEFT JOIN asset a ON l.entity_type = 'asset' AND a.id = l.entity_id
+			LEFT JOIN contract c ON l.entity_type = 'contract' AND c.id = l.entity_id
+			LEFT JOIN ticket k ON l.entity_type = 'ticket' AND k.id = l.entity_id
+			WHERE l.organization_id = $1 AND (d.organization_id <> $1
+				OR COALESCE(a.organization_id, c.organization_id, k.organization_id) IS DISTINCT FROM $1)`,
+		// organization_usage is the sum of the sizes of the versions.
+		"usage_mismatch": `SELECT count(*) FROM organization_usage u WHERE u.organization_id = $1
+			AND u.storage_bytes <> (SELECT COALESCE(sum(size), 0) FROM document_version WHERE organization_id = $1)`,
+	}
+	for _, status := range ticket.Statuses {
+		queries["ticket_"+status] = `SELECT count(*) FROM ticket WHERE organization_id = $1 AND status = '` + status + `'`
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// checkDueTimes compares the due times of the tickets of the organization
+// with the computation of the SLA package (WP-292) for their creation: in
+// the seed calendar (Europe/Berlin, the holidays relative to at) with
+// calendar, else in the built-in standard calendar in UTC, the zone of an
+// organization without one; the targets are those of the seeded policy of
+// the ticket's priority.
+func checkDueTimes(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time, calendar bool) {
+	t.Helper()
+	cal, loc := sla.DefaultCalendar(), time.UTC
+	if calendar {
+		cal = SeedCalendar(at)
+		var err error
+		if loc, err = time.LoadLocation(CalendarTimezone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	schedule := cal.In(loc)
+	targets := map[string]seedSLA{}
+	for _, p := range seedSLAs {
+		targets[p.priority] = p
+	}
+	rows, err := f.Admin.Query(context.Background(), `SELECT t.title, t.priority, t.created_at, s.response_due_at,
+			s.resolution_due_at, p.name
+		FROM ticket t JOIN ticket_sla s ON s.ticket_id = t.id JOIN sla p ON p.id = s.sla_id
+		WHERE t.organization_id = $1`, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title, priority, policy string
+		var created, response, resolution time.Time
+		if err = rows.Scan(&title, &priority, &created, &response, &resolution, &policy); err != nil {
+			t.Fatal(err)
+		}
+		target := targets[priority]
+		wantResponse, responseErr := schedule.Add(created, target.response)
+		wantResolution, resolutionErr := schedule.Add(created, target.resolution)
+		if responseErr != nil || resolutionErr != nil {
+			t.Fatalf("org %s, %s: %v %v", orgID, title, responseErr, resolutionErr)
+		}
+		if policy != SLAName(priority) || !response.Equal(wantResponse) || !resolution.Equal(wantResolution) {
+			t.Errorf("org %s, %s (%s, created %s): policy %s, due %s / %s; want %s, due %s / %s", orgID, title, priority,
+				created.UTC().Format(time.RFC3339), policy, response.UTC().Format(time.RFC3339),
+				resolution.UTC().Format(time.RFC3339), SLAName(priority), wantResponse.Format(time.RFC3339),
+				wantResolution.Format(time.RFC3339))
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkChecksums compares size and checksum of every document version of
+// the organization with its deterministic content.
+func checkChecksums(t *testing.T, f *scopetest.Fixture, orgID, slug string) {
+	t.Helper()
+	o := &orgSeed{id: orgID, slug: slug}
+	want := map[string][]byte{}
+	for _, list := range [][]seedDocument{demoDocuments, acmeDocuments} {
+		for i := range list {
+			for n := 1; n <= DocumentVersions; n++ {
+				want[fmt.Sprintf("%s/%d", list[i].title, n)] = o.documentContent(&list[i], n)
+			}
+		}
+	}
+	rows, err := f.Admin.Query(context.Background(), `SELECT d.title, v.version, v.size, v.checksum_sha256
+		FROM document_version v JOIN document d ON d.id = v.document_id WHERE v.organization_id = $1`, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title, checksum string
+		var version int
+		var size int64
+		if err = rows.Scan(&title, &version, &size, &checksum); err != nil {
+			t.Fatal(err)
+		}
+		content, ok := want[fmt.Sprintf("%s/%d", title, version)]
+		if !ok || size != int64(len(content)) || checksum != sha256Hex(content) {
+			t.Errorf("org %s, %s version %d: size %d, checksum %s; want the content of the seed", orgID, title, version, size, checksum)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// storedVersion is a document version as TestSeedDocumentContent reads it.
+type storedVersion struct {
+	key, checksum string
+	size          int64
+}
+
+// TestSeedDocumentContent covers the content of the seeded documents
+// (WP-820): with Options.Blobs every version lies under its storage key in
+// the bucket reticora-documents, its sha256 is checksum_sha256 and its
+// length the size of the version; a second run finds the same content and
+// creates no version. Without a store only the metadata arise.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedDocumentContent(t *testing.T) {
+	f := scopetest.Seed(t, "5d")
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
+	dir := t.TempDir()
+	store := blob.NewFileStore(dir)
+	versionsOf := func(prefix string) map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		for _, key := range []string{"demo", "acme"} {
+			var n int
+			if err := f.Admin.QueryRow(ctx, `SELECT count(*) FROM document_version WHERE organization_id = $1`,
+				ID(prefix, "org", key)).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			out[key] = n
+		}
+		return out
+	}
+	readVersions := func(orgs []Org) []storedVersion {
+		t.Helper()
+		rows, err := f.Admin.Query(ctx, `SELECT storage_key, size, checksum_sha256 FROM document_version
+			WHERE organization_id IN ($1, $2)`, orgs[0].ID, orgs[1].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []storedVersion
+		for rows.Next() {
+			var v storedVersion
+			if err = rows.Scan(&v.key, &v.size, &v.checksum); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, v)
+		}
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	opts := Options{Prefix: "seeddoc-", Objects: baseObjects, Metrics: 0, At: at, Blobs: store}
+	for round := 1; round <= 2; round++ {
+		summary, err := Run(ctx, f.App, opts)
+		if err != nil {
+			t.Fatalf("seed %d: %v", round, err)
+		}
+		if summary.DocumentVersions != 8 || summary.DocumentContents != 8 {
+			t.Errorf("run %d: %d versions, %d contents; want 8 and 8", round, summary.DocumentVersions, summary.DocumentContents)
+		}
+		if got := versionsOf("seeddoc-"); got["demo"] != 6 || got["acme"] != 2 {
+			t.Errorf("run %d: versions %v, want demo 6 and acme 2", round, got)
+		}
+		stored := readVersions(summary.Orgs)
+		if len(stored) != 8 {
+			t.Fatalf("run %d: %d versions in the database, want 8", round, len(stored))
+		}
+		for _, v := range stored {
+			r, getErr := store.Get(ctx, document.Bucket, v.key)
+			if getErr != nil {
+				t.Errorf("run %d: content of %s: %v", round, v.key, getErr)
+				continue
+			}
+			content, readErr := io.ReadAll(r)
+			_ = r.Close()
+			if readErr != nil || int64(len(content)) != v.size || sha256Hex(content) != v.checksum {
+				t.Errorf("run %d: content of %s: %d bytes, sha256 %s; want %d bytes, %s", round, v.key, len(content),
+					sha256Hex(content), v.size, v.checksum)
+			}
+		}
+	}
+
+	// Without a store the seed writes the metadata only.
+	plain := Options{Prefix: "seeddoc-plain-", Objects: baseObjects, Metrics: 0, At: at}
+	summary, err := Run(ctx, f.App, plain)
+	if err != nil {
+		t.Fatalf("seed without store: %v", err)
+	}
+	if summary.DocumentVersions != 8 || summary.DocumentContents != 0 {
+		t.Errorf("without store: %d versions, %d contents; want 8 and 0", summary.DocumentVersions, summary.DocumentContents)
+	}
+	if got := versionsOf("seeddoc-plain-"); got["demo"] != 6 || got["acme"] != 2 {
+		t.Errorf("without store: versions %v, want demo 6 and acme 2", got)
+	}
+	for _, org := range summary.Orgs {
+		if _, statErr := os.Stat(filepath.Join(dir, document.Bucket, "org", org.ID)); !os.IsNotExist(statErr) {
+			t.Errorf("without store: content of org %s in the store (%v)", org.Slug, statErr)
+		}
+	}
 }
