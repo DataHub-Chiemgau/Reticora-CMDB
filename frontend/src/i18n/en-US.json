@@ -671,17 +671,6 @@
     "location": "Location",
     "supplier": "Supplier",
     "create": "Create Asset",
-    "bulk": {
-      "selected": "{{count}} selected",
-      "setStatus": "Set status…",
-      "apply": "Apply",
-      "clearSelection": "Clear selection",
-      "selectAll": "Select all visible assets",
-      "selectRow": "Select {{name}}",
-      "toolbarLabel": "Bulk edit",
-      "success": "Updated status of {{count}} assets",
-      "error": "The bulk change could not be fully applied"
-    },
     "barcode": "Barcode",
     "rfidTag": "RFID tag",
     "purchaseDate": "Purchase date",
@@ -689,14 +678,6 @@
     "invoiceNumber": "Invoice number",
     "warrantyEnd": "Warranty end",
     "status": "Status",
-    "statuses": {
-      "in_stock": "In stock",
-      "assigned": "Assigned",
-      "maintenance": "Maintenance",
-      "retired": "Retired",
-      "disposed": "Disposed",
-      "lost": "Lost"
-    },
     "categories": {
       "hardware": "Hardware",
       "software": "Software",
@@ -705,9 +686,57 @@
       "accessory": "Accessory",
       "other": "Other"
     },
-    "summary": "Manage assets with their category, status and location.",
+    "summary": "Manage assets with their category, lifecycle and location.",
     "emptyTitle": "No assets yet",
-    "emptyHint": "Create the first asset to track stock, status and location."
+    "emptyHint": "Create the first asset to track stock, lifecycle and location.",
+    "columns": {
+      "inventory_no": "Inventory number",
+      "name": "Name",
+      "category": "Category",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "serial_number": "Serial number",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID tag",
+      "lifecycle_state": "Lifecycle",
+      "location_id": "Location",
+      "cost_center": "Cost center",
+      "purchase_date": "Purchase date",
+      "purchase_price": "Purchase price",
+      "currency": "Currency",
+      "warranty_until": "Warranty until"
+    },
+    "columnsButton": "Columns",
+    "columnsLegend": "Shown columns",
+    "allLifecycleStates": "All states",
+    "lifecycleFilter": "Lifecycle",
+    "sortBy": "Sort by {{column}}",
+    "totalCapped": "more than {{count}}",
+    "pagination": "Pages",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "deleteConflict": "The asset cannot be deleted.",
+    "views": {
+      "label": "View",
+      "none": "No view",
+      "extended": "{{name}} (extended)",
+      "extendedHint": "This view has further conditions. It runs in the saved views.",
+      "open": "Open in saved views",
+      "save": "Save as view",
+      "name": "View name",
+      "saveTitle": "Save view",
+      "saved": "View \"{{name}}\" saved",
+      "saveError": "The view could not be saved."
+    },
+    "guided": {
+      "categories": "Category",
+      "chooseCategory": "What kind of asset are you creating?",
+      "change": "Change category",
+      "chosen": "Category: {{category}}",
+      "more": "More details",
+      "less": "Fewer details",
+      "submitError": "The asset could not be created."
+    }
   },
   "assignment": {
     "title": "Assignments",
@@ -2568,7 +2597,18 @@
     "reason": "Reason",
     "title": "Lifecycle",
     "current": "Current",
-    "apply": "Apply"
+    "apply": "Apply",
+    "states": {
+      "ordered": "Ordered",
+      "received": "Received",
+      "in_stock": "In stock",
+      "reserved": "Reserved",
+      "preparing": "Preparing",
+      "deployed": "Deployed",
+      "repair": "Repair",
+      "retired": "Retired",
+      "disposed": "Disposed"
+    }
   },
   "relationship": {
     "add": "Add relationship",

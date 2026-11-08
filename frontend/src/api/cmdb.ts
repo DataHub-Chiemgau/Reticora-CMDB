@@ -1084,7 +1084,7 @@ export async function resolveScannedCode(code: string): Promise<ScannedObject> {
       kind: 'asset',
       id: asset.id,
       name: asset.name,
-      code: asset.inventory_no ?? asset.asset_tag,
+      code: asset.inventory_no,
     };
   }
   if (urn?.kind === 'consumable') {

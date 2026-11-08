@@ -671,17 +671,6 @@
     "location": "Standort",
     "supplier": "Lieferant",
     "create": "Asset anlegen",
-    "bulk": {
-      "selected": "{{count}} ausgewählt",
-      "setStatus": "Status setzen…",
-      "apply": "Anwenden",
-      "clearSelection": "Auswahl aufheben",
-      "selectAll": "Alle sichtbaren Assets auswählen",
-      "selectRow": "{{name}} auswählen",
-      "toolbarLabel": "Massenbearbeitung",
-      "success": "Status von {{count}} Assets aktualisiert",
-      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
-    },
     "barcode": "Barcode",
     "rfidTag": "RFID-Tag",
     "purchaseDate": "Kaufdatum",
@@ -689,14 +678,6 @@
     "invoiceNumber": "Rechnungsnummer",
     "warrantyEnd": "Garantie bis",
     "status": "Status",
-    "statuses": {
-      "in_stock": "Auf Lager",
-      "assigned": "Zugewiesen",
-      "maintenance": "Wartung",
-      "retired": "Ausgemustert",
-      "disposed": "Entsorgt",
-      "lost": "Verloren"
-    },
     "categories": {
       "hardware": "Hardware",
       "software": "Software",
@@ -705,9 +686,57 @@
       "accessory": "Zubehör",
       "other": "Sonstiges"
     },
-    "summary": "Assets mit Kategorie, Status und Standort verwalten.",
+    "summary": "Assets mit Kategorie, Lebenszyklus und Standort verwalten.",
     "emptyTitle": "Noch keine Assets",
-    "emptyHint": "Lege das erste Asset an, um Bestand, Status und Standort zu verfolgen."
+    "emptyHint": "Lege das erste Asset an, um Bestand, Lebenszyklus und Standort zu verfolgen.",
+    "columns": {
+      "inventory_no": "Inventarnummer",
+      "name": "Name",
+      "category": "Kategorie",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serial_number": "Seriennummer",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID-Tag",
+      "lifecycle_state": "Lebenszyklus",
+      "location_id": "Standort",
+      "cost_center": "Kostenstelle",
+      "purchase_date": "Kaufdatum",
+      "purchase_price": "Kaufpreis",
+      "currency": "Währung",
+      "warranty_until": "Garantie bis"
+    },
+    "columnsButton": "Spalten",
+    "columnsLegend": "Angezeigte Spalten",
+    "allLifecycleStates": "Alle Zustände",
+    "lifecycleFilter": "Lebenszyklus",
+    "sortBy": "Nach {{column}} sortieren",
+    "totalCapped": "mehr als {{count}}",
+    "pagination": "Seiten",
+    "previousPage": "Vorherige Seite",
+    "nextPage": "Nächste Seite",
+    "deleteConflict": "Das Asset kann nicht gelöscht werden.",
+    "views": {
+      "label": "Sicht",
+      "none": "Keine Sicht",
+      "extended": "{{name}} (erweitert)",
+      "extendedHint": "Diese Sicht enthält weitere Bedingungen. Sie läuft in den gespeicherten Sichten.",
+      "open": "In Sichten öffnen",
+      "save": "Als Sicht speichern",
+      "name": "Name der Sicht",
+      "saveTitle": "Sicht speichern",
+      "saved": "Sicht „{{name}}“ gespeichert",
+      "saveError": "Die Sicht konnte nicht gespeichert werden."
+    },
+    "guided": {
+      "categories": "Kategorie",
+      "chooseCategory": "Welche Art von Asset legst du an?",
+      "change": "Kategorie ändern",
+      "chosen": "Kategorie: {{category}}",
+      "more": "Weitere Angaben",
+      "less": "Weniger Angaben",
+      "submitError": "Das Asset konnte nicht angelegt werden."
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -2568,7 +2597,18 @@
     "reason": "Grund",
     "title": "Lebenszyklus",
     "current": "Aktuell",
-    "apply": "Anwenden"
+    "apply": "Anwenden",
+    "states": {
+      "ordered": "Bestellt",
+      "received": "Eingegangen",
+      "in_stock": "Auf Lager",
+      "reserved": "Reserviert",
+      "preparing": "In Vorbereitung",
+      "deployed": "Im Einsatz",
+      "repair": "In Reparatur",
+      "retired": "Ausgemustert",
+      "disposed": "Entsorgt"
+    }
   },
   "relationship": {
     "add": "Beziehung hinzufügen",

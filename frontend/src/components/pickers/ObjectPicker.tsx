@@ -341,7 +341,7 @@ export function ObjectPicker({
       kind: 'asset',
       id: asset.id,
       name: asset.name,
-      code: asset.inventory_no ?? asset.asset_tag,
+      code: asset.inventory_no,
     }));
   } else if (kind === 'consumable') {
     hits = (consumables.data?.data ?? []).map((item) => ({

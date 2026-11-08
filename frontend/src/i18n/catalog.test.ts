@@ -17,7 +17,7 @@ import { DRAFT_ITEM_KINDS, DRAFT_OPS } from '../stores/metamodelDraft';
 import { DRAFT_STATUSES } from '../pages/MetamodelDraftsPage';
 import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
-import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
+import { ASSET_CATEGORIES, ASSET_LIFECYCLE_STATES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
@@ -166,10 +166,20 @@ function specEnum(schema: string, property?: string): string[] {
 // the value lists come from the backend module (CHECK constraint or
 // constants) named next to each.
 const BACKEND_ENUMS = {
-  // backend/migrations/000009_phase2_assets.up.sql asset_status_check; the
-  // constraint was dropped in 000055 ("asset.status keeps the legacy
-  // vocabulary"), the default stays in_stock (internal/asset/handler.go).
-  assetStatuses: ['in_stock', 'assigned', 'maintenance', 'retired', 'disposed', 'lost'],
+  // The states of the system lifecycle model physical_asset
+  // (backend/migrations/000055_cmdb_extensions.up.sql); the asset list
+  // shows lifecycle_state instead of the legacy status (E-120, WP-319).
+  assetLifecycleStates: [
+    'ordered',
+    'received',
+    'in_stock',
+    'reserved',
+    'preparing',
+    'deployed',
+    'repair',
+    'retired',
+    'disposed',
+  ],
   // backend/migrations/000009_phase2_assets.up.sql asset_category_check.
   assetCategories: ['hardware', 'software', 'license', 'cloud_resource', 'accessory', 'other'],
   // backend/migrations/000257_assignment_projection.up.sql: the status of
@@ -217,7 +227,7 @@ const BACKEND_ENUMS = {
 
 // WP-525: the enums the inventory, ticket, order and room plan pages show.
 const pageEnumerations: Array<[string, readonly string[]]> = [
-  ['asset.statuses', BACKEND_ENUMS.assetStatuses],
+  ['lifecycle.states', BACKEND_ENUMS.assetLifecycleStates],
   ['asset.categories', BACKEND_ENUMS.assetCategories],
   ['assignment.statuses', BACKEND_ENUMS.assignmentStatuses],
   // assignment_type of the projection (000257): assignment or transfer.
@@ -457,7 +467,7 @@ describe('i18n catalog', () => {
   });
 
   it('offers exactly the backend values in the page filters', () => {
-    expect([...ASSET_STATUSES]).toEqual(BACKEND_ENUMS.assetStatuses);
+    expect([...ASSET_LIFECYCLE_STATES]).toEqual(BACKEND_ENUMS.assetLifecycleStates);
     expect([...ASSET_CATEGORIES]).toEqual(BACKEND_ENUMS.assetCategories);
     expect([...ASSIGNMENT_STATUSES]).toEqual(BACKEND_ENUMS.assignmentStatuses);
     expect([...DOCUMENT_CATEGORIES]).toEqual(BACKEND_ENUMS.documentCategories);
@@ -626,8 +636,8 @@ describe('i18n catalog', () => {
   });
 
   it('labels in_stock as "Auf Lager" in de and "In stock" in en', () => {
-    expect(lookup(deDE, 'asset.statuses.in_stock')).toBe('Auf Lager');
-    expect(lookup(enUS, 'asset.statuses.in_stock')).toBe('In stock');
+    expect(lookup(deDE, 'lifecycle.states.in_stock')).toBe('Auf Lager');
+    expect(lookup(enUS, 'lifecycle.states.in_stock')).toBe('In stock');
   });
 
   it('maps the stored German dashboard roles onto the English values', () => {
@@ -680,6 +690,8 @@ describe('i18n catalog', () => {
     ...Object.keys(importSources),
     // WP-317: the guided creation.
     ...Object.keys(createSources),
+    // WP-319: the asset list with the guided asset creation.
+    '../pages/AssetListPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??

@@ -456,11 +456,19 @@ export function useAskAI() {
 
 // --- Assets ---
 
-export function useAssetList(params: AssetListParams, { enabled = true }: ListQueryOptions = {}) {
+/**
+ * useAssetList lists the assets; with keepPrevious the previous page stays
+ * shown while a changed column, sort, filter or page loads (WP-319).
+ */
+export function useAssetList(
+  params: AssetListParams,
+  { enabled = true, keepPrevious = false }: ListQueryOptions & { keepPrevious?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['assets', params],
     queryFn: () => assetApi.list(params),
     enabled,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
   });
 }
 
@@ -517,8 +525,16 @@ export function useCreateAsset() {
 export function useUpdateAsset() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: AssetUpdateRequest }) =>
-      assetApi.update(id, data),
+    // version (WP-740) is sent as If-Match like useUpdateCI.
+    mutationFn: ({
+      id,
+      data,
+      version,
+    }: {
+      id: string;
+      data: AssetUpdateRequest;
+      version?: number;
+    }) => assetApi.update(id, data, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] });
     },

@@ -328,6 +328,17 @@ export interface FieldViolation {
 }
 
 /**
+ * FieldErrorInfo is the error of one form field (ApiError.fieldErrors):
+ * invalid (a violation, 400/422), conflict (409, e.g. a taken
+ * inventory_no or a field changed since the read version) or forbidden
+ * (403, refused by the field permissions).
+ */
+export interface FieldErrorInfo {
+  kind: 'invalid' | 'conflict' | 'forbidden';
+  message: string;
+}
+
+/**
  * ApiError carries the parsed RFC 7807 problem detail of a failed request.
  *
  * The backend answers field-metadata validation failures with HTTP 422 and a
@@ -369,6 +380,18 @@ export class ApiError extends Error {
    * PROBLEM_FEATURE_NOT_ENTITLED; undefined without a problem body.
    */
   readonly type?: string;
+  /**
+   * currentVersion is current_version of a 409 version conflict (API-07):
+   * the version the object has now, to reload it before a new attempt.
+   */
+  readonly currentVersion?: number;
+  /**
+   * guard is the failed system guard of a refused lifecycle transition
+   * (422 lifecycle-guard, WP-279), e.g. storage_location.
+   */
+  readonly guard?: string;
+  /** missing are the references the failed guard misses, e.g. location_id. */
+  readonly missing: string[];
 
   constructor(
     status: number,
@@ -383,6 +406,9 @@ export class ApiError extends Error {
       field?: string;
       problem?: Record<string, unknown>;
       type?: string;
+      currentVersion?: number;
+      guard?: string;
+      missing?: string[];
     } = {},
   ) {
     super(message);
@@ -397,6 +423,33 @@ export class ApiError extends Error {
     this.field = options.field;
     this.problem = options.problem ?? {};
     this.type = options.type;
+    this.currentVersion = options.currentVersion;
+    this.guard = options.guard;
+    this.missing = options.missing ?? [];
+  }
+
+  /**
+   * fieldErrors joins what a form shows at its inputs (WP-319): the
+   * violations (first message per field), the field of a FieldProblem with
+   * the detail, and the conflictFields of a 409 (changed since the read
+   * version) or of a 403 (refused by the field permissions, RBA-07). A
+   * field keeps its first message; the summary of the error stays message.
+   */
+  fieldErrors(): Record<string, FieldErrorInfo> {
+    const errors: Record<string, FieldErrorInfo> = {};
+    const kind: FieldErrorInfo['kind'] =
+      this.status === 403 ? 'forbidden' : this.status === 409 ? 'conflict' : 'invalid';
+    const add = (field: string, entry: FieldErrorInfo) => {
+      if (field !== '' && !(field in errors)) errors[field] = entry;
+    };
+    for (const [field, detail] of Object.entries(this.violationsByField())) {
+      add(field, { kind: 'invalid', message: detail || this.message });
+    }
+    if (this.field) add(this.field, { kind, message: this.detail || this.message });
+    for (const field of this.conflictFields) {
+      add(field, { kind, message: this.detail || this.message });
+    }
+    return errors;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -432,6 +485,9 @@ export class ApiError extends Error {
       trace_id?: unknown;
       fields?: unknown;
       field?: unknown;
+      current_version?: unknown;
+      guard?: unknown;
+      missing?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
@@ -444,14 +500,20 @@ export class ApiError extends Error {
     const violations: FieldViolation[] = Array.isArray(problem.violations)
       ? problem.violations.flatMap((entry) => {
           if (typeof entry !== 'object' || entry === null) return [];
-          const { field, detail: violationDetail } = entry as Record<string, unknown>;
+          const {
+            field,
+            detail: violationDetail,
+            message: violationMessage,
+          } = entry as Record<string, unknown>;
           if (typeof field !== 'string' || field === '') return [];
-          return [
-            {
-              field,
-              detail: typeof violationDetail === 'string' ? violationDetail : '',
-            },
-          ];
+          // A lifecycle problem names the text message (LifecycleProblem).
+          const text =
+            typeof violationDetail === 'string'
+              ? violationDetail
+              : typeof violationMessage === 'string'
+                ? violationMessage
+                : '';
+          return [{ field, detail: text }];
         })
       : [];
 
@@ -462,6 +524,15 @@ export class ApiError extends Error {
       : [];
     const conflictFields = Array.isArray(problem.fields)
       ? problem.fields.filter((field): field is string => typeof field === 'string')
+      : [];
+    const currentVersion =
+      typeof problem.current_version === 'number' ? problem.current_version : undefined;
+    const guard =
+      typeof problem.guard === 'string' && problem.guard !== '' ? problem.guard : undefined;
+    const missing = Array.isArray(problem.missing)
+      ? problem.missing.filter(
+          (entry): entry is string => typeof entry === 'string' && entry !== '',
+        )
       : [];
 
     return new ApiError(status, detail || title || statusText, {
@@ -474,6 +545,9 @@ export class ApiError extends Error {
       field,
       problem: body as Record<string, unknown>,
       type,
+      currentVersion,
+      guard,
+      missing,
     });
   }
 }
@@ -1130,82 +1204,64 @@ export interface RackLayout {
 
 // --- Phase 2: Asset Management ---
 
-export interface Asset {
-  id: string;
-  organization_id: string;
-  client_id?: string;
-  ci_id?: string;
-  asset_tag: string;
-  /** Inventory number of AST-01 (WP-739); the API name of asset_tag. */
-  inventory_no?: string;
-  name: string;
-  category: string;
-  status: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  custom_fields: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
+// Asset and the request types of the writes come from the OpenAPI contract
+// (K27, WP-319) with the AST-01 names (inventory_no, purchase_price,
+// warranty_until, supplier_id, primary_ci_id; WP-739, WP-272) and version
+// (WP-740). The deprecated status and location stay in the contract until
+// E-120 removes them; the UI shows lifecycle_state and location_id.
+export type Asset = components['schemas']['Asset'];
+export type AssetCreateRequest = components['schemas']['CreateAssetRequest'];
+export type AssetUpdateRequest = components['schemas']['UpdateAssetRequest'];
 
-export interface AssetCreateRequest {
-  asset_tag: string;
-  name: string;
-  category?: string;
-  status?: string;
-  client_id?: string;
-  ci_id?: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  custom_fields?: Record<string, unknown>;
-}
+/** AssetFilterOperator is an operator of filter[field][op] (API-02). */
+export type AssetFilterOperator = 'gte' | 'lte' | 'like' | 'in';
 
-export interface AssetUpdateRequest {
-  name?: string;
-  category?: string;
-  status?: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  ci_id?: string;
-  custom_fields?: Record<string, unknown>;
+/** AssetFilter is one field filter of GET /assets: a value, optionally with an operator. */
+export interface AssetFilter {
+  field: string;
+  value: string;
+  op?: AssetFilterOperator;
 }
 
 export interface AssetListParams {
   limit?: number;
   offset?: number;
   cursor?: string;
+  /** Deprecated status filter of the dashboard widget (E-120). */
   status?: string;
   category?: string;
   client_id?: string;
   search?: string;
   sort_by?: string;
   sort_dir?: string;
+  /** sort is a field of the sort whitelist, a leading - sorts descending (API-02). */
+  sort?: string;
+  /** fields are the response fields; id is always returned (API-02). */
+  fields?: readonly string[];
+  /** filter are the field filters, sent as filter[field] or filter[field][op]. */
+  filter?: readonly AssetFilter[];
+}
+
+/**
+ * assetListQuery builds the query of GET /assets after api.ParseListQuery:
+ * the plain parameters, sort, fields (comma-separated) and every filter as
+ * filter[<field>] or filter[<field>][<op>].
+ */
+export function assetListQuery(params: AssetListParams): string {
+  const { fields, filter, ...plain } = params;
+  const query: Record<string, string | number | undefined> = { ...plain };
+  if (fields && fields.length > 0) query.fields = fields.join(',');
+  for (const entry of filter ?? []) {
+    if (entry.value === '') continue;
+    query[entry.op ? `filter[${entry.field}][${entry.op}]` : `filter[${entry.field}]`] =
+      entry.value;
+  }
+  return buildQuery(query);
 }
 
 export const assetApi = {
   list(params: AssetListParams = {}): Promise<PaginatedResponse<Asset>> {
-    return fetchAPI(`/assets${buildQuery(params)}`);
+    return fetchAPI(`/assets${assetListQuery(params)}`);
   },
   get(id: string): Promise<Asset> {
     return fetchAPI(`/assets/${id}`);
@@ -1213,8 +1269,17 @@ export const assetApi = {
   create(data: AssetCreateRequest): Promise<Asset> {
     return fetchAPI('/assets', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: AssetUpdateRequest): Promise<Asset> {
-    return fetchAPI(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  /**
+   * update patches an asset. With `version` (the asset version the editor
+   * read, WP-740) the request carries If-Match like ciApi.update, so a
+   * concurrent change is refused with 409 instead of being overwritten.
+   */
+  update(id: string, data: AssetUpdateRequest, version?: number): Promise<Asset> {
+    return fetchAPI(`/assets/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/assets/${id}`, { method: 'DELETE' });

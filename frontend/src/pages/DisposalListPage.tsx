@@ -177,7 +177,7 @@ export function DisposalListPage() {
               { value: '', label: t('disposal.selectAsset', 'Asset wählen') },
               ...(assets.data?.data ?? []).map((a) => ({
                 value: a.id,
-                label: `${a.asset_tag} — ${a.name}`,
+                label: `${a.inventory_no ?? a.id} — ${a.name}`,
               })),
             ]}
           />

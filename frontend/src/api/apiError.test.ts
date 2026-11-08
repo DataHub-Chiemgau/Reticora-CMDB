@@ -315,3 +315,140 @@ describe('relationshipApi', () => {
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('DELETE');
   });
 });
+
+// WP-319: the problem members of version conflicts and lifecycle guards,
+// fieldErrors() for the forms and If-Match on asset updates.
+describe('ApiError problem members (WP-319)', () => {
+  it('takes current_version and the changed fields from a 409', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'urn:reticora:problem:version-conflict',
+            title: 'Conflict',
+            status: 409,
+            detail: 'fields changed since the If-Match version: name',
+            fields: ['name'],
+            current_version: 7,
+          },
+          409,
+        ),
+      ),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+    const error = (await fetchAPI('/assets/a-1').catch((e: unknown) => e)) as InstanceType<
+      typeof ApiError
+    >;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.currentVersion).toBe(7);
+    expect(error.conflictFields).toEqual(['name']);
+    expect(error.guard).toBeUndefined();
+    expect(error.missing).toEqual([]);
+    expect(error.fieldErrors()).toEqual({
+      name: { kind: 'conflict', message: 'fields changed since the If-Match version: name' },
+    });
+  });
+
+  it('takes guard and missing from a 422 lifecycle-guard problem', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'urn:reticora:problem:lifecycle-guard',
+            title: 'Unprocessable Entity',
+            status: 422,
+            detail: 'the guard storage_location failed',
+            guard: 'storage_location',
+            missing: ['location_id'],
+            violations: [
+              { field: 'location_id', code: 'guard.storage_location', message: 'no storage' },
+            ],
+          },
+          422,
+        ),
+      ),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+    const error = (await fetchAPI('/assets/a-1/lifecycle-transitions').catch(
+      (e: unknown) => e,
+    )) as InstanceType<typeof ApiError>;
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.guard).toBe('storage_location');
+    expect(error.missing).toEqual(['location_id']);
+    expect(error.currentVersion).toBeUndefined();
+    expect(error.fieldErrors()).toEqual({
+      location_id: { kind: 'invalid', message: 'no storage' },
+    });
+  });
+
+  it('joins violations, field and conflictFields in fieldErrors()', async () => {
+    const { ApiError } = await importClientWithSession();
+    const error = ApiError.fromProblem(409, 'Conflict', {
+      detail: 'inventory_no is taken',
+      field: 'inventory_no',
+      violations: [{ field: 'name', detail: 'is required' }],
+      fields: ['barcode', 'inventory_no'],
+    });
+    expect(error.fieldErrors()).toEqual({
+      name: { kind: 'invalid', message: 'is required' },
+      inventory_no: { kind: 'conflict', message: 'inventory_no is taken' },
+      barcode: { kind: 'conflict', message: 'inventory_no is taken' },
+    });
+  });
+
+  it('marks the fields of a 403 as refused by the field permissions', async () => {
+    const { ApiError } = await importClientWithSession();
+    const error = ApiError.fromProblem(403, 'Forbidden', {
+      type: 'urn:reticora:problem:forbidden',
+      detail: 'field permission denied',
+      fields: ['purchase_price', 'cost_center'],
+    });
+    expect(error.fieldErrors()).toEqual({
+      purchase_price: { kind: 'forbidden', message: 'field permission denied' },
+      cost_center: { kind: 'forbidden', message: 'field permission denied' },
+    });
+  });
+
+  it('sends the asset version as If-Match on update', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => jsonResponse({ id: 'a-1', name: 'x' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { assetApi } = await importClientWithSession();
+
+    await assetApi.update('a-1', { name: 'Laptop 2' }, 4);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/assets/a-1');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('PATCH');
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Headers).get('If-Match')).toBe('"4"');
+
+    await assetApi.update('a-1', { name: 'Laptop 3' });
+    expect((fetchMock.mock.calls[1]?.[1]?.headers as Headers).has('If-Match')).toBe(false);
+  });
+
+  it('renders sort, fields and filter[field][op] of the asset list', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(() =>
+        jsonResponse({ data: [], total: 0, limit: 50, offset: 0, has_more: false }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { assetApi } = await importClientWithSession();
+
+    await assetApi.list({
+      sort: '-name',
+      fields: ['inventory_no', 'name'],
+      filter: [
+        { field: 'lifecycle_state', value: 'in_stock' },
+        { field: 'purchase_date', op: 'gte', value: '2026-01-01' },
+      ],
+      category: 'hardware',
+    });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost');
+    expect(url.pathname).toBe('/api/v1/assets');
+    expect(url.searchParams.get('sort')).toBe('-name');
+    expect(url.searchParams.get('fields')).toBe('inventory_no,name');
+    expect(url.searchParams.get('filter[lifecycle_state]')).toBe('in_stock');
+    expect(url.searchParams.get('filter[purchase_date][gte]')).toBe('2026-01-01');
+    expect(url.searchParams.get('category')).toBe('hardware');
+  });
+});

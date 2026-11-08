@@ -95,6 +95,8 @@ export default tseslint.config(
       'src/components/import/**/*.tsx',
       // WP-317: the guided creation (type tiles and steps).
       'src/components/create/**/*.tsx',
+      // WP-319: the asset list and its guided creation.
+      'src/pages/AssetListPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
