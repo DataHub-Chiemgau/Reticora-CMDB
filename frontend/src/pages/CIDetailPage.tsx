@@ -1,12 +1,13 @@
-import { Braces, Network, Pencil } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { Braces, Network, Pencil, Tags } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
-import type { TopologyGraphData } from '../api/client';
-import { useCI, useCINeighbors, useUpdateCI } from '../api/hooks';
-import { localizedText } from '../api/cmdb';
-import { useCIType, useCITypes } from '../api/cmdbHooks';
+import type { CI, TopologyGraphData } from '../api/client';
+import { useCI, useCINeighbors, useHasPermission, useUpdateCI } from '../api/hooks';
+import { localizedText, tagLabel } from '../api/cmdb';
+import { useCIType, useCITypes, useSetCITags, useTags } from '../api/cmdbHooks';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -294,6 +295,8 @@ export function CIDetailPage() {
         </div>
 
         <div className="min-w-0 space-y-4">
+          <CITagsCard ci={ci} />
+
           <Card title={t('ci.attributes')}>
             {Object.keys(ci.attributes ?? {}).length === 0 ? (
               <EmptyState title={t('ci.noAttributes')} icon={<Braces />} className="py-8" />
@@ -392,6 +395,165 @@ export function CIDetailPage() {
 
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />
     </div>
+  );
+}
+
+/** tagRefusal words a refused PUT /cis/{id}/tags like the refusal of a PATCH. */
+function tagRefusal(error: unknown, t: TFunction): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409) {
+      return t('ci.tags.conflict', {
+        fields: error.conflictFields.length > 0 ? error.conflictFields.join(', ') : 'tags',
+      });
+    }
+    if (error.status === 412) return t('ci.tags.precondition');
+    if (error.status === 403) return t('ci.tags.forbidden');
+    if (error.status === 422) {
+      const fields = error.violations.map((v) => v.field);
+      return t('ci.tags.invalid', {
+        detail: fields.length > 0 ? fields.join(', ') : (error.detail ?? error.message),
+      });
+    }
+    return t('ci.tags.reason', { detail: error.detail ?? error.message });
+  }
+  return t('ci.tags.reason', { detail: error instanceof Error ? error.message : String(error) });
+}
+
+/**
+ * CITagsCard shows the catalog tags of a CI as colored chips and changes
+ * them with a selection from the catalog (CI-08, UI-14, WP-817): PUT
+ * /cis/{id}/tags with If-Match of the shown version; 412 and 409 appear as
+ * with the PATCH. Only catalog tags are offered, nothing is created. The
+ * catalog is read only for a CI with tags (for names and colors) and while
+ * the selection is open; the change needs ci:write.
+ */
+function CITagsCard({ ci }: { ci: CI }) {
+  const { t, i18n } = useTranslation();
+  const keys = useMemo(() => ci.tags ?? [], [ci.tags]);
+  const mayWrite = useHasPermission('ci:write') === true;
+  const [selection, setSelection] = useState<string[] | null>(null);
+  const editing = selection !== null;
+  const catalog = useTags(undefined, { enabled: editing || keys.length > 0 });
+  const setTags = useSetCITags();
+  const byKey = useMemo(
+    () => new Map((catalog.data?.data ?? []).map((tag) => [tag.key, tag])),
+    [catalog.data],
+  );
+  // Keys of the CI the catalog does not know stay removable in the selection.
+  const offered = useMemo(() => {
+    const catalogKeys = (catalog.data?.data ?? []).map((tag) => tag.key);
+    const unknown = (selection ?? []).filter((key) => !byKey.has(key));
+    return [...catalogKeys, ...unknown.filter((key, i, all) => all.indexOf(key) === i)];
+  }, [catalog.data, selection, byKey]);
+
+  const open = () => {
+    setTags.reset();
+    setSelection([...keys]);
+  };
+  const toggle = (key: string) =>
+    setSelection((current) =>
+      (current ?? []).includes(key)
+        ? (current ?? []).filter((k) => k !== key)
+        : [...(current ?? []), key],
+    );
+  const save = () => {
+    if (!selection) return;
+    setTags.mutate(
+      { id: ci.id, tags: [...selection].sort(), version: ci.version },
+      { onSuccess: () => setSelection(null) },
+    );
+  };
+
+  return (
+    <Card
+      title={t('ci.tags.title')}
+      actions={
+        mayWrite && !editing ? (
+          <Button size="sm" variant="secondary" icon={<Pencil />} onClick={open}>
+            {t('ci.tags.edit')}
+          </Button>
+        ) : undefined
+      }
+    >
+      {keys.length === 0 ? (
+        <p className="text-sm text-fg-muted">{t('ci.tags.none')}</p>
+      ) : (
+        <ul aria-label={t('ci.tags.title')} className="flex flex-wrap gap-1.5">
+          {keys.map((key) => {
+            const tag = byKey.get(key);
+            return (
+              <li
+                key={key}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel px-2.5 py-0.5 text-xs font-medium text-fg"
+                style={tag?.color ? { borderColor: tag.color } : undefined}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-2 w-2 shrink-0 rounded-full bg-fg-subtle"
+                  style={tag?.color ? { backgroundColor: tag.color } : undefined}
+                />
+                <span className="[overflow-wrap:anywhere]">
+                  {tag ? tagLabel(tag, i18n.language) : key}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {editing ? (
+        <div className="mt-4 space-y-3 border-t border-line pt-4">
+          {catalog.isLoading ? (
+            <SkeletonList rows={2} label={t('app.loading')} />
+          ) : catalog.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {t('ci.tags.catalogError')}
+            </p>
+          ) : offered.length === 0 ? (
+            <p className="text-sm text-fg-muted">{t('ci.tags.catalogEmpty')}</p>
+          ) : (
+            <fieldset className="min-w-0">
+              <legend className="text-sm font-medium text-fg">{t('ci.tags.select')}</legend>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {offered.map((key) => {
+                  const tag = byKey.get(key);
+                  return (
+                    <label key={key} className="flex items-center gap-2 text-sm text-fg">
+                      <input
+                        type="checkbox"
+                        checked={selection.includes(key)}
+                        onChange={() => toggle(key)}
+                      />
+                      <span className="[overflow-wrap:anywhere]">
+                        {tag ? tagLabel(tag, i18n.language) : `${key} (${t('ci.tags.unknown')})`}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          )}
+          {setTags.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {tagRefusal(setTags.error, t)}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              icon={<Tags />}
+              onClick={save}
+              loading={setTags.isPending}
+              disabled={catalog.isLoading}
+            >
+              {t('common.save')}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelection(null)}>
+              {t('common.cancel')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 

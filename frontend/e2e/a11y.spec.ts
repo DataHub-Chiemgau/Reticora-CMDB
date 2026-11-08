@@ -193,6 +193,33 @@ const RELATIONSHIP_TYPES: Handler = {
   }),
 };
 
+// WP-817: a system tag and an own tag with a color in the tag catalog.
+const TAG_HANDLERS: Handler[] = [
+  {
+    path: '/tags',
+    reply: () => ({
+      body: list(
+        [
+          { key: 'archived', is_system: true, display_name: { de: 'Archiviert', en: 'Archived' } },
+          {
+            key: 'a11y-backup',
+            is_system: false,
+            display_name: { de: 'a11y Sicherung', en: 'a11y backup' },
+            color: '#1f6feb',
+          },
+        ].map((tag, i) => ({
+          id: `fa000000-0000-4000-8000-00000000000${i + 1}`,
+          organization_id: ORG_ID,
+          color: null,
+          created_at: AT,
+          updated_at: AT,
+          ...tag,
+        })),
+      ),
+    }),
+  },
+];
+
 // One entry per route of src/App.tsx; the parity test below fails when a
 // route is added there without an entry here.
 const ROUTES: A11yRoute[] = [
@@ -270,6 +297,13 @@ const ROUTES: A11yRoute[] = [
   { path: '/inventory', url: '/inventory', ready: text('a11y-move') },
   { path: '/locations', url: '/locations', ready: text(M.location) },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
+  {
+    // WP-817: the tag catalog, read-only without tag:manage.
+    path: '/tags',
+    url: '/tags',
+    handlers: TAG_HANDLERS,
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-backup' }),
+  },
   {
     path: '/ci-types',
     url: '/ci-types',

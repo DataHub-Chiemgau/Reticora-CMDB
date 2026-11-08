@@ -7,6 +7,7 @@ import {
   useSavedViewPresets,
   useFilterQuery,
   useSaveView,
+  useClonePreset,
   useUpdateSavedView,
   useDeleteSavedView,
   useFilterPreview,
@@ -16,9 +17,16 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useEffectivePermissions, useHasPermission } from '../api/hooks';
 import { ApiError, roleApi } from '../api/client';
-import { VIEW_FIELDS, type QueryResult, type SavedView, type SavedViewSortKey } from '../api/cmdb';
+import {
+  VIEW_FIELDS,
+  presetName,
+  type QueryResult,
+  type SavedView,
+  type SavedViewPreset,
+  type SavedViewSortKey,
+} from '../api/cmdb';
 import { Badge } from '../components/ui/Badge';
-import { Bookmark, Eye, Filter, Plus, Save, X } from 'lucide-react';
+import { Bookmark, Copy, Eye, Filter, Pencil, Plus, Save, X } from 'lucide-react';
 import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -108,6 +116,23 @@ function formatCell(value: unknown): string {
 /** The text of one cell; a catalog-keyed field shows its label (GLO-10). */
 function cellText(t: TFunction, row: QueryResult, field: string): string {
   return fieldValueText(t, field, row.columns?.[field], formatCell);
+}
+
+/**
+ * viewRefusal words a refused write on a view (WP-817): 403 for a missing
+ * right, 404 for a view that is gone or not the caller's to change (E-86),
+ * 409 for a name the caller already uses.
+ */
+function viewRefusal(error: unknown, t: TFunction): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return t('savedviews.errors.forbidden');
+    if (error.status === 404) return t('savedviews.errors.notFound');
+    if (error.status === 409) return t('savedviews.errors.conflict');
+    return t('savedviews.errors.reason', { detail: error.detail || error.title || error.message });
+  }
+  return t('savedviews.errors.reason', {
+    detail: error instanceof Error ? error.message : String(error),
+  });
 }
 
 /** The row of a view in the lists: a quiet button, the open view highlighted. */
@@ -409,12 +434,17 @@ function FilterEditor({
 }
 
 export function SavedViewsPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const views = useSavedViews();
   const presets = useSavedViewPresets();
   const saveView = useSaveView();
+  const clonePreset = useClonePreset();
   const updateView = useUpdateSavedView();
   const deleteView = useDeleteSavedView();
+  // The outcome of the last write from the lists: a refusal (403, 404, 409)
+  // as an alert, a clone as a status.
+  const [message, setMessage] = useState<{ kind: 'error' | 'done'; text: string } | null>(null);
+  const refused = (error: unknown) => setMessage({ kind: 'error', text: viewRefusal(error, t) });
   // entity_kind asset and asset.* of a CI need the page assets (WP-315).
   const { isEnabled } = useEntitlements();
   const { isPageEnabled } = useModules();
@@ -430,7 +460,8 @@ export function SavedViewsPage() {
     queryFn: () => roleApi.list({ limit: 200 }),
     enabled: mayReadRoles,
   });
-  // Only the owner changes or deletes a view (E-86): a view shared with the
+  // Only the owner changes or deletes a view (E-86), or a holder of
+  // saved_view:manage (WP-307): for everybody else a view shared with the
   // caller is read-only and the server answers 404 to its PATCH and DELETE.
   // Until the caller's id is known no view counts as own (fail closed).
   const me = useEffectivePermissions().data?.user_id;
@@ -539,8 +570,63 @@ export function SavedViewsPage() {
     });
   };
 
+  // A system view is cloned by its key (from_preset, VIE-02); the server
+  // takes over its filter, sort and columns.
+  const clone = (preset: SavedViewPreset) => {
+    const label = presetName(preset, i18n.language);
+    const name = window.prompt(
+      t('savedviews.clonePrompt'),
+      t('savedviews.cloneName', { name: label }),
+    );
+    if (!name) return;
+    setMessage(null);
+    clonePreset.mutate(
+      { key: preset.key, name },
+      {
+        onSuccess: () => setMessage({ kind: 'done', text: t('savedviews.cloned', { name }) }),
+        onError: refused,
+      },
+    );
+  };
+
+  // A view shared with the caller is cloned as an own, unshared view.
+  const cloneView = (view: SavedView) => {
+    const name = window.prompt(
+      t('savedviews.clonePrompt'),
+      t('savedviews.cloneName', { name: view.name }),
+    );
+    if (!name) return;
+    setMessage(null);
+    saveView.mutate(
+      {
+        name,
+        entity_kind: view.entity_kind,
+        filter_spec: view.filter_spec,
+        sort: view.sort ?? [],
+        columns: view.columns ?? [],
+        shared: false,
+        shared_with_roles: [],
+      },
+      {
+        onSuccess: () => setMessage({ kind: 'done', text: t('savedviews.cloned', { name }) }),
+        onError: refused,
+      },
+    );
+  };
+
+  const removeView = (view: SavedView) => {
+    setMessage(null);
+    deleteView.mutate(view.id, {
+      onSuccess: () => {
+        if (runningView?.id === view.id) setRunningView(null);
+      },
+      onError: refused,
+    });
+  };
+
   const updateCurrent = () => {
     if (!runningView || !own) return;
+    setMessage(null);
     updateView.mutate(
       {
         id: runningView.id,
@@ -551,7 +637,7 @@ export function SavedViewsPage() {
           shared_with_roles: presentation.roles,
         },
       },
-      { onSuccess: (updated) => setRunningView(updated as SavedView) },
+      { onSuccess: (updated) => setRunningView(updated as SavedView), onError: refused },
     );
   };
 
@@ -572,30 +658,52 @@ export function SavedViewsPage() {
         title={t('savedviews.title', 'Gespeicherte Ansichten')}
         description={t(
           'savedviews.subtitle',
-          'Vorlagen und eigene Filter — z. B. „Produktiv-Server ohne Backup“ oder „Garantie läuft in 90 Tagen ab“.',
+          'Systemansichten wie „Meine Geräte“, „Garantie läuft bald ab“ und „Server ohne Monitoring“ sowie eigene und geteilte Filter.',
         )}
       />
+      {message ? (
+        <p
+          role={message.kind === 'error' ? 'alert' : 'status'}
+          className={cn('text-sm', message.kind === 'error' ? 'text-danger' : 'text-fg-muted')}
+        >
+          {message.text}
+        </p>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="min-w-0 space-y-4 lg:col-span-1">
-          <Card title={t('savedviews.presets', 'Vorlagen')}>
+          <Card title={t('savedviews.presets', 'Systemansichten')}>
+            {/* System views (VIE-02): named in the UI language, read-only,
+                cloned into an own view; no edit and no delete. */}
             <ul className="-mx-2 space-y-0.5">
-              {(presets.data?.data ?? []).map((p) => (
-                <li key={p.name}>
-                  <button
-                    type="button"
-                    onClick={() => run(p.name, p.filter_spec as ActiveSpec, p.entity_kind)}
-                    aria-current={activeView === p.name ? 'true' : undefined}
-                    className={viewRowClasses(activeView === p.name)}
-                  >
-                    <span className="min-w-0 [overflow-wrap:anywhere]">{p.name}</span>
-                    <Badge variant="neutral">{p.entity_kind}</Badge>
-                  </button>
-                </li>
-              ))}
+              {(presets.data?.data ?? []).map((p) => {
+                const label = presetName(p, i18n.language);
+                return (
+                  <li key={p.key} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => run(label, p.filter_spec as ActiveSpec, p.entity_kind)}
+                      aria-current={activeView === label ? 'true' : undefined}
+                      className={viewRowClasses(activeView === label)}
+                    >
+                      <span className="min-w-0 [overflow-wrap:anywhere]">{label}</span>
+                      <Badge variant="neutral">{t(`rules.entityKinds.${p.entity_kind}`)}</Badge>
+                      <Badge variant="neutral">{t('savedviews.readOnlyBadge')}</Badge>
+                    </button>
+                    <IconButton
+                      size="sm"
+                      icon={<Copy />}
+                      label={t('savedviews.cloneLabel', { name: label })}
+                      onClick={() => clone(p)}
+                      disabled={clonePreset.isPending}
+                      className="shrink-0"
+                    />
+                  </li>
+                );
+              })}
             </ul>
           </Card>
-          <Card title={t('savedviews.mine', 'Meine Ansichten')}>
+          <Card title={t('savedviews.mine', 'Meine und geteilte Ansichten')}>
             {views.isLoading ? <SkeletonList rows={3} label="…" /> : null}
             <ul className="-mx-2 space-y-0.5">
               {(views.data?.data ?? []).map((v) => (
@@ -618,16 +726,40 @@ export function SavedViewsPage() {
                         })}
                       </Badge>
                     ) : null}
+                    {me && v.owner_id !== me ? (
+                      <Badge variant="neutral">{t('savedviews.foreign')}</Badge>
+                    ) : null}
                   </button>
-                  {me && v.owner_id === me ? (
+                  {writable(v) ? (
+                    <>
+                      <IconButton
+                        size="sm"
+                        icon={<Pencil />}
+                        label={t('savedviews.editLabel', { name: v.name })}
+                        onClick={() => {
+                          run(v.name, v.filter_spec as ActiveSpec, v.entity_kind, v);
+                          edit(v, v.filter_spec, v.entity_kind, v.name);
+                        }}
+                        className="shrink-0"
+                      />
+                      <IconButton
+                        size="sm"
+                        icon={<X />}
+                        label={`${t('common.delete')}: ${v.name}`}
+                        onClick={() => removeView(v)}
+                        className="shrink-0 hover:text-danger"
+                      />
+                    </>
+                  ) : (
                     <IconButton
                       size="sm"
-                      icon={<X />}
-                      label={`${t('common.delete')}: ${v.name}`}
-                      onClick={() => deleteView.mutate(v.id)}
-                      className="shrink-0 hover:text-danger"
+                      icon={<Copy />}
+                      label={t('savedviews.cloneLabel', { name: v.name })}
+                      onClick={() => cloneView(v)}
+                      disabled={saveView.isPending}
+                      className="shrink-0"
                     />
-                  ) : null}
+                  )}
                 </li>
               ))}
               {(views.data?.data ?? []).length === 0 && !views.isLoading ? (

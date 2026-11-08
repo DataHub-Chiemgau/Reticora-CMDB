@@ -46,7 +46,8 @@
     "ci-types": "CI-Typen",
     "relationship-types": "Beziehungstypen",
     "reviews": "Reviews",
-    "jobs": "Jobs"
+    "jobs": "Jobs",
+    "tags": "Tags"
   },
   "common": {
     "save": "Speichern",
@@ -106,7 +107,8 @@
       "audit": "Audit-Protokoll öffnen",
       "security": "Sicherheit & Datenschutz öffnen",
       "map": "Karte öffnen",
-      "roomplan": "Raumplan öffnen"
+      "roomplan": "Raumplan öffnen",
+      "tags": "Tags öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -315,7 +317,21 @@
       "decommissioned": "Außer Betrieb",
       "unknown": "Unbekannt"
     },
-    "timeline": "Zeitverlauf"
+    "timeline": "Zeitverlauf",
+    "tags": {
+      "title": "Tags",
+      "none": "Keine Tags.",
+      "edit": "Tags bearbeiten",
+      "select": "Tags aus dem Katalog",
+      "catalogEmpty": "Der Katalog enthält noch keine Tags.",
+      "catalogError": "Der Tag-Katalog kann nicht geladen werden.",
+      "unknown": "nicht im Katalog",
+      "conflict": "Die Tags wurden zwischenzeitlich geändert ({{fields}}). Laden Sie das CI neu.",
+      "precondition": "Die Version des CIs ist unbekannt. Laden Sie das CI neu.",
+      "invalid": "Unbekannte Tags: {{detail}}",
+      "forbidden": "Ihnen fehlt das Recht, das CI zu ändern.",
+      "reason": "Die Tags konnten nicht gespeichert werden: {{detail}}"
+    }
   },
   "form": {
     "createCI": "CI anlegen",
@@ -1948,14 +1964,14 @@
   "savedviews": {
     "sharedWithRoles": "für {{count}} Rollen",
     "title": "Gespeicherte Ansichten",
-    "presets": "Vorlagen",
+    "presets": "Systemansichten",
     "hint": "Wählen Sie links eine Ansicht aus.",
     "noResults": "Keine Treffer.",
-    "subtitle": "Vorlagen und eigene Filter — z. B. „Produktiv-Server ohne Backup“.",
-    "none": "Noch keine eigenen Ansichten.",
+    "subtitle": "Systemansichten wie „Meine Geräte“, „Garantie läuft bald ab“ und „Server ohne Monitoring“ sowie eigene und geteilte Filter.",
+    "none": "Noch keine eigenen oder geteilten Ansichten.",
     "results": "Ergebnisse",
     "shared": "geteilt",
-    "mine": "Meine Ansichten",
+    "mine": "Meine und geteilte Ansichten",
     "save": "Als Ansicht speichern",
     "namePrompt": "Name der Ansicht",
     "forbidden": "Keine Berechtigung für diese Ansicht",
@@ -2035,6 +2051,19 @@
       "forbiddenFields": "Keine Berechtigung für die Felder: {{fields}}. Die Bedingungen sind markiert.",
       "noWritePermission": "Keine Schreibberechtigung für diese Ansicht.",
       "nameRequired": "Geben Sie einen Namen für die Ansicht an."
+    },
+    "readOnlyBadge": "schreibgeschützt",
+    "cloneLabel": "Klonen: {{name}}",
+    "clonePrompt": "Name der Kopie",
+    "cloneName": "Kopie von {{name}}",
+    "cloned": "„{{name}}“ wurde als eigene Ansicht angelegt.",
+    "editLabel": "Bearbeiten: {{name}}",
+    "foreign": "von anderen",
+    "errors": {
+      "forbidden": "Keine Berechtigung für diese Aktion.",
+      "notFound": "Die Ansicht gibt es nicht mehr, oder Sie dürfen sie nicht ändern.",
+      "conflict": "Eine eigene Ansicht mit diesem Namen gibt es schon.",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }
   },
   "lifecycle": {
@@ -3088,5 +3117,44 @@
     "from": "von {{location}}",
     "to": "nach {{location}}",
     "reason": "Grund: {{reason}}"
+  },
+  "tags": {
+    "title": "Tags",
+    "subtitle": "Der Tag-Katalog der Organisation: Schlüssel, Namen und Farben der Tags, die CIs tragen.",
+    "readOnly": "Sie können den Katalog lesen; Anlegen, Ändern und Löschen erfordern das Recht tag:manage.",
+    "create": "Tag anlegen",
+    "createTitle": "Tag anlegen",
+    "editTitle": "Tag bearbeiten",
+    "editLabel": "Bearbeiten: {{name}}",
+    "deleteLabel": "Löschen: {{name}}",
+    "deleteTitle": "Tag löschen",
+    "deleteConfirm": "Tag „{{name}}“ endgültig löschen?",
+    "empty": "Noch keine Tags.",
+    "loadError": "Die Tags können nicht geladen werden.",
+    "system": "System",
+    "custom": "Eigen",
+    "keyHint": "Kleinbuchstaben, Ziffern, _ und -, höchstens 63 Zeichen; nach dem Anlegen nicht änderbar.",
+    "keyFixed": "Der Schlüssel ist nicht änderbar.",
+    "colorHint": "Optional, im Format #rrggbb; leer entfernt die Farbe.",
+    "fields": {
+      "name": "Name",
+      "key": "Schlüssel",
+      "nameDe": "Name (Deutsch)",
+      "nameEn": "Name (Englisch)",
+      "color": "Farbe",
+      "kind": "Art"
+    },
+    "errors": {
+      "keyFormat": "Der Schlüssel ist ungültig: Kleinbuchstaben, Ziffern, _ und -, beginnend mit Buchstabe oder Ziffer.",
+      "colorFormat": "Die Farbe muss das Format #rrggbb haben.",
+      "nameRequired": "Geben Sie mindestens einen Namen an.",
+      "keyTaken": "Einen Tag mit diesem Schlüssel gibt es schon.",
+      "inUse": "Der Tag ist noch zugeordnet oder ein System-Tag und kann nicht gelöscht werden.",
+      "forbidden": "Ihnen fehlt das Recht tag:manage.",
+      "forbiddenRead": "Keine Berechtigung, die Tags zu lesen.",
+      "notFound": "Den Tag gibt es nicht mehr.",
+      "invalid": "Ungültige Angaben: {{detail}}",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
   }
 }

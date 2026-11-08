@@ -31,6 +31,7 @@ import {
   metamodelTransferApi,
   savedViewApi,
   sensitiveFieldApi,
+  tagApi,
   templateApi,
   templateMigrationApi,
   type AttributeDefinition,
@@ -51,13 +52,14 @@ import {
   type MetamodelDraftItem,
   type MetamodelTestReportPage,
   type SavedView,
+  type TagWrite,
   type TemplateClone,
   type TemplateCreate,
   type TemplateMigrationRequest,
   type TemplatePatch,
   type TemplateVersionItemsUpdate,
 } from './cmdb';
-import { ApiError } from './client';
+import { ApiError, ciApi } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
@@ -1060,6 +1062,20 @@ export function useUpdateSavedView() {
 }
 
 /**
+ * Clones a system view into an own view (POST /saved-views with
+ * from_preset, VIE-02, WP-817); the server takes over its filter, sort and
+ * columns.
+ */
+export function useClonePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, name }: { key: string; name: string }) =>
+      savedViewApi.clonePreset(key, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
+/**
  * The preview of the filter builder (WP-315): POST /search/query?limit=10
  * under RLS and field permissions, answering total and the first hits. A
  * mutation, run by the button; a 422 names the node (field where…), a 403
@@ -1095,5 +1111,64 @@ export function useFilterQuery(spec: (Record<string, unknown> & { entity_kind?: 
     // the wait.
     staleTime: 0,
     retry: false,
+  });
+}
+
+// Tags (CI-08, WP-753, WP-817): org-wide, so the queries carry no scope.
+
+/**
+ * useTags reads the tag catalog: without `page` the whole catalog (every
+ * page over next_cursor) for a selection such as the CI detail page and the
+ * bulk bar (WP-816); with `page` one page of `limit` from `cursor`, as the
+ * tag administration pages through it.
+ */
+export function useTags(page?: { limit?: number; cursor?: string }, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: ['tags', page ?? 'all'],
+    queryFn: async () =>
+      page ? tagApi.list(page) : { data: await tagApi.all(), has_more: false as boolean },
+    ...options,
+  });
+}
+
+export function useCreateTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { key: string } & TagWrite) => tagApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+export function useUpdateTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: TagWrite }) => tagApi.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+export function useDeleteTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tagApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+/**
+ * Replaces the tags of a CI (PUT /cis/{id}/tags with If-Match of `version`,
+ * API-07); the answer is the CI with its new version, which replaces the
+ * cached one.
+ */
+export function useSetCITags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, tags, version }: { id: string; tags: string[]; version?: number }) =>
+      ciApi.setTags(id, tags, version),
+    onSuccess: (ci, variables) => {
+      qc.setQueryData(['ci', variables.id], ci);
+      void qc.invalidateQueries({ queryKey: ['cis'] });
+      void qc.invalidateQueries({ queryKey: ['ci', variables.id] });
+    },
   });
 }

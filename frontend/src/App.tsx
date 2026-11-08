@@ -98,6 +98,7 @@ const MetamodelDraftsPage = lazyPage(
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
+const TagsPage = lazyPage(() => import('./pages/TagsPage'), 'TagsPage');
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
@@ -222,6 +223,7 @@ function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/locations" element={<LocationTreePage />} />
           <Route path="/saved-views" element={<SavedViewsPage />} />
+          <Route path="/tags" element={<TagsPage />} />
           <Route path="/ci-types" element={<CITypeAdminPage />} />
           <Route path="/ci-types/templates" element={<TemplatesPage />} />
           <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />

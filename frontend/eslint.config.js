@@ -69,6 +69,8 @@ export default tseslint.config(
       // WP-315: the click builder and the saved views page.
       'src/components/rules/**/*.tsx',
       'src/pages/SavedViewsPage.tsx',
+      // WP-817: the tag administration (the saved views page is listed above).
+      'src/pages/TagsPage.tsx',
       // WP-806: the inventory page and the object history.
       'src/pages/InventoryPage.tsx',
       'src/components/cmdb/ObjectHistory.tsx',

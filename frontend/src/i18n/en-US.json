@@ -46,7 +46,8 @@
     "ci-types": "CI Types",
     "relationship-types": "Relationship types",
     "reviews": "Reviews",
-    "jobs": "Jobs"
+    "jobs": "Jobs",
+    "tags": "Tags"
   },
   "common": {
     "save": "Save",
@@ -106,7 +107,8 @@
       "audit": "Open audit log",
       "security": "Open security & privacy",
       "map": "Open map",
-      "roomplan": "Open room plan"
+      "roomplan": "Open room plan",
+      "tags": "Open tags"
     },
     "contact": {
       "label": "Contact",
@@ -315,7 +317,21 @@
       "decommissioned": "Decommissioned",
       "unknown": "Unknown"
     },
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "tags": {
+      "title": "Tags",
+      "none": "No tags.",
+      "edit": "Edit tags",
+      "select": "Tags from the catalog",
+      "catalogEmpty": "The catalog holds no tags yet.",
+      "catalogError": "The tag catalog cannot be loaded.",
+      "unknown": "not in the catalog",
+      "conflict": "The tags changed in the meantime ({{fields}}). Reload the CI.",
+      "precondition": "The version of the CI is unknown. Reload the CI.",
+      "invalid": "Unknown tags: {{detail}}",
+      "forbidden": "You lack the permission to change the CI.",
+      "reason": "The tags could not be saved: {{detail}}"
+    }
   },
   "form": {
     "createCI": "Create CI",
@@ -1948,14 +1964,14 @@
   "savedviews": {
     "sharedWithRoles": "for {{count}} roles",
     "title": "Saved views",
-    "presets": "Presets",
+    "presets": "System views",
     "hint": "Select a view on the left.",
     "noResults": "No results.",
-    "subtitle": "Presets and custom filters — e.g. “Production servers without backup”.",
-    "none": "No custom views yet.",
+    "subtitle": "System views such as “My devices”, “Warranty expiring soon” and “Servers without monitoring”, plus your own and shared filters.",
+    "none": "No own or shared views yet.",
     "results": "Results",
     "shared": "shared",
-    "mine": "My views",
+    "mine": "My and shared views",
     "save": "Save as view",
     "namePrompt": "View name",
     "forbidden": "No permission for this view",
@@ -2035,6 +2051,19 @@
       "forbiddenFields": "No permission for the fields: {{fields}}. The conditions are marked.",
       "noWritePermission": "No write permission for this view.",
       "nameRequired": "Enter a name for the view."
+    },
+    "readOnlyBadge": "read-only",
+    "cloneLabel": "Clone: {{name}}",
+    "clonePrompt": "Name of the copy",
+    "cloneName": "Copy of {{name}}",
+    "cloned": "“{{name}}” was created as your own view.",
+    "editLabel": "Edit: {{name}}",
+    "foreign": "by others",
+    "errors": {
+      "forbidden": "No permission for this action.",
+      "notFound": "The view no longer exists, or you may not change it.",
+      "conflict": "You already have a view with this name.",
+      "reason": "The action failed: {{detail}}"
     }
   },
   "lifecycle": {
@@ -3088,5 +3117,44 @@
     "from": "from {{location}}",
     "to": "to {{location}}",
     "reason": "Reason: {{reason}}"
+  },
+  "tags": {
+    "title": "Tags",
+    "subtitle": "The tag catalog of the organization: keys, names and colors of the tags CIs carry.",
+    "readOnly": "You can read the catalog; creating, changing and deleting require the permission tag:manage.",
+    "create": "Create tag",
+    "createTitle": "Create tag",
+    "editTitle": "Edit tag",
+    "editLabel": "Edit: {{name}}",
+    "deleteLabel": "Delete: {{name}}",
+    "deleteTitle": "Delete tag",
+    "deleteConfirm": "Delete the tag “{{name}}” permanently?",
+    "empty": "No tags yet.",
+    "loadError": "The tags cannot be loaded.",
+    "system": "System",
+    "custom": "Custom",
+    "keyHint": "Lower case letters, digits, _ and -, at most 63 characters; not changeable after creation.",
+    "keyFixed": "The key cannot be changed.",
+    "colorHint": "Optional, as #rrggbb; empty removes the color.",
+    "fields": {
+      "name": "Name",
+      "key": "Key",
+      "nameDe": "Name (German)",
+      "nameEn": "Name (English)",
+      "color": "Color",
+      "kind": "Kind"
+    },
+    "errors": {
+      "keyFormat": "The key is invalid: lower case letters, digits, _ and -, starting with a letter or digit.",
+      "colorFormat": "The color must have the format #rrggbb.",
+      "nameRequired": "Enter at least one name.",
+      "keyTaken": "A tag with this key already exists.",
+      "inUse": "The tag is still assigned or a system tag and cannot be deleted.",
+      "forbidden": "You lack the permission tag:manage.",
+      "forbiddenRead": "No permission to read the tags.",
+      "notFound": "The tag no longer exists.",
+      "invalid": "Invalid values: {{detail}}",
+      "reason": "The action failed: {{detail}}"
+    }
   }
 }

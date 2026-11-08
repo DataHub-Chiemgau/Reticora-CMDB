@@ -54,7 +54,9 @@ export type AppPage =
   | 'relationship-types'
   | 'locations'
   | 'inventory'
-  | 'saved-views';
+  | 'saved-views'
+  // Tag catalog (CI-08, WP-817): core without a module gate (E-105).
+  | 'tags';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -98,6 +100,7 @@ export const pageToPath: Record<AppPage, string> = {
   locations: '/locations',
   inventory: '/inventory',
   'saved-views': '/saved-views',
+  tags: '/tags',
 };
 
 interface CommandPaletteProps {
@@ -422,6 +425,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.map', 'Karte öffnen'),
         keywords: ['map karte gis standorte sites'],
         action: () => onNavigate('map'),
+      },
+      {
+        id: 'nav-tags',
+        label: t('commandPalette.commands.tags'),
+        keywords: ['tags schlagwörter labels katalog catalog'],
+        action: () => onNavigate('tags'),
       },
       {
         id: 'nav-roomplan',

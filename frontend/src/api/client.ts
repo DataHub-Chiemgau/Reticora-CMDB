@@ -49,6 +49,11 @@ export interface CI {
   management_ip?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
+  /**
+   * Keys of the catalog tags of the CI (CI-07, CI-08), sorted; [] without
+   * tags. Read-only here: PUT /cis/{id}/tags (ciApi.setTags) writes them.
+   */
+  tags: string[];
   discovery_source?: string;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -772,6 +777,20 @@ export const ciApi = {
 
   delete(id: string): Promise<void> {
     return fetchAPI(`/cis/${id}`, { method: 'DELETE' });
+  },
+
+  /**
+   * setTags replaces the tags of a CI with catalog keys (PUT /cis/{id}/tags,
+   * CI-08); [] removes every tag, an unknown key is 422 and is not created.
+   * With `version` the request carries If-Match like update: 412 when the
+   * version is unknown, 409 when the tags changed since (API-07).
+   */
+  setTags(id: string, tags: string[], version?: number): Promise<CI> {
+    return fetchAPI(`/cis/${id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
   },
 
   /**

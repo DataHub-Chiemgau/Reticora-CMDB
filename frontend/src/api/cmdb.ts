@@ -1354,12 +1354,47 @@ export const VIEW_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/**
+ * A system view (VIE-02, WP-307): a code preset with a stable key, a name
+ * per language and no row in saved_view. It is read-only; a caller clones it
+ * with savedViewApi.clonePreset.
+ */
+export interface SavedViewPreset {
+  key: string;
+  /** English name. */
+  name: string;
+  display_name: { de: string; en: string };
+  entity_kind: string;
+  filter_spec: Record<string, unknown>;
+  sort?: SavedViewSortKey[];
+  columns?: string[];
+  /** Always true. */
+  system: boolean;
+}
+
+/** presetName is the name of a system view in the UI language, else English. */
+export function presetName(preset: SavedViewPreset, language: string): string {
+  const lang = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  return preset.display_name?.[lang] || preset.display_name?.en || preset.name || preset.key;
+}
+
 export const savedViewApi = {
   list(params: { limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<SavedView>>(`/saved-views${qs(params)}`);
   },
-  presets(): Promise<{ data: SavedView[] }> {
+  presets(): Promise<{ data: SavedViewPreset[] }> {
     return fetchAPI('/saved-views/presets');
+  },
+  /**
+   * clonePreset creates an own view from a system view (POST /saved-views
+   * with from_preset, VIE-02): the server takes over its entity kind,
+   * filter, sort and columns; the clone is not shared.
+   */
+  clonePreset(key: string, name: string): Promise<SavedView> {
+    return fetchAPI('/saved-views', {
+      method: 'POST',
+      body: JSON.stringify({ name, from_preset: key }),
+    });
   },
   create(data: {
     name: string;
@@ -1394,6 +1429,51 @@ export const savedViewApi = {
       method: 'POST',
       body: JSON.stringify(spec),
     });
+  },
+};
+
+// ─── Tags (CI-08, WP-753, WP-817) ────────────────────────────────────────────
+
+/** A catalog tag of the organization; CI.tags lists its key. */
+export type Tag = components['schemas']['Tag'];
+/** The name of a tag in de and/or en. */
+export type TagDisplayName = components['schemas']['TagDisplayName'];
+
+/** The changeable fields of a tag; color null removes the color. */
+export interface TagWrite {
+  display_name?: TagDisplayName;
+  color?: string | null;
+}
+
+/** tagLabel is the name of a tag in the UI language, else the other one, else its key. */
+export function tagLabel(tag: Pick<Tag, 'key' | 'display_name'>, language: string): string {
+  const lang = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  return tag.display_name?.[lang] || tag.display_name?.en || tag.display_name?.de || tag.key;
+}
+
+/**
+ * tagApi is the tag catalog (WP-753): org-wide, core without a module gate
+ * (E-105), read with ci:read and written with tag:manage (E-106). The list
+ * pages by the signed keyset cursor (next_cursor, API-02).
+ */
+export const tagApi = {
+  list(params: { limit?: number; cursor?: string } = {}): Promise<PaginatedResponse<Tag>> {
+    return fetchAPI(`/tags${qs(params)}`);
+  },
+  /** all reads the whole catalog, page by page over next_cursor. */
+  all(): Promise<Tag[]> {
+    return fetchAllPages<Tag>('/tags');
+  },
+  create(data: { key: string } & TagWrite): Promise<Tag> {
+    return fetchAPI('/tags', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update changes name and color; the key is unchangeable (422). */
+  update(id: string, data: TagWrite): Promise<Tag> {
+    return fetchAPI(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** delete removes a tag no CI carries; an assigned or system tag is 409. */
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/tags/${id}`, { method: 'DELETE' });
   },
 };
 
