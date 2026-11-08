@@ -45,6 +45,9 @@ import {
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type LocationUpdateRequest,
+  type ConvertReservationRequest,
+  type ReserveAssetRequest,
+  type StockBooking,
   type MetamodelDraftItem,
   type MetamodelTestReportPage,
   type SavedView,
@@ -821,10 +824,53 @@ export function useClients(enabled = true) {
 }
 
 // Inventory movements + items
-export function useMovements(params: { asset_id?: string; movement_type?: string } = {}) {
+/** The movements of the ledger, newest first; asset_id or consumable_id narrow them to one object. */
+export function useMovements(
+  params: { asset_id?: string; consumable_id?: string; movement_type?: string } = {},
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['stock-movements', params],
     queryFn: () => inventoryApi.listMovements(params),
+    enabled,
+  });
+}
+
+/** The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283). */
+export function useStockLevels(consumableId: string | undefined) {
+  return useQuery({
+    queryKey: ['consumable-stock', consumableId],
+    queryFn: () => inventoryApi.stockLevels(consumableId!),
+    enabled: !!consumableId,
+  });
+}
+
+/**
+ * invalidateStock reads again what a booking, a reservation or its end
+ * changes: the ledger, the reservations, the history of the object and the
+ * stock and availability per bin.
+ */
+function invalidateStock(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['stock-movements'] }),
+    qc.invalidateQueries({ queryKey: ['reservations'] }),
+    qc.invalidateQueries({ queryKey: ['history'] }),
+    qc.invalidateQueries({ queryKey: ['consumable-stock'] }),
+    qc.invalidateQueries({ queryKey: ['inventory-items'] }),
+    qc.invalidateQueries({ queryKey: ['inventory-availability'] }),
+  ]);
+}
+
+/**
+ * useStockBooking books a movement through POST /stock-movements: receipt
+ * and transfer of a consumable between bins, transfer of a serial asset
+ * (WP-756, E-142).
+ */
+export function useStockBooking() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StockBooking) => inventoryApi.book(data),
+    onSuccess: () => invalidateStock(qc),
   });
 }
 
@@ -850,11 +896,28 @@ export function useReservations(state?: string) {
   });
 }
 
-export function useCreateReservation() {
+/** useReserveAsset reserves an asset through POST /assets/{id}/reserve (WP-277). */
+export function useReserveAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: reservationApi.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reservations'] }),
+    mutationFn: ({ assetId, data }: { assetId: string; data: ReserveAssetRequest }) =>
+      reservationApi.reserve(assetId, data),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+/**
+ * useConvertReservation turns an active asset reservation into an
+ * assignment (POST /reservations/{id}/convert, WP-277); the assignment list
+ * is read again as well.
+ */
+export function useConvertReservation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: ConvertReservationRequest }) =>
+      reservationApi.convert(id, data),
+    onSuccess: () =>
+      Promise.all([invalidateStock(qc), qc.invalidateQueries({ queryKey: ['assignments'] })]),
   });
 }
 
@@ -862,7 +925,7 @@ export function useReleaseReservation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => reservationApi.release(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reservations'] }),
+    onSuccess: () => invalidateStock(qc),
   });
 }
 

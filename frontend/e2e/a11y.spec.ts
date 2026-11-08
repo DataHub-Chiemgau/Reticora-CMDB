@@ -504,6 +504,46 @@ const DIALOGS: {
   },
 ];
 
+// WP-806 (UI-15): the flow dialogs of the inventory page and the assign
+// dialog of WP-318 with their pickers. The flows need the modules inventory
+// and stocktake and the features stock and assets_basic (E-44); the handlers
+// say so explicitly and go ahead of A11Y_HANDLERS.
+const FLOW_HANDLERS: Handler[] = [
+  {
+    path: '/modules',
+    reply: () => ({
+      body: {
+        data: [
+          { key: 'inventory', phase: 'P2', nav: ['assets'], enabled: true },
+          { key: 'stocktake', phase: 'P2', nav: ['stocktake'], enabled: true },
+        ],
+      },
+    }),
+  },
+  {
+    path: '/entitlements',
+    reply: () => ({
+      body: list(
+        ['assets_basic', 'stock'].map((feature_key) => ({
+          organization_id: ORG_ID,
+          feature_key,
+          plan: 'standard',
+          enabled: true,
+          limits: {},
+          source: 'manual',
+        })),
+      ),
+    }),
+  },
+];
+
+const FLOW_DIALOGS: { name: string; url: string; button: RegExp }[] = [
+  { name: 'inventory receive', url: '/inventory', button: /^(empfangen|receive)$/i },
+  { name: 'inventory move', url: '/inventory', button: /^(verschieben|move)$/i },
+  { name: 'inventory reserve', url: '/inventory', button: /^(reservieren|reserve)$/i },
+  { name: 'assignments assign', url: '/assignments', button: /^(zuweisen|assign)$/i },
+];
+
 test.describe('accessibility (WCAG 2.1 AA)', () => {
   test('every route of the router has a check', () => {
     const covered = ROUTES.map((route) => route.path).sort();
@@ -598,6 +638,28 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
               language,
             );
             await expect(dialog.plainText(page)).not.toHaveCSS('color', 'rgb(0, 0, 0)');
+          });
+        }
+      }
+
+      for (const dialog of FLOW_DIALOGS) {
+        for (const theme of THEMES) {
+          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url: dialog.url,
+                handlers: FLOW_HANDLERS,
+                prepare: async (p) => {
+                  await p.getByRole('button', { name: dialog.button }).click();
+                  await expect(p.getByRole('dialog').getByRole('combobox').first()).toBeVisible();
+                },
+                ready: (p) => p.getByRole('dialog'),
+                include: '[role="dialog"]',
+              },
+              theme,
+              language,
+            );
           });
         }
       }

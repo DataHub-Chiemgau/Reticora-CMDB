@@ -867,6 +867,32 @@ export interface StockMovement {
   created_at: string;
 }
 
+/**
+ * StockBooking is the body of POST /stock-movements as the flows send it:
+ * a quantity booking of a consumable in bins, or the transfer of a serial
+ * asset to a location (E-142). Other movement types of an asset arise only
+ * in their domain paths (assign, reserve, dispose).
+ */
+export type StockBooking =
+  | {
+      consumable_id: string;
+      movement_type: 'receipt' | 'retrieval' | 'correction' | 'transfer';
+      from_location_id?: string;
+      to_location_id?: string;
+      quantity: number;
+      reason?: string;
+    }
+  | {
+      asset_id: string;
+      movement_type: 'transfer';
+      to_location_id: string;
+      reason?: string;
+    };
+
+/** The stock of a consumable in one bin: on_hand and reserved (STK-02, WP-283). */
+export type ConsumableStock = components['schemas']['ConsumableStock'];
+export type ConsumableStockList = components['schemas']['ConsumableStockListResponse'];
+
 export interface QuantityItem {
   id: string;
   sku?: string;
@@ -894,17 +920,22 @@ export const inventoryApi = {
   ) {
     return fetchAPI<PaginatedResponse<StockMovement>>(`/stock-movements${qs(params)}`);
   },
-  record(data: {
-    item_kind?: string;
-    asset_id?: string;
-    quantity_item_id?: string;
-    movement_type: string;
-    from_location_id?: string;
-    to_location_id?: string;
-    quantity?: number;
-    reason?: string;
-  }) {
-    return fetchAPI('/stock-movements', { method: 'POST', body: JSON.stringify(data) });
+  /**
+   * book records a physical movement through POST /stock-movements (WP-274,
+   * WP-756, E-38): a consumable books receipt, retrieval, correction or
+   * transfer with quantity on its stock per bin; a serial asset only moves
+   * by transfer to to_location_id (E-142). Movements are never changed or
+   * deleted; a correction is a counter-booking (Convention 14).
+   */
+  book(data: StockBooking) {
+    return fetchAPI<StockMovement>('/stock-movements', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /** The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283). */
+  stockLevels(consumableId: string) {
+    return fetchAPI<ConsumableStockList>(`/consumables/${consumableId}/stock${qs({ limit: 200 })}`);
   },
   listItems(params: { limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<QuantityItem>>(`/inventory/items${qs(params)}`);
@@ -966,13 +997,19 @@ export interface Reservation {
   reason?: string;
 }
 
+export type ReserveAssetRequest = components['schemas']['ReserveAssetRequest'];
+export type ConvertReservationRequest = components['schemas']['ConvertReservationRequest'];
+
 export const reservationApi = {
   list(params: { state?: string; limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<Reservation>>(`/reservations${qs(params)}`);
   },
+  /**
+   * create reserves a quantity of a consumable in a bin (WP-759). Assets are
+   * reserved only through reserve (POST /assets/{id}/reserve, WP-277).
+   */
   create(data: {
-    asset_id?: string;
-    consumable_id?: string;
+    consumable_id: string;
     /** The bin; without it the only bin of the consumable (WP-284). */
     location_id?: string;
     quantity?: number;
@@ -982,7 +1019,29 @@ export const reservationApi = {
     project_ref?: string;
     reason?: string;
   }) {
-    return fetchAPI('/reservations', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI<Reservation>('/reservations', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /**
+   * reserve reserves an asset for a user (assignee_id) or a project
+   * (project_ref) until reserved_until (POST /assets/{id}/reserve, AST-06,
+   * WP-277); 409 asset-reserved or asset-assigned when it is taken.
+   */
+  reserve(assetId: string, data: ReserveAssetRequest) {
+    return fetchAPI<Reservation>(`/assets/${assetId}/reserve`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /**
+   * convert turns an active asset reservation into an assignment (POST
+   * /reservations/{id}/convert, WP-277): to assignee_id or team_id, else to
+   * the user of the reservation. 409 when it is no longer active.
+   */
+  convert(id: string, data: ConvertReservationRequest = {}) {
+    return fetchAPI<components['schemas']['ConvertReservationResponse']>(
+      `/reservations/${id}/convert`,
+      { method: 'POST', body: JSON.stringify(data) },
+    );
   },
   release(id: string): Promise<Reservation> {
     return fetchAPI(`/reservations/${id}/release`, { method: 'POST', body: '{}' });

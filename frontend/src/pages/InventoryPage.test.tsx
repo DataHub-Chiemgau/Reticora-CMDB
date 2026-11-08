@@ -4,17 +4,15 @@ import { InventoryPage, MOVEMENT_TYPES } from './InventoryPage';
 import { renderWithProviders } from '../test/utils';
 
 // WP-274 (STK-04, E-38): the page knows the eleven movement types of the
-// ledger and none of the former names; the booking dialog offers per object
-// kind only the types POST /stock-movements takes and sends quantity only
-// with a quantity item.
+// ledger and none of the former names. WP-806 (UI-15): the free-text booking
+// dialog gave way to the flows of StockFlowDialogs (flows.test.tsx); a click
+// on the object of a movement opens its history.
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
-const ASSET = 'a5000000-0000-4000-8000-000000000001';
-const ITEM = 'c1000000-0000-4000-8000-000000000001';
 const CONSUMABLE = 'c2000000-0000-4000-8000-000000000001';
 
 function json(body: unknown, status = 200) {
@@ -26,17 +24,11 @@ function json(body: unknown, status = 200) {
 
 const empty = { data: [], total: 0, limit: 50, offset: 0, has_more: false };
 
-/** stubInventoryApi answers the lists of the page and records every POST /stock-movements body. */
+/** stubInventoryApi answers the lists of the page. */
 function stubInventoryApi() {
-  const posts: Record<string, unknown>[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input.toString(), 'http://test');
     const method = (init?.method ?? 'GET').toUpperCase();
-    if (url.pathname === '/api/v1/stock-movements' && method === 'POST') {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      posts.push(body);
-      return json({ id: 'm-1', item_kind: 'asset', ...body }, 201);
-    }
     if (url.pathname === '/api/v1/stock-movements') {
       return json({
         data: [
@@ -61,7 +53,6 @@ function stubInventoryApi() {
     return json({ status: 404, detail: `unexpected request: ${method} ${url.pathname}` }, 404);
   });
   vi.stubGlobal('fetch', fetchMock);
-  return posts;
 }
 
 function optionValues(select: HTMLElement) {
@@ -90,49 +81,26 @@ describe('InventoryPage movements', () => {
     expect(time?.getAttribute('dateTime')).toBe('2026-10-14T08:00:00Z');
   });
 
-  it('books an asset without quantity and a quantity item with quantity', async () => {
-    const posts = stubInventoryApi();
+  it('offers the flows instead of the free-text dialog and opens the history of an object (WP-806)', async () => {
+    stubInventoryApi();
+    const fetchMock = vi.mocked(fetch);
     renderWithProviders(<InventoryPage />, { route: '/inventory' });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Bewegung erfassen' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(optionValues(within(dialog).getByLabelText('Objektart'))).toEqual([
-      'asset',
-      'quantity_item',
-    ]);
-    const type = within(dialog).getByLabelText('Bewegungsart');
-    expect(optionValues(type)).toEqual([
-      'receipt',
-      'transfer',
-      'deployment',
-      'retrieval',
-      'repair',
-      'correction',
-    ]);
-    expect(within(dialog).queryByLabelText('Menge')).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Empfangen' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Verschieben' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reservieren' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Bewegung erfassen' })).toBeNull();
 
-    fireEvent.change(type, { target: { value: 'transfer' } });
-    fireEvent.change(within(dialog).getByLabelText('Asset-ID (serialisiert)'), {
-      target: { value: ASSET },
-    });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Bewegung erfassen' }));
-    await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]).toEqual({ asset_id: ASSET, movement_type: 'transfer' });
-
-    fireEvent.click(await screen.findByRole('button', { name: 'Bewegung erfassen' }));
-    const second = await screen.findByRole('dialog');
-    fireEvent.change(within(second).getByLabelText('Objektart'), {
-      target: { value: 'quantity_item' },
-    });
-    const quantityType = within(second).getByLabelText('Bewegungsart');
-    expect(optionValues(quantityType)).toEqual(['receipt', 'retrieval', 'correction', 'transfer']);
-    fireEvent.change(quantityType, { target: { value: 'retrieval' } });
-    fireEvent.change(within(second).getByLabelText('Mengenartikel-ID'), {
-      target: { value: ITEM },
-    });
-    fireEvent.change(within(second).getByLabelText('Menge'), { target: { value: '3' } });
-    fireEvent.click(within(second).getByRole('button', { name: 'Bewegung erfassen' }));
-    await waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts[1]).toEqual({ quantity_item_id: ITEM, quantity: 3, movement_type: 'retrieval' });
+    fireEvent.click(await screen.findByRole('button', { name: `Historie öffnen: ${CONSUMABLE}` }));
+    const dialog = await screen.findByRole('dialog', { name: `Historie: ${CONSUMABLE}` });
+    expect(await within(dialog).findByText('Entnahme')).toBeTruthy();
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) =>
+          String(input).includes(`/stock-movements?consumable_id=${CONSUMABLE}`),
+        ),
+      ).toBe(true),
+    );
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/history/'))).toBe(false);
   });
 });

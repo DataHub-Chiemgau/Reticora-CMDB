@@ -69,6 +69,9 @@ export default tseslint.config(
       // WP-315: the click builder and the saved views page.
       'src/components/rules/**/*.tsx',
       'src/pages/SavedViewsPage.tsx',
+      // WP-806: the inventory page and the object history.
+      'src/pages/InventoryPage.tsx',
+      'src/components/cmdb/ObjectHistory.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',

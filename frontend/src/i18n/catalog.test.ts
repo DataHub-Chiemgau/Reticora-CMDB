@@ -17,6 +17,7 @@ import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
+import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
 import { NODE_KINDS, relationshipChangeKinds } from '../api/client';
@@ -250,6 +251,9 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
+  // WP-806: the movement types of the ledger (STK-04, WP-274).
+  ['movement.types', MOVEMENT_TYPES],
+  ['movement.types', specEnum('MovementType')],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
 ];
@@ -347,9 +351,17 @@ describe('i18n catalog', () => {
         '../components/pickers/LocationPicker.tsx',
         '../components/pickers/UserTeamPicker.tsx',
         '../components/flows/AssignDialogs.tsx',
+        '../components/flows/StockFlowDialogs.tsx',
       ]),
     );
     expect(Object.keys(flowSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
+    expect([...MOVEMENT_TYPES]).toEqual(specEnum('MovementType'));
+    // The former key inventory.movementTypes is gone: one label per type.
+    expect(lookup(deDE, 'inventory.movementTypes')).toBeUndefined();
+    expect(lookup(enUS, 'inventory.movementTypes')).toBeUndefined();
   });
 
   it('offers exactly the template version states of the OpenAPI types (WP-314)', () => {
@@ -429,6 +441,8 @@ describe('i18n catalog', () => {
     '../components/cmdb/CIRelationshipsCard.tsx',
     // WP-315: the saved views page and the click builder.
     '../pages/SavedViewsPage.tsx',
+    // WP-806: the inventory page (the stock flow dialogs are flowSources).
+    '../pages/InventoryPage.tsx',
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
     ...Object.keys(ruleSources),
