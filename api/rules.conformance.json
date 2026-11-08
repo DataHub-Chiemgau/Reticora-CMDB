@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); the cases named reference: and reference list: compare reference attributes (WP-254: user, location, reference and the other alias types hold the id of the target as text, multi_value a list of ids, finding F-2 of WP-326); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
   "version": 1,
   "cases": [
     {
@@ -1232,6 +1232,313 @@
         "disks": ["ssd"]
       },
       "result": true
+    },
+    {
+      "name": "reference: eq the referenced id",
+      "condition": {
+        "op": "eq",
+        "field": "owner",
+        "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: eq another id",
+      "condition": {
+        "op": "eq",
+        "field": "owner",
+        "value": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": false
+    },
+    {
+      "name": "reference: eq on an absent reference",
+      "condition": {
+        "op": "eq",
+        "field": "owner",
+        "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "values": {},
+      "result": false
+    },
+    {
+      "name": "reference: ne another id",
+      "condition": {
+        "op": "ne",
+        "field": "location",
+        "value": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+      },
+      "values": {
+        "location": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: ne on an absent reference",
+      "condition": {
+        "op": "ne",
+        "field": "location",
+        "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "values": {},
+      "result": true
+    },
+    {
+      "name": "reference: in the listed ids",
+      "condition": {
+        "op": "in",
+        "field": "owner",
+        "value": [
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+        ]
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: in without the id",
+      "condition": {
+        "op": "in",
+        "field": "owner",
+        "value": [
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d",
+          "c9d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f"
+        ]
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": false
+    },
+    {
+      "name": "reference: not_in the listed ids",
+      "condition": {
+        "op": "not_in",
+        "field": "location",
+        "value": [
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+        ]
+      },
+      "values": {
+        "location": "c9d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: empty when absent",
+      "condition": {
+        "op": "empty",
+        "field": "contract"
+      },
+      "values": {},
+      "result": true
+    },
+    {
+      "name": "reference: empty for an empty id",
+      "condition": {
+        "op": "empty",
+        "field": "contract"
+      },
+      "values": {
+        "contract": ""
+      },
+      "result": true
+    },
+    {
+      "name": "reference: not_empty with an id",
+      "condition": {
+        "op": "not_empty",
+        "field": "contract"
+      },
+      "values": {
+        "contract": "c9d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: an id of digits compares as text",
+      "condition": {
+        "op": "eq",
+        "field": "owner",
+        "value": "12345678-1234-4123-8123-123456789012"
+      },
+      "values": {
+        "owner": "12345678-1234-4123-8123-123456789012"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: an id of digits is no number",
+      "condition": {
+        "op": "gt",
+        "field": "owner",
+        "value": 0
+      },
+      "values": {
+        "owner": "12345678-1234-4123-8123-123456789012"
+      },
+      "result": false
+    },
+    {
+      "name": "reference: contains a part of the id",
+      "condition": {
+        "op": "contains",
+        "field": "owner",
+        "value": "8b4d"
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "result": true
+    },
+    {
+      "name": "reference list: contains the id",
+      "condition": {
+        "op": "contains",
+        "field": "related",
+        "value": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+      },
+      "values": {
+        "related": [
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+        ]
+      },
+      "result": true
+    },
+    {
+      "name": "reference list: contains not another id",
+      "condition": {
+        "op": "contains",
+        "field": "related",
+        "value": "c9d8e7f6-a5b4-4c3d-9e2f-1a0b9c8d7e6f"
+      },
+      "values": {
+        "related": [
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+        ]
+      },
+      "result": false
+    },
+    {
+      "name": "reference list: eq an element is false",
+      "condition": {
+        "op": "eq",
+        "field": "related",
+        "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+      },
+      "values": {
+        "related": ["3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"]
+      },
+      "result": false
+    },
+    {
+      "name": "reference list: in is false for a list",
+      "condition": {
+        "op": "in",
+        "field": "related",
+        "value": ["3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"]
+      },
+      "values": {
+        "related": ["3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"]
+      },
+      "result": false
+    },
+    {
+      "name": "reference list: empty list is empty",
+      "condition": {
+        "op": "empty",
+        "field": "related"
+      },
+      "values": {
+        "related": []
+      },
+      "result": true
+    },
+    {
+      "name": "reference list: not_empty with ids",
+      "condition": {
+        "op": "not_empty",
+        "field": "related"
+      },
+      "values": {
+        "related": ["3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"]
+      },
+      "result": true
+    },
+    {
+      "name": "reference: all of a reference and a text field",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "owner",
+            "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+          },
+          {
+            "op": "eq",
+            "field": "status",
+            "value": "active"
+          }
+        ]
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+        "status": "active"
+      },
+      "result": true
+    },
+    {
+      "name": "reference: any of two references, one holds",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "owner",
+            "value": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+          },
+          {
+            "op": "contains",
+            "field": "related",
+            "value": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+          }
+        ]
+      },
+      "values": {
+        "owner": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+        "related": ["a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"]
+      },
+      "result": true
+    },
+    {
+      "name": "reference: not of another location",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "location",
+            "value": "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"
+          }
+        ]
+      },
+      "values": {
+        "location": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+      },
+      "result": true
     }
   ],
   "invalid_conditions": [
@@ -1491,6 +1798,41 @@
         ]
       },
       "path": "rules[1].rules[0].field"
+    },
+    {
+      "name": "invalid: reference eq with a list of ids",
+      "condition": {
+        "op": "eq",
+        "field": "owner",
+        "value": ["3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192"]
+      },
+      "path": "value"
+    },
+    {
+      "name": "invalid: reference in with a resolved reference object",
+      "condition": {
+        "op": "in",
+        "field": "owner",
+        "value": [
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+          {
+            "id": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+          }
+        ]
+      },
+      "path": "value[1]"
+    },
+    {
+      "name": "invalid: reference contains with a list of ids",
+      "condition": {
+        "op": "contains",
+        "field": "related",
+        "value": [
+          "3f6c1a2e-8b4d-4e1f-9a7c-2d5e6f708192",
+          "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+        ]
+      },
+      "path": "value"
     }
   ],
   "expressions": [

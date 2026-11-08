@@ -549,9 +549,9 @@ func frmKindFields() []*frmKind {
 			field("sensitive", "core.due_date", "due_date", "", "2031-03-26"),
 		}},
 		{kind: "document", fields: [3]frmKindField{
-			field("readable", "core.description", "description", "", "fr326ddesc"),
-			field("none", "core.tags", "tags", "", "fr326dtag"),
-			field("sensitive", "core.file_name", "file_name", "", "fr326dsens"),
+			field("readable", "core.description", "description", "description", "fr326ddesc"),
+			field("none", "core.tags", "tags", "tags", "fr326dtag"),
+			field("sensitive", "core.file_name", "file_name", "fileName", "fr326dsens"),
 		}},
 		{kind: "relationship", fields: [3]frmKindField{
 			field("readable", "core.notes", "notes", "", "fr326rnotes"),
@@ -596,24 +596,26 @@ func frmItem(body, id string) map[string]any {
 // for the object kinds besides ci (WP-326, TST-01 [P2], RBA-07, Konvention
 // 11): asset, contract, ticket, document and relationship, each with a
 // readable field, a field with the grant none and a sensitive field
-// without grant, probed in every channel that delivers the kind:
+// without grant, probed in every channel that delivers the kind (the role
+// may write documents, so the readable document field is editable):
 //
 //   - asset: REST detail and list, GraphQL asset, search, structured query
 //     (column), webhook (asset.created and asset.changed, bound
 //     subscription);
 //   - contract: REST detail and list;
 //   - ticket: REST detail and list, search;
-//   - document: search;
+//   - document: REST detail, list and the attachments of the ticket,
+//     GraphQL Asset.documents, search; writes through POST and PATCH
+//     (the readable field passes, the others are 403 with the field);
 //   - relationship: REST list of the CI, webhook (relationship.created,
 //     bound subscription).
 //
 // The export of POST /api/v1/exports is CI-only (assets export through
 // POST /api/v1/assets/bulk, DATEV in export/datev_test.go), GraphQL has no
 // member of these fields for contract, ticket or relationship, and the
-// structured query knows ci and asset only. The REST and GraphQL DTOs of
-// documents run through no field projection:
-// docs/acceptance/tst-01-phase2.md records that as a finding against
-// WP-267.
+// structured query knows ci and asset only. Documents were bound to the
+// field permissions in REST and GraphQL with finding F-1 of
+// docs/acceptance/tst-01-phase2.md (WP-267).
 //
 // Retest:
 //
@@ -638,7 +640,8 @@ func TestFieldRightsChannelMatrixObjectKinds(t *testing.T) {
 	// readable, per kind one field with the grant none and one sensitive
 	// field without grant (marked once the administrator wrote the
 	// objects: without a grant of its key nobody writes it, E-43).
-	readerPerms := []string{"ci:read", "asset:read", "contract:read", "ticket:read", "document:read", "relationship:read", "search:read"}
+	readerPerms := []string{"ci:read", "asset:read", "contract:read", "ticket:read", "document:read", "document:write",
+		"relationship:read", "search:read"}
 	roleID := f.ID()
 	raw, _ := json.Marshal(readerPerms)
 	exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'wp326-reader', $3::jsonb)`, roleID, f.OrgA, string(raw))
@@ -689,7 +692,8 @@ func TestFieldRightsChannelMatrixObjectKinds(t *testing.T) {
 		"tags": []string{ticket.fields[1].value}, "due_date": ticket.fields[2].value + "T12:00:00Z"})
 	document := byKind["document"]
 	document.id = create("/api/v1/documents", map[string]any{"title": "wp326-doc", "description": document.fields[0].value,
-		"tags": []string{document.fields[1].value}, "file_name": document.fields[2].value + ".txt"})
+		"tags": []string{document.fields[1].value}, "file_name": document.fields[2].value + ".txt",
+		"links": []map[string]any{{"entity_type": "asset", "entity_id": asset.id}, {"entity_type": "ticket", "entity_id": ticket.id}}})
 	rel := byKind["relationship"]
 	source, target := f.CI(t, f.OrgA, f.Client1, "wp326-source"), f.CI(t, f.OrgA, f.Client1, "wp326-target")
 	rel.id = create("/api/v1/relationships", map[string]any{"source_ci_id": source, "target_ci_id": target, "rel_type": "depends_on",
@@ -796,6 +800,30 @@ func TestFieldRightsChannelMatrixObjectKinds(t *testing.T) {
 		}
 		return frmProbe{visible: strings.Contains(r.body, fl.value), exists: exists, detail: trim(r.body)}
 	}
+	graphQLDocuments := func(fl *frmKindField) frmProbe {
+		r := e.call(reader, http.MethodPost, "/bff/graphql", map[string]any{"query": fmt.Sprintf(`{ asset(id: %q) { documents { id title %s } } }`, asset.id, fl.gql)})
+		if r.code != http.StatusOK || strings.Contains(r.body, `"errors"`) {
+			t.Fatalf("graphql asset documents: %d %s", r.code, trim(r.body))
+		}
+		var body struct {
+			Data struct {
+				Asset struct {
+					Documents []map[string]any `json:"documents"`
+				} `json:"asset"`
+			} `json:"data"`
+		}
+		_ = json.Unmarshal([]byte(r.body), &body)
+		var doc map[string]any
+		for _, d := range body.Data.Asset.Documents {
+			if d["id"] == document.id {
+				doc = d
+			}
+		}
+		if doc == nil || doc["title"] != "wp326-doc" {
+			t.Fatalf("graphql asset documents miss %s: %s", document.id, trim(r.body))
+		}
+		return frmProbe{visible: strings.Contains(r.body, fl.value), exists: doc[fl.gql] != nil, detail: trim(r.body)}
+	}
 	structuredAsset := func(fl *frmKindField) frmProbe {
 		// Custom fields are the attributes of the query.
 		column := strings.Replace(fl.path, "custom_fields.", "attributes.", 1)
@@ -832,6 +860,10 @@ func TestFieldRightsChannelMatrixObjectKinds(t *testing.T) {
 			{"search /api/v1/search", searchProbe(ticket)},
 		},
 		"document": {
+			{"REST GET /api/v1/documents/{id}", rest(document, "/api/v1/documents/"+document.id)},
+			{"REST GET /api/v1/documents", rest(document, "/api/v1/documents?limit=200")},
+			{"REST GET /api/v1/tickets/{id}/attachments", rest(document, "/api/v1/tickets/"+ticket.id+"/attachments")},
+			{"GraphQL Asset.documents", graphQLDocuments},
 			{"search /api/v1/search", searchProbe(document)},
 		},
 		"relationship": {
@@ -855,6 +887,63 @@ func TestFieldRightsChannelMatrixObjectKinds(t *testing.T) {
 			}
 		}
 	}
+	// The writes of documents (after the reads: the new values would hit
+	// the search): POST with each field, PATCH with the patchable ones (a
+	// document has no file_name to patch). The readable field passes, the
+	// field with the grant none and the sensitive field are 403 with the
+	// field and change nothing. The POST needs a file_name, the sensitive
+	// field: it is refused always, with file_name among the fields.
+	type frmWrite struct {
+		method, path string
+		body         map[string]any
+		refused      []string
+	}
+	for i := range document.fields {
+		fl := &document.fields[i]
+		value := any(fl.value + "w")
+		if fl.path == "tags" {
+			value = []string{fl.value}
+		}
+		post := map[string]any{"title": "wp326-doc-w", "file_name": "wp326-w.txt"}
+		post[fl.path] = value
+		postRefused := []string{"file_name"}
+		if !fl.readable && fl.path != "file_name" {
+			postRefused = append(postRefused, fl.path)
+			slices.Sort(postRefused)
+		}
+		writes := []frmWrite{{http.MethodPost, "/api/v1/documents", post, postRefused}}
+		if fl.path != "file_name" {
+			var refused []string
+			if !fl.readable {
+				refused = []string{fl.path}
+			}
+			writes = append(writes, frmWrite{http.MethodPatch, "/api/v1/documents/" + document.id, map[string]any{fl.path: value}, refused})
+		}
+		for _, wr := range writes {
+			t.Run("document/write "+wr.method+"/"+fl.name, func(t *testing.T) {
+				r := e.call(reader, wr.method, wr.path, wr.body)
+				var problem struct {
+					Fields []string `json:"fields"`
+				}
+				_ = json.Unmarshal([]byte(r.body), &problem)
+				switch {
+				case len(wr.refused) == 0 && r.code/100 != 2:
+					t.Errorf("%s %s with %s: %d %s, want success", wr.method, wr.path, fl.path, r.code, trim(r.body))
+				case len(wr.refused) > 0 && (r.code != http.StatusForbidden || !slices.Equal(problem.Fields, wr.refused)):
+					t.Errorf("%s %s with %s: %d %s, want 403 with fields %v", wr.method, wr.path, fl.path, r.code, trim(r.body), wr.refused)
+				}
+			})
+		}
+	}
+	var docTags []string
+	var docFile string
+	if err = f.Admin.QueryRow(bg, `SELECT tags, file_name FROM document WHERE id = $1`, document.id).Scan(&docTags, &docFile); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(docTags, []string{document.fields[1].value}) || docFile != document.fields[2].value+".txt" {
+		t.Errorf("refused writes changed the document: tags %v, file_name %q", docTags, docFile)
+	}
+
 	// Control: the readable attribute of the edge stays in the projected
 	// answer.
 	if r := get("/api/v1/cis/" + source + "/relationships"); !strings.Contains(r.body, "s326") {

@@ -93,9 +93,10 @@ Benannter Test: `TestFieldRightsChannelMatrix`
 WP-730): Kanalmatrix REST/GraphQL/Suche/strukturierte Abfrage/Export/Webhook
 × lesbar/nicht lesbar/sensibel für die Objektart `ci`. Für die übrigen
 Objektarten (Konvention 11) ergänzt WP-326 in derselben Datei
-`TestFieldRightsChannelMatrixObjectKinds` (`:621`, 45 Fälle) mit je einem
+`TestFieldRightsChannelMatrixObjectKinds` (`:623`, 62 Fälle) mit je einem
 lesbaren Feld, einem Feld mit Grant `none` und einem sensiblen Feld ohne
-Grant:
+Grant; für `document` kommen seit der Behebung von F-1 die Schreibfälle
+(POST und PATCH) hinzu:
 
 | Objektart | Kanäle mit Zeilen | Kanäle ohne Projektion der Objektart |
 |---|---|---|
@@ -103,7 +104,7 @@ Grant:
 | `asset` | REST Detail und Liste, GraphQL `asset`, Suche, strukturierte Abfrage (Spalte), Webhook `asset.created` und `asset.changed` | Export: `POST /api/v1/exports` nimmt keine Assets (WP-782, `POST /api/v1/assets/bulk`), DATEV unter [DATEV](#datev-exp-01-p2-e-50) |
 | `contract` | REST Detail und Liste | GraphQL, Suche und strukturierte Abfrage liefern keine Verträge; Webhook nur `contract.expiring` (Projektion in `webhook/project.go`, Unit-Tests WP-730) |
 | `ticket` | REST Detail und Liste, Suche | GraphQL und strukturierte Abfrage liefern keine Tickets; Webhook-Ereignisse `ticket.*` werden einer Policy, die Tickets einschränkt, ganz vorenthalten (`unruledKinds`) |
-| `document` | Suche | REST und GraphQL: siehe Befund F-1 |
+| `document` | REST Detail, Liste und Anhänge `GET /tickets/{id}/attachments`, GraphQL `Asset.documents`, Suche; Schreiben über `POST /documents` und `PATCH /documents/{id}` (lesbares Feld 2xx, Grant `none` und sensibel 403 mit `fields`) | Webhook-Ereignisse `document.*` werden einer Policy, die Dokumente einschränkt, ganz vorenthalten (`unruledKinds`); behoben mit F-1 |
 | `relationship` | REST `GET /cis/{id}/relationships`, Webhook `relationship.created` | GraphQL `relationships` liefert weder `notes` noch `attributes` |
 
 | Teilfall | Nachweis | WP |
@@ -155,19 +156,22 @@ dem Formatwert `datev` über `POST /api/v1/exports` liest keine CI-Daten
 
 Alle Abschnitte der Konformanzdatei laufen auf beiden Seiten: `rules.test.ts`
 führt die Abschnitte von Regeln, Bedingungen und Ausdrücken aus,
-`filter.test.ts` die Filterabschnitte. Zu Referenzen in Bedingungen siehe
-Befund F-2.
+`filter.test.ts` die Filterabschnitte. Referenzen in Bedingungen prüfen
+seit der Behebung von F-2 die Fälle `reference: …` und `reference list: …`
+in `condition_cases` und `invalid_conditions` (Go, TS und
+`fieldmeta.Evaluate`).
 
 ## Befunde
 
-| Nr. | Befund | Gegen | Wirkung |
-|---|---|---|---|
-| F-1 | Die REST-DTOs der Dokumente (`GET/PATCH /api/v1/documents…`, `backend/internal/document/handler.go`) und der GraphQL-Typ `Document` (`Asset.documents`) laufen durch keine Feldrechte-Projektion: `description`, `tags`, `file_name` und `category` sind auch bei Grant `none` oder Sensibilität lesbar, Schreibzugriffe werden nicht geprüft. `field_grant` und die Suche kennen die Objektart `document` (die Suche projiziert sie, `TestFieldRightsChannelMatrixObjectKinds`), Konvention 11 verlangt die Bindung im WP der Objektart. | WP-267 | Lücke RBA-07 für `document` in REST und GraphQL; die Matrix führt für `document` nur die Suche |
-| F-2 | `api/rules.conformance.json` enthält keine Fälle für Referenzen in Bedingungen (Vergleich auf Referenzattribute wie `user`, `location`, `reference`). WP-254 hat Referenzen in Regelbedingungen ausdrücklich an ein Folge-WP gegeben. | WP-254 (Folge-WP) | MET-45 bleibt PASS für die vorhandenen Operatoren; Referenzbedingungen sind nicht konformanzgeprüft |
+| Nr. | Befund | Gegen | Wirkung | Stand |
+|---|---|---|---|---|
+| F-1 | Die REST-DTOs der Dokumente (`GET/PATCH /api/v1/documents…`, `backend/internal/document/handler.go`) und der GraphQL-Typ `Document` (`Asset.documents`) laufen durch keine Feldrechte-Projektion: `description`, `tags`, `file_name` und `category` sind auch bei Grant `none` oder Sensibilität lesbar, Schreibzugriffe werden nicht geprüft. `field_grant` und die Suche kennen die Objektart `document` (die Suche projiziert sie, `TestFieldRightsChannelMatrixObjectKinds`), Konvention 11 verlangt die Bindung im WP der Objektart. | WP-267 | Lücke RBA-07 für `document` in REST und GraphQL; die Matrix führt für `document` nur die Suche | Behoben (Folgecommit „Sicherheit: Feldrechte für Dokumente …“): REST projiziert Dokumente und Versionen mit der Objektart `document` (`backend/internal/document/fieldrights.go`, `permission.Project`), auch die Ticket-Anhänge; Liste mit Filter/Suche/Sortierung auf nicht lesbare Felder, POST, PATCH und Uploads (schreiben `file_size`, `mime_type`) auf nicht editierbare Felder → 403 mit `fields`; der Download benennt die Datei bei nicht lesbarem `file_name` nach der Dokument-ID; GraphQL `Document` löst die Felder über Resolver auf (nicht lesbar → `null`, Schema dafür nullable). Nachweis `TestFieldRightsChannelMatrixObjectKinds` (REST, GraphQL, Schreiben), `TestDocumentFieldRightsREST`, `TestDocumentFieldPermissions`, `TestProjectDocument` |
+| F-2 | `api/rules.conformance.json` enthält keine Fälle für Referenzen in Bedingungen (Vergleich auf Referenzattribute wie `user`, `location`, `reference`). WP-254 hat Referenzen in Regelbedingungen ausdrücklich an ein Folge-WP gegeben. | WP-254 (Folge-WP) | MET-45 bleibt PASS für die vorhandenen Operatoren; Referenzbedingungen sind nicht konformanzgeprüft | Behoben: 23 `condition_cases` und 3 `invalid_conditions` für Referenzen (Einzel-ID als Text, auch nur aus Ziffern; abwesend und leer; `in`/`not_in`; Teil-ID mit `contains`; Referenzliste mit `contains`, `empty`, `eq`/`in` falsch; Logik mit Referenzen). Go (`rules`, `fieldmeta`) und TS bestehen sie ohne Änderung der Auswertung |
 
 Beim Lückenschluss sind keine Produktfehler aufgefallen; die ergänzten Fälle
 laufen gegen den bestehenden Produktionscode grün. Dieses WP ändert keinen
-Produktionscode.
+Produktionscode. Die Befunde F-1 und F-2 sind im Folgecommit behoben
+(Spalte Stand).
 
 ## Laufergebnis
 

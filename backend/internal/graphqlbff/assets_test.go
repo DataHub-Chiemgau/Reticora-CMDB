@@ -530,6 +530,54 @@ func TestAssetFieldPermissions(t *testing.T) {
 	}
 }
 
+// TestDocumentFieldPermissions: the document fields of Asset.documents
+// follow the document policy (RBA-07, WP-267, finding F-1 of WP-326): a
+// field with the grant none and a sensitive one without grant are null,
+// the structural members and the readable fields stay.
+func TestDocumentFieldPermissions(t *testing.T) {
+	f := newAssetFixture(t)
+	ctx := context.Background()
+	repo := permission.NewMemoryFieldGrants()
+	role := frRole
+	g := permission.FieldGrant{RoleID: &role, ObjectKind: permission.KindDocument, FieldKey: ptr("core.tags"), Level: permission.LevelNone}
+	if _, err := repo.CreateFieldGrant(ctx, fixtureOrg, &g); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateSensitiveField(ctx, fixtureOrg, &permission.SensitiveField{ObjectKind: permission.KindDocument,
+		FieldKey: "core.file_name"}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := permission.NewFieldResolver(nil, nil, repo, nil).PolicyForGrants(ctx, fixtureOrg,
+		[]identity.Grant{{RoleID: frRole, Permissions: assetRead}}, nil)
+	if err != nil || !policy.Restricted(permission.KindDocument) {
+		t.Fatalf("policy: %v", err)
+	}
+	resp := f.run(t, f.h, assetRead, policy, `{ asset(id: "`+f.asset+`") { documents { `+documentFields+` } } }`)
+	if len(resp.Errors) != 0 {
+		t.Fatalf("errors: %+v", resp.Errors)
+	}
+	docs, _ := resp.Data["asset"].(map[string]any)["documents"].([]any)
+	if len(docs) != 2 {
+		t.Fatalf("documents: %v", docs)
+	}
+	for _, raw := range docs {
+		d := raw.(map[string]any)
+		if d["fileName"] != nil || d["tags"] != nil {
+			t.Errorf("hidden fields delivered: %v", d)
+		}
+		if d["title"] == nil || d["mimeType"] != "application/pdf" || d["category"] != "general" {
+			t.Errorf("readable fields missing: %v", d)
+		}
+	}
+	// Without a restriction every field is there.
+	open := f.run(t, f.h, assetRead, nil, `{ asset(id: "`+f.asset+`") { documents { fileName tags } } }`)
+	for _, raw := range open.Data["asset"].(map[string]any)["documents"].([]any) {
+		if d := raw.(map[string]any); d["fileName"] == nil || d["tags"] == nil {
+			t.Errorf("unrestricted: %v", d)
+		}
+	}
+}
+
 // TestAssetDetailComplexity: the detail with every field and the default
 // pages stays within the budget (SEC-10, E-16); three of them in one
 // request are refused.

@@ -55,6 +55,10 @@ func (r *Resolver) CI() generated.CIResolver { return &ciResolver{r} }
 // Asset implements generated.ResolverRoot (GQL-03).
 func (r *Resolver) Asset() generated.AssetResolver { return &assetResolver{r} }
 
+// Document implements generated.ResolverRoot: the fields under field
+// permissions (RBA-07, WP-267).
+func (r *Resolver) Document() generated.DocumentResolver { return &documentResolver{r} }
+
 // Query implements generated.ResolverRoot.
 func (r *Resolver) Query() generated.QueryResolver { return &queryResolver{r} }
 

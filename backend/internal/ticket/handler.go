@@ -706,6 +706,11 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "ticket attachments are not available")
 		return
 	}
+	policy, err := permission.PolicyFrom(r.Context())
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 	docs, total, err := h.docs.GetLinksForEntity(r.Context(), t.OrganizationID, attachmentEntityType, ticketID, page)
 	if err != nil {
 		if errors.Is(err, api.ErrInvalidCursor) {
@@ -718,7 +723,20 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	if docs == nil {
 		docs = []document.Document{}
 	}
-	api.WriteJSON(w, http.StatusOK, api.NewestFirstPage(docs, total, page, func(d *document.Document) (time.Time, string) {
+	list := api.NewestFirstPage(docs, total, page, func(d *document.Document) (time.Time, string) {
 		return d.CreatedAt, d.ID
-	}))
+	})
+	// The attachments are documents under the field permissions of the
+	// kind document (WP-267, finding F-1 of WP-326).
+	data, err := document.ProjectList(policy, list.Data)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if data == nil {
+		api.WriteJSON(w, http.StatusOK, list)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[any]{Data: data, Total: list.Total, Limit: list.Limit,
+		Offset: list.Offset, HasMore: list.HasMore, NextCursor: list.NextCursor})
 }

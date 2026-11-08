@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -150,22 +151,27 @@ func recordVersionAudit(ctx context.Context, tx pgx.Tx, v *Version) error {
 // CreateVersion handles POST /api/v1/documents/{id}/versions (E-38): the
 // binary body becomes the next version; 201 with the version.
 func (h *Handler) CreateVersion(w http.ResponseWriter, r *http.Request) {
-	_, v, ok := h.storeVersion(w, r)
+	doc, v, policy, ok := h.storeVersion(w, r)
 	if !ok {
 		return
 	}
-	api.WriteJSON(w, http.StatusCreated, v)
+	body, err := projectVersion(policy, doc, v)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, body)
 }
 
 // UploadContent handles PUT /api/v1/documents/{id}/content: like POST
 // …/versions it stores the body as the next version (compatibility) and
 // answers 200 with the document, which mirrors the new version.
 func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
-	doc, _, ok := h.storeVersion(w, r)
+	doc, _, policy, ok := h.storeVersion(w, r)
 	if !ok {
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, doc)
+	writeDocument(w, http.StatusOK, policy, doc)
 }
 
 // storeVersion stores the request body as the next version of the document
@@ -181,41 +187,52 @@ func (h *Handler) UploadContent(w http.ResponseWriter, r *http.Request) {
 // any other answers 404 before anything is stored. (5) After the commit the
 // version's malware scan is submitted (WithScans, WP-734). Each upload takes one of
 // the upload slots of the instance (503 with Retry-After without one) and
-// runs under the upload deadline. It writes the error response itself and
-// reports whether the version was stored.
-func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Document, *Version, bool) {
+// runs under the upload deadline. An upload writes file_size and mime_type
+// of the document: a principal that may not edit them is refused with 403
+// and the fields before any blob (WP-267). It writes the error response
+// itself and reports whether the version was stored; the policy is that of
+// the request.
+func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Document, *Version, *permission.FieldPolicy, bool) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if h.blobs == nil {
 		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "document content upload requires blob storage")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	release, ok := h.beginUpload(w)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	defer release()
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return nil, nil, nil, false
+	}
 
 	id := chi.URLParam(r, "id")
 	doc, err := h.repo.GetWritable(r.Context(), t.OrganizationID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if refuseSignatureChange(w, doc, nil) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	// (1) Body, verified type (SEC-09, sniff.go), size and checksum.
 	mimeType, payload, ok := h.readUpload(w, r)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	size := int64(len(payload))
+	if checkErr := checkUpload(policy, doc, size, mimeType); checkErr != nil {
+		api.WriteFieldError(w, checkErr)
+		return nil, nil, nil, false
+	}
 	sum := sha256.Sum256(payload)
 	checksum := hex.EncodeToString(sum[:])
 
@@ -226,17 +243,17 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		if !api.WriteEntitlementError(w, err) {
 			api.WriteRepoError(w, err)
 		}
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if limit != nil {
 		used, usageErr := h.repo.StorageUsage(r.Context(), t.OrganizationID)
 		if usageErr != nil {
 			api.WriteRepoError(w, usageErr)
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		if used+size > *limit {
 			api.WriteEntitlementError(w, storageLimitError(*limit, used))
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 	}
 
@@ -254,7 +271,7 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 	v.StorageKey = blob.OrgKey(t.OrganizationID, "documents", doc.ID, v.ID)
 	if err = h.blobs.Put(r.Context(), h.bucket, v.StorageKey, bytes.NewReader(payload), size, mimeType); err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not store the document content")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	// (4) The binding transaction; its refusal removes the blob again.
@@ -268,11 +285,11 @@ func (h *Handler) storeVersion(w http.ResponseWriter, r *http.Request) (*Documen
 		default:
 			api.WriteRepoError(w, err)
 		}
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	// (5) The malware scan of the committed version (SEC-09, E-42).
 	h.enqueueScan(r.Context(), v)
-	return updated, v, true
+	return updated, v, policy, true
 }
 
 // ListVersions handles GET /api/v1/documents/{id}/versions: the versions of
@@ -290,7 +307,12 @@ func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
-	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), page)
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
+	docID := chi.URLParam(r, "id")
+	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, docID, page)
 	if err != nil {
 		switch {
 		case errors.Is(err, api.ErrInvalidCursor):
@@ -310,14 +332,30 @@ func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		next = api.EncodeCursor(api.Cursor{Sort: versionCursorSort, Dir: "desc",
 			Value: strconv.Itoa(items[len(items)-1].Version), ID: items[len(items)-1].ID})
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Version]{
+	list := api.ListResponse[Version]{
 		Data:       items,
 		Total:      total,
 		Limit:      page.Limit,
 		Offset:     page.Offset,
 		HasMore:    next != "",
 		NextCursor: next,
-	})
+	}
+	if !policy.Restricted(permission.KindDocument) {
+		api.WriteJSON(w, http.StatusOK, list)
+		return
+	}
+	// Size, MIME type and uploader of a version are those of the document
+	// (file_size, mime_type, uploaded_by) under its field permissions.
+	doc := &Document{ID: docID}
+	data := make([]any, len(items))
+	for i := range items {
+		if data[i], err = projectVersion(policy, doc, &items[i]); err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[any]{Data: data, Total: list.Total, Limit: list.Limit,
+		Offset: list.Offset, HasMore: list.HasMore, NextCursor: list.NextCursor})
 }
 
 // Usage handles GET /api/v1/documents/usage: the stored bytes of the whole

@@ -144,6 +144,34 @@ describe('DocumentDetailPage', () => {
     );
   });
 
+  it('shows fields left out by the field permissions as missing and never writes them back', async () => {
+    // RBA-07 (WP-267): category, file_name, file_size and the version's
+    // size and MIME type are not readable.
+    const hidden: Record<string, unknown> = { ...documentOf('clean', 1), description: 'offen' };
+    for (const key of ['category', 'file_name', 'file_size', 'mime_type', 'tags'])
+      delete hidden[key];
+    const version: Record<string, unknown> = { ...versionOf(1, 'clean') };
+    delete version.size;
+    delete version.mime_type;
+    const calls = stubApi({
+      'GET /documents/doc-1': () => json(hidden),
+      'GET /documents/doc-1/versions': () => json(page([version])),
+      'GET /documents/doc-1/links': () => json(page([])),
+      'PATCH /documents/doc-1': ({ body }) => json({ ...hidden, ...(body as object) }),
+    });
+    renderPage();
+
+    const table = await screen.findByRole('table');
+    expect(await within(table).findByText('v1')).toBeInTheDocument();
+    expect(within(table).getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByLabelText('Kategorie')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('Titel'), { target: { value: 'Neuer Titel' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ title: 'Neuer Titel' });
+  });
+
   it('reads a pending scan again until it is clean', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let scan: Scan = 'pending_scan';

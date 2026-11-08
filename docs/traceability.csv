@@ -1553,3 +1553,6 @@ ABN-02;[Q];G2;tests/load/writes.js;WP-823
 NFR-03;[B], Teilumfang [P5];G2;tests/load/writes.js;WP-823
 UI-14;[P2–P4, A];C;frontend/src/pages/ContractsPage.test.tsx;WP-808
 UI-14;[P2–P4, A];C;frontend/src/components/bulk/BulkBar.test.tsx;WP-816
+RBA-07;[P2];B;backend/internal/document/fieldrights_test.go;WP-267
+RBA-07;[P2];B;backend/internal/tenant/rls/fieldrights_matrix_integration_test.go;WP-267
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-254

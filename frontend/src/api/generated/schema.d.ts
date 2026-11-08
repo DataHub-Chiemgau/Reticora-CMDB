@@ -1510,12 +1510,15 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List documents */
+    /**
+     * List documents
+     * @description Each document carries only the fields the field permissions let the caller read (object kind document, field keys core.<field>, RBA-07, WP-267). A `category` filter or sort and a `search` (it also matches file_name) on a field the caller cannot read in every scope answer 403 with the fields.
+     */
     get: operations['listDocuments'];
     put?: never;
     /**
      * Create a document metadata record
-     * @description links creates the document and its links in one transaction (E-61, option 1). Each target is checked like POST /api/v1/documents/{id}/links: an unknown entity_type answers 422, a target that does not exist or lies outside the caller's scope 404, and nothing is created. A document without links is org-wide, so a principal restricted to some clients, sites or teams needs at least one link, otherwise 403 (E-09, E-11), and so does a link whose target lies outside its write scope. With links the audit log records document.created with the new document and one document.linked per link (link_id, entity_type, entity_id) in the transaction of the creation.
+     * @description links creates the document and its links in one transaction (E-61, option 1). Each target is checked like POST /api/v1/documents/{id}/links: an unknown entity_type answers 422, a target that does not exist or lies outside the caller's scope 404, and nothing is created. A document without links is org-wide, so a principal restricted to some clients, sites or teams needs at least one link, otherwise 403 (E-09, E-11), and so does a link whose target lies outside its write scope. With links the audit log records document.created with the new document and one document.linked per link (link_id, entity_type, entity_id) in the transaction of the creation. Every sent field must be editable under the field permissions (object kind document, RBA-07, WP-267), otherwise 403 with the fields; the answer carries only the readable fields.
      */
     post: operations['createDocument'];
     delete?: never;
@@ -1534,7 +1537,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** Get a document */
+    /**
+     * Get a document
+     * @description The document with the fields the field permissions let the caller read (object kind document, RBA-07, WP-267).
+     */
     get: operations['getDocument'];
     put?: never;
     post?: never;
@@ -1547,7 +1553,7 @@ export interface paths {
     head?: never;
     /**
      * Update a document
-     * @description A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+     * @description A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09). A sent field the caller may not read, or a readable one whose value changes, must be editable under the field permissions (object kind document, RBA-07, WP-267), otherwise 403 with the fields; the answer carries only the readable fields.
      */
     patch: operations['updateDocument'];
     trace?: never;
@@ -4393,7 +4399,7 @@ export interface paths {
     get: operations['downloadDocumentContent'];
     /**
      * Upload the binary content of a document
-     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created.
+     * @description Stores the request body as the next version of the document, like POST /api/v1/documents/{id}/versions (kept for compatibility, E-38), and answers with the document, which mirrors the new version in version, storage_key, file_size and mime_type. Every upload gets an object key of its own. The Content-Type header must name one of the allowed types and the content must carry its signature (SEC-09); the stored MIME type is the verified one. The body is limited to RETICORA_DOCUMENT_MAX_UPLOAD_MB (default 50 MiB). A principal restricted to some clients, sites or teams uploads only to documents whose links it sees completely; other documents answer 404 before anything is stored (TEN-05, E-09). An upload that would take the stored bytes of the organization above max_storage_mb answers 403 entitlement-limit and stores nothing (MGT-01, E-44). The audit log records document.version_created. An upload writes file_size and mime_type of the document: a caller who may not edit them under the field permissions (object kind document, RBA-07, WP-267) is refused with 403 and the fields before anything is stored; the answer carries only the readable fields, and the download names the file by the document id when file_name is not readable.
      */
     put: operations['uploadDocumentContent'];
     post?: never;
@@ -8820,7 +8826,7 @@ export interface paths {
     };
     /**
      * List the versions of a document
-     * @description Version, size, MIME type, checksum and scan status of every version of a visible document, highest version first, paged with `limit` and the signed `cursor` (API-02). A document outside the caller's scope answers 404.
+     * @description Version, size, MIME type, checksum and scan status of every version of a visible document, highest version first, paged with `limit` and the signed `cursor` (API-02). A document outside the caller's scope answers 404. size, mime_type and uploaded_by follow the field permissions of the document (RBA-07, WP-267).
      */
     get: operations['listDocumentVersions'];
     put?: never;
@@ -8924,7 +8930,7 @@ export interface paths {
     };
     /**
      * List the documents attached to a ticket
-     * @description The documents linked to the ticket (document_link with entity_type ticket; TKT-01, WP-765), newest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02); a forged cursor is 400. A ticket that does not exist or lies outside the caller's scope answers 404; of its documents the caller sees those whose link to the ticket it sees. Upload, scan and linking stay with the documents (POST /api/v1/documents/{id}/links with entity_type ticket). Requires document:read.
+     * @description The documents linked to the ticket (document_link with entity_type ticket; TKT-01, WP-765), newest first (created_at, id), paged with `limit` (at most 200) and the signed `cursor` from `next_cursor` (API-02); a forged cursor is 400. A ticket that does not exist or lies outside the caller's scope answers 404; of its documents the caller sees those whose link to the ticket it sees. Upload, scan and linking stay with the documents (POST /api/v1/documents/{id}/links with entity_type ticket). Each document carries only the fields the field permissions let the caller read (object kind document, RBA-07, WP-267). Requires document:read.
      */
     get: operations['listTicketAttachments'];
     put?: never;
@@ -13405,20 +13411,21 @@ export interface components {
     AssignmentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Assignment'][];
     };
+    /** @description A document. The fields id, organization_id, title, storage_key, version, scan_status, scanned_at and the timestamps are always present (scan_status and scanned_at once there is content); the others are left out when the field permissions do not let the caller read them (object kind document, field keys core.<field>, RBA-07, WP-267). */
     Document: {
       id: string;
       organization_id: string;
       title: string;
       description?: string;
-      file_name: string;
-      file_size: number;
-      mime_type: string;
+      file_name?: string;
+      file_size?: number;
+      mime_type?: string;
       /** @description Server-generated object key of the current version below org/<organization_id>/, set by PUT /api/v1/documents/{id}/content or POST /api/v1/documents/{id}/versions; empty until content is uploaded. */
       readonly storage_key: string;
       version: number;
-      category: string;
-      tags: string[];
-      uploaded_by: string;
+      category?: string;
+      tags?: string[];
+      uploaded_by?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -17161,6 +17168,7 @@ export interface components {
     DocumentLinkListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['DocumentLink'][];
     };
+    /** @description A version of a document. size, mime_type and uploaded_by are those of the document (file_size, mime_type, uploaded_by) and are left out when the field permissions do not let the caller read them (RBA-07, WP-267). */
     DocumentVersion: {
       id: string;
       organization_id: string;
@@ -17168,8 +17176,8 @@ export interface components {
       /** @description Version number, 1 for the first content; the document mirrors the highest. */
       version: number;
       /** Format: int64 */
-      size: number;
-      mime_type: string;
+      size?: number;
+      mime_type?: string;
       /** @description Hex sha256 of the content; null only for versions stored before versioning. */
       checksum_sha256: string | null;
       /**
@@ -20967,6 +20975,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -20996,7 +21014,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Forbidden: the route permission, the scope (a document without links or a link outside the write scope) or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description A link with an entity type outside the registry, or `category` `signature`, which only a signed assignment, return or transfer sets (WP-276, WP-748). */
       422: {
@@ -21094,6 +21121,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      /** @description Forbidden: the route permission or the field permissions (FieldForbiddenProblem with `fields`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
@@ -28552,7 +28589,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission, the plan (feature-not-entitled), the storage limit max_storage_mb (entitlement-limit, MGT-01, E-44) or the field permissions of file_size and mime_type (FieldForbiddenProblem with `fields`, RBA-07, WP-267). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
@@ -40826,7 +40872,16 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['EntitlementLimit'];
+      /** @description Forbidden: a missing permission, the plan (feature-not-entitled), the storage limit max_storage_mb (entitlement-limit, MGT-01, E-44) or the field permissions of file_size and mime_type (FieldForbiddenProblem with `fields`, RBA-07, WP-267). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json':
+            components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
+        };
+      };
       404: components['responses']['NotFound'];
       /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
       409: {

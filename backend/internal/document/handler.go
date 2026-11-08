@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
@@ -204,6 +205,16 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, ferr)
 		return
 	}
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
+	// A filter, search or sort on a field the principal cannot read is 403
+	// with the fields (WP-267, pattern of contract and asset).
+	if filterErr := permission.CheckListFilter(policy, permission.KindDocument, nil, listFieldPaths(&filter)); filterErr != nil {
+		api.WriteFieldError(w, filterErr)
+		return
+	}
 
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
@@ -223,7 +234,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if page.Cursor != nil {
 		hasMore = len(items) == page.Limit
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Document]{
+	writeDocumentList(w, policy, &api.ListResponse[Document]{
 		Data:       items,
 		Total:      total,
 		Limit:      page.Limit,
@@ -241,6 +252,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
@@ -248,7 +263,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, item)
+	writeDocument(w, http.StatusOK, policy, item)
 }
 
 // Create handles POST /api/v1/documents
@@ -274,6 +289,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if refuseSignatureChange(w, nil, &req.Category) {
+		return
+	}
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
+	// Every sent field must be editable (403 with the fields).
+	if err := permission.CheckWrite(policy, permission.KindDocument, "", permission.ObjectRef{}, req.sentFields()); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 
@@ -326,7 +350,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusCreated, d)
+	writeDocument(w, http.StatusCreated, policy, d)
 }
 
 // checkEntityFilter checks the query parameters entity_type and entity_id
@@ -395,6 +419,15 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if refuseSignatureChange(w, current, req.Category) {
 		return
 	}
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
+	// A field the principal may not edit is 403 with the fields (WP-267).
+	if checkErr := checkUpdate(policy, current, &req); checkErr != nil {
+		api.WriteFieldError(w, checkErr)
+		return
+	}
 
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
@@ -402,7 +435,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	api.WriteJSON(w, http.StatusOK, item)
+	writeDocument(w, http.StatusOK, policy, item)
 }
 
 // Delete handles DELETE /api/v1/documents/{id}
@@ -451,6 +484,10 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "version must be a positive integer")
 		return
 	}
+	policy, ok := policyOf(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	doc, err := h.repo.GetByID(r.Context(), t.OrganizationID, id)
 	if err != nil {
@@ -482,7 +519,7 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key, downloadOf(doc.FileName, mimeType))
+	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key, downloadOf(downloadName(policy, doc), mimeType))
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a download URL")
 		return
