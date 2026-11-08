@@ -3,6 +3,8 @@ package labels_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -11,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // TestLabelLookup covers WP-762 (INV-03) against PostgreSQL: the URN, the
@@ -146,4 +149,66 @@ func TestLabelLookup(t *testing.T) {
 	otherFull := lookupRoute(repo, entitled(t, f.OrgB, entitlement.FeatureBarcode, entitlement.FeatureAssetsBasic, entitlement.FeatureStock))
 	notFound(t, "organization B: code of A", lookup(t, otherFull, otherOrg, "LK-INV-1"))
 	notFound(t, "organization B: URN of A", lookup(t, otherFull, otherOrg, "urn:reticora:asset:"+asset1))
+}
+
+// TestLabelLookupUniformNotFound covers the enumeration case of WP-829
+// (SEC-11) against PostgreSQL: for a caller of client 1, the code of an
+// object of another organization, of another client and a code that does
+// not exist answer identically, status, Content-Type and body, over the
+// register (barcode, inventory number) and over the URN; the answer does
+// not reveal whether a code exists.
+func TestLabelLookupUniformNotFound(t *testing.T) {
+	f := scopetest.Seed(t, "2e")
+	bg := context.Background()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	own := f.Asset(t, f.OrgA, f.Client1, "LK829-INV-OWN")
+	exec(`UPDATE asset SET barcode = 'LK829-BC-OWN' WHERE id = $1`, own)
+	otherClient := f.Asset(t, f.OrgA, f.Client2, "LK829-INV-C2")
+	exec(`UPDATE asset SET barcode = 'LK829-BC-C2' WHERE id = $1`, otherClient)
+	otherOrg := f.Asset(t, f.OrgB, "", "LK829-INV-B")
+	exec(`UPDATE asset SET barcode = 'LK829-BC-B' WHERE id = $1`, otherOrg)
+
+	route := lookupRoute(labels.NewPGRepository(f.App),
+		entitled(t, f.OrgA, entitlement.FeatureBarcode, entitlement.FeatureAssetsBasic, entitlement.FeatureStock))
+	// raw sends the code as a client-1 user of organization A with a fixed
+	// trace id, so bodies compare verbatim.
+	raw := func(code string) *httptest.ResponseRecorder {
+		t.Helper()
+		ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, ClientID: f.Client1})
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: "user-1", OrganizationID: f.OrgA, Permissions: allReads,
+			Type: identity.PrincipalTypeUser})
+		w := httptest.NewRecorder()
+		w.Header().Set(api.RequestIDHeader, "wp829")
+		route.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/labels/lookup?code="+url.QueryEscape(code), http.NoBody).WithContext(ctx))
+		return w
+	}
+
+	if w := raw("LK829-BC-OWN"); w.Code != http.StatusOK {
+		t.Fatalf("own asset: %d %s, want 200", w.Code, w.Body.String())
+	}
+	missing := raw("LK829-NONE")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("unknown code: %d %s, want 404", missing.Code, missing.Body.String())
+	}
+	for name, code := range map[string]string{
+		"barcode of another organization":          "LK829-BC-B",
+		"inventory number of another organization": "LK829-INV-B",
+		"URN of another organization":              "urn:reticora:asset:" + otherOrg,
+		"barcode of another client":                "LK829-BC-C2",
+		"inventory number of another client":       "LK829-INV-C2",
+		"URN of another client":                    "urn:reticora:asset:" + otherClient,
+		"URN that does not exist":                  "urn:reticora:asset:" + f.ID(),
+	} {
+		w := raw(code)
+		if w.Code != missing.Code || w.Body.String() != missing.Body.String() ||
+			w.Header().Get("Content-Type") != missing.Header().Get("Content-Type") {
+			t.Errorf("%s: %d %q %s, want %d %q %s as for an unknown code", name, w.Code, w.Header().Get("Content-Type"),
+				w.Body.String(), missing.Code, missing.Header().Get("Content-Type"), missing.Body.String())
+		}
+	}
 }

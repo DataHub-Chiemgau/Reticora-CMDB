@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +17,10 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -24,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -541,5 +546,159 @@ func TestBulkRevertOnTheQueue(t *testing.T) {
 	}
 	if n := e.count(`SELECT count(*) FROM ci WHERE id = ANY($1::uuid[]) AND status = 'active'`, ids); n != 3 {
 		t.Errorf("CIs reverted on the queue: %d, want 3", n)
+	}
+}
+
+// TestBulkRevertNegativeCasesAgainstPostgres covers the security cases of
+// the revert of CI and asset bulks (SEC-11, WP-829; ci.bulk of WP-305 and
+// WP-783, asset.bulk of WP-781 with the revert of WP-784) against
+// PostgreSQL, wired like server/router.go with the idempotency middleware
+// (API-04) in front of POST /jobs/{id}/revert:
+//
+//   - a principal of another organization, with every right, does not find
+//     the job: 404 like an unknown job, also with the Idempotency-Key of
+//     the creator;
+//   - without the right of the original operation (ci:write, asset:write)
+//     the revert is 403 and queues no revert job;
+//   - a repeated POST with the same Idempotency-Key replays the stored 202
+//     verbatim, also after the revert ended, and queues no second job;
+//   - a second revert of the reverted job is 409 already reverted.
+//
+// The cases of merge jobs are in handler_test.go and
+// revert_metrics_integration_test.go (WP-553, WP-404) and not repeated.
+func TestBulkRevertNegativeCasesAgainstPostgres(t *testing.T) {
+	e := newBulkRevertEnv(t)
+	f := e.f
+	store := jobs.NewPGRepository(f.App)
+	jobSvc := jobs.NewService(store)
+	jobSvc.Register(jobs.Kind{Name: ci.BulkJobKind, MaxAttempts: 1, Cancellable: true})
+	jobSvc.Register(jobs.Kind{Name: asset.BulkJobKind, MaxAttempts: 1, Cancellable: true})
+	jobSvc.Register(jobs.Kind{Name: jobs.RevertKind, MaxAttempts: 1})
+	ciSvc := ci.NewService(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox())).
+		WithFieldResolver(citype.NewPGRepository(f.App)).WithBulkJobs(jobSvc).WithCreatorPolicy(allRights)
+	assets := asset.NewHandler(asset.NewPGRepository(f.App).WithEvents(events.NewOutbox())).WithBulkJobs(jobSvc)
+	mux := chi.NewRouter()
+	mux.Use(permission.FieldPolicyMiddleware(phase1Resolver{}))
+	mux.Use(middleware.IdempotencyWithStore(cache.NewMemoryStore()))
+	ci.NewHandler(ciSvc).RegisterRoutes(mux)
+	assets.RegisterRoutes(mux)
+	jobs.NewAPIHandler(jobSvc).
+		WithKind(ci.BulkJobKind, identity.PermCIWrite, ci.NewBulkRevert(ciSvc, jobSvc, store).Revert).
+		WithBulkKind(ci.BulkJobKind).
+		WithKind(asset.BulkJobKind, identity.PermAssetWrite, asset.NewBulkRevert(assets, jobSvc, store).Revert).
+		WithBulkKind(asset.BulkJobKind).
+		WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
+		RegisterRoutes(mux)
+	e.mux, e.jobSvc = mux, jobSvc
+
+	// post sends POST /jobs/{id}/revert as ctx, with the Idempotency-Key
+	// key (empty: none), and a fixed trace id so bodies compare verbatim.
+	post := func(ctx context.Context, id, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/"+id+"/revert", http.NoBody).WithContext(ctx)
+		r.Header.Set("Content-Type", "application/json")
+		if key != "" {
+			r.Header.Set("Idempotency-Key", key)
+		}
+		w := httptest.NewRecorder()
+		w.Header().Set(api.RequestIDHeader, "wp829")
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	revertJobs := func(bulkJobID string) int {
+		return e.count(`SELECT count(*) FROM job WHERE organization_id = $1 AND kind = $2 AND idempotency_key = $3`,
+			f.OrgA, jobs.RevertKind, "revert:"+bulkJobID)
+	}
+	userB := f.AppUser(t, f.OrgB, "wp829-foreign")
+	foreignScope := database.OrgWideScope(f.OrgB, userB)
+	foreign := tenant.WithTenant(database.ContextWithTenantScope(context.Background(), &foreignScope),
+		tenant.TenantInfo{OrganizationID: f.OrgB, UserID: userB})
+	foreign = identity.WithPrincipal(foreign, identity.Principal{Subject: userB, OrganizationID: f.OrgB, Type: identity.PrincipalTypeUser,
+		Permissions: identity.AllPermissions()})
+
+	for _, c := range []struct {
+		kind  string
+		write identity.Permission
+		// reader are the read rights of the kind besides job:read and
+		// ci:read, without its write right.
+		reader []identity.Permission
+		// bulk runs a synchronous bulk of two objects of client 1 as ctx
+		// and returns its job.
+		bulk func(ctx context.Context) string
+	}{
+		{kind: ci.BulkJobKind, write: identity.PermCIWrite, bulk: func(ctx context.Context) string {
+			return e.syncBulk(ctx, map[string]any{"action": "set_status", "status": "maintenance", "ids": e.cis("wp829-ci-", f.Client1, 2)}).BulkJobID
+		}},
+		{kind: asset.BulkJobKind, write: identity.PermAssetWrite, reader: []identity.Permission{identity.PermAssetRead},
+			bulk: func(ctx context.Context) string {
+				ids := []string{f.Asset(t, f.OrgA, f.Client1, "wp829-a1"), f.Asset(t, f.OrgA, f.Client1, "wp829-a2")}
+				w := e.do(ctx, http.MethodPost, "/api/v1/assets/bulk", "", map[string]any{"action": "set_fields", "ids": ids,
+					"params": map[string]any{"fields": map[string]any{"notes": "wp829"}}})
+				var res ci.BulkResult
+				if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &res) != nil || res.BulkJobID == "" || res.Succeeded != 2 {
+					t.Fatalf("asset bulk: %d %s", w.Code, w.Body.String())
+				}
+				return res.BulkJobID
+			}},
+	} {
+		t.Run(c.kind, func(t *testing.T) {
+			creator := e.principal(e.creator, f.Client1, append([]identity.Permission{c.write}, c.reader...)...)
+			bulkJobID := c.bulk(creator)
+			if job := e.wait(bulkJobID); job.Kind != c.kind || job.Status != jobs.StatusSucceeded {
+				t.Fatalf("bulk job: %+v", job)
+			}
+			key := "wp829-" + c.kind
+
+			// Another organization: 404 like an unknown job.
+			unknown := post(foreign, f.ID(), "")
+			for _, k := range []string{"", key} {
+				w := post(foreign, bulkJobID, k)
+				if w.Code != http.StatusNotFound || w.Code != unknown.Code || w.Body.String() != unknown.Body.String() {
+					t.Errorf("revert by organization B (key %q): %d %s, want 404 %s", k, w.Code, w.Body.String(), unknown.Body.String())
+				}
+			}
+
+			// Without the right of the original operation: 403.
+			stranger := e.principal(f.AppUser(t, f.OrgA, "wp829-reader-"+c.kind), f.Client1, c.reader...)
+			for _, k := range []string{"", key} {
+				if w := post(stranger, bulkJobID, k); w.Code != http.StatusForbidden {
+					t.Errorf("revert without %s (key %q): %d %s, want 403", c.write, k, w.Code, w.Body.String())
+				}
+			}
+			if n := revertJobs(bulkJobID); n != 0 {
+				t.Fatalf("refused reverts queued %d revert jobs", n)
+			}
+
+			// The revert with an Idempotency-Key, then the replay.
+			first := post(creator, bulkJobID, key)
+			var accepted jobs.Job
+			if first.Code != http.StatusAccepted || json.Unmarshal(first.Body.Bytes(), &accepted) != nil || accepted.Kind != jobs.RevertKind {
+				t.Fatalf("revert: %d %s, want 202", first.Code, first.Body.String())
+			}
+			replay := func(when string) {
+				t.Helper()
+				w := post(creator, bulkJobID, key)
+				if w.Code != http.StatusAccepted || w.Header().Get("Idempotency-Replayed") != "true" || w.Body.String() != first.Body.String() {
+					t.Errorf("repeated POST with the same key %s: %d %q %s, want the stored 202 %s",
+						when, w.Code, w.Header().Get("Idempotency-Replayed"), w.Body.String(), first.Body.String())
+				}
+			}
+			replay("while the revert runs")
+			if done := e.wait(accepted.ID); done.Status != jobs.StatusSucceeded {
+				t.Fatalf("revert job: %s %s", done.Status, done.Error)
+			}
+			replay("after the revert")
+			if n := revertJobs(bulkJobID); n != 1 {
+				t.Errorf("revert jobs of the bulk: %d, want 1", n)
+			}
+
+			// A second revert of the same job: 409, also with a new key.
+			if w := post(creator, bulkJobID, ""); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), jobs.ErrAlreadyReverted.Error()) {
+				t.Errorf("second revert: %d %s, want 409 already reverted", w.Code, w.Body.String())
+			}
+			if w := post(creator, bulkJobID, key+"-2"); w.Code != http.StatusConflict {
+				t.Errorf("second revert with a new key: %d %s, want 409", w.Code, w.Body.String())
+			}
+		})
 	}
 }

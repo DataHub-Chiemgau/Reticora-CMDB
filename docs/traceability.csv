@@ -1528,3 +1528,4 @@ UI-14;[P2–P4, A];C;frontend/src/pages/StocktakeDetailPage.test.tsx;WP-813
 ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/writers_integration_test.go;WP-826
 MET-50;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
 UI-11;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
+SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
