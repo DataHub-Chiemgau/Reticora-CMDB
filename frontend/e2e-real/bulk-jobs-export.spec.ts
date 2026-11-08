@@ -177,6 +177,8 @@ interface SavedView {
   entity_kind: string;
   filter_spec: Record<string, unknown>;
   shared: boolean;
+  /** display_name: the name of a system view per UI language (VIE-02, WP-817). */
+  display_name?: { de?: string; en?: string };
 }
 
 interface Notification {
@@ -283,6 +285,10 @@ async function openTenant(browser: Browser, label: string): Promise<Tenant> {
   t.serverType = rows(types).find((ty) => ty.key === 'server')?.id ?? '';
   expect(t.serverType, 'catalog type server').not.toBe('');
   return t;
+}
+
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function waitForPath(page: Page, path: string, method: string): Promise<Response> {
@@ -1006,11 +1012,20 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
 
   test('V01 a saved view created on the saved-views page persists across reload with its filter and stays private to the tenant', async () => {
     const page = a.page;
+    const main = page.locator('#main-content');
     const tag = `vw1x${s}`;
     const preset = 'Servers without backup relationship';
     const presets = await ok<List<SavedView>>(a, 'GET', '/saved-views/presets');
-    const presetSpec = rows(presets).find((p) => p.name === preset)?.filter_spec;
+    const presetView = rows(presets).find((p) => p.name === preset);
+    const presetSpec = presetView?.filter_spec;
     expect(presetSpec, `preset ${preset}`).toBeTruthy();
+    // WP-817: the page names a system view in the UI language (display_name.de); its run
+    // button starts with that name, followed by the badges of entity kind and read-only.
+    // The clone button next to it is named "Klonen: …", so the name is anchored at the start.
+    const presetLabel = presetView?.display_name?.de || preset;
+    const presetButton = main.getByRole('button', {
+      name: new RegExp(`^${escapeRe(presetLabel)}`),
+    });
 
     // CIs the preset distinguishes: a subtype of the system type server
     // (ci_type_subtree, VIE-02) without vs a server with a backed_up_by
@@ -1031,10 +1046,9 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     });
 
     await page.goto('/saved-views');
-    const main = page.locator('#main-content');
     await expect(main.getByRole('heading', { name: 'Gespeicherte Ansichten' })).toBeVisible();
     const ranPreset = waitForPath(page, '/search/query', 'POST');
-    await main.getByRole('button', { name: new RegExp(preset) }).click();
+    await presetButton.click();
     expect((await ranPreset).status()).toBe(200);
     await expect(main.getByRole('link', { name: prod.name, exact: true })).toBeVisible();
     await expect(main.getByRole('link', { name: staging.name, exact: true })).toHaveCount(0);
@@ -1093,7 +1107,7 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
     await main.getByRole('button', { name: `Löschen: ${viewName}` }).click();
     expect((await deleted).status()).toBe(204);
     await page.reload();
-    await expect(main.getByRole('button', { name: preset })).toBeVisible();
+    await expect(presetButton).toBeVisible();
     await expect(main.getByRole('button', { name: viewName, exact: true })).toHaveCount(0);
     expect((await api(rq, a.token, 'GET', `/saved-views/${view.id}`)).status).toBe(404);
   });

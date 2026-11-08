@@ -482,7 +482,8 @@ function seedBinary(): string {
 /**
  * seedDemo runs the SIM-01 seed (backend/cmd/seed, WP-203) against the stack database
  * (DATABASE_URL): the organizations demo (plan pro, admin@demo.local) and acme
- * (admin@acme.local) with 40 CIs each, located and in the search index (WP-433). The seed
+ * (admin@acme.local) with 40 CIs each, located and in the search index (WP-433); demo
+ * holds 2 blade chassis and 8 blades of the Phase-2 seed (WP-819) on top, 50 CIs in all. The seed
  * is deterministic and inserts only what is missing, so a second run changes nothing. It
  * returns the organizations the seed prints.
  */

@@ -447,12 +447,19 @@ test.describe('client- and site-scoped users (TEN-04, TEN-06, TEN-09, EXP-01)', 
       const url = new URL(r.url());
       return url.pathname === '/api/v1/cis' && url.searchParams.get('search') === w.ci2.name;
     });
-    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(w.ci2.name);
+    const picker = dialog.getByRole('combobox', { name: 'Gegenstelle' });
+    await picker.fill(w.ci2.name);
     const search = await searched;
     expect(search.status(), 'search of the C1 user').toBe(200);
     expect(rows((await search.json()) as List<CI>).map((c) => c.id)).not.toContain(w.ci2.id);
     await expect(dialog.getByText('Keine Treffer')).toBeVisible();
-    await expect(dialog.getByRole('option')).toHaveCount(0);
+    // WP-323: the dialog also holds selects (direction, relationship type) whose options
+    // count as role option; only the hit list of the ObjectPicker (the listbox the combobox
+    // controls) must be empty, and the picker stays collapsed: the C2 CI is no hit.
+    await expect(picker).toHaveAttribute('aria-expanded', 'false');
+    const hitList = dialog.locator(`[id="${await picker.getAttribute('aria-controls')}"]`);
+    await expect(hitList).toHaveCount(1);
+    await expect(hitList.getByRole('option')).toHaveCount(0);
     await expect(dialog.getByRole('button', { name: 'Anlegen' })).toBeDisabled();
     expectNoTraceOfC2('relationship form', await bodyText(page));
 

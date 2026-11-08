@@ -375,9 +375,15 @@ test.describe('Saved views: sort, columns and role sharing set in the UI (VIE-01
     const { ctx, page, token } = await signIn(browser, w.outsider);
     try {
       const main = page.locator('#main-content');
-      await expect(main.getByText('Meine Ansichten')).toBeVisible();
+      // WP-817: the list of own views is "Meine und geteilte Ansichten" (own views and those
+      // shared with the caller, org-wide or by role); the system views have a card of their own.
+      await expect(
+        main.getByRole('heading', { name: 'Meine und geteilte Ansichten', exact: true }),
+      ).toBeVisible();
       // The list has loaded once the empty state or a view is there; the role view is not.
-      await expect(main.getByText('Noch keine eigenen Ansichten.')).toBeVisible();
+      await expect(
+        main.getByText('Noch keine eigenen oder geteilten Ansichten.', { exact: true }),
+      ).toBeVisible();
       await expect(viewButton(page, w.viewName)).toHaveCount(0);
       const list = await api<List<SavedView>>(page.request, token, 'GET', '/saved-views');
       expect(list.status).toBe(200);
