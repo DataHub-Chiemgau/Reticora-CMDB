@@ -41,6 +41,7 @@ import {
   privacyApi,
   credentialApi,
   vrfApi,
+  ApiError,
 } from '../api/client';
 import type {
   DiscoveryScopeInput,
@@ -68,6 +69,11 @@ import type {
   TicketCreateRequest,
   TicketUpdateRequest,
   TicketListParams,
+  TicketComment,
+  TicketLink,
+  TicketLinkTarget,
+  ReviewItemTicketRequest,
+  Ticket,
   UserListParams,
   UserStatus,
   AppUser,
@@ -741,6 +747,179 @@ export function useDeleteTicket() {
   return useMutation({
     mutationFn: (id: string) => ticketApi.delete(id),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+}
+
+/** useTicket reads one ticket (GET /tickets/{id}). */
+export function useTicket(id: string) {
+  return useQuery({
+    queryKey: ['tickets', 'detail', id],
+    queryFn: () => ticketApi.get(id),
+    enabled: !!id,
+  });
+}
+
+/** useTicketComments reads the comments of a ticket page by page (limit/offset). */
+export function useTicketComments(ticketId: string, pageSize = 50) {
+  return useInfiniteQuery({
+    queryKey: ['tickets', 'comments', ticketId],
+    queryFn: ({ pageParam }) =>
+      ticketApi.listComments(ticketId, { limit: pageSize, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last: PaginatedResponse<TicketComment>, pages) =>
+      last.has_more ? pages.reduce((sum, page) => sum + page.data.length, 0) : undefined,
+    enabled: !!ticketId,
+  });
+}
+
+export function useAddTicketComment(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { content: string; is_internal?: boolean }) =>
+      ticketApi.addComment(ticketId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'comments', ticketId] });
+    },
+  });
+}
+
+/** useTicketLinks reads the object links of a ticket page by page over next_cursor (WP-764). */
+export function useTicketLinks(ticketId: string) {
+  return useInfiniteQuery({
+    queryKey: ['tickets', 'links', ticketId],
+    queryFn: ({ pageParam }) => ticketApi.listLinks(ticketId, { cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: PaginatedResponse<TicketLink>) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!ticketId,
+  });
+}
+
+export function useAddTicketLink(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (target: TicketLinkTarget) => ticketApi.addLink(ticketId, target),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'links', ticketId] });
+    },
+  });
+}
+
+export function useRemoveTicketLink(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (linkId: string) => ticketApi.removeLink(ticketId, linkId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'links', ticketId] });
+    },
+  });
+}
+
+/**
+ * fetchTicketAttachments reads every document attached to a ticket (GET
+ * /tickets/{id}/attachments, WP-765), following next_cursor page by page.
+ */
+export async function fetchTicketAttachments(ticketId: string): Promise<Document[]> {
+  const all: Document[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await ticketApi.listAttachments(ticketId, { limit: 200, cursor });
+    all.push(...(page.data ?? []));
+    if (!page.has_more || !page.next_cursor) return all;
+    cursor = page.next_cursor;
+  }
+}
+
+/**
+ * ticketAttachmentsKey is the key LinkedDocuments uses for the documents
+ * of a ticket, so the page and the card share one request.
+ */
+export const ticketAttachmentsKey = (ticketId: string) =>
+  ['documents', 'linked', 'ticket', ticketId] as const;
+
+/** useTicketAttachments reads the documents of a ticket (WP-765). */
+export function useTicketAttachments(ticketId: string, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ticketAttachmentsKey(ticketId),
+    queryFn: () => fetchTicketAttachments(ticketId),
+    enabled: enabled && !!ticketId,
+  });
+}
+
+/** TICKET_SLA_POLL_MS: the SLA state of a ticket is read again every minute. */
+export const TICKET_SLA_POLL_MS = 60_000;
+
+/**
+ * useTicketSLA reads the SLA state of a ticket (GET /tickets/{id}/sla,
+ * WP-292) every minute; enabled holds the request back without the
+ * feature ticketing_standard (E-39), so no 403 arises.
+ */
+export function useTicketSLA(ticketId: string, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ['tickets', 'sla', ticketId],
+    queryFn: () => slaApi.getTicket(ticketId),
+    enabled: enabled && !!ticketId,
+    refetchInterval: TICKET_SLA_POLL_MS,
+  });
+}
+
+/** useCreateTicketFromReview opens a ticket for one review item (WP-291). */
+export function useCreateTicketFromReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: ReviewItemTicketRequest }) =>
+      ticketApi.createFromReview(id, data),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-items'] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+}
+
+/** BulkTicketResult reports the tickets opened for several review items. */
+export interface BulkTicketResult {
+  created: { id: string; ticket: Ticket }[];
+  failed: { id: string; status?: number; message: string }[];
+}
+
+/** BULK_TICKET_LIMIT is the most review items one bulk action opens tickets for. */
+export const BULK_TICKET_LIMIT = 100;
+
+/**
+ * useBulkCreateTicketsFromReviews opens a ticket for each of several review
+ * items, one request after the other (POST /review-items/{id}/ticket, like
+ * useBulkResolveReviews); an item that fails (403, 404, 409 of an open
+ * ticket) is reported with the detail of the server and does not stop the
+ * others.
+ */
+export function useBulkCreateTicketsFromReviews() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }): Promise<BulkTicketResult> => {
+      const result: BulkTicketResult = { created: [], failed: [] };
+      for (const id of ids.slice(0, BULK_TICKET_LIMIT)) {
+        try {
+          const ticket = await ticketApi.createFromReview(id);
+          result.created.push({ id, ticket });
+        } catch (err) {
+          result.failed.push({
+            id,
+            status: err instanceof ApiError ? err.status : undefined,
+            message:
+              err instanceof ApiError
+                ? (err.detail ?? err.message)
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          });
+        }
+      }
+      return result;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-items'] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });

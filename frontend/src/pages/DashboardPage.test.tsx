@@ -270,6 +270,51 @@ describe('DashboardPage', () => {
     });
   });
 
+  it('counts new and open tickets as open, also the critical ones (WP-814)', async () => {
+    useDashboardStore.setState({ role: 'management', hidden: [] });
+    const counts: Record<string, number> = {
+      'new|': 2,
+      'open|': 3,
+      'new|critical': 1,
+      'open|critical': 3,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      if (url.pathname === '/api/v1/tickets') {
+        const key = `${url.searchParams.get('status')}|${url.searchParams.get('priority') ?? ''}`;
+        return json({ ...paginated([]), total: counts[key] ?? 99 });
+      }
+      if (url.pathname === '/api/v1/modules') {
+        return json({
+          data: [{ key: 'ticketing', phase: 'P2', nav: ['tickets', 'slas'], enabled: true }],
+        });
+      }
+      if (url.pathname === '/api/v1/cis' || url.pathname === '/api/v1/collectors') {
+        return json(paginated([]));
+      }
+      return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+    const open = (await screen.findByRole('link', { name: 'Offene Tickets' })).closest('section')!;
+    await waitFor(() => expect(within(open).getByText('5')).toBeInTheDocument());
+    const critical = screen.getByRole('link', { name: 'Kritische Tickets' }).closest('section')!;
+    await waitFor(() => expect(within(critical).getByText('4')).toBeInTheDocument());
+    const statuses = fetchMock.mock.calls
+      .map(([input]) => new URL(String(input), 'http://localhost'))
+      .filter((url) => url.pathname === '/api/v1/tickets')
+      .map((url) => url.searchParams.get('status'));
+    expect(new Set(statuses)).toEqual(new Set(['new', 'open']));
+    useDashboardStore.setState({ role: 'technician', hidden: [] });
+  });
+
   it('hides the widgets of switched-off modules (WP-214)', async () => {
     useAuthStore.setState({
       token: 'header.payload.signature',

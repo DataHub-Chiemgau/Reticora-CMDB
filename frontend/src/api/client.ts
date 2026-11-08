@@ -1531,14 +1531,19 @@ export interface StocktakeCompletion {
 
 // --- Phase 2: Ticket System (Essential) ---
 
+/** The states of the ticket state machine (TKT-01, WP-290); a ticket starts as new. */
+export type TicketStatus = 'new' | 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+
+export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
+
 export interface Ticket {
   id: string;
   organization_id: string;
   ticket_number: number;
   title: string;
   description?: string;
-  status: string;
-  priority: string;
+  status: TicketStatus;
+  priority: TicketPriority | string;
   category: string;
   reporter_id: string;
   assignee_id?: string;
@@ -1556,7 +1561,9 @@ export interface Ticket {
 export interface TicketComment {
   id: string;
   ticket_id: string;
-  author_id: string;
+  /** The writing user; null exactly for a system comment (author_type system, WP-291). */
+  author_id: string | null;
+  author_type: 'user' | 'system';
   content: string;
   is_internal: boolean;
   created_at: string;
@@ -1579,7 +1586,7 @@ export interface TicketCreateRequest {
 export interface TicketUpdateRequest {
   title?: string;
   description?: string;
-  status?: string;
+  status?: TicketStatus;
   priority?: string;
   category?: string;
   assignee_id?: string;
@@ -1598,6 +1605,37 @@ export interface TicketListParams {
   assignee_id?: string;
   team_id?: string;
   search?: string;
+}
+
+/** The targets of a ticket link (TicketLink.entity_type, WP-764). */
+export type TicketLinkEntityType = 'asset' | 'ci' | 'contract' | 'location' | 'review_item';
+
+/** TicketLink is an object linked to a ticket besides its primary object (WP-764). */
+export interface TicketLink {
+  id: string;
+  organization_id: string;
+  ticket_id: string;
+  entity_type: TicketLinkEntityType;
+  entity_id: string;
+  created_at: string;
+}
+
+export interface TicketLinkTarget {
+  entity_type: TicketLinkEntityType;
+  entity_id: string;
+}
+
+/** CursorParams page a list over the signed next_cursor (API-02). */
+export interface CursorParams {
+  limit?: number;
+  cursor?: string;
+}
+
+/** ReviewItemTicketRequest opens a ticket for a review item (WP-291). */
+export interface ReviewItemTicketRequest {
+  priority?: TicketPriority;
+  assignee_id?: string;
+  team_id?: string;
 }
 
 export const ticketApi = {
@@ -1630,6 +1668,33 @@ export const ticketApi = {
     params: ListParams = {},
   ): Promise<PaginatedResponse<TicketComment>> {
     return fetchAPI(`/tickets/${ticketId}/comments${buildQuery(params)}`);
+  },
+  /** listLinks reads the object links of a ticket, oldest first (WP-764). */
+  listLinks(ticketId: string, params: CursorParams = {}): Promise<PaginatedResponse<TicketLink>> {
+    return fetchAPI(`/tickets/${ticketId}/links${buildQuery(params)}`);
+  },
+  addLink(ticketId: string, target: TicketLinkTarget): Promise<TicketLink> {
+    return fetchAPI(`/tickets/${ticketId}/links`, {
+      method: 'POST',
+      body: JSON.stringify(target),
+    });
+  },
+  removeLink(ticketId: string, linkId: string): Promise<void> {
+    return fetchAPI(`/tickets/${ticketId}/links/${linkId}`, { method: 'DELETE' });
+  },
+  /** listAttachments reads the documents linked to a ticket, newest first (WP-765). */
+  listAttachments(
+    ticketId: string,
+    params: CursorParams = {},
+  ): Promise<PaginatedResponse<Document>> {
+    return fetchAPI(`/tickets/${ticketId}/attachments${buildQuery(params)}`);
+  },
+  /** createFromReview opens a ticket for an open review item; the item stays open (WP-291). */
+  createFromReview(reviewItemId: string, data: ReviewItemTicketRequest = {}): Promise<Ticket> {
+    return fetchAPI(`/review-items/${reviewItemId}/ticket`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 
@@ -1937,6 +2002,14 @@ export interface TicketSLA {
   resolved_at?: string;
   response_breached: boolean;
   resolution_breached: boolean;
+  /** The business calendar of the due times (TKT-02); null for elapsed time or the standard calendar. */
+  calendar_id?: string | null;
+  /** Business minutes until response_due_at; negative once overdue, null once responded. */
+  response_remaining_minutes?: number | null;
+  /** Business minutes until resolution_due_at; negative once overdue, null once resolved. */
+  resolution_remaining_minutes?: number | null;
+  /** paused: the moment lies outside business hours or on a holiday of the calendar. */
+  paused?: boolean;
   created_at: string;
   updated_at: string;
 }

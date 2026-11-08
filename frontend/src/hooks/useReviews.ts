@@ -67,6 +67,12 @@ export interface ReviewItem {
   resolved_by?: string;
   resolved_at?: string;
   escalated: boolean;
+  /**
+   * tickets are the tickets linked to the item that the caller sees
+   * (WP-291); absent without ticket:read, the module ticketing or the
+   * feature ticketing_essential.
+   */
+  tickets?: { id: string; ticket_number: number; status: string }[];
   created_at: string;
 }
 

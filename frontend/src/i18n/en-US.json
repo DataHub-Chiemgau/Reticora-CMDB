@@ -856,7 +856,88 @@
       "high": "High",
       "critical": "Critical"
     },
-    "allPriorities": "All priorities"
+    "allPriorities": "All priorities",
+    "allCategories": "All categories",
+    "myTeams": "My teams",
+    "assignment": "Assign to a person or team",
+    "relatedObject": "Related object (CI or asset)",
+    "detail": {
+      "notFound": "Ticket not found",
+      "edit": "Edit",
+      "details": "Details",
+      "dueDate": "Due",
+      "noDueDate": "no due date",
+      "noDescription": "No description",
+      "noRelated": "No related object",
+      "updatedAt": "Updated",
+      "resolvedAt": "Resolved at",
+      "closedAt": "Closed at"
+    },
+    "workflow": {
+      "title": "Status",
+      "current": "Current status:",
+      "moveTo": "→ {{status}}",
+      "reopen": "Reopen",
+      "none": "No further status change possible.",
+      "conflict": "Status change refused: {{detail}} The ticket was reloaded."
+    },
+    "assign": {
+      "title": "Assignment",
+      "user": "Person",
+      "team": "Team",
+      "none": "unassigned",
+      "submit": "Assign"
+    },
+    "links": {
+      "title": "Linked objects",
+      "add": "Link object",
+      "submit": "Link",
+      "remove": "Remove link: {{type}}",
+      "empty": "No linked objects.",
+      "more": "Load more",
+      "kind": "Kind of target",
+      "object": "CI or asset",
+      "duplicate": "This object is already linked to the ticket.",
+      "notFound": "Ticket or object not found.",
+      "kinds": {
+        "object": "CI or asset",
+        "location": "Location"
+      },
+      "types": {
+        "asset": "Asset",
+        "ci": "CI",
+        "contract": "Contract",
+        "location": "Location",
+        "review_item": "Review item"
+      }
+    },
+    "comments": {
+      "title": "Comments",
+      "empty": "No comments yet.",
+      "more": "Load older",
+      "new": "New comment",
+      "internalToggle": "Internal comment",
+      "internal": "Internal",
+      "external": "External",
+      "system": "System",
+      "submit": "Comment"
+    },
+    "attachments": {
+      "title": "Attachments ({{count}})"
+    },
+    "sla": {
+      "title": "SLA",
+      "response": "Response",
+      "resolution": "Resolution",
+      "due": "Due",
+      "remaining": "{{duration}} left",
+      "overdue": "overdue by {{duration}}",
+      "met": "met",
+      "duration": "{{hours}} h {{minutes}} min",
+      "paused": "paused",
+      "breached": "breached",
+      "none": "No SLA assigned."
+    }
   },
   "userMgmt": {
     "title": "Users & Teams",
@@ -2345,7 +2426,16 @@
     "object": "Object",
     "age": "Age",
     "selectTitle": "Select an item",
-    "selectHint": "Compare the observation with its CI and decide here."
+    "selectHint": "Compare the observation with its CI and decide here.",
+    "ticket": {
+      "create": "Create ticket",
+      "bulkCreate": "Create tickets",
+      "created": "Ticket #{{number}} created.",
+      "result": "{{created}} tickets created, {{failed}} failed.",
+      "failedItem": "{{name}}: {{message}}",
+      "linked": "Tickets",
+      "limit": "At most {{limit}} items per bulk action."
+    }
   },
   "notifications": {
     "title": "Notifications",

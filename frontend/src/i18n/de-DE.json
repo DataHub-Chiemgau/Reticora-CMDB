@@ -856,7 +856,88 @@
       "high": "Hoch",
       "critical": "Kritisch"
     },
-    "allPriorities": "Alle Prioritäten"
+    "allPriorities": "Alle Prioritäten",
+    "allCategories": "Alle Kategorien",
+    "myTeams": "Meine Teams",
+    "assignment": "Zuweisung an Person oder Team",
+    "relatedObject": "Bezugsobjekt (CI oder Asset)",
+    "detail": {
+      "notFound": "Ticket nicht gefunden",
+      "edit": "Bearbeiten",
+      "details": "Details",
+      "dueDate": "Fällig",
+      "noDueDate": "keine Fälligkeit",
+      "noDescription": "Keine Beschreibung",
+      "noRelated": "Kein Bezugsobjekt",
+      "updatedAt": "Geändert",
+      "resolvedAt": "Gelöst am",
+      "closedAt": "Geschlossen am"
+    },
+    "workflow": {
+      "title": "Status",
+      "current": "Aktueller Status:",
+      "moveTo": "→ {{status}}",
+      "reopen": "Wieder öffnen",
+      "none": "Kein weiterer Statuswechsel möglich.",
+      "conflict": "Statuswechsel abgelehnt: {{detail}} Das Ticket wurde neu geladen."
+    },
+    "assign": {
+      "title": "Zuweisung",
+      "user": "Person",
+      "team": "Team",
+      "none": "nicht zugewiesen",
+      "submit": "Zuweisen"
+    },
+    "links": {
+      "title": "Verknüpfte Objekte",
+      "add": "Objekt verknüpfen",
+      "submit": "Verknüpfen",
+      "remove": "Verknüpfung lösen: {{type}}",
+      "empty": "Keine verknüpften Objekte.",
+      "more": "Weitere laden",
+      "kind": "Art des Ziels",
+      "object": "CI oder Asset",
+      "duplicate": "Dieses Objekt ist bereits mit dem Ticket verknüpft.",
+      "notFound": "Ticket oder Objekt nicht gefunden.",
+      "kinds": {
+        "object": "CI oder Asset",
+        "location": "Standort"
+      },
+      "types": {
+        "asset": "Asset",
+        "ci": "CI",
+        "contract": "Vertrag",
+        "location": "Standort",
+        "review_item": "Prüfeintrag"
+      }
+    },
+    "comments": {
+      "title": "Kommentare",
+      "empty": "Noch keine Kommentare.",
+      "more": "Ältere laden",
+      "new": "Neuer Kommentar",
+      "internalToggle": "Interner Kommentar",
+      "internal": "Intern",
+      "external": "Extern",
+      "system": "System",
+      "submit": "Kommentieren"
+    },
+    "attachments": {
+      "title": "Anhänge ({{count}})"
+    },
+    "sla": {
+      "title": "SLA",
+      "response": "Reaktion",
+      "resolution": "Lösung",
+      "due": "Fällig",
+      "remaining": "noch {{duration}}",
+      "overdue": "überfällig seit {{duration}}",
+      "met": "erfüllt",
+      "duration": "{{hours}} h {{minutes}} min",
+      "paused": "pausiert",
+      "breached": "verletzt",
+      "none": "Kein SLA zugeordnet."
+    }
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -2345,7 +2426,16 @@
     "object": "Objekt",
     "age": "Alter",
     "selectTitle": "Eintrag auswählen",
-    "selectHint": "Vergleichen Sie die Beobachtung mit dem CI und entscheiden Sie hier."
+    "selectHint": "Vergleichen Sie die Beobachtung mit dem CI und entscheiden Sie hier.",
+    "ticket": {
+      "create": "Ticket erstellen",
+      "bulkCreate": "Tickets erstellen",
+      "created": "Ticket #{{number}} erstellt.",
+      "result": "{{created}} Tickets erstellt, {{failed}} fehlgeschlagen.",
+      "failedItem": "{{name}}: {{message}}",
+      "linked": "Tickets",
+      "limit": "Höchstens {{limit}} Einträge je Sammelaktion."
+    }
   },
   "notifications": {
     "title": "Benachrichtigungen",

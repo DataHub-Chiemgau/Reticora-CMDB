@@ -20,7 +20,8 @@ import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
-import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
+import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from '../pages/TicketListPage';
+import { TICKET_TRANSITIONS } from '../pages/TicketDetailPage';
 import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
 import {
   CARDINALITIES,
@@ -194,6 +195,10 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['document.categories', BACKEND_ENUMS.documentCategories],
   ['ticket.statuses', BACKEND_ENUMS.ticketStatuses],
   ['ticket.categories', BACKEND_ENUMS.ticketCategories],
+  // WP-814: the ticket priorities (WP-290) and the targets of a ticket link (WP-764).
+  ['ticket.priorities', TICKET_PRIORITIES],
+  ['ticket.priorities', specEnum('TicketPriority')],
+  ['ticket.links.types', specEnum('TicketLink', 'entity_type')],
   ['orders.statuses', specEnum('Order', 'status')],
   ['keys.statuses', specEnum('KeyItem', 'status')],
   ['ci.statuses', specEnum('CIStatus')],
@@ -383,6 +388,18 @@ describe('i18n catalog', () => {
     expect([...DOCUMENT_CATEGORIES]).toEqual(BACKEND_ENUMS.documentCategories);
     expect([...TICKET_STATUSES]).toEqual(BACKEND_ENUMS.ticketStatuses);
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
+    expect([...TICKET_PRIORITIES]).toEqual(specEnum('TicketPriority'));
+  });
+
+  it('labels the ticket priorities and mirrors the state machine (WP-814)', () => {
+    expect(lookup(deDE, 'ticket.priorities.critical')).toBe('Kritisch');
+    expect(lookup(enUS, 'ticket.priorities.critical')).toBe('Critical');
+    // backend/internal/ticket/states.go: every state has its next states,
+    // each of them a state of the machine.
+    expect(Object.keys(TICKET_TRANSITIONS)).toEqual(BACKEND_ENUMS.ticketStatuses);
+    for (const next of Object.values(TICKET_TRANSITIONS)) {
+      for (const status of next) expect(BACKEND_ENUMS.ticketStatuses).toContain(status);
+    }
   });
 
   it('lists the pickers and the flow dialogs (WP-318)', () => {
@@ -512,6 +529,9 @@ describe('i18n catalog', () => {
     '../pages/DocumentListPage.tsx',
     '../pages/DocumentDetailPage.tsx',
     ...Object.keys(documentSources),
+    // WP-814: the ticket pages.
+    '../pages/TicketListPage.tsx',
+    '../pages/TicketDetailPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??

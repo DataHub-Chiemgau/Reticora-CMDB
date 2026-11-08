@@ -72,6 +72,7 @@ const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'Complia
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
 const StocktakeListPage = lazyPage(() => import('./pages/StocktakeListPage'), 'StocktakeListPage');
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
+const TicketDetailPage = lazyPage(() => import('./pages/TicketDetailPage'), 'TicketDetailPage');
 const UserManagementPage = lazyPage(
   () => import('./pages/UserManagementPage'),
   'UserManagementPage',
@@ -262,6 +263,7 @@ function App() {
           <Route path="/reviews" element={<ReviewInboxPage />} />
           <Route path="/jobs" element={<JobCenterPage />} />
           <Route path="/tickets" element={<TicketListPage />} />
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/users" element={<UserManagementPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/slas" element={<SLAPage />} />

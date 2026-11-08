@@ -15,16 +15,29 @@
  * widget opens the inbox on the escalated items (REC-08, F-247). A
  * duplicate_ip item of duplicate observations shows its address, VRF and
  * every side of payload.holders; accept names the stale side as ci_id and
- * is no bulk action (NET-06, E-53, WP-773).
+ * is no bulk action (NET-06, E-53, WP-773). With the module ticketing, the
+ * feature ticketing_essential and the rights ticket:write and
+ * review:resolve the inbox opens a ticket for one item or for the selected
+ * open items (WP-291, WP-814); that is no resolution, the item stays open,
+ * and an item with a ticket links to it.
  */
-import { ChevronLeft, ChevronRight, Inbox, MousePointerClick } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Inbox, MousePointerClick, Ticket } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useCI, useHasPermission, useMountedCIs } from '../api/hooks';
+import {
+  BULK_TICKET_LIMIT,
+  useBulkCreateTicketsFromReviews,
+  useCI,
+  useCreateTicketFromReview,
+  useHasPermission,
+  useMountedCIs,
+  type BulkTicketResult,
+} from '../api/hooks';
+import { useEntitlements, useModules } from '../hooks/useEntitlements';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
-import type { CI } from '../api/client';
+import { ApiError, type CI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -168,6 +181,47 @@ export function commonActions(items: ReviewItem[]): ReviewAction[] {
   );
 }
 
+/**
+ * useCanCreateTickets tells whether the inbox offers "Ticket erstellen":
+ * the module ticketing is on, the organization holds ticketing_essential
+ * (fail closed while the entitlements load) and the user holds
+ * ticket:write and review:resolve (WP-291).
+ */
+function useCanCreateTickets(canResolve: boolean): boolean {
+  const { isModuleEnabled } = useModules();
+  const { entitlements, isEnabled } = useEntitlements();
+  const canWriteTickets = useHasPermission('ticket:write') === true;
+  return (
+    canResolve &&
+    canWriteTickets &&
+    isModuleEnabled('ticketing') &&
+    entitlements !== undefined &&
+    isEnabled('ticketing_essential')
+  );
+}
+
+/** ItemTickets links the tickets of an item (WP-291). */
+function ItemTickets({ item, className }: { item: ReviewItem; className?: string }) {
+  const { t } = useTranslation();
+  const tickets = item.tickets ?? [];
+  if (tickets.length === 0) return null;
+  return (
+    <span className={cn('inline-flex flex-wrap items-center gap-1.5', className)}>
+      <span className="sr-only">{t('reviews.ticket.linked')}</span>
+      {tickets.map((ticket) => (
+        <Link
+          key={ticket.id}
+          to={`/tickets/${ticket.id}`}
+          onClick={(event) => event.stopPropagation()}
+          className="inline-flex items-center gap-1 font-mono text-xs text-accent hover:underline"
+        >
+          <Ticket aria-hidden="true" className="h-3 w-3" />#{ticket.ticket_number}
+        </Link>
+      ))}
+    </span>
+  );
+}
+
 /** relativeAge words the age of an item ("3 days ago"); the full date is the tooltip. */
 function relativeAge(iso: string, language: string): string {
   const created = new Date(iso).getTime();
@@ -214,6 +268,11 @@ export function ReviewInboxPage() {
   // The server decides every resolution; without review:resolve the inbox
   // offers none (fail closed while the rights load).
   const canResolve = useHasPermission('review:resolve') === true;
+  const canCreateTickets = useCanCreateTickets(canResolve);
+  const bulkTickets = useBulkCreateTicketsFromReviews();
+  const [ticketResult, setTicketResult] = useState<BulkTicketResult | null>(null);
+  // The names of the items of the last bulk ticket run, for its report.
+  const [ticketNames, setTicketNames] = useState<Map<string, string>>(new Map());
 
   const filter = useMemo(() => ({ status, kind, escalated }), [status, kind, escalated]);
   const { data, isLoading, error, refetch } = useReviewItems(filter, offset);
@@ -293,6 +352,17 @@ export function ReviewInboxPage() {
           setBulkAction('');
         },
       },
+    );
+  }
+
+  function runBulkTickets() {
+    const targets = checkedItems.filter((item) => item.status === 'open');
+    if (targets.length === 0 || targets.length > BULK_TICKET_LIMIT) return;
+    setBulkResult(null);
+    setTicketNames(new Map(targets.map((item) => [item.id, summary(item)])));
+    bulkTickets.mutate(
+      { ids: targets.map((item) => item.id) },
+      { onSuccess: (result) => setTicketResult(result) },
     );
   }
 
@@ -384,6 +454,31 @@ export function ReviewInboxPage() {
         </p>
       ) : null}
 
+      {ticketResult ? (
+        <div role="status" className="space-y-1 text-sm text-fg-muted">
+          <p>
+            {t('reviews.ticket.result', {
+              created: ticketResult.created.length,
+              failed: ticketResult.failed.length,
+            })}
+          </p>
+          {ticketResult.failed.length > 0 ? (
+            <ul className="list-disc pl-5 text-danger">
+              {ticketResult.failed.map((failure) => {
+                return (
+                  <li key={failure.id}>
+                    {t('reviews.ticket.failedItem', {
+                      name: ticketNames.get(failure.id) ?? failure.id,
+                      message: failure.message,
+                    })}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
       {resolve.error ? (
         <ErrorState
           title={t('reviews.resolveError', {
@@ -443,6 +538,23 @@ export function ReviewInboxPage() {
                 >
                   {t('reviews.bulk.run')}
                 </Button>
+                {canCreateTickets ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={<Ticket />}
+                    onClick={runBulkTickets}
+                    disabled={checkedItems.length > BULK_TICKET_LIMIT || bulk.isPending}
+                    loading={bulkTickets.isPending}
+                    title={
+                      checkedItems.length > BULK_TICKET_LIMIT
+                        ? t('reviews.ticket.limit', { limit: BULK_TICKET_LIMIT })
+                        : undefined
+                    }
+                  >
+                    {t('reviews.ticket.bulkCreate')}
+                  </Button>
+                ) : null}
                 {moreOpen && checkedItems.length < total ? (
                   <Button
                     size="sm"
@@ -552,6 +664,7 @@ export function ReviewInboxPage() {
                             <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
                           </span>
                         ) : null}
+                        <ItemTickets item={item} className="ml-2 align-middle" />
                       </td>
                       <td className={tdClasses}>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -598,6 +711,7 @@ export function ReviewInboxPage() {
                 key={selected.id}
                 item={selected}
                 canResolve={canResolve}
+                canCreateTicket={canCreateTickets}
                 resolve={resolve}
               />
             ) : (
@@ -618,13 +732,18 @@ export function ReviewInboxPage() {
 function ReviewDetail({
   item,
   canResolve,
+  canCreateTicket,
   resolve,
 }: {
   item: ReviewItem;
   canResolve: boolean;
+  canCreateTicket: boolean;
   resolve: ReturnType<typeof useResolveReview>;
 }) {
   const { t, i18n } = useTranslation();
+  // Opening a ticket is no resolution: the item stays open (WP-291).
+  const createTicket = useCreateTicketFromReview();
+  const offerTicket = canCreateTicket && item.status === 'open';
   const candidates = item.candidate_ci_ids ?? [];
   const [candidate, setCandidate] = useState(candidates[0] ?? '');
   // The candidates are named by their CIs (F-346).
@@ -697,7 +816,22 @@ function ReviewDetail({
             <span className="font-mono text-xs [overflow-wrap:anywhere]">{summary(item)}</span>
             <Age iso={item.created_at} />
           </p>
+          <ItemTickets item={item} />
         </div>
+        {createTicket.data ? (
+          <p role="status" className="text-sm text-fg">
+            <Link to={`/tickets/${createTicket.data.id}`} className="text-accent hover:underline">
+              {t('reviews.ticket.created', { number: createTicket.data.ticket_number })}
+            </Link>
+          </p>
+        ) : null}
+        {createTicket.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {createTicket.error instanceof ApiError
+              ? (createTicket.error.detail ?? createTicket.error.message)
+              : String(createTicket.error)}
+          </p>
+        ) : null}
         {candidates.length > 1 ? (
           <Select
             label={holders ? t('reviews.holders.side') : t('reviews.candidate')}
@@ -740,8 +874,20 @@ function ReviewDetail({
           </div>
         ) : null}
       </div>
-      {item.status === 'open' && actions.length > 0 ? (
+      {item.status === 'open' && (actions.length > 0 || offerTicket) ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-line bg-canvas/60 px-5 py-3">
+          {offerTicket ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Ticket />}
+              loading={createTicket.isPending}
+              disabled={createTicket.isPending || resolve.isPending}
+              onClick={() => createTicket.mutate({ id: item.id })}
+            >
+              {t('reviews.ticket.create')}
+            </Button>
+          ) : null}
           {actions.map((action) => (
             <Button
               key={action}

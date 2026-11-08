@@ -166,6 +166,113 @@ const DOCUMENT_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-814: the fixture ticket with its primary CI, a link to that CI, an
+// external and a system comment, a clean attachment and a breached SLA.
+const TICKET_ID = 'dc000000-0000-4000-8000-000000000001';
+const TICKET_USER = '00000000-0000-0000-0000-000000000001';
+const ticketComment = (id: number, extra: Record<string, unknown>) => ({
+  id: `dc100000-0000-4000-8000-00000000000${id}`,
+  organization_id: ORG_ID,
+  ticket_id: TICKET_ID,
+  content: `a11y Kommentar ${id}`,
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+const TICKET_HANDLERS: Handler[] = [
+  {
+    path: `/tickets/${TICKET_ID}`,
+    reply: () => ({
+      body: {
+        id: TICKET_ID,
+        organization_id: ORG_ID,
+        ticket_number: 42,
+        title: M.ticket,
+        description: 'a11y Papierstau',
+        status: 'open',
+        priority: 'high',
+        category: 'incident',
+        reporter_id: TICKET_USER,
+        assignee_id: TICKET_USER,
+        related_ci_id: CI_ID,
+        due_date: AT,
+        tags: [],
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/comments`,
+    reply: () => ({
+      body: list([
+        ticketComment(1, { author_id: TICKET_USER, author_type: 'user', is_internal: false }),
+        ticketComment(2, { author_id: null, author_type: 'system', is_internal: true }),
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/links`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'dc200000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          ticket_id: TICKET_ID,
+          entity_type: 'ci',
+          entity_id: CI_ID,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/attachments`,
+    reply: () => ({
+      body: list([
+        {
+          id: DOCUMENT_ID,
+          organization_id: ORG_ID,
+          title: M.document,
+          file_name: 'handbuch.pdf',
+          file_size: 204800,
+          mime_type: 'application/pdf',
+          storage_key: `org/${ORG_ID}/documents/${DOCUMENT_ID}/2`,
+          version: 2,
+          category: 'manual',
+          tags: [],
+          uploaded_by: TICKET_USER,
+          created_at: AT,
+          updated_at: AT,
+          scan_status: 'clean',
+          scanned_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/sla`,
+    reply: () => ({
+      body: {
+        id: 'dc300000-0000-4000-8000-000000000001',
+        organization_id: ORG_ID,
+        ticket_id: TICKET_ID,
+        sla_id: 'dc400000-0000-4000-8000-000000000001',
+        response_due_at: AT,
+        resolution_due_at: AT,
+        response_breached: true,
+        resolution_breached: false,
+        calendar_id: null,
+        response_remaining_minutes: -90,
+        resolution_remaining_minutes: 125,
+        paused: false,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+];
+
 const RELATIONSHIP_TYPES: Handler = {
   path: '/relationship-types',
   reply: () => ({
@@ -409,6 +516,18 @@ const ROUTES: A11yRoute[] = [
   { path: '/reviews', url: '/reviews', ready: text(M.review) },
   { path: '/jobs', url: '/jobs', ready: text(M.job) },
   { path: '/tickets', url: '/tickets', ready: text(M.ticket) },
+  {
+    // WP-814: head, status changes, assignment, links, comments, attachments and SLA.
+    path: '/tickets/:id',
+    url: `/tickets/${TICKET_ID}`,
+    handlers: TICKET_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Kommentar 2')).toBeVisible();
+      await expect(page.locator('#main-content').getByText(M.document)).toBeVisible();
+    },
+    ready: (page) =>
+      page.locator('#main-content').getByRole('list').getByRole('link', { name: M.ci }).first(),
+  },
   {
     path: '/users',
     url: '/users',
