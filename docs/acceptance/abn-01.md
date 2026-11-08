@@ -193,6 +193,14 @@ dort die INS-04-Tests (`--grep @ins-04 --grep-invert @plain-http`) über
 (Job 122571465336, Stand `372d442`, PR #102), grün; Nachtrag vom 2026-10-28.
 Damit ist der Retest von F-352 bestanden.
 
+Änderung nach dem Einfrieren, 2026-11-08 (Nachzug zu PR #137, Design-System):
+Die Review-Inbox zeigt die Queue jetzt als Tabelle statt als Liste.
+`frontend/e2e/onboarding.spec.ts` sucht das erste offene Review-Item daher
+unter `main tbody tr button` statt `main ul li button`. Daten, Schritte und
+Erwartungen bleiben unverändert; die Prüfsumme der Spec in
+`artefakte/SHA256SUMS` ist neu. PR #137 hatte die Spec angepasst, die
+Prüfsumme aber nicht nachgezogen (Job `gate` auf `main` rot).
+
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|
 | 1 | Self-Signup | über den Link „Konto anlegen“ der Anmeldeseite; Bestätigungs-Mail, Organisation mit Trial | bestanden (Lauf #219, Fassung WP-529; frühere Fassung in Lauf #122) |
@@ -284,6 +292,16 @@ dem Speichern sichtbar ist. Der Schritt galt dann als erledigt, bevor der
 PUT ankam, oder schlug nach dem Speichern mit zwei Treffern fehl
 (Strict Mode). Unter Last wurde das sichtbar. Daten, Schritte und
 Erwartungen bleiben unverändert; die Prüfsumme der Spec in
+`artefakte/SHA256SUMS` ist neu.
+
+Änderung nach dem Einfrieren, 2026-11-08 (Nachzug zu PR #137, Design-System):
+Die CI-Detailseite trägt den CI-Namen jetzt als Überschrift der Ebene 1, die
+Review-Inbox zeigt die Queue als Tabelle und daneben den Vergleich des
+geöffneten Items als zweite Tabelle. `frontend/e2e-real/abn-01-konflikt.spec.ts`
+sucht deshalb die Überschrift der Ebene 1, die Einträge unter
+`main tbody tr button` und die Vergleichstabelle über die Spalte
+„Beobachtet“; die Status „Erledigt“/„Verworfen“ prüft sie an der Tabellenzeile.
+Daten, Schritte und Erwartungen bleiben unverändert; die Prüfsumme der Spec in
 `artefakte/SHA256SUMS` ist neu.
 
 **Gemockter Lauf (Regression, Freigabe vom 2026-10-14):**
