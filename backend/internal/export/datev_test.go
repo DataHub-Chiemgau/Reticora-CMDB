@@ -24,6 +24,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/text/encoding/charmap"
 )
 
 // The DATEV export of the asset accounting (EXP-01, TST-01, E-50, WP-310):
@@ -497,5 +498,88 @@ func TestDATEVBatches(t *testing.T) {
 	}
 	if res.Rows != renderBatchSize+3 || len(src.queries) != 2 || src.queries[1].AfterID != src.rows[renderBatchSize-1].ID {
 		t.Errorf("rows %d after %d queries", res.Rows, len(src.queries))
+	}
+}
+
+// TestDATEVHeaderAndClosedColumn covers the TST-01 [P2] DATEV cases that
+// the golden file shows only implicitly (WP-326, EXP-01, E-50): the
+// header is the headers of export/datev_mapping.json (the default
+// mapping) in their order, Windows-1252 encoded and closed with CRLF,
+// also for an export without rows; a source the creator may not read
+// stays an empty column in every row (the column count is unchanged) and
+// is named in the manifest with reason field_permission, while the other
+// cells keep their formats (amount with decimal comma, date DD.MM.YYYY).
+func TestDATEVHeaderAndClosedColumn(t *testing.T) {
+	raw, err := os.ReadFile("datev_mapping.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file DATEVMapping
+	if err = json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	headers := make([]string, 0, len(file.Columns))
+	for _, c := range file.Columns {
+		headers = append(headers, c.Header)
+	}
+	header, err := charmap.Windows1252.NewEncoder().String(strings.Join(headers, ";") + "\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(DefaultDATEVMapping().Columns, file.Columns) {
+		t.Errorf("default mapping %+v, want the columns of datev_mapping.json", DefaultDATEVMapping().Columns)
+	}
+	all := permission.UnrestrictedPolicy(identity.AllPermissions())
+	var out, report bytes.Buffer
+	if _, err = RenderDATEV(context.Background(), &fakeAssets{}, frOrg, JobFilters{}, DefaultDATEVMapping(), "EUR", all, &out, &report); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != header {
+		t.Errorf("header without rows %q, want %q", out.String(), header)
+	}
+	if !strings.Contains(header, "W\xe4hrung") {
+		t.Errorf("header %q: the umlaut is not Windows-1252", header)
+	}
+
+	// The creator may not read the supplier of any asset.
+	bg := context.Background()
+	grants := permission.NewMemoryFieldGrants()
+	if _, err = grants.CreateFieldGrant(bg, frOrg, &permission.FieldGrant{RoleID: ptrTo(frRole), ObjectKind: permission.KindAsset,
+		FieldKey: ptrTo("core.supplier"), Level: permission.LevelNone}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := permission.NewFieldResolver(&frAccess{grants: []identity.Grant{frGrant(frRole)}}, nil, grants, nil).
+		Resolve(bg, identity.Principal{Subject: frUser, OrganizationID: frOrg, Type: identity.PrincipalTypeUser, Permissions: identity.AllPermissions()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	report.Reset()
+	res, err := RenderDATEV(bg, &fakeAssets{rows: datevRows()}, frOrg, JobFilters{}, DefaultDATEVMapping(), "EUR", policy, &out, &report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(res.Manifest.Omitted, OmittedField{Field: "supplier", Reason: ReasonFieldPermission}) || slices.Contains(res.Manifest.Fields, "supplier") {
+		t.Errorf("manifest %+v, want supplier omitted for field_permission", res.Manifest)
+	}
+	col := slices.IndexFunc(file.Columns, func(c DATEVColumn) bool { return c.Source == "supplier" })
+	if col < 0 {
+		t.Fatal("datev_mapping.json has no supplier column")
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\r\n"), "\r\n")
+	if len(lines) != 1+res.Rows || !strings.HasPrefix(out.String(), header) {
+		t.Fatalf("file %q: want the header and %d rows", out.String(), res.Rows)
+	}
+	for _, line := range lines[1:] {
+		cells := strings.Split(line, ";")
+		if len(cells) != len(file.Columns) || cells[col] != "" {
+			t.Errorf("row %q: want %d cells with an empty supplier column", line, len(file.Columns))
+		}
+	}
+	if strings.Contains(strings.Join(lines[1:], "\n"), "S\xf6hne") {
+		t.Errorf("the closed supplier leaks: %q", out.String())
+	}
+	if !strings.Contains(lines[1], ";15.03.2024;1234,50;") {
+		t.Errorf("first row %q: date and amount lost their formats", lines[1])
 	}
 }

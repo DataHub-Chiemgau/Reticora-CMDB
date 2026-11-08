@@ -74,6 +74,19 @@ func newComposeEnv(t *testing.T) *composeEnv {
 	systemDefinition(t, f, "wp252_ref", "user", "", "", "")
 	systemDefinition(t, f, "wp252_multi", "text", "", "", "")
 	systemDefinition(t, f, "wp252_pat", "text", "", `{"pattern": "^[a-z]"}`, `"abz"`)
+	// The cases of TestCompositionConformanceMatrix with materialized
+	// layers that the definitions above leave out (WP-326): allowed values
+	// in validation.options, enum_values with validation.options, a former
+	// data type name, a reference alias and an equal multi_value.
+	systemDefinition(t, f, "wp326_opt", "text", "", `{"options": ["x", "y", "z"]}`, "")
+	systemDefinition(t, f, "wp326_eo", "enum", `["a","b"]`, "", "")
+	systemDefinition(t, f, "wp326_alias", "textarea", "", "", "")
+	systemDefinition(t, f, "wp326_uref", "user", "", "", "")
+	systemDefinition(t, f, "wp326_mv", "text", "", "", "")
+	if _, err := f.Admin.Exec(context.Background(), `UPDATE attribute_definition SET multi_value = true
+		WHERE organization_id IS NULL AND ci_type_id IS NULL AND key = 'wp326_mv'`); err != nil {
+		t.Fatalf("system definition wp326_mv: %v", err)
+	}
 
 	// The type chain root → mid → leaf (WP-248), inheritable definitions.
 	e.root = e.createType(e.org, "wp252-root")
@@ -90,6 +103,10 @@ func newComposeEnv(t *testing.T) *composeEnv {
 	typed(e.leaf, `{"key":"wp252_num","data_type":"decimal","validation":{"max":50}}`)
 	typed(e.leaf, `{"key":"wp252_len","data_type":"text","validation":{"max_length":20}}`)
 	typed(e.leaf, `{"key":"wp252_leaf","data_type":"integer"}`)
+	typed(e.root, `{"key":"wp326_opt","data_type":"text","validation":{"options":["y","z","w"]}}`)
+	typed(e.mid, `{"key":"wp326_eo","data_type":"enum","validation":{"options":["b","c"]}}`)
+	typed(e.mid, `{"key":"wp326_alias","data_type":"multiline"}`)
+	typed(e.root, `{"key":"wp326_uref","data_type":"reference","reference_target":"user"}`)
 
 	// Two sets at leaf in position order (WP-709).
 	e.set1, e.set2 = e.createSet(e.org, "wp252-set-1"), e.createSet(e.org, "wp252-set-2")
@@ -97,6 +114,7 @@ func newComposeEnv(t *testing.T) *composeEnv {
 		`{"key":"wp252_enum","data_type":"enum","enum_values":["b","c","d"],"default":"c","inheritable":true}`)
 	e.mustSetAttribute(e.org, e.set2.ID, `{"key":"wp252_enum","data_type":"enum","enum_values":["a","b","c","d"],"default":"b","inheritable":true}`)
 	e.mustSetAttribute(e.org, e.set2.ID, `{"key":"wp252_def","data_type":"text","default":"set2","inheritable":true}`)
+	e.mustSetAttribute(e.org, e.set1.ID, `{"key":"wp326_mv","data_type":"text","multi_value":true,"inheritable":true}`)
 	e.putSets(e.org, e.leaf.ID, e.set1.ID, e.set2.ID)
 
 	e.probe = e.childType(e.org, "wp252-probe", e.leaf.ID)
@@ -172,6 +190,22 @@ func TestCompositionParityAgainstPostgres(t *testing.T) {
 	if v := leaf["wp252_num"].Validation; !leaf["wp252_num"].Required || *v.Min != 1 || *v.Max != 50 {
 		t.Errorf("leaf wp252_num = %+v %+v", leaf["wp252_num"], v)
 	}
+	// The matrix cases added by WP-326, as both sides see them.
+	if v := leaf["wp326_opt"].Validation; v == nil || !reflect.DeepEqual(v.Options, []any{"y", "z"}) {
+		t.Errorf("leaf wp326_opt = %+v, want the options [y z]", v)
+	}
+	if v := leaf["wp326_eo"]; !reflect.DeepEqual(v.EnumValues, []string{"b"}) {
+		t.Errorf("leaf wp326_eo = %+v, want enum_values [b] (enum_values with validation.options)", v)
+	}
+	if v := leaf["wp326_alias"]; v.DataType != fieldmeta.TypeMultiline {
+		t.Errorf("leaf wp326_alias = %+v, want the MET-11 name multiline", v)
+	}
+	if v := leaf["wp326_uref"]; fieldmeta.ReferenceTargetOf(&v) != "user" {
+		t.Errorf("leaf wp326_uref = %+v, want a reference to user", v)
+	}
+	if v := leaf["wp326_mv"]; v.MultiValue == nil || !*v.MultiValue {
+		t.Errorf("leaf wp326_mv = %+v, want multi_value", v)
+	}
 
 	// Conflicts written past the backend: the database refuses them with
 	// the code Compose reports.
@@ -189,6 +223,10 @@ func TestCompositionParityAgainstPostgres(t *testing.T) {
 			Validation: &fieldmeta.ValidationRules{Min: f64(60)}}},
 		{"empty length range", "validation", `{"max_length": 1}`, fieldmeta.FieldDefinition{Name: "wp252_len", DataType: fieldmeta.TypeText,
 			Validation: &fieldmeta.ValidationRules{MaxLength: intp(1)}}},
+		{"validation.options without a common value", "validation", `{"options": ["q"]}`, fieldmeta.FieldDefinition{Name: "wp326_opt",
+			DataType: fieldmeta.TypeText, Validation: &fieldmeta.ValidationRules{Options: []any{"q"}}}},
+		{"multi_value differs from the set", "multi_value", "false", fieldmeta.FieldDefinition{Name: "wp326_mv", DataType: fieldmeta.TypeText,
+			MultiValue: new(bool)}},
 	} {
 		_, goErr := citype.Compose([]fieldmeta.FieldDefinition{probeEffective[c.def.Name]}, []fieldmeta.FieldDefinition{c.def})
 		var conflict *citype.CompositionError
@@ -328,7 +366,7 @@ func compareSchema(t *testing.T, name string, typ *citype.Type, defs []fieldmeta
 	}
 	for i := range defs {
 		d := &defs[i]
-		if !strings.HasPrefix(d.Name, "wp252_") {
+		if !strings.HasPrefix(d.Name, "wp252_") && !strings.HasPrefix(d.Name, "wp326_") {
 			continue
 		}
 		p, _ := props[d.Name].(map[string]any)

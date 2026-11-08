@@ -186,6 +186,104 @@ func TestResolveFieldsOverChain(t *testing.T) {
 	}
 }
 
+// TestResolveFieldsTypeChainLayers is the TST-01 [P2] case "inheritance"
+// (WP-326, MET-06) as composition layers: ResolveFields over the chain
+// root → mid → leaf of a fake lister (layeredLister) without system and
+// organization layers. The leaf inherits the inheritable definitions of
+// its ancestors, a definition with inheritable = false stays with its
+// type, the subtype refines (narrower bounds, intersection of the allowed
+// values, a later default) and removes nothing (a required inherited from
+// the root stays required, a pattern of the mid stays), and a conflict
+// over the chain (data type, empty range, no allowed value left) is a
+// *CompositionError with key and code, also when the conflicting
+// definitions lie two levels apart.
+func TestResolveFieldsTypeChainLayers(t *testing.T) {
+	ctx := context.Background()
+	chain := func(leafFields ...Field) layeredLister {
+		return layeredLister{globals: []Field{}, chain: []Type{
+			{ID: "root", Fields: []Field{
+				{Name: "vendor", DataType: fieldmeta.TypeText, Required: true, Inheritable: true},
+				{Name: "ports", DataType: fieldmeta.TypeInteger, Inheritable: true,
+					Validation: &fieldmeta.ValidationRules{Min: f64(1), Max: f64(48)}},
+				{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"a", "b", "c"}, DefaultValue: "a", Inheritable: true},
+				{Name: "root_secret", DataType: fieldmeta.TypeText, Inheritable: false},
+			}},
+			{ID: "mid", ParentTypeID: "root", Fields: []Field{
+				{Name: "ports", DataType: fieldmeta.TypeInteger, Inheritable: true,
+					Validation: &fieldmeta.ValidationRules{Min: f64(4)}},
+				{Name: "code", DataType: fieldmeta.TypeText, Inheritable: true,
+					Validation: &fieldmeta.ValidationRules{Pattern: "^[A-Z]"}},
+				{Name: "mid_only", DataType: fieldmeta.TypeText, Inheritable: false},
+			}},
+			{ID: "leaf", ParentTypeID: "mid", Fields: leafFields},
+		}}
+	}
+
+	defs, err := ResolveFields(ctx, chain(
+		Field{Name: "vendor", DataType: fieldmeta.TypeText, Required: false},
+		Field{Name: "ports", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(24)}},
+		Field{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"b", "c", "d"}, DefaultValue: "c"},
+		Field{Name: "code", DataType: fieldmeta.TypeText},
+		Field{Name: "leaf_only", DataType: fieldmeta.TypeText, Inheritable: false},
+	), "org", "leaf", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]fieldmeta.FieldDefinition{}
+	for _, d := range defs {
+		byName[d.Name] = d
+	}
+	for _, name := range []string{"root_secret", "mid_only"} {
+		if _, ok := byName[name]; ok {
+			t.Errorf("%s: a definition with inheritable = false of an ancestor reached the leaf", name)
+		}
+	}
+	if _, ok := byName["leaf_only"]; !ok {
+		t.Error("the leaf's own definition with inheritable = false is missing")
+	}
+	if v := byName["vendor"]; !v.Required {
+		t.Errorf("vendor = %+v: the required inherited from the root was dropped", v)
+	}
+	if p := byName["ports"].Validation; p == nil || *p.Min != 4 || *p.Max != 24 {
+		t.Errorf("ports = %+v, want 4..24 (min of mid, max of leaf)", p)
+	}
+	if tier := byName["tier"]; !slices.Equal(tier.EnumValues, []string{"b", "c"}) || tier.DefaultValue != "c" {
+		t.Errorf("tier = %+v, want [b c] with the leaf's default", tier)
+	}
+	if code := byName["code"]; code.Validation == nil || code.Validation.Pattern != "^[A-Z]" {
+		t.Errorf("code = %+v: the pattern inherited from mid was dropped", code)
+	}
+	// The mid alone inherits from the root only.
+	if defs, err = ResolveFields(ctx, chain(), "org", "mid", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(defs, func(d fieldmeta.FieldDefinition) bool { return d.Name == "mid_only" }) ||
+		slices.ContainsFunc(defs, func(d fieldmeta.FieldDefinition) bool { return d.Name == "root_secret" }) {
+		t.Errorf("mid = %+v, want its own mid_only without root_secret", defs)
+	}
+
+	for name, tc := range map[string]struct {
+		leaf Field
+		key  string
+		code string
+	}{
+		"data type differs from the root":     {Field{Name: "vendor", DataType: fieldmeta.TypeInteger}, "vendor", CodeDatatypeConflict},
+		"range empty against mid":             {Field{Name: "ports", DataType: fieldmeta.TypeInteger, Validation: &fieldmeta.ValidationRules{Max: f64(3)}}, "ports", CodeRangeEmpty},
+		"no allowed value left from the root": {Field{Name: "tier", DataType: fieldmeta.TypeEnum, EnumValues: []string{"x"}}, "tier", CodeEnumEmpty},
+	} {
+		_, err = ResolveFields(ctx, chain(tc.leaf), "org", "leaf", "")
+		var conflict *CompositionError
+		if !errors.As(err, &conflict) || conflict.CompositionKey() != tc.key || conflict.CompositionCode() != tc.code {
+			t.Errorf("%s: err = %v, want a composition error of %s with %s", name, err, tc.key, tc.code)
+		}
+	}
+	// A definition with inheritable = false of an ancestor does not
+	// conflict with the leaf: it is no layer of the leaf.
+	if _, err = ResolveFields(ctx, chain(Field{Name: "root_secret", DataType: fieldmeta.TypeInteger}), "org", "leaf", ""); err != nil {
+		t.Errorf("leaf over a non-inheritable definition of the root: %v", err)
+	}
+}
+
 // TestTypeHandlerErrorContract covers the error contract of Handler.Create
 // and Handler.Update (WP-248): an unknown type is 404, a cycle and a taken
 // key 409, parent errors 422; every parent error is RFC 7807 with field

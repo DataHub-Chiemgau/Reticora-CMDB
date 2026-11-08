@@ -696,3 +696,86 @@ func TestMemoryFieldGrantsValidationAndPaging(t *testing.T) {
 		t.Errorf("other organization lists %d grants", len(items))
 	}
 }
+
+// TestFieldResolutionTypeChain is the TST-01 [P2] case "field permissions
+// over the type chain" (WP-326, RBA-07, E-43) on a chain of three types
+// grandchild → child → parent, read at the grandchild: a grant at an
+// ancestor applies to its subtypes, the grant at the nearer type of the
+// chain wins (per stage, so a field grant at the parent still beats a type
+// grant at the grandchild), and a field marked sensitive at an ancestor
+// stays none at every subtype unless a field grant with exactly its key
+// exists, at any type of the chain or without type; a grant of another key,
+// a type grant or an object grant does not open it.
+func TestFieldResolutionTypeChain(t *testing.T) {
+	const grandchild = "00000000-0000-4000-8000-0000000000d4"
+	serial := "core.serial_number"
+	role := ptr(tRoleA)
+	cases := []struct {
+		name      string
+		fields    []FieldGrant
+		object    []ObjectGrant
+		sensitive []SensitiveField
+		field     string
+		// at is the type read ("" the grandchild).
+		at   string
+		want Level
+	}{
+		{name: "grant at the parent applies to the grandchild", field: hostname, want: LevelNone,
+			fields: []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: ptr(hostname), Level: LevelNone}}},
+		{name: "type grant at the parent applies to the grandchild", field: hostname, want: LevelRead,
+			fields: []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), Level: LevelRead}}},
+		{name: "grant at the child beats the parent", field: hostname, want: LevelRead,
+			fields: []FieldGrant{
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: ptr(hostname), Level: LevelNone},
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tChildType), FieldKey: ptr(hostname), Level: LevelRead}}},
+		{name: "grant at the grandchild beats child and parent", field: hostname, want: LevelNone,
+			fields: []FieldGrant{
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: ptr(hostname), Level: LevelWrite},
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tChildType), FieldKey: ptr(hostname), Level: LevelRead},
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(grandchild), FieldKey: ptr(hostname), Level: LevelNone}}},
+		{name: "field grant at the parent beats a type grant at the grandchild", field: hostname, want: LevelRead,
+			fields: []FieldGrant{
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(grandchild), Level: LevelNone},
+				{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: ptr(hostname), Level: LevelRead}}},
+		{name: "grant at a type outside the chain does not apply", field: hostname, want: LevelWrite,
+			fields: []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tOtherType), FieldKey: ptr(hostname), Level: LevelNone}}},
+		{name: "sensitive at the parent: none at the grandchild", field: serial, want: LevelNone,
+			sensitive: []SensitiveField{{ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: serial}},
+			fields:    []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(grandchild), Level: LevelWrite}},
+			object:    []ObjectGrant{{GranteeRoleID: role, ObjectKind: KindCI, ObjectID: tObject, Level: LevelWrite}}},
+		{name: "sensitive at the parent: a grant of another key does not open it", field: serial, want: LevelNone,
+			sensitive: []SensitiveField{{ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: serial}},
+			fields:    []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(grandchild), FieldKey: ptr(hostname), Level: LevelWrite}}},
+		{name: "sensitive at the parent: opened by its key at the parent", field: serial, want: LevelRead,
+			sensitive: []SensitiveField{{ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: serial}},
+			fields:    []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: ptr(serial), Level: LevelRead}}},
+		{name: "sensitive at the parent: opened by its key at the grandchild", field: serial, want: LevelWrite,
+			sensitive: []SensitiveField{{ObjectKind: KindCI, CITypeID: ptr(tParentType), FieldKey: serial}},
+			fields:    []FieldGrant{{RoleID: role, ObjectKind: KindCI, CITypeID: ptr(grandchild), FieldKey: ptr(serial), Level: LevelWrite}}},
+		{name: "sensitive at the grandchild does not close the parent", field: serial, at: tParentType, want: LevelWrite,
+			sensitive: []SensitiveField{{ObjectKind: KindCI, CITypeID: ptr(grandchild), FieldKey: serial}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, _ := fixture(t)
+			repo.SetTypeParent(tOrg, grandchild, tChildType)
+			for _, s := range tc.sensitive {
+				addSensitive(t, repo, s)
+			}
+			for _, g := range tc.fields {
+				addField(t, repo, g)
+			}
+			for _, g := range tc.object {
+				addObject(t, repo, g)
+			}
+			p := policyFor(t, repo, []identity.Grant{roleGrant(tRoleA, "ci:read", "ci:write")}, nil)
+			at := tc.at
+			if at == "" {
+				at = grandchild
+			}
+			if got := p.Level(KindCI, at, tc.field, obj); got != tc.want {
+				t.Errorf("Level = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
