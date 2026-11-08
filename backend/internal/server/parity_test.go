@@ -184,8 +184,10 @@ func TestParityComparisonHandlesPlannedOperations(t *testing.T) {
 // TestRoutesAndSpecificationAreInParity covers API-01 for both profiles:
 // the PostgreSQL profile and --no-db serve exactly the documented
 // operations. With every late module on, that is the whole specification;
-// with the G1 default (WP-214, E-03) it is the specification without the
-// paths marked x-phase; with release G2 (RETICORA_MODULES=P2, WP-706) the
+// with release G1 (no late module, WP-214, E-03; the test profile
+// NoModules since WP-830) it is the specification without the paths marked
+// x-phase; with release G2, the default without RETICORA_MODULES
+// (ParseModules(""), WP-830; the same as the phase value P2 of WP-706), the
 // paths without x-phase or with x-phase P2. Operations marked x-status:
 // planned (E-38, WP-247) are left out in every release and must not be
 // served.
@@ -202,11 +204,8 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load planned operations: %v", err)
 	}
-	g1, err := ParseModules("")
-	if err != nil {
-		t.Fatalf("parse modules: %v", err)
-	}
-	g2, err := ParseModules(PhaseP2)
+	g1 := NoModules()
+	g2, err := ParseModules("")
 	if err != nil {
 		t.Fatalf("parse modules: %v", err)
 	}

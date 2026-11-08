@@ -1563,3 +1563,5 @@ AST-04;[P2];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
 UI-14;[P2–P4, A];C;frontend/src/pages/CIDetailPage.test.tsx;WP-810
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/form-builder.spec.ts;WP-324
 UI-14;[P2–P4, A];C;frontend/e2e/a11y.spec.ts;WP-324
+API-06;[P2]/[P3]/[P4]/[A];G2;backend/internal/server/modules_test.go;WP-830
+RBA-05;[P2–P4], [A];G2;backend/internal/server/modules_test.go;WP-830

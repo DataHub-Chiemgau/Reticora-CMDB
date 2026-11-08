@@ -469,8 +469,9 @@ func main() {
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)
-	// Late modules (phase P2 and later, add-ons) are off unless
-	// RETICORA_MODULES enables them (WP-214, E-03).
+	// Late modules (phase P2 and later, add-ons; WP-214, E-03): without
+	// RETICORA_MODULES the release default G2 switches the P2 modules on
+	// and keeps P3, P4 and the add-ons off (WP-830).
 	modules, err := server.ParseModules(cfg.Modules)
 	if err != nil {
 		slog.Error("invalid module configuration", "error", err)

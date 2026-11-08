@@ -724,8 +724,9 @@ jobs:
             exit 1
           fi
 
-      # G1 default (RETICORA_MODULES unset): playwright.real.config.ts leaves
-      # the specs of late modules out (WP-541).
+      # Release default G2 (RETICORA_MODULES unset, WP-830): the P2 modules
+      # are on, P3, P4 and the add-ons off; playwright.real.config.ts leaves
+      # the specs of the modules that stay off out (WP-541).
       - name: Run the real-stack E2E suite (${{ matrix.project }}) against the expected-failure list
         id: e2e-real-g1
         working-directory: frontend
@@ -738,12 +739,15 @@ jobs:
           ../tests/audit/run-auditdefect.sh playwright --report "$RUNNER_TEMP/e2e-real/e2e-real.json" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
           ../tests/audit/run-auditdefect.sh compare --kinds e2e-real --projects "$PROJECT" --results "$RUNNER_TEMP/e2e-real/e2e-real-results.txt"
 
-      # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module is
-      # off in the G1 default (E-03); the server of the same installation is
-      # restarted with RETICORA_MODULES=maintenance (an overlay on top of the
+      # WP-541 (MGT-04, NTF-05, NFR-04): module run. The maintenance module
+      # (P3) is off in the release default G2 (E-03, WP-830); the server of
+      # the same installation is restarted with RETICORA_MODULES=maintenance
+      # (an overlay on top of the
       # files setup-real-stack.sh applies, with the signup secrets of the
       # running server) and the frontend recreated after it, as
-      # setup-real-stack.sh does. It runs whenever the G1 run ran, green or red.
+      # setup-real-stack.sh does. It runs whenever the default run ran, green
+      # or red. RETICORA_MODULES=maintenance names one module key, so this run
+      # serves maintenance without the P2 modules (unchanged since WP-541).
       - name: Restart the server with RETICORA_MODULES=maintenance (module run)
         if: ${{ !cancelled() && steps.e2e-real-g1.outcome != 'skipped' }}
         run: |

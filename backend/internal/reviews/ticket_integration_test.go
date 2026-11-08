@@ -43,7 +43,8 @@ type rtEnv struct {
 }
 
 // newRTEnv builds the production router with enforced entitlements and the
-// late modules of spec ("all" or "" for none).
+// late modules of spec ("all", or "" for none: the G1 profile NoModules,
+// WP-830).
 func newRTEnv(t *testing.T, f *scopetest.Fixture, user, modules string) *rtEnv {
 	t.Helper()
 	masterKey, err := crypto.GenerateMasterKey()
@@ -54,9 +55,11 @@ func newRTEnv(t *testing.T, f *scopetest.Fixture, user, modules string) *rtEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := server.ParseModules(modules)
-	if err != nil {
-		t.Fatal(err)
+	set := server.NoModules()
+	if modules != "" {
+		if set, err = server.ParseModules(modules); err != nil {
+			t.Fatal(err)
+		}
 	}
 	repos := server.PostgresRepositories(f.App, audit.NewPGRecorder())
 	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{Enforce: true})

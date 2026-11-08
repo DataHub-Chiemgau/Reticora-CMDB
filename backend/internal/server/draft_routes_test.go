@@ -163,10 +163,8 @@ func TestDraftParameterFailsClosed(t *testing.T) {
 		}
 	}
 
-	g1, err := ParseModules("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Release G1 (no late module): the test profile since WP-830.
+	g1 := NoModules()
 	h := middleware.TenantMiddleware(testRouterWithModules(t, &audit.Handler{}, g1))
 	code, created := call(h, http.MethodPost, "/api/v1/ci-types", `{"key":"draft_probe","name":"Draft probe","description":"before"}`)
 	if code != http.StatusCreated {

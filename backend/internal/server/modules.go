@@ -12,9 +12,10 @@ import (
 )
 
 // Module is a product module whose phase tag is later than G1 (API-06,
-// RBA-05). After E-03 such modules are switched off in the G1 release: their
-// routes are not registered, their workers do not start and the UI hides
-// their navigation (WP-214).
+// RBA-05). A module that is off has no registered routes, its workers do
+// not start and the UI hides its navigation (WP-214, E-03). The release
+// default is G2 (WP-830): every module with phase P2 is on, the modules of
+// P3, P4 and the add-ons [A] stay off (E-03, SEQ-01).
 type Module struct {
 	Key string `json:"key"`
 	// Phase is the phase tag of the module: P2, P3, P4 or A (add-on).
@@ -42,7 +43,8 @@ const (
 )
 
 // PhaseP2 is the phase value of RETICORA_MODULES that switches on every
-// module with phase P2 (release G2, WP-706).
+// module with phase P2 (release G2, WP-706); since WP-830 it is also the
+// default of an empty RETICORA_MODULES.
 const PhaseP2 = "P2"
 
 // LateModules lists every module with a phase tag from P2 or [A], after
@@ -112,17 +114,29 @@ func AllModules() *ModuleSet {
 	return s
 }
 
-// ParseModules reads RETICORA_MODULES: empty switches every late module off
-// (the G1 default after E-03), "all" switches them all on, otherwise a comma
-// list of module keys and the phase value P2, which switches on every module
-// with phase P2 (release G2, WP-706). Unknown keys fail, so a typo does not
-// silently leave a module off.
+// NoModules switches every late module off: the release G1 after E-03
+// (WP-214). Since WP-830 it is a test profile only; no value of
+// RETICORA_MODULES selects it.
+func NoModules() *ModuleSet {
+	return &ModuleSet{enabled: map[string]bool{}}
+}
+
+// ParseModules reads RETICORA_MODULES: empty is the release default G2
+// (WP-830), every module with phase P2 on and the modules of P3, P4 and the
+// add-ons off, the same as the phase value P2; "all" switches every late
+// module on, otherwise a comma list of module keys and the phase value P2,
+// which switches on every module with phase P2 (WP-706). Only the modules
+// listed are on. Unknown keys fail, so a typo does not silently leave a
+// module off.
 func ParseModules(spec string) (*ModuleSet, error) {
 	spec = strings.TrimSpace(spec)
 	if strings.EqualFold(spec, "all") {
 		return AllModules(), nil
 	}
-	s := &ModuleSet{enabled: map[string]bool{}}
+	if spec == "" {
+		spec = PhaseP2
+	}
+	s := NoModules()
 	for _, key := range strings.Split(spec, ",") {
 		key = strings.TrimSpace(key)
 		if key == "" {

@@ -1378,7 +1378,7 @@ export interface paths {
     };
     /**
      * List the late modules and whether this release serves them
-     * @description Modules with a phase tag from P2 or [A] (API-06, RBA-05) are switched off in the G1 release unless RETICORA_MODULES enables them (WP-214, E-03). Their operations carry x-phase in this specification and answer 404 while the module is off; the UI hides their navigation.
+     * @description Modules with a phase tag from P2 or [A] (API-06, RBA-05) are release switches (WP-214, E-03). Without RETICORA_MODULES the release G2 serves the modules with phase P2; those of P3, P4 and the add-ons [A] stay off unless RETICORA_MODULES enables them (WP-830). Their operations carry x-phase in this specification and answer 404 while the module is off; the UI hides their navigation.
      */
     get: operations['listModules'];
     put?: never;

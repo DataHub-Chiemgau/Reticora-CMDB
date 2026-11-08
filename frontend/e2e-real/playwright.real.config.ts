@@ -20,10 +20,12 @@ if (projects.length === 0) {
   throw new Error('frontend/playwright.config.ts defines no projects');
 }
 
-// Specs of late modules (phase P2 and later, E-03): their routes answer 404 in the G1
-// default, so the G1 run leaves them out. The module run of install-smoke.yml restarts the
-// server with RETICORA_MODULES=<key> and sets E2E_MODULE_RUN=<key>; then only the specs of
-// that module run (README.md, "Module run", WP-541).
+// Specs of late modules that stay off in the release default G2 (P3, P4 and add-ons; E-03,
+// WP-830): their routes answer 404 without RETICORA_MODULES, so the default run leaves them
+// out; the P2 modules are on and their specs run in the default run. The module run of
+// install-smoke.yml restarts the server with RETICORA_MODULES=<key> and sets
+// E2E_MODULE_RUN=<key>; then only the specs of that module run (README.md, "Module run",
+// WP-541).
 const MODULE_SPECS: Record<string, string> = {
   maintenance: '**/maintenance.spec.ts',
 };

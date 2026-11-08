@@ -260,8 +260,9 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		})
 	}
 	// The health of the CIs follows the monitoring state every minute
-	// (DB-05, MON-02): a worker of its own, so it runs in the G1 default
-	// configuration without the module alerting (F-087).
+	// (DB-05, MON-02): a worker of its own, so it runs without the module
+	// alerting (P3, F-087), which stays off in the release defaults G1 and
+	// G2 (WP-830).
 	if refresher, ok := d.repos.Metrics.(monitoring.HealthRefreshingStore); ok {
 		health := monitoring.NewHealthWorker(refresher.HealthRefresher())
 		workers = append(workers, server.Worker{
@@ -274,7 +275,8 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 
 // workerSwitch reports whether a worker starts on this instance: its
 // operator switch is on (OPS-02) and its module, if it belongs to a late
-// module, is enabled (WP-214).
+// module, is enabled (WP-214). With the release default G2 (WP-830) only
+// the workers of the P3 module alerting (monitoring) stay off.
 func workerSwitch(cfg *config.Config, modules *server.ModuleSet) func(name string) bool {
 	return func(name string) bool {
 		return cfg.WorkerEnabled(name) && modules.WorkerAllowed(name)
@@ -366,7 +368,8 @@ func registerSystemJobs(scheduler *jobs.Scheduler, d *systemJobDeps) error {
 // a database only the reservation sweeper runs.
 func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	// Release expired reservations (spec §10); reservations belong to the
-	// inventory module (WP-214).
+	// inventory module (WP-214), which the release default G2 switches on
+	// (WP-830).
 	var systemJobs []jobs.Schedule
 	if d.modules.Enabled(server.ModuleInventory) {
 		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
