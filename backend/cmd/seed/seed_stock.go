@@ -120,6 +120,67 @@ func (s *stockSeed) ensureConsumables(ctx context.Context) error {
 	return nil
 }
 
+// ensureScaledConsumables writes the consumables beyond those of the level
+// up to orgSeed.consumables (WP-821) set-based in one statement, like the
+// consumables of ensureConsumables (name in turn, sku SKU-<n>, min_level,
+// supplier) with the deterministic id <prefix>/consumable/<n>, and books
+// the stock of each through one receipt of the movement service, the
+// booking way of ensureConsumables, into bin (n-1) mod bins + 1. Every
+// quantity reaches MinLevel, so the consumables below their minimum stay
+// those of the level. An existing consumable or receipt is skipped.
+func (s *stockSeed) ensureScaledConsumables(ctx context.Context) error {
+	first := s.content.consumables + 1
+	if s.org.consumables < first {
+		return nil
+	}
+	if _, err := s.tx.Exec(ctx, `
+		INSERT INTO consumable (id, organization_id, name, sku, supplier_id, category, unit, min_level, notes)
+		SELECT md5($1 || '/consumable/' || n)::uuid, $2, ($3::text[])[(n - 1) % cardinality($3::text[]) + 1],
+			'SKU-' || CASE WHEN n < 10000 THEN lpad(n::text, 4, '0') ELSE n::text END,
+			CASE WHEN cardinality($4::uuid[]) > 0 THEN ($4::uuid[])[n % cardinality($4::uuid[]) + 1] END,
+			'general', 'pcs', $5, 'Seed (WP-821)'
+		FROM generate_series($6::int, $7::int) AS n
+		ON CONFLICT DO NOTHING`,
+		s.org.prefix, s.org.id, seedConsumableNames, s.supplierIDs, MinLevel, first, s.org.consumables); err != nil {
+		return err
+	}
+	rows, err := s.tx.Query(ctx, `
+		SELECT c.id::text, c.sku, n FROM generate_series($3::int, $4::int) AS n
+		JOIN consumable c ON c.id = md5($2 || '/consumable/' || n)::uuid AND c.organization_id = $1
+		WHERE NOT EXISTS (SELECT 1 FROM stock_movement m WHERE m.id = md5($2 || '/movement/receipt/' || c.sku || '/1')::uuid)
+		ORDER BY n`, s.org.id, s.org.prefix, first, s.org.consumables)
+	if err != nil {
+		return err
+	}
+	type pending struct {
+		id, sku string
+		n       int
+	}
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err = rows.Scan(&p.id, &p.sku, &p.n); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, p)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, p := range todo {
+		quantity := float64(MinLevel + 10 + p.n%20)
+		m := &movement.Movement{ID: s.org.uid("movement", "receipt", p.sku, "1"), OrganizationID: s.org.id,
+			ItemKind: "consumable", ConsumableID: p.id, MovementType: "receipt", ToLocationID: s.binID((p.n-1)%s.content.bins + 1),
+			Quantity: &quantity, ActorID: s.admin, Reason: "seed: initial stock", OccurredAt: s.org.at.AddDate(0, 0, -7)}
+		if err = s.movements.RecordTx(ctx, s.tx, m); err != nil {
+			return fmt.Errorf("receipt %s: %w", p.sku, err)
+		}
+	}
+	return nil
+}
+
 // seedOrder is an internal order of the seed: its target state and the
 // quantity received of its one position of 10.
 type seedOrder struct {

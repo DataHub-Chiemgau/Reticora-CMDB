@@ -500,6 +500,15 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		{Objects: 40, RelationshipsPerCI: MaxRelationshipsPerCI + 1, At: at},
 		{Objects: 40, Orgs: -1, At: at}, {Objects: 40, Orgs: MaxOrgs + 1, At: at},
 		{Objects: 40, At: at, APIKey: true, APIKeyRole: "auditor"}, {Objects: 40, At: at, APIKeyRole: "Viewer"},
+		// The Phase-2 volumes (WP-821): CIs and assets together at most
+		// MaxObjects, consumables and tickets at most 50.000, none
+		// negative or below SIM-01.
+		{Objects: 40, Assets: MaxObjects - 39, At: at}, {Objects: MaxObjects, Assets: BaseAssets, At: at},
+		{Objects: 25000, Assets: 25001, At: at},
+		{Objects: 40, Consumables: MaxConsumables + 1, At: at}, {Objects: 40, Tickets: MaxTickets + 1, At: at},
+		{Objects: 40, Assets: -1, At: at}, {Objects: 40, Consumables: -1, At: at}, {Objects: 40, Tickets: -1, At: at},
+		{Objects: 40, Assets: BaseAssets - 1, At: at}, {Objects: 40, Consumables: BaseConsumables - 1, At: at},
+		{Objects: 40, Tickets: BaseTickets - 1, At: at}, {Objects: 40, Assets: 1, At: at},
 	} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("options %+v accepted", o)
@@ -518,6 +527,13 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		"one per CI and two relationships": {Objects: 40, InterfacesPerCI: 1, IPsPerCI: 1, RelationshipsPerCI: 2, At: at},
 		"the key of viewer":                {Objects: 40, At: at, APIKey: true, APIKeyRole: "viewer"},
 		"the key of client_technician":     {Objects: 40, At: at, APIKey: true, APIKeyRole: "client_technician"},
+		// WP-821: 10.000 objects of E-17 as CIs and assets; unset volumes
+		// are the SIM-01 quantities and do not count against MaxObjects.
+		"the Phase-2 load seed": {Objects: 5000, Assets: 5000, Consumables: 2000, Tickets: 5000, At: at},
+		"the SIM-01 volumes":    {Objects: 40, Assets: BaseAssets, Consumables: BaseConsumables, Tickets: BaseTickets, At: at},
+		"the largest volumes": {Objects: 40, Assets: MaxObjects - 40, Consumables: MaxConsumables, Tickets: MaxTickets,
+			At: at},
+		"the largest seed without Phase-2 volumes": {Objects: MaxObjects, At: at},
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s is refused: %v", name, err)
@@ -536,6 +552,18 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		if farthest := 1 + (dependencies-1)/servers; farthest >= servers {
 			t.Errorf("%d objects: dependency distance %d reaches the %d servers", objects, farthest, servers)
 		}
+	}
+	// An unset volume is the SIM-01 quantity (WP-821), which is what the
+	// levels of WP-819 and WP-820 seed.
+	unset := Options{Objects: 40, At: at}
+	if unset.assets() != BaseAssets || unset.consumables() != BaseConsumables || unset.tickets() != BaseTickets {
+		t.Errorf("unset volumes: %d assets, %d consumables, %d tickets", unset.assets(), unset.consumables(), unset.tickets())
+	}
+	full := stockContentOf(phase2Full)
+	if n := full.linked + chassisCount + full.stock; n != BaseAssets || full.consumables != BaseConsumables ||
+		len(ticketDocContentOf(phase2Full).tickets) != BaseTickets {
+		t.Errorf("the demo level seeds %d assets, %d consumables, %d tickets; want %d, %d, %d", n, full.consumables,
+			len(ticketDocContentOf(phase2Full).tickets), BaseAssets, BaseConsumables, BaseTickets)
 	}
 	// An empty APIKeyRole is org_admin (WP-325).
 	empty := Options{Objects: 40, At: at, APIKey: true}
@@ -1301,4 +1329,174 @@ func TestSeedDocumentContent(t *testing.T) {
 			t.Errorf("without store: content of org %s in the store (%v)", org.Slug, statErr)
 		}
 	}
+}
+
+// fieldValueCounts reads the field values of the [B] CIs of one
+// organization (WP-821) through the maintenance pool; at is the anchor of
+// the seed. The mismatch queries count violations.
+func fieldValueCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	fields := `('` + strings.Join(FieldValueFields, `', '`) + `')`
+	queries := map[string]string{
+		// [B] CIs with the three discovered values of snmp, observed at
+		// the anchor.
+		"ci_with_values": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + `
+			AND (SELECT count(*) FROM ci_field_value v WHERE v.ci_id = c.id AND v.discovered_source = '` + FieldValueSource + `'
+				AND v.field_name IN ` + fields + ` AND v.observed_at = $2) = 3`,
+		"snmp_values": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1
+			AND discovered_source = '` + FieldValueSource + `'`,
+		// The discovered values are the columns of the CI.
+		"value_mismatch": `SELECT count(*) FROM ci_field_value v JOIN ci c ON c.id = v.ci_id
+			WHERE v.organization_id = $1 AND v.discovered_source = '` + FieldValueSource + `'
+			AND v.discovered_value #>> '{}' IS DISTINCT FROM CASE v.field_name WHEN 'hostname' THEN c.hostname
+				WHEN 'serial_number' THEN c.serial_number WHEN 'management_ip' THEN host(c.management_ip) END`,
+		// The overrides: the provenance rows of the computed attributes
+		// of the linked CIs (source computed) hold none.
+		"override": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1 AND override_value IS NOT NULL`,
+		"override_every_20th": `SELECT count(*) FROM ci_field_value v JOIN ci c ON c.id = v.ci_id
+			WHERE v.organization_id = $1 AND v.override_value IS NOT NULL AND v.field_name = '` + OverrideField + `'
+			AND v.protected AND v.override_value #>> '{}' = c.hostname AND ` + baseTypeOnly + `
+			AND substring(c.name FROM '[0-9]+$')::int % ` + fmt.Sprint(OverrideEvery) + ` = 0`,
+		"computed_values": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1 AND discovered_source = 'computed'`,
+		"ci_version":      `SELECT COALESCE(sum(version), 0)::int FROM ci WHERE organization_id = $1`,
+		"ci_change":       `SELECT count(*) FROM ci_change WHERE organization_id = $1`,
+		"audit":           `SELECT count(*) FROM audit_log WHERE organization_id = $1`,
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// TestSeedScaled covers the Phase-2 volumes of the load seed (WP-821,
+// SIM-01 [P2] for ABN-02): Objects 1000, Assets 500, Consumables 200 and
+// Tickets 100 give the demo organization these quantities; the further
+// assets lie in the bins without a CI, every further consumable has its
+// receipt and stock_level.on_hand stays the sum of the bookings, the
+// further tickets have the due times of the seed calendar. Every [B] CI
+// has its three discovered values of snmp (the columns), every 20th a
+// protected override on hostname. The relationships are those of a seed
+// without Phase-2 volumes, the SIM-01 data set of the CIs and acme stay as
+// they are, the integrity check finds nothing, and a second run changes
+// nothing.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedScaled(t *testing.T) {
+	f := scopetest.Seed(t, "d1")
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	const objects, assets, consumables, tickets = 1000, 500, 200, 100
+	opts := Options{Prefix: "seedscale-", Objects: objects, Metrics: 0, Assets: assets, Consumables: consumables,
+		Tickets: tickets, At: at}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
+	summary, err := Run(ctx, f.App, opts)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	demo, acme := summary.Orgs[0].ID, summary.Orgs[1].ID
+
+	// The further tickets in work have their first response.
+	responded := 6
+	for n := BaseTickets + 1; n <= tickets; n++ {
+		if s := scaledStatuses[n%len(scaledStatuses)]; s == ticket.StatusInProgress || s == ticket.StatusWaiting {
+			responded++
+		}
+	}
+	stockWant := map[string]int{
+		"asset": assets, "asset_linked": 42, "ci_asset": 42, "asset_in_bin": assets - 42, "asset_engineer": assets / 4,
+		"serial_mismatch": 0, "consumable": consumables, "consumable_ast": consumables, "below_min": 1,
+		"stock_mismatch": 0, "cross_org": 0, "other_movement": 0, "movement": 26 + consumables - BaseConsumables,
+		"stocktake_running": 1, "stocktake_item_mismatch": 0, "stocktake_asset_item": assets - 42,
+		"warranty_mismatch": 0, "warranty_set": 42,
+	}
+	ticketWant := map[string]int{
+		"ticket": tickets, "ticket_related": tickets, "ticket_engineer": tickets, "ticket_created_before_at": tickets,
+		"ticket_sla": tickets, "ticket_sla_calendar": tickets, "ticket_first_response": responded, "ticket_cross_org": 0,
+		"document": 3, "link_ticket": 1,
+	}
+	fieldWant := map[string]int{
+		"ci_with_values": objects, "snmp_values": 3 * objects, "value_mismatch": 0,
+		"override": objects / OverrideEvery, "override_every_20th": objects / OverrideEvery, "computed_values": 42,
+	}
+	var first map[string]int
+	check := func(round string) {
+		t.Helper()
+		got := map[string]int{}
+		for name, n := range stockCounts(t, f, demo, at) {
+			got["stock."+name] = n
+		}
+		for name, n := range ticketDocCounts(t, f, demo, at) {
+			got["ticket."+name] = n
+		}
+		for name, n := range fieldValueCounts(t, f, demo, at) {
+			got["field."+name] = n
+		}
+		for name, n := range counts(t, f, demo) {
+			got["base."+name] = n
+		}
+		for prefix, want := range map[string]map[string]int{"stock.": stockWant, "ticket.": ticketWant, "field.": fieldWant} {
+			for name, n := range want {
+				if got[prefix+name] != n {
+					t.Errorf("%s: %s%s = %d, want %d", round, prefix, name, got[prefix+name], n)
+				}
+			}
+		}
+		// The CIs keep the SIM-01 data set of their size, the
+		// relationships those of a seed without Phase-2 volumes, so the
+		// graph of the core switch stays as tests/load/api.js expects.
+		for table, n := range seedCounts(objects, 0) {
+			if got["base."+table] != n {
+				t.Errorf("%s: %s = %d, want %d", round, table, got["base."+table], n)
+			}
+		}
+		checkDueTimes(t, f, demo, at, true)
+		// acme keeps its quantities.
+		if a, k := stockCounts(t, f, acme, at), ticketDocCounts(t, f, acme, at); a["asset"] != 10 || a["consumable"] != 2 ||
+			k["ticket"] != 2 {
+			t.Errorf("%s: acme holds %d assets, %d consumables, %d tickets", round, a["asset"], a["consumable"], k["ticket"])
+		}
+		if fv := fieldValueCounts(t, f, acme, at); fv["snmp_values"] != 0 || fv["override"] != 0 {
+			t.Errorf("%s: acme holds %d discovered values and %d overrides", round, fv["snmp_values"], fv["override"])
+		}
+		if first == nil {
+			first = got
+			return
+		}
+		for name, n := range got {
+			if first[name] != n {
+				t.Errorf("%s: %s = %d, %d after the first run", round, name, n, first[name])
+			}
+		}
+	}
+	check("first run")
+	if violations := integrityViolations(t, f, demo); len(violations) > 0 {
+		t.Errorf("integrity check: %v", violations)
+	}
+	// The further assets and tickets carry the deterministic ids.
+	var deterministic int
+	if err = f.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM asset WHERE organization_id = $1
+			AND id = md5('seedscale-demo/asset/' || substring(inventory_no FROM 5)::int)::uuid)
+		+ (SELECT count(*) FROM ticket WHERE organization_id = $1
+			AND id = md5('seedscale-demo/ticket/' || substring(title FROM 13)::int)::uuid)`, demo).Scan(&deterministic); err != nil ||
+		deterministic != assets-BaseAssets+tickets-BaseTickets {
+		t.Errorf("%d further assets and tickets with deterministic ids, want %d (err %v)", deterministic,
+			assets-BaseAssets+tickets-BaseTickets, err)
+	}
+
+	// A second run with the same options adds nothing.
+	if _, err = Run(ctx, f.App, opts); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	check("second run")
 }

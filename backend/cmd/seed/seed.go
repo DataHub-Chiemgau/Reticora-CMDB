@@ -28,8 +28,19 @@ type Options struct {
 	Prefix string
 	// Objects is the number of CIs of the demo organization: 40 is the
 	// SIM-01 data set, 10.000 the NFR-10 load seed, at most 50.000
-	// (headroom of NFR-01).
+	// (headroom of NFR-01) less Assets.
 	Objects int
+	// The Phase-2 volumes of the demo organization (WP-821): Assets is its
+	// number of assets (at least the 60 of SIM-01; Objects + Assets at
+	// most MaxObjects, as NFR-01 counts CIs and assets as objects, E-17),
+	// Consumables its number of consumables (20 to MaxConsumables) and
+	// Tickets its number of tickets (10 to MaxTickets). Zero is the SIM-01
+	// quantity and does not count against MaxObjects. The objects beyond
+	// SIM-01 are written set-based with deterministic ids: assets in the
+	// bins without a CI, consumables with one receipt each, tickets with
+	// the due times of the seed calendar; acme and the small organizations
+	// keep their quantities.
+	Assets, Consumables, Tickets int
 	// Metrics is the number of metric samples of the demo organization.
 	Metrics int
 	// The volumes of NFR-01 (WP-439, F-279) apply to the demo organization;
@@ -92,8 +103,39 @@ func APIKeyName(role string) string {
 	return "load-test-" + role
 }
 
-// MaxObjects is the headroom of NFR-01.
+// MaxObjects is the headroom of NFR-01: CIs and assets of the demo
+// organization together (E-17).
 const MaxObjects = 50000
+
+// The SIM-01 quantities of the Phase-2 objects of the demo organization
+// (WP-819, WP-820): 40 assets linked to the mounted CIs, 2 of the blade
+// chassis and 18 in the bins; 20 consumables; 10 tickets. The volume
+// options cannot go below them.
+const (
+	BaseAssets      = 60
+	BaseConsumables = 20
+	BaseTickets     = 10
+)
+
+// MaxConsumables and MaxTickets bound the Phase-2 volume options beside
+// MaxObjects.
+const (
+	MaxConsumables = 50000
+	MaxTickets     = 50000
+)
+
+// assets, consumables and tickets are the Phase-2 quantities of the demo
+// organization: the option, or the SIM-01 quantity for zero.
+func (o *Options) assets() int      { return orBase(o.Assets, BaseAssets) }
+func (o *Options) consumables() int { return orBase(o.Consumables, BaseConsumables) }
+func (o *Options) tickets() int     { return orBase(o.Tickets, BaseTickets) }
+
+func orBase(n, base int) int {
+	if n == 0 {
+		return base
+	}
+	return n
+}
 
 // The bounds of the volume options: twice the ratios of NFR-01 per object
 // (5 interfaces, 20 addresses, 10 relationships) and the 5.000
@@ -165,6 +207,9 @@ func (o *Options) Validate() error {
 	if o.Metrics < 0 {
 		return fmt.Errorf("metrics must not be negative")
 	}
+	if err := o.validatePhase2Volumes(); err != nil {
+		return err
+	}
 	if o.InterfacesPerCI < 0 || o.InterfacesPerCI > MaxInterfacesPerCI {
 		return fmt.Errorf("interfaces per CI must be between 1 and %d", MaxInterfacesPerCI)
 	}
@@ -188,6 +233,28 @@ func (o *Options) Validate() error {
 	return nil
 }
 
+// validatePhase2Volumes checks the Phase-2 volume options (WP-821): none is
+// negative or below its SIM-01 quantity, an explicit Assets fits beside
+// Objects into MaxObjects.
+func (o *Options) validatePhase2Volumes() error {
+	if o.Assets < 0 || o.Consumables < 0 || o.Tickets < 0 {
+		return fmt.Errorf("assets, consumables and tickets must not be negative")
+	}
+	if o.Assets != 0 && o.Assets < BaseAssets {
+		return fmt.Errorf("assets must be at least %d (SIM-01)", BaseAssets)
+	}
+	if o.Assets != 0 && o.Objects+o.Assets > MaxObjects {
+		return fmt.Errorf("objects + assets must not exceed %d (NFR-01 counts CIs and assets)", MaxObjects)
+	}
+	if o.Consumables != 0 && (o.Consumables < BaseConsumables || o.Consumables > MaxConsumables) {
+		return fmt.Errorf("consumables must be between %d and %d", BaseConsumables, MaxConsumables)
+	}
+	if o.Tickets != 0 && (o.Tickets < BaseTickets || o.Tickets > MaxTickets) {
+		return fmt.Errorf("tickets must be between %d and %d", BaseTickets, MaxTickets)
+	}
+	return nil
+}
+
 // orgSpec is one organization of the seed.
 type orgSpec struct {
 	key, name, domain string
@@ -197,6 +264,8 @@ type orgSpec struct {
 	interfaces, ips, relationships int
 	// phase2 is the Phase-2 content (WP-325).
 	phase2 phase2Level
+	// The Phase-2 quantities (WP-821); 0 keeps those of the level.
+	assets, consumables, tickets int
 }
 
 // orgSpecs lists the organizations of the seed: the demo organization with
@@ -205,12 +274,13 @@ type orgSpec struct {
 // share 10.12.0.0/16: every organization has VRFs of its own.
 func (o *Options) orgSpecs() []orgSpec {
 	specs := []orgSpec{
-		{"demo", "Demo", "demo.local", 10, o.Objects, o.Metrics, o.InterfacesPerCI, o.IPsPerCI, o.RelationshipsPerCI, phase2Full},
-		{"acme", "acme", "acme.local", 11, baseObjects, baseObjects, 0, 0, 0, phase2Subset},
+		{"demo", "Demo", "demo.local", 10, o.Objects, o.Metrics, o.InterfacesPerCI, o.IPsPerCI, o.RelationshipsPerCI, phase2Full,
+			o.assets(), o.consumables(), o.tickets()},
+		{"acme", "acme", "acme.local", 11, baseObjects, baseObjects, 0, 0, 0, phase2Subset, 0, 0, 0},
 	}
 	for k := 1; k <= o.Orgs; k++ {
 		key := fmt.Sprintf("org-%04d", k)
-		specs = append(specs, orgSpec{key, fmt.Sprintf("Org %04d", k), key + ".local", 12, baseObjects, baseObjects, 0, 0, 0, phase2None})
+		specs = append(specs, orgSpec{key, fmt.Sprintf("Org %04d", k), key + ".local", 12, baseObjects, baseObjects, 0, 0, 0, phase2None, 0, 0, 0})
 	}
 	return specs
 }
@@ -221,11 +291,13 @@ func (o *Options) orgSpecs() []orgSpec {
 // inserted only if missing, so a second run with the same options changes
 // nothing. After the seed transaction of an organization the Phase-2 steps
 // run in a transaction of their own through the services (phase2Steps,
-// WP-325), then its assets and stock in a further one (stockSteps, WP-819),
-// then its business calendar, SLA policies, tickets and documents in a
-// further one after storing the document contents (ticketDocSteps, WP-820),
-// its CIs are indexed for the search (index) and the index of its
-// searchable attribute is built (attributeIndex). At the end the statistics
+// WP-325), then its assets and stock with the assets and consumables of
+// the Phase-2 volumes and the field values of its CIs in a further one
+// (stockSteps, WP-819, WP-821), then its business calendar, SLA policies,
+// tickets with those of the volumes and documents in a further one after
+// storing the document contents (ticketDocSteps, WP-820), its CIs are
+// indexed for the search (index) and the index of its searchable
+// attribute is built (attributeIndex). At the end the statistics
 // of the grown tables are refreshed (database.AnalyzeAfterBulk).
 func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error) {
 	if err := opts.Validate(); err != nil {
@@ -239,6 +311,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, opts Options) (Summary, error)
 			domain: spec.domain, prefix: opts.Prefix + spec.key, octet: spec.octet, objects: spec.objects,
 			metrics: spec.metrics, at: opts.At, ifacesPerCI: max(spec.interfaces, 1), ipsPerCI: max(spec.ips, 1),
 			relsPerCI: spec.relationships, phase2: spec.phase2, keyRole: opts.keyRole(),
+			assets: spec.assets, consumables: spec.consumables, tickets: spec.tickets,
 		}
 		o.issueKey = opts.APIKey && n == 0
 		if err := database.WithOrganizationSetup(ctx, pool, o.id, o.seed); err != nil {
@@ -286,6 +359,10 @@ type orgSeed struct {
 	// phase2 is the Phase-2 content, keyRole the role of the load-test key.
 	phase2  phase2Level
 	keyRole string
+	// assets, consumables and tickets are the Phase-2 quantities of the
+	// organization (Options, WP-821); beyond those of its level they are
+	// written set-based. 0 keeps the quantities of the level.
+	assets, consumables, tickets int
 }
 
 func (o *orgSeed) uid(parts ...string) string {

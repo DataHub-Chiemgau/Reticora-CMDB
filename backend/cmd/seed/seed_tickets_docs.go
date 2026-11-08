@@ -342,6 +342,7 @@ func (o *orgSeed) ticketDocSteps(ctx context.Context, pool *pgxpool.Pool, blobs 
 			{"business calendar", s.ensureCalendar},
 			{"sla policies", s.ensureSLAs},
 			{"tickets", s.ensureTickets},
+			{"scaled tickets", s.ensureScaledTickets},
 			{"documents", s.ensureDocuments},
 		}
 		for _, step := range steps {
@@ -484,6 +485,169 @@ func (s *ticketDocSeed) ensureTickets(ctx context.Context) error {
 			return fmt.Errorf("ticket %s: %w", title, err)
 		}
 		s.ticketIDs[spec.n] = t.ID
+	}
+	return nil
+}
+
+// scaledStatuses are the states of the tickets beyond those of the level,
+// in turn (WP-821): the open states the ticket lists show most.
+var scaledStatuses = []string{ticket.StatusNew, ticket.StatusOpen, ticket.StatusInProgress, ticket.StatusWaiting}
+
+// ScaledTicketMaxAgeHours bounds the age of a scaled ticket at the anchor:
+// ticket n was created 1 + n mod ScaledTicketMaxAgeHours hours before it.
+const ScaledTicketMaxAgeHours = 336
+
+// scaledBatch is the number of SLA states of one statement.
+const scaledBatch = 5000
+
+// ensureScaledTickets writes the tickets beyond those of the level up to
+// orgSeed.tickets (WP-821) set-based in one statement: ticket n (from the
+// level's count on) has the title TicketTitle(n) and the deterministic id
+// <prefix>/ticket/<n>, relates to [B] CI (n-1) mod objects + 1, is
+// reported and assigned like the seeded tickets, takes its state and its
+// priority in turn (scaledStatuses, the priorities of seedSLAs) and was
+// created 1 + n mod ScaledTicketMaxAgeHours hours before the anchor. The
+// database numbers them and derives client and site from the CI; unlike
+// the ticket service they emit no ticket event. Their SLA states follow
+// (ensureScaledSLAs). An existing ticket is skipped.
+func (s *ticketDocSeed) ensureScaledTickets(ctx context.Context) error {
+	first := len(s.content.tickets) + 1
+	if s.org.tickets < first {
+		return nil
+	}
+	priorities := make([]string, len(seedSLAs))
+	for i, p := range seedSLAs {
+		priorities[i] = p.priority
+	}
+	if _, err := s.tx.Exec(ctx, `
+		INSERT INTO ticket (id, organization_id, title, description, status, priority, category, reporter_id,
+			assignee_id, related_ci_id, created_at, updated_at)
+		SELECT md5($1 || '/ticket/' || n)::uuid, $2, 'Seed ticket ' || n, 'Seed (WP-821)',
+			($3::text[])[n % cardinality($3::text[]) + 1],
+			($4::text[])[(n / cardinality($3::text[])) % cardinality($4::text[]) + 1],
+			$5, $6::uuid, $7::uuid, md5($1 || '/ci/' || ((n - 1) % $8::int + 1))::uuid,
+			$9::timestamptz - make_interval(hours => 1 + n % $10::int),
+			$9::timestamptz - make_interval(hours => 1 + n % $10::int)
+		FROM generate_series($11::int, $12::int) AS n
+		ON CONFLICT DO NOTHING`,
+		s.org.prefix, s.org.id, scaledStatuses, priorities, ticket.DefaultCategory, s.admin, s.assignee, s.org.objects,
+		s.org.at, ScaledTicketMaxAgeHours, first, s.org.tickets); err != nil {
+		return err
+	}
+	return s.ensureScaledSLAs(ctx, first)
+}
+
+// scaledState is a scaled ticket without an SLA state.
+type scaledState struct {
+	ticket, priority, status, policy string
+	created                          time.Time
+}
+
+// ensureScaledSLAs writes the SLA states of the scaled tickets from first
+// on that have none, set-based in batches of scaledBatch with what
+// sla.PGRepository.ApplyForTicket writes per ticket: the seeded policy of
+// the ticket's priority, the due times the SLA package computes in the
+// calendar of the seed for the creation (sla.Schedule.Add), the breach
+// flags as the refresh of the package sets them and, once the ticket is in
+// work, the first response ticketFirstResponse after the creation. Without
+// a seed calendar (no level with scaled tickets lacks one) every ticket
+// goes through ApplyForTicket.
+func (s *ticketDocSeed) ensureScaledSLAs(ctx context.Context, first int) error {
+	rows, err := s.tx.Query(ctx, `
+		SELECT t.id::text, t.priority, t.status, t.created_at, p.id::text
+		FROM generate_series($3::int, $4::int) AS n
+		JOIN ticket t ON t.id = md5($2 || '/ticket/' || n)::uuid AND t.organization_id = $1
+		JOIN sla p ON p.organization_id = $1 AND p.client_id IS NULL AND p.name = $5 || t.priority
+		WHERE NOT EXISTS (SELECT 1 FROM ticket_sla x WHERE x.ticket_id = t.id)
+		ORDER BY n`, s.org.id, s.org.prefix, first, s.org.tickets, SLAName(""))
+	if err != nil {
+		return err
+	}
+	var todo []scaledState
+	for rows.Next() {
+		var st scaledState
+		if err = rows.Scan(&st.ticket, &st.priority, &st.status, &st.created, &st.policy); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, st)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	if len(todo) == 0 {
+		return nil
+	}
+	if s.calendarID == "" {
+		for i := range todo {
+			t := &ticket.Ticket{ID: todo[i].ticket, OrganizationID: s.org.id, Priority: todo[i].priority, CreatedAt: todo[i].created}
+			if _, err = s.slas.ApplyForTicket(ctx, s.org.id, t, ""); err != nil {
+				return fmt.Errorf("ticket %s: sla: %w", t.ID, err)
+			}
+		}
+		return nil
+	}
+	stored, err := s.slas.GetCalendar(ctx, s.org.id, s.calendarID)
+	if err != nil {
+		return fmt.Errorf("calendar: %w", err)
+	}
+	cal := stored.Calendar()
+	loc, err := time.LoadLocation(cal.Timezone)
+	if err != nil {
+		return fmt.Errorf("calendar zone %q: %w", cal.Timezone, err)
+	}
+	schedule := cal.In(loc)
+	for start := 0; start < len(todo); start += scaledBatch {
+		if err = s.insertScaledSLAs(ctx, schedule, todo[start:min(start+scaledBatch, len(todo))]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertScaledSLAs computes and inserts the SLA states of chunk.
+func (s *ticketDocSeed) insertScaledSLAs(ctx context.Context, schedule *sla.Schedule, chunk []scaledState) error {
+	targets := map[string]seedSLA{}
+	for _, p := range seedSLAs {
+		targets[p.priority] = p
+	}
+	var tickets, policies []string
+	var response, resolution []time.Time
+	var firstResponse []*time.Time
+	for i := range chunk {
+		st := &chunk[i]
+		target, ok := targets[st.priority]
+		if !ok {
+			return fmt.Errorf("ticket %s: no seeded policy of priority %s", st.ticket, st.priority)
+		}
+		responseDue, err := schedule.Add(st.created, target.response)
+		if err != nil {
+			return err
+		}
+		resolutionDue, err := schedule.Add(st.created, target.resolution)
+		if err != nil {
+			return err
+		}
+		var responded *time.Time
+		if st.status == ticket.StatusInProgress || st.status == ticket.StatusWaiting {
+			at := st.created.Add(ticketFirstResponse).UTC()
+			responded = &at
+		}
+		tickets, policies = append(tickets, st.ticket), append(policies, st.policy)
+		response, resolution = append(response, responseDue.UTC()), append(resolution, resolutionDue.UTC())
+		firstResponse = append(firstResponse, responded)
+	}
+	if _, err := s.tx.Exec(ctx, `
+		INSERT INTO ticket_sla (organization_id, ticket_id, sla_id, response_due_at, resolution_due_at, calendar_id,
+			sla_explicit, first_response_at, response_breached, resolution_breached)
+		SELECT $1, f.ticket::uuid, f.policy::uuid, f.response, f.resolution, $2::uuid, false, f.responded,
+			CASE WHEN f.responded IS NULL THEN now() > f.response ELSE f.responded > f.response END, now() > f.resolution
+		FROM unnest($3::text[], $4::text[], $5::timestamptz[], $6::timestamptz[], $7::timestamptz[])
+			AS f(ticket, policy, response, resolution, responded)
+		ON CONFLICT (organization_id, ticket_id) DO NOTHING`,
+		s.org.id, s.calendarID, tickets, policies, response, resolution, firstResponse); err != nil {
+		return fmt.Errorf("sla states: %w", err)
 	}
 	return nil
 }

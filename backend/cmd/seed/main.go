@@ -30,6 +30,21 @@
 // -document-content stores the contents in the object store of the server
 // (RETICORA_S3_*, bucket reticora-documents); without it only the metadata
 // is seeded.
+//
+// Phase-2 volumes (WP-821): -assets, -consumables and -tickets scale the
+// assets (60 of SIM-01 up to 50.000 minus objects; NFR-01 counts CIs and
+// assets as objects, E-17), consumables (20 to 50.000) and tickets (10 to
+// 50.000) of the demo organization. The objects beyond SIM-01 are written
+// set-based: assets in the bins without a CI, consumables with one receipt
+// each, tickets with the due times of the seed calendar; they leave the
+// graph of the core switch as it is. A flag that is not set keeps the
+// SIM-01 quantity and does not count against the 50.000 objects. Every [B]
+// CI of the demo organization also gets its hostname, serial number and
+// management address as discovered values of the source snmp, every 20th a
+// protected override on hostname with the value of its column (field
+// values with provenance). The Phase-2 load seed of ABN-02 (WP-327, WP-822)
+// is e.g. -objects 5000 -assets 5000 -consumables 2000 -tickets 5000
+// -api-key-role engineer (tests/load/README.md).
 package main
 
 import (
@@ -48,7 +63,12 @@ import (
 func main() {
 	dsn := flag.String("database-url", os.Getenv("RETICORA_DATABASE_URL"),
 		"PostgreSQL connection string (defaults to RETICORA_DATABASE_URL)")
-	objects := flag.Int("objects", baseObjects, fmt.Sprintf("CIs of the demo organization (%d-%d; 10000 for NFR-10)", baseObjects, MaxObjects))
+	objects := flag.Int("objects", baseObjects,
+		fmt.Sprintf("CIs of the demo organization (%d to %d minus assets, the -assets value when set; 10000 for NFR-10)", baseObjects, MaxObjects))
+	assets := flag.Int("assets", BaseAssets,
+		fmt.Sprintf("assets of the demo organization (%d to %d minus objects; when not set the SIM-01 %d, outside the bound)", BaseAssets, MaxObjects, BaseAssets))
+	consumables := flag.Int("consumables", BaseConsumables, fmt.Sprintf("consumables of the demo organization (%d-%d)", BaseConsumables, MaxConsumables))
+	tickets := flag.Int("tickets", BaseTickets, fmt.Sprintf("tickets of the demo organization (%d-%d)", BaseTickets, MaxTickets))
 	metrics := flag.Int("metrics", 2000, "metric samples of the demo organization")
 	interfaces := flag.Int("interfaces-per-ci", 1, fmt.Sprintf("interfaces of every CI of the demo organization (1-%d; NFR-01: 5)", MaxInterfacesPerCI))
 	ips := flag.Int("ips-per-ci", 1, fmt.Sprintf("addresses of every CI of the demo organization (1-%d; NFR-01: 20)", MaxIPsPerCI))
@@ -63,6 +83,16 @@ func main() {
 	documentContent := flag.Bool("document-content", false,
 		"store the content of the seeded documents in the object store of RETICORA_S3_* (bucket "+document.Bucket+")")
 	flag.Parse()
+	// A Phase-2 volume that is not set is the SIM-01 quantity (0): an
+	// unset -assets does not count against MaxObjects, so -objects 50000
+	// keeps working (WP-821).
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	for name, value := range map[string]*int{"assets": assets, "consumables": consumables, "tickets": tickets} {
+		if !explicit[name] {
+			*value = 0
+		}
+	}
 	if *dsn == "" {
 		fmt.Fprintln(os.Stderr, "seed: database URL is required")
 		os.Exit(2)
@@ -97,6 +127,7 @@ func main() {
 	start := time.Now()
 	summary, err := Run(ctx, pool, Options{Prefix: *prefix, Objects: *objects, Metrics: *metrics,
 		InterfacesPerCI: *interfaces, IPsPerCI: *ips, RelationshipsPerCI: *relationships, Orgs: *orgs, At: anchor,
+		Assets: *assets, Consumables: *consumables, Tickets: *tickets,
 		APIKey: *keyFile != "", APIKeyRole: *keyRole, Blobs: blobs})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "seed: %v\n", err)

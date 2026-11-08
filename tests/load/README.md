@@ -122,6 +122,47 @@ Attributindex); der Seed mit 10.000 Objekten ohne Volumina 15 s. Der Job
 `nfr01-volume` (unten) misst die Seed-Dauer auf dem Runner
 (`seed-nfr01-volume.txt`).
 
+### Phase-2-Last-Seed (WP-821, ABN-02)
+
+NFR-01 zählt Objekte als CI + Asset; die Budgets gelten bei 10.000 Objekten
+je Organisation, 50.000 sind Headroom ohne Budgetzusage (E-17). Drei
+Optionen skalieren die Phase-2-Objekte der Demo-Organisation; acme und die
+kleinen Organisationen behalten ihre Mengen:
+
+| Option | Standard (SIM-01) | Grenzen | Wirkung |
+|---|---|---|---|
+| `-assets` | 60 | 60 bis 50.000 − `-objects` | weitere Assets reihum in den Bins des Lagers hq, ohne CI-Verknüpfung, mit den AST-01-Feldern, Lieferant und Vertrag wie die Lager-Assets aus WP-819 |
+| `-consumables` | 20 | 20–50.000 | weitere Mengenartikel mit je einer `receipt`-Buchung über den Bewegungsdienst (`stock_level.on_hand` = Summe der Buchungen) |
+| `-tickets` | 10 | 10–50.000 | weitere Tickets (reihum `new`, `open`, `in_progress`, `waiting` und die vier Prioritäten) auf [B]-CIs, Fristen aus der Kalenderberechnung des SLA-Pakets im Seed-Kalender |
+
+Die Mengen über SIM-01 entstehen mengenbasiert mit deterministischen IDs
+(`<prefix>demo/asset/<n>`, `…/consumable/<n>`, `…/ticket/<n>`); die
+Phase-2-Objekte ändern den Graphen des Core-Switches nicht (`IMPACT_ALL =
+OBJECTS - 3`). Ein nicht gesetztes `-assets` zählt nicht gegen die Grenze,
+`-objects 50000` allein bleibt zulässig. Unabhängig von den Optionen
+schreibt der Seed für jedes [B]-CI der Demo-Organisation `hostname`,
+`serial_number` und `management_ip` als Feldwerte der Quelle `snmp` in
+`ci_field_value` (gleich den Spalten, `observed_at` = `-at`) und für jedes
+20. CI einen geschützten Override auf `hostname` mit dem Spaltenwert; damit
+misst der Override-Abgleich der Knotenlesung gegen Provenienzzeilen
+(`docs/acceptance/lasttest-g1.md`, offener Punkt 10). `-api-key-role` stellt
+den Lasttest-Schlüssel für den Nutzer einer Standardrolle aus
+(`load-test-<role>`), damit Feldrechte und Layouts mitgemessen werden.
+Beispiel mit 5.000 CIs und 5.000 Assets (10.000 Objekte nach E-17):
+
+```sh
+go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 5000 \
+  -assets 5000 -consumables 2000 -tickets 5000 -api-key-role engineer \
+  -api-key-file /tmp/load-engineer.key
+```
+
+Lokal (ohne TimescaleDB, ohne Last) dauerte dieser Seed etwa 25 s. Die
+Mengen des Phase-2-Lastlaufs legen WP-822 (Standardeingaben in `load.yml`)
+und WP-327 (Headroom-Läufe) fest. `TestSeedScaled` und
+`TestSeedOptionsAreBounded` in `backend/cmd/seed/seed_integration_test.go`
+prüfen Mengen, Buchungsinvariante, Feldwerte, Beziehungszahl, Grenzen und
+den zweiten Lauf.
+
 ### Workflow
 
 `.github/workflows/load.yml` (manuell und nächtlich) führt diese Schritte aus:

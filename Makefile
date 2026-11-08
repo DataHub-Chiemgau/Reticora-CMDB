@@ -155,19 +155,31 @@ down:
 # admin@demo.local) and "acme", each with two clients, racks, CIs with LLDP,
 # mounts, metrics, a collector with scopes, reviews, an echo webhook and a VRF
 # example (cmd/seed). SEED_OBJECTS scales the demo organization for the load
-# test of NFR-10 (10000; at most 50000). Phase 2 (WP-325): through the
-# metamodel services the demo organization also gets derived types
+# test of NFR-10 (10000; with SEED_ASSETS at most 50000, see below). Phase 2
+# (WP-325): through the metamodel services the demo organization also gets
+# derived types
 # (blade_chassis, blade_server), two attribute sets, two templates with two
 # published versions, rules, form layouts for engineer and viewer, field
 # grants and the users engineer@, viewer@ and client_technician@; acme gets a
 # derived type, a template with one published version and viewer@. The seed
 # is deterministic and idempotent; any error fails the target.
+# Phase-2 volumes (WP-821): SEED_ASSETS, SEED_CONSUMABLES and SEED_TICKETS
+# scale the assets, consumables and tickets of the demo organization; the
+# defaults are the SIM-01 quantities (60, 20, 10), so make seed without
+# variables creates the SIM-01 data set including Phase 2. SEED_OBJECTS +
+# SEED_ASSETS is at most 50000 (NFR-01 counts CIs and assets, E-17),
+# consumables and tickets at most 50000 each; e.g. the Phase-2 load seed
+# SEED_OBJECTS=5000 SEED_ASSETS=5000 (tests/load/README.md).
 SEED_OBJECTS ?= 40
 SEED_METRICS ?= 2000
+SEED_ASSETS ?= 60
+SEED_CONSUMABLES ?= 20
+SEED_TICKETS ?= 10
 seed:
 	@echo "==> Seeding database..."
 	cd $(BACKEND_DIR) && go run ./cmd/seed -database-url "$(DATABASE_URL)" \
-		-objects $(SEED_OBJECTS) -metrics $(SEED_METRICS)
+		-objects $(SEED_OBJECTS) -metrics $(SEED_METRICS) \
+		-assets $(SEED_ASSETS) -consumables $(SEED_CONSUMABLES) -tickets $(SEED_TICKETS)
 
 # ─── E2E ────────────────────────────────────────────────────────────────────────
 e2e:

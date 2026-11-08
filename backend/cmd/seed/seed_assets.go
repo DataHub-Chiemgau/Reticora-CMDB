@@ -23,6 +23,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/order"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
@@ -49,6 +50,9 @@ type stockContent struct {
 	// orders in every state, the running stocktake and the field grants of
 	// the asset fields.
 	orders, stocktake, assetGrants bool
+	// fieldValues: the provenance of the [B] CIs in ci_field_value
+	// (ensureFieldValues, WP-821).
+	fieldValues bool
 }
 
 // stockContentOf is the content of the level: the full one for demo, a
@@ -58,7 +62,7 @@ func stockContentOf(level phase2Level) *stockContent {
 	switch level {
 	case phase2Full:
 		return &stockContent{suppliers: true, linked: baseObjects, chassis: true, stock: 18, bins: 10, consumables: 20,
-			orders: true, stocktake: true, assetGrants: true}
+			orders: true, stocktake: true, assetGrants: true, fieldValues: true}
 	case phase2Subset:
 		return &stockContent{linked: 5, stock: 5, bins: 1, consumables: 2}
 	default:
@@ -90,6 +94,7 @@ type stockSeed struct {
 	movements   *movement.Service
 	orders      *order.PGRepository
 	stocktakes  *stocktake.PGRepository
+	overrides   *override.PGRepository
 
 	supplierIDs   []string
 	contractIDs   []string
@@ -104,8 +109,10 @@ type stockSeed struct {
 // CIs are written through the CI service of the server (computed
 // attributes, history, audit, events and search documents), so the links
 // leave ci.asset_id, ci_change and warranty_days_left as the application
-// does. Every object is found again by its key, so a second run books
-// nothing twice.
+// does. The assets and consumables beyond those of the level (WP-821) are
+// written set-based before the stocktake freezes the branch, and the [B]
+// CIs get their field values last. Every object is found again by its
+// key, so a second run books nothing twice.
 func (o *orgSeed) stockSteps(ctx context.Context, pool *pgxpool.Pool) error {
 	content := stockContentOf(o.phase2)
 	if content == nil {
@@ -125,7 +132,7 @@ func (o *orgSeed) stockSteps(ctx context.Context, pool *pgxpool.Pool) error {
 			assets: asset.NewPGRepository(pool).WithEvents(events.NewOutbox()), cis: ci.NewService(cis).WithFieldResolver(types),
 			grants: permission.NewPGFieldGrants(pool), consumables: consumable.NewPGRepository(pool),
 			movements: movement.NewService(movement.NewPGRepository(pool)), orders: order.NewPGRepository(pool),
-			stocktakes: stocktake.NewPGRepository(pool), assetIDs: map[int]string{}}
+			stocktakes: stocktake.NewPGRepository(pool), overrides: override.NewPGRepository(pool), assetIDs: map[int]string{}}
 		if content.orders {
 			s.engineer = o.uid("user", "engineer")
 		}
@@ -138,10 +145,13 @@ func (o *orgSeed) stockSteps(ctx context.Context, pool *pgxpool.Pool) error {
 			{"storage branch", s.ensureStorage},
 			{"composition", s.ensureComposition},
 			{"assets", s.ensureAssets},
+			{"scaled assets", s.ensureScaledAssets},
 			{"asset field permissions", s.ensureAssetGrants},
 			{"consumables", s.ensureConsumables},
+			{"scaled consumables", s.ensureScaledConsumables},
 			{"orders", s.ensureOrders},
 			{"stocktake", s.ensureStocktake},
+			{"field values", s.ensureFieldValues},
 		}
 		for _, step := range steps {
 			if err := step.fn(ctx); err != nil {
@@ -454,6 +464,146 @@ func (s *stockSeed) ensureAssetGrants(ctx context.Context) error {
 		if _, err = s.grants.CreateFieldGrant(ctx, s.org.id, &permission.FieldGrant{RoleID: &role, ObjectKind: permission.KindAsset,
 			FieldKey: &key, Level: permission.LevelNone, CreatedBy: &s.admin}); err != nil {
 			return fmt.Errorf("grant viewer %s: %w", field, err)
+		}
+	}
+	return nil
+}
+
+// ensureScaledAssets writes the assets beyond the asset plan up to
+// orgSeed.assets (WP-821) set-based in one statement: further stock assets
+// like the stock assets of the plan, in turn in the bins, without a CI,
+// with the AST-01 fields, owner, supplier and contract by the rules of
+// ensureAssets and the deterministic id <prefix>/asset/<n>. The lifecycle
+// state is the one the database gave the stock assets of the plan. Unlike
+// Create they emit no asset.created event: the load seed needs the rows,
+// not their consumers. An existing asset is skipped (ON CONFLICT).
+func (s *stockSeed) ensureScaledAssets(ctx context.Context) error {
+	plan := s.assetPlan()
+	first := len(plan) + 1
+	if s.org.assets < first || s.content.stock == 0 {
+		return nil
+	}
+	template := s.assetIDs[plan[len(plan)-1].n]
+	owner := []string{s.admin, s.admin, s.admin, s.admin}
+	if s.engineer != "" {
+		// The system view my_devices_asset of engineer (WP-307).
+		owner[0] = s.engineer
+	}
+	_, err := s.tx.Exec(ctx, `
+		INSERT INTO asset (id, organization_id, client_id, inventory_no, name, category, status, purchase_date,
+			purchase_price, warranty_until, serial_number, notes, custom_fields, manufacturer, model, cost_center,
+			supplier_id, contract_id, owner_user_id, location_id, lifecycle_state)
+		SELECT md5($1 || '/asset/' || n)::uuid, $2, $3::uuid, 'INV-' || lpad(n::text, 5, '0'),
+			'Spare server INV-' || lpad(n::text, 5, '0'), 'hardware', 'in_stock', $4::date - (400 + n),
+			(1500 + 10 * n)::numeric, $4::date + (365 + 10 * n),
+			'SN' || upper(substr(md5($1 || '/serial/spare/' || n), 1, 12)), 'Seed (WP-821)', '{}'::jsonb,
+			'Reticora Labs', 'R-1U', 'CC-' || lpad((n % $5::int + 1)::text, 3, '0'),
+			CASE WHEN cardinality($6::uuid[]) > 0 THEN ($6::uuid[])[n % cardinality($6::uuid[]) + 1] END,
+			CASE WHEN cardinality($7::uuid[]) > 0 THEN ($7::uuid[])[n % cardinality($7::uuid[]) + 1] END,
+			($8::uuid[])[n % 4 + 1], md5($1 || '/location/bin/' || ((n - 1) % $9::int + 1))::uuid, t.lifecycle_state
+		FROM generate_series($10::int, $11::int) AS n
+		CROSS JOIN (SELECT lifecycle_state FROM asset WHERE id = $12::uuid) t
+		ON CONFLICT DO NOTHING`,
+		s.org.prefix, s.org.id, s.org.uid("client", "hq"), s.day(0), CostCenters, s.supplierIDs, s.contractIDs, owner,
+		s.content.bins, first, s.org.assets, template)
+	return err
+}
+
+// The field values of the [B] CIs (WP-821).
+const (
+	// FieldValueSource is the source of the seeded discovered values.
+	FieldValueSource = "snmp"
+	// OverrideEvery: every OverrideEvery-th [B] CI has an override on
+	// OverrideField.
+	OverrideEvery = 20
+	OverrideField = "hostname"
+	// fieldValueBatch is the number of CIs of one RecordDiscoveredBatch.
+	fieldValueBatch = 1000
+)
+
+// FieldValueFields are the discovered fields of every [B] CI.
+var FieldValueFields = []string{"hostname", "serial_number", "management_ip"}
+
+// ensureFieldValues writes the provenance of the [B] CIs of the
+// organization (CI-10, OVR-01) the way the ingest and the API do, through
+// the override repository, which joins this transaction
+// (database.WithRequestTenant): every [B] CI without values of
+// FieldValueSource gets its hostname, serial number and management address
+// as discovered values of FieldValueSource observed at the anchor
+// (RecordDiscoveredBatch, in batches of fieldValueBatch CIs), and every
+// OverrideEvery-th CI without an override on OverrideField gets one with
+// the value of its column (ensureOverrides). The values equal the columns,
+// so the effective values stay the columns and no serial_mismatch review
+// arises.
+func (s *stockSeed) ensureFieldValues(ctx context.Context) error {
+	if !s.content.fieldValues {
+		return nil
+	}
+	rows, err := s.tx.Query(ctx, `
+		SELECT c.id::text, COALESCE(c.hostname, ''), COALESCE(c.serial_number, ''), COALESCE(host(c.management_ip), '')
+		FROM generate_series(1, $3::int) AS i
+		JOIN ci c ON c.id = md5($2 || '/ci/' || i)::uuid AND c.organization_id = $1
+		WHERE NOT EXISTS (SELECT 1 FROM ci_field_value v WHERE v.ci_id = c.id AND v.discovered_source = $4)
+		ORDER BY i`, s.org.id, s.org.prefix, s.org.objects, FieldValueSource)
+	if err != nil {
+		return err
+	}
+	var batch []override.DiscoveredValues
+	for rows.Next() {
+		var id, hostname, serial, address string
+		if err = rows.Scan(&id, &hostname, &serial, &address); err != nil {
+			rows.Close()
+			return err
+		}
+		batch = append(batch, override.DiscoveredValues{CIID: id, Source: FieldValueSource, ObservedAt: s.org.at,
+			Values: map[string]any{FieldValueFields[0]: hostname, FieldValueFields[1]: serial, FieldValueFields[2]: address}})
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for start := 0; start < len(batch); start += fieldValueBatch {
+		if err = s.overrides.RecordDiscoveredBatch(ctx, s.org.id, batch[start:min(start+fieldValueBatch, len(batch))]); err != nil {
+			return fmt.Errorf("discovered values: %w", err)
+		}
+	}
+	return s.ensureOverrides(ctx)
+}
+
+// ensureOverrides sets the override on OverrideField of every
+// OverrideEvery-th [B] CI that has none, with the value of its column,
+// through SetOverride (protected, like an override of the API): the CI
+// keeps its value, its version rises and its history and audit record the
+// override like any manual write.
+func (s *stockSeed) ensureOverrides(ctx context.Context) error {
+	rows, err := s.tx.Query(ctx, `
+		SELECT c.id::text, c.`+OverrideField+`
+		FROM generate_series(1, $3::int / $4::int) AS k
+		JOIN ci c ON c.id = md5($2 || '/ci/' || (k * $4::int))::uuid AND c.organization_id = $1
+		WHERE c.`+OverrideField+` IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ci_field_value v
+			WHERE v.ci_id = c.id AND v.field_name = $5 AND v.override_value IS NOT NULL)
+		ORDER BY k`, s.org.id, s.org.prefix, s.org.objects, OverrideEvery, OverrideField)
+	if err != nil {
+		return err
+	}
+	type pending struct{ id, value string }
+	var todo []pending
+	for rows.Next() {
+		var p pending
+		if err = rows.Scan(&p.id, &p.value); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, p)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, p := range todo {
+		if _, err = s.overrides.SetOverride(ctx, s.org.id, p.id, OverrideField, p.value, s.admin,
+			"Seed (WP-821): confirmed "+OverrideField, true); err != nil {
+			return fmt.Errorf("override %s of CI %s: %w", OverrideField, p.id, err)
 		}
 	}
 	return nil
