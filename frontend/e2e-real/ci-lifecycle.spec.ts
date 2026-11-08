@@ -333,10 +333,17 @@ function insertAsset(vars: Record<string, string>): string {
   }
   const sql = `BEGIN;
 SET LOCAL app.org_id = :'org';
+-- The asset card names the supplier through supplier_id (WP-810, AST-01).
+WITH s AS (
+  INSERT INTO supplier (organization_id, name) VALUES (:'org', :'supplier')
+  ON CONFLICT (organization_id, name) DO UPDATE SET name = EXCLUDED.name
+  RETURNING id)
 INSERT INTO asset (organization_id, client_id, asset_tag, name, serial_number, rfid_tag, barcode,
-                   purchase_date, warranty_end, supplier, invoice_number, lifecycle_state, location_id)
+                   purchase_date, warranty_end, supplier, supplier_id, invoice_number, lifecycle_state,
+                   location_id)
 VALUES (:'org', :'client', :'tag', :'name', :'serial', :'rfid', :'barcode',
-        :'purchase'::date, :'warranty'::date, :'supplier', :'invoice', :'lifecycle', :'location')
+        :'purchase'::date, :'warranty'::date, :'supplier', (SELECT id FROM s), :'invoice',
+        :'lifecycle', :'location')
 RETURNING id;
 COMMIT;`;
   const args = [DATABASE_URL, '-X', '-q', '-At', '-v', 'ON_ERROR_STOP=1'];

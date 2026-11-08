@@ -206,10 +206,17 @@ test.describe('SIM-01 demo seed: admin@demo.local, 50 CIs, search, no acme data'
       'GET',
       `/search?q=${seedSerial('demo', 21)}`,
     );
+    // With the P2 modules of the release standard (WP-830) the search also
+    // finds the asset the seed gives CI 21 (same serial, WP-819).
+    const ownHits = rows(own.body);
     expect(
-      rows(own.body).map((h) => h.entity_id),
+      ownHits.filter((h) => h.entity_type === 'ci').map((h) => h.entity_id),
       'control: serial number of demo',
     ).toEqual([seedId('demo', 'ci', '21')]);
+    expect(
+      ownHits.filter((h) => h.entity_type !== 'ci').map((h) => h.entity_type),
+      'control: other hits of the demo serial are its asset',
+    ).toEqual(ownHits.length > 1 ? ['asset'] : []);
     const other = await api<List<SearchHit>>(
       w.rq,
       w.token,
