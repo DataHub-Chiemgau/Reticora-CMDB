@@ -1480,7 +1480,7 @@ func TestSeedScaled(t *testing.T) {
 		}
 	}
 	check("first run")
-	if violations := integrityViolations(t, f, demo); len(violations) > 0 {
+	if violations := scopetest.IntegrityViolations(t, f.Admin, demo); len(violations) > 0 {
 		t.Errorf("integrity check: %v", violations)
 	}
 	// The further assets and tickets carry the deterministic ids.
