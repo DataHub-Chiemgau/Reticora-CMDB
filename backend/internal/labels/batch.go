@@ -59,6 +59,12 @@ var (
 	errBatchStore    = errors.New("the label batch has no blob storage or object source")
 )
 
+// JobReadSQL is the rule of Download as SQL condition on the table job, for
+// the job API (jobs.PGRepository.WithReadCondition, WP-828): GET /jobs and
+// /jobs/{id} with result, cancel and revert show a label batch job to its
+// creator only and answer 404 to every other principal.
+const JobReadSQL = jobs.CreatorReadSQL
+
 // BatchRequest is the body of POST /api/v1/labels/batch and the parameters
 // of its job: the template (default a4_24), the kind of the objects and
 // either their ids or the location whose subtree is the inventory area.
@@ -443,7 +449,8 @@ func (h *BatchHandler) Download(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusConflict, "Conflict", "the label batch has no valid result")
 		return
 	}
-	signed, err := h.blobs.PresignedGetURL(r.Context(), BatchBucket, BatchObjectKey(job.OrganizationID, job.ID))
+	signed, err := h.blobs.PresignedGetURL(r.Context(), BatchBucket, BatchObjectKey(job.OrganizationID, job.ID),
+		blob.Download{FileName: "labels-" + job.ID + ".pdf", ContentType: "application/pdf"})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "label batch: sign the download", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the download could not be signed")

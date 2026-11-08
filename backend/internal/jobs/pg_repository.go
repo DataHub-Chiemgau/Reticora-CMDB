@@ -20,13 +20,45 @@ import (
 // paths (a tenant scope in the context) run with the principal's complete
 // scope, so row level security shows them only the jobs whose snapshot lies
 // in their scope, and export jobs only of their own user (ownExport); worker
-// and system paths run with the organization-wide scope of orgID.
+// and system paths run with the organization-wide scope of orgID. A kind
+// whose own read endpoint is narrower than the scope rule names its rule
+// with WithReadCondition (WP-828).
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// readConditions are the conditions of request paths per kind
+	// (WithReadCondition), in the order they were added.
+	readConditions []kindCondition
 }
+
+// CreatorReadSQL is a read condition (WithReadCondition) for a kind whose
+// own endpoint serves its jobs to their creator only: the user of the
+// transaction (app.user_id) created the job; a principal without user id
+// and a job without creator never match.
+const CreatorReadSQL = `job.created_by IS NOT NULL AND job.created_by::text = NULLIF(current_setting('` + database.UserGUC + `', true), '')`
+
+// kindCondition is the read condition of the jobs of one kind.
+type kindCondition struct{ kind, cond string }
 
 // NewPGRepository creates a PostgreSQL job repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+// WithReadCondition adds the SQL condition cond (columns of job, qualified
+// as job.<column>) that a job of kind must meet on request paths besides
+// the scope rule: a kind whose own endpoint shows its jobs to fewer
+// principals than the scope snapshot does (an import run over JSON rows to
+// its starter only, WP-828) shows them in the job API (GET /jobs, GET
+// /jobs/{id}, result, cancel and revert) to the same principals, with the
+// same 404. Worker and system paths are unaffected. kind is a fixed name
+// of lower case letters, digits, '.' and '_'; any other panics.
+func (r *PGRepository) WithReadCondition(kind, cond string) *PGRepository {
+	for _, c := range kind {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '.' && c != '_' {
+			panic("jobs: invalid kind name for a read condition: " + kind)
+		}
+	}
+	r.readConditions = append(r.readConditions, kindCondition{kind: kind, cond: cond})
+	return r
+}
 
 const jobColumns = `id::text, COALESCE(organization_id::text, ''), kind, status, progress, params, result,
 	COALESCE(error, ''), COALESCE(idempotency_key, ''), COALESCE(created_by::text, ''), attempts, max_attempts,
@@ -58,12 +90,18 @@ func requestPath(ctx context.Context) bool {
 	return ok
 }
 
-// visible is the condition ownExport on request paths, otherwise none.
-func visible(ctx context.Context) string {
-	if requestPath(ctx) {
-		return " AND " + ownExport
+// visible is the condition ownExport and the read conditions of the kinds
+// (WithReadCondition) on request paths, otherwise none.
+func (r *PGRepository) visible(ctx context.Context) string {
+	if !requestPath(ctx) {
+		return ""
 	}
-	return ""
+	var b strings.Builder
+	b.WriteString(" AND " + ownExport)
+	for _, c := range r.readConditions {
+		b.WriteString(" AND (job.kind <> '" + c.kind + "' OR (" + c.cond + "))")
+	}
+	return b.String()
 }
 
 // inScope runs fn in the transaction of the call: on request paths with the
@@ -164,7 +202,7 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 		// The idempotency key or the reference is taken: the first job,
 		// unless the caller cannot see it.
 		existing, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job
-			WHERE organization_id = $1 AND ((kind = $2 AND idempotency_key = $3) OR (ref_table = $4 AND ref_id = $5::uuid))`+visible(ctx),
+			WHERE organization_id = $1 AND ((kind = $2 AND idempotency_key = $3) OR (ref_table = $4 AND ref_id = $5::uuid))`+r.visible(ctx),
 			job.OrganizationID, job.Kind, nilIfEmpty(job.IdempotencyKey), nilIfEmpty(job.RefTable), nilIfEmpty(job.RefID)))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("%w: the idempotency key or reference belongs to a job outside the scope", ErrNotFound)
@@ -180,7 +218,7 @@ func (r *PGRepository) Insert(ctx context.Context, job *Job) (bool, error) {
 
 func (r *PGRepository) getOne(ctx context.Context, orgID, where string, args ...any) (*Job, error) {
 	var out *Job
-	own := visible(ctx)
+	own := r.visible(ctx)
 	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, `SELECT `+jobColumns+` FROM job WHERE organization_id = $1 AND `+where+own,
 			append([]any{orgID}, args...)...))
@@ -213,7 +251,7 @@ func (r *PGRepository) GetByRef(ctx context.Context, orgID, refTable, refID stri
 func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, page api.PaginationParams) ([]Job, int, error) {
 	out := []Job{}
 	var total int
-	own := visible(ctx)
+	own := r.visible(ctx)
 	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where, args := []string{"organization_id = $1"}, []any{orgID}
 		if filter.Kind != "" {
@@ -341,7 +379,7 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 		return nil, ErrNotFound
 	}
 	var out *Job
-	own := visible(ctx)
+	own := r.visible(ctx)
 	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		fromText := make([]string, len(from))
 		for i, s := range from {
@@ -392,7 +430,7 @@ func (r *PGRepository) MarkReverted(ctx context.Context, orgID, id, by string, a
 		return nil, ErrNotFound
 	}
 	var out *Job
-	own := visible(ctx)
+	own := r.visible(ctx)
 	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		j, err := scanJob(tx.QueryRow(ctx, `
 			UPDATE job SET reverted_at = $3, reverted_by = $4::uuid

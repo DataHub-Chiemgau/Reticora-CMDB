@@ -37,6 +37,7 @@ import {
   useUpdateCIType,
 } from '../api/cmdbHooks';
 import { useHasPermission } from '../api/hooks';
+import { parseRule, type Rule } from '../rules/rules';
 import { useModules } from '../hooks/useEntitlements';
 import {
   isDraftItem,
@@ -646,6 +647,122 @@ function TypeDialog({
   );
 }
 
+/** ruleValueText shows a value of a rule: texts quoted, lists joined. */
+function ruleValueText(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(ruleValueText).join(', ')}]`;
+  return typeof value === 'string' ? `"${value}"` : String(value);
+}
+
+/**
+ * validationSummary is the short form of the value rules of an attribute
+ * (validation, the rule AST of MET-45) in the UI language; undefined
+ * without rules.
+ */
+export function validationSummary(validation: unknown, t: TFunction): string | undefined {
+  if (validation === null || validation === undefined) return undefined;
+  if (typeof validation === 'object' && Object.keys(validation).length === 0) return undefined;
+  let rule: Rule;
+  try {
+    rule = parseRule(validation);
+  } catch {
+    return JSON.stringify(validation);
+  }
+  const walk = (r: Rule): string => {
+    const kind = t(`rules.validationKinds.${r.op}`);
+    switch (r.op) {
+      case 'all':
+        return r.rules.map(walk).join(' · ');
+      case 'required':
+        return kind;
+      case 'pattern':
+        return `${kind} ${r.pattern}`;
+      case 'range':
+        return `${kind} (${t(`rules.rangeOf.${r.of ?? 'value'}`)}) ${r.min ?? '…'}–${r.max ?? '…'}`;
+      case 'enum':
+        return `${kind} ${ruleValueText(r.values)}`;
+    }
+  };
+  return walk(rule) || undefined;
+}
+
+/** The parts of the conditional rules of an attribute (fieldmeta.ConditionalRules). */
+const CONDITIONAL_PARTS = ['visible_when', 'required_when', 'read_only_when'] as const;
+
+/**
+ * conditionalSummary is the short form of the conditional rules of an
+ * attribute (visible_when, required_when, read_only_when,
+ * allowed_values_when; predicates combined with AND) in the UI language;
+ * undefined without rules.
+ */
+export function conditionalSummary(conditional: unknown, t: TFunction): string | undefined {
+  if (typeof conditional !== 'object' || conditional === null) return undefined;
+  const c = conditional as Record<string, unknown>;
+  const predicates = (list: unknown): string => {
+    if (!Array.isArray(list)) return JSON.stringify(list);
+    return list
+      .map((p: { field?: unknown; op?: unknown; value?: unknown }) => {
+        const op = t(`rules.conditionOps.${String(p.op)}`, String(p.op));
+        return p.value === undefined
+          ? `${String(p.field)} ${op}`
+          : `${String(p.field)} ${op} ${ruleValueText(p.value)}`;
+      })
+      .join(` ${t('rules.conditionJunctions.all')} `);
+  };
+  const parts: string[] = [];
+  for (const part of CONDITIONAL_PARTS) {
+    const list = c[part];
+    if (Array.isArray(list) && list.length > 0) {
+      parts.push(`${t(`citypes.ruleSummary.${part}`)} ${predicates(list)}`);
+    }
+  }
+  const allowed = c.allowed_values_when as { when?: unknown; values?: unknown } | undefined;
+  if (allowed && typeof allowed === 'object') {
+    parts.push(
+      t('citypes.ruleSummary.allowed_values_when', {
+        when: predicates(allowed.when ?? []),
+        values: ruleValueText(allowed.values ?? []),
+      }),
+    );
+  }
+  return parts.length > 0 ? parts.join('; ') : undefined;
+}
+
+/**
+ * AttributeRules shows the attribute-bound rules of a definition read-only
+ * as short forms (E-114, WP-802) and links to the rule catalog filtered to
+ * the attribute, where new conditions and validations are made (WP-801).
+ */
+function AttributeRules({ definition, t }: { definition: AttributeDefinition; t: TFunction }) {
+  const catalogOn = useModules().isModuleEnabled('metamodel');
+  const validation = validationSummary(definition.validation, t);
+  const conditional = conditionalSummary(definition.conditional, t);
+  if (!validation && !conditional) return null;
+  return (
+    <div className="space-y-0.5 text-xs text-fg-muted" data-testid="attribute-rules">
+      {validation ? (
+        <p className="[overflow-wrap:anywhere]">
+          <span className="font-medium text-fg">{t('citypes.ruleSummary.validation')}</span>{' '}
+          <span className="font-mono">{validation}</span>
+        </p>
+      ) : null}
+      {conditional ? (
+        <p className="[overflow-wrap:anywhere]">
+          <span className="font-medium text-fg">{t('citypes.ruleSummary.conditional')}</span>{' '}
+          <span className="font-mono">{conditional}</span>
+        </p>
+      ) : null}
+      {catalogOn ? (
+        <Link
+          to={`/rules?attribute_key=${encodeURIComponent(definition.key)}`}
+          className="text-accent hover:underline"
+        >
+          {t('citypes.ruleSummary.openCatalog', { key: definition.key })}
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * AttributeRow is an attribute of the catalog: label, key, data type and
  * group, its origin, its flags and marks and its index status, and the
@@ -713,9 +830,6 @@ function AttributeRow({
           ) : null}
           {d.is_system ? <Badge variant="info">{t('citypes.system')}</Badge> : null}
           {d.required ? <Badge variant="warning">{t('citypes.flagRequired')}</Badge> : null}
-          {d.conditional && Object.keys(d.conditional).length > 0 ? (
-            <Badge variant="info">{t('citypes.conditional')}</Badge>
-          ) : null}
           {d.searchable ? <Badge variant="neutral">{t('citypes.flagSearchable')}</Badge> : null}
           {d.unique ? (
             <Badge variant="neutral">
@@ -732,6 +846,7 @@ function AttributeRow({
           {appliesTo ? <Badge variant="neutral">{appliesTo}</Badge> : null}
           {draftChange ? <DraftMarker change={draftChange} /> : null}
         </div>
+        <AttributeRules definition={d} t={t} />
         <IndexStatus
           status={d.index_status}
           attributeKey={d.key}

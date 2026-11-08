@@ -1,17 +1,35 @@
-// Shared helpers of the load scenarios (NFR-10, WP-204, WP-437).
+// Shared helpers of the load scenarios (NFR-10, WP-204, WP-437, WP-822).
 import http from 'k6/http';
 import crypto from 'k6/crypto';
 import { check, fail } from 'k6';
 
 export const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
-const API_KEY = __ENV.API_KEY || '';
 
+// The API keys of the run by extra.key of params: default is the key of
+// org_admin (API_KEY, cmd/seed -api-key-file), restricted the key of the
+// role user viewer with its field grants (API_KEY_RESTRICTED, cmd/seed
+// -api-key-role viewer; WP-822).
+const API_KEYS = {
+  default: { value: __ENV.API_KEY || '', hint: 'API_KEY is required (cmd/seed -api-key-file)' },
+  restricted: {
+    value: __ENV.API_KEY_RESTRICTED || '',
+    hint: 'API_KEY_RESTRICTED is required (cmd/seed -api-key-role viewer -api-key-file)',
+  },
+};
+
+// params returns the request parameters of a request named name: the API
+// key extra.key selects (default or restricted; a missing key ends the run
+// with fail), extra.headers and extra.timeout.
 export function params(name, extra = {}) {
-  if (!API_KEY) {
-    fail('API_KEY is required (cmd/seed -api-key-file)');
+  const key = API_KEYS[extra.key || 'default'];
+  if (!key) {
+    fail(`unknown API key ${extra.key}: default or restricted`);
+  }
+  if (!key.value) {
+    fail(key.hint);
   }
   return {
-    headers: { 'X-API-Key': API_KEY, 'Content-Type': 'application/json', ...(extra.headers || {}) },
+    headers: { 'X-API-Key': key.value, 'Content-Type': 'application/json', ...(extra.headers || {}) },
     tags: { name },
     timeout: extra.timeout || '60s',
   };
@@ -33,14 +51,15 @@ export function failed(res, name) {
   return res;
 }
 
-export function get(path, name) {
-  const res = failed(http.get(`${BASE_URL}/api/v1${path}`, params(name)), name);
+// get and post pass extra on to params (the API key, headers, timeout).
+export function get(path, name, extra = {}) {
+  const res = failed(http.get(`${BASE_URL}/api/v1${path}`, params(name, extra)), name);
   check(res, { [`${name} 200`]: (r) => r.status === 200 });
   return res;
 }
 
-export function post(path, body, name, okStatus = [200, 202]) {
-  const res = failed(http.post(`${BASE_URL}/api/v1${path}`, JSON.stringify(body), params(name)), name);
+export function post(path, body, name, okStatus = [200, 202], extra = {}) {
+  const res = failed(http.post(`${BASE_URL}/api/v1${path}`, JSON.stringify(body), params(name, extra)), name);
   check(res, { [`${name} ${okStatus.join('/')}`]: (r) => okStatus.includes(r.status) });
   return res;
 }

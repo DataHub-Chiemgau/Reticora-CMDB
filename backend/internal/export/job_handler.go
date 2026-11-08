@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -246,13 +247,16 @@ func (h *JobHandler) toResponse(r *http.Request, job *Job, preview *datevPreview
 	if job.ExpiresAt != nil && !job.ExpiresAt.After(time.Now().UTC()) {
 		return resp, nil
 	}
-	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, job.ObjectKey)
+	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, job.ObjectKey,
+		blob.Download{FileName: path.Base(job.ObjectKey), ContentType: exportContentTypes[job.Format]})
 	if err != nil {
 		return resp, nil
 	}
 	resp.DownloadURL = url
 	if job.Format == FormatDATEV {
-		if reportURL, rerr := h.blobs.PresignedGetURL(r.Context(), h.bucket, ErrorReportKey(job)); rerr == nil {
+		reportKey := ErrorReportKey(job)
+		if reportURL, rerr := h.blobs.PresignedGetURL(r.Context(), h.bucket, reportKey,
+			blob.Download{FileName: path.Base(reportKey), ContentType: errorReportContentType}); rerr == nil {
 			resp.ErrorReportURL = reportURL
 		}
 	}

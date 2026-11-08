@@ -7,7 +7,8 @@ import type { Handler } from './support/backend';
 // waited for until its scan is clean, previewed (POST /imports/preview),
 // mapped in a new profile (POST /import-profiles), checked in a dry run and
 // imported (POST /imports, GET /jobs/{id}, GET /imports/{id}) with the
-// report of each run; an infected file aborts the assistant. Every request
+// report of each run and its row errors page by page (GET
+// /imports/{id}/errors); an infected file aborts the assistant. Every request
 // and answer follows api/openapi.yaml (WP-530). Reusing a profile and the
 // report download follow with WP-324.
 
@@ -19,6 +20,7 @@ const PROFILE_ID = '7b000000-0000-4000-8000-000000000001';
 const DRY_JOB = '7c000000-0000-4000-8000-000000000001';
 const RUN_JOB = '7c000000-0000-4000-8000-000000000002';
 const CSV = 'Hostname;Seriennummer\nsrv-01;SN-1\nsrv-02;SN-2\nsrv-03;SN-3\n';
+const ERRORS_CURSOR = 'eyJvIjoxfQ.c2lnbmVk';
 
 function document(scan: string) {
   return {
@@ -165,7 +167,28 @@ function importHandlers(scan: string): Handler[] {
     { path: `/jobs/${RUN_JOB}`, reply: () => ({ body: job(RUN_JOB, 1, 1, false) }) },
     { path: `/imports/${DRY_JOB}`, reply: () => ({ body: run(DRY_JOB, true) }) },
     { path: `/imports/${RUN_JOB}`, reply: () => ({ body: run(RUN_JOB, false) }) },
+    {
+      path: new RegExp(`^/imports/(${DRY_JOB}|${RUN_JOB})/errors$`),
+      reply: (_request, url) => ({ body: rowErrors(url.searchParams.get('cursor')) }),
+    },
   ];
+}
+
+/** rowErrors is a page of GET /imports/{id}/errors: two pages of one error each. */
+function rowErrors(cursor: string | null) {
+  const second = cursor === ERRORS_CURSOR;
+  return {
+    data: [
+      second
+        ? { line: 4, field: 'serial_number', code: 'invalid_value', message: 'is required' }
+        : { line: null, field: 'Typ', code: 'column_missing', message: 'Typ is missing' },
+    ],
+    total: 2,
+    limit: 50,
+    offset: second ? 1 : 0,
+    has_more: !second,
+    ...(second ? {} : { next_cursor: ERRORS_CURSOR }),
+  };
 }
 
 async function upload(page: Page) {
@@ -213,6 +236,18 @@ test('imports a CSV file: file, mapping, dry run, run and report', async ({ page
   const dryReport = page.getByRole('region', { name: 'Bericht' });
   await expect(dryReport.getByText('Teilerfolg: 1 von 3 Zeilen fehlerhaft')).toBeVisible();
   await expect(dryReport.getByText('Dry Run', { exact: true })).toBeVisible();
+  // The row errors page by page (GET /imports/{id}/errors, next_cursor).
+  const errors = dryReport.getByRole('region', { name: 'Fehlerliste' });
+  await expect(errors.getByText('column_missing')).toBeVisible();
+  await expect(errors.getByText('1–1 von 2 Fehlern')).toBeVisible();
+  await errors.getByRole('button', { name: 'Weiter', exact: true }).click();
+  await expect(errors.getByText('invalid_value')).toBeVisible();
+  await expect(errors.getByText('2–2 von 2 Fehlern')).toBeVisible();
+  expect(
+    calls
+      .filter((c) => c.path === `/imports/${DRY_JOB}/errors`)
+      .map((c) => new URLSearchParams(c.search).get('cursor')),
+  ).toEqual([null, ERRORS_CURSOR]);
 
   await page.getByRole('button', { name: 'Weiter zum Ausführen' }).click();
   await page.getByRole('button', { name: 'Import ausführen' }).click();

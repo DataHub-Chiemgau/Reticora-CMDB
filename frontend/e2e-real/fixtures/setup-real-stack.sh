@@ -155,6 +155,17 @@ objects_status="$("${objects_curl[@]}" "${base_url}/objects/exports/")"
     echo "FAIL: ${base_url}/objects/exports/ answers $objects_status, not 403 of the object store (frontend/objects-proxy.conf)"
     exit 1
 }
+# Every answer of the proxy path is a download that is never rendered or
+# sniffed on this origin (finding of WP-829).
+headers_curl=(curl -sS -o /dev/null -D -)
+[ -z "${E2E_CA_CERT:-}" ] || headers_curl+=(--cacert "$E2E_CA_CERT")
+objects_headers="$("${headers_curl[@]}" "${base_url}/objects/exports/" | tr -d '\r')"
+for header in 'x-content-type-options: nosniff' 'content-disposition: attachment' "content-security-policy: sandbox; default-src 'none'"; do
+    grep -qixF "$header" <<<"$objects_headers" || {
+        echo "FAIL: ${base_url}/objects/exports/ answers without \"$header\" (frontend/objects-proxy.conf)"
+        exit 1
+    }
+done
 
 if [ "$(id -u)" -ne 0 ] && [ "$(sysctl -n net.ipv4.ip_unprivileged_port_start)" -gt 161 ]; then
     if [ -n "${GITHUB_ACTIONS:-}" ]; then

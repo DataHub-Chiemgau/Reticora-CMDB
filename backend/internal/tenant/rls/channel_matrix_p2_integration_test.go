@@ -733,9 +733,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	// nothing.
 	rows["import"] = matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
-			// The run and its report (a presigned URL), 404 like an unknown
+			// The run, its report (a presigned URL) and its row errors, 404 like an unknown
 			// id for every other principal.
-			return append(details(p, "/api/v1/imports/", "", s.importJob), details(p, "/api/v1/imports/", "/report", s.importJob)...)
+			out := append(details(p, "/api/v1/imports/", "", s.importJob), details(p, "/api/v1/imports/", "/report", s.importJob)...)
+			return append(out, details(p, "/api/v1/imports/", "/errors", s.importJob)...)
 		},
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 			profile := s.profiles[0]
@@ -923,11 +924,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	})
 	extend("job", func(p *channelPrincipal) []matrixProbe {
 		// The job model shows a job where its snapshot lies in the scope
-		// (WP-404), the import job as well: unlike GET /imports/{id}, which
-		// shows a run over rows to its starter only, the other user with
-		// an org-wide scope reads it (see the finding in the commit of
-		// WP-828).
-		objs := []object{{s.importJob.id, seenBy("org", "other-user", "client")}, s.bulkJob}
+		// (WP-404); an import job like GET /imports/{id} (WP-828): a run
+		// over rows to its starter only, not to the other user with an
+		// org-wide scope (404 like an unknown job).
+		objs := []object{s.importJob, s.bulkJob}
 		return append([]matrixProbe{list(p, "/api/v1/jobs?limit=200", objs...)}, details(p, "/api/v1/jobs/", "", objs...)...)
 	})
 }

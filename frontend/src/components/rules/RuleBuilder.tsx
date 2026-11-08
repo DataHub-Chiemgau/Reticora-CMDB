@@ -8,6 +8,8 @@ import { cn } from '../ui/utils';
 import { AttributePicker, fieldSpecLabel } from './AttributePicker';
 import { ValueEditor } from './ValueEditor';
 import { evaluateCondition, evaluateRule, type Condition, type Rule } from '../../rules/rules';
+import { ASSET_PREFIX, computedTypeFit, evalExpr } from '../../rules/expr';
+import { localizedText } from '../../api/cmdb';
 import {
   CONDITION_JUNCTIONS,
   CONDITION_LIST_OPS,
@@ -76,6 +78,28 @@ import {
   type FilterOp,
   type GroupJunction,
   type RelatedDirection,
+  changeExprKind,
+  checkExpr,
+  emptyExprRoot,
+  exprCanAddOperand,
+  exprCanRemoveOperand,
+  exprChildren,
+  exprFieldSpec,
+  exprFieldsOf,
+  exprIssues,
+  exprNodeAtPath,
+  exprSampleValue,
+  exprStats,
+  fromExpr,
+  mapExprNode,
+  newExprOperand,
+  type ExprCheck,
+  type ExprFieldSpec,
+  type ExprNode,
+  type ExprOp,
+  type ExprResultType,
+  type ExpressionMode,
+  type LiteralType,
 } from '../../rules/builderModes';
 
 /** A relationship type a related node may name (rel_types). */
@@ -1380,9 +1404,411 @@ function ValidationBuilder({
   );
 }
 
+// ─── Expression mode (WP-802) ────────────────────────────────────────────────
+
+export interface ExpressionBuilderProps {
+  /** The expression mode: emits only $defs/expr of api/rules.schema.json. */
+  mode: ExpressionMode;
+  /** initialValue is the expression loaded once (null: a new one); key the component to load another. */
+  initialValue?: unknown;
+  /** fields are what the expression can read: entered attributes of the type and asset fields. */
+  fields: readonly ExprFieldSpec[];
+  /** restrictFields allows only the references of fields (default); false leaves them to the server. */
+  restrictFields?: boolean;
+  /** dataType is the data type of the computed attribute: a result type that does not fit shows a hint. */
+  dataType?: string;
+  /** timeZone is the IANA zone of today in the preview (the zone of the organization). */
+  timeZone: string;
+  /** now is the instant of the preview (default: the time the builder opened). */
+  now?: Date;
+  /** onChange reports every edit: the expression to send or why it cannot go out. */
+  onChange?: (check: ExprCheck) => void;
+  /** serverError is a 422 of the server naming the path of a node (computed, computed.args[1] …). */
+  serverError?: { path: string; message: string };
+  showIssues?: boolean;
+  label?: string;
+}
+
+/** The input type of a sample value of the preview. */
+function sampleInputType(type: ExprResultType | undefined): string {
+  if (type === 'number') return 'number';
+  if (type === 'date') return 'date';
+  return 'text';
+}
+
+function ExpressionBuilder({
+  mode,
+  initialValue,
+  fields,
+  restrictFields = true,
+  dataType,
+  timeZone,
+  now: nowProp,
+  onChange,
+  serverError,
+  showIssues = false,
+  label,
+}: ExpressionBuilderProps) {
+  const { t, i18n } = useTranslation();
+  const [loadError] = useState<string | undefined>(() => {
+    try {
+      fromExpr(initialValue);
+      return undefined;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  });
+  const [root, setRoot] = useState<ExprNode>(() => {
+    try {
+      return fromExpr(initialValue);
+    } catch {
+      return emptyExprRoot();
+    }
+  });
+  const [openedAt] = useState(() => new Date());
+  const now = nowProp ?? openedAt;
+  const [sample, setSample] = useState<Record<string, string>>({});
+  const { container, setFocusId } = useFocusAfterEdit();
+  // Only the fields of the catalog may be read: no computed attribute, not
+  // the attribute itself (the server refuses both with 422 on computed).
+  const allowed = useMemo(() => {
+    if (!restrictFields) return undefined;
+    const keys = new Set(fields.map((f) => f.field));
+    return (field: string) => keys.has(field);
+  }, [fields, restrictFields]);
+  const check = useMemo<ExprCheck>(
+    () => (loadError ? { ok: false, message: loadError } : checkExpr(root, allowed)),
+    [root, loadError, allowed],
+  );
+  useReport(check, onChange);
+  const issues = useMemo(
+    () => (showIssues ? exprIssues(root, allowed) : new Map<string, string>()),
+    [showIssues, root, allowed],
+  );
+  const serverNode = serverError ? exprNodeAtPath(root, serverError.path) : undefined;
+  const typeNode = !check.ok && !check.issue && check.message ? check.nodeId : undefined;
+  const stats = exprStats(root);
+
+  const can = (next: ExprNode) => {
+    const s = exprStats(next);
+    return s.nodes <= mode.maxNodes && s.depth <= mode.maxDepth;
+  };
+  const replace = (id: string, fn: (n: ExprNode) => ExprNode | null) =>
+    mapExprNode(root, id, fn) ?? emptyExprRoot();
+  const apply = (next: ExprNode, focus?: string) => {
+    if (!can(next)) return;
+    setRoot(next);
+    if (focus) setFocusId(focus);
+  };
+  const removeOperand = (id: string) => {
+    const focus = neighbourOf(root, id, exprChildren);
+    const next = replace(id, () => null);
+    setRoot(next);
+    setFocusId(focus && trail(next, focus, exprChildren) ? focus : next.id);
+  };
+
+  const fieldLabel = (spec: ExprFieldSpec): string => {
+    if (spec.source === 'asset') {
+      const column = spec.field.slice(ASSET_PREFIX.length);
+      return t('rules.fieldLabels.asset', { name: t(`savedviews.fields.${column}`, column) });
+    }
+    const name =
+      (spec.definition && localizedText(spec.definition.display_name, i18n.language)) || spec.field;
+    return t('rules.fieldLabels.attribute', { name });
+  };
+
+  const problem = (node: ExprNode): string | undefined => {
+    if (serverNode === node.id && serverError) {
+      return t('rules.builder.serverError', { message: serverError.message });
+    }
+    const issue = issues.get(node.id);
+    if (issue) return t(`rules.issues.${issue}`);
+    if (showIssues && typeNode === node.id && !check.ok && check.message) {
+      return t('rules.expression.typeError', { message: check.message });
+    }
+    return undefined;
+  };
+
+  function renderNode(node: ExprNode, parent: ExprNode | null, position: number) {
+    const kindLabel = t(`rules.exprOps.${node.kind}`);
+    const name = parent
+      ? t('rules.expression.operandName', { kind: kindLabel, position })
+      : t('rules.expression.rootName', { kind: kindLabel });
+    const head = (
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="min-w-48 max-w-xs flex-1">
+          <Select
+            label={
+              parent ? t('rules.expression.operandKind', { position }) : t('rules.expression.kind')
+            }
+            value={node.kind}
+            onChange={(e) =>
+              apply(
+                replace(node.id, (n) => changeExprKind(n, e.target.value as ExprOp)),
+                node.id,
+              )
+            }
+            options={mode.nodeKinds.map((kind) => ({
+              value: kind,
+              label: t(`rules.exprOps.${kind}`),
+            }))}
+          />
+        </div>
+        {parent && exprCanRemoveOperand(parent) ? (
+          <IconButton
+            size="sm"
+            icon={<Trash2 />}
+            label={t('rules.builder.delete', { name })}
+            onClick={() => removeOperand(node.id)}
+            className="shrink-0 hover:text-danger"
+          />
+        ) : null}
+      </div>
+    );
+    let body: ReactNode = null;
+    switch (node.kind) {
+      case 'field': {
+        const known = fields.some((f) => f.field === node.field);
+        const current = !known && node.field !== '' ? exprFieldSpec(fields, node.field) : undefined;
+        const options = [
+          { value: '', label: t('rules.builder.chooseField') },
+          ...fields.map((f) => ({ value: f.field, label: fieldLabel(f) })),
+          ...(!known && node.field !== ''
+            ? [
+                {
+                  value: node.field,
+                  label: t('rules.expression.unavailableField', {
+                    name: current ? fieldLabel(current) : node.field,
+                  }),
+                },
+              ]
+            : []),
+        ];
+        body = (
+          <Select
+            label={t('rules.expression.field')}
+            value={node.field}
+            onChange={(e) => apply(replace(node.id, (n) => ({ ...n, field: e.target.value })))}
+            options={options}
+          />
+        );
+        break;
+      }
+      case 'literal':
+        body = (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Select
+              label={t('rules.expression.literalType')}
+              value={node.type}
+              onChange={(e) => {
+                const type = e.target.value as LiteralType;
+                apply(
+                  replace(node.id, (n) => ({
+                    ...n,
+                    type,
+                    text:
+                      type === 'boolean'
+                        ? 'true'
+                        : n.kind === 'literal' && n.type !== 'boolean'
+                          ? n.text
+                          : '',
+                  })),
+                );
+              }}
+              options={mode.literalTypes.map((type) => ({
+                value: type,
+                label: t(`rules.literalTypes.${type}`),
+              }))}
+            />
+            {node.type === 'boolean' ? (
+              <Select
+                label={t('rules.expression.literalValue')}
+                value={node.text}
+                onChange={(e) => apply(replace(node.id, (n) => ({ ...n, text: e.target.value })))}
+                options={[
+                  { value: 'true', label: t('rules.bool.true') },
+                  { value: 'false', label: t('rules.bool.false') },
+                ]}
+              />
+            ) : (
+              <Input
+                label={t('rules.expression.literalValue')}
+                type={node.type === 'number' ? 'number' : 'text'}
+                step={node.type === 'number' ? 'any' : undefined}
+                value={node.text}
+                onChange={(e) => apply(replace(node.id, (n) => ({ ...n, text: e.target.value })))}
+              />
+            )}
+          </div>
+        );
+        break;
+      case 'today':
+        body = (
+          <p className="text-sm text-fg-muted">
+            {t('rules.expression.todayHint', { zone: timeZone })}
+          </p>
+        );
+        break;
+      default:
+        body = (
+          <>
+            <div className="space-y-3 border-l-2 border-line pl-3">
+              {node.children.map((c, i) => renderNode(c, node, i + 1))}
+            </div>
+            {exprCanAddOperand(node)
+              ? (() => {
+                  const operand = newExprOperand();
+                  const next = replace(node.id, (n) =>
+                    'children' in n ? { ...n, children: [...n.children, operand] } : n,
+                  );
+                  return (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<Plus />}
+                      disabled={!can(next)}
+                      onClick={() => apply(next, operand.id)}
+                    >
+                      {t('rules.expression.addOperand')}
+                    </Button>
+                  );
+                })()
+              : null}
+          </>
+        );
+    }
+    return (
+      <NodeFrame
+        key={node.id}
+        id={node.id}
+        label={name}
+        error={problem(node)}
+        className={parent ? 'bg-fg/[0.02]' : undefined}
+      >
+        {head}
+        {body}
+      </NodeFrame>
+    );
+  }
+
+  // The preview: evalExpr against editable sample values, with now and the
+  // time zone of the organization.
+  const referenced = exprFieldsOf(root);
+  const specOf = (field: string) => exprFieldSpec(fields, field);
+  let outcome: ReactNode;
+  if (!check.ok) outcome = <p className="text-sm text-fg">{t('rules.preview.incomplete')}</p>;
+  else {
+    const inputs: Record<string, unknown> = {};
+    for (const field of referenced) {
+      const value = exprSampleValue(specOf(field)?.type, sample[field] ?? '');
+      if (value !== undefined) inputs[field] = value;
+    }
+    const result = evalExpr(check.expr, inputs, now, timeZone);
+    outcome =
+      result === null ? (
+        <p className="text-sm text-fg">{t('rules.preview.resultEmpty')}</p>
+      ) : (
+        <p className="text-sm text-fg">
+          {t('rules.preview.result')}{' '}
+          <code className="font-mono" data-testid="expression-result">
+            {String(result)}
+          </code>
+        </p>
+      );
+  }
+  const fit = check.ok && dataType ? computedTypeFit(check.expr, dataType) : 'fits';
+
+  const labelId = useId();
+  return (
+    <div ref={container} className="space-y-3">
+      <BuilderHead
+        labelId={labelId}
+        label={label ?? t('rules.builder.expressionLabel')}
+        stats={stats}
+        mode={mode}
+      />
+      {loadError ? (
+        <p role="alert" className="text-sm text-danger">
+          {t('rules.expression.loadError', { message: loadError })}
+        </p>
+      ) : null}
+      {serverError && !serverNode ? (
+        <p className="text-sm text-danger">
+          {t('rules.builder.serverError', { message: serverError.message })}
+        </p>
+      ) : null}
+      <div aria-labelledby={labelId}>{renderNode(root, null, 1)}</div>
+      {check.ok && dataType && fit !== 'fits' ? (
+        <p role="status" className="text-sm text-warning" data-testid="expression-type-hint">
+          {fit === 'mismatch'
+            ? t('rules.expression.typeMismatch', {
+                result: t(`rules.resultTypes.${check.resultType}`),
+                dataType: t(`citypes.dataTypes.${dataType}`, dataType),
+              })
+            : t('rules.expression.notComputable', {
+                dataType: t(`citypes.dataTypes.${dataType}`, dataType),
+              })}
+        </p>
+      ) : null}
+      <section
+        aria-label={t('rules.preview.expressionTitle')}
+        className="space-y-2 rounded-lg border border-dashed border-line p-3"
+      >
+        <p className="text-sm font-medium text-fg">{t('rules.preview.expressionTitle')}</p>
+        <p className="text-xs text-fg-muted">
+          {t('rules.preview.today', {
+            date: evalExpr({ op: 'today' }, {}, now, timeZone),
+            zone: timeZone,
+          })}
+        </p>
+        {referenced.length === 0 ? (
+          <p className="text-sm text-fg-muted">{t('rules.preview.noInputs')}</p>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {referenced.map((field) => {
+              const spec = specOf(field);
+              const sampleLabel = t('rules.preview.sampleOf', {
+                field: spec ? fieldLabel(spec) : field,
+              });
+              const value = sample[field] ?? '';
+              const set = (v: string) => setSample((s) => ({ ...s, [field]: v }));
+              return spec?.type === 'boolean' ? (
+                <Select
+                  key={field}
+                  label={sampleLabel}
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                  options={[
+                    { value: '', label: t('rules.preview.absent') },
+                    { value: 'true', label: t('rules.bool.true') },
+                    { value: 'false', label: t('rules.bool.false') },
+                  ]}
+                />
+              ) : (
+                <Input
+                  key={field}
+                  label={sampleLabel}
+                  type={sampleInputType(spec?.type)}
+                  step={spec?.type === 'number' ? 'any' : undefined}
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                />
+              );
+            })}
+          </div>
+        )}
+        <div aria-live="polite" data-testid="expression-preview">
+          {outcome}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 // ─── The builder ─────────────────────────────────────────────────────────────
 
-export type RuleBuilderProps = FilterBuilderProps | ConditionBuilderProps | ValidationBuilderProps;
+export type RuleBuilderProps =
+  FilterBuilderProps | ConditionBuilderProps | ValidationBuilderProps | ExpressionBuilderProps;
 
 function isConditionProps(props: RuleBuilderProps): props is ConditionBuilderProps {
   return props.mode?.id === 'condition';
@@ -1392,6 +1818,10 @@ function isValidationProps(props: RuleBuilderProps): props is ValidationBuilderP
   return props.mode?.id === 'validation';
 }
 
+function isExpressionProps(props: RuleBuilderProps): props is ExpressionBuilderProps {
+  return props.mode?.id === 'expression';
+}
+
 /**
  * RuleBuilder edits a rule by clicks, without a text DSL (CH18, E-54). Its
  * mode fixes the output format and no mode emits nodes of another: the
@@ -1399,11 +1829,14 @@ function isValidationProps(props: RuleBuilderProps): props is ValidationBuilderP
  * (WP-801) the condition grammar of api/rules.schema.json (all, any, not,
  * comparisons) with a preview by evaluateCondition, the validation mode
  * (WP-801) the value rule AST (all, required, pattern, range, enum) with a
- * preview by evaluateRule. Every output passes parseFilter, parseCondition
- * or parseRule before it is reported as ready.
+ * preview by evaluateRule, the expression mode (WP-802) $defs/expr for
+ * computed attributes with a preview by evalExpr in the zone of the
+ * organization. Every output passes parseFilter, parseCondition, parseRule
+ * or parseExpr before it is reported as ready.
  */
 export function RuleBuilder(props: RuleBuilderProps) {
   if (isConditionProps(props)) return <ConditionBuilder {...props} />;
   if (isValidationProps(props)) return <ValidationBuilder {...props} />;
+  if (isExpressionProps(props)) return <ExpressionBuilder {...props} />;
   return <FilterBuilder {...props} />;
 }

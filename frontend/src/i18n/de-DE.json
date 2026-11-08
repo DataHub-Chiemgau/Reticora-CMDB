@@ -1603,7 +1603,7 @@
       "allFailed": "Alle Zeilen fehlerhaft",
       "dryRun": "Dry Run",
       "dryRunNote": "Im Dry Run wurde nichts geschrieben; die Zahlen zeigen, was der Import tun würde.",
-      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Zeile, Feld, Code und Meldung jeder Zeile stehen im Bericht.",
+      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Die Fehlerliste zeigt Zeile, Feld, Code und Meldung; der Bericht enthält zusätzlich das Ergebnis jeder Zeile.",
       "failed": "Der Import ist fehlgeschlagen.",
       "cancelled": "Der Import wurde abgebrochen; es gibt keinen Bericht.",
       "download": "Bericht herunterladen",
@@ -1615,6 +1615,20 @@
         "updated": "Aktualisiert",
         "skipped": "Übersprungen",
         "failed": "Fehlerhaft"
+      },
+      "errorList": {
+        "title": "Fehlerliste",
+        "table": "Fehler je Zeile",
+        "loading": "Fehlerliste wird geladen …",
+        "empty": "Der Bericht enthält keine Fehler.",
+        "line": "Zeile",
+        "field": "Feld",
+        "code": "Code",
+        "message": "Meldung",
+        "wholeFile": "Datei",
+        "range": "{{from}}–{{to}} von {{total}} Fehlern",
+        "previous": "Zurück",
+        "next": "Weiter"
       }
     },
     "errors": {
@@ -2197,8 +2211,19 @@
         "naming": "Bezeichnung",
         "data": "Daten",
         "constraints": "Einschränkungen",
-        "applicability": "Geltungsbereich"
+        "applicability": "Geltungsbereich",
+        "expression": "Ausdruck"
       }
+    },
+    "computedChoice": "Berechnetes Attribut (Wert aus einem Ausdruck; nach dem Anlegen nicht umschaltbar)",
+    "ruleSummary": {
+      "validation": "Wertregel:",
+      "conditional": "Bedingt:",
+      "visible_when": "sichtbar wenn",
+      "required_when": "Pflicht wenn",
+      "read_only_when": "schreibgeschützt wenn",
+      "allowed_values_when": "erlaubte Werte {{values}} wenn {{when}}",
+      "openCatalog": "Regeln zu {{key}} im Regelkatalog"
     }
   },
   "inventory": {
@@ -3389,7 +3414,8 @@
       "loadError": "Der gespeicherte Filter lässt sich nicht laden: {{message}}",
       "conditionLabel": "Bedingung",
       "validationLabel": "Wertregel",
-      "conditionEmpty": "Keine Bedingung – die Regel gilt immer."
+      "conditionEmpty": "Keine Bedingung – die Regel gilt immer.",
+      "expressionLabel": "Ausdruck"
     },
     "junctions": {
       "and": "UND",
@@ -3437,7 +3463,8 @@
       "no_pattern": "Geben Sie ein Muster an.",
       "bad_pattern": "Das Muster ist ungültig (keine Lookarounds und Rückverweise).",
       "no_bound": "Geben Sie ein Minimum oder ein Maximum an.",
-      "min_above_max": "Das Minimum liegt über dem Maximum."
+      "min_above_max": "Das Minimum liegt über dem Maximum.",
+      "field_not_allowed": "Dieses Feld kann der Ausdruck nicht lesen (berechnetes Attribut oder das Attribut selbst)."
     },
     "exists": {
       "true": "ist gesetzt",
@@ -3519,7 +3546,54 @@
       "notHolds": "Die Bedingung trifft nicht zu – die Regel greift nicht.",
       "noRule": "Noch keine Wertregel.",
       "valid": "Der Wert erfüllt die Regel.",
-      "violations": "Verletzungen"
+      "violations": "Verletzungen",
+      "expressionTitle": "Vorschau mit Beispielwerten",
+      "noInputs": "Der Ausdruck liest noch kein Feld.",
+      "result": "Ergebnis:",
+      "resultEmpty": "Ergebnis: leer (fehlende Eingabe, falsche Art, Division durch 0 oder kein Datum).",
+      "today": "Heute: {{date}} (Zeitzone {{zone}})"
+    },
+    "exprOps": {
+      "field": "Feld",
+      "literal": "Festwert",
+      "add": "Summe (+)",
+      "sub": "Differenz (−)",
+      "mul": "Produkt (×)",
+      "div": "Quotient (÷)",
+      "today": "Heutiges Datum",
+      "days_between": "Tage zwischen",
+      "concat": "Verketten",
+      "lower": "Kleinbuchstaben",
+      "upper": "Großbuchstaben",
+      "coalesce": "Erster gesetzter Wert"
+    },
+    "literalTypes": {
+      "string": "Text",
+      "number": "Zahl",
+      "boolean": "Ja/Nein"
+    },
+    "resultTypes": {
+      "number": "eine Zahl",
+      "string": "einen Text",
+      "date": "ein Datum",
+      "boolean": "Ja/Nein",
+      "any": "einen beliebigen Wert"
+    },
+    "expression": {
+      "kind": "Art des Ausdrucks",
+      "operandKind": "Operand {{position}}",
+      "rootName": "Ausdruck: {{kind}}",
+      "operandName": "Operand {{position}}: {{kind}}",
+      "field": "Feld",
+      "unavailableField": "{{name}} (nicht verfügbar)",
+      "literalType": "Art des Festwerts",
+      "literalValue": "Festwert",
+      "todayHint": "Das Datum von heute in der Zeitzone {{zone}}.",
+      "addOperand": "Operand hinzufügen",
+      "typeError": "Ungültiger Ausdruck: {{message}}",
+      "loadError": "Der gespeicherte Ausdruck lässt sich nicht laden: {{message}}",
+      "typeMismatch": "Der Ausdruck ergibt {{result}}, das passt nicht zum Datentyp {{dataType}}. Der Server prüft verbindlich und lehnt ihn ab.",
+      "notComputable": "Der Datentyp {{dataType}} kann nicht berechnet werden (Ganzzahl, Dezimalzahl, Text, mehrzeiliger Text, Datum, Ja/Nein)."
     }
   },
   "movement": {
@@ -3794,6 +3868,9 @@
     "startBatch": "Etiketten erzeugen",
     "download": "PDF herunterladen",
     "openPdf": "PDF öffnen",
+    "downloadLink": "PDF über den Download-Link speichern",
+    "pdfLoadFailed": "Das PDF konnte nicht geladen werden ({{detail}}). Bitte über den Download-Link speichern.",
+    "popupBlocked": "Das PDF konnte nicht in einem neuen Tab geöffnet werden (Pop-up blockiert). Bitte über den Download-Link speichern.",
     "queued": "Auftrag angelegt …",
     "progress": "Status: {{status}} ({{progress}} %)",
     "result": "{{labels}} Etiketten auf {{pages}} Seiten, abrufbar bis {{expires}}",
@@ -3889,6 +3966,22 @@
       "removeField": "Entfernen: {{name}}",
       "fieldRemoved": "{{name}} aus dem Layout entfernt.",
       "refused": "Vom Server abgelehnt."
+    },
+    "preview": {
+      "title": "Vorschau",
+      "open": "Vorschau öffnen",
+      "close": "Vorschau schließen",
+      "template": "Template der Vorschau",
+      "noTemplate": "Ohne Template",
+      "role": "Rolle der Vorschau",
+      "ownRoles": "Eigene Rollen",
+      "form": "Formularvorschau",
+      "publishedState": "Die Vorschau zeigt den veröffentlichten Stand. Eingaben bleiben lokal und werden nicht gespeichert.",
+      "draftState": "Die Vorschau zeigt den Stand des Drafts {{name}}. Eingaben bleiben lokal und werden nicht gespeichert.",
+      "roleLocked": "Die Vorschau als andere Rolle erfordert das Recht citype:manage.",
+      "roleForbidden": "Die Vorschau als diese Rolle wurde abgelehnt (citype:manage). Sie zeigt das Formular für die eigenen Rollen.",
+      "unsaved": "Der Editor enthält ungespeicherte Änderungen. Die Vorschau zeigt den gespeicherten Stand.",
+      "error": "Die Vorschau konnte nicht geladen werden"
     }
   }
 }

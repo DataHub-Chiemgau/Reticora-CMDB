@@ -1414,6 +1414,8 @@ export type ImportPreviewRequest = components['schemas']['ImportPreviewRequest']
 export type ImportStartDocumentRequest = components['schemas']['ImportStartDocumentRequest'];
 export type ImportJobAccepted = components['schemas']['ImportJobAccepted'];
 export type ImportRun = components['schemas']['ImportRun'];
+export type ImportError = components['schemas']['ImportError'];
+export type ImportErrorList = components['schemas']['ImportErrorListResponse'];
 
 /** The problem types of a refused import file (422) and of an unfinished report (409). */
 export const PROBLEM_IMPORT_FORMAT_UNSUPPORTED =
@@ -1459,7 +1461,8 @@ export function importJobResult(result: unknown): ImportJobResult | undefined {
  * importApi reads and writes the mapping profiles (/import-profiles,
  * WP-774), previews a file (POST /imports/preview, WP-301), starts a run
  * (POST /imports with document_id, WP-301/WP-302) and reads its projection
- * and the download link of its CSV report (GET /imports/{id}[/report]).
+ * and the download link of its CSV report (GET /imports/{id}[/report]) and
+ * its row errors page by page (GET /imports/{id}/errors).
  * The progress of a run is the job (GET /jobs/{id}, useImportRun).
  */
 export const importApi = {
@@ -1494,6 +1497,10 @@ export const importApi = {
   /** The presigned link (15 min) of the CSV report of a finished run; 409 while it runs. */
   reportUrl(id: string): Promise<{ download_url: string }> {
     return fetchAPI(`/imports/${id}/report`);
+  },
+  /** A page of the row errors of a finished run (line, field, code, message); 409 while it runs. */
+  errors(id: string, params: { limit?: number; cursor?: string } = {}): Promise<ImportErrorList> {
+    return fetchAPI(`/imports/${id}/errors${buildQuery(params)}`);
   },
 };
 

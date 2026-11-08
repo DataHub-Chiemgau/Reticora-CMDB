@@ -757,7 +757,10 @@ export function useDeleteLayout() {
   });
 }
 
-/** The resolved form of a CI type for a template and a role (GET /ci-types/{id}/form). */
+/**
+ * The resolved form of a CI type for a template and a role (GET
+ * /ci-types/{id}/form); with draft the state of the draft (E-113, WP-803).
+ */
 export function useResolvedTypeForm(
   ciTypeId: string | undefined,
   params: ResolvedFormParams = {},

@@ -1378,6 +1378,7 @@ AST-03;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 AST-01;[P2];B;backend/internal/asset/link_integration_test.go;WP-272
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];B;backend/internal/reviews/ticket_integration_test.go;WP-291
 IMP-IO-01;[P2];C;backend/internal/importer/ci_integration_test.go;WP-302
+IMP-IO-01;[P2];C;backend/internal/importer/errors_test.go;WP-302
 AST-01;[P2];B;backend/internal/asset/concurrency_integration_test.go;WP-740
 EVT-03;[P2–P3];B;backend/internal/asset/concurrency_integration_test.go;WP-740
 UI-11;[P2];C;frontend/src/pages/TemplatesPage.test.tsx;WP-314
@@ -1517,6 +1518,8 @@ UI-14;[P2–P4, A];C;frontend/src/pages/TagsPage.test.tsx;WP-817
 VIE-02;[P2];C;frontend/src/pages/SavedViewsPage.test.tsx;WP-817
 UI-11;[P2];C;frontend/src/pages/RulesPage.test.tsx;WP-801
 ABN-02;[Q];G2;backend/internal/asset/querybudget_integration_test.go;WP-824
+ABN-02;[Q];G2;backend/internal/savedview/querybudget_integration_test.go;WP-824
+ABN-02;[Q];G2;backend/internal/savedview/warranty_index_integration_test.go;WP-824
 UI-15;[P2];C;frontend/src/components/flows/scan.test.tsx;WP-807
 INV-03;[P2], RFID/Direct-Access [P4];C;frontend/src/components/flows/scan.test.tsx;WP-807
 UI-14;[P2–P4, A];C;frontend/src/pages/TicketDetailPage.test.tsx;WP-814
@@ -1528,3 +1531,11 @@ UI-14;[P2–P4, A];C;frontend/src/pages/StocktakeDetailPage.test.tsx;WP-813
 ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/writers_integration_test.go;WP-826
 MET-50;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
 UI-11;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
+SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
+API-06;[P2]/[P3]/[P4]/[A];C;frontend/src/api/deprecatedPaths.test.ts;WP-846
+MET-52;[P2];C;frontend/src/components/metamodel/LayoutPreview.test.tsx;WP-803
+UI-11;[P2];C;frontend/src/components/metamodel/LayoutPreview.test.tsx;WP-803
+ABN-02;[Q];G2;tests/load/phase2.js;WP-822
+NFR-02;[B];G2;tests/load/phase2.js;WP-822
+UI-11;[P2];C;frontend/src/components/rules/ComputedEditor.test.tsx;WP-802
+MET-45;Phase 1 im Fokus, voller Tag fehlt;C;frontend/src/rules/rules.test.ts;WP-802

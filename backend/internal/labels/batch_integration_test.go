@@ -351,6 +351,38 @@ func TestLabelBatch(t *testing.T) {
 	if rec = download(inProcess, f.ID(), creator); rec.Code != http.StatusNotFound {
 		t.Errorf("download of an unknown job: %d %s, want 404", rec.Code, rec.Body)
 	}
+
+	// The job API shows the batch job to the same principals as the
+	// download (WP-828): its creator; another user, also with an org-wide
+	// scope, gets 404 like for an unknown job and does not list it.
+	jobAPI := chi.NewRouter()
+	jobs.NewAPIHandler(jobs.NewService(jobs.NewPGRepository(f.App).WithReadCondition(labels.BatchJobKind, labels.JobReadSQL))).
+		WithKind(labels.BatchJobKind, identity.PermAssetRead, nil).RegisterRoutes(jobAPI)
+	otherUser := f.AppUser(t, f.OrgA, "bt-other")
+	otherScope := database.OrgWideScope(f.OrgA, otherUser)
+	stranger := who{user: otherUser, scope: &otherScope, perms: append([]identity.Permission{identity.PermJobRead}, allPerms...)}
+	creatorScope := database.OrgWideScope(f.OrgA, f.User)
+	owner := who{user: f.User, scope: &creatorScope, perms: creator.perms}
+	for _, path := range []string{"/api/v1/jobs/" + byIDs, "/api/v1/jobs/" + byIDs + "/result"} {
+		if rec = serve(jobAPI, http.MethodGet, path, "", owner); rec.Code != http.StatusOK {
+			t.Errorf("GET %s by the creator: %d %s, want 200", path, rec.Code, rec.Body)
+		}
+		if rec = serve(jobAPI, http.MethodGet, path, "", stranger); rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), byIDs) {
+			t.Errorf("GET %s by another user: %d %s, want 404", path, rec.Code, rec.Body)
+		}
+	}
+	unknownJob := serve(jobAPI, http.MethodDelete, "/api/v1/jobs/"+f.ID(), "", stranger)
+	if rec = serve(jobAPI, http.MethodDelete, "/api/v1/jobs/"+byIDs, "", stranger); rec.Code != http.StatusNotFound || rec.Code != unknownJob.Code {
+		t.Errorf("DELETE of the batch job by another user: %d %s, want 404 like an unknown job (%d)", rec.Code, rec.Body, unknownJob.Code)
+	}
+	list := "/api/v1/jobs?kind=" + labels.BatchJobKind + "&limit=200"
+	if rec = serve(jobAPI, http.MethodGet, list, "", owner); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), byIDs) {
+		t.Errorf("GET /jobs by the creator: %d, want the batch job %s", rec.Code, byIDs)
+	}
+	if rec = serve(jobAPI, http.MethodGet, list, "", stranger); rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), byIDs) ||
+		!strings.Contains(rec.Body.String(), `"total":0`) {
+		t.Errorf("GET /jobs by another user: %d %s, want no batch job", rec.Code, rec.Body)
+	}
 	// A batch without a visible object fails; its download is 409.
 	empty := start(inProcess, `{"kind":"asset","ids":["`+gamma+`"]}`, creator)
 	if job := wait(empty); job.Status != jobs.StatusFailed {

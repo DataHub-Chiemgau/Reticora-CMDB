@@ -1167,7 +1167,13 @@ func (e *Expr) compile(entityKind, table string, cat *catalog, args []any, start
 			return tagComparison(table, n, param), nil
 		}
 		col, jsonValue, wrap := n.column(entityKind, table, cat, param)
-		return wrap(comparison(col, jsonValue, kind, n, param)), nil
+		exact := comparison(col, jsonValue, kind, n, param)
+		if index := n.numberColumnCondition(entityKind, table, kind, cat, param); index != "" {
+			// The index condition holds for every hit of the exact
+			// comparison, so the conjunction equals it (also as NULL).
+			exact = "(" + index + " AND " + exact + ")"
+		}
+		return wrap(exact), nil
 	}
 	sql, err = compile(e)
 	return sql, args, next, err
@@ -1181,7 +1187,7 @@ func (e *Expr) compile(entityKind, table string, cat *catalog, args []any, start
 //
 // With the catalog a CI attribute is read with the expression of the
 // attribute indexes, reticora_attr_text with the key as a literal
-// (citype.KeyExpression; E-73 (Korrekturplan), WP-435, WP-607), as the
+// (citype.TableKeyExpression; E-73 (Korrekturplan), WP-435, WP-607), as the
 // attribute filter of the CI list compares it; the key passed
 // validAttributeKey.
 func (e *Expr) column(entityKind, table string, cat *catalog, param func(any) string) (col, jsonValue string, wrap func(string) string) {
@@ -1217,11 +1223,73 @@ func (e *Expr) column(entityKind, table string, cat *catalog, param func(any) st
 	if typed && ref.entity == "ci" {
 		// The key is a literal here as in the index expression; it passed
 		// validAttributeKey ([a-z0-9_]), so it needs no quoting. No
-		// parameter is added that the SQL might not use.
-		return citype.KeyExpression(ref.key), fmt.Sprintf("%s->'%s'", jsonb, ref.key), wrap
+		// parameter is added that the SQL might not use. The attributes
+		// are those of table: in a related node the CI of its level
+		// (rn<level>), not the bare column, which only the scoping of the
+		// subquery resolved to it.
+		return citype.TableKeyExpression(table, ref.key), fmt.Sprintf("%s->'%s'", jsonb, ref.key), wrap
 	}
 	p := param(ref.key)
 	return fmt.Sprintf("%s->>%s", jsonb, p), fmt.Sprintf("%s->%s", jsonb, p), wrap
+}
+
+// numberColumns are the CI attributes whose number value is also a stored
+// column of ci with an index (finding of WP-824, migration 000274):
+// attribute key → column. numeric comparisons are not leakproof, so under
+// row level security no index serves the comparison of the attribute
+// itself (E-133); the column is double precision, compared with the
+// leakproof float8 operators.
+var numberColumns = map[string]string{"warranty_days_left": "warranty_days_left_num"}
+
+// float8Of maps a numeric expression to double precision exactly as the
+// generated columns of numberColumns map the attribute (000274): clamped,
+// so that it never raises, and monotone.
+func float8Of(x string) string {
+	return fmt.Sprintf(`CASE WHEN %[1]s >= 1e308 THEN 'Infinity'::float8 WHEN %[1]s <= -1e308 THEN '-Infinity'::float8 `+
+		`WHEN abs(%[1]s) < 1e-300 THEN 0::float8 ELSE %[1]s::float8 END`, x)
+}
+
+// numberColumnCondition returns the index condition on the column of
+// numberColumns for a comparison of a CI attribute resolved as a number
+// (catalog), "" for any other comparison. The mapping to double precision
+// is monotone (float8Of), so the condition holds for every value the exact
+// numeric comparison matches: eq and in compare the mapped values for
+// equality, lt and lte (gt and gte) with lte (gte), between inclusive. ne
+// (IS DISTINCT FROM, also without a value), exists and like get none.
+func (e *Expr) numberColumnCondition(entityKind, table, kind string, cat *catalog, param func(any) string) string {
+	if kind != kindNumber {
+		return ""
+	}
+	ref, isAttr := attributeRef(entityKind, e.Field)
+	if !isAttr || ref.entity != "ci" {
+		return ""
+	}
+	column, indexed := numberColumns[ref.key]
+	if _, typed := cat.attribute(ref.entity, ref.key); !typed || !indexed {
+		return ""
+	}
+	col := table + "." + column
+	value := func(v any) string { return float8Of(param(fmt.Sprint(v)) + "::numeric") }
+	switch e.Op {
+	case OpEq:
+		return col + " = " + value(e.Value)
+	case OpLt, OpLte:
+		return col + " <= " + value(e.Value)
+	case OpGt, OpGte:
+		return col + " >= " + value(e.Value)
+	case OpBetween:
+		values := e.Value.([]any)
+		low := value(values[0])
+		return col + " BETWEEN " + low + " AND " + value(values[1])
+	case OpIn:
+		values := e.Value.([]any)
+		texts := make([]string, len(values))
+		for i, v := range values {
+			texts[i] = fmt.Sprint(v)
+		}
+		return col + " = ANY(ARRAY(SELECT " + float8Of("u.v") + " FROM unnest(" + param(texts) + "::numeric[]) AS u(v)))"
+	}
+	return ""
 }
 
 // tagComparison renders a tag comparison (WP-309) with the building block

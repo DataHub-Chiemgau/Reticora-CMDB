@@ -37,6 +37,20 @@
 # and every value at 50,000 objects, topology and impact included, are
 # measured without a budget (LATENCY_BUDGETS=none). The failure thresholds
 # hold in both. The evidence is the median of three runs (E-58).
+# Phase 2 (WP-822, ABN-02, NFR-02): every job starts the server with
+# RETICORA_MODULES=P2, the release configuration of G2 (every module of
+# phase P2 in server.LateModules, metamodel and import included after
+# E-105), and seeds the demo organization with objects CIs and the inputs
+# assets, tickets and consumables (cmd/seed -assets, -tickets,
+# -consumables; 10,000 each): 10,000 CIs and 10,000 assets are 20,000
+# objects of NFR-01. api-large-50000 keeps the SIM-01 quantities of the
+# Phase-2 objects, because the seed takes at most 50,000 CIs and assets
+# together (MaxObjects). The job phase2 runs tests/load/phase2.js (lists,
+# search, filters, relationship search and bulk of Phase 2) with a second
+# key from a second seed run with -api-key-role viewer
+# (API_KEY_RESTRICTED). The job api keeps its thresholds against the
+# extended seed: OBJECTS stays the CI count objects.
+#
 # The job archive gathers the k6 summaries, run records (commit, lscpu,
 # memory, configuration) and outcomes of all jobs into one artifact,
 # load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
@@ -57,8 +71,17 @@ on:
       server_ref:
         description: "Commit, tag or branch the server, the seed and the migrations are built from (empty: the run's commit)"
         default: ""
+      assets:
+        description: "Assets of the demo organization (Phase 2, cmd/seed -assets; WP-822: 10000)"
+        default: "10000"
+      tickets:
+        description: "Tickets of the demo organization (Phase 2, cmd/seed -tickets; WP-822: 10000)"
+        default: "10000"
+      consumables:
+        description: "Consumables of the demo organization (Phase 2, cmd/seed -consumables; WP-822: 10000)"
+        default: "10000"
       scenarios:
-        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large), or all"
+        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large, phase2), or all"
         default: "all"
   schedule:
     - cron: "17 2 * * *"
@@ -121,19 +144,22 @@ jobs:
         run: |
           # objects and latency_budgets: the size of the demo organization
           # (empty: the input objects) and the p95 budgets of api.js
-          # (LATENCY_BUDGETS); group selects several jobs by one name.
-          all='[{"scenario":"api","script":"api.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"all","group":""},
-                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load","seed_args":"","objects":"","latency_budgets":"","group":""},
-                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool","seed_args":"","objects":"","latency_budgets":"","group":""},
-                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover","seed_args":"","objects":"","latency_budgets":"","group":""},
+          # (LATENCY_BUDGETS); group selects several jobs by one name;
+          # phase2_volumes: inputs (the inputs assets, tickets and
+          # consumables) or sim01 (the SIM-01 quantities; WP-822).
+          all='[{"scenario":"api","script":"api.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"all","group":"","phase2_volumes":"inputs"},
+                {"scenario":"ingest","script":"ingest.js","k6_scenario":"load","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
+                {"scenario":"ingest-spool","script":"ingest.js","k6_scenario":"spool","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
+                {"scenario":"ingest-rediscover","script":"ingest.js","k6_scenario":"rediscover","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
                 {"scenario":"nfr01-volume","script":"api.js","k6_scenario":"",
-                 "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500","objects":"","latency_budgets":"all","group":""},
-                {"scenario":"api-large-28000","script":"api.js","k6_scenario":"","seed_args":"","objects":"28000","latency_budgets":"lists","group":"api-large"},
-                {"scenario":"api-large-50000","script":"api.js","k6_scenario":"","seed_args":"","objects":"50000","latency_budgets":"none","group":"api-large"}]'
+                 "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500","objects":"","latency_budgets":"all","group":"","phase2_volumes":"inputs"},
+                {"scenario":"api-large-28000","script":"api.js","k6_scenario":"","seed_args":"","objects":"28000","latency_budgets":"lists","group":"api-large","phase2_volumes":"inputs"},
+                {"scenario":"api-large-50000","script":"api.js","k6_scenario":"","seed_args":"","objects":"50000","latency_budgets":"none","group":"api-large","phase2_volumes":"sim01"},
+                {"scenario":"phase2","script":"phase2.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"}]'
           want="$(jq -cn --arg s "$SCENARIOS" '$s | gsub("\\s"; "") | split(",") | map(select(. != ""))')"
           unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] - [$all[].group] | join(", ")')"
           if [ -n "$unknown" ] || [ "$want" = "[]" ]; then
-            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large (api-large-28000, api-large-50000) or all"
+            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large (api-large-28000, api-large-50000), phase2 or all"
             exit 1
           fi
           matrix="$(jq -cn --argjson all "$all" --argjson want "$want" \
@@ -161,6 +187,11 @@ jobs:
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora?sslmode=disable
       RUNTIME_DATABASE_URL: postgres://reticora_test_runtime:reticora_test_runtime@localhost:5432/reticora?sslmode=disable
       OBJECTS: ${{ matrix.objects || inputs.objects || '10000' }}
+      # The Phase-2 volumes of the seed (WP-822); empty with phase2_volumes
+      # sim01: no flag, the SIM-01 quantities.
+      ASSETS: ${{ matrix.phase2_volumes == 'inputs' && (inputs.assets || '10000') || '' }}
+      TICKETS: ${{ matrix.phase2_volumes == 'inputs' && (inputs.tickets || '10000') || '' }}
+      CONSUMABLES: ${{ matrix.phase2_volumes == 'inputs' && (inputs.consumables || '10000') || '' }}
       LATENCY_BUDGETS: ${{ matrix.latency_budgets || 'all' }}
       DURATION: ${{ inputs.duration || '2m' }}
       SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
@@ -168,6 +199,9 @@ jobs:
       # The server configuration of every job (E-58: four ingest lanes, the
       # raised rate limit); the run record names it.
       INGEST_LANES: "4"
+      # The release configuration of G2 (WP-822): every module of phase P2
+      # (server.ParseModules).
+      MODULES: "P2"
       RATE_LIMIT_RPM: "1000000"
       RATE_LIMIT_ORG_RPM: "1000000"
     steps:
@@ -228,18 +262,33 @@ jobs:
 
       # The seed is a tool with the migration login (database.NewAdminPool).
       # nfr01-volume adds the volumes of NFR-01 (matrix seed_args; a
-      # server_ref before WP-439 has no such options and fails here).
-      - name: Seed (SIM-01, NFR-10, NFR-01)
+      # server_ref before WP-439 has no such options and fails here), every
+      # job but api-large-50000 the Phase-2 volumes ASSETS, TICKETS and
+      # CONSUMABLES (WP-821; a server_ref before WP-821 fails here).
+      # phase2.js (WP-822) also needs the key of the role user viewer: a
+      # second run with the same options changes no row and issues
+      # load-test-viewer beside load-test (-api-key-role, WP-325).
+      - name: Seed (SIM-01, NFR-10, NFR-01, Phase 2)
         id: seed
         env:
           SEED_ARGS: ${{ matrix.seed_args }}
+          K6_SCRIPT: ${{ matrix.script }}
         run: |
           mkdir -p load-results
           read -ra volume <<< "$SEED_ARGS"
+          if [ -n "$ASSETS" ]; then
+            volume+=(-assets "$ASSETS" -tickets "$TICKETS" -consumables "$CONSUMABLES")
+          fi
           start=$SECONDS
           "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" "${volume[@]}" \
             -api-key-file "$RUNNER_TEMP/load.key" > /dev/null
           echo "seed seconds: $((SECONDS - start))" | tee "load-results/seed-$SCENARIO_NAME.txt"
+          if [ "$K6_SCRIPT" = phase2.js ]; then
+            start=$SECONDS
+            "$RUNNER_TEMP/seed" -database-url "$DATABASE_URL" -objects "$OBJECTS" "${volume[@]}" \
+              -api-key-role viewer -api-key-file "$RUNNER_TEMP/load-restricted.key" > /dev/null
+            echo "seed seconds of the viewer key: $((SECONDS - start))" | tee -a "load-results/seed-$SCENARIO_NAME.txt"
+          fi
 
       # NFR-01 (WP-439): what the seed holds; nfr01-volume fails below the
       # volumes of NFR-01 (10,000 objects with 50,000 interfaces, 200,000
@@ -257,6 +306,9 @@ jobs:
           UNION ALL SELECT 'addresses of demo', count(*) FROM ip_address WHERE organization_id = (SELECT id FROM demo)
           UNION ALL SELECT 'relationships of demo', count(*) FROM ci_relationship WHERE organization_id = (SELECT id FROM demo)
           UNION ALL SELECT 'organizations', count(*) FROM organization
+          UNION ALL SELECT 'assets of demo', count(*) FROM asset WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'tickets of demo', count(*) FROM ticket WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'consumables of demo', count(*) FROM consumable WHERE organization_id = (SELECT id FROM demo)
           SQL
           if [ "$SCENARIO_NAME" = nfr01-volume ]; then
             awk -F'|' 'BEGIN { split("10000 50000 200000 100000 500", want, " ") }
@@ -277,17 +329,37 @@ jobs:
           RETICORA_MASTER_KEY="$(head -c 32 /dev/urandom | base64)" \
           RETICORA_RATE_LIMIT_RPM="$RATE_LIMIT_RPM" RETICORA_RATE_LIMIT_ORG_RPM="$RATE_LIMIT_ORG_RPM" \
           RETICORA_INGEST_LANES="$INGEST_LANES" \
+          RETICORA_MODULES="$MODULES" \
           RETICORA_PPROF_ADDR=127.0.0.1:6060 \
           nohup "$RUNNER_TEMP/server" > "$RUNNER_TEMP/server.log" 2>&1 &
           for _ in $(seq 1 60); do curl -fsS http://localhost:8080/healthz >/dev/null && exit 0; sleep 1; done
           cat "$RUNNER_TEMP/server.log"; exit 1
 
       # F-116: the global search reads the index of the whole organization,
-      # rebuilt after the seed as an operator does it.
+      # rebuilt after the seed as an operator does it. Since WP-786 the
+      # rebuild is the job search.reindex (202 with job_id): the step waits
+      # until it succeeded, so phase2.js finds the assets (WP-822); an
+      # answer without job_id (a server_ref before WP-786) rebuilt in the
+      # request.
       - name: Rebuild the search index
         run: |
-          curl -fsS -X POST -H "X-API-Key: $(cat "$RUNNER_TEMP/load.key")" http://localhost:8080/api/v1/search/reindex
-          echo
+          key="$(cat "$RUNNER_TEMP/load.key")"
+          answer="$(curl -fsS -X POST -H "X-API-Key: $key" http://localhost:8080/api/v1/search/reindex)"
+          echo "$answer"
+          job="$(jq -r '.job_id // empty' <<< "$answer")"
+          if [ -z "$job" ]; then
+            exit 0
+          fi
+          for _ in $(seq 1 600); do
+            status="$(curl -fsS -H "X-API-Key: $key" "http://localhost:8080/api/v1/jobs/$job" | jq -r .status)"
+            case "$status" in
+              succeeded) echo "search.reindex $job succeeded"; exit 0 ;;
+              queued | running) sleep 1 ;;
+              *) echo "::error title=reindex::search.reindex $job: $status"; exit 1 ;;
+            esac
+          done
+          echo "::error title=reindex::search.reindex $job did not end within 10 minutes"
+          exit 1
 
       # Statistics of the seeded tables and the rebuilt index before the
       # first request: without them the plans depend on when autovacuum
@@ -331,6 +403,9 @@ jobs:
           args=(-e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" -e OBJECTS="$OBJECTS")
           if [ -n "$K6_SCENARIO" ]; then
             args+=(-e SCENARIO="$K6_SCENARIO")
+          fi
+          if [ "$K6_SCRIPT" = phase2.js ]; then
+            args+=(-e API_KEY_RESTRICTED="$(cat "$RUNNER_TEMP/load-restricted.key")")
           fi
           if [ "$K6_SCRIPT" = api.js ]; then
             args+=(-e LATENCY_BUDGETS="$LATENCY_BUDGETS")
@@ -462,6 +537,8 @@ jobs:
             echo "latency budgets: $LATENCY_BUDGETS"
             echo "duration: $DURATION"
             echo "seed options: ${SEED_ARGS:-none}"
+            echo "phase-2 volumes: ${ASSETS:-SIM-01} assets, ${TICKETS:-SIM-01} tickets, ${CONSUMABLES:-SIM-01} consumables"
+            echo "modules: $MODULES"
             echo "ingest lanes: $INGEST_LANES"
             echo "rate limit rpm: $RATE_LIMIT_RPM"
             echo "rate limit org rpm: $RATE_LIMIT_ORG_RPM"

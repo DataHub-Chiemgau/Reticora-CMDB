@@ -7,9 +7,12 @@
  * /api/v1/search/query. WP-801 adds the condition mode (the condition
  * grammar of api/rules.schema.json: all, any, not and comparisons) and the
  * validation mode (the value rule AST of MET-45: all, required, pattern,
- * range and enum) for the rule catalog; the expression mode (WP-802)
- * follows. No mode emits nodes of another: no like in conditions, no
- * comparison in value rules, no required in a filter.
+ * range and enum) for the rule catalog. WP-802 adds the expression mode
+ * ($defs/expr of api/rules.schema.json: field, literal, add, sub, mul, div,
+ * today, days_between, concat, lower, upper, coalesce) for computed
+ * attributes. No mode emits nodes of another: no like in conditions, no
+ * comparison in value rules, no required in a filter, no rule or
+ * comparison in an expression.
  *
  * The binding check is the server's (savedview.Expr.Validate,
  * backend/internal/savedview/filter.go); the field whitelist and the
@@ -38,6 +41,20 @@ import {
   type FilterOp,
   type RelatedDirection,
 } from './filter';
+import {
+  ASSET_PREFIX,
+  DEPRECATED_EXPR_ASSET_FIELDS,
+  EXPR_ARITY,
+  EXPR_ASSET_FIELDS,
+  EXPR_OPS,
+  MAX_EXPR_DEPTH,
+  exprResultType,
+  parseExpr,
+  type Expr,
+  type ExprArgsOp,
+  type ExprOp,
+  type ExprResultType,
+} from './expr';
 
 /** The output format of the filter mode: FilterExpr of the OpenAPI document. */
 export type FilterExpr = components['schemas']['FilterExpr'];
@@ -1471,5 +1488,373 @@ export function previewValue(kind: FieldKind | undefined, input: string): unknow
     return input.trim() !== '' && Number.isFinite(n) ? n : input;
   }
   if (kind === 'bool') return input === 'true';
+  return input;
+}
+
+// ─── Expression mode (WP-802) ────────────────────────────────────────────────
+
+export type { Expr, ExprOp, ExprResultType };
+
+/** The node kinds of the expression mode: the operators of $defs/expr. */
+export const EXPR_NODE_KINDS: readonly ExprOp[] = EXPR_OPS;
+
+/** The kinds of a literal: text, number or boolean. */
+export const LITERAL_TYPES = ['string', 'number', 'boolean'] as const;
+export type LiteralType = (typeof LITERAL_TYPES)[number];
+
+/** The problems the expression mode reports at a node. */
+export const EXPR_ISSUES = ['no_field', 'not_number', 'field_not_allowed'] as const;
+export type ExprIssue = (typeof EXPR_ISSUES)[number];
+
+/**
+ * A node of the expression builder. A literal keeps the text of its input
+ * (a number is read on emit); an operator with operands keeps them as
+ * children, never fewer than its arity.
+ */
+export type ExprNode =
+  | { id: string; kind: 'field'; field: string }
+  | { id: string; kind: 'literal'; type: LiteralType; text: string }
+  | { id: string; kind: 'today' }
+  | { id: string; kind: ExprArgsOp; children: ExprNode[] };
+
+/**
+ * A field an expression can read: an entered (not computed) attribute of
+ * the type or asset.<field> of the whitelist. type is the kind of sample
+ * value of the preview; an attribute counts as any for the server's type
+ * check.
+ */
+export interface ExprFieldSpec {
+  field: string;
+  source: 'attribute' | 'asset';
+  type: ExprResultType;
+  /** The attribute's definition (attributes only). */
+  definition?: AttributeDefinition;
+}
+
+/** The sample kind of an attribute by its data type. */
+function attributeResultType(dataType: string): ExprResultType {
+  switch (dataType) {
+    case 'integer':
+    case 'decimal':
+    case 'number':
+      return 'number';
+    case 'date':
+      return 'date';
+    case 'boolean':
+      return 'boolean';
+    default:
+      return 'string';
+  }
+}
+
+/**
+ * exprFieldCatalog lists what an expression of the attribute selfKey can
+ * read: the entered attributes of the definitions (no computed one, not
+ * the attribute itself, each key once) and the asset fields of the
+ * whitelist without the deprecated names.
+ */
+export function exprFieldCatalog(
+  definitions: readonly AttributeDefinition[],
+  selfKey?: string,
+): ExprFieldSpec[] {
+  const seen = new Set<string>();
+  const attributes: ExprFieldSpec[] = [];
+  for (const d of definitions) {
+    if (d.computed || d.key === selfKey || seen.has(d.key)) continue;
+    seen.add(d.key);
+    attributes.push({
+      field: d.key,
+      source: 'attribute',
+      type: attributeResultType(d.data_type),
+      definition: d,
+    });
+  }
+  attributes.sort((a, b) => a.field.localeCompare(b.field));
+  const assets: ExprFieldSpec[] = Object.entries(EXPR_ASSET_FIELDS)
+    .filter(([name]) => !DEPRECATED_EXPR_ASSET_FIELDS.includes(name))
+    .map(([name, type]) => ({ field: `${ASSET_PREFIX}${name}`, source: 'asset', type }));
+  return [...attributes, ...assets];
+}
+
+/** exprFieldSpec finds the spec of a reference; a whitelisted asset field outside the catalog too. */
+export function exprFieldSpec(
+  catalog: readonly ExprFieldSpec[],
+  field: string,
+): ExprFieldSpec | undefined {
+  const spec = catalog.find((f) => f.field === field);
+  if (spec) return spec;
+  const name = field.startsWith(ASSET_PREFIX) ? field.slice(ASSET_PREFIX.length) : undefined;
+  const type = name === undefined ? undefined : EXPR_ASSET_FIELDS[name];
+  return type ? { field, source: 'asset', type } : undefined;
+}
+
+function isArgsKind(kind: ExprOp): kind is ExprArgsOp {
+  return kind !== 'field' && kind !== 'literal' && kind !== 'today';
+}
+
+const ARITHMETIC: readonly ExprOp[] = ['add', 'sub', 'mul', 'div'];
+
+/** newExprOperand returns the operand an operator adds: an empty field reference. */
+export function newExprOperand(): ExprNode {
+  return { id: newId(), kind: 'field', field: '' };
+}
+
+/**
+ * newExprNode returns an empty node of a kind; an operator gets as many
+ * operands as it needs (empty field references; a number literal for the
+ * further operands of arithmetic).
+ */
+export function newExprNode(kind: ExprOp): ExprNode {
+  switch (kind) {
+    case 'field':
+      return newExprOperand();
+    case 'literal':
+      return { id: newId(), kind, type: 'string', text: '' };
+    case 'today':
+      return { id: newId(), kind };
+  }
+  const [min] = EXPR_ARITY[kind];
+  const children = Array.from({ length: min }, (_, i): ExprNode =>
+    i > 0 && ARITHMETIC.includes(kind)
+      ? { id: newId(), kind: 'literal', type: 'number', text: '' }
+      : newExprOperand(),
+  );
+  return { id: newId(), kind, children };
+}
+
+/**
+ * changeExprKind turns a node into another kind; an operator taking
+ * operands keeps those of the node it replaces as far as its arity allows.
+ */
+export function changeExprKind(node: ExprNode, kind: ExprOp): ExprNode {
+  if (node.kind === kind) return node;
+  const next = newExprNode(kind);
+  if (!isArgsKind(kind) || !('children' in next)) return { ...next, id: node.id };
+  // A node that takes no operands becomes the first operand (with an id of
+  // its own: the operator keeps the id of the node it replaces).
+  const before = 'children' in node ? node.children : [{ ...node, id: newId() }];
+  const [min, max] = EXPR_ARITY[kind];
+  const kept = max === -1 ? before : before.slice(0, max);
+  const children = [...kept, ...next.children.slice(kept.length)].slice(
+    0,
+    Math.max(min, kept.length),
+  );
+  return { id: node.id, kind, children };
+}
+
+/** exprCanAddOperand: the operator takes another operand. */
+export function exprCanAddOperand(node: ExprNode): boolean {
+  return 'children' in node && EXPR_ARITY[node.kind][1] === -1;
+}
+
+/** exprCanRemoveOperand: the operator keeps its arity without one operand. */
+export function exprCanRemoveOperand(node: ExprNode): boolean {
+  return 'children' in node && node.children.length > EXPR_ARITY[node.kind][0];
+}
+
+function exprNodeOf(e: Expr): ExprNode {
+  switch (e.op) {
+    case 'field':
+      return { id: newId(), kind: 'field', field: e.field };
+    case 'literal':
+      return {
+        id: newId(),
+        kind: 'literal',
+        type: typeof e.value as LiteralType,
+        text: String(e.value),
+      };
+    case 'today':
+      return { id: newId(), kind: 'today' };
+    default:
+      return { id: newId(), kind: e.op, children: e.args.map(exprNodeOf) };
+  }
+}
+
+/** The root of a new expression: an empty field reference. */
+export function emptyExprRoot(): ExprNode {
+  return newExprOperand();
+}
+
+/** fromExpr turns an expression into the tree of the builder (throws on an invalid one). */
+export function fromExpr(input: unknown): ExprNode {
+  if (input === null || input === undefined) return emptyExprRoot();
+  return exprNodeOf(parseExpr(input));
+}
+
+/** literalValue reads the input of a literal; NaN: no number. */
+function literalValue(node: Extract<ExprNode, { kind: 'literal' }>): string | number | boolean {
+  if (node.type === 'boolean') return node.text === 'true';
+  if (node.type === 'number') {
+    const n = node.text.trim() === '' ? Number.NaN : Number(node.text);
+    return Number.isFinite(n) ? n : Number.NaN;
+  }
+  return node.text;
+}
+
+/** toExpr emits the expression of a tree ($defs/expr only). */
+export function toExpr(node: ExprNode): Expr {
+  switch (node.kind) {
+    case 'field':
+      return { op: 'field', field: node.field };
+    case 'literal':
+      return { op: 'literal', value: literalValue(node) };
+    case 'today':
+      return { op: 'today' };
+    default:
+      return { op: node.kind, args: node.children.map(toExpr) };
+  }
+}
+
+/** exprChildren returns the operands of a node. */
+export function exprChildren(node: ExprNode): ExprNode[] {
+  return 'children' in node ? node.children : [];
+}
+
+/** exprStats counts the nodes and the depth of a tree. */
+export function exprStats(root: ExprNode): { nodes: number; depth: number } {
+  let nodes = 1;
+  let depth = 0;
+  for (const c of exprChildren(root)) {
+    const s = exprStats(c);
+    nodes += s.nodes;
+    depth = Math.max(depth, s.depth);
+  }
+  return { nodes, depth: depth + 1 };
+}
+
+/** exprPaths maps the server path of each node (computed, computed.args[1] …) to its id. */
+export function exprPaths(root: ExprNode, base = 'computed'): Map<string, string> {
+  const paths = new Map<string, string>();
+  const walk = (node: ExprNode, path: string) => {
+    paths.set(path, node.id);
+    exprChildren(node).forEach((c, i) => walk(c, `${path}.args[${i}]`));
+  };
+  walk(root, base);
+  return paths;
+}
+
+/** exprNodeAtPath returns the id of the deepest node a server path names. */
+export function exprNodeAtPath(root: ExprNode, path: string): string | undefined {
+  return deepestPath(exprPaths(root), path);
+}
+
+/**
+ * exprErrorPath reads the path an expression error names (args[1].op: …)
+ * as a path below computed; a message without one names the expression.
+ */
+export function exprErrorPath(message: string): string {
+  const path = /^((?:args\[\d+\]\.?)*(?:op|field|value|args)?|expression): /.exec(message)?.[1];
+  if (!path || path === 'expression') return 'computed';
+  return `computed.${path.replace(/\.$/, '')}`;
+}
+
+/** exprFieldsOf lists the references of a tree, each once in the order they appear. */
+export function exprFieldsOf(root: ExprNode): string[] {
+  const out: string[] = [];
+  const walk = (node: ExprNode) => {
+    if (node.kind === 'field' && node.field !== '' && !out.includes(node.field)) {
+      out.push(node.field);
+    }
+    exprChildren(node).forEach(walk);
+  };
+  walk(root);
+  return out;
+}
+
+/**
+ * exprIssues checks each node for what the builder must complete before
+ * it goes out: a reference to choose, a number to read, a reference that
+ * the catalog does not offer (a computed attribute, the attribute itself).
+ * allowed tells whether a reference may be read; without it every
+ * reference may.
+ */
+export function exprIssues(
+  root: ExprNode,
+  allowed?: (field: string) => boolean,
+): Map<string, ExprIssue> {
+  const issues = new Map<string, ExprIssue>();
+  const walk = (node: ExprNode) => {
+    if (node.kind === 'field') {
+      if (node.field === '') issues.set(node.id, 'no_field');
+      else if (allowed && !allowed(node.field)) issues.set(node.id, 'field_not_allowed');
+    }
+    if (node.kind === 'literal' && node.type === 'number') {
+      if (Number.isNaN(literalValue(node))) issues.set(node.id, 'not_number');
+    }
+    exprChildren(node).forEach(walk);
+  };
+  walk(root);
+  return issues;
+}
+
+/** The result of checking an expression tree: the expression to send or the node and its problem. */
+export type ExprCheck =
+  | { ok: true; expr: Expr; resultType: ExprResultType }
+  | { ok: false; nodeId?: string; issue?: ExprIssue; message?: string };
+
+/**
+ * checkExpr completes exprIssues with parseExpr, so only an expression of
+ * $defs/expr goes out; a type error of parseExpr names its node.
+ */
+export function checkExpr(root: ExprNode, allowed?: (field: string) => boolean): ExprCheck {
+  const first = exprIssues(root, allowed).entries().next();
+  if (!first.done) return { ok: false, nodeId: first.value[0], issue: first.value[1] };
+  try {
+    const expr = parseExpr(toExpr(root));
+    return { ok: true, expr, resultType: exprResultType(expr) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, nodeId: exprNodeAtPath(root, exprErrorPath(message)), message };
+  }
+}
+
+/** mapExprNode replaces the node of id by fn(node) (null removes an operand). */
+export function mapExprNode(
+  node: ExprNode,
+  id: string,
+  fn: (n: ExprNode) => ExprNode | null,
+): ExprNode | null {
+  if (node.id === id) return fn(node);
+  if (!('children' in node)) return node;
+  const children = node.children.flatMap((c) => {
+    const next = mapExprNode(c, id, fn);
+    return next ? [next] : [];
+  });
+  return { ...node, children };
+}
+
+/** The expression mode (WP-802): $defs/expr of api/rules.schema.json for computed attributes. */
+export interface ExpressionMode {
+  id: 'expression';
+  nodeKinds: readonly ExprOp[];
+  literalTypes: readonly LiteralType[];
+  maxDepth: number;
+  maxNodes: number;
+}
+
+/**
+ * The limits of the expression mode: the nesting of the Go package
+ * (maxExprDepth) and the node count of the other modes.
+ */
+export const EXPRESSION_MODE: ExpressionMode = {
+  id: 'expression',
+  nodeKinds: EXPR_NODE_KINDS,
+  literalTypes: LITERAL_TYPES,
+  maxDepth: MAX_EXPR_DEPTH,
+  maxNodes: MAX_FILTER_NODES,
+};
+
+/**
+ * exprSampleValue reads an input of the preview as a value of the sample
+ * kind: a number for number fields, a boolean for boolean fields, text
+ * otherwise; empty is absent.
+ */
+export function exprSampleValue(type: ExprResultType | undefined, input: string): unknown {
+  if (input === '') return undefined;
+  if (type === 'number') {
+    const n = Number(input);
+    return input.trim() !== '' && Number.isFinite(n) ? n : input;
+  }
+  if (type === 'boolean') return input === 'true';
   return input;
 }

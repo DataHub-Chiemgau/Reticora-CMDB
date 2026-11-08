@@ -2838,7 +2838,13 @@ paths:
       summary: List the jobs of the organization (API-09, JOB-03)
       description: >-
         Export, import, bulk, merge, template migration and the system jobs
-        share one job model (JOB-01). Requires job:read.
+        share one job model (JOB-01). Requires job:read. Lists the jobs
+        whose scope snapshot lies in the caller's scope (TEN-09); an export
+        job only to its creator, an import job (import.run) only where GET
+        /imports/{id} shows it: a run over JSON rows to its starter, a run
+        of a document while the document is visible, and a label batch job
+        (labels.batch) only to its creator like its download (WP-828). The
+        same rule holds on every /jobs/{id} route, with 404 for any other job.
       parameters:
         - name: kind
           in: query
@@ -2875,6 +2881,11 @@ paths:
       operationId: getJob
       tags: [Jobs]
       summary: A job with its status, progress and result
+      description: >-
+        Visible under the rule of GET /jobs (scope snapshot, export job to
+        its creator, import job like GET /imports/{id}, label batch job to
+        its creator, WP-828); 404 for
+        any other job, like an unknown id.
       responses:
         '200':
           description: The job
@@ -3046,7 +3057,9 @@ paths:
             urn:reticora:problem:forbidden, FieldForbiddenProblem with
             `action` ci:delete and empty `fields`) on the type and scope of
             the merged CI or its survivor, checked before the state of the
-            merge (403, never 409).
+            merge (403, never 409). The right is checked before every state
+            of the job: without it the answer is 403 also for a job that
+            is not revertible, expired or reverted already (WP-829).
           content:
             application/problem+json:
               schema:
@@ -5247,13 +5260,18 @@ paths:
     post:
       operationId: addConsumableMovement
       tags: [Consumables]
+      deprecated: true
+      x-deprecated-at: '2026-11-08'
+      x-sunset: '2027-11-09'
+      x-successor: '/api/v1/stock-movements'
       summary: Record a stock in/out movement and adjust the level atomically
       description: >-
-        The successor is POST /api/v1/stock-movements with consumable_id and
-        the quantity bookings receipt and retrieval (E-38, WP-756); this
-        path books through the same movement service: in is a receipt into
-        the bin location_id, out a retrieval from it. The deprecation follows
-        with WP-846.
+        Deprecated (E-38, WP-756, WP-846): the successor is POST
+        /api/v1/stock-movements with consumable_id and the quantity bookings
+        receipt and retrieval; this path books through the same movement
+        service: in is a receipt into the bin location_id, out a retrieval
+        from it. The path answers until x-sunset with the Deprecation, Sunset
+        and successor-version Link headers.
       requestBody:
         required: true
         content:
@@ -16853,14 +16871,18 @@ paths:
     x-feature: stock
     get:
       operationId: listInventoryItems
+      deprecated: true
+      x-deprecated-at: '2026-11-08'
+      x-sunset: '2027-11-09'
+      x-successor: '/api/v1/consumables'
       summary: Manage quantity-based inventory items
       description: >-
-        Alias of GET /api/v1/consumables (E-38, E-40, WP-757): the
-        consumables in the form of a quantity item, stock_level the sum of
-        on_hand over the bins the caller sees, location_id the bin when the
-        article lies in exactly one, attributes empty. The successor is GET
-        /api/v1/consumables; the deprecation follows with WP-846 once the
-        web client no longer calls this path.
+        Deprecated (E-38, E-40, WP-757, WP-846): alias of GET
+        /api/v1/consumables, the consumables in the form of a quantity item,
+        stock_level the sum of on_hand over the bins the caller sees,
+        location_id the bin when the article lies in exactly one, attributes
+        empty. The path answers until x-sunset with the Deprecation, Sunset
+        and successor-version Link headers.
       responses:
         '200':
           description: Manage quantity-based inventory items
@@ -16868,13 +16890,17 @@ paths:
           description: Unauthorized
     post:
       operationId: createInventoryItems
+      deprecated: true
+      x-deprecated-at: '2026-11-08'
+      x-sunset: '2027-11-09'
+      x-successor: '/api/v1/consumables'
       summary: Manage quantity-based inventory items
       description: >-
-        Alias of POST /api/v1/consumables (E-38, E-40, WP-757): creates a
-        consumable; a stock_level > 0 is booked as a receipt into the bin
-        location_id through the movement service in the same transaction.
-        The successor is POST /api/v1/consumables; the deprecation follows
-        with WP-846 once the web client no longer calls this path.
+        Deprecated (E-38, E-40, WP-757, WP-846): alias of POST
+        /api/v1/consumables, creates a consumable; a stock_level > 0 is
+        booked as a receipt into the bin location_id through the movement
+        service in the same transaction. The path answers until x-sunset
+        with the Deprecation, Sunset and successor-version Link headers.
       responses:
         '201':
           description: Manage quantity-based inventory items
@@ -21538,8 +21564,9 @@ paths:
         the error of the row). While the run is queued or running 409
         import-report-not-ready; a cancelled run has no report (404). Like
         the projection of the run, the document of the run must lie in the
-        caller's scope (404). Without job service or blob storage 503.
-        Requires import:run.
+        caller's scope (404). A run whose report is not stored is 404 as
+        well; a blob storage that cannot be asked is 503. Without job
+        service or blob storage 503. Requires import:run.
       responses:
         '200':
           description: Download link of the report
@@ -21547,6 +21574,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImportReportLink'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/imports/{id}/errors:
+    x-phase: P2
+    x-feature: import
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listImportErrors
+      tags: [Import]
+      summary: List the row errors of an import run
+      description: >-
+        The errors of a finished run as JSON (line, field, code, message):
+        every line of its report (GET /api/v1/imports/{id}/report) except
+        the outcome lines of the rows written or skipped (codes created,
+        updated, skipped), in the order of the report. A line of null is an
+        error of the file as a whole (a mapped column missing in the
+        header, a limit of the file). Notes of a written row (e.g.
+        read_only_field) are listed as well, so total counts errors, not
+        failed rows (rows_failed of the run). The list is read from the
+        stored report, there is no import table. Paged by limit and the
+        signed cursor of next_cursor. Visibility and answers follow the
+        report: 409 import-report-not-ready while the run is queued or
+        running, 404 for a cancelled run, a run without stored report, a
+        job of another kind and a run the caller does not see (document
+        outside the scope; a run over JSON rows for everyone but its
+        starter). A report that cannot be read is 503, never a partial
+        list. Without job service or blob storage 503. Requires import:run.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: A page of the errors of the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportErrorListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -31491,6 +31567,40 @@ components:
       properties:
         download_url:
           type: string
+
+    ImportError:
+      type: object
+      description: One error of an import run, a line of its report.
+      required: [line, field, code, message]
+      properties:
+        line:
+          type: [integer, 'null']
+          description: >-
+            Line of the file (the header is line 1) or number of the JSON row
+            of an API run (from 1), as in the report; null for an error of
+            the file as a whole.
+        field:
+          type: string
+          description: Target of the mapping or column of the file; empty when the error concerns the whole row.
+        code:
+          type: string
+          description: >-
+            Code of the error, e.g. transform_failed, invalid_value,
+            out_of_scope, location_not_found or a parser code
+            (import-row-malformed).
+        message:
+          type: string
+
+    ImportErrorListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ImportError'
 
     LabelLookupResult:
       type: object

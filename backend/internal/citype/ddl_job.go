@@ -155,6 +155,14 @@ func KeyExpression(key string) string {
 	return ValueExpression(quoteLiteral(key))
 }
 
+// TableKeyExpression is KeyExpression over the attributes of table (a
+// table name or alias of the query, never user input), for queries with
+// more than one CI in scope such as the related nodes of the saved views
+// (WP-789). It matches the index expression like KeyExpression.
+func TableKeyExpression(table, key string) string {
+	return "reticora_attr_text(" + table + ".attributes, " + quoteLiteral(key) + ")"
+}
+
 // IndexStatement is the CREATE INDEX statement of a definition's own index;
 // "" when the definition needs none: it is neither searchable nor unique,
 // or the index of its key serves it (UsesKeyIndex, KeyIndexStatement). A

@@ -10,11 +10,14 @@
  * a draft "publish" writes directly after a confirmation (MET-04, POST or
  * PATCH with If-Match); with an active draft (WP-798) withDraft captures
  * the write as a draft item (202) and the editor keeps its state.
+ *
+ * The area "Vorschau" (WP-803, MET-52) shows the form as role X with
+ * template Y (LayoutPreview); it reads only and is closed at first.
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Send, Trash2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Send, Trash2 } from 'lucide-react';
 import {
   useActiveDraftItems,
   useAllCITypes,
@@ -62,6 +65,7 @@ import {
   type FieldOrigin,
   type PaletteField,
 } from '../components/metamodel/LayoutEditor';
+import { LayoutPreview } from '../components/metamodel/LayoutPreview';
 
 /** The problem type of a refused value at one field (WP-510). */
 const INVALID_FIELD = 'urn:reticora:problem:invalid-field';
@@ -226,6 +230,7 @@ export function FormBuilderPage() {
   const [reload, setReload] = useState(0);
   const [confirm, setConfirm] = useState<'publish' | 'remove' | null>(null);
   const [notice, setNotice] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
   const target = `${templateId || id}:${roleId}`;
   const sourceKey = own
     ? `own:${own.id}:${own.version}:${reload}`
@@ -574,6 +579,35 @@ export function FormBuilderPage() {
           invalidMessage={editorPath ? apiError?.detail : undefined}
         />
       ) : null}
+
+      <section
+        aria-labelledby="form-builder-preview"
+        className="space-y-4 rounded-xl border border-line bg-panel p-4"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 id="form-builder-preview" className="text-base font-semibold text-fg">
+            {t('formBuilder.preview.title')}
+          </h2>
+          <Button
+            variant="secondary"
+            icon={previewOpen ? <EyeOff /> : <Eye />}
+            aria-expanded={previewOpen}
+            onClick={() => setPreviewOpen((open) => !open)}
+          >
+            {previewOpen ? t('formBuilder.preview.close') : t('formBuilder.preview.open')}
+          </Button>
+        </div>
+        {previewOpen ? (
+          <LayoutPreview
+            key={target}
+            ciTypeId={id}
+            templates={templates}
+            initialTemplateId={templateId}
+            initialRoleId={roleId}
+            unsaved={dirty}
+          />
+        ) : null}
+      </section>
 
       <Modal
         open={confirm === 'publish'}

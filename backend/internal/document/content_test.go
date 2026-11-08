@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -61,7 +62,7 @@ func (s *fakeBlobStore) Delete(_ context.Context, bucket, key string) error {
 	return nil
 }
 
-func (s *fakeBlobStore) PresignedGetURL(_ context.Context, bucket, key string) (string, error) {
+func (s *fakeBlobStore) PresignedGetURL(_ context.Context, bucket, key string, _ blob.Download) (string, error) {
 	return "https://minio.example.com/" + bucket + "/" + key + "?signature=fake", nil
 }
 

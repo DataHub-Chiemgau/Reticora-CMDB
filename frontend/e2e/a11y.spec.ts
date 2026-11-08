@@ -582,6 +582,110 @@ const IMPORT_HANDLERS: Handler[] = [
   },
 ];
 
+// The report of a dry run with its row errors (GET /imports/{id}/errors,
+// finding of WP-322): a saved profile, the finished job, its projection and
+// one page of errors with a next page.
+const IMPORT_JOB_ID = '7c000000-0000-4000-8000-0000000000a1';
+const IMPORT_REPORT_HANDLERS: Handler[] = [
+  ...IMPORT_HANDLERS,
+  {
+    path: '/import-profiles',
+    reply: () => ({
+      body: list([
+        {
+          id: '7b000000-0000-4000-8000-0000000000a1',
+          organization_id: ORG_ID,
+          name: 'a11y-import-profile',
+          description: null,
+          entity: 'ci',
+          format: 'csv',
+          mode: 'both',
+          sheet: null,
+          mapping: { columns: { Hostname: { target: 'name', transforms: [] } }, defaults: {} },
+          identity_keys: ['name'],
+          created_by: '00000000-0000-0000-0000-000000000001',
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    method: 'POST',
+    path: '/imports',
+    reply: () => ({
+      status: 202,
+      body: { job_id: IMPORT_JOB_ID, status: 'queued', kind: 'import.run' },
+    }),
+  },
+  {
+    path: `/jobs/${IMPORT_JOB_ID}`,
+    reply: () => ({
+      body: {
+        id: IMPORT_JOB_ID,
+        organization_id: ORG_ID,
+        kind: 'import.run',
+        status: 'succeeded',
+        progress: 100,
+        result: { dry_run: true, total: 2, created: 1, updated: 0, skipped: 0, failed: 1 },
+        attempts: 1,
+        max_attempts: 1,
+        created_at: AT,
+        updated_at: AT,
+        cancellable: false,
+      },
+    }),
+  },
+  {
+    path: `/imports/${IMPORT_JOB_ID}`,
+    reply: () => ({
+      body: {
+        id: IMPORT_JOB_ID,
+        kind: 'import.run',
+        status: 'succeeded',
+        progress: 100,
+        source: 'document',
+        document_id: IMPORT_DOCUMENT.id,
+        document_version: 1,
+        row_count: null,
+        profile_id: '7b000000-0000-4000-8000-0000000000a1',
+        mode: 'both',
+        dry_run: true,
+        sheet: null,
+        rows_total: 2,
+        rows_failed: 1,
+        error_code: null,
+        error: null,
+        cancellable: false,
+        created_at: AT,
+        started_at: AT,
+        finished_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/imports/${IMPORT_JOB_ID}/errors`,
+    reply: () => ({
+      body: {
+        data: [
+          {
+            line: null,
+            field: 'Seriennummer',
+            code: 'column_missing',
+            message: 'a11y-import-file',
+          },
+          { line: 3, field: 'name', code: 'invalid_value', message: 'a11y-import-error' },
+        ],
+        total: 3,
+        limit: 50,
+        offset: 0,
+        has_more: true,
+        next_cursor: 'a11y-next',
+      },
+    }),
+  },
+];
+
 // One entry per route of src/App.tsx; the parity test below fails when a
 // route is added there without an entry here.
 const ROUTES: A11yRoute[] = [
@@ -1279,6 +1383,40 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
             );
           });
         }
+      }
+
+      // The report of an import dry run with its row errors page by page
+      // (GET /imports/{id}/errors, finding of WP-322).
+      for (const theme of THEMES) {
+        test(`page /imports report with row errors (${themeName(theme)})`, async ({ page }) => {
+          await checkPage(
+            page,
+            {
+              url: '/imports',
+              handlers: IMPORT_REPORT_HANDLERS,
+              prepare: async (p) => {
+                await p.locator('#main-content input[type="file"]').setInputFiles({
+                  name: 'a11y-import.csv',
+                  mimeType: 'text/csv',
+                  buffer: Buffer.from('Hostname;Seriennummer\na11y-import-srv;SN-1\n'),
+                });
+                await p
+                  .getByRole('button', { name: /Weiter zur Zuordnung|Continue to mapping/ })
+                  .click();
+                await p
+                  .getByLabel(/^(Profil|Profile)$/)
+                  .selectOption('7b000000-0000-4000-8000-0000000000a1');
+                await p
+                  .getByRole('button', { name: /Weiter zum Prüfen|Continue to check/ })
+                  .click();
+                await p.getByRole('button', { name: /Dry Run starten|Start dry run/ }).click();
+              },
+              ready: (p) => p.locator('#main-content td', { hasText: 'a11y-import-error' }),
+            },
+            theme,
+            language,
+          );
+        });
       }
 
       // WP-524 (E-87): the CI detail of a CI outside the client chosen in the

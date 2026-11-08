@@ -400,3 +400,96 @@ func TestStructuredQueryRelatedIndexUseAgainstPostgres(t *testing.T) {
 		t.Logf("%s:\n%s", c.name, plan)
 	}
 }
+
+// TestRelatedAttributeComparesInnerCI proves that the attribute comparison
+// of a related node reads the related CI (rn<level>), not the CI of the
+// enclosing query: outer and related CIs carry different values of the
+// typed attribute warranty_days_left (system definition, 000225), at one
+// and at two levels of nesting. The compiled SQL names the attribute of
+// the alias of its level (reticora_attr_text(rn1.attributes, …)), never
+// the bare column.
+func TestRelatedAttributeComparesInnerCI(t *testing.T) {
+	f := scopetest.Seed(t, "2e")
+	bg := context.Background()
+	ci := func(name string, days int) string {
+		t.Helper()
+		id := f.CI(t, f.OrgA, f.Client1, name)
+		if _, err := f.Admin.Exec(bg, `UPDATE ci SET attributes = jsonb_build_object('warranty_days_left', $2::int) WHERE id = $1`, id, days); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	edge := func(src, dst string) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES ($1, $2, $3, 'runs_on')`,
+			f.OrgA, src, dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// soonOnLate (10) runs on late (400), lateOnSoon (400) on soon (10);
+	// top (400) runs on lateOnSoon, top2 (10) on soonOnLate.
+	soon, late := ci("inner-soon", 10), ci("inner-late", 400)
+	soonOnLate, lateOnSoon := ci("outer-soon-on-late", 10), ci("outer-late-on-soon", 400)
+	top, top2 := ci("top-on-late-on-soon", 400), ci("top-on-soon-on-late", 10)
+	edge(soonOnLate, late)
+	edge(lateOnSoon, soon)
+	edge(top, lateOnSoon)
+	edge(top2, soonOnLate)
+
+	engine := NewPGQueryEngine(f.App)
+	ctx := f.OrgCtx(f.OrgA)
+	lt30 := &Expr{Field: "attributes.warranty_days_left", Op: OpLt, Value: float64(30)}
+	gt30 := &Expr{Field: "attributes.warranty_days_left", Op: OpGt, Value: float64(30)}
+	related := func(where *Expr) *Expr {
+		return &Expr{Related: &RelatedExpr{Direction: DirectionOut, Where: where}}
+	}
+	for _, c := range []struct {
+		name  string
+		where *Expr
+		want  []string
+	}{
+		// CIs that run on a CI whose warranty ends within 30 days:
+		// lateOnSoon (own value 400) and top2, not soonOnLate (own value
+		// 10, runs on late), which a comparison of the outer CI would find.
+		{"related lt 30", related(lt30), []string{lateOnSoon, top2}},
+		{"related gt 30", related(gt30), []string{soonOnLate, top}},
+		// Own value and related value differ.
+		{"own gt 30, related lt 30", &Expr{And: []Expr{*gt30, *related(lt30)}}, []string{lateOnSoon}},
+		{"own lt 30, related lt 30", &Expr{And: []Expr{*lt30, *related(lt30)}}, []string{top2}},
+		// Two levels: runs on a CI (gt 30) that runs on one with lt 30.
+		{"nested", related(&Expr{And: []Expr{*gt30, *related(lt30)}}), []string{top}},
+		{"nested reverse", related(&Expr{And: []Expr{*lt30, *related(gt30)}}), []string{top2}},
+	} {
+		rows, _, err := engine.Query(ctx, f.OrgA, &FilterSpec{EntityKind: "ci", Where: c.where}, api.PaginationParams{Limit: 50})
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		got := []string{}
+		for i := range rows {
+			got = append(got, rows[i].ID)
+		}
+		want := append([]string{}, c.want...)
+		sort.Strings(got)
+		sort.Strings(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", c.name, got, want)
+		}
+	}
+
+	cat := &catalog{
+		attrs:    map[attrRef]resolvedAttribute{{"ci", "warranty_days_left"}: {kind: kindNumber}},
+		relAttrs: map[attrRef]resolvedAttribute{{"ci", "warranty_days_left"}: {kind: kindNumber}},
+	}
+	sql, _, _, err := related(&Expr{And: []Expr{*gt30, *related(lt30)}}).compile("ci", "ci", cat, nil, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sql, "reticora_attr_text(attributes") {
+		t.Errorf("the attribute is not qualified by the alias of its level: %s", sql)
+	}
+	for _, alias := range []string{"rn1", "rn2"} {
+		if !strings.Contains(sql, "reticora_attr_text("+alias+".attributes, 'warranty_days_left')") {
+			t.Errorf("no comparison of %s.attributes: %s", alias, sql)
+		}
+	}
+}

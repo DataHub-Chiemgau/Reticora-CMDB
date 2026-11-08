@@ -1185,7 +1185,7 @@ export interface paths {
     };
     /**
      * List the jobs of the organization (API-09, JOB-03)
-     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read.
+     * @description Export, import, bulk, merge, template migration and the system jobs share one job model (JOB-01). Requires job:read. Lists the jobs whose scope snapshot lies in the caller's scope (TEN-09); an export job only to its creator, an import job (import.run) only where GET /imports/{id} shows it: a run over JSON rows to its starter, a run of a document while the document is visible, and a label batch job (labels.batch) only to its creator like its download (WP-828). The same rule holds on every /jobs/{id} route, with 404 for any other job.
      */
     get: operations['listJobs'];
     put?: never;
@@ -1206,7 +1206,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** A job with its status, progress and result */
+    /**
+     * A job with its status, progress and result
+     * @description Visible under the rule of GET /jobs (scope snapshot, export job to its creator, import job like GET /imports/{id}, label batch job to its creator, WP-828); 404 for any other job, like an unknown id.
+     */
     get: operations['getJob'];
     put?: never;
     post?: never;
@@ -2429,7 +2432,8 @@ export interface paths {
     put?: never;
     /**
      * Record a stock in/out movement and adjust the level atomically
-     * @description The successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval (E-38, WP-756); this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The deprecation follows with WP-846.
+     * @deprecated
+     * @description Deprecated (E-38, WP-756, WP-846): the successor is POST /api/v1/stock-movements with consumable_id and the quantity bookings receipt and retrieval; this path books through the same movement service: in is a receipt into the bin location_id, out a retrieval from it. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     post: operations['addConsumableMovement'];
     delete?: never;
@@ -7299,13 +7303,15 @@ export interface paths {
     };
     /**
      * Manage quantity-based inventory items
-     * @description Alias of GET /api/v1/consumables (E-38, E-40, WP-757): the consumables in the form of a quantity item, stock_level the sum of on_hand over the bins the caller sees, location_id the bin when the article lies in exactly one, attributes empty. The successor is GET /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757, WP-846): alias of GET /api/v1/consumables, the consumables in the form of a quantity item, stock_level the sum of on_hand over the bins the caller sees, location_id the bin when the article lies in exactly one, attributes empty. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     get: operations['listInventoryItems'];
     put?: never;
     /**
      * Manage quantity-based inventory items
-     * @description Alias of POST /api/v1/consumables (E-38, E-40, WP-757): creates a consumable; a stock_level > 0 is booked as a receipt into the bin location_id through the movement service in the same transaction. The successor is POST /api/v1/consumables; the deprecation follows with WP-846 once the web client no longer calls this path.
+     * @deprecated
+     * @description Deprecated (E-38, E-40, WP-757, WP-846): alias of POST /api/v1/consumables, creates a consumable; a stock_level > 0 is booked as a receipt into the bin location_id through the movement service in the same transaction. The path answers until x-sunset with the Deprecation, Sunset and successor-version Link headers.
      */
     post: operations['createInventoryItems'];
     delete?: never;
@@ -9063,9 +9069,32 @@ export interface paths {
     };
     /**
      * Get the report of an import run
-     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). Without job service or blob storage 503. Requires import:run.
+     * @description A presigned URL (15 minutes) of the report of a finished run, a CSV file in UTF-8 with BOM, separated by semicolons, with the columns Zeile;Feld;Code;Meldung: every parse and limit error and one line with the outcome of every data row (created, updated, skipped or the error of the row). While the run is queued or running 409 import-report-not-ready; a cancelled run has no report (404). Like the projection of the run, the document of the run must lie in the caller's scope (404). A run whose report is not stored is 404 as well; a blob storage that cannot be asked is 503. Without job service or blob storage 503. Requires import:run.
      */
     get: operations['getImportReport'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/imports/{id}/errors': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the row errors of an import run
+     * @description The errors of a finished run as JSON (line, field, code, message): every line of its report (GET /api/v1/imports/{id}/report) except the outcome lines of the rows written or skipped (codes created, updated, skipped), in the order of the report. A line of null is an error of the file as a whole (a mapped column missing in the header, a limit of the file). Notes of a written row (e.g. read_only_field) are listed as well, so total counts errors, not failed rows (rows_failed of the run). The list is read from the stored report, there is no import table. Paged by limit and the signed cursor of next_cursor. Visibility and answers follow the report: 409 import-report-not-ready while the run is queued or running, 404 for a cancelled run, a run without stored report, a job of another kind and a run the caller does not see (document outside the scope; a run over JSON rows for everyone but its starter). A report that cannot be read is 503, never a partial list. Without job service or blob storage 503. Requires import:run.
+     */
+    get: operations['listImportErrors'];
     put?: never;
     post?: never;
     delete?: never;
@@ -15031,6 +15060,19 @@ export interface components {
     ImportReportLink: {
       download_url: string;
     };
+    /** @description One error of an import run, a line of its report. */
+    ImportError: {
+      /** @description Line of the file (the header is line 1) or number of the JSON row of an API run (from 1), as in the report; null for an error of the file as a whole. */
+      line: number | null;
+      /** @description Target of the mapping or column of the file; empty when the error concerns the whole row. */
+      field: string;
+      /** @description Code of the error, e.g. transform_failed, invalid_value, out_of_scope, location_not_found or a parser code (import-row-malformed). */
+      code: string;
+      message: string;
+    };
+    ImportErrorListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ImportError'][];
+    };
     /** @description The object a scanned code names (INV-03, WP-762). */
     LabelLookupResult: {
       /** @enum {string} */
@@ -20327,7 +20369,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
-      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind (for a bulk kind only a holder of its permission, ci:write for ci.bulk), a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). */
+      /** @description Forbidden: neither the creator of the job nor a holder of the permission of its kind (for a bulk kind only a holder of its permission, ci:write for ci.bulk), a missing permission or the quota (ProblemDetail, see EntitlementLimit: entitlement-limit for max_cis like POST /cis/{id}/unmerge, ENT-03), or, for ci.merge, the action grants (RBA-07, WP-728; type urn:reticora:problem:forbidden, FieldForbiddenProblem with `action` ci:delete and empty `fields`) on the type and scope of the merged CI or its survivor, checked before the state of the merge (403, never 409). The right is checked before every state of the job: without it the answer is 403 also for a job that is not revertible, expired or reverted already (WP-829). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -41309,6 +41351,46 @@ export interface operations {
           'application/json': components['schemas']['ImportReportLink'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listImportErrors: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description A page of the errors of the run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportErrorListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

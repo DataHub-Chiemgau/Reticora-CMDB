@@ -63,7 +63,11 @@ type Store interface {
 	Put(ctx context.Context, bucket, key string, reader io.Reader, size int64, contentType string) error
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, bucket, key string) error
-	PresignedGetURL(ctx context.Context, bucket, key string) (string, error)
+	// PresignedGetURL returns a time-limited URL that delivers the object
+	// only as a download (Download): the caller names the file name and the
+	// verified type, or leaves them empty for a nameless
+	// application/octet-stream attachment.
+	PresignedGetURL(ctx context.Context, bucket, key string, dl Download) (string, error)
 }
 
 // FileStore stores blobs on the local filesystem.
@@ -108,6 +112,9 @@ func (s *FileStore) Get(_ context.Context, bucket, key string) (io.ReadCloser, e
 		return nil, err
 	}
 	file, err := os.Open(objectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		err = ErrNotFound
+	}
 	if err != nil {
 		return nil, fmt.Errorf("blob: open file %q: %w", objectPath, err)
 	}
@@ -120,14 +127,20 @@ func (s *FileStore) Delete(_ context.Context, bucket, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(objectPath); err != nil {
+	err = os.Remove(objectPath)
+	if errors.Is(err, os.ErrNotExist) {
+		err = ErrNotFound
+	}
+	if err != nil {
 		return fmt.Errorf("blob: delete file %q: %w", objectPath, err)
 	}
 	return nil
 }
 
-// PresignedGetURL returns a development-only file URL for the object.
-func (s *FileStore) PresignedGetURL(_ context.Context, bucket, key string) (string, error) {
+// PresignedGetURL returns a development-only file URL for the object. A
+// file URL carries no response headers, so dl is not applied; a web page
+// cannot open file URLs anyway.
+func (s *FileStore) PresignedGetURL(_ context.Context, bucket, key string, _ Download) (string, error) {
 	objectPath, err := s.objectPath(bucket, key)
 	if err != nil {
 		return "", err
@@ -349,8 +362,13 @@ func (s *S3Store) Delete(ctx context.Context, bucket, key string) error {
 	return nil
 }
 
-// PresignedGetURL creates a time-limited GET URL signed with SigV4 query parameters.
-func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string) (string, error) {
+// PresignedGetURL creates a time-limited GET URL signed with SigV4 query
+// parameters. The URL carries response-content-disposition (attachment,
+// with the file name of dl) and response-content-type (the type of dl or
+// application/octet-stream) inside the signed query: the object store
+// answers with these headers, and the holder of the URL cannot change them
+// (SEC-11, finding of WP-829).
+func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string, dl Download) (string, error) {
 	objectURL, err := s.objectURL(bucket, key)
 	if err != nil {
 		return "", err
@@ -368,6 +386,8 @@ func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string) (string
 	queryValues.Set("X-Amz-Date", amzDate)
 	queryValues.Set("X-Amz-Expires", strconv.FormatInt(int64(s3PresignTTL/time.Second), 10))
 	queryValues.Set("X-Amz-SignedHeaders", "host")
+	queryValues.Set("response-content-disposition", dl.disposition())
+	queryValues.Set("response-content-type", dl.contentType())
 	canonicalQuery := canonicalQueryString(queryValues)
 	canonicalHeaders := fmt.Sprintf("host:%s\n", objectURL.Host)
 
@@ -437,7 +457,7 @@ func (s *S3Store) doRequest(ctx context.Context, method, bucket, key string, bod
 
 	defer resp.Body.Close()
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	return nil, fmt.Errorf("blob: %s %s returned %s: %s", method, objectURL.String(), resp.Status, strings.TrimSpace(string(bodyBytes)))
+	return nil, statusError(method, objectURL.String(), resp, strings.TrimSpace(string(bodyBytes)))
 }
 
 func (s *S3Store) signRequest(req *http.Request, payloadHash string) error {

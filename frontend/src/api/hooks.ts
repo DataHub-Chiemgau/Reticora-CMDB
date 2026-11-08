@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQueries,
@@ -782,6 +783,23 @@ export function useImportRun(id: string | null) {
     enabled: !!id && finished,
   });
   return { job, run, finished };
+}
+
+/** IMPORT_ERRORS_PAGE_LIMIT is the number of row errors on one page of the report. */
+export const IMPORT_ERRORS_PAGE_LIMIT = 50;
+
+/**
+ * useImportErrors reads one page of the row errors of a finished run (GET
+ * /imports/{id}/errors, limit and cursor); the next page follows from
+ * next_cursor. The previous page stays visible while the next one loads.
+ */
+export function useImportErrors(id: string, cursor: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ['imports', 'errors', id, cursor ?? null],
+    queryFn: () => importApi.errors(id, { limit: IMPORT_ERRORS_PAGE_LIMIT, cursor }),
+    enabled: !!id && enabled,
+    placeholderData: keepPreviousData,
+  });
 }
 
 // --- Stocktakes ---

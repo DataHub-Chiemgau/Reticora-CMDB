@@ -15,6 +15,8 @@
  *            inherited rows, inheritable editable, computed without required
  *            and unique, sensitive (WP-726) and no mark on 403, applies_to of
  *            global attributes (WP-255)
+ *   Rules    WP-802: validation and conditional of an attribute read-only
+ *            as short forms with a link to /rules?attribute_key=<key>
  *   Index    index_status (WP-796): every state, retry n/3, rebuild, polling
  *            until succeeded
  *   Sets     WP-797: the section of the attribute sets (create, 409 on
@@ -638,6 +640,48 @@ describe('CITypeAdminPage attribute catalog', () => {
       unique: false,
       unique_scope: 'org',
     });
+  });
+
+  it('shows validation and conditional read-only as short forms with a link to the rule catalog (WP-802)', async () => {
+    stubBackend({
+      definitions: [
+        definition('ad-h', 'hostname', {
+          ci_type_id: 't-printer',
+          validation: {
+            op: 'all',
+            rules: [
+              { op: 'pattern', pattern: '^[a-z]+$' },
+              { op: 'range', of: 'length', max: 63 },
+            ],
+          },
+          conditional: {
+            visible_when: [{ field: 'env', op: 'eq', value: 'prod' }],
+            required_when: [
+              { field: 'env', op: 'in', value: ['prod', 'test'] },
+              { field: 'tier', op: 'not_empty' },
+            ],
+          },
+        }),
+        definition('ad-p', 'plain', { ci_type_id: 't-printer' }),
+      ],
+    });
+    await open('Drucker');
+    const hostname = await row('hostname');
+    const rules = within(hostname).getByTestId('attribute-rules');
+    expect(rules).toHaveTextContent(
+      'Wertregel: Muster ^[a-z]+$ · Bereich (die Länge (Zeichen)) …–63',
+    );
+    expect(rules).toHaveTextContent(
+      'Bedingt: sichtbar wenn env ist gleich "prod"; Pflicht wenn env ist einer von ["prod", "test"] UND tier ist gesetzt',
+    );
+    expect(
+      within(rules).getByRole('link', { name: 'Regeln zu hostname im Regelkatalog' }),
+    ).toHaveAttribute('href', '/rules?attribute_key=hostname');
+    // Read-only: no badge "bedingt" any more and no editor of the rules in the row.
+    expect(within(hostname).queryByText('bedingt')).not.toBeInTheDocument();
+    expect(within(hostname).queryByRole('textbox')).not.toBeInTheDocument();
+    // An attribute without rules shows neither a short form nor a link.
+    expect(within(await row('plain')).queryByTestId('attribute-rules')).not.toBeInTheDocument();
   });
 
   it('marks sensitive attributes of the type chain', async () => {
