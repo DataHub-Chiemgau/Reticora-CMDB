@@ -117,6 +117,60 @@ const documentVersion = (version: number, scan: string) => ({
   ...(scan === 'pending_scan' ? {} : { scanned_at: AT }),
   created_at: AT,
 });
+// WP-320: the detail page of the fixture consumable with its stock and
+// availability in one bin and the rights that show the booking and
+// reservation actions.
+const CONSUMABLE_ID = 'e1000000-0000-4000-8000-000000000001';
+const CONSUMABLE_BIN = 'e1100000-0000-4000-8000-000000000001';
+const CONSUMABLE_HANDLERS: Handler[] = [
+  {
+    path: `/consumables/${CONSUMABLE_ID}`,
+    reply: () => ({
+      body: {
+        id: CONSUMABLE_ID,
+        organization_id: ORG_ID,
+        name: M.consumable,
+        sku: 'TN-1',
+        barcode: '4006381333931',
+        category: 'printer',
+        unit: 'pcs',
+        stock_level: 2,
+        min_level: 4,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/consumables/${CONSUMABLE_ID}/stock`,
+    reply: () => ({
+      body: list([
+        {
+          consumable_id: CONSUMABLE_ID,
+          location_id: CONSUMABLE_BIN,
+          on_hand: 2,
+          reserved: 1,
+          updated_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/consumables/${CONSUMABLE_ID}/availability`,
+    reply: () => ({
+      body: list([{ location_id: CONSUMABLE_BIN, on_hand: 2, reserved: 1, available: 1 }]),
+    }),
+  },
+  {
+    path: '/me/permissions',
+    reply: () => ({
+      body: {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        permissions: ['stock:read', 'stock:write', 'reservation:write'],
+      },
+    }),
+  },
+];
 const DOCUMENT_HANDLERS: Handler[] = [
   {
     path: '/documents/usage',
@@ -505,6 +559,12 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
   { path: '/consumables', url: '/consumables', ready: text(M.consumable) },
+  {
+    path: '/consumables/:id',
+    url: `/consumables/${CONSUMABLE_ID}`,
+    handlers: CONSUMABLE_HANDLERS,
+    ready: (page) => page.getByRole('heading', { name: M.consumable }),
+  },
   { path: '/orders', url: '/orders', ready: text(M.order) },
   { path: '/maintenance', url: '/maintenance', ready: text(M.maintenance) },
   { path: '/disposal', url: '/disposal', ready: text(M.disposal) },

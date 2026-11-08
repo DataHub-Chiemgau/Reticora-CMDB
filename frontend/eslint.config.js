@@ -76,6 +76,9 @@ export default tseslint.config(
       // WP-806: the inventory page and the object history.
       'src/pages/InventoryPage.tsx',
       'src/components/cmdb/ObjectHistory.tsx',
+      // WP-320: the warehouse pages of the quantity items.
+      'src/pages/ConsumableListPage.tsx',
+      'src/pages/ConsumableDetailPage.tsx',
       // WP-321: the document pages, the upload and the document components.
       'src/pages/DocumentListPage.tsx',
       'src/pages/DocumentDetailPage.tsx',

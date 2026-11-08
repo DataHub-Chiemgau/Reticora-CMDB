@@ -2802,21 +2802,18 @@ export const roomApi = {
 
 // ─── Block D modules: consumables, orders, maintenance, disposal, keys, trainings, desks ───
 
-export interface Consumable {
-  id: string;
-  organization_id: string;
-  client_id?: string;
-  name: string;
-  sku?: string;
-  category: string;
-  unit: string;
-  stock_level: number;
-  min_level: number;
-  location?: string;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
+/**
+ * Consumable is a quantity item of the warehouse (E-40, WP-283) as the
+ * OpenAPI types describe it: its stock lies per bin (GET
+ * /consumables/{id}/stock); stock_level is the read-only total over all bins.
+ */
+export type Consumable = components['schemas']['Consumable'];
+export type CreateConsumableRequest = components['schemas']['CreateConsumableRequest'];
+export type UpdateConsumableRequest = components['schemas']['UpdateConsumableRequest'];
+/** The availability of a consumable in one bin: on_hand, reserved, available (WP-759). */
+export type ConsumableAvailability = components['schemas']['ConsumableAvailability'];
+export type ConsumableAvailabilityList =
+  components['schemas']['ConsumableAvailabilityListResponse'];
 
 export const consumableApi = {
   list(params: ListParams & { low_stock?: boolean } = {}): Promise<PaginatedResponse<Consumable>> {
@@ -2826,20 +2823,22 @@ export const consumableApi = {
   get(id: string): Promise<Consumable> {
     return fetchAPI(`/consumables/${id}`);
   },
-  create(data: Partial<Consumable> & { name: string }): Promise<Consumable> {
+  create(data: CreateConsumableRequest): Promise<Consumable> {
     return fetchAPI('/consumables', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: Partial<Consumable>): Promise<Consumable> {
+  update(id: string, data: UpdateConsumableRequest): Promise<Consumable> {
     return fetchAPI(`/consumables/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/consumables/${id}`, { method: 'DELETE' });
   },
-  addMovement(
-    id: string,
-    data: { direction: 'in' | 'out'; quantity: number; reason?: string },
-  ): Promise<unknown> {
-    return fetchAPI(`/consumables/${id}/movements`, { method: 'POST', body: JSON.stringify(data) });
+  /**
+   * availability reads on_hand, reserved and available of a consumable per
+   * bin, page by page over next_cursor (GET /consumables/{id}/availability,
+   * WP-759). It succeeds the deprecated GET /inventory/availability.
+   */
+  availability(id: string, cursor?: string): Promise<ConsumableAvailabilityList> {
+    return fetchAPI(`/consumables/${id}/availability${buildQuery({ limit: 200, cursor })}`);
   },
 };
 

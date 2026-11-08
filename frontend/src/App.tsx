@@ -84,6 +84,10 @@ const ConsumableListPage = lazyPage(
   () => import('./pages/ConsumableListPage'),
   'ConsumableListPage',
 );
+const ConsumableDetailPage = lazyPage(
+  () => import('./pages/ConsumableDetailPage'),
+  'ConsumableDetailPage',
+);
 const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderListPage');
 const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
@@ -252,6 +256,7 @@ function App() {
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />
           <Route path="/consumables" element={<ConsumableListPage />} />
+          <Route path="/consumables/:id" element={<ConsumableDetailPage />} />
           <Route path="/orders" element={<OrderListPage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
           <Route path="/disposal" element={<DisposalListPage />} />

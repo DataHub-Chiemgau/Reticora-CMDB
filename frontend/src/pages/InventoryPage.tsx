@@ -1,15 +1,23 @@
-import { ArrowDownToLine, ArrowLeftRight, Boxes, Lock, MapPin, Warehouse } from 'lucide-react';
+import {
+  ArrowDownToLine,
+  ArrowLeftRight,
+  ArrowUpFromLine,
+  Boxes,
+  Lock,
+  MapPin,
+  Pencil,
+} from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { Link } from 'react-router-dom';
 import {
   useMovements,
-  useQuantityItems,
   useReservations,
-  useAvailability,
   useReleaseReservation,
   useConvertReservation,
 } from '../api/cmdbHooks';
+import { useHasPermission } from '../api/hooks';
 import type { Reservation } from '../api/cmdb';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -49,6 +57,7 @@ import {
 } from '../components/flows/StockFlowDialogs';
 import type { PickedHolder } from '../components/pickers/UserTeamPicker';
 import { TableEmptyRow } from './ListParts';
+import { ConsumableBookingDialog } from './ConsumableDetailPage';
 
 /** The eleven movement types of the ledger (STK-04, WP-274), labelled by movement.types.*. */
 export const MOVEMENT_TYPES = [
@@ -65,10 +74,18 @@ export const MOVEMENT_TYPES = [
   'correction',
 ] as const;
 
-type InventoryTab = 'movements' | 'items' | 'reservations' | 'availability';
+/**
+ * The tabs of the page. The quantity items live on /consumables with their
+ * stock and availability per bin (WP-320); the org-wide availability of
+ * the deprecated GET /inventory/availability is gone with its tab.
+ */
+type InventoryTab = 'movements' | 'reservations';
 
-/** The flows of the page (UI-15, WP-806); each is a dialog of StockFlowDialogs. */
-type StockFlow = 'receive' | 'move' | 'moveAsset' | 'reserve';
+/**
+ * The flows of the page (UI-15, WP-806): the dialogs of StockFlowDialogs and
+ * the retrieval and correction of a consumable (WP-320).
+ */
+type StockFlow = 'receive' | 'retrieve' | 'correct' | 'move' | 'moveAsset' | 'reserve';
 
 /** HistoryTarget is the object whose history the page shows in a dialog. */
 interface HistoryTarget {
@@ -80,11 +97,9 @@ interface HistoryTarget {
 function objectTarget(row: {
   asset_id?: string;
   consumable_id?: string;
-  quantity_item_id?: string;
 }): HistoryTarget | undefined {
   if (row.asset_id) return { entityType: 'asset', id: row.asset_id };
-  const consumable = row.consumable_id ?? row.quantity_item_id;
-  return consumable ? { entityType: 'consumable', id: consumable } : undefined;
+  return row.consumable_id ? { entityType: 'consumable', id: row.consumable_id } : undefined;
 }
 
 /**
@@ -123,11 +138,12 @@ export function InventoryPage() {
   const [converting, setConverting] = useState<Reservation | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const gates = useStockFlowGates();
+  // Retrieval and correction book quantities: stock:write (WP-245, WP-756).
+  const canWriteStock = useHasPermission('stock:write') === true;
+  const canBook = gates.receive && canWriteStock;
 
   const movements = useMovements({ movement_type: typeFilter });
-  const items = useQuantityItems();
   const reservations = useReservations('active');
-  const availability = useAvailability();
   const releaseReservation = useReleaseReservation();
   const convertReservation = useConvertReservation();
 
@@ -158,9 +174,7 @@ export function InventoryPage() {
 
   const tabs = [
     { id: 'movements', label: t('inventory.movements') },
-    { id: 'items', label: t('inventory.items') },
     { id: 'reservations', label: t('inventory.reservations') },
-    { id: 'availability', label: t('inventory.availability') },
   ] as const;
 
   /** Arrow keys, Home and End move between the tabs (WAI-ARIA tabs pattern). */
@@ -202,6 +216,20 @@ export function InventoryPage() {
                 {t('stockFlow.receive')}
               </Button>
             ) : null}
+            {canBook ? (
+              <Button
+                variant="secondary"
+                icon={<ArrowUpFromLine />}
+                onClick={() => setFlow('retrieve')}
+              >
+                {t('consumables.movementTypes.retrieval')}
+              </Button>
+            ) : null}
+            {canBook ? (
+              <Button variant="secondary" icon={<Pencil />} onClick={() => setFlow('correct')}>
+                {t('consumables.movementTypes.correction')}
+              </Button>
+            ) : null}
             {gates.move ? (
               <Button variant="secondary" icon={<ArrowLeftRight />} onClick={() => setFlow('move')}>
                 {t('stockFlow.move')}
@@ -221,34 +249,43 @@ export function InventoryPage() {
         }
       />
 
-      <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-line">
-        {tabs.map((tb, index) => {
-          const selected = tab === tb.id;
-          return (
-            <button
-              key={tb.id}
-              ref={(node) => {
-                tabRefs.current[tb.id] = node;
-              }}
-              type="button"
-              role="tab"
-              id={`inventory-tab-${tb.id}`}
-              aria-selected={selected}
-              aria-controls="inventory-panel"
-              tabIndex={selected ? 0 : -1}
-              onClick={() => setTab(tb.id)}
-              onKeyDown={(event) => onTabKeyDown(event, index)}
-              className={cn(
-                '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
-                selected
-                  ? 'border-accent text-fg'
-                  : 'border-transparent text-fg-muted hover:text-fg',
-              )}
-            >
-              {tb.label}
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-end justify-between gap-2 border-b border-line">
+        <div role="tablist" className="-mb-px flex gap-1 overflow-x-auto">
+          {tabs.map((tb, index) => {
+            const selected = tab === tb.id;
+            return (
+              <button
+                key={tb.id}
+                ref={(node) => {
+                  tabRefs.current[tb.id] = node;
+                }}
+                type="button"
+                role="tab"
+                id={`inventory-tab-${tb.id}`}
+                aria-selected={selected}
+                aria-controls="inventory-panel"
+                tabIndex={selected ? 0 : -1}
+                onClick={() => setTab(tb.id)}
+                onKeyDown={(event) => onTabKeyDown(event, index)}
+                className={cn(
+                  '-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+                  selected
+                    ? 'border-accent text-fg'
+                    : 'border-transparent text-fg-muted hover:text-fg',
+                )}
+              >
+                {tb.label}
+              </button>
+            );
+          })}
+        </div>
+        <Link
+          to="/consumables"
+          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-accent-strong underline-offset-2 hover:underline"
+        >
+          <Boxes aria-hidden="true" className="h-4 w-4" />
+          {t('inventory.toConsumables')}
+        </Link>
       </div>
 
       <div role="tabpanel" id="inventory-panel" aria-labelledby={`inventory-tab-${tab}`}>
@@ -261,7 +298,6 @@ export function InventoryPage() {
             t={t}
           />
         ) : null}
-        {tab === 'items' ? <ItemsTab items={items} t={t} /> : null}
         {tab === 'reservations' ? (
           <ReservationsTab
             reservations={reservations}
@@ -272,12 +308,13 @@ export function InventoryPage() {
             t={t}
           />
         ) : null}
-        {tab === 'availability' ? <AvailabilityTab availability={availability} t={t} /> : null}
       </div>
 
       {/* The dialogs stay mounted: a request waiting in its undo window is
           sent when the page is left (useUndoableSubmit). */}
       <ReceiveDialog {...dialog('receive')} />
+      <ConsumableBookingDialog type="retrieval" {...dialog('retrieve')} />
+      <ConsumableBookingDialog type="correction" {...dialog('correct')} />
       <MoveStockDialog {...dialog('move')} />
       <MoveAssetDialog {...dialog('moveAsset')} />
       <ReserveDialog {...dialog('reserve')} />
@@ -410,77 +447,6 @@ function MovementsTab({
   );
 }
 
-function ItemsTab({ items, t }: { items: ReturnType<typeof useQuantityItems>; t: TFunction }) {
-  const rows = items.data?.data ?? [];
-  return (
-    <div className="space-y-4">
-      {items.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
-      {items.error ? (
-        <ErrorState
-          title={t('app.error')}
-          description={items.error instanceof Error ? items.error.message : undefined}
-          retryLabel={t('common.retry')}
-          onRetry={() => void items.refetch()}
-        />
-      ) : null}
-      {items.data ? (
-        <Card className="p-0 overflow-hidden">
-          <ScrollRegion label={t('inventory.items')}>
-            <table className={tableClasses}>
-              <thead className={theadClasses}>
-                <tr>
-                  <th scope="col" className={thClasses}>
-                    {t('common.name')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('inventory.sku')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('consumables.stock')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('consumables.minLevel')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('ci.status')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((it) => (
-                  <tr key={it.id} className={trClasses}>
-                    <td className={tdPrimaryClasses}>{it.name}</td>
-                    <td className={tdMonoClasses}>{it.sku || '—'}</td>
-                    <td className={cn(tdNumericClasses, 'whitespace-nowrap text-fg')}>
-                      {it.stock_level} {it.unit}
-                    </td>
-                    <td className={tdNumericClasses}>{it.min_level}</td>
-                    <td className={tdClasses}>
-                      {it.stock_level <= it.min_level ? (
-                        <Badge variant="danger">{t('consumables.low')}</Badge>
-                      ) : (
-                        <Badge variant="success">{t('consumables.ok')}</Badge>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {rows.length === 0 ? (
-                  <TableEmptyRow
-                    colSpan={5}
-                    icon={<Boxes />}
-                    title={t('inventory.emptyItemsTitle')}
-                    description={t('inventory.emptyItemsHint')}
-                  />
-                ) : null}
-              </tbody>
-            </table>
-          </ScrollRegion>
-        </Card>
-      ) : null}
-    </div>
-  );
-}
-
 function ReservationsTab({
   reservations,
   errors,
@@ -594,84 +560,6 @@ function ReservationsTab({
                     icon={<Lock />}
                     title={t('inventory.emptyReservationsTitle')}
                     description={t('inventory.emptyReservationsHint')}
-                  />
-                ) : null}
-              </tbody>
-            </table>
-          </ScrollRegion>
-        </Card>
-      ) : null}
-    </div>
-  );
-}
-
-function AvailabilityTab({
-  availability,
-  t,
-}: {
-  availability: ReturnType<typeof useAvailability>;
-  t: TFunction;
-}) {
-  const rows = availability.data?.data ?? [];
-  return (
-    <div className="space-y-4">
-      {availability.isLoading ? <SkeletonList rows={5} label={t('app.loading')} /> : null}
-      {availability.error ? (
-        <ErrorState
-          title={t('app.error')}
-          description={availability.error instanceof Error ? availability.error.message : undefined}
-          retryLabel={t('common.retry')}
-          onRetry={() => void availability.refetch()}
-        />
-      ) : null}
-      {availability.data ? (
-        <Card className="p-0 overflow-hidden">
-          <ScrollRegion label={t('inventory.availability')}>
-            <table className={tableClasses}>
-              <thead className={theadClasses}>
-                <tr>
-                  <th scope="col" className={thClasses}>
-                    {t('inventory.item')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('inventory.total')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('inventory.available')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('inventory.reserved')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('inventory.assigned')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('inventory.repair')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((a) => (
-                  <tr key={`${a.item_kind}-${a.item_id}`} className={trClasses}>
-                    <td className={tdMonoClasses}>
-                      <span className="inline-flex flex-wrap items-center gap-2">
-                        <span>{a.item_id.slice(0, 8)}…</span>
-                        <Badge variant="neutral">{t(`pickers.kinds.${a.item_kind}`)}</Badge>
-                      </span>
-                    </td>
-                    <td className={tdNumericClasses}>{a.total}</td>
-                    <td className={cn(tdNumericClasses, 'font-medium text-fg')}>{a.available}</td>
-                    <td className={tdNumericClasses}>{a.reserved}</td>
-                    <td className={tdNumericClasses}>{a.assigned}</td>
-                    <td className={tdNumericClasses}>{a.repair}</td>
-                  </tr>
-                ))}
-                {rows.length === 0 ? (
-                  <TableEmptyRow
-                    colSpan={6}
-                    icon={<Warehouse />}
-                    title={t('inventory.emptyAvailabilityTitle')}
-                    description={t('inventory.emptyAvailabilityHint')}
                   />
                 ) : null}
               </tbody>

@@ -53,6 +53,7 @@ import type {
   RelationshipUpdateRequest,
   ListParams,
   AssetCreateRequest,
+  ConsumableAvailabilityList,
   AssetUpdateRequest,
   AssetListParams,
   AssignAssetRequest,
@@ -456,11 +457,40 @@ export function useAssetList(params: AssetListParams, { enabled = true }: ListQu
 // --- Consumables ---
 
 /** useConsumableList lists the consumables; /consumables is a scoped list (client_id). */
-export function useConsumableList(params: ListParams, { enabled = true }: ListQueryOptions = {}) {
+export function useConsumableList(
+  params: ListParams & { low_stock?: boolean },
+  { enabled = true }: ListQueryOptions = {},
+) {
   return useQuery({
     queryKey: ['consumables', params],
     queryFn: () => consumableApi.list(params),
     enabled,
+  });
+}
+
+/** useConsumable reads one consumable (GET /consumables/{id}). */
+export function useConsumable(id: string | undefined) {
+  return useQuery({
+    queryKey: ['consumables', 'detail', id],
+    queryFn: () => consumableApi.get(id!),
+    enabled: !!id,
+  });
+}
+
+/**
+ * useConsumableAvailability reads on_hand, reserved and available of a
+ * consumable per bin page by page over next_cursor (GET
+ * /consumables/{id}/availability, WP-759); bookings and reservations read it
+ * again (invalidateStock).
+ */
+export function useConsumableAvailability(id: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: ['consumable-availability', id],
+    queryFn: ({ pageParam }) => consumableApi.availability(id!, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: ConsumableAvailabilityList) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!id,
   });
 }
 

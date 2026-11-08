@@ -23,6 +23,7 @@ import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from '../pages/TicketListPage';
 import { TICKET_TRANSITIONS } from '../pages/TicketDetailPage';
 import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
+import { CONSUMABLE_BOOKING_TYPES } from '../api/cmdb';
 import {
   CARDINALITIES,
   IMPACT_DIRECTIONS,
@@ -300,6 +301,8 @@ const enumerations: Array<[string, readonly string[]]> = [
   // WP-806: the movement types of the ledger (STK-04, WP-274).
   ['movement.types', MOVEMENT_TYPES],
   ['movement.types', specEnum('MovementType')],
+  // WP-320: the quantity bookings of a consumable (WP-756).
+  ['consumables.movementTypes', CONSUMABLE_BOOKING_TYPES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
 ];
@@ -417,6 +420,8 @@ describe('i18n catalog', () => {
 
   it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
     expect([...MOVEMENT_TYPES]).toEqual(specEnum('MovementType'));
+    // The quantity bookings are movement types of the ledger (WP-320).
+    expect(specEnum('MovementType')).toEqual(expect.arrayContaining([...CONSUMABLE_BOOKING_TYPES]));
     // The former key inventory.movementTypes is gone: one label per type.
     expect(lookup(deDE, 'inventory.movementTypes')).toBeUndefined();
     expect(lookup(enUS, 'inventory.movementTypes')).toBeUndefined();
@@ -522,6 +527,9 @@ describe('i18n catalog', () => {
     '../pages/RulesPage.tsx',
     // WP-806: the inventory page (the stock flow dialogs are flowSources).
     '../pages/InventoryPage.tsx',
+    // WP-320: the list and the detail page of the quantity items.
+    '../pages/ConsumableListPage.tsx',
+    '../pages/ConsumableDetailPage.tsx',
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
     ...Object.keys(ruleSources),

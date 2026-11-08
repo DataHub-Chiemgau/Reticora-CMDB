@@ -136,8 +136,18 @@ function ObjectScan({
   return <ScanButton field={field} accept={[kind]} onObject={onObject} />;
 }
 
+export interface ConsumableFlowDialogProps extends StockFlowDialogProps {
+  /** initialItem puts a consumable into the picker, e.g. the object of a scan (WP-807). */
+  initialItem?: PickedObject;
+  /**
+   * lockItem fixes initialItem as the consumable of the dialog, e.g. on its
+   * detail page (WP-320): no picker and no scan of the item.
+   */
+  lockItem?: boolean;
+}
+
 /** quantityOf reads a quantity input; anything but a positive number is undefined. */
-function quantityOf(value: string): number | undefined {
+export function quantityOf(value: string): number | undefined {
   const quantity = Number(value);
   return value.trim() !== '' && Number.isFinite(quantity) && quantity > 0 ? quantity : undefined;
 }
@@ -176,11 +186,15 @@ export function ReceiveDialog({
   open,
   onOpenChange,
   initialItem,
-}: StockFlowDialogProps & { initialItem?: PickedObject }) {
+  lockItem,
+}: ConsumableFlowDialogProps) {
+  // A locked item (its detail page) shows neither picker nor scan.
+  const fixed = lockItem ? initialItem : undefined;
   const { t } = useTranslation();
   const booking = useStockBooking();
   const { scheduleSubmit } = useUndoableSubmit();
-  const [item, setItem] = useState<PickedObject[]>([]);
+  const [picked, setItem] = useState<PickedObject[]>([]);
+  const item = fixed ? [fixed] : picked;
   const [bin, setBin] = useState<PickedLocation | null>(null);
   const [quantity, setQuantity] = useState('1');
   const [reason, setReason] = useState('');
@@ -220,25 +234,32 @@ export function ReceiveDialog({
   };
 
   return (
-    <Modal open={open} onOpenChange={close} title={t('stockFlow.receiveTitle')}>
+    <Modal
+      open={open}
+      onOpenChange={close}
+      title={t('stockFlow.receiveTitle')}
+      description={fixed ? objectLabel(fixed) : undefined}
+    >
       <div className="space-y-4">
-        <WithScan
-          scan={
-            <ObjectScan
-              field={t('stockFlow.consumable')}
-              kind="consumable"
-              onObject={(object) => setItem([object])}
+        {fixed ? null : (
+          <WithScan
+            scan={
+              <ObjectScan
+                field={t('stockFlow.consumable')}
+                kind="consumable"
+                onObject={(object) => setItem([object])}
+              />
+            }
+          >
+            <ObjectPicker
+              label={t('stockFlow.consumable')}
+              kinds={['consumable']}
+              value={item}
+              onChange={setItem}
+              required
             />
-          }
-        >
-          <ObjectPicker
-            label={t('stockFlow.consumable')}
-            kinds={['consumable']}
-            value={item}
-            onChange={setItem}
-            required
-          />
-        </WithScan>
+          </WithScan>
+        )}
         <WithScan scan={<BinScan field={t('stockFlow.toBin')} onBin={setBin} />}>
           <LocationPicker
             label={t('stockFlow.toBin')}
@@ -286,11 +307,15 @@ export function MoveStockDialog({
   open,
   onOpenChange,
   initialItem,
-}: StockFlowDialogProps & { initialItem?: PickedObject }) {
+  lockItem,
+}: ConsumableFlowDialogProps) {
+  // A locked item (its detail page) shows neither picker nor scan.
+  const fixed = lockItem ? initialItem : undefined;
   const { t } = useTranslation();
   const booking = useStockBooking();
   const { scheduleSubmit } = useUndoableSubmit();
-  const [item, setItem] = useState<PickedObject[]>([]);
+  const [picked, setItem] = useState<PickedObject[]>([]);
+  const item = fixed ? [fixed] : picked;
   const [from, setFrom] = useState('');
   const [to, setTo] = useState<PickedLocation | null>(null);
   const [quantity, setQuantity] = useState('1');
@@ -355,31 +380,38 @@ export function MoveStockDialog({
   } else if (chosen && stock.data && rows.length === 0) stockNotice = t('stockFlow.noStock');
 
   return (
-    <Modal open={open} onOpenChange={close} title={t('stockFlow.moveTitle')}>
+    <Modal
+      open={open}
+      onOpenChange={close}
+      title={t('stockFlow.moveTitle')}
+      description={fixed ? objectLabel(fixed) : undefined}
+    >
       <div className="space-y-4">
-        <WithScan
-          scan={
-            <ObjectScan
-              field={t('stockFlow.consumable')}
-              kind="consumable"
-              onObject={(object) => {
-                setItem([object]);
+        {fixed ? null : (
+          <WithScan
+            scan={
+              <ObjectScan
+                field={t('stockFlow.consumable')}
+                kind="consumable"
+                onObject={(object) => {
+                  setItem([object]);
+                  setFrom('');
+                }}
+              />
+            }
+          >
+            <ObjectPicker
+              label={t('stockFlow.consumable')}
+              kinds={['consumable']}
+              value={item}
+              onChange={(next) => {
+                setItem(next);
                 setFrom('');
               }}
+              required
             />
-          }
-        >
-          <ObjectPicker
-            label={t('stockFlow.consumable')}
-            kinds={['consumable']}
-            value={item}
-            onChange={(next) => {
-              setItem(next);
-              setFrom('');
-            }}
-            required
-          />
-        </WithScan>
+          </WithScan>
+        )}
         {rows.length > 0 ? (
           <Select
             label={t('stockFlow.fromBin')}

@@ -939,17 +939,18 @@ export function useStockLevels(consumableId: string | undefined) {
 
 /**
  * invalidateStock reads again what a booking, a reservation or its end
- * changes: the ledger, the reservations, the history of the object and the
- * stock and availability per bin.
+ * changes: the ledger, the reservations, the history of the object, the
+ * consumables with their total stock and the stock and availability per bin
+ * (WP-320).
  */
 function invalidateStock(qc: QueryClient) {
   return Promise.all([
     qc.invalidateQueries({ queryKey: ['stock-movements'] }),
     qc.invalidateQueries({ queryKey: ['reservations'] }),
     qc.invalidateQueries({ queryKey: ['history'] }),
+    qc.invalidateQueries({ queryKey: ['consumables'] }),
     qc.invalidateQueries({ queryKey: ['consumable-stock'] }),
-    qc.invalidateQueries({ queryKey: ['inventory-items'] }),
-    qc.invalidateQueries({ queryKey: ['inventory-availability'] }),
+    qc.invalidateQueries({ queryKey: ['consumable-availability'] }),
   ]);
 }
 
@@ -963,20 +964,6 @@ export function useStockBooking() {
   return useMutation({
     mutationFn: (data: StockBooking) => inventoryApi.book(data),
     onSuccess: () => invalidateStock(qc),
-  });
-}
-
-export function useQuantityItems() {
-  return useQuery({
-    queryKey: ['inventory-items'],
-    queryFn: () => inventoryApi.listItems({ limit: 100 }),
-  });
-}
-
-export function useAvailability(params: { item_kind?: string; item_id?: string } = {}) {
-  return useQuery({
-    queryKey: ['inventory-availability', params],
-    queryFn: () => inventoryApi.availability(params),
   });
 }
 
@@ -994,6 +981,19 @@ export function useReserveAsset() {
   return useMutation({
     mutationFn: ({ assetId, data }: { assetId: string; data: ReserveAssetRequest }) =>
       reservationApi.reserve(assetId, data),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+/**
+ * useReserveConsumable reserves a quantity of a consumable in a bin (POST
+ * /reservations with item_kind consumable, WP-759); 409 insufficient-stock
+ * when the bin holds less than on_hand − reserved.
+ */
+export function useReserveConsumable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Parameters<typeof reservationApi.create>[0]) => reservationApi.create(data),
     onSuccess: () => invalidateStock(qc),
   });
 }

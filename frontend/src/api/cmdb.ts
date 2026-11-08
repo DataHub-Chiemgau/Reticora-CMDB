@@ -977,14 +977,23 @@ export async function resolveScannedCode(code: string): Promise<ScannedObject> {
   return { kind: 'location', id: location.id, name: location.name, location };
 }
 
-// ─── Movements + quantity items (§9, §6) ─────────────────────────────────────
+// ─── Movements and stock of consumables (§9, §6) ─────────────────────────────
+
+/**
+ * CONSUMABLE_BOOKING_TYPES are the quantity bookings of a consumable over
+ * POST /stock-movements (WP-756), labelled by consumables.movementTypes.*:
+ * receipt into a bin (to_location_id), retrieval from a bin
+ * (from_location_id), correction of one bin (to_location_id raises,
+ * from_location_id lowers) and transfer between two different bins.
+ */
+export const CONSUMABLE_BOOKING_TYPES = ['receipt', 'retrieval', 'correction', 'transfer'] as const;
+export type ConsumableBookingType = (typeof CONSUMABLE_BOOKING_TYPES)[number];
 
 export interface StockMovement {
   id: string;
   item_kind: string;
   asset_id?: string;
   consumable_id?: string;
-  quantity_item_id?: string;
   movement_type: string;
   from_location_id?: string;
   to_location_id?: string;
@@ -1005,7 +1014,7 @@ export interface StockMovement {
 export type StockBooking =
   | {
       consumable_id: string;
-      movement_type: 'receipt' | 'retrieval' | 'correction' | 'transfer';
+      movement_type: ConsumableBookingType;
       from_location_id?: string;
       to_location_id?: string;
       quantity: number;
@@ -1021,17 +1030,6 @@ export type StockBooking =
 /** The stock of a consumable in one bin: on_hand and reserved (STK-02, WP-283). */
 export type ConsumableStock = components['schemas']['ConsumableStock'];
 export type ConsumableStockList = components['schemas']['ConsumableStockListResponse'];
-
-export interface QuantityItem {
-  id: string;
-  sku?: string;
-  name: string;
-  category: string;
-  unit: string;
-  stock_level: number;
-  min_level: number;
-  location_id?: string;
-}
 
 export const inventoryApi = {
   listMovements(
@@ -1062,50 +1060,16 @@ export const inventoryApi = {
       body: JSON.stringify(data),
     });
   },
-  /** The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283). */
-  stockLevels(consumableId: string) {
-    return fetchAPI<ConsumableStockList>(`/consumables/${consumableId}/stock${qs({ limit: 200 })}`);
-  },
-  listItems(params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<QuantityItem>>(`/inventory/items${qs(params)}`);
-  },
-  createItem(data: {
-    name: string;
-    sku?: string;
-    category?: string;
-    unit?: string;
-    stock_level?: number;
-    min_level?: number;
-    location_id?: string;
-  }) {
-    return fetchAPI('/inventory/items', { method: 'POST', body: JSON.stringify(data) });
-  },
-  convertToAsset(itemId: string, data: { asset_tag: string; serial_number?: string }) {
-    return fetchAPI<{ asset_id: string }>(`/inventory/items/${itemId}/convert`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  },
-  availability(params: { item_kind?: string; item_id?: string } = {}) {
-    return fetchAPI<{ data: Availability[] }>(`/inventory/availability${qs(params)}`);
+  /**
+   * The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283);
+   * cursor is the next_cursor of the page before.
+   */
+  stockLevels(consumableId: string, cursor?: string) {
+    return fetchAPI<ConsumableStockList>(
+      `/consumables/${consumableId}/stock${qs({ limit: 200, cursor })}`,
+    );
   },
 };
-
-/**
- * A row of the org-wide projection `GET /inventory/availability`; a
- * consumable sums its stock rows per bin (WP-284). The path stays an alias
- * (E-38); the successor per bin is `GET /consumables/{id}/availability`.
- */
-export interface Availability {
-  item_kind: 'asset' | 'consumable';
-  item_id: string;
-  total: number;
-  available: number;
-  reserved: number;
-  assigned: number;
-  repair: number;
-  unavailable: number;
-}
 
 // ─── Reservations (§10) ──────────────────────────────────────────────────────
 
@@ -1138,6 +1102,7 @@ export const reservationApi = {
    * reserved only through reserve (POST /assets/{id}/reserve, WP-277).
    */
   create(data: {
+    item_kind?: 'consumable';
     consumable_id: string;
     /** The bin; without it the only bin of the consumable (WP-284). */
     location_id?: string;
