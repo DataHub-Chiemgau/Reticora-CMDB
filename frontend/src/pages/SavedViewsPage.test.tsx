@@ -7,7 +7,8 @@
  * permanently empty and its empty-state string was unconditionally true.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import i18n from '../i18n';
 import { renderWithProviders } from '../test/utils';
 import { SavedViewsPage } from './SavedViewsPage';
 
@@ -18,14 +19,20 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// A system view as WP-307 answers it: stable key, name per language (VIE-02).
 const preset = {
-  id: '',
-  organization_id: '',
-  name: 'Assets with warranty expiring within 90 days',
+  key: 'warranty_expiring',
+  name: 'Warranty expiring soon',
+  display_name: { de: 'Garantie läuft bald ab', en: 'Warranty expiring soon' },
   entity_kind: 'asset',
   filter_spec: { warranty_within_days: 90 },
-  shared: true,
+  sort: [],
+  columns: [],
+  system: true,
 };
+
+/** The run button of the system view (the clone action reads "Klonen: …"). */
+const presetButton = /^Garantie läuft bald ab/;
 
 const me = 'user-1';
 
@@ -55,6 +62,9 @@ function mockApi(
     search?: (n: number) => Response;
     me?: string | null;
     permissions?: string[];
+    patch?: () => Response;
+    post?: () => Response;
+    del?: () => Response;
   } = {},
 ) {
   let searches = 0;
@@ -69,14 +79,19 @@ function mockApi(
             permissions: overrides.permissions ?? ['saved_view:write', 'role:read'],
           });
     if (url.includes('/roles')) return json({ data: roles, total: roles.length });
+    if (url.includes('/attribute-definitions')) return json({ data: [] });
+    if (url.includes('/relationship-types')) return json({ data: [], total: 0 });
     if (url.includes('/saved-views/presets')) return json({ data: [preset] });
     if (url.includes('/search/query'))
       return overrides.search ? overrides.search(searches++) : json({ data: [], total: 0 });
-    if (url.includes('/saved-views') && method === 'POST') return json({ id: 'new' }, 201);
+    if (url.includes('/saved-views') && method === 'POST')
+      return overrides.post ? overrides.post() : json({ id: 'new' }, 201);
     if (url.includes('/saved-views/') && method === 'PATCH')
-      return json({ ...ownView, ...JSON.parse(String(init?.body)) });
+      return overrides.patch
+        ? overrides.patch()
+        : json({ ...ownView, ...JSON.parse(String(init?.body)) });
     if (url.includes('/saved-views') && method === 'DELETE')
-      return new Response(null, { status: 204 });
+      return overrides.del ? overrides.del() : new Response(null, { status: 204 });
     return json({ data: overrides.views ?? [], total: 0, limit: 50, offset: 0, has_more: false });
   });
 }
@@ -97,7 +112,7 @@ describe('SavedViewsPage', () => {
     // Nothing is running yet, so there is nothing to save.
     expect(screen.queryByRole('button', { name: /speichern|save as view/i })).toBeNull();
 
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
 
     // entity_kind is a sibling column of filter_spec, so it must be folded
     // into the query; otherwise an asset view runs against the ci table and
@@ -131,7 +146,7 @@ describe('SavedViewsPage', () => {
     vi.spyOn(window, 'prompt').mockReturnValue(null);
 
     renderWithProviders(<SavedViewsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
     fireEvent.click(await screen.findByRole('button', { name: /speichern|save as view/i }));
 
     await waitFor(() => expect(window.prompt).toHaveBeenCalled());
@@ -219,7 +234,7 @@ describe('SavedViewsPage', () => {
       fetchMock.mock.calls.filter((call) => String(call[0]).includes('/search/query')).length;
 
     renderWithProviders(<SavedViewsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
 
     fireEvent.click(await screen.findByRole('button', { name: /erneut versuchen|retry/i }));
 
@@ -236,7 +251,7 @@ describe('SavedViewsPage', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderWithProviders(<SavedViewsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Keine Berechtigung für diese Ansicht');
@@ -255,7 +270,7 @@ describe('SavedViewsPage', () => {
       fetchMock.mock.calls.filter((call) => String(call[0]).includes('/search/query')).length;
 
     renderWithProviders(<SavedViewsPage />);
-    const button = await screen.findByRole('button', { name: new RegExp(preset.name, 'i') });
+    const button = await screen.findByRole('button', { name: presetButton });
     fireEvent.click(button);
     await waitFor(() => expect(searches()).toBe(1));
     await screen.findByText('Keine Treffer.');
@@ -406,7 +421,7 @@ describe('SavedViewsPage sort, columns and sharing (F-336)', () => {
     vi.spyOn(window, 'prompt').mockReturnValue('Garantie absteigend');
 
     renderWithProviders(<SavedViewsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
 
     fireEvent.change(await screen.findByLabelText('Sortieren nach'), {
       target: { value: 'warranty_end' },
@@ -500,9 +515,452 @@ describe('SavedViewsPage sort, columns and sharing (F-336)', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     renderWithProviders(<SavedViewsPage />);
-    fireEvent.click(await screen.findByRole('button', { name: new RegExp(preset.name, 'i') }));
+    fireEvent.click(await screen.findByRole('button', { name: presetButton }));
 
     expect(await screen.findByText('Die Rollen können nicht geladen werden.')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/roles'))).toBe(false);
+  });
+});
+
+/**
+ * WP-315 (SRC-03, CH18): the filter of a view is edited with the click
+ * builder; saving sends the complete state, the preview runs on the server
+ * with limit 10, and the answers 422, 403 and 404 appear at the node or as
+ * a hint.
+ */
+describe('SavedViewsPage filter builder (WP-315)', () => {
+  const calls = (fetchMock: ReturnType<typeof mockApi>, method: string, path: string) =>
+    fetchMock.mock.calls.filter(
+      (call) => (call[1]?.method ?? 'GET') === method && String(call[0]).includes(path),
+    );
+  const bodyOf = (call: unknown[] | undefined) =>
+    JSON.parse(String((call?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
+
+  const sharedView = {
+    ...ownView,
+    id: 'view-9',
+    name: 'Org servers',
+    shared: true,
+    shared_with_roles: ['role-1'],
+    sort: [{ field: 'name', dir: 'desc' }],
+    columns: ['name', 'status'],
+    filter_spec: {
+      lacks_relationship: 'backup',
+      where: {
+        and: [
+          { field: 'status', op: 'eq', value: 'active' },
+          { field: 'hostname', op: 'like', value: 'srv-*' },
+        ],
+      },
+    },
+  };
+
+  async function addNameCondition(value: string) {
+    const root = await screen.findByRole('group', { name: 'Gruppe (UND)' });
+    fireEvent.click(
+      within(root).getAllByRole('button', { name: 'Bedingung hinzufügen' }).slice(-1)[0]!,
+    );
+    const added = screen.getAllByRole('group', { name: /^Bedingung \d+$/ }).slice(-1)[0]!;
+    fireEvent.change(within(added).getByLabelText('Feld'), { target: { value: 'name' } });
+    fireEvent.change(within(added).getByLabelText('Wert'), { target: { value } });
+  }
+
+  async function editView(name: RegExp) {
+    fireEvent.click(await screen.findByRole('button', { name }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter bearbeiten' }));
+  }
+
+  it('creates a new view by POST', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    fireEvent.change(screen.getByLabelText('Name der Ansicht'), {
+      target: { value: 'Web servers' },
+    });
+    expect(screen.getByLabelText('Objektart')).toHaveValue('ci');
+    await addNameCondition('web-01');
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'POST', '/saved-views')[0])).toEqual({
+      name: 'Web servers',
+      entity_kind: 'ci',
+      filter_spec: { where: { and: [{ field: 'name', op: 'eq', value: 'web-01' }] } },
+      sort: [],
+      columns: [],
+      shared: false,
+      shared_with_roles: [],
+    });
+    expect(calls(fetchMock, 'PATCH', '/saved-views')).toHaveLength(0);
+    // The saved view runs at once.
+    await waitFor(() =>
+      expect(bodyOf(calls(fetchMock, 'POST', '/search/query').slice(-1)[0])).toEqual({
+        where: { and: [{ field: 'name', op: 'eq', value: 'web-01' }] },
+        entity_kind: 'ci',
+      }),
+    );
+  });
+
+  it('saves an own org-shared view by PATCH with its complete state and keeps the flat keys', async () => {
+    const fetchMock = mockApi({ views: [sharedView] });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+
+    // The flat key is shown next to the builder, not editable.
+    expect(screen.getByRole('list', { name: 'Weitere Kriterien' })).toHaveTextContent(
+      'lacks_relationship: "backup"',
+    );
+    expect(screen.getByLabelText('Name der Ansicht')).toHaveValue('Org servers');
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    fireEvent.change(within(second).getByLabelText('Wert'), { target: { value: 'db-*' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'PATCH', '/saved-views/view-9')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'PATCH', '/saved-views/view-9')[0])).toEqual({
+      name: 'Org servers',
+      entity_kind: 'ci',
+      filter_spec: {
+        lacks_relationship: 'backup',
+        where: {
+          and: [
+            { field: 'status', op: 'eq', value: 'active' },
+            { field: 'hostname', op: 'like', value: 'db-*' },
+          ],
+        },
+      },
+      sort: [{ field: 'name', dir: 'desc' }],
+      columns: ['name', 'status'],
+      shared: true,
+      shared_with_roles: ['role-1'],
+    });
+    expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(0);
+  });
+
+  it('saves a preset as a new view by POST without from_preset and keeps its flat keys', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(presetButton);
+
+    expect(screen.getByLabelText('Objektart')).toHaveValue('asset');
+    expect(screen.getByRole('list', { name: 'Weitere Kriterien' })).toHaveTextContent(
+      'warranty_within_days: 90',
+    );
+    expect(screen.queryByRole('button', { name: 'Filter speichern' })).toBeNull();
+    await addNameCondition('laptop-*');
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    const body = bodyOf(calls(fetchMock, 'POST', '/saved-views')[0]);
+    expect(body).toEqual({
+      name: preset.display_name.de,
+      entity_kind: 'asset',
+      filter_spec: {
+        warranty_within_days: 90,
+        where: { and: [{ field: 'name', op: 'eq', value: 'laptop-*' }] },
+      },
+      sort: [],
+      columns: [],
+      shared: false,
+      shared_with_roles: [],
+    });
+    expect('from_preset' in body).toBe(false);
+  });
+
+  it('previews on the server with limit 10 and shows total', async () => {
+    const fetchMock = mockApi({
+      search: () =>
+        json({
+          data: [
+            { id: 'ci-1', entity_kind: 'ci', name: 'web-01' },
+            { id: 'ci-2', entity_kind: 'ci', name: 'web-02' },
+          ],
+          total: 37,
+        }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    await addNameCondition('web-*');
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    const previewSection = await screen.findByRole('region', { name: 'Vorschau' });
+    expect(previewSection).toHaveTextContent('37 Treffer');
+    expect(within(previewSection).getByText('web-02')).toBeInTheDocument();
+    const call = calls(fetchMock, 'POST', '/search/query')[0];
+    expect(String(call?.[0])).toContain('/search/query?limit=10');
+    expect(bodyOf(call)).toEqual({
+      where: { and: [{ field: 'name', op: 'eq', value: 'web-*' }] },
+      entity_kind: 'ci',
+    });
+  });
+
+  it('marks the second node on a 422 with the path where.and[1]', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      search: (n) =>
+        n === 0
+          ? json({ data: [], total: 0 })
+          : json(
+              {
+                type: 'urn:reticora:problem:invalid-field',
+                title: 'Unprocessable Entity',
+                status: 422,
+                detail: 'where.and[1]: unknown field "hostnme"',
+                field: 'where.and[1]',
+              },
+              422,
+            ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    await waitFor(() => expect(second).toHaveAttribute('data-invalid', 'true'));
+    expect(second).toHaveAccessibleDescription('Vom Server abgelehnt: unknown field "hostnme"');
+    expect(screen.getByRole('group', { name: 'Bedingung 1' })).not.toHaveAttribute('data-invalid');
+  });
+
+  it('marks the comparisons of a 403 with fields and no longer offers those fields', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      search: (n) =>
+        n === 0
+          ? json({ data: [], total: 0 })
+          : json(
+              {
+                type: 'urn:reticora:problem:forbidden',
+                title: 'Forbidden',
+                status: 403,
+                detail: 'field permissions do not allow this request on: hostname',
+                fields: ['hostname'],
+              },
+              403,
+            ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    expect(
+      await screen.findByText(/Keine Berechtigung für die Felder: hostname/),
+    ).toBeInTheDocument();
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    expect(second).toHaveAccessibleDescription('Keine Berechtigung für das Feld hostname.');
+    const first = screen.getByRole('group', { name: 'Bedingung 1' });
+    const offered = within(within(first).getByLabelText('Feld'))
+      .getAllByRole('option')
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(offered).not.toContain('hostname');
+    expect(offered).toContain('fqdn');
+  });
+
+  it('says so when saving answers 404 (no write permission)', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      patch: () => json({ title: 'Not Found', status: 404, detail: 'saved view not found' }, 404),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter speichern' }));
+
+    expect(
+      await screen.findByText('Keine Schreibberechtigung für diese Ansicht.'),
+    ).toBeInTheDocument();
+  });
+
+  it('saves a view shared by somebody else as a new view', async () => {
+    const fetchMock = mockApi({ views: [{ ...sharedView, owner_id: 'user-2' }] });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+
+    expect(screen.queryByRole('button', { name: 'Filter speichern' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(calls(fetchMock, 'PATCH', '/saved-views')).toHaveLength(0);
+  });
+
+  it('lets saved_view:manage save a foreign view by PATCH (WP-307)', async () => {
+    const fetchMock = mockApi({
+      views: [{ ...sharedView, owner_id: 'user-2' }],
+      permissions: ['saved_view:write', 'saved_view:manage', 'role:read'],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter speichern' }));
+    await waitFor(() => expect(calls(fetchMock, 'PATCH', '/saved-views/view-9')).toHaveLength(1));
+  });
+
+  it('sends no incomplete filter and marks the node', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    const root = await screen.findByRole('group', { name: 'Gruppe (UND)' });
+    fireEvent.click(within(root).getByRole('button', { name: 'Bedingung hinzufügen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    expect(await screen.findByText(/Der Filter ist unvollständig/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Bedingung 1' })).toHaveAccessibleDescription(
+      'Wählen Sie ein Feld.',
+    );
+    expect(calls(fetchMock, 'POST', '/search/query')).toHaveLength(0);
+  });
+});
+
+/**
+ * WP-817 (VIE-02, UI-14): shared views and system views. With
+ * saved_view:manage (WP-307) the page offers edit and delete of views of
+ * others too; without it a foreign view is read and cloned. System views are
+ * named in the UI language, marked read-only and cloned with from_preset.
+ */
+describe('SavedViewsPage shared and system views (WP-817)', () => {
+  const calls = (fetchMock: ReturnType<typeof mockApi>, method: string, path: string) =>
+    fetchMock.mock.calls.filter(
+      (call) => (call[1]?.method ?? 'GET') === method && String(call[0]).includes(path),
+    );
+  const bodyOf = (call: unknown[] | undefined) =>
+    JSON.parse(String((call?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
+
+  const foreign = {
+    ...ownView,
+    id: 'view-2',
+    owner_id: 'user-2',
+    name: 'Team servers',
+    shared: true,
+    sort: [{ field: 'name', dir: 'desc' }],
+    columns: ['name'],
+    shared_with_roles: [],
+  };
+  const managePermissions = ['saved_view:write', 'saved_view:manage', 'role:read'];
+
+  it('offers edit and delete of a foreign view with saved_view:manage', async () => {
+    const fetchMock = mockApi({ views: [foreign], permissions: managePermissions });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Löschen: Team servers' }));
+    await waitFor(() => expect(calls(fetchMock, 'DELETE', '/saved-views/view-2')).toHaveLength(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bearbeiten: Team servers' }));
+    expect(await screen.findByLabelText('Name der Ansicht')).toHaveValue('Team servers');
+    fireEvent.click(screen.getByRole('button', { name: 'Filter speichern' }));
+    await waitFor(() => expect(calls(fetchMock, 'PATCH', '/saved-views/view-2')).toHaveLength(1));
+    expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(0);
+    // Sharing is offered and saved for the foreign view as well.
+    expect(screen.getByRole('button', { name: 'Änderungen speichern' })).toBeInTheDocument();
+  });
+
+  it('offers neither edit nor delete of a foreign view without saved_view:manage, but a clone', async () => {
+    const fetchMock = mockApi({ views: [foreign] });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(window, 'prompt').mockReturnValue('My team servers');
+    renderWithProviders(<SavedViewsPage />);
+
+    const clone = await screen.findByRole('button', { name: 'Klonen: Team servers' });
+    expect(screen.queryByRole('button', { name: 'Löschen: Team servers' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Bearbeiten: Team servers' })).toBeNull();
+    // It is listed as a view of others and can be run (read).
+    expect(screen.getByRole('button', { name: /^Team servers/ })).toHaveTextContent('von anderen');
+
+    fireEvent.click(clone);
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'POST', '/saved-views')[0])).toEqual({
+      name: 'My team servers',
+      entity_kind: 'ci',
+      filter_spec: { status: 'active' },
+      sort: [{ field: 'name', dir: 'desc' }],
+      columns: ['name'],
+      shared: false,
+      shared_with_roles: [],
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '„My team servers“ wurde als eigene Ansicht angelegt.',
+    );
+  });
+
+  it('shows a refused delete (404) and a refused clone (403) as a message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        views: [foreign],
+        permissions: managePermissions,
+        del: () => json({ title: 'Not Found', status: 404, detail: 'saved view not found' }, 404),
+        post: () => json({ title: 'Forbidden', status: 403 }, 403),
+      }),
+    );
+    vi.spyOn(window, 'prompt').mockReturnValue('Copy');
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Löschen: Team servers' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Ansicht gibt es nicht mehr, oder Sie dürfen sie nicht ändern.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Klonen: Garantie läuft bald ab/ }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('Keine Berechtigung für diese Aktion.'),
+    );
+  });
+
+  it('names a system view by the UI language, marks it read-only and offers no edit or delete', async () => {
+    vi.stubGlobal('fetch', mockApi({ permissions: managePermissions }));
+    renderWithProviders(<SavedViewsPage />);
+
+    const run = await screen.findByRole('button', { name: presetButton });
+    expect(run).toHaveTextContent('schreibgeschützt');
+    expect(screen.queryByRole('button', { name: /Bearbeiten: Garantie/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Löschen: Garantie/ })).toBeNull();
+    expect(screen.queryByText('warranty_expiring')).toBeNull();
+
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    try {
+      expect(
+        await screen.findByRole('button', { name: /^Warranty expiring soon/ }),
+      ).toHaveTextContent('read-only');
+      expect(screen.getByRole('button', { name: 'Clone: Warranty expiring soon' })).toBeVisible();
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('de-DE');
+      });
+    }
+  });
+
+  it('clones a system view with from_preset', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('Meine Garantien');
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Klonen: Garantie läuft bald ab' }));
+    expect(prompt).toHaveBeenCalledWith('Name der Kopie', 'Kopie von Garantie läuft bald ab');
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'POST', '/saved-views')[0])).toEqual({
+      name: 'Meine Garantien',
+      from_preset: 'warranty_expiring',
+    });
+  });
+
+  it('names the three system views of VIE-02 in the subtitle', async () => {
+    vi.stubGlobal('fetch', mockApi());
+    renderWithProviders(<SavedViewsPage />);
+
+    const subtitle = await screen.findByText(/^Systemansichten wie/);
+    expect(subtitle).toHaveTextContent('Meine Geräte');
+    expect(subtitle).toHaveTextContent('Garantie läuft bald ab');
+    expect(subtitle).toHaveTextContent('Server ohne Monitoring');
+    expect(subtitle).not.toHaveTextContent('90 Tagen');
   });
 });

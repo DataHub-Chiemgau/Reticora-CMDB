@@ -136,6 +136,8 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// DATEV jobs read assets and the mapping override (WP-310).
 		exportWorker.Assets, _ = d.repos.Asset.(export.AssetSource)
 		exportWorker.Orgs = d.repos.TenantHierarchy
+		// Asset jobs of POST /assets/bulk read the selection by id (WP-782).
+		exportWorker.AssetRows, _ = d.repos.Asset.(export.AssetRows)
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },

@@ -48,6 +48,9 @@ if (!['all', 'lists', 'none'].includes(LATENCY_BUDGETS)) {
 }
 // TOTAL_CAP is where GET /cis stops counting (E-104).
 const TOTAL_CAP = 10000;
+// The CIs GET /cis lists: the OBJECTS of the seed and its 10 Phase-2 CIs,
+// two blade chassis with four blades each (cmd/seed, WP-819).
+const LISTED_CIS = OBJECTS + Number(__ENV.PHASE2_CIS || 10);
 // The searchable attribute of the seed and its number of values
 // (cmd/seed AttributeKey, CostCenters): CI i holds CC-<i mod 50 + 1>.
 const ATTR_KEY = __ENV.ATTR_KEY || 'cost_center';
@@ -182,7 +185,7 @@ export function listSorted() {
       }
       const total = r.json('total');
       const capped = r.json('total_capped') === true;
-      return OBJECTS > TOTAL_CAP ? total === TOTAL_CAP && capped : total <= TOTAL_CAP && !capped;
+      return LISTED_CIS > TOTAL_CAP ? total === TOTAL_CAP && capped : total <= TOTAL_CAP && !capped;
     },
   });
   sleep(0.2);

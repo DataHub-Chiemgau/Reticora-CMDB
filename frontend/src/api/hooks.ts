@@ -1,4 +1,10 @@
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   ciApi,
   relationshipApi,
@@ -14,6 +20,8 @@ import {
   assignmentApi,
   consumableApi,
   documentApi,
+  importApi,
+  fetchAPI,
   stocktakeApi,
   ticketApi,
   userApi,
@@ -35,6 +43,7 @@ import {
   privacyApi,
   credentialApi,
   vrfApi,
+  ApiError,
 } from '../api/client';
 import type {
   DiscoveryScopeInput,
@@ -46,19 +55,34 @@ import type {
   RelationshipUpdateRequest,
   ListParams,
   AssetCreateRequest,
+  ConsumableAvailabilityList,
   AssetUpdateRequest,
   AssetListParams,
   AssignAssetRequest,
   ReturnAssetRequest,
   TransferAssetRequest,
   AssignmentListParams,
+  Document,
   DocumentCreateRequest,
+  DocumentLinkTarget,
   DocumentListParams,
+  DocumentVersion,
+  CreateImportProfileRequest,
+  ImportStartDocumentRequest,
+  UpdateImportProfileRequest,
   StocktakeCreateRequest,
+  StocktakeUpdateRequest,
+  StockScanCreateRequest,
+  CursorParams,
   StocktakeListParams,
   TicketCreateRequest,
   TicketUpdateRequest,
   TicketListParams,
+  TicketComment,
+  TicketLink,
+  TicketLinkTarget,
+  ReviewItemTicketRequest,
+  Ticket,
   UserListParams,
   UserStatus,
   AppUser,
@@ -77,6 +101,7 @@ import type {
   MetricQueryParams,
   AlertRuleCreateRequest,
 } from '../api/client';
+import { isActive, type Job } from '../hooks/useJobs';
 
 /**
  * ListQueryOptions switch a list query off, e.g. a picker until the user
@@ -119,6 +144,8 @@ function useRelationshipInvalidation(ciId: string) {
   const queryClient = useQueryClient();
   return () => {
     void queryClient.invalidateQueries({ queryKey: ['ci-relationships', ciId] });
+    // Every edge mutation writes a history row (WP-296).
+    void queryClient.invalidateQueries({ queryKey: ['relationship-changes'] });
     void queryClient.invalidateQueries({ queryKey: ['topology-neighbors', ciId] });
     void queryClient.invalidateQueries({ queryKey: ['topology'] });
   };
@@ -166,6 +193,18 @@ export function useDeleteRelationship(ciId: string) {
       invalidate();
       void queryClient.invalidateQueries({ queryKey: ['relationship-suppressions', ciId] });
     },
+  });
+}
+
+/**
+ * The history of an edge (WP-296), newest first; every edge mutation
+ * invalidates it (useRelationshipInvalidation).
+ */
+export function useRelationshipChanges(id: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['relationship-changes', id],
+    queryFn: () => relationshipApi.changes(id!),
+    enabled: !!id && enabled,
   });
 }
 
@@ -427,11 +466,40 @@ export function useAssetList(params: AssetListParams, { enabled = true }: ListQu
 // --- Consumables ---
 
 /** useConsumableList lists the consumables; /consumables is a scoped list (client_id). */
-export function useConsumableList(params: ListParams, { enabled = true }: ListQueryOptions = {}) {
+export function useConsumableList(
+  params: ListParams & { low_stock?: boolean },
+  { enabled = true }: ListQueryOptions = {},
+) {
   return useQuery({
     queryKey: ['consumables', params],
     queryFn: () => consumableApi.list(params),
     enabled,
+  });
+}
+
+/** useConsumable reads one consumable (GET /consumables/{id}). */
+export function useConsumable(id: string | undefined) {
+  return useQuery({
+    queryKey: ['consumables', 'detail', id],
+    queryFn: () => consumableApi.get(id!),
+    enabled: !!id,
+  });
+}
+
+/**
+ * useConsumableAvailability reads on_hand, reserved and available of a
+ * consumable per bin page by page over next_cursor (GET
+ * /consumables/{id}/availability, WP-759); bookings and reservations read it
+ * again (invalidateStock).
+ */
+export function useConsumableAvailability(id: string | undefined) {
+  return useInfiniteQuery({
+    queryKey: ['consumable-availability', id],
+    queryFn: ({ pageParam }) => consumableApi.availability(id!, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: ConsumableAvailabilityList) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!id,
   });
 }
 
@@ -515,10 +583,14 @@ export function useTransferAssignment() {
 
 // --- Documents ---
 
-export function useDocumentList(params: DocumentListParams) {
+export function useDocumentList(
+  params: DocumentListParams,
+  { enabled = true }: ListQueryOptions = {},
+) {
   return useQuery({
     queryKey: ['documents', params],
     queryFn: () => documentApi.list(params),
+    enabled,
   });
 }
 
@@ -542,6 +614,176 @@ export function useDeleteDocument() {
   });
 }
 
+/** SCAN_POLL_MS is the interval at which a pending scan is read again (WP-321). */
+export const SCAN_POLL_MS = 5000;
+
+const pendingScan = (status: string | undefined) => status === 'pending_scan';
+
+/** useDocument reads a document; while its current version is pending_scan every 5 s. */
+export function useDocument(id: string) {
+  return useQuery({
+    queryKey: ['documents', 'detail', id],
+    queryFn: () => documentApi.get(id),
+    enabled: !!id,
+    refetchInterval: (query) =>
+      pendingScan((query.state.data as Document | undefined)?.scan_status) ? SCAN_POLL_MS : false,
+  });
+}
+
+/**
+ * useDocumentVersions reads the versions of a document page by page over
+ * next_cursor; while a loaded version is pending_scan every 5 s.
+ */
+export function useDocumentVersions(id: string) {
+  return useInfiniteQuery({
+    queryKey: ['documents', 'versions', id],
+    queryFn: ({ pageParam }) => documentApi.listVersions(id, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: PaginatedResponse<DocumentVersion>) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!id,
+    refetchInterval: (query) =>
+      (query.state.data?.pages ?? []).some((page) =>
+        page.data.some((version) => pendingScan(version.scan_status)),
+      )
+        ? SCAN_POLL_MS
+        : false,
+  });
+}
+
+export function useUpdateDocument(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { title?: string; description?: string; category?: string }) =>
+      documentApi.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+export function useDocumentLinks(id: string) {
+  return useQuery({
+    queryKey: ['documents', 'links', id],
+    queryFn: () => documentApi.getLinks(id),
+    enabled: !!id,
+  });
+}
+
+/** useLinkDocument links a document to a target (POST /documents/{id}/links, WP-267). */
+export function useLinkDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, target }: { id: string; target: DocumentLinkTarget }) =>
+      documentApi.link(id, target),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+/** useUnlinkDocument removes a link (DELETE /documents/{id}/links/{link_id}, WP-267). */
+export function useUnlinkDocument() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, linkId }: { id: string; linkId: string }) => documentApi.unlink(id, linkId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['documents'] });
+    },
+  });
+}
+
+/** useDocumentUsage reads the storage usage of the organization (WP-731). */
+export function useDocumentUsage() {
+  return useQuery({
+    queryKey: ['documents', 'usage'],
+    queryFn: () => documentApi.usage(),
+  });
+}
+
+// --- Import (IMP-IO-01, WP-322) ---
+
+/** useImportProfiles lists the mapping profiles of the organization (sorted by name). */
+export function useImportProfiles(enabled = true) {
+  return useQuery({
+    queryKey: ['import-profiles'],
+    queryFn: () => importApi.listProfiles({ limit: 200 }),
+    enabled,
+  });
+}
+
+export function useCreateImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateImportProfileRequest) => importApi.createProfile(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+export function useUpdateImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateImportProfileRequest }) =>
+      importApi.updateProfile(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+export function useDeleteImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => importApi.deleteProfile(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+/**
+ * useImportPreview reads the header and up to 20 rows of a scanned file
+ * (POST /imports/preview), for XLSX of the chosen sheet. A refused file
+ * (409, 422) is not retried.
+ */
+export function useImportPreview(documentId: string | undefined, sheet?: string, enabled = true) {
+  return useQuery({
+    queryKey: ['imports', 'preview', documentId, sheet ?? ''],
+    queryFn: () =>
+      importApi.preview({ document_id: documentId ?? '', ...(sheet ? { sheet } : {}) }),
+    enabled: enabled && !!documentId,
+    retry: false,
+  });
+}
+
+/** useStartImport starts a run (POST /imports, 202 with the job). */
+export function useStartImport() {
+  return useMutation({
+    mutationFn: (data: ImportStartDocumentRequest) => importApi.start(data),
+  });
+}
+
+/** IMPORT_POLL_MS is the pause between two reads of a running import job. */
+export const IMPORT_POLL_MS = 3000;
+
+/**
+ * useImportRun follows an import run: the job (GET /jobs/{id}) every 3 s
+ * while isActive holds, then once the projection of the run (GET
+ * /imports/{id}) with its counters and error code.
+ */
+export function useImportRun(id: string | null) {
+  const job = useQuery({
+    queryKey: ['jobs', id, 'import'],
+    queryFn: () => fetchAPI<Job>(`/jobs/${id}`),
+    enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data && !isActive(query.state.data) ? false : IMPORT_POLL_MS,
+  });
+  const finished = !!job.data && !isActive(job.data);
+  const run = useQuery({
+    queryKey: ['imports', 'run', id],
+    queryFn: () => importApi.get(id ?? ''),
+    enabled: !!id && finished,
+  });
+  return { job, run, finished };
+}
+
 // --- Stocktakes ---
 
 export function useStocktakeList(params: StocktakeListParams) {
@@ -551,10 +793,84 @@ export function useStocktakeList(params: StocktakeListParams) {
   });
 }
 
+export function useStocktake(id: string) {
+  return useQuery({
+    queryKey: ['stocktakes', id],
+    queryFn: () => stocktakeApi.get(id),
+    enabled: !!id,
+  });
+}
+
+/** STOCKTAKE_PAGE_LIMIT is the page size the stocktake lists are read with (API-02 maximum). */
+export const STOCKTAKE_PAGE_LIMIT = 200;
+/** STOCKTAKE_MAX_PAGES caps how many cursor pages of one list are read. */
+export const STOCKTAKE_MAX_PAGES = 25;
+
+/**
+ * collectPages reads a cursor list page by page (next_cursor) up to
+ * STOCKTAKE_MAX_PAGES and returns all rows; truncated tells that rows are
+ * left unread.
+ */
+async function collectPages<T>(
+  read: (params: CursorParams) => Promise<PaginatedResponse<T>>,
+): Promise<{ data: T[]; truncated: boolean }> {
+  const data: T[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < STOCKTAKE_MAX_PAGES; page += 1) {
+    const res = await read({ limit: STOCKTAKE_PAGE_LIMIT, cursor });
+    data.push(...res.data);
+    if (!res.has_more || !res.next_cursor) return { data, truncated: false };
+    cursor = res.next_cursor;
+  }
+  return { data, truncated: true };
+}
+
+/**
+ * useStocktakeItems reads the frozen expected stock of a stocktake (GET
+ * …/items, all pages). The snapshot does not follow scans or movements, so
+ * its key lies outside ['stocktakes'] and only start and completion read it
+ * again.
+ */
+export function useStocktakeItems(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktake-items', id],
+    queryFn: () => collectPages((params) => stocktakeApi.items(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
+/** useStocktakeScans reads the scans of a stocktake, newest first (GET …/scans, all pages). */
+export function useStocktakeScans(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktakes', id, 'scans'],
+    queryFn: () => collectPages((params) => stocktakeApi.listScans(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
+/** useStocktakeDifferences reads the difference list (GET …/differences, all pages). */
+export function useStocktakeDifferences(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktakes', id, 'differences'],
+    queryFn: () => collectPages((params) => stocktakeApi.differences(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
 export function useCreateStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: StocktakeCreateRequest) => stocktakeApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+export function useUpdateStocktake(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StocktakeUpdateRequest) => stocktakeApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
     },
@@ -571,23 +887,49 @@ export function useDeleteStocktake() {
   });
 }
 
-export function useStocktakeDifference(stocktakeId: string, params: ListParams = {}) {
-  return useQuery({
-    queryKey: ['stocktakes', stocktakeId, 'difference', params],
-    queryFn: () => stocktakeApi.difference(stocktakeId, params),
-    enabled: !!stocktakeId,
+/** useStartStocktake starts a planned stocktake; the snapshot is read afresh. */
+export function useStartStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stocktakeApi.start(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+      queryClient.invalidateQueries({ queryKey: ['stocktake-items', id] });
+    },
   });
 }
 
+export function useCancelStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stocktakeApi.cancel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+/** useAddScan records a scan; counters, scans and the difference list are read again. */
+export function useAddScan(stocktakeId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StockScanCreateRequest) => stocktakeApi.addScan(stocktakeId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+/** useCompleteStocktake completes a stocktake; the server books its corrections (WP-761). */
 export function useCompleteStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, applyCorrections = true }: { id: string; applyCorrections?: boolean }) =>
-      stocktakeApi.complete(id, applyCorrections),
-    onSuccess: (_data, { id }) => {
+    mutationFn: (id: string) => stocktakeApi.complete(id),
+    onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
-      queryClient.invalidateQueries({ queryKey: ['stocktakes', id] });
+      queryClient.invalidateQueries({ queryKey: ['stocktake-items', id] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['consumables'] });
     },
   });
 }
@@ -627,6 +969,179 @@ export function useDeleteTicket() {
   return useMutation({
     mutationFn: (id: string) => ticketApi.delete(id),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+}
+
+/** useTicket reads one ticket (GET /tickets/{id}). */
+export function useTicket(id: string) {
+  return useQuery({
+    queryKey: ['tickets', 'detail', id],
+    queryFn: () => ticketApi.get(id),
+    enabled: !!id,
+  });
+}
+
+/** useTicketComments reads the comments of a ticket page by page (limit/offset). */
+export function useTicketComments(ticketId: string, pageSize = 50) {
+  return useInfiniteQuery({
+    queryKey: ['tickets', 'comments', ticketId],
+    queryFn: ({ pageParam }) =>
+      ticketApi.listComments(ticketId, { limit: pageSize, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (last: PaginatedResponse<TicketComment>, pages) =>
+      last.has_more ? pages.reduce((sum, page) => sum + page.data.length, 0) : undefined,
+    enabled: !!ticketId,
+  });
+}
+
+export function useAddTicketComment(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { content: string; is_internal?: boolean }) =>
+      ticketApi.addComment(ticketId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'comments', ticketId] });
+    },
+  });
+}
+
+/** useTicketLinks reads the object links of a ticket page by page over next_cursor (WP-764). */
+export function useTicketLinks(ticketId: string) {
+  return useInfiniteQuery({
+    queryKey: ['tickets', 'links', ticketId],
+    queryFn: ({ pageParam }) => ticketApi.listLinks(ticketId, { cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: PaginatedResponse<TicketLink>) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled: !!ticketId,
+  });
+}
+
+export function useAddTicketLink(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (target: TicketLinkTarget) => ticketApi.addLink(ticketId, target),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'links', ticketId] });
+    },
+  });
+}
+
+export function useRemoveTicketLink(ticketId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (linkId: string) => ticketApi.removeLink(ticketId, linkId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tickets', 'links', ticketId] });
+    },
+  });
+}
+
+/**
+ * fetchTicketAttachments reads every document attached to a ticket (GET
+ * /tickets/{id}/attachments, WP-765), following next_cursor page by page.
+ */
+export async function fetchTicketAttachments(ticketId: string): Promise<Document[]> {
+  const all: Document[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const page = await ticketApi.listAttachments(ticketId, { limit: 200, cursor });
+    all.push(...(page.data ?? []));
+    if (!page.has_more || !page.next_cursor) return all;
+    cursor = page.next_cursor;
+  }
+}
+
+/**
+ * ticketAttachmentsKey is the key LinkedDocuments uses for the documents
+ * of a ticket, so the page and the card share one request.
+ */
+export const ticketAttachmentsKey = (ticketId: string) =>
+  ['documents', 'linked', 'ticket', ticketId] as const;
+
+/** useTicketAttachments reads the documents of a ticket (WP-765). */
+export function useTicketAttachments(ticketId: string, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ticketAttachmentsKey(ticketId),
+    queryFn: () => fetchTicketAttachments(ticketId),
+    enabled: enabled && !!ticketId,
+  });
+}
+
+/** TICKET_SLA_POLL_MS: the SLA state of a ticket is read again every minute. */
+export const TICKET_SLA_POLL_MS = 60_000;
+
+/**
+ * useTicketSLA reads the SLA state of a ticket (GET /tickets/{id}/sla,
+ * WP-292) every minute; enabled holds the request back without the
+ * feature ticketing_standard (E-39), so no 403 arises.
+ */
+export function useTicketSLA(ticketId: string, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: ['tickets', 'sla', ticketId],
+    queryFn: () => slaApi.getTicket(ticketId),
+    enabled: enabled && !!ticketId,
+    refetchInterval: TICKET_SLA_POLL_MS,
+  });
+}
+
+/** useCreateTicketFromReview opens a ticket for one review item (WP-291). */
+export function useCreateTicketFromReview() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: ReviewItemTicketRequest }) =>
+      ticketApi.createFromReview(id, data),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-items'] });
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    },
+  });
+}
+
+/** BulkTicketResult reports the tickets opened for several review items. */
+export interface BulkTicketResult {
+  created: { id: string; ticket: Ticket }[];
+  failed: { id: string; status?: number; message: string }[];
+}
+
+/** BULK_TICKET_LIMIT is the most review items one bulk action opens tickets for. */
+export const BULK_TICKET_LIMIT = 100;
+
+/**
+ * useBulkCreateTicketsFromReviews opens a ticket for each of several review
+ * items, one request after the other (POST /review-items/{id}/ticket, like
+ * useBulkResolveReviews); an item that fails (403, 404, 409 of an open
+ * ticket) is reported with the detail of the server and does not stop the
+ * others.
+ */
+export function useBulkCreateTicketsFromReviews() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ids }: { ids: string[] }): Promise<BulkTicketResult> => {
+      const result: BulkTicketResult = { created: [], failed: [] };
+      for (const id of ids.slice(0, BULK_TICKET_LIMIT)) {
+        try {
+          const ticket = await ticketApi.createFromReview(id);
+          result.created.push({ id, ticket });
+        } catch (err) {
+          result.failed.push({
+            id,
+            status: err instanceof ApiError ? err.status : undefined,
+            message:
+              err instanceof ApiError
+                ? (err.detail ?? err.message)
+                : err instanceof Error
+                  ? err.message
+                  : String(err),
+          });
+        }
+      }
+      return result;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-items'] });
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });

@@ -325,9 +325,12 @@ func TestBulkRevertAgainstPostgres(t *testing.T) {
 			if n := e.count(`SELECT count(*) FROM event_outbox WHERE entity_id = $1::text AND type = 'ci.changed'`, id); n != 2 {
 				t.Errorf("CI %s: %d events ci.changed, want bulk and revert", id, n)
 			}
+			// The CI had no status override before the bulk: the revert
+			// removes the one the bulk created, also the one its manual
+			// inverse write gave the field (WP-306).
 			if n := e.count(`SELECT count(*) FROM ci_field_value WHERE ci_id = $1 AND field_name = 'status'
-				AND override_reason = $2`, id, "bulk.revert:"+res.BulkJobID); n != 1 {
-				t.Errorf("CI %s: the inverse write is no manual change of the revert (%d overrides)", id, n)
+				AND override_at IS NOT NULL`, id); n != 0 {
+				t.Errorf("CI %s: %d status overrides after the revert, want none as before the bulk", id, n)
 			}
 		}
 		if n := e.count(`SELECT count(*) FROM bulk_change_set WHERE job_id = $1 AND revert_outcome = 'reverted'

@@ -44,8 +44,12 @@
     "saved-views": "Ansichten",
     "locations": "Standorte",
     "ci-types": "CI-Typen",
+    "relationship-types": "Beziehungstypen",
     "reviews": "Reviews",
-    "jobs": "Jobs"
+    "jobs": "Jobs",
+    "tags": "Tags",
+    "rules": "Regelkatalog",
+    "import": "Import"
   },
   "common": {
     "save": "Speichern",
@@ -105,7 +109,11 @@
       "audit": "Audit-Protokoll öffnen",
       "security": "Sicherheit & Datenschutz öffnen",
       "map": "Karte öffnen",
-      "roomplan": "Raumplan öffnen"
+      "roomplan": "Raumplan öffnen",
+      "tags": "Tags öffnen",
+      "rules": "Regelkatalog öffnen",
+      "scan": "Scannen",
+      "import": "Import-Assistent öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -314,7 +322,21 @@
       "decommissioned": "Außer Betrieb",
       "unknown": "Unbekannt"
     },
-    "timeline": "Zeitverlauf"
+    "timeline": "Zeitverlauf",
+    "tags": {
+      "title": "Tags",
+      "none": "Keine Tags.",
+      "edit": "Tags bearbeiten",
+      "select": "Tags aus dem Katalog",
+      "catalogEmpty": "Der Katalog enthält noch keine Tags.",
+      "catalogError": "Der Tag-Katalog kann nicht geladen werden.",
+      "unknown": "nicht im Katalog",
+      "conflict": "Die Tags wurden zwischenzeitlich geändert ({{fields}}). Laden Sie das CI neu.",
+      "precondition": "Die Version des CIs ist unbekannt. Laden Sie das CI neu.",
+      "invalid": "Unbekannte Tags: {{detail}}",
+      "forbidden": "Ihnen fehlt das Recht, das CI zu ändern.",
+      "reason": "Die Tags konnten nicht gespeichert werden: {{detail}}"
+    }
   },
   "form": {
     "createCI": "CI anlegen",
@@ -684,7 +706,7 @@
     "category": "Kategorie",
     "size": "Größe",
     "version": "Version",
-    "upload": "Dokument anlegen",
+    "upload": "Dokument hochladen",
     "categories": {
       "general": "Allgemein",
       "contract": "Vertrag",
@@ -697,7 +719,89 @@
     },
     "summary": "Verträge, Rechnungen und Handbücher als Dokumente verwalten.",
     "emptyTitle": "Noch keine Dokumente",
-    "emptyHint": "Lege ein Dokument an, um Verträge, Rechnungen und Handbücher zu sammeln."
+    "emptyHint": "Lade ein Dokument hoch, um Verträge, Rechnungen und Handbücher zu sammeln.",
+    "scanStatus": "Scanstatus",
+    "scanStatuses": {
+      "pending_scan": "Wird geprüft",
+      "clean": "Sauber",
+      "infected": "Infiziert",
+      "scan_failed": "Prüfung fehlgeschlagen"
+    },
+    "scan": {
+      "none": "Ohne Inhalt",
+      "pending": "Der Inhalt wird auf Schadsoftware geprüft. Der Download ist bis zum Abschluss der Prüfung gesperrt.",
+      "quarantined": "Quarantäne: Im Inhalt wurde Schadsoftware gefunden. Download und neue Verknüpfungen sind gesperrt.",
+      "failed": "Gesperrt, wird erneut geprüft."
+    },
+    "versionLabel": "v{{version}}",
+    "download": "Herunterladen",
+    "downloadNamed": "{{name}} herunterladen",
+    "downloadVersion": "Version {{version}} herunterladen",
+    "downloadLocked": "Gesperrt",
+    "add": "Dokument hinzufügen",
+    "linkExisting": "Vorhandenes verknüpfen",
+    "searchDocument": "Dokument suchen",
+    "noLinkedDocuments": "Noch keine Dokumente verknüpft.",
+    "usage": {
+      "title": "Speicherverbrauch",
+      "ofLimit": "{{used}} von {{limit}} ({{percent}} %)",
+      "unlimited": "{{used}} belegt",
+      "nearLimit": "Der Speicher der Organisation ist fast voll.",
+      "limitReached": "Das Speicherlimit der Organisation ist erreicht. Lösche Dokumente oder erweitere das Paket."
+    },
+    "metadata": "Metadaten",
+    "description": "Beschreibung",
+    "saved": "Gespeichert.",
+    "versions": "Versionen",
+    "newVersion": "Neue Version",
+    "newVersionFile": "Datei der neuen Version",
+    "mimeType": "Dateityp",
+    "checksum": "Prüfsumme (SHA-256)",
+    "uploadedAt": "Hochgeladen am",
+    "noChecksum": "Keine",
+    "noVersions": "Noch kein Inhalt hochgeladen.",
+    "moreVersions": "Weitere Versionen laden",
+    "links": "Verknüpfungen",
+    "addLink": "Verknüpfung hinzufügen",
+    "noLinks": "Noch keine Verknüpfungen.",
+    "linkTypes": {
+      "ci": "CI",
+      "asset": "Asset",
+      "ticket": "Ticket",
+      "location": "Standort",
+      "disposal_record": "Entsorgung",
+      "stocktake": "Inventur",
+      "contract": "Vertrag",
+      "stock_movement": "Lagerbewegung"
+    },
+    "unlink": "Verknüpfung ({{type}}) lösen",
+    "linkTarget": "Ziel",
+    "linkKinds": {
+      "object": "CI oder Asset",
+      "location": "Standort"
+    },
+    "linkObject": "Objekt",
+    "link": "Verknüpfen"
+  },
+  "upload": {
+    "label": "Datei hochladen",
+    "hint": "Datei hierher ziehen oder auswählen, höchstens {{max}}.",
+    "choose": "Datei auswählen",
+    "percent": "{{percent}} %",
+    "progress": "Upload von {{name}}",
+    "done": "{{name}} hochgeladen.",
+    "retry": "Erneut hochladen",
+    "discard": "Verwerfen",
+    "errors": {
+      "tooLarge": "Die Datei ist zu groß für das Upload-Limit des Servers.",
+      "tooLargeLocal": "Die Datei ist zu groß (höchstens {{max}}).",
+      "unsupportedType": "Dieser Dateityp ist nicht erlaubt.",
+      "mimeMismatch": "Der Inhalt passt nicht zum Dateityp.",
+      "storageLimit": "Das Speicherlimit der Organisation ist erreicht.",
+      "unavailable": "Der Upload ist gerade nicht möglich. Bitte später erneut versuchen.",
+      "network": "Die Verbindung wurde unterbrochen. Bitte erneut versuchen.",
+      "withTrace": "{{detail}} (Trace-ID: {{traceId}})"
+    }
   },
   "stocktake": {
     "title": "Inventur",
@@ -723,7 +827,116 @@
     },
     "summary": "Inventuren starten und Fortschritt und Fehlbestände verfolgen.",
     "emptyTitle": "Noch keine Inventuren",
-    "emptyHint": "Starte eine Inventur, um Bestände mit dem Soll abzugleichen."
+    "emptyHint": "Starte eine Inventur, um Bestände mit dem Soll abzugleichen.",
+    "area": "Bereich",
+    "overview": "Überblick",
+    "startedAt": "Gestartet am",
+    "completedAt": "Abgeschlossen am",
+    "start": "Starten",
+    "cancel": "Inventur abbrechen",
+    "complete": "Abschließen",
+    "edit": "Bearbeiten",
+    "labels": "Etiketten drucken",
+    "labelFor": "Etikett für {{name}}",
+    "deleteNamed": "{{name}} löschen",
+    "open": "Offen",
+    "legacyHint": "Diese Inventur hat keinen Bereich (frühere Version). Sie kann weder gestartet noch gescannt, nur abgebrochen werden.",
+    "readOnlyCompleted": "Die Inventur ist abgeschlossen und nur lesbar.",
+    "readOnlyCancelled": "Die Inventur ist abgebrochen und nur lesbar.",
+    "recentScans": "Letzte Scans",
+    "results": {
+      "found": "Gefunden",
+      "missing": "Fehlend",
+      "unexpected": "Unerwartet"
+    },
+    "scanMethods": {
+      "barcode": "Barcode",
+      "qrcode": "QR-Code",
+      "rfid": "RFID",
+      "manual": "Manuell"
+    },
+    "counters": {
+      "label": "Zählstand",
+      "expected": "Soll",
+      "found": "Gefunden",
+      "unexpected": "Unerwartet",
+      "open": "Noch offen",
+      "missing": "Fehlend"
+    },
+    "columns": {
+      "asset": "Asset",
+      "consumable": "Mengenartikel",
+      "bin": "Lagerplatz",
+      "expected": "Soll",
+      "counted": "Ist",
+      "difference": "Differenz",
+      "count": "Zählen",
+      "expectedLocation": "Erwarteter Standort",
+      "foundLocation": "Fundort",
+      "result": "Ergebnis",
+      "scannedAt": "Zeitpunkt",
+      "object": "Objekt",
+      "method": "Erfassung"
+    },
+    "snapshot": {
+      "assets": "Soll-Bestand: Assets",
+      "consumables": "Soll-Bestand: Mengenartikel je Lagerplatz",
+      "noAssets": "Keine Assets im Soll-Bestand.",
+      "noConsumables": "Keine Mengenartikel im Soll-Bestand."
+    },
+    "quantities": {
+      "countedSoFar": "Bisher gezählt: {{sum}}",
+      "additional": "Zusätzliche Menge",
+      "additionalFor": "Zusätzliche Menge für {{name}} in {{bin}}",
+      "count": "Zählen"
+    },
+    "scan": {
+      "title": "Scannen",
+      "open": "Scanner öffnen",
+      "dialogTitle": "Inventur scannen",
+      "dialogDescription": "Standortetikett setzt den Fundort; Assets und Mengenartikel werden dort erfasst.",
+      "place": "Fundort",
+      "currentPlace": "Aktueller Fundort: {{name}}",
+      "noPlace": "Zuerst einen Fundort wählen oder ein Standortetikett scannen.",
+      "placeSet": "Fundort gesetzt: {{name}}",
+      "needBin": "Mengenartikel werden in einem Lagerplatz (Bin) gezählt. Bitte einen Lagerplatz als Fundort wählen.",
+      "recorded": "{{name}}: {{result}}",
+      "tally": "Gefunden {{found}} · Unerwartet {{unexpected}} · Noch offen {{open}}",
+      "countIn": "{{name}} in {{bin}} zählen",
+      "manualTitle": "Fund ohne Scanner erfassen",
+      "manualObject": "Gefundenes Objekt",
+      "quantity": "Menge",
+      "record": "Fund erfassen"
+    },
+    "differences": {
+      "title": "Differenzliste",
+      "assets": "Assets",
+      "quantities": "Mengen",
+      "moved": "Abweichender Standort",
+      "none": "Keine Differenzen."
+    },
+    "confirmStart": {
+      "title": "Inventur starten?",
+      "body": "Der Start friert den Soll-Bestand des Bereichs {{area}} ein. Spätere Bewegungen ändern ihn nicht mehr."
+    },
+    "confirmCancel": {
+      "title": "Inventur abbrechen?",
+      "body": "Die Inventur wird abgebrochen und ist danach nur noch lesbar. Es werden keine Korrekturen gebucht."
+    },
+    "confirmComplete": {
+      "title": "Inventur abschließen?",
+      "body": "Der Abschluss bucht voraussichtlich diese Bewegungen; noch offene Einträge gelten danach als fehlend.",
+      "movements": "Voraussichtliche Bewegungen",
+      "none": "Keine Bewegungen zu buchen.",
+      "transfer": "{{type}}: {{name}} von {{from}} nach {{to}}",
+      "correction": "{{type}}: {{name}} in {{bin}} ({{delta}})",
+      "note": "Maßgeblich ist der Bestand beim Abschluss; die gebuchten Bewegungen zeigt die Antwort."
+    },
+    "completion": {
+      "title": "Gebuchte Bewegungen",
+      "summary": "Gebuchte Korrekturen: {{number}}",
+      "movement": "{{type}}: {{name}} ({{from}} → {{to}}, Menge {{quantity}})"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -754,7 +967,88 @@
       "high": "Hoch",
       "critical": "Kritisch"
     },
-    "allPriorities": "Alle Prioritäten"
+    "allPriorities": "Alle Prioritäten",
+    "allCategories": "Alle Kategorien",
+    "myTeams": "Meine Teams",
+    "assignment": "Zuweisung an Person oder Team",
+    "relatedObject": "Bezugsobjekt (CI oder Asset)",
+    "detail": {
+      "notFound": "Ticket nicht gefunden",
+      "edit": "Bearbeiten",
+      "details": "Details",
+      "dueDate": "Fällig",
+      "noDueDate": "keine Fälligkeit",
+      "noDescription": "Keine Beschreibung",
+      "noRelated": "Kein Bezugsobjekt",
+      "updatedAt": "Geändert",
+      "resolvedAt": "Gelöst am",
+      "closedAt": "Geschlossen am"
+    },
+    "workflow": {
+      "title": "Status",
+      "current": "Aktueller Status:",
+      "moveTo": "→ {{status}}",
+      "reopen": "Wieder öffnen",
+      "none": "Kein weiterer Statuswechsel möglich.",
+      "conflict": "Statuswechsel abgelehnt: {{detail}} Das Ticket wurde neu geladen."
+    },
+    "assign": {
+      "title": "Zuweisung",
+      "user": "Person",
+      "team": "Team",
+      "none": "nicht zugewiesen",
+      "submit": "Zuweisen"
+    },
+    "links": {
+      "title": "Verknüpfte Objekte",
+      "add": "Objekt verknüpfen",
+      "submit": "Verknüpfen",
+      "remove": "Verknüpfung lösen: {{type}}",
+      "empty": "Keine verknüpften Objekte.",
+      "more": "Weitere laden",
+      "kind": "Art des Ziels",
+      "object": "CI oder Asset",
+      "duplicate": "Dieses Objekt ist bereits mit dem Ticket verknüpft.",
+      "notFound": "Ticket oder Objekt nicht gefunden.",
+      "kinds": {
+        "object": "CI oder Asset",
+        "location": "Standort"
+      },
+      "types": {
+        "asset": "Asset",
+        "ci": "CI",
+        "contract": "Vertrag",
+        "location": "Standort",
+        "review_item": "Prüfeintrag"
+      }
+    },
+    "comments": {
+      "title": "Kommentare",
+      "empty": "Noch keine Kommentare.",
+      "more": "Ältere laden",
+      "new": "Neuer Kommentar",
+      "internalToggle": "Interner Kommentar",
+      "internal": "Intern",
+      "external": "Extern",
+      "system": "System",
+      "submit": "Kommentieren"
+    },
+    "attachments": {
+      "title": "Anhänge ({{count}})"
+    },
+    "sla": {
+      "title": "SLA",
+      "response": "Reaktion",
+      "resolution": "Lösung",
+      "due": "Fällig",
+      "remaining": "noch {{duration}}",
+      "overdue": "überfällig seit {{duration}}",
+      "met": "erfüllt",
+      "duration": "{{hours}} h {{minutes}} min",
+      "paused": "pausiert",
+      "breached": "verletzt",
+      "none": "Kein SLA zugeordnet."
+    }
   },
   "userMgmt": {
     "title": "Benutzer & Teams",
@@ -1194,6 +1488,154 @@
     "startHint": "Wählen Sie ein Format; die Datei steht zum Download bereit, sobald der Auftrag abgeschlossen ist.",
     "jobsHint": "Fertige Exporte bleiben 24 Stunden verfügbar."
   },
+  "import": {
+    "title": "Import",
+    "subtitle": "CSV- oder XLSX-Datei hochladen, Spalten zuordnen, im Dry Run prüfen und importieren.",
+    "steps": {
+      "label": "Schritte des Imports",
+      "item": "{{index}}. {{name}}",
+      "file": "Datei",
+      "mapping": "Zuordnung",
+      "check": "Prüfen",
+      "run": "Ausführen"
+    },
+    "back": "Zurück",
+    "next": {
+      "mapping": "Weiter zur Zuordnung",
+      "check": "Weiter zum Prüfen",
+      "run": "Weiter zum Ausführen"
+    },
+    "file": {
+      "title": "Datei",
+      "hint": "CSV oder XLSX, höchstens 50 MB. Die Datei wird als Dokument gespeichert und vor dem Import auf Schadsoftware geprüft.",
+      "label": "Importdatei hochladen",
+      "scanStatus": "Scanstatus:",
+      "scanPending": "Die Datei wird auf Schadsoftware geprüft …",
+      "infected": "Die Datei ist infiziert und in Quarantäne. Der Import ist abgebrochen.",
+      "scanFailed": "Die Prüfung der Datei ist fehlgeschlagen. Der Import ist abgebrochen.",
+      "notClean": "Die Datei ist noch nicht sauber geprüft.",
+      "another": "Andere Datei hochladen"
+    },
+    "preview": {
+      "title": "Spaltenvorschau",
+      "loading": "Vorschau wird geladen …",
+      "summary": "{{format}}, {{columns}} Spalten, {{rows}} Beispielzeilen",
+      "sheet": "Tabellenblatt"
+    },
+    "formats": {
+      "csv": "CSV",
+      "xlsx": "XLSX"
+    },
+    "profile": {
+      "title": "Mapping-Profil",
+      "choose": "Profil",
+      "new": "Neues Profil",
+      "option": "{{name}} ({{entity}})",
+      "name": "Name des Profils",
+      "entity": "Objektart",
+      "mode": "Modus",
+      "ciType": "CI-Typ",
+      "ciTypeFromColumn": "Aus einer Spalte (CI-Typ)",
+      "format": "Format des Profils: {{format}}",
+      "identityKeys": "Identitätsschlüssel",
+      "identityHint": "Zuordnungsziele, an denen ein bestehendes Objekt erkannt wird.",
+      "identityEmpty": "Zuerst Spalten zuordnen.",
+      "create": "Profil anlegen",
+      "update": "Profil speichern",
+      "delete": "Profil löschen",
+      "saved": "Profil „{{name}}“ gespeichert.",
+      "unsaved": "Ungespeicherte Änderungen: vor dem Prüfen speichern."
+    },
+    "entities": {
+      "ci": "CIs",
+      "asset": "Assets",
+      "contract": "Verträge",
+      "consumable": "Verbrauchsmaterial",
+      "location": "Standorte",
+      "relationship": "Beziehungen"
+    },
+    "modes": {
+      "create_missing": "Nur fehlende anlegen",
+      "update_existing": "Nur bestehende aktualisieren",
+      "both": "Anlegen und aktualisieren"
+    },
+    "transforms": {
+      "trim": "Leerzeichen entfernen",
+      "date_format": "Datumsformat",
+      "enum_map": "Werte umsetzen",
+      "split": "Liste trennen",
+      "constant": "Fester Wert"
+    },
+    "mapping": {
+      "title": "Spaltenzuordnung",
+      "target": "Ziel von {{column}}",
+      "default": "Standardwert für {{name}}",
+      "examples": "Beispiele: {{values}}",
+      "transformsOf": "Transformationen von {{column}}",
+      "step": "{{index}}. {{name}}",
+      "addTransform": "Transformation für {{column}} hinzufügen",
+      "chooseTransform": "Transformation wählen",
+      "removeTransform": "{{name}} von {{column}} entfernen",
+      "layout": "Layout ({{name}})",
+      "values": "Zuordnung ({{name}})",
+      "separator": "Trennzeichen ({{name}})",
+      "constant": "Wert ({{name}})",
+      "enumMapPlaceholder": "quelle=ziel, quelle2=ziel2"
+    },
+    "check": {
+      "title": "Prüfen (Dry Run)",
+      "hint": "Der Dry Run liest die Datei mit dem Profil „{{name}}“ und prüft jede Zeile, ohne etwas zu schreiben.",
+      "start": "Dry Run starten"
+    },
+    "run": {
+      "title": "Ausführen",
+      "hint": "Der Import schreibt im Modus „{{mode}}“ des Profils.",
+      "start": "Import ausführen",
+      "again": "Neuen Import beginnen"
+    },
+    "report": {
+      "title": "Bericht",
+      "loading": "Bericht wird geladen …",
+      "running": "{{status}}: {{progress}} %",
+      "progress": "Fortschritt des Imports",
+      "ok": "Ohne Fehler",
+      "partial": "Teilerfolg: {{failed}} von {{total}} Zeilen fehlerhaft",
+      "allFailed": "Alle Zeilen fehlerhaft",
+      "dryRun": "Dry Run",
+      "dryRunNote": "Im Dry Run wurde nichts geschrieben; die Zahlen zeigen, was der Import tun würde.",
+      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Zeile, Feld, Code und Meldung jeder Zeile stehen im Bericht.",
+      "failed": "Der Import ist fehlgeschlagen.",
+      "cancelled": "Der Import wurde abgebrochen; es gibt keinen Bericht.",
+      "download": "Bericht herunterladen",
+      "notReady": "Der Bericht ist noch nicht fertig.",
+      "unknown": "–",
+      "counters": {
+        "total": "Gesamt",
+        "created": "Angelegt",
+        "updated": "Aktualisiert",
+        "skipped": "Übersprungen",
+        "failed": "Fehlerhaft"
+      }
+    },
+    "errors": {
+      "import-format-unsupported": "Das Dateiformat wird nicht unterstützt (nur CSV und XLSX).",
+      "import-sheet-not-found": "Das Tabellenblatt gibt es in der Datei nicht.",
+      "import-file-too-complex": "Die Datei ist zu komplex (höchstens 500 Spalten und 1 MiB je Zeile).",
+      "import-file-too-large": "Die Datei ist größer als 50 MB.",
+      "import-row-limit": "Die Datei hat mehr als 50.000 Datenzeilen.",
+      "notEntitled": "Der Import ist für die Organisation nicht freigeschaltet.",
+      "forbidden": "Dafür fehlt die Berechtigung.",
+      "field": "{{field}}: {{detail}}"
+    },
+    "permissions": {
+      "run": "Prüfen und Ausführen brauchen die Berechtigung import:run.",
+      "manage": "Profile speichern braucht die Berechtigung import:manage."
+    },
+    "api": {
+      "title": "Import über die API",
+      "hint": "Ohne Datei: POST /api/v1/imports mit rows (höchstens {{max}} Zeilen je Anfrage), einem Profil im Format json und einem Idempotency-Key gegen doppelte Läufe."
+    }
+  },
   "monitoring": {
     "title": "Monitoring",
     "subtitle": "Metriken abfragen und Alarmregeln verwalten.",
@@ -1322,9 +1764,36 @@
     "low": "niedrig",
     "ok": "OK",
     "minLevel": "Mindestbestand",
-    "stock": "Bestand",
     "emptyTitle": "Noch keine Artikel",
-    "emptyHint": "Lege einen Artikel an, um Bestand und Mindestbestand zu überwachen."
+    "emptyHint": "Lege einen Artikel an, um Bestand und Mindestbestand zu überwachen.",
+    "movementTypes": {
+      "receipt": "Wareneingang",
+      "retrieval": "Entnahme",
+      "correction": "Korrektur",
+      "transfer": "Umlagerung"
+    },
+    "book": "Buchen",
+    "correctionDirection": "Richtung",
+    "correctionIncrease": "Erhöhen (Zugang in ein Fach)",
+    "correctionDecrease": "Mindern (Abgang aus einem Fach)",
+    "bin": "Fach",
+    "reasonRequired": "Grund (Pflicht)",
+    "reserveTitle": "Menge reservieren",
+    "masterData": "Stammdaten",
+    "barcode": "Barcode",
+    "barcodeOptional": "Barcode (optional)",
+    "category": "Kategorie",
+    "unit": "Einheit",
+    "totalStock": "Gesamtbestand",
+    "quantityWithUnit": "{{quantity}} {{unit}}",
+    "belowMinimum": "Gesamtbestand {{stock}} liegt unter dem Mindestbestand {{min}}.",
+    "movements": "Bewegungen",
+    "stockPerBin": "Bestand je Fach",
+    "onHand": "Bestand",
+    "updatedAt": "Stand",
+    "noBinsTitle": "Noch kein Bestand",
+    "noBinsHint": "Sobald Ware in ein Fach gebucht ist, erscheint hier der Bestand je Fach.",
+    "loadMoreBins": "Weitere Fächer laden"
   },
   "orders": {
     "summary": "Interne Bestellungen mit Genehmigungs-Workflow.",
@@ -1733,55 +2202,32 @@
     }
   },
   "inventory": {
-    "assigned": "Zugewiesen",
     "movementType": "Bewegungsart",
     "reserved": "Reserviert",
-    "assetId": "Asset-ID (serialisiert)",
-    "itemId": "Mengenartikel-ID",
     "allTypes": "Alle Arten",
     "movements": "Bewegungen",
-    "repair": "Reparatur",
     "reservations": "Reservierungen",
     "reason": "Grund",
-    "availability": "Verfügbarkeit",
     "item": "Artikel",
     "quantity": "Menge",
     "noMovements": "Keine Bewegungen.",
-    "items": "Mengenartikel",
-    "toLocation": "Ziellocation-ID",
     "release": "Freigeben",
     "title": "Inventar",
     "noReservations": "Keine aktiven Reservierungen.",
-    "record": "Bewegung erfassen",
-    "total": "Gesamt",
     "available": "Verfügbar",
-    "subtitle": "Bewegungsjournal, Mengenartikel, Reservierungen und Verfügbarkeit.",
-    "objectKind": "Objektart",
-    "kindAsset": "Asset (serialisiert)",
+    "subtitle": "Bewegungsjournal und Reservierungen; Mengenartikel mit Bestand je Fach in der Lagerverwaltung.",
     "occurredAt": "Zeitpunkt",
     "project": "Projekt",
     "expiresAt": "Gültig bis",
     "emptyMovementsTitle": "Noch keine Bewegungen",
     "emptyMovementsHint": "Erfasse eine Bewegung, um Zu- und Abgänge nachzuvollziehen.",
-    "emptyItemsTitle": "Noch keine Mengenartikel",
-    "emptyItemsHint": "Mengenartikel erscheinen hier, sobald sie angelegt sind.",
     "emptyReservationsTitle": "Keine aktiven Reservierungen",
     "emptyReservationsHint": "Reservierte Assets und Artikel erscheinen hier, bis sie freigegeben werden.",
-    "emptyAvailabilityTitle": "Noch keine Verfügbarkeit",
-    "emptyAvailabilityHint": "Sobald Bestand gebucht ist, zeigt diese Übersicht, was verfügbar, reserviert und zugewiesen ist.",
-    "movementTypes": {
-      "receipt": "Wareneingang",
-      "transfer": "Umlagerung",
-      "assignment": "Zuweisung",
-      "return": "Rückgabe",
-      "deployment": "Einsatz",
-      "retrieval": "Entnahme",
-      "reservation": "Reservierung",
-      "release": "Freigabe",
-      "repair": "Reparatur",
-      "disposal": "Entsorgung",
-      "correction": "Korrektur"
-    }
+    "reservedUntil": "bis {{date}}",
+    "sku": "SKU",
+    "openHistory": "Historie öffnen: {{object}}",
+    "historyOf": "Historie: {{object}}",
+    "toConsumables": "Mengenartikel"
   },
   "impact": {
     "affectedList": "Betroffen:",
@@ -1880,14 +2326,14 @@
   "savedviews": {
     "sharedWithRoles": "für {{count}} Rollen",
     "title": "Gespeicherte Ansichten",
-    "presets": "Vorlagen",
+    "presets": "Systemansichten",
     "hint": "Wählen Sie links eine Ansicht aus.",
     "noResults": "Keine Treffer.",
-    "subtitle": "Vorlagen und eigene Filter — z. B. „Produktiv-Server ohne Backup“.",
-    "none": "Noch keine eigenen Ansichten.",
+    "subtitle": "Systemansichten wie „Meine Geräte“, „Garantie läuft bald ab“ und „Server ohne Monitoring“ sowie eigene und geteilte Filter.",
+    "none": "Noch keine eigenen oder geteilten Ansichten.",
     "results": "Ergebnisse",
     "shared": "geteilt",
-    "mine": "Meine Ansichten",
+    "mine": "Meine und geteilte Ansichten",
     "save": "Als Ansicht speichern",
     "namePrompt": "Name der Ansicht",
     "forbidden": "Keine Berechtigung für diese Ansicht",
@@ -1937,7 +2383,84 @@
       "rfid_tag": "RFID-Tag",
       "purchase_cost": "Anschaffungskosten",
       "purchase_date": "Kaufdatum",
-      "warranty_end": "Garantieende"
+      "warranty_end": "Garantieende",
+      "inventory_no": "Inventarnummer",
+      "purchase_price": "Anschaffungspreis",
+      "warranty_until": "Garantie bis",
+      "cost_center": "Kostenstelle",
+      "currency": "Währung",
+      "supplier_id": "Lieferant (ID)",
+      "contract_id": "Vertrag (ID)",
+      "owner_user_id": "Verantwortliche Person",
+      "owner_team_id": "Verantwortliches Team",
+      "firmware_version": "Firmware-Version",
+      "primary_mac": "Primäre MAC-Adresse",
+      "hardware_uuid": "Hardware-UUID",
+      "sys_object_id": "SNMP sysObjectID",
+      "vrf_id": "VRF",
+      "location": "Standort (Pfad)",
+      "location_kind": "Standortart",
+      "observed_at": "Beobachtet am",
+      "invoice_number": "Rechnungsnummer",
+      "notes": "Notizen",
+      "primary_ci_id": "Primäres CI",
+      "number": "Vertragsnummer",
+      "kind": "Art",
+      "start_date": "Beginn",
+      "end_date": "Ende",
+      "notice_period_days": "Kündigungsfrist (Tage)",
+      "value": "Wert",
+      "sku": "Artikelnummer (SKU)",
+      "unit": "Einheit",
+      "parent": "Übergeordneter Standort (Pfad)",
+      "path": "Standortpfad",
+      "rel_type": "Beziehungstyp",
+      "source_ci_id": "Quell-CI",
+      "target_ci_id": "Ziel-CI",
+      "source_serial_number": "Seriennummer der Quelle",
+      "target_serial_number": "Seriennummer des Ziels",
+      "source_hardware_uuid": "Hardware-UUID der Quelle",
+      "target_hardware_uuid": "Hardware-UUID des Ziels",
+      "source_primary_mac": "MAC-Adresse der Quelle",
+      "target_primary_mac": "MAC-Adresse des Ziels",
+      "source_management_ip": "Management-IP der Quelle",
+      "target_management_ip": "Management-IP des Ziels",
+      "source_interface_id": "Schnittstelle der Quelle",
+      "target_interface_id": "Schnittstelle des Ziels",
+      "confidence": "Konfidenz"
+    },
+    "editor": {
+      "newView": "Neue Ansicht",
+      "editFilter": "Filter bearbeiten",
+      "title": "Filter",
+      "name": "Name der Ansicht",
+      "entityKind": "Objektart",
+      "flat": "Weitere Kriterien",
+      "flatHint": "Diese Kriterien der Ansicht bleiben beim Speichern erhalten; der Builder bearbeitet sie nicht.",
+      "preview": "Vorschau",
+      "previewTitle": "Vorschau",
+      "previewTotal": "{{count}} Treffer",
+      "save": "Filter speichern",
+      "saveNew": "Als neue Ansicht speichern",
+      "saveAsNew": "Sie können diese Ansicht nicht ändern; sie wird als neue eigene Ansicht gespeichert.",
+      "incomplete": "Der Filter ist unvollständig; die markierten Knoten fehlen noch.",
+      "invalid": "Der Server hat den Filter abgelehnt; der Knoten ist markiert.",
+      "forbiddenFields": "Keine Berechtigung für die Felder: {{fields}}. Die Bedingungen sind markiert.",
+      "noWritePermission": "Keine Schreibberechtigung für diese Ansicht.",
+      "nameRequired": "Geben Sie einen Namen für die Ansicht an."
+    },
+    "readOnlyBadge": "schreibgeschützt",
+    "cloneLabel": "Klonen: {{name}}",
+    "clonePrompt": "Name der Kopie",
+    "cloneName": "Kopie von {{name}}",
+    "cloned": "„{{name}}“ wurde als eigene Ansicht angelegt.",
+    "editLabel": "Bearbeiten: {{name}}",
+    "foreign": "von anderen",
+    "errors": {
+      "forbidden": "Keine Berechtigung für diese Aktion.",
+      "notFound": "Die Ansicht gibt es nicht mehr, oder Sie dürfen sie nicht ändern.",
+      "conflict": "Eine eigene Ansicht mit diesem Namen gibt es schon.",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }
   },
   "lifecycle": {
@@ -1956,8 +2479,8 @@
     "outgoing": "Dieses CI → Ziel",
     "incoming": "Quelle → dieses CI",
     "type": "Beziehungstyp",
-    "targetCi": "CI-ID der Gegenstelle",
-    "ciNotFound": "Kein CI mit dieser ID gefunden.",
+    "targetCi": "Gegenstelle",
+    "ciNotFound": "Die Gegenstelle wurde nicht gefunden oder ist nicht sichtbar.",
     "notes": "Notiz",
     "verificationState": "Prüfstatus",
     "state": {
@@ -1966,7 +2489,47 @@
       "disputed": "Widersprochen",
       "stale": "Veraltet"
     },
-    "projected": "projiziert (Struktur)"
+    "projected": "projiziert (Struktur)",
+    "typePairRefused": "Der Beziehungstyp erlaubt diese Kombination von CI-Typen nicht.",
+    "cardinalityRefused": "Die Kante würde die Kardinalität des Beziehungstyps überschreiten.",
+    "noTypes": "Kein Beziehungstyp passt zu diesem CI und dieser Richtung.",
+    "attributes": "Attribute",
+    "history": {
+      "title": "Kantenhistorie",
+      "empty": "Keine Änderungen erfasst.",
+      "loadError": "Die Historie der Beziehung konnte nicht geladen werden.",
+      "fields": "Geändert: {{fields}}",
+      "by": "Von {{actor}} über {{source}}"
+    },
+    "changeKinds": {
+      "created": "Angelegt",
+      "updated": "Geändert",
+      "verification_changed": "Prüfstatus geändert",
+      "refreshed": "Aufgefrischt",
+      "removed": "Entfernt",
+      "suppressed": "Unterdrückt",
+      "rewired": "Umgehängt",
+      "restored": "Wiederhergestellt"
+    },
+    "changedFields": {
+      "attributes": "Attribute",
+      "confidence": "Konfidenz",
+      "verification_state": "Prüfstatus",
+      "source_system": "Quellsystem",
+      "notes": "Notiz"
+    },
+    "actorTypes": {
+      "user": "Benutzer",
+      "api_key": "API-Schlüssel",
+      "system": "System"
+    },
+    "changeSources": {
+      "ui": "Oberfläche",
+      "api": "API",
+      "collector": "Collector",
+      "import": "Import",
+      "system": "System"
+    }
   },
   "relationshipCard": {
     "suppress": "Entfernen und unterdrücken",
@@ -1990,6 +2553,94 @@
     "noReason": "Kein Grund angegeben",
     "lift": "Aufheben",
     "liftHint": "Die Discovery legt die Kante im nächsten Zyklus wieder an."
+  },
+  "relationshipTypes": {
+    "title": "Beziehungstypen",
+    "subtitle": "System- und eigene Beziehungstypen mit Richtung, Auswirkung und Attributschema.",
+    "add": "Beziehungstyp anlegen",
+    "editNamed": "{{name}} bearbeiten",
+    "deleteNamed": "{{name}} löschen",
+    "deleteTitle": "Beziehungstyp löschen",
+    "deleteConfirm": "Der Beziehungstyp {{name}} wird gelöscht.",
+    "keyFixed": "Schlüssel: {{key}} (unveränderlich)",
+    "loadError": "Die Beziehungstypen konnten nicht geladen werden.",
+    "empty": "Keine Beziehungstypen vorhanden.",
+    "system": "System",
+    "own": "Eigener Typ",
+    "columns": {
+      "name": "Name (Gegenrichtung)",
+      "key": "Schlüssel",
+      "category": "Kategorie",
+      "impact": "Auswirkung",
+      "cardinality": "Kardinalität",
+      "origin": "Herkunft"
+    },
+    "groups": {
+      "naming": "Benennung",
+      "behaviour": "Verhalten"
+    },
+    "fields": {
+      "key": "Schlüssel",
+      "displayName": "Name (ausgehend)",
+      "reverseName": "Name der Gegenrichtung (eingehend)",
+      "description": "Beschreibung",
+      "category": "Kategorie",
+      "impactDirection": "Auswirkungsrichtung",
+      "cardinality": "Kardinalität",
+      "directed": "Gerichtet",
+      "redundant": "Redundant (Auswirkung erst, wenn alle Kanten ausfallen)",
+      "allowedSource": "Erlaubte Quelltypen",
+      "allowedTarget": "Erlaubte Zieltypen",
+      "allowedHint": "Keine Auswahl erlaubt alle CI-Typen; Untertypen sind eingeschlossen."
+    },
+    "categories": {
+      "network": "Netzwerk",
+      "power": "Strom",
+      "hosting": "Hosting",
+      "logical": "Logisch",
+      "physical": "Physisch"
+    },
+    "impactDirections": {
+      "source_depends_on_target": "Quelle hängt vom Ziel ab",
+      "target_depends_on_source": "Ziel hängt von der Quelle ab",
+      "none": "Keine Auswirkung",
+      "undirected": "Ungerichtet (beidseitig, heuristisch)"
+    },
+    "cardinalities": {
+      "many_to_many": "Viele zu vielen",
+      "one_to_one": "Eins zu eins",
+      "one_to_many": "Eins zu vielen",
+      "many_to_one": "Viele zu eins"
+    },
+    "schema": {
+      "title": "Attributschema der Kanten",
+      "empty": "Kanten dieses Typs haben keine Attribute.",
+      "add": "Attribut hinzufügen",
+      "attribute": "Attribut {{number}}",
+      "remove": "Attribut {{number}} entfernen",
+      "key": "Schlüssel",
+      "labelDe": "Bezeichnung (Deutsch)",
+      "labelEn": "Bezeichnung (Englisch)",
+      "dataType": "Datentyp",
+      "required": "Pflichtfeld",
+      "default": "Vorgabewert",
+      "enumValues": "Erlaubte Werte (kommagetrennt)",
+      "min": "Minimum",
+      "max": "Maximum",
+      "minLength": "Mindestlänge",
+      "maxLength": "Höchstlänge",
+      "pattern": "Muster (regulärer Ausdruck)"
+    },
+    "errors": {
+      "keyTaken": "Ein Beziehungstyp mit diesem Schlüssel existiert bereits.",
+      "systemKey": "Der Schlüssel gehört einem Systemtyp und kann nicht verwendet werden.",
+      "inUse": "Der Beziehungstyp wird von Beziehungen oder Unterdrückungen verwendet und kann nicht gelöscht werden.",
+      "invalid": "Ungültige Definition: {{detail}}",
+      "forbidden": "Keine Berechtigung: Für Beziehungstypen ist das Recht relationship_type:manage nötig.",
+      "forbiddenList": "Keine Berechtigung, die Beziehungstypen zu lesen.",
+      "notFound": "Der Beziehungstyp wurde nicht gefunden oder ist geschützt.",
+      "reason": "Die Änderung wurde abgelehnt: {{detail}}"
+    }
   },
   "scope": {
     "label": "Arbeitsbereich",
@@ -2084,7 +2735,16 @@
     "object": "Objekt",
     "age": "Alter",
     "selectTitle": "Eintrag auswählen",
-    "selectHint": "Vergleichen Sie die Beobachtung mit dem CI und entscheiden Sie hier."
+    "selectHint": "Vergleichen Sie die Beobachtung mit dem CI und entscheiden Sie hier.",
+    "ticket": {
+      "create": "Ticket erstellen",
+      "bulkCreate": "Tickets erstellen",
+      "created": "Ticket #{{number}} erstellt.",
+      "result": "{{created}} Tickets erstellt, {{failed}} fehlgeschlagen.",
+      "failedItem": "{{name}}: {{message}}",
+      "linked": "Tickets",
+      "limit": "Höchstens {{limit}} Einträge je Sammelaktion."
+    }
   },
   "notifications": {
     "title": "Benachrichtigungen",
@@ -2156,6 +2816,9 @@
       },
       "template": {
         "migrate": "Template-Migration"
+      },
+      "import": {
+        "run": "Import-Lauf"
       }
     },
     "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet."
@@ -2688,5 +3351,544 @@
     "account": "Konto",
     "accountMenu": "Kontomenü von {{name}}",
     "openCount": "{{count}} offen"
+  },
+  "rules": {
+    "builder": {
+      "label": "Filter",
+      "chooseField": "Feld wählen …",
+      "chooseValue": "Wert wählen …",
+      "addCondition": "Bedingung hinzufügen",
+      "addGroup": "Gruppe hinzufügen",
+      "addRelated": "Beziehung hinzufügen",
+      "negate": "{{name}} negieren",
+      "removeNegation": "{{name}} aufheben",
+      "delete": "{{name}} löschen",
+      "serverError": "Vom Server abgelehnt: {{message}}",
+      "forbiddenField": "Keine Berechtigung für das Feld {{field}}.",
+      "groupName": "Gruppe ({{junction}})",
+      "junction": "Verknüpfung",
+      "empty": "Noch keine Bedingung – die Ansicht zeigt alle Objekte.",
+      "notName": "Negation",
+      "relatedName": "Beziehung",
+      "direction": "Richtung",
+      "maxDepth": "Tiefe (1–{{max}})",
+      "relTypes": "Beziehungstypen (keine Auswahl: alle)",
+      "relatedWhere": "Das verbundene CI erfüllt:",
+      "comparisonName": "Bedingung {{position}}",
+      "field": "Feld",
+      "operator": "Operator",
+      "value": "Wert",
+      "valueFrom": "{{label}} von",
+      "valueTo": "{{label}} bis",
+      "values": "{{label}}: gewählte Werte",
+      "addValueOf": "{{label}} hinzufügen",
+      "addValue": "Hinzufügen",
+      "removeValue": "{{value}} entfernen",
+      "likeHint": "* als Platzhalter; ohne * wird nach einer Teilzeichenkette gesucht.",
+      "limits": "{{nodes}} von {{maxNodes}} Knoten · Tiefe {{depth}} von {{maxDepth}}",
+      "loadError": "Der gespeicherte Filter lässt sich nicht laden: {{message}}",
+      "conditionLabel": "Bedingung",
+      "validationLabel": "Wertregel",
+      "conditionEmpty": "Keine Bedingung – die Regel gilt immer."
+    },
+    "junctions": {
+      "and": "UND",
+      "or": "ODER"
+    },
+    "junctionHints": {
+      "and": "Alle Bedingungen (UND)",
+      "or": "Mindestens eine (ODER)"
+    },
+    "nodeKinds": {
+      "and": "UND-Gruppe",
+      "or": "ODER-Gruppe",
+      "not": "NICHT",
+      "related": "Beziehung",
+      "compare": "Bedingung"
+    },
+    "directions": {
+      "out": "ausgehend (das CI ist Quelle)",
+      "in": "eingehend (das CI ist Ziel)",
+      "both": "beide Richtungen"
+    },
+    "ops": {
+      "eq": "ist gleich",
+      "ne": "ist ungleich",
+      "lt": "kleiner als",
+      "lte": "kleiner oder gleich",
+      "gt": "größer als",
+      "gte": "größer oder gleich",
+      "like": "passt auf (Text)",
+      "in": "ist einer von",
+      "exists": "ist gesetzt / leer",
+      "between": "liegt zwischen",
+      "has_any": "hat eines der Tags",
+      "has_all": "hat alle Tags"
+    },
+    "issues": {
+      "empty_group": "Die Gruppe ist leer.",
+      "no_field": "Wählen Sie ein Feld.",
+      "no_value": "Geben Sie einen Wert an.",
+      "list_empty": "Geben Sie mindestens einen Wert an.",
+      "two_values": "Geben Sie zwei Werte an (von und bis).",
+      "not_number": "Der Wert muss eine Zahl sein.",
+      "not_time": "Der Wert muss ein Datum oder eine Zeit sein.",
+      "no_related_filter": "Die Beziehung braucht eine Bedingung für das verbundene CI.",
+      "no_pattern": "Geben Sie ein Muster an.",
+      "bad_pattern": "Das Muster ist ungültig (keine Lookarounds und Rückverweise).",
+      "no_bound": "Geben Sie ein Minimum oder ein Maximum an.",
+      "min_above_max": "Das Minimum liegt über dem Maximum."
+    },
+    "exists": {
+      "true": "ist gesetzt",
+      "false": "ist leer"
+    },
+    "bool": {
+      "true": "ja",
+      "false": "nein"
+    },
+    "entityKinds": {
+      "ci": "CIs",
+      "asset": "Assets"
+    },
+    "fieldLabels": {
+      "tags": "Tags",
+      "attribute": "Attribut: {{name}}",
+      "assetAttribute": "Asset-Attribut: {{name}}",
+      "asset": "Asset: {{name}}"
+    },
+    "conditionJunctions": {
+      "all": "UND",
+      "any": "ODER"
+    },
+    "conditionJunctionHints": {
+      "all": "Alle Bedingungen (UND)",
+      "any": "Mindestens eine (ODER)"
+    },
+    "conditionOps": {
+      "eq": "ist gleich",
+      "ne": "ist ungleich",
+      "in": "ist einer von",
+      "not_in": "ist keiner von",
+      "gt": "größer als",
+      "gte": "größer oder gleich",
+      "lt": "kleiner als",
+      "lte": "kleiner oder gleich",
+      "contains": "enthält",
+      "empty": "ist leer",
+      "not_empty": "ist gesetzt"
+    },
+    "validationKinds": {
+      "all": "Alle Regeln",
+      "required": "Pflichtwert",
+      "pattern": "Muster",
+      "range": "Bereich",
+      "enum": "Erlaubte Werte"
+    },
+    "validation": {
+      "add": {
+        "all": "Gruppe (alle) hinzufügen",
+        "required": "Pflichtwert hinzufügen",
+        "pattern": "Muster hinzufügen",
+        "range": "Bereich hinzufügen",
+        "enum": "Erlaubte Werte hinzufügen"
+      },
+      "nodeName": "{{kind}} {{position}}",
+      "empty": "Noch keine Wertregel – fügen Sie mindestens eine hinzu.",
+      "requiredHint": "Der Wert darf nicht leer sein.",
+      "pattern": "Regulärer Ausdruck",
+      "of": "Gemessen wird",
+      "min": "Minimum",
+      "max": "Maximum",
+      "values": "Erlaubter Wert"
+    },
+    "rangeOf": {
+      "value": "der Wert (Zahl)",
+      "length": "die Länge (Zeichen)"
+    },
+    "preview": {
+      "conditionTitle": "Vorschau mit Beispielobjekt",
+      "validationTitle": "Vorschau mit Beispielwert",
+      "noFields": "Die Bedingung nennt noch kein Feld.",
+      "sampleOf": "Beispiel: {{field}}",
+      "sampleValue": "Beispielwert",
+      "absent": "(nicht gesetzt)",
+      "incomplete": "Die Regel ist noch unvollständig.",
+      "always": "Ohne Bedingung gilt die Regel immer.",
+      "holds": "Die Bedingung trifft zu – die Regel greift.",
+      "notHolds": "Die Bedingung trifft nicht zu – die Regel greift nicht.",
+      "noRule": "Noch keine Wertregel.",
+      "valid": "Der Wert erfüllt die Regel.",
+      "violations": "Verletzungen"
+    }
+  },
+  "movement": {
+    "types": {
+      "receipt": "Wareneingang",
+      "transfer": "Umlagerung",
+      "assignment": "Zuweisung",
+      "return": "Rückgabe",
+      "deployment": "Einsatz",
+      "retrieval": "Entnahme",
+      "reservation": "Reservierung",
+      "release": "Freigabe",
+      "repair": "Reparatur",
+      "disposal": "Entsorgung",
+      "correction": "Korrektur"
+    }
+  },
+  "stockFlow": {
+    "receive": "Empfangen",
+    "receiveTitle": "Ware empfangen",
+    "move": "Verschieben",
+    "moveTitle": "Bestand verschieben",
+    "moveAsset": "Asset verschieben",
+    "moveAssetTitle": "Asset an einen Standort verschieben",
+    "reserve": "Reservieren",
+    "reserveTitle": "Asset reservieren",
+    "consumable": "Mengenartikel",
+    "asset": "Asset",
+    "toBin": "Ziel-Fach",
+    "fromBin": "Quell-Fach",
+    "toLocation": "Ziel-Standort",
+    "chooseBin": "Fach wählen",
+    "binOption": "{{bin}} – Bestand {{onHand}}, reserviert {{reserved}}",
+    "loadingStock": "Bestand wird geladen …",
+    "noStock": "Der Mengenartikel liegt in keinem Fach.",
+    "stockLoadError": "Der Bestand je Fach konnte nicht geladen werden.",
+    "quantity": "Menge",
+    "reason": "Grund",
+    "quantityPositive": "Die Menge muss größer als 0 sein.",
+    "maxQuantity": "Höchstens {{max}} verfügbar (Bestand abzüglich Reservierungen).",
+    "sameBin": "Ziel-Fach und Quell-Fach müssen sich unterscheiden.",
+    "reservedUntil": "Reserviert bis",
+    "expiresAt": "Verfällt am (optional)",
+    "reserveFor": "Reserviert für",
+    "forUser": "Person",
+    "forProject": "Projekt",
+    "assignee": "Person",
+    "projectRef": "Projekt",
+    "receivePending": "{{quantity}} × „{{item}}“ wird in {{bin}} gebucht",
+    "receiveFailed": "Empfangen von „{{item}}“ fehlgeschlagen: {{message}}",
+    "movePending": "{{quantity}} × „{{item}}“ wird nach {{bin}} verschoben",
+    "moveFailed": "Verschieben von „{{item}}“ fehlgeschlagen: {{message}}",
+    "moveAssetPending": "„{{asset}}“ wird nach {{location}} verschoben",
+    "reservePending": "„{{asset}}“ wird reserviert",
+    "reserveFailed": "Reservieren von „{{asset}}“ fehlgeschlagen: {{message}}",
+    "convert": "Umwandeln",
+    "convertOf": "In Zuweisung umwandeln: {{item}}",
+    "releaseOf": "Freigeben: {{item}}",
+    "convertTitle": "Reservierung in Zuweisung umwandeln",
+    "convertDescription": "Die Reservierung für das Projekt „{{project}}“ wird einer Person oder einem Team zugewiesen.",
+    "recipient": "Empfänger",
+    "errors": {
+      "insufficientStock": "Der Bestand im Fach reicht nicht aus.",
+      "assetReserved": "Das Asset ist bereits reserviert.",
+      "assetAssigned": "Das Asset ist bereits zugewiesen.",
+      "notActive": "Die Reservierung ist nicht mehr aktiv."
+    }
+  },
+  "objectHistory": {
+    "title": "Historie",
+    "empty": "Noch keine Änderungen oder Bewegungen.",
+    "loadError": "Die Historie konnte nicht geladen werden.",
+    "movementsLoadError": "Die Bewegungen konnten nicht geladen werden.",
+    "quantity": "Menge {{quantity}}",
+    "from": "von {{location}}",
+    "to": "nach {{location}}",
+    "reason": "Grund: {{reason}}"
+  },
+  "tags": {
+    "title": "Tags",
+    "subtitle": "Der Tag-Katalog der Organisation: Schlüssel, Namen und Farben der Tags, die CIs tragen.",
+    "readOnly": "Sie können den Katalog lesen; Anlegen, Ändern und Löschen erfordern das Recht tag:manage.",
+    "create": "Tag anlegen",
+    "createTitle": "Tag anlegen",
+    "editTitle": "Tag bearbeiten",
+    "editLabel": "Bearbeiten: {{name}}",
+    "deleteLabel": "Löschen: {{name}}",
+    "deleteTitle": "Tag löschen",
+    "deleteConfirm": "Tag „{{name}}“ endgültig löschen?",
+    "empty": "Noch keine Tags.",
+    "loadError": "Die Tags können nicht geladen werden.",
+    "system": "System",
+    "custom": "Eigen",
+    "keyHint": "Kleinbuchstaben, Ziffern, _ und -, höchstens 63 Zeichen; nach dem Anlegen nicht änderbar.",
+    "keyFixed": "Der Schlüssel ist nicht änderbar.",
+    "colorHint": "Optional, im Format #rrggbb; leer entfernt die Farbe.",
+    "fields": {
+      "name": "Name",
+      "key": "Schlüssel",
+      "nameDe": "Name (Deutsch)",
+      "nameEn": "Name (Englisch)",
+      "color": "Farbe",
+      "kind": "Art"
+    },
+    "errors": {
+      "keyFormat": "Der Schlüssel ist ungültig: Kleinbuchstaben, Ziffern, _ und -, beginnend mit Buchstabe oder Ziffer.",
+      "colorFormat": "Die Farbe muss das Format #rrggbb haben.",
+      "nameRequired": "Geben Sie mindestens einen Namen an.",
+      "keyTaken": "Einen Tag mit diesem Schlüssel gibt es schon.",
+      "inUse": "Der Tag ist noch zugeordnet oder ein System-Tag und kann nicht gelöscht werden.",
+      "forbidden": "Ihnen fehlt das Recht tag:manage.",
+      "forbiddenRead": "Keine Berechtigung, die Tags zu lesen.",
+      "notFound": "Den Tag gibt es nicht mehr.",
+      "invalid": "Ungültige Angaben: {{detail}}",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "ruleCatalog": {
+    "title": "Regelkatalog",
+    "subtitle": "Validierungen und Bedingungen je Typ, Attribut-Set oder Template-Version",
+    "hint": "Eine Regel gilt für ein Attribut genau eines Ziels. Ohne Bedingung gilt sie immer; Pflicht-, Schreibschutz- und Sichtbarkeitsregeln setzen den Zustand des Attributs, solange die Bedingung zutrifft. Die Regeln der Attributdefinitionen bleiben daneben bestehen.",
+    "moduleOff": "Das Modul Metamodell ist in dieser Version nicht aktiv.",
+    "create": "Regel anlegen",
+    "createTitle": "Regel anlegen",
+    "editTitle": "Regel {{key}} bearbeiten",
+    "edit": "Regel {{key}} bearbeiten",
+    "deleteRule": "Regel {{key}} löschen",
+    "deleteTitle": "Regel löschen",
+    "deleteConfirm": "Die Regel {{key}} wird gelöscht.",
+    "delete": "Löschen",
+    "save": "Speichern",
+    "notDeleted": "Nicht gelöscht: {{reason}}",
+    "empty": "Keine Regeln für diese Filter.",
+    "listLabel": "Regeln",
+    "loadMore": "Weitere laden",
+    "always": "immer",
+    "system": "System",
+    "readOnly": "nur lesbar",
+    "active": "aktiv",
+    "inactive": "inaktiv",
+    "noTarget": "ohne Ziel",
+    "targetLine": "{{kind}}: {{name}}",
+    "versionLabel": "{{template}} · Version {{version}} ({{status}})",
+    "kinds": {
+      "validation": "Validierung",
+      "required": "Pflicht",
+      "readonly": "Schreibgeschützt",
+      "visible": "Sichtbar"
+    },
+    "targets": {
+      "ci_type": "CI-Typ",
+      "attribute_set": "Attribut-Set",
+      "template_version": "Template-Version"
+    },
+    "filters": {
+      "ci_type": "CI-Typ",
+      "attribute_set": "Attribut-Set",
+      "template_version": "Template-Version",
+      "attribute_key": "Attribut-Schlüssel",
+      "kind": "Regelart"
+    },
+    "columns": {
+      "key": "Schlüssel",
+      "attribute": "Attribut",
+      "kind": "Art",
+      "target": "Ziel",
+      "condition": "Bedingung",
+      "active": "Status",
+      "version": "Version",
+      "actions": "Aktionen"
+    },
+    "form": {
+      "key": "Schlüssel",
+      "kind": "Regelart",
+      "targetKind": "Art des Ziels",
+      "target": "Ziel",
+      "chooseTarget": "Ziel wählen …",
+      "attribute": "Attribut",
+      "chooseAttribute": "Attribut wählen …",
+      "isActive": "Aktiv",
+      "lockedVersion": "Die Template-Version ist veröffentlicht oder zurückgezogen; der Server lehnt Änderungen an ihren Regeln ab.",
+      "conditionHint": "Leer lassen, damit die Regel immer gilt.",
+      "condition": "Bedingung",
+      "ast": "Wertregel der Validierung",
+      "astRequired": "Eine Validierung braucht mindestens eine Wertregel.",
+      "message": "Meldung (optional)",
+      "messageDe": "Meldung Deutsch",
+      "messageEn": "Meldung Englisch"
+    },
+    "errors": {
+      "forbidden": "Keine Berechtigung: Systemregeln sind schreibgeschützt, Änderungen brauchen das Recht citype:manage.",
+      "conflict": "Konflikt: {{detail}} (z. B. ist die Template-Version veröffentlicht oder zurückgezogen oder der Schlüssel vergeben).",
+      "notFound": "Die Regel gibt es nicht mehr.",
+      "reason": "Abgelehnt: {{detail}}"
+    }
+  },
+  "scan": {
+    "title": "Code scannen",
+    "description": "Kamera, Handscanner oder Eingabe: Inventarnummer, Barcode oder Etikett.",
+    "scanFor": "{{field}} per Scan wählen",
+    "camera": "Kamerabild",
+    "codeLabel": "Code (Handscanner oder Eingabe)",
+    "resolve": "Übernehmen",
+    "close": "Schließen",
+    "manualMode": "Manuell eingeben",
+    "useCamera": "Kamera verwenden",
+    "starting": "Kamera wird gestartet …",
+    "scanning": "Code vor die Kamera halten oder mit dem Handscanner lesen.",
+    "reasons": {
+      "insecure": "Die Kamera steht nur über HTTPS oder localhost zur Verfügung. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "denied": "Der Zugriff auf die Kamera ist nicht freigegeben. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "noCamera": "Keine Kamera gefunden. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "error": "Die Kamera ließ sich nicht starten. Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen.",
+      "chosen": "Manuelle Eingabe: Code mit dem Handscanner lesen oder eingeben und mit Enter abschließen."
+    },
+    "resolving": "Code wird aufgelöst …",
+    "notFound": "„{{code}}“ nicht gefunden.",
+    "wrongKind": "Der Code bezeichnet {{kind}}; dieses Feld nimmt das nicht an.",
+    "kinds": {
+      "asset": "ein Asset",
+      "consumable": "einen Mengenartikel",
+      "location": "einen Standort, der hier nicht passt"
+    },
+    "kindLabels": {
+      "asset": "Asset",
+      "consumable": "Mengenartikel",
+      "location": "Standort"
+    },
+    "result": "Gescanntes Objekt",
+    "kind": "Art",
+    "name": "Name",
+    "inventoryNo": "Inventarnummer",
+    "code": "Code",
+    "path": "Pfad",
+    "actions": {
+      "assign": "Zuweisen",
+      "return": "Zurücknehmen",
+      "reserve": "Reservieren",
+      "receive": "Empfangen",
+      "move": "Verschieben",
+      "history": "Historie"
+    },
+    "notAssigned": "Das Asset ist niemandem zugewiesen.",
+    "scanAgain": "Weiter scannen"
+  },
+  "signature": {
+    "handover": "Unterschrift bei Übergabe",
+    "return": "Unterschrift bei Rückgabe",
+    "hint": "Mit Maus, Stift oder Finger im Feld unterschreiben. „Löschen“ leert das Feld. Ohne Unterschrift wird die Bewegung unsigniert gebucht.",
+    "signed": "Unterschrift erfasst. „Löschen“ leert das Feld.",
+    "clear": "Löschen",
+    "signer": "Name der unterschreibenden Person (optional; nötig, wenn ein Team hält)",
+    "tooLarge": "Die Unterschrift ist zu groß und wurde nicht gesendet. Bitte löschen und neu unterschreiben."
+  },
+  "labels": {
+    "title": "Etiketten drucken",
+    "assetDescription": "Etikett für {{name}} als PDF.",
+    "batchDescription": "Etiketten für den Inventurbereich {{name}} als PDF.",
+    "template": "Vorlage",
+    "kind": "Objektart",
+    "templates": {
+      "asset_50x25": "Asset-Etikett 50 × 25 mm",
+      "bin_100x50": "Lagerplatz-Etikett 100 × 50 mm",
+      "a4_24": "A4-Bogen mit 24 Etiketten"
+    },
+    "kinds": {
+      "asset": "Assets",
+      "consumable": "Mengenartikel",
+      "location": "Standorte"
+    },
+    "printAsset": "PDF öffnen",
+    "startBatch": "Etiketten erzeugen",
+    "download": "PDF herunterladen",
+    "openPdf": "PDF öffnen",
+    "queued": "Auftrag angelegt …",
+    "progress": "Status: {{status}} ({{progress}} %)",
+    "result": "{{labels}} Etiketten auf {{pages}} Seiten, abrufbar bis {{expires}}",
+    "close": "Schließen"
+  },
+  "formBuilder": {
+    "open": "Formular gestalten",
+    "title": "Form Builder",
+    "titleOf": "Formular gestalten: {{name}}",
+    "description": "Ordnet die Felder des Formulars je Typ, Template und Rolle an. Das Datenmodell bleibt unverändert.",
+    "breadcrumb": "CI-Typen",
+    "back": "Zurück zu den CI-Typen",
+    "typeError": "Der CI-Typ konnte nicht geladen werden",
+    "layoutsError": "Die Layouts konnten nicht geladen werden",
+    "resolveError": "Das aufgelöste Formular konnte nicht geladen werden",
+    "moduleOff": "Das Modul Metamodell ist abgeschaltet. Layouts lassen sich erst bearbeiten, wenn es wieder eingeschaltet ist.",
+    "selection": "Ziel und Rolle",
+    "target": "Ziel",
+    "targetType": "Typ {{name}}",
+    "targetTemplate": "Template {{name}}",
+    "role": "Rolle",
+    "noRole": "Ohne Rolle",
+    "state": "Layoutstand",
+    "ownLayout": "Eigenes Layout {{key}}, Version {{version}}",
+    "source": {
+      "default": "Standardlayout",
+      "inherited": "Geerbt von {{name}}",
+      "inheritedUnknown": "Geerbtes Layout"
+    },
+    "copiedRole": "Kopie des Formulars für die Rolle {{role}}",
+    "copyHint": "Der Editor startet mit einer Kopie. Erst das Speichern legt ein eigenes Layout an.",
+    "draftHint": "Änderungen landen im Draft {{name}}.",
+    "key": "Schlüssel des Layouts",
+    "publish": "Veröffentlichen",
+    "saveInDraft": "Im Draft speichern",
+    "removeOwn": "Eigenes Layout entfernen",
+    "published": "Das Layout ist veröffentlicht.",
+    "removed": "Das eigene Layout ist entfernt. Es gilt wieder das geerbte Layout.",
+    "savedInDraft": "Im Draft {{name}} gespeichert.",
+    "titlesRequired": "Jeder Abschnitt braucht einen Titel auf Deutsch und Englisch.",
+    "confirmPublish": {
+      "title": "Layout veröffentlichen?",
+      "description": "Das Layout gilt sofort für alle Formulare dieses Ziels und dieser Rolle."
+    },
+    "confirmRemove": {
+      "title": "Eigenes Layout entfernen?",
+      "description": "Danach gilt wieder das geerbte Layout oder das Standardlayout."
+    },
+    "errors": {
+      "forbidden": "Keine Berechtigung zum Bearbeiten der Formulare (citype:manage). Trace-ID: {{traceId}}",
+      "resolveForbidden": "Das Formular dieser Rolle darf nur mit dem Recht citype:manage geladen werden. Trace-ID: {{traceId}}",
+      "conflict": "Für dieses Ziel und diese Rolle gibt es schon ein Layout, oder der Schlüssel ist vergeben.",
+      "conflictKey": "Schlüssel oder Ziel und Rolle sind bereits belegt.",
+      "stale": "Das Layout wurde inzwischen geändert und neu geladen. Bitte die Änderungen erneut vornehmen.",
+      "invalid": "Der Server hat das Layout abgelehnt.",
+      "invalidAt": "Der Server hat einen Wert abgelehnt. Die Stelle ist markiert."
+    },
+    "origin": {
+      "own": "eigen",
+      "inherited": "geerbt von {{type}}",
+      "set": "Set {{name}}",
+      "global": "global"
+    },
+    "editor": {
+      "palette": "Feldpalette",
+      "paletteHint": "Attribute des Ziels. Datentyp und Pflicht werden nur angezeigt.",
+      "paletteEmpty": "Alle Attribute sind platziert.",
+      "targetSection": "Zielabschnitt",
+      "noSectionForPalette": "Zum Platzieren zuerst einen Abschnitt anlegen.",
+      "place": "Platzieren: {{name}}",
+      "placed": "{{name}} in Abschnitt {{section}} platziert.",
+      "required": "Pflicht",
+      "unknownField": "Kein Attribut des Ziels",
+      "requiredHint": "Pflichtfelder ohne Platz im Layout: {{names}}. Der Server hängt sie im Abschnitt „Pflichtfelder“ an.",
+      "sections": "Abschnitte",
+      "addSection": "Abschnitt hinzufügen",
+      "noSections": "Noch keine Abschnitte.",
+      "sectionAdded": "Abschnitt {{key}} angelegt.",
+      "sectionRemoved": "Abschnitt {{name}} gelöscht.",
+      "removeSection": "Abschnitt löschen: {{name}}",
+      "titleDe": "Titel (DE) von {{key}}",
+      "titleEn": "Titel (EN) von {{key}}",
+      "titleMissing": "Titel fehlt",
+      "visibleWhen": "Sichtbar, wenn die Regeln gelten: {{name}}",
+      "noRules": "Der Typ hat keine Katalogregeln.",
+      "ruleUnknown": "nicht im Katalog",
+      "noFields": "Noch keine Felder in diesem Abschnitt.",
+      "fieldsOf": "Felder von {{name}}",
+      "width": "Breite: {{name}}",
+      "moveToSection": "In Abschnitt verschieben: {{name}}",
+      "chooseSection": "Abschnitt wählen",
+      "movedToSection": "{{name}} in Abschnitt {{section}} verschoben, Position {{position}} von {{total}}.",
+      "removeField": "Entfernen: {{name}}",
+      "fieldRemoved": "{{name}} aus dem Layout entfernt.",
+      "refused": "Vom Server abgelehnt."
+    }
   }
 }

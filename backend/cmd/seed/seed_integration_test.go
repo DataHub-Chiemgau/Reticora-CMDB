@@ -6,10 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,26 +22,39 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
 )
 
+// baseTypeOnly restricts a query on the CIs c to the [B] data set: the
+// system types switch, pdu and server without their subtypes, so the
+// Phase-2 CIs of the derived types (WP-819) do not count.
+const baseTypeOnly = `c.ci_type_id IN (SELECT t.id FROM ci_type t WHERE t.organization_id IS NULL
+	AND t.key IN ('switch', 'pdu', 'server'))`
+
 // counts reads the seeded rows of one organization through the maintenance
-// pool.
+// pool; the CIs and their locations and documents count over the [B] types
+// only (baseTypeOnly).
 func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	for table, query := range map[string]string{
-		"client":            `SELECT count(*) FROM client WHERE organization_id = $1`,
-		"rack":              `SELECT count(*) FROM rack WHERE organization_id = $1`,
-		"ci":                `SELECT count(*) FROM ci WHERE organization_id = $1`,
-		"ci_location":       `SELECT count(*) FROM ci WHERE organization_id = $1 AND location_id IS NOT NULL`,
-		"ci_site":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND site_id IS NOT NULL`,
-		"ci_room":           `SELECT count(*) FROM ci WHERE organization_id = $1 AND room_id IS NOT NULL`,
-		"ci_document":       `SELECT count(*) FROM search_document WHERE organization_id = $1 AND entity_type = 'ci'`,
+		"client":      `SELECT count(*) FROM client WHERE organization_id = $1`,
+		"rack":        `SELECT count(*) FROM rack WHERE organization_id = $1`,
+		"ci":          `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly,
+		"ci_location": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.location_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_site":     `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.site_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_room":     `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND c.room_id IS NOT NULL AND ` + baseTypeOnly,
+		"ci_document": `SELECT count(*) FROM search_document d JOIN ci c ON c.id = d.entity_id
+			WHERE d.organization_id = $1 AND d.entity_type = 'ci' AND ` + baseTypeOnly,
 		"ci_attribute":      `SELECT count(*) FROM ci WHERE organization_id = $1 AND attributes->>'` + AttributeKey + `' LIKE 'CC-___'`,
 		"rack_mount":        `SELECT count(*) FROM rack_mount WHERE organization_id = $1`,
 		"network_interface": `SELECT count(*) FROM network_interface WHERE organization_id = $1`,
@@ -275,7 +291,7 @@ func TestSeedSIM01(t *testing.T) {
 
 	// Data integrity of the load seed (ABN-03, NFR-10).
 	for _, org := range []string{demo, acme} {
-		if violations := integrityViolations(t, f, org); len(violations) > 0 {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, org); len(violations) > 0 {
 			t.Errorf("integrity check of org %s: %v", org, violations)
 		}
 	}
@@ -388,12 +404,12 @@ func TestSeedNFR01Volumes(t *testing.T) {
 	// The spread of the rows in the demo organization; every query counts
 	// the rows that break a rule.
 	for name, query := range map[string]string{
-		"CIs without the interfaces eth0 to eth4": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND
+		"CIs without the interfaces eth0 to eth4": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + ` AND
 			(SELECT array_agg(n.name ORDER BY n.if_index) FROM network_interface n WHERE n.ci_id = c.id) IS DISTINCT FROM '{eth0,eth1,eth2,eth3,eth4}'`,
 		"management interfaces other than eth0": `SELECT count(*) FROM network_interface WHERE organization_id = $1 AND is_management <> (name = 'eth0')`,
 		"interfaces without four addresses": `SELECT count(*) FROM network_interface n WHERE n.organization_id = $1 AND
 			(SELECT count(*) FROM ip_address a WHERE a.interface_id = n.id) <> 4`,
-		"CIs whose eth0 lacks the management address": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND NOT EXISTS (
+		"CIs whose eth0 lacks the management address": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + ` AND NOT EXISTS (
 			SELECT 1 FROM network_interface n JOIN ip_address a ON a.interface_id = n.id
 			WHERE n.ci_id = c.id AND n.name = 'eth0' AND a.address = c.management_ip AND a.subnet_id = md5('seedvol-demo/subnet/management')::uuid)`,
 		"further addresses outside the server networks": `SELECT count(*) FROM ip_address a WHERE a.organization_id = $1
@@ -456,7 +472,7 @@ func TestSeedNFR01Volumes(t *testing.T) {
 
 	// Data integrity of every organization (ABN-03).
 	for _, o := range summary.Orgs {
-		if violations := integrityViolations(t, f, o.ID); len(violations) > 0 {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, o.ID); len(violations) > 0 {
 			t.Errorf("integrity check of %s: %v", o.Slug, violations)
 		}
 	}
@@ -466,50 +482,6 @@ func TestSeedNFR01Volumes(t *testing.T) {
 		t.Fatalf("second seed: %v", err)
 	}
 	check("second run")
-}
-
-// integrityViolations runs tests/integrity-check.sql for one organization
-// and returns the checks with violations (ABN-03).
-func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
-	t.Helper()
-	script, err := os.ReadFile("../../../tests/integrity-check.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	tx, err := f.Admin.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `SELECT set_config('integrity.org', $1, true)`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := tx.Query(ctx, string(script))
-	if err != nil {
-		t.Fatalf("integrity check: %v", err)
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	checks := 0
-	for rows.Next() {
-		var name string
-		var n int
-		if err := rows.Scan(&name, &n); err != nil {
-			t.Fatal(err)
-		}
-		checks++
-		if n > 0 {
-			out[name] = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if checks == 0 {
-		t.Fatal("integrity check returned no checks")
-	}
-	return out
 }
 
 // TestSeedOptionsAreBounded covers the bounds of the seed, also of the
@@ -528,6 +500,15 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		{Objects: 40, RelationshipsPerCI: MaxRelationshipsPerCI + 1, At: at},
 		{Objects: 40, Orgs: -1, At: at}, {Objects: 40, Orgs: MaxOrgs + 1, At: at},
 		{Objects: 40, At: at, APIKey: true, APIKeyRole: "auditor"}, {Objects: 40, At: at, APIKeyRole: "Viewer"},
+		// The Phase-2 volumes (WP-821): CIs and assets together at most
+		// MaxObjects, consumables and tickets at most 50.000, none
+		// negative or below SIM-01.
+		{Objects: 40, Assets: MaxObjects - 39, At: at}, {Objects: MaxObjects, Assets: BaseAssets, At: at},
+		{Objects: 25000, Assets: 25001, At: at},
+		{Objects: 40, Consumables: MaxConsumables + 1, At: at}, {Objects: 40, Tickets: MaxTickets + 1, At: at},
+		{Objects: 40, Assets: -1, At: at}, {Objects: 40, Consumables: -1, At: at}, {Objects: 40, Tickets: -1, At: at},
+		{Objects: 40, Assets: BaseAssets - 1, At: at}, {Objects: 40, Consumables: BaseConsumables - 1, At: at},
+		{Objects: 40, Tickets: BaseTickets - 1, At: at}, {Objects: 40, Assets: 1, At: at},
 	} {
 		if err := o.Validate(); err == nil {
 			t.Errorf("options %+v accepted", o)
@@ -546,6 +527,13 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		"one per CI and two relationships": {Objects: 40, InterfacesPerCI: 1, IPsPerCI: 1, RelationshipsPerCI: 2, At: at},
 		"the key of viewer":                {Objects: 40, At: at, APIKey: true, APIKeyRole: "viewer"},
 		"the key of client_technician":     {Objects: 40, At: at, APIKey: true, APIKeyRole: "client_technician"},
+		// WP-821: 10.000 objects of E-17 as CIs and assets; unset volumes
+		// are the SIM-01 quantities and do not count against MaxObjects.
+		"the Phase-2 load seed": {Objects: 5000, Assets: 5000, Consumables: 2000, Tickets: 5000, At: at},
+		"the SIM-01 volumes":    {Objects: 40, Assets: BaseAssets, Consumables: BaseConsumables, Tickets: BaseTickets, At: at},
+		"the largest volumes": {Objects: 40, Assets: MaxObjects - 40, Consumables: MaxConsumables, Tickets: MaxTickets,
+			At: at},
+		"the largest seed without Phase-2 volumes": {Objects: MaxObjects, At: at},
 	} {
 		if err := o.Validate(); err != nil {
 			t.Errorf("%s is refused: %v", name, err)
@@ -564,6 +552,18 @@ func TestSeedOptionsAreBounded(t *testing.T) {
 		if farthest := 1 + (dependencies-1)/servers; farthest >= servers {
 			t.Errorf("%d objects: dependency distance %d reaches the %d servers", objects, farthest, servers)
 		}
+	}
+	// An unset volume is the SIM-01 quantity (WP-821), which is what the
+	// levels of WP-819 and WP-820 seed.
+	unset := Options{Objects: 40, At: at}
+	if unset.assets() != BaseAssets || unset.consumables() != BaseConsumables || unset.tickets() != BaseTickets {
+		t.Errorf("unset volumes: %d assets, %d consumables, %d tickets", unset.assets(), unset.consumables(), unset.tickets())
+	}
+	full := stockContentOf(phase2Full)
+	if n := full.linked + chassisCount + full.stock; n != BaseAssets || full.consumables != BaseConsumables ||
+		len(ticketDocContentOf(phase2Full).tickets) != BaseTickets {
+		t.Errorf("the demo level seeds %d assets, %d consumables, %d tickets; want %d, %d, %d", n, full.consumables,
+			len(ticketDocContentOf(phase2Full).tickets), BaseAssets, BaseConsumables, BaseTickets)
 	}
 	// An empty APIKeyRole is org_admin (WP-325).
 	empty := Options{Objects: 40, At: at, APIKey: true}
@@ -653,6 +653,37 @@ func phase2Counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]i
 // load-test-viewer active. A further run changes no count and writes no
 // metamodel audit entry.
 //
+// The assets and the stock (WP-819): demo holds 2 suppliers and 3
+// contracts (one ends within 30 days of the anchor, one has ended), 60
+// assets with the AST-01 fields, 40 of them linked to the mounted [B] CIs
+// and 2 to the blade chassis through the CI service (ci.asset_id, primary
+// CI, asset.linked, warranty_days_left), 18 in the bins; the chassis carry
+// 4 configuration blades each without asset. The storage branch warehouse
+// → zone → shelf → 10 bins lies below the site hq, the 20 consumables get
+// their stock from receipts only, stock_level is the sum of the bookings
+// per consumable and bin and one consumable is below its minimum. There is
+// an internal order in each of the nine states, requested by engineer and
+// approved by the administrator, the receipts of three of them booked with
+// order_id, and a running stocktake of the warehouse with its frozen
+// snapshot and three scans (two found, one unexpected). viewer sees neither
+// purchase price nor cost center of an asset. acme holds 10 assets (5
+// linked), a branch with one bin and 2 consumables with stock. No link
+// crosses an organization, no serial_mismatch review arises, the integrity
+// check stays empty and a further run books nothing.
+//
+// The tickets and documents (WP-820): demo holds the default business
+// calendar in Europe/Berlin with weekdays and two holidays relative to the
+// anchor, the client hq is in Europe/Berlin and every priority has a
+// policy bound to the calendar; acme has the policies without a calendar
+// (built-in standard in UTC). The 10 and 2 tickets relate to [B] CIs or
+// assets, demo's are assigned to engineer, and their due times are those
+// of the SLA package for their creation; at the anchor a ticket is overdue
+// in each organization. The 3 and 1 documents carry two versions each with
+// size and sha256 of their deterministic content, the storage key of the
+// upload path and the scan status clean, linked to an asset, a contract
+// and a ticket of their own organization; organization_usage is the sum of
+// the sizes and a further run creates no version.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestSeedSIM01Phase2(t *testing.T) {
 	f := scopetest.Seed(t, "07")
@@ -685,9 +716,94 @@ func TestSeedSIM01Phase2(t *testing.T) {
 			"user": 2, "engineer": 0, "viewer": 1, "client_technician": 0,
 		},
 	}
+	// The assets and the stock (WP-819).
+	stockExpected := map[string]map[string]int{
+		demo: {
+			"supplier": 2, "contract": 3, "contract_ending": 1, "contract_ended": 1,
+			"asset": 60, "asset_ast01": 60, "asset_linked": 42, "ci_asset": 42, "asset_in_bin": 18, "asset_engineer": 15,
+			"chassis": 2, "chassis_asset": 2, "configuration_child": 8, "phase2_ci_network": 0,
+			"warranty_set": 42, "warranty_mismatch": 0, "warranty_expiring": 4, "serial_mismatch": 0,
+			"warehouse": 1, "zone": 1, "shelf": 1, "bin": 10, "bin_hq": 13,
+			"consumable": 20, "consumable_ast": 20, "below_min": 1, "stock_mismatch": 0, "cross_org": 0,
+			"other_movement": 0, "movement": 26, "order_receipt": 3, "order_receipt_quantity": 24,
+			"order": 9, "order_engineer": 9, "order_approved_by_admin": 6,
+			"order_draft": 1, "order_submitted": 1, "order_approved": 1, "order_rejected": 1, "order_ordered": 1,
+			"order_partially_received": 1, "order_received": 1, "order_closed": 1, "order_cancelled": 1,
+			"stocktake_running": 1, "stocktake_item_mismatch": 0, "stocktake_asset_item": 18,
+			"scan": 3, "scan_found": 2, "scan_unexpected": 1, "asset_grant_none": 2, "asset_link_audit": 42,
+		},
+		acme: {
+			"supplier": 0, "contract": 0, "contract_ending": 0, "contract_ended": 0,
+			"asset": 10, "asset_ast01": 0, "asset_linked": 5, "ci_asset": 5, "asset_in_bin": 5, "asset_engineer": 0,
+			"chassis": 0, "chassis_asset": 0, "configuration_child": 0, "phase2_ci_network": 0,
+			"warranty_set": 5, "warranty_mismatch": 0, "warranty_expiring": 4, "serial_mismatch": 0,
+			"warehouse": 1, "zone": 1, "shelf": 1, "bin": 1, "bin_hq": 4,
+			"consumable": 2, "consumable_ast": 0, "below_min": 0, "stock_mismatch": 0, "cross_org": 0,
+			"other_movement": 0, "movement": 2, "order_receipt": 0, "order_receipt_quantity": 0,
+			"order": 0, "order_engineer": 0, "order_approved_by_admin": 0,
+			"order_draft": 0, "order_submitted": 0, "order_approved": 0, "order_rejected": 0, "order_ordered": 0,
+			"order_partially_received": 0, "order_received": 0, "order_closed": 0, "order_cancelled": 0,
+			"stocktake_running": 0, "stocktake_item_mismatch": 0, "stocktake_asset_item": 0,
+			"scan": 0, "scan_found": 0, "scan_unexpected": 0, "asset_grant_none": 0, "asset_link_audit": 5,
+		},
+	}
+	// The calendar, the policies, the tickets and the documents (WP-820).
+	ticketExpected := map[string]map[string]int{
+		demo: {
+			"calendar": 1, "client_hq_timezone": 1, "sla": 4, "sla_calendar": 4,
+			"ticket": 10, "ticket_new": 2, "ticket_open": 2, "ticket_in_progress": 2, "ticket_waiting": 1,
+			"ticket_resolved": 2, "ticket_closed": 1, "ticket_related": 10, "ticket_related_asset": 3, "ticket_engineer": 10,
+			"ticket_created_before_at": 10, "ticket_sla": 10, "ticket_sla_calendar": 10, "ticket_first_response": 6,
+			"ticket_resolution": 3, "ticket_cross_org": 0,
+			"document": 3, "document_version": 6, "version_clean": 6, "version_key_mismatch": 0, "document_mirror_mismatch": 0,
+			"link_asset": 1, "link_contract": 1, "link_ticket": 1, "link_cross_org": 0, "usage_mismatch": 0,
+		},
+		acme: {
+			"calendar": 0, "client_hq_timezone": 0, "sla": 4, "sla_calendar": 0,
+			"ticket": 2, "ticket_new": 1, "ticket_open": 0, "ticket_in_progress": 1, "ticket_waiting": 0,
+			"ticket_resolved": 0, "ticket_closed": 0, "ticket_related": 2, "ticket_related_asset": 1, "ticket_engineer": 0,
+			"ticket_created_before_at": 2, "ticket_sla": 2, "ticket_sla_calendar": 0, "ticket_first_response": 1,
+			"ticket_resolution": 0, "ticket_cross_org": 0,
+			"document": 1, "document_version": 2, "version_clean": 2, "version_key_mismatch": 0, "document_mirror_mismatch": 0,
+			"link_asset": 1, "link_contract": 0, "link_ticket": 0, "link_cross_org": 0, "usage_mismatch": 0,
+		},
+	}
+	slugs := map[string]string{demo: "seedp2-demo", acme: "seedp2-acme"}
+	usage := map[string]int64{}
 	audits := map[string]int{}
 	check := func(round string) {
 		t.Helper()
+		for org, want := range ticketExpected {
+			got := ticketDocCounts(t, f, org, opts.At)
+			for name, n := range want {
+				if got[name] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, name, got[name], n)
+				}
+			}
+			if got["ticket_overdue"] < 1 {
+				t.Errorf("%s, org %s: no ticket is overdue at the anchor", round, org)
+			}
+			checkDueTimes(t, f, org, opts.At, org == demo)
+			checkChecksums(t, f, org, slugs[org])
+			var stored int64
+			if usageErr := f.Admin.QueryRow(ctx, `SELECT storage_bytes FROM organization_usage WHERE organization_id = $1`, org).
+				Scan(&stored); usageErr != nil {
+				t.Fatalf("usage of org %s: %v", org, usageErr)
+			}
+			if before, ok := usage[org]; !ok {
+				usage[org] = stored
+			} else if stored != before {
+				t.Errorf("%s, org %s: storage_bytes = %d, %d after the first run", round, org, stored, before)
+			}
+		}
+		for org, want := range stockExpected {
+			got := stockCounts(t, f, org, opts.At)
+			for name, n := range want {
+				if got[name] != n {
+					t.Errorf("%s, org %s: %s = %d, want %d", round, org, name, got[name], n)
+				}
+			}
+		}
 		for org, want := range expected {
 			got := phase2Counts(t, f, org)
 			for name, n := range want {
@@ -714,6 +830,13 @@ func TestSeedSIM01Phase2(t *testing.T) {
 		}
 	}
 	check("first run")
+
+	// The Phase-2 data keep the integrity of the data model (ABN-03).
+	for _, org := range []string{demo, acme} {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, org); len(violations) > 0 {
+			t.Errorf("integrity check of org %s: %v", org, violations)
+		}
+	}
 
 	// The administrator publishes the versions and is the actor of the
 	// metamodel audit entries.
@@ -783,6 +906,138 @@ func TestSeedSIM01Phase2(t *testing.T) {
 	check("third run")
 }
 
+// stockCounts reads the asset and stock rows of one organization (WP-819)
+// through the maintenance pool; at is the anchor of the seed. The
+// mismatch, cross-organization and network queries count violations.
+func stockCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	queries := map[string]string{
+		"supplier":        `SELECT count(*) FROM supplier WHERE organization_id = $1`,
+		"contract":        `SELECT count(*) FROM contract WHERE organization_id = $1 AND start_date IS NOT NULL AND end_date IS NOT NULL`,
+		"contract_ending": `SELECT count(*) FROM contract WHERE organization_id = $1 AND end_date BETWEEN $2::date AND $2::date + 30`,
+		"contract_ended":  `SELECT count(*) FROM contract WHERE organization_id = $1 AND end_date < $2::date`,
+		"asset":           `SELECT count(*) FROM asset WHERE organization_id = $1`,
+		// The AST-01 fields of WP-271, supplier and contract included.
+		"asset_ast01": `SELECT count(*) FROM asset WHERE organization_id = $1 AND manufacturer IS NOT NULL AND model IS NOT NULL
+			AND cost_center IS NOT NULL AND supplier_id IS NOT NULL AND contract_id IS NOT NULL AND owner_user_id IS NOT NULL
+			AND purchase_price IS NOT NULL AND warranty_until IS NOT NULL AND purchase_date < $2::date`,
+		// Primary CI and ci.asset_id agree; the asset has the client, the
+		// serial number and the location of its CI.
+		"asset_linked": `SELECT count(*) FROM asset a JOIN ci c ON c.id = a.ci_id AND c.asset_id = a.id
+			WHERE a.organization_id = $1 AND a.client_id = c.client_id AND a.serial_number = c.serial_number
+			AND a.location_id = c.location_id`,
+		"ci_asset": `SELECT count(*) FROM ci WHERE organization_id = $1 AND asset_id IS NOT NULL`,
+		"asset_in_bin": `SELECT count(*) FROM asset a JOIN location l ON l.id = a.location_id
+			WHERE a.organization_id = $1 AND l.kind = 'bin' AND a.ci_id IS NULL`,
+		// The system view my_devices_asset of engineer (WP-307).
+		"asset_engineer": `SELECT count(*) FROM asset a JOIN app_user u ON u.id = a.owner_user_id
+			WHERE a.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		"chassis": `SELECT count(*) FROM ci c JOIN ci_type t ON t.id = c.ci_type_id
+			WHERE c.organization_id = $1 AND t.key = '` + ChassisTypeKey + `'`,
+		"chassis_asset": `SELECT count(*) FROM ci c JOIN ci_type t ON t.id = c.ci_type_id JOIN asset a ON a.id = c.asset_id
+			WHERE c.organization_id = $1 AND t.key = '` + ChassisTypeKey + `' AND a.client_id = c.client_id`,
+		"configuration_child": `SELECT count(*) FROM ci c JOIN ci p ON p.id = c.parent_ci_id JOIN ci_type t ON t.id = c.ci_type_id
+			WHERE c.organization_id = $1 AND c.child_mode = 'configuration' AND c.asset_id IS NULL AND t.key = '` + BladeTypeKey + `'
+			AND c.client_id = p.client_id AND c.location_id = p.location_id`,
+		"phase2_ci_network": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND NOT ` + baseTypeOnly + ` AND (
+				EXISTS (SELECT 1 FROM network_interface n WHERE n.ci_id = c.id)
+				OR EXISTS (SELECT 1 FROM ci_relationship r WHERE r.source_ci_id = c.id OR r.target_ci_id = c.id))`,
+		"warranty_set": `SELECT count(*) FROM ci WHERE organization_id = $1 AND asset_id IS NOT NULL
+			AND jsonb_typeof(attributes->'` + ComputedKey + `') = 'number'`,
+		// warranty_days_left is the days from today to the warranty end of
+		// the asset (WP-717, WP-718); the system view warranty_expiring
+		// (WP-307) finds the linked CIs whose warranty ends within its days
+		// after the anchor, and more as the anchor ages.
+		"warranty_mismatch": `SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id JOIN organization o ON o.id = c.organization_id
+			WHERE c.organization_id = $1
+			AND (c.attributes->>'` + ComputedKey + `')::int IS DISTINCT FROM a.warranty_until - (now() AT TIME ZONE o.timezone)::date`,
+		"warranty_expiring": `SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id
+			WHERE c.organization_id = $1 AND a.warranty_until BETWEEN $2::date AND $2::date + ` + fmt.Sprint(savedview.WarrantyExpiringDays) + `
+			AND (c.attributes->>'` + ComputedKey + `')::int <= ` + fmt.Sprint(savedview.WarrantyExpiringDays),
+		"serial_mismatch": `SELECT count(*) FROM review_item WHERE organization_id = $1 AND kind = 'serial_mismatch'`,
+		"warehouse":       `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'warehouse'`,
+		"zone":            `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'zone'`,
+		"shelf":           `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'shelf'`,
+		"bin":             `SELECT count(*) FROM location WHERE organization_id = $1 AND kind = 'bin'`,
+		// The storage branch lies below the site hq.
+		"bin_hq": `SELECT count(*) FROM location l JOIN client c ON c.id = l.client_id JOIN site s ON s.id = l.site_id
+			WHERE l.organization_id = $1 AND l.kind IN ('warehouse', 'zone', 'shelf', 'bin') AND c.slug = 'hq'
+			AND s.client_id = c.id`,
+		"consumable":     `SELECT count(*) FROM consumable WHERE organization_id = $1 AND sku IS NOT NULL AND min_level > 0`,
+		"consumable_ast": `SELECT count(*) FROM consumable WHERE organization_id = $1 AND supplier_id IS NOT NULL`,
+		"below_min": `SELECT count(*) FROM consumable c WHERE c.organization_id = $1
+			AND (SELECT COALESCE(sum(s.on_hand), 0) FROM stock_level s WHERE s.consumable_id = c.id) < c.min_level`,
+		// stock_level.on_hand is the sum of the bookings per consumable and
+		// bin (WP-283).
+		"stock_mismatch": `SELECT count(*) FROM (
+				SELECT consumable_id, bin, sum(delta) AS booked FROM (
+					SELECT consumable_id, to_location_id AS bin, quantity AS delta FROM stock_movement
+					WHERE organization_id = $1 AND consumable_id IS NOT NULL AND to_location_id IS NOT NULL
+					UNION ALL
+					SELECT consumable_id, from_location_id, -quantity FROM stock_movement
+					WHERE organization_id = $1 AND consumable_id IS NOT NULL AND from_location_id IS NOT NULL) m
+				GROUP BY consumable_id, bin) b
+			FULL JOIN (SELECT consumable_id, location_id, on_hand FROM stock_level WHERE organization_id = $1) s
+				ON s.consumable_id = b.consumable_id AND s.location_id = b.bin
+			WHERE s.on_hand IS DISTINCT FROM b.booked`,
+		"cross_org": `SELECT (SELECT count(*) FROM ci c JOIN asset a ON a.id = c.asset_id
+				WHERE c.organization_id = $1 AND a.organization_id <> $1)
+			+ (SELECT count(*) FROM stock_level s LEFT JOIN consumable k ON k.id = s.consumable_id
+				LEFT JOIN location l ON l.id = s.location_id
+				WHERE s.organization_id = $1 AND (k.organization_id IS DISTINCT FROM $1 OR l.organization_id IS DISTINCT FROM $1))
+			+ (SELECT count(*) FROM stock_movement m LEFT JOIN consumable k ON k.id = m.consumable_id
+				LEFT JOIN asset a ON a.id = m.asset_id LEFT JOIN location l ON l.id = m.to_location_id
+				WHERE m.organization_id = $1 AND (k.organization_id <> $1 OR a.organization_id <> $1 OR l.organization_id <> $1))`,
+		"other_movement": `SELECT count(*) FROM stock_movement WHERE organization_id = $1
+			AND (movement_type <> 'receipt' OR item_kind <> 'consumable')`,
+		"movement":      `SELECT count(*) FROM stock_movement WHERE organization_id = $1`,
+		"order_receipt": `SELECT count(*) FROM stock_movement WHERE organization_id = $1 AND order_id IS NOT NULL`,
+		"order_receipt_quantity": `SELECT COALESCE(sum(quantity), 0)::int FROM stock_movement
+			WHERE organization_id = $1 AND order_id IS NOT NULL`,
+		"order": `SELECT count(*) FROM internal_order WHERE organization_id = $1 AND supplier_id IS NOT NULL
+			AND target_location_id IS NOT NULL`,
+		"order_engineer": `SELECT count(*) FROM internal_order o JOIN app_user u ON u.id = o.requested_by
+			WHERE o.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		// Four eyes: the administrator approves or rejects what engineer
+		// requested.
+		"order_approved_by_admin": `SELECT count(*) FROM internal_order o JOIN app_user u ON u.id = o.approved_by
+			WHERE o.organization_id = $1 AND u.email LIKE 'admin@%' AND o.approved_by <> o.requested_by`,
+		"stocktake_running": `SELECT count(*) FROM stocktake WHERE organization_id = $1 AND status = 'in_progress'
+			AND started_at IS NOT NULL AND location_id IS NOT NULL`,
+		// The frozen snapshot holds the stock assets and the stock of every
+		// bin of the branch.
+		"stocktake_item_mismatch": `SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM stocktake WHERE organization_id = $1) THEN 0 ELSE
+				(SELECT count(*) FROM stocktake_item WHERE organization_id = $1)
+				- (SELECT count(*) FROM asset a JOIN location l ON l.id = a.location_id WHERE a.organization_id = $1 AND l.kind = 'bin')
+				- (SELECT count(*) FROM stock_level WHERE organization_id = $1) END`,
+		"stocktake_asset_item": `SELECT count(*) FROM stocktake_item WHERE organization_id = $1 AND item_kind = 'asset'`,
+		"scan":                 `SELECT count(*) FROM stock_scan WHERE organization_id = $1`,
+		"scan_found":           `SELECT count(*) FROM stock_scan WHERE organization_id = $1 AND scan_result = 'found'`,
+		"scan_unexpected":      `SELECT count(*) FROM stock_scan WHERE organization_id = $1 AND scan_result = 'unexpected'`,
+		"asset_grant_none": `SELECT count(*) FROM field_grant g JOIN role r ON r.id = g.role_id
+			WHERE g.organization_id = $1 AND r.name = 'viewer' AND g.object_kind = 'asset' AND g.level = 'none'
+			AND g.field_key IN ('core.purchase_cost', 'core.cost_center')`,
+		"asset_link_audit": `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = 'asset.linked'`,
+	}
+	for _, status := range []string{"draft", "submitted", "approved", "rejected", "ordered", "partially_received", "received",
+		"closed", "cancelled"} {
+		queries["order_"+status] = `SELECT count(*) FROM internal_order WHERE organization_id = $1 AND status = '` + status + `'`
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
 // sameKeys reports whether a and b hold the same keys.
 func sameKeys(a, b []string) bool {
 	if len(a) != len(b) {
@@ -801,4 +1056,447 @@ func sameKeys(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// ticketDocCounts reads the calendar, SLA, ticket and document rows of one
+// organization (WP-820) through the maintenance pool; at is the anchor of
+// the seed. The mismatch and cross-organization queries count violations.
+func ticketDocCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	queries := map[string]string{
+		"calendar": `SELECT count(*) FROM business_calendar WHERE organization_id = $1 AND client_id IS NULL AND is_default
+			AND timezone = '` + CalendarTimezone + `' AND jsonb_array_length(weekly_hours) = 5 AND jsonb_array_length(holidays) = 2`,
+		"client_hq_timezone": `SELECT count(*) FROM client WHERE organization_id = $1 AND slug = 'hq'
+			AND timezone = '` + CalendarTimezone + `'`,
+		"sla": `SELECT count(DISTINCT priority) FROM sla WHERE organization_id = $1 AND client_id IS NULL AND business_calendar
+			AND priority IN ('low', 'medium', 'high', 'critical')`,
+		"sla_calendar": `SELECT count(*) FROM sla s JOIN business_calendar b ON b.id = s.calendar_id
+			AND b.organization_id = s.organization_id WHERE s.organization_id = $1`,
+		"ticket": `SELECT count(*) FROM ticket WHERE organization_id = $1`,
+		"ticket_related": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND client_id IS NOT NULL
+			AND (related_ci_id IS NOT NULL OR related_asset_id IS NOT NULL)`,
+		"ticket_related_asset": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND related_asset_id IS NOT NULL`,
+		"ticket_engineer": `SELECT count(*) FROM ticket t JOIN app_user u ON u.id = t.assignee_id
+			WHERE t.organization_id = $1 AND u.email LIKE 'engineer@%'`,
+		"ticket_created_before_at": `SELECT count(*) FROM ticket WHERE organization_id = $1 AND created_at < $2`,
+		"ticket_sla":               `SELECT count(*) FROM ticket_sla WHERE organization_id = $1`,
+		"ticket_sla_calendar":      `SELECT count(*) FROM ticket_sla WHERE organization_id = $1 AND calendar_id IS NOT NULL`,
+		"ticket_first_response":    `SELECT count(*) FROM ticket_sla WHERE organization_id = $1 AND first_response_at IS NOT NULL`,
+		"ticket_resolution": `SELECT count(*) FROM ticket_sla s JOIN ticket t ON t.id = s.ticket_id
+			WHERE s.organization_id = $1 AND s.resolved_at IS NOT NULL AND t.resolved_at = s.resolved_at`,
+		// At the anchor a response or a resolution is due and missing.
+		"ticket_overdue": `SELECT count(*) FROM ticket_sla WHERE organization_id = $1
+			AND ((first_response_at IS NULL AND response_due_at < $2) OR (resolved_at IS NULL AND resolution_due_at < $2))`,
+		"ticket_cross_org": `SELECT count(*) FROM ticket t LEFT JOIN ci c ON c.id = t.related_ci_id
+			LEFT JOIN asset a ON a.id = t.related_asset_id LEFT JOIN app_user u ON u.id = t.assignee_id
+			LEFT JOIN ticket_sla s ON s.ticket_id = t.id LEFT JOIN sla p ON p.id = s.sla_id
+			WHERE t.organization_id = $1 AND (c.organization_id <> $1 OR a.organization_id <> $1 OR u.organization_id <> $1
+				OR s.organization_id <> $1 OR p.organization_id <> $1)`,
+		"document":         `SELECT count(*) FROM document WHERE organization_id = $1`,
+		"document_version": `SELECT count(*) FROM document_version WHERE organization_id = $1`,
+		"version_clean": `SELECT count(*) FROM document_version WHERE organization_id = $1 AND scan_status = 'clean'
+			AND scanned_at IS NOT NULL AND checksum_sha256 ~ '^[0-9a-f]{64}$' AND size > 0`,
+		// The storage key of the upload path: org/<org>/documents/<document>/<version id>.
+		"version_key_mismatch": `SELECT count(*) FROM document_version WHERE organization_id = $1
+			AND storage_key <> 'org/' || organization_id || '/documents/' || document_id || '/' || id`,
+		// The document mirrors its highest version.
+		"document_mirror_mismatch": `SELECT count(*) FROM document d JOIN document_version v ON v.document_id = d.id
+			AND v.version = (SELECT max(version) FROM document_version WHERE document_id = d.id)
+			WHERE d.organization_id = $1 AND (d.version <> v.version OR d.storage_key <> v.storage_key
+				OR d.file_size <> v.size OR d.mime_type <> v.mime)`,
+		"link_asset":    `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'asset'`,
+		"link_contract": `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'contract'`,
+		"link_ticket":   `SELECT count(*) FROM document_link WHERE organization_id = $1 AND entity_type = 'ticket'`,
+		"link_cross_org": `SELECT count(*) FROM document_link l JOIN document d ON d.id = l.document_id
+			LEFT JOIN asset a ON l.entity_type = 'asset' AND a.id = l.entity_id
+			LEFT JOIN contract c ON l.entity_type = 'contract' AND c.id = l.entity_id
+			LEFT JOIN ticket k ON l.entity_type = 'ticket' AND k.id = l.entity_id
+			WHERE l.organization_id = $1 AND (d.organization_id <> $1
+				OR COALESCE(a.organization_id, c.organization_id, k.organization_id) IS DISTINCT FROM $1)`,
+		// organization_usage is the sum of the sizes of the versions.
+		"usage_mismatch": `SELECT count(*) FROM organization_usage u WHERE u.organization_id = $1
+			AND u.storage_bytes <> (SELECT COALESCE(sum(size), 0) FROM document_version WHERE organization_id = $1)`,
+	}
+	for _, status := range ticket.Statuses {
+		queries["ticket_"+status] = `SELECT count(*) FROM ticket WHERE organization_id = $1 AND status = '` + status + `'`
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// checkDueTimes compares the due times of the tickets of the organization
+// with the computation of the SLA package (WP-292) for their creation: in
+// the seed calendar (Europe/Berlin, the holidays relative to at) with
+// calendar, else in the built-in standard calendar in UTC, the zone of an
+// organization without one; the targets are those of the seeded policy of
+// the ticket's priority.
+func checkDueTimes(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time, calendar bool) {
+	t.Helper()
+	cal, loc := sla.DefaultCalendar(), time.UTC
+	if calendar {
+		cal = SeedCalendar(at)
+		var err error
+		if loc, err = time.LoadLocation(CalendarTimezone); err != nil {
+			t.Fatal(err)
+		}
+	}
+	schedule := cal.In(loc)
+	targets := map[string]seedSLA{}
+	for _, p := range seedSLAs {
+		targets[p.priority] = p
+	}
+	rows, err := f.Admin.Query(context.Background(), `SELECT t.title, t.priority, t.created_at, s.response_due_at,
+			s.resolution_due_at, p.name
+		FROM ticket t JOIN ticket_sla s ON s.ticket_id = t.id JOIN sla p ON p.id = s.sla_id
+		WHERE t.organization_id = $1`, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title, priority, policy string
+		var created, response, resolution time.Time
+		if err = rows.Scan(&title, &priority, &created, &response, &resolution, &policy); err != nil {
+			t.Fatal(err)
+		}
+		target := targets[priority]
+		wantResponse, responseErr := schedule.Add(created, target.response)
+		wantResolution, resolutionErr := schedule.Add(created, target.resolution)
+		if responseErr != nil || resolutionErr != nil {
+			t.Fatalf("org %s, %s: %v %v", orgID, title, responseErr, resolutionErr)
+		}
+		if policy != SLAName(priority) || !response.Equal(wantResponse) || !resolution.Equal(wantResolution) {
+			t.Errorf("org %s, %s (%s, created %s): policy %s, due %s / %s; want %s, due %s / %s", orgID, title, priority,
+				created.UTC().Format(time.RFC3339), policy, response.UTC().Format(time.RFC3339),
+				resolution.UTC().Format(time.RFC3339), SLAName(priority), wantResponse.Format(time.RFC3339),
+				wantResolution.Format(time.RFC3339))
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checkChecksums compares size and checksum of every document version of
+// the organization with its deterministic content.
+func checkChecksums(t *testing.T, f *scopetest.Fixture, orgID, slug string) {
+	t.Helper()
+	o := &orgSeed{id: orgID, slug: slug}
+	want := map[string][]byte{}
+	for _, list := range [][]seedDocument{demoDocuments, acmeDocuments} {
+		for i := range list {
+			for n := 1; n <= DocumentVersions; n++ {
+				want[fmt.Sprintf("%s/%d", list[i].title, n)] = o.documentContent(&list[i], n)
+			}
+		}
+	}
+	rows, err := f.Admin.Query(context.Background(), `SELECT d.title, v.version, v.size, v.checksum_sha256
+		FROM document_version v JOIN document d ON d.id = v.document_id WHERE v.organization_id = $1`, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title, checksum string
+		var version int
+		var size int64
+		if err = rows.Scan(&title, &version, &size, &checksum); err != nil {
+			t.Fatal(err)
+		}
+		content, ok := want[fmt.Sprintf("%s/%d", title, version)]
+		if !ok || size != int64(len(content)) || checksum != sha256Hex(content) {
+			t.Errorf("org %s, %s version %d: size %d, checksum %s; want the content of the seed", orgID, title, version, size, checksum)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// storedVersion is a document version as TestSeedDocumentContent reads it.
+type storedVersion struct {
+	key, checksum string
+	size          int64
+}
+
+// TestSeedDocumentContent covers the content of the seeded documents
+// (WP-820): with Options.Blobs every version lies under its storage key in
+// the bucket reticora-documents, its sha256 is checksum_sha256 and its
+// length the size of the version; a second run finds the same content and
+// creates no version. Without a store only the metadata arise.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedDocumentContent(t *testing.T) {
+	f := scopetest.Seed(t, "5d")
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
+	dir := t.TempDir()
+	store := blob.NewFileStore(dir)
+	versionsOf := func(prefix string) map[string]int {
+		t.Helper()
+		out := map[string]int{}
+		for _, key := range []string{"demo", "acme"} {
+			var n int
+			if err := f.Admin.QueryRow(ctx, `SELECT count(*) FROM document_version WHERE organization_id = $1`,
+				ID(prefix, "org", key)).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			out[key] = n
+		}
+		return out
+	}
+	readVersions := func(orgs []Org) []storedVersion {
+		t.Helper()
+		rows, err := f.Admin.Query(ctx, `SELECT storage_key, size, checksum_sha256 FROM document_version
+			WHERE organization_id IN ($1, $2)`, orgs[0].ID, orgs[1].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []storedVersion
+		for rows.Next() {
+			var v storedVersion
+			if err = rows.Scan(&v.key, &v.size, &v.checksum); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, v)
+		}
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	opts := Options{Prefix: "seeddoc-", Objects: baseObjects, Metrics: 0, At: at, Blobs: store}
+	for round := 1; round <= 2; round++ {
+		summary, err := Run(ctx, f.App, opts)
+		if err != nil {
+			t.Fatalf("seed %d: %v", round, err)
+		}
+		if summary.DocumentVersions != 8 || summary.DocumentContents != 8 {
+			t.Errorf("run %d: %d versions, %d contents; want 8 and 8", round, summary.DocumentVersions, summary.DocumentContents)
+		}
+		if got := versionsOf("seeddoc-"); got["demo"] != 6 || got["acme"] != 2 {
+			t.Errorf("run %d: versions %v, want demo 6 and acme 2", round, got)
+		}
+		stored := readVersions(summary.Orgs)
+		if len(stored) != 8 {
+			t.Fatalf("run %d: %d versions in the database, want 8", round, len(stored))
+		}
+		for _, v := range stored {
+			r, getErr := store.Get(ctx, document.Bucket, v.key)
+			if getErr != nil {
+				t.Errorf("run %d: content of %s: %v", round, v.key, getErr)
+				continue
+			}
+			content, readErr := io.ReadAll(r)
+			_ = r.Close()
+			if readErr != nil || int64(len(content)) != v.size || sha256Hex(content) != v.checksum {
+				t.Errorf("run %d: content of %s: %d bytes, sha256 %s; want %d bytes, %s", round, v.key, len(content),
+					sha256Hex(content), v.size, v.checksum)
+			}
+		}
+	}
+
+	// Without a store the seed writes the metadata only.
+	plain := Options{Prefix: "seeddoc-plain-", Objects: baseObjects, Metrics: 0, At: at}
+	summary, err := Run(ctx, f.App, plain)
+	if err != nil {
+		t.Fatalf("seed without store: %v", err)
+	}
+	if summary.DocumentVersions != 8 || summary.DocumentContents != 0 {
+		t.Errorf("without store: %d versions, %d contents; want 8 and 0", summary.DocumentVersions, summary.DocumentContents)
+	}
+	if got := versionsOf("seeddoc-plain-"); got["demo"] != 6 || got["acme"] != 2 {
+		t.Errorf("without store: versions %v, want demo 6 and acme 2", got)
+	}
+	for _, org := range summary.Orgs {
+		if _, statErr := os.Stat(filepath.Join(dir, document.Bucket, "org", org.ID)); !os.IsNotExist(statErr) {
+			t.Errorf("without store: content of org %s in the store (%v)", org.Slug, statErr)
+		}
+	}
+}
+
+// fieldValueCounts reads the field values of the [B] CIs of one
+// organization (WP-821) through the maintenance pool; at is the anchor of
+// the seed. The mismatch queries count violations.
+func fieldValueCounts(t *testing.T, f *scopetest.Fixture, orgID string, at time.Time) map[string]int {
+	t.Helper()
+	fields := `('` + strings.Join(FieldValueFields, `', '`) + `')`
+	queries := map[string]string{
+		// [B] CIs with the three discovered values of snmp, observed at
+		// the anchor.
+		"ci_with_values": `SELECT count(*) FROM ci c WHERE c.organization_id = $1 AND ` + baseTypeOnly + `
+			AND (SELECT count(*) FROM ci_field_value v WHERE v.ci_id = c.id AND v.discovered_source = '` + FieldValueSource + `'
+				AND v.field_name IN ` + fields + ` AND v.observed_at = $2) = 3`,
+		"snmp_values": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1
+			AND discovered_source = '` + FieldValueSource + `'`,
+		// The discovered values are the columns of the CI.
+		"value_mismatch": `SELECT count(*) FROM ci_field_value v JOIN ci c ON c.id = v.ci_id
+			WHERE v.organization_id = $1 AND v.discovered_source = '` + FieldValueSource + `'
+			AND v.discovered_value #>> '{}' IS DISTINCT FROM CASE v.field_name WHEN 'hostname' THEN c.hostname
+				WHEN 'serial_number' THEN c.serial_number WHEN 'management_ip' THEN host(c.management_ip) END`,
+		// The overrides: the provenance rows of the computed attributes
+		// of the linked CIs (source computed) hold none.
+		"override": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1 AND override_value IS NOT NULL`,
+		"override_every_20th": `SELECT count(*) FROM ci_field_value v JOIN ci c ON c.id = v.ci_id
+			WHERE v.organization_id = $1 AND v.override_value IS NOT NULL AND v.field_name = '` + OverrideField + `'
+			AND v.protected AND v.override_value #>> '{}' = c.hostname AND ` + baseTypeOnly + `
+			AND substring(c.name FROM '[0-9]+$')::int % ` + fmt.Sprint(OverrideEvery) + ` = 0`,
+		"computed_values": `SELECT count(*) FROM ci_field_value WHERE organization_id = $1 AND discovered_source = 'computed'`,
+		"ci_version":      `SELECT COALESCE(sum(version), 0)::int FROM ci WHERE organization_id = $1`,
+		"ci_change":       `SELECT count(*) FROM ci_change WHERE organization_id = $1`,
+		"audit":           `SELECT count(*) FROM audit_log WHERE organization_id = $1`,
+	}
+	out := map[string]int{}
+	for name, query := range queries {
+		args := []any{orgID}
+		if strings.Contains(query, "$2") {
+			args = append(args, at)
+		}
+		var n int
+		if err := f.Admin.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", name, err)
+		}
+		out[name] = n
+	}
+	return out
+}
+
+// TestSeedScaled covers the Phase-2 volumes of the load seed (WP-821,
+// SIM-01 [P2] for ABN-02): Objects 1000, Assets 500, Consumables 200 and
+// Tickets 100 give the demo organization these quantities; the further
+// assets lie in the bins without a CI, every further consumable has its
+// receipt and stock_level.on_hand stays the sum of the bookings, the
+// further tickets have the due times of the seed calendar. Every [B] CI
+// has its three discovered values of snmp (the columns), every 20th a
+// protected override on hostname. The relationships are those of a seed
+// without Phase-2 volumes, the SIM-01 data set of the CIs and acme stay as
+// they are, the integrity check finds nothing, and a second run changes
+// nothing.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestSeedScaled(t *testing.T) {
+	f := scopetest.Seed(t, "d1")
+	ctx := context.Background()
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	const objects, assets, consumables, tickets = 1000, 500, 200, 100
+	opts := Options{Prefix: "seedscale-", Objects: objects, Metrics: 0, Assets: assets, Consumables: consumables,
+		Tickets: tickets, At: at}
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(context.Background(), `DROP INDEX IF EXISTS `+citype.KeyIndexName(AttributeKey))
+	})
+	summary, err := Run(ctx, f.App, opts)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	demo, acme := summary.Orgs[0].ID, summary.Orgs[1].ID
+
+	// The further tickets in work have their first response.
+	responded := 6
+	for n := BaseTickets + 1; n <= tickets; n++ {
+		if s := scaledStatuses[n%len(scaledStatuses)]; s == ticket.StatusInProgress || s == ticket.StatusWaiting {
+			responded++
+		}
+	}
+	stockWant := map[string]int{
+		"asset": assets, "asset_linked": 42, "ci_asset": 42, "asset_in_bin": assets - 42, "asset_engineer": assets / 4,
+		"serial_mismatch": 0, "consumable": consumables, "consumable_ast": consumables, "below_min": 1,
+		"stock_mismatch": 0, "cross_org": 0, "other_movement": 0, "movement": 26 + consumables - BaseConsumables,
+		"stocktake_running": 1, "stocktake_item_mismatch": 0, "stocktake_asset_item": assets - 42,
+		"warranty_mismatch": 0, "warranty_set": 42,
+	}
+	ticketWant := map[string]int{
+		"ticket": tickets, "ticket_related": tickets, "ticket_engineer": tickets, "ticket_created_before_at": tickets,
+		"ticket_sla": tickets, "ticket_sla_calendar": tickets, "ticket_first_response": responded, "ticket_cross_org": 0,
+		"document": 3, "link_ticket": 1,
+	}
+	fieldWant := map[string]int{
+		"ci_with_values": objects, "snmp_values": 3 * objects, "value_mismatch": 0,
+		"override": objects / OverrideEvery, "override_every_20th": objects / OverrideEvery, "computed_values": 42,
+	}
+	var first map[string]int
+	check := func(round string) {
+		t.Helper()
+		got := map[string]int{}
+		for name, n := range stockCounts(t, f, demo, at) {
+			got["stock."+name] = n
+		}
+		for name, n := range ticketDocCounts(t, f, demo, at) {
+			got["ticket."+name] = n
+		}
+		for name, n := range fieldValueCounts(t, f, demo, at) {
+			got["field."+name] = n
+		}
+		for name, n := range counts(t, f, demo) {
+			got["base."+name] = n
+		}
+		for prefix, want := range map[string]map[string]int{"stock.": stockWant, "ticket.": ticketWant, "field.": fieldWant} {
+			for name, n := range want {
+				if got[prefix+name] != n {
+					t.Errorf("%s: %s%s = %d, want %d", round, prefix, name, got[prefix+name], n)
+				}
+			}
+		}
+		// The CIs keep the SIM-01 data set of their size, the
+		// relationships those of a seed without Phase-2 volumes, so the
+		// graph of the core switch stays as tests/load/api.js expects.
+		for table, n := range seedCounts(objects, 0) {
+			if got["base."+table] != n {
+				t.Errorf("%s: %s = %d, want %d", round, table, got["base."+table], n)
+			}
+		}
+		checkDueTimes(t, f, demo, at, true)
+		// acme keeps its quantities.
+		if a, k := stockCounts(t, f, acme, at), ticketDocCounts(t, f, acme, at); a["asset"] != 10 || a["consumable"] != 2 ||
+			k["ticket"] != 2 {
+			t.Errorf("%s: acme holds %d assets, %d consumables, %d tickets", round, a["asset"], a["consumable"], k["ticket"])
+		}
+		if fv := fieldValueCounts(t, f, acme, at); fv["snmp_values"] != 0 || fv["override"] != 0 {
+			t.Errorf("%s: acme holds %d discovered values and %d overrides", round, fv["snmp_values"], fv["override"])
+		}
+		if first == nil {
+			first = got
+			return
+		}
+		for name, n := range got {
+			if first[name] != n {
+				t.Errorf("%s: %s = %d, %d after the first run", round, name, n, first[name])
+			}
+		}
+	}
+	check("first run")
+	if violations := scopetest.IntegrityViolations(t, f.Admin, demo); len(violations) > 0 {
+		t.Errorf("integrity check: %v", violations)
+	}
+	// The further assets and tickets carry the deterministic ids.
+	var deterministic int
+	if err = f.Admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM asset WHERE organization_id = $1
+			AND id = md5('seedscale-demo/asset/' || substring(inventory_no FROM 5)::int)::uuid)
+		+ (SELECT count(*) FROM ticket WHERE organization_id = $1
+			AND id = md5('seedscale-demo/ticket/' || substring(title FROM 13)::int)::uuid)`, demo).Scan(&deterministic); err != nil ||
+		deterministic != assets-BaseAssets+tickets-BaseTickets {
+		t.Errorf("%d further assets and tickets with deterministic ids, want %d (err %v)", deterministic,
+			assets-BaseAssets+tickets-BaseTickets, err)
+	}
+
+	// A second run with the same options adds nothing.
+	if _, err = Run(ctx, f.App, opts); err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	check("second run")
 }

@@ -8,12 +8,13 @@
  * duplicate observations shows its address, VRF and every side, sends the
  * chosen side as ci_id and offers no accept in bulk (WP-773).
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../test/utils';
 import { ReviewInboxPage, commonActions, reviewDiff } from './ReviewInboxPage';
 import type { ReviewItem } from '../hooks/useReviews';
 import type { CI } from '../api/client';
+import { useAuthStore } from '../auth/authStore';
 
 const CI_A = '11111111-1111-4111-8111-111111111111';
 const CI_B = '22222222-2222-4222-8222-222222222222';
@@ -569,5 +570,147 @@ describe('ReviewInboxPage', () => {
     }
     expect(screen.queryByRole('checkbox', { name: /auswählen/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Alle offenen auswählen/)).not.toBeInTheDocument();
+  });
+});
+
+describe('ReviewInboxPage tickets (WP-814)', () => {
+  const TICKET_RIGHTS = [...RESOLVER, 'ticket:write'];
+
+  interface TicketServer {
+    items: ReviewItem[];
+    permissions?: string[];
+    module?: boolean;
+    essential?: boolean;
+    ticket?: (id: string) => Response;
+  }
+
+  /** stubTicketServer adds modules, entitlements and the ticket action to stubServer. */
+  function stubTicketServer({
+    items,
+    permissions = TICKET_RIGHTS,
+    module = true,
+    essential = true,
+    ticket,
+  }: TicketServer) {
+    const inbox = stubServer(items, undefined, permissions);
+    const fallback = inbox.getMockImplementation()!;
+    inbox.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const match = url.match(/\/review-items\/([^/]+)\/ticket$/);
+      if (match && init?.method === 'POST') {
+        return ticket
+          ? ticket(match[1]!)
+          : json({ id: `ticket-${match[1]}`, ticket_number: 7, title: 'x', status: 'new' }, 201);
+      }
+      if (url.includes('/modules')) {
+        return json({
+          data: [{ key: 'ticketing', phase: 'P2', nav: ['tickets', 'slas'], enabled: module }],
+        });
+      }
+      if (url.includes('/entitlements')) {
+        return json(
+          page([
+            { organization_id: 'org-1', feature_key: 'ticketing_essential', enabled: essential },
+          ]),
+        );
+      }
+      return fallback(input, init);
+    });
+    return inbox;
+  }
+
+  beforeEach(() => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+  });
+
+  afterEach(() => {
+    useAuthStore.setState({ token: null, expiresAt: null, user: null });
+  });
+
+  it('opens a ticket for an item, which stays open', async () => {
+    const fetchMock = stubTicketServer({ items: [conflict] });
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /firmware_version/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Ticket erstellen' }));
+
+    const created = await screen.findByRole('link', { name: 'Ticket #7 erstellt.' });
+    expect(created).toHaveAttribute('href', '/tickets/ticket-rev-2');
+    const posts = fetchMock.mock.calls
+      .filter((call) => call[1]?.method === 'POST')
+      .map((call) => String(call[0]));
+    expect(posts).toEqual(['/api/v1/review-items/rev-2/ticket']);
+    // No resolution: the actions of the item stay.
+    expect(screen.getByRole('button', { name: 'Übernehmen' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Verwerfen' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['without ticket:write', { permissions: RESOLVER }],
+    ['without review:resolve', { permissions: ['discovery:read', 'ticket:write'] }],
+    ['with the module ticketing off', { module: false }],
+    ['without ticketing_essential', { essential: false }],
+  ])('offers no ticket %s', async (_case, options: Partial<TicketServer>) => {
+    const fetchMock = stubTicketServer({ items: [conflict], ...options });
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /firmware_version/ }));
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+      expect(urls.some((url) => url.includes('/me/permissions'))).toBe(true);
+      expect(urls.some((url) => url.includes('/entitlements'))).toBe(true);
+      expect(urls.some((url) => url.includes('/modules'))).toBe(true);
+    });
+    await screen.findByRole('table', { name: 'Vergleich von Beobachtung und CI' });
+    expect(screen.queryByRole('button', { name: 'Ticket erstellen' })).not.toBeInTheDocument();
+  });
+
+  it('opens tickets for three items one by one and reports a 409', async () => {
+    const third: ReviewItem = { ...conflict, id: 'rev-9', payload: { name: 'ap-lager-03' } };
+    const fetchMock = stubTicketServer({
+      items: [ambiguous, conflict, third],
+      ticket: (id) =>
+        id === 'rev-2'
+          ? json(
+              {
+                status: 409,
+                title: 'Conflict',
+                detail: 'an open ticket is already linked to the review item: #41 (t-41)',
+              },
+              409,
+            )
+          : json({ id: `ticket-${id}`, ticket_number: 50, title: 'x', status: 'new' }, 201),
+    });
+    renderWithProviders(<ReviewInboxPage />);
+
+    fireEvent.click(await screen.findByLabelText(/Alle offenen auswählen/));
+    fireEvent.click(await screen.findByRole('button', { name: 'Tickets erstellen' }));
+
+    expect(await screen.findByText('2 Tickets erstellt, 1 fehlgeschlagen.')).toBeInTheDocument();
+    expect(screen.getByText(/#41 \(t-41\)/)).toHaveTextContent('firmware_version');
+    const posts = fetchMock.mock.calls
+      .filter((call) => call[1]?.method === 'POST')
+      .map((call) => String(call[0]));
+    expect(posts).toEqual([
+      '/api/v1/review-items/rev-1/ticket',
+      '/api/v1/review-items/rev-2/ticket',
+      '/api/v1/review-items/rev-9/ticket',
+    ]);
+  });
+
+  it('links the tickets of an item', async () => {
+    stubTicketServer({
+      items: [{ ...conflict, tickets: [{ id: 'ticket-41', ticket_number: 41, status: 'open' }] }],
+    });
+    renderWithProviders(<ReviewInboxPage />);
+
+    const links = await screen.findAllByRole('link', { name: '#41' });
+    expect(links[0]).toHaveAttribute('href', '/tickets/ticket-41');
+    fireEvent.click(screen.getByRole('button', { name: /firmware_version/ }));
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '#41' })).toHaveLength(2));
   });
 });

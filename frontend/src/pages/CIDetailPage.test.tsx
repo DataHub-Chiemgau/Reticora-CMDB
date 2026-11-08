@@ -693,3 +693,132 @@ describe('CIDetailPage under a chosen scope (E-87, F-169)', () => {
     expect(screen.queryByText(/ausgeblendet/)).toBeNull();
   });
 });
+
+/**
+ * WP-817 (CI-08, UI-14): the tags of a CI as colored chips from the
+ * catalog, changed with a selection from the catalog through PUT
+ * /cis/{id}/tags with If-Match; 409 and 412 appear like those of a PATCH.
+ */
+describe('CIDetailPage tags (WP-817)', () => {
+  const taggedCI = { ...ci, version: 4, tags: ['backup'] };
+  const catalog = [
+    {
+      id: 'tag-1',
+      organization_id: 'org-1',
+      key: 'backup',
+      display_name: { de: 'Sicherung', en: 'Backup' },
+      color: '#1f6feb',
+      is_system: false,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+    {
+      id: 'tag-2',
+      organization_id: 'org-1',
+      key: 'prod',
+      display_name: { de: 'Produktion', en: 'Production' },
+      color: null,
+      is_system: false,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    },
+  ];
+
+  function mockTagApi(put: (init: RequestInit) => Response, permissions = ['ci:read', 'ci:write']) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const { pathname } = new URL(String(input), 'http://localhost');
+      const method = init?.method ?? 'GET';
+      const ok = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      if (pathname.endsWith('/me/permissions')) return ok({ user_id: 'user-1', permissions });
+      if (pathname.endsWith('/cis/ci-1/tags') && method === 'PUT') return put(init!);
+      if (pathname.endsWith('/api/v1/tags')) {
+        return ok({ data: catalog, total: 2, limit: 200, offset: 0, has_more: false });
+      }
+      if (pathname.endsWith('/cis/ci-1')) return ok(taggedCI);
+      return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('shows the tags of the CI as chips named from the catalog', async () => {
+    mockTagApi(() => new Response(null, { status: 500 }));
+    renderDetail();
+
+    const chips = await screen.findByRole('list', { name: 'Tags' });
+    expect(await within(chips).findByText('Sicherung')).toBeInTheDocument();
+    expect(within(chips).queryByText('backup')).toBeNull();
+  });
+
+  it('replaces the tags with a selection from the catalog through PUT with If-Match', async () => {
+    const fetchMock = mockTagApi(
+      (init) =>
+        new Response(
+          JSON.stringify({
+            ...taggedCI,
+            version: 5,
+            tags: (JSON.parse(String(init.body)) as { tags: string[] }).tags,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json', ETag: '"5"' } },
+        ),
+    );
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Tags bearbeiten' }));
+    const selection = await screen.findByRole('group', { name: 'Tags aus dem Katalog' });
+    expect(within(selection).getByRole('checkbox', { name: 'Sicherung' })).toBeChecked();
+    fireEvent.click(within(selection).getByRole('checkbox', { name: 'Sicherung' }));
+    fireEvent.click(within(selection).getByRole('checkbox', { name: 'Produktion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'PUT')).toHaveLength(1),
+    );
+    const put = fetchMock.mock.calls.find((call) => call[1]?.method === 'PUT')!;
+    expect(String(put[0])).toContain('/cis/ci-1/tags');
+    expect(JSON.parse(String(put[1]!.body))).toEqual({ tags: ['prod'] });
+    expect(new Headers(put[1]!.headers).get('If-Match')).toBe('"4"');
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: 'Tags aus dem Katalog' })).toBeNull(),
+    );
+  });
+
+  it('shows a 409 of the tags as a message', async () => {
+    mockTagApi(
+      () =>
+        new Response(
+          JSON.stringify({
+            type: 'urn:reticora:problem:version-conflict',
+            title: 'Conflict',
+            status: 409,
+            detail: 'the CI changed since version 4',
+            fields: ['tags'],
+          }),
+          { status: 409, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+    );
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Tags bearbeiten' }));
+    const selection = await screen.findByRole('group', { name: 'Tags aus dem Katalog' });
+    fireEvent.click(within(selection).getByRole('checkbox', { name: 'Produktion' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+
+    expect(
+      await screen.findByText(/Die Tags wurden zwischenzeitlich geändert \(tags\)/),
+    ).toHaveAttribute('role', 'alert');
+  });
+
+  it('offers no change without ci:write', async () => {
+    mockTagApi(() => new Response(null, { status: 500 }), ['ci:read']);
+    renderDetail();
+
+    const chips = await screen.findByRole('list', { name: 'Tags' });
+    expect(await within(chips).findByText('Sicherung')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Tags bearbeiten' })).toBeNull();
+  });
+});

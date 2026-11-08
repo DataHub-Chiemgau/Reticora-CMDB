@@ -20,7 +20,10 @@ import {
 /*
  * The SIM-01 demo data on the real stack (WP-433; F-113, F-277, F-278; nothing mocked): the
  * seed (backend/cmd/seed) creates the organizations demo (plan pro) and acme with 40 CIs
- * each, and the development realm (deploy/keycloak/realm-reticora-dev.json) holds their
+ * each; since the Phase-2 seed (WP-819, backend/cmd/seed/seed_assets.go, ensureComposition)
+ * demo additionally holds two blade chassis (blade_chassis bc-01, bc-02) with four blades each
+ * (blade_server, configuration children), so demo has 50 CIs and acme still 40. The
+ * development realm (deploy/keycloak/realm-reticora-dev.json) holds their
  * administrators. Before WP-433 the realm had no admin@demo.local, so the seeded demo
  * organization could not be used through the UI, and the seeded CIs had neither a search
  * document nor a location.
@@ -33,7 +36,7 @@ import {
  * second factor at the first login (AUT-09).
  *
  * Test → requirement IDs proven:
- *  S1 admin@demo.local signs in to the demo organization; the CI list shows its 40 CIs
+ *  S1 admin@demo.local signs in to the demo organization; the CI list shows its 50 CIs
  *     ............................................................ SIM-01 (WP-433, F-113)
  *  S2 the global search (command palette, GET /search) finds srv-00021 of demo and opens
  *     it; the CI is located in rack R02 of the server room hq .... SIM-01 (WP-433, F-277, F-278)
@@ -100,7 +103,7 @@ function waitForApi(page: Page, path: string): Promise<Response> {
   );
 }
 
-test.describe('SIM-01 demo seed: admin@demo.local, 40 CIs, search, no acme data', () => {
+test.describe('SIM-01 demo seed: admin@demo.local, 50 CIs, search, no acme data', () => {
   test.beforeAll(async ({ browser, playwright }) => {
     // The first run builds the seed with the Go toolchain.
     test.setTimeout(12 * 60_000);
@@ -134,7 +137,7 @@ test.describe('SIM-01 demo seed: admin@demo.local, 40 CIs, search, no acme data'
     await w?.rq.dispose();
   });
 
-  test('S1 admin@demo.local signs in to the demo organization and the CI list shows its 40 CIs', async () => {
+  test('S1 admin@demo.local signs in to the demo organization and the CI list shows its 50 CIs', async () => {
     if (w.created) {
       test.info().annotations.push({
         type: 'setup',
@@ -150,11 +153,12 @@ test.describe('SIM-01 demo seed: admin@demo.local, 40 CIs, search, no acme data'
     expect(org.body).toMatchObject({ id: w.demo.id, slug: 'demo', plan: 'pro' });
     const cis = await api<List<CI>>(w.rq, w.token, 'GET', '/cis?limit=1');
     expect(cis.status, 'GET /cis').toBe(200);
-    expect(cis.body.total, 'CIs of the demo organization').toBe(40);
+    // 40 CIs of the base seed plus 2 blade chassis and 8 blades of the Phase-2 seed (WP-819).
+    expect(cis.body.total, 'CIs of the demo organization').toBe(50);
 
     await w.page.goto('/cmdb');
     const main = w.page.locator('#main-content');
-    await expect(main.getByText(/^40 Einträge$/)).toBeVisible();
+    await expect(main.getByText(/^50 Einträge$/)).toBeVisible();
   });
 
   test('S2 the global search finds srv-00021 of demo and opens it; it is located in the server room hq', async () => {

@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"math"
@@ -212,5 +213,44 @@ func TestChainAfterRetention(t *testing.T) {
 	forged[2].Changes = map[string]interface{}{"deleted_through_seq": float64(2), "anchor_hash": GenesisHash}
 	if r := VerifyEntries(forged); r.Intact {
 		t.Errorf("a wrong anchor verifies: %+v", r)
+	}
+}
+
+// TestWithCorrelationIDKeepsRequestInfo covers WP-306: WithCorrelationID
+// replaces only the correlation id; request id, source and the recorded
+// flag stay those of the request, so an entry written in the inner context
+// marks the outer one as audited (the route audit of the bulk request
+// writes none of its own). Without a request context it starts one.
+func TestWithCorrelationIDKeepsRequestInfo(t *testing.T) {
+	outer := WithRequestInfo(context.Background(), RequestInfo{RequestID: "req-306", CorrelationID: "corr-req", Source: SourceUI})
+	inner := WithCorrelationID(outer, "job-306")
+	info, ok := RequestInfoFrom(inner)
+	if !ok || info.RequestID != "req-306" || info.Source != SourceUI || info.CorrelationID != "job-306" {
+		t.Fatalf("inner request info %+v (%v), want request req-306, source ui, correlation job-306", info, ok)
+	}
+	if prior, _ := RequestInfoFrom(outer); prior.CorrelationID != "corr-req" {
+		t.Errorf("outer correlation id %q, want corr-req unchanged", prior.CorrelationID)
+	}
+	if Recorded(outer) || Recorded(inner) {
+		t.Fatal("recorded before any entry")
+	}
+	entry := Entry{OrganizationID: "org-306", Action: "ci.updated"}
+	if err := normalize(inner, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.CorrelationID != "job-306" || entry.RequestID != "req-306" || entry.Source != SourceUI {
+		t.Errorf("entry %+v, want correlation job-306, request req-306, source ui", entry)
+	}
+	if !Recorded(inner) || !Recorded(outer) {
+		t.Errorf("after an entry in the inner context: inner %v, outer %v, want both recorded", Recorded(inner), Recorded(outer))
+	}
+
+	bare := WithCorrelationID(context.Background(), "job-bare")
+	if info, ok := RequestInfoFrom(bare); !ok || info.CorrelationID != "job-bare" || info.RequestID != "" {
+		t.Errorf("without a request context: %+v (%v), want only the correlation id", info, ok)
+	}
+	MarkRecorded(bare)
+	if !Recorded(bare) {
+		t.Error("without a request context: an entry is not recorded")
 	}
 }

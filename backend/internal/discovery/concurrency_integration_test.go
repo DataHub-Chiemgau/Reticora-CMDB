@@ -9,7 +9,6 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -444,7 +443,7 @@ func TestDiscoveryConcurrency(t *testing.T) {
 		}
 	}
 
-	if v := integrityViolations(t, f, f.OrgA); len(v) > 0 {
+	if v := scopetest.IntegrityViolations(t, f.Admin, f.OrgA); len(v) > 0 {
 		t.Errorf("integrity violations after the concurrency matrix: %v", v)
 	}
 }
@@ -520,43 +519,4 @@ func (s *failOnce) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID str
 		return ipam.SyncResult{}, errors.New("injected failure after the interface sync")
 	}
 	return res, err
-}
-
-// integrityViolations runs tests/integrity-check.sql for one organization
-// and returns the checks with violations (ABN-03).
-func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
-	t.Helper()
-	script, err := os.ReadFile("../../../tests/integrity-check.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	tx, err := f.Admin.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `SELECT set_config('integrity.org', $1, true)`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := tx.Query(ctx, string(script))
-	if err != nil {
-		t.Fatalf("integrity check: %v", err)
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	for rows.Next() {
-		var name string
-		var n int
-		if err := rows.Scan(&name, &n); err != nil {
-			t.Fatal(err)
-		}
-		if n > 0 {
-			out[name] = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return out
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -38,8 +40,17 @@ import (
 // reverted yet back per CI through Service.Update as a manual change of its
 // creator; on the locked row PGRepository.Update leaves every field whose
 // value changed since the bulk (revertExpectation) and marks each row
-// reverted or skipped in the same transaction. The state of the overrides
-// stays as the inverse write leaves it; WP-306 restores it.
+// reverted or skipped in the same transaction.
+//
+// Overrides (OVR-03, WP-306): in the same transaction the revert restores
+// per reverted field the state of its override before the bulk
+// (override_before): an override the bulk created is removed
+// (override.ClearOverrideTx) and the field falls back to the observed
+// value, which the inverse write then writes instead of the old one; an
+// override that existed before gets value, author, reason, protection and
+// time back (override.RestoreOverrideTx). A field whose override changed
+// since the bulk (another state than override_after) is skipped like a
+// field whose value changed: value and override stay.
 //
 // The other actions (WP-783) record in the transaction of their write
 // path: the owner like a column, each tag actually added or removed (op
@@ -350,6 +361,161 @@ type revertExpectation struct {
 	marks    []jobs.ChangeMark
 	reverted []string
 	skipped  []string
+	// restores are the overrides of the reverted fields to bring back to
+	// their state before the bulk (WP-306).
+	restores []overrideRestore
+}
+
+// overrideRestore is the state before the bulk of the override of one
+// reverted field; nil before: the field had none.
+type overrideRestore struct {
+	field  string
+	before *overrideState
+}
+
+// fieldOverrideState is the state of one field in ci_field_value on the
+// locked row: its override (nil: none) and its observed value.
+type fieldOverrideState struct {
+	override      *overrideState
+	discovered    any
+	hasDiscovered bool
+}
+
+// overridableRevertField reports whether the field of a change set row can
+// carry an override (recordManualOverrides): a CI column or attribute, not
+// a derived field (owner, tags, templates) nor an edge or lifecycle row.
+func overridableRevertField(row *jobs.Change) bool {
+	switch row.FieldName {
+	case ChangeFieldTags, ChangeFieldTemplates, ChangeFieldRelationship, ChangeFieldLifecycle:
+		return false
+	}
+	return row.Op == jobs.OpSet && !derivedFields[row.FieldName]
+}
+
+// decodeOverrideState decodes override_before or override_after; nil for a
+// field without override.
+func decodeOverrideState(raw json.RawMessage) (*overrideState, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var state overrideState
+	if err := json.Unmarshal(raw, &state); err != nil {
+		return nil, fmt.Errorf("decode override state of the bulk change set: %w", err)
+	}
+	return &state, nil
+}
+
+// sameOverrideState reports whether two override states are equal: value,
+// author, reason, protection and time.
+func sameOverrideState(a, b *overrideState) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	text := func(s *string) string {
+		if s == nil {
+			return ""
+		}
+		return *s
+	}
+	x, errA := json.Marshal(a.Value)
+	y, errB := json.Marshal(b.Value)
+	return errA == nil && errB == nil && sameJSON(x, y) && strings.EqualFold(text(a.Author), text(b.Author)) &&
+		text(a.Reason) == text(b.Reason) && a.Protected == b.Protected && a.At.Equal(b.At)
+}
+
+// revertOverrideStates reads on the locked row the state in ci_field_value
+// of the fields of rows that can carry an override, with one query.
+func revertOverrideStates(ctx context.Context, tx pgx.Tx, ciID string, rows []jobs.Change) (map[string]*fieldOverrideState, error) {
+	var names []string
+	for i := range rows {
+		if overridableRevertField(&rows[i]) && !slices.Contains(names, rows[i].FieldName) {
+			names = append(names, rows[i].FieldName)
+		}
+	}
+	states := make(map[string]*fieldOverrideState, len(names))
+	if len(names) == 0 {
+		return states, nil
+	}
+	found, err := tx.Query(ctx, `
+		SELECT field_name, override_at IS NOT NULL, override_value, override_author::text, override_reason, override_at,
+			protected, discovered_value, discovered_at IS NOT NULL
+		FROM ci_field_value WHERE ci_id = $1 AND field_name = ANY($2::text[])`, ciID, names)
+	if err != nil {
+		return nil, fmt.Errorf("read overrides of the revert: %w", err)
+	}
+	defer found.Close()
+	for found.Next() {
+		var name string
+		var overridden, protected, hasDiscovered bool
+		var overrideRaw, discoveredRaw []byte
+		var author, reason *string
+		var at *time.Time
+		if scanErr := found.Scan(&name, &overridden, &overrideRaw, &author, &reason, &at, &protected, &discoveredRaw,
+			&hasDiscovered); scanErr != nil {
+			return nil, fmt.Errorf("read overrides of the revert: %w", scanErr)
+		}
+		state := &fieldOverrideState{hasDiscovered: hasDiscovered}
+		if hasDiscovered && len(discoveredRaw) > 0 {
+			if decodeErr := json.Unmarshal(discoveredRaw, &state.discovered); decodeErr != nil {
+				return nil, fmt.Errorf("decode observed value of the revert: %w", decodeErr)
+			}
+		}
+		if overridden && at != nil {
+			state.override = &overrideState{Author: author, Reason: reason, At: *at, Protected: protected}
+			if len(overrideRaw) > 0 {
+				if decodeErr := json.Unmarshal(overrideRaw, &state.override.Value); decodeErr != nil {
+					return nil, fmt.Errorf("decode override of the revert: %w", decodeErr)
+				}
+			}
+		}
+		states[name] = state
+	}
+	return states, found.Err()
+}
+
+// overrideUnchanged decides the override of one row on the locked row: it
+// reports whether the override is the one the bulk left (override_after)
+// and, when it is, records the restore of the state before the bulk. A
+// field the bulk gave its override that had none before falls back to the
+// observed value: req writes it instead of the old value (like
+// ClearOverride; a structural column such as location_id keeps the old
+// value).
+func (e *revertExpectation) overrideUnchanged(row *jobs.Change, state *fieldOverrideState, req *UpdateRequest,
+	attributes map[string]any) (bool, error) {
+	if !overridableRevertField(row) {
+		return true, nil
+	}
+	after, err := decodeOverrideState(row.OverrideAfter)
+	if err != nil {
+		return false, err
+	}
+	var current *overrideState
+	if state != nil {
+		current = state.override
+	}
+	if !sameOverrideState(current, after) {
+		return false, nil
+	}
+	before, err := decodeOverrideState(row.OverrideBefore)
+	if err != nil {
+		return false, err
+	}
+	e.restores = append(e.restores, overrideRestore{field: row.FieldName, before: before})
+	if before != nil || state == nil || !state.hasDiscovered {
+		return true, nil
+	}
+	if setter, column := revertColumns[row.FieldName]; column {
+		if _, overridable := overrideColumns[row.FieldName]; overridable {
+			if observed, isText := state.discovered.(string); isText {
+				setter(req, &observed)
+			}
+		}
+		return true, nil
+	}
+	if attributes != nil {
+		attributes[row.FieldName] = state.discovered
+	}
+	return true, nil
 }
 
 type revertExpectationKey struct{}
@@ -395,7 +561,7 @@ func applyRevertExpectation(ctx context.Context, tx pgx.Tx, orgID string, before
 	if e == nil {
 		return nil
 	}
-	e.marks, e.reverted, e.skipped = nil, nil, nil
+	e.marks, e.reverted, e.skipped, e.restores = nil, nil, nil, nil
 	var attributes map[string]any
 	if req.Attributes != nil {
 		attributes = make(map[string]any, len(req.Attributes))
@@ -404,6 +570,10 @@ func applyRevertExpectation(ctx context.Context, tx pgx.Tx, orgID string, before
 		}
 	}
 	catalog, err := revertTagCatalog(ctx, tx, orgID, e.rows)
+	if err != nil {
+		return err
+	}
+	states, err := revertOverrideStates(ctx, tx, before.ID, e.rows)
 	if err != nil {
 		return err
 	}
@@ -430,6 +600,13 @@ func applyRevertExpectation(ctx context.Context, tx pgx.Tx, orgID string, before
 		default:
 			_, sent := attributes[row.FieldName]
 			keep = sent && sameRawJSON(before.Attributes[row.FieldName], row.NewValue)
+		}
+		if keep {
+			// An override changed since the bulk keeps value and override
+			// (WP-306).
+			if keep, err = e.overrideUnchanged(row, states[row.FieldName], req, attributes); err != nil {
+				return err
+			}
 		}
 		if keep {
 			e.marks = append(e.marks, jobs.ChangeMark{ID: row.ID, Outcome: jobs.OutcomeReverted})
@@ -516,6 +693,46 @@ func markRevertTx(ctx context.Context, tx pgx.Tx, orgID string) error {
 		return nil
 	}
 	return jobs.MarkChangeTx(ctx, tx, orgID, e.marks)
+}
+
+// restoreRevertOverrides brings the overrides of the fields the inverse
+// write of the expectation in ctx reverted back to their state before the
+// bulk, in tx after that write (WP-306): it removes the override the bulk
+// created (and the one the inverse write gave the field as a manual
+// change), or writes the override from before the bulk back with its
+// author, reason and time. raise: the inverse write did not raise the
+// version, so each restore does (raiseVersion). It reports whether it
+// changed an override; nothing without an expectation.
+func restoreRevertOverrides(ctx context.Context, tx pgx.Tx, orgID, ciID string, raise bool) (bool, error) {
+	e := revertExpectationFrom(ctx)
+	if e == nil {
+		return false, nil
+	}
+	changed := false
+	for i := range e.restores {
+		r := &e.restores[i]
+		if r.before == nil {
+			cleared, err := override.ClearOverrideTx(ctx, tx, orgID, ciID, r.field, raise)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || cleared
+			continue
+		}
+		state := override.OverrideState{Value: r.before.Value, At: r.before.At, Protected: r.before.Protected,
+			Reason: DefaultChangeReason}
+		if r.before.Author != nil {
+			state.Author = *r.before.Author
+		}
+		if r.before.Reason != nil && strings.TrimSpace(*r.before.Reason) != "" {
+			state.Reason = *r.before.Reason
+		}
+		if err := override.RestoreOverrideTx(ctx, tx, orgID, ciID, r.field, &state, raise); err != nil {
+			return false, err
+		}
+		changed = true
+	}
+	return changed, nil
 }
 
 // ─── Revert job ──────────────────────────────────────────────────────────────

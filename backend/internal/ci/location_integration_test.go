@@ -193,6 +193,14 @@ func TestMigration74MovesReferencesToLocation(t *testing.T) {
 		exec(quantityItemTable)
 	}
 	exec(legacyTable)
+	// Later rules on ci that the schema before 000074 does not know: the
+	// location of a CI with an asset is the asset's location (000088), that
+	// of a configuration child its parent's (000244). The down migration
+	// rewrites location_id of every CI, also of the seeded ones linked to an
+	// asset or a parent (make seed, WP-819), so both checks are off inside
+	// the rolled-back transaction.
+	exec(`ALTER TABLE ci DISABLE TRIGGER trg_ci_asset_location`)
+	exec(`ALTER TABLE ci DISABLE TRIGGER trg_ci_configuration_child`)
 	exec(down)
 	// Before 000074 asset and quantity item reference location_node; the
 	// derivation of their site from location (000151) is not part of that

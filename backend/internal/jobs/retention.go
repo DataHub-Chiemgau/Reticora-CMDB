@@ -53,6 +53,12 @@ const (
 	RetentionReviewItems = "retention.review_items"
 	// RetentionMergeSnapshots ends what a CI merge keeps (CI-12, F-251).
 	RetentionMergeSnapshots = "retention.merge_snapshots"
+	// RetentionBulkChangeSet ends the change sets of bulk jobs (BLK-02,
+	// WP-306).
+	RetentionBulkChangeSet = "retention.bulk_change_set"
+	// BulkChangeSetRetention is how long the change set of a bulk job is
+	// kept (WP-135): a fixed period, far beyond the revert window of 24 h.
+	BulkChangeSetRetention = 30 * 24 * time.Hour
 )
 
 // Retention deletes expired data.
@@ -100,6 +106,7 @@ func (r *Retention) Schedules() []Schedule {
 		{Kind: RetentionSoftDeleted, Spec: "37 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunSoftDeleted},
 		{Kind: RetentionReviewItems, Spec: "47 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunReviewItems},
 		{Kind: RetentionMergeSnapshots, Spec: "57 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunMergeSnapshots},
+		{Kind: RetentionBulkChangeSet, Spec: "7 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunBulkChangeSet},
 	}
 }
 
@@ -377,6 +384,20 @@ func (r *Retention) RunMergeSnapshots(ctx context.Context) error {
 			return int(deleted.RowsAffected()), fmt.Errorf("empty expired merge snapshots: %w", err)
 		}
 		return int(deleted.RowsAffected() + emptied.RowsAffected()), nil
+	})
+}
+
+// RunBulkChangeSet deletes the change set rows of bulk jobs (bulk_change_set,
+// WP-305) created more than BulkChangeSetRetention ago (BLK-02, WP-306);
+// their jobs are long past the revert window.
+func (r *Retention) RunBulkChangeSet(ctx context.Context) error {
+	cutoff := r.now().Add(-BulkChangeSetRetention)
+	return r.eachOrganization(ctx, RetentionBulkChangeSet, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		tag, err := tx.Exec(ctx, `DELETE FROM bulk_change_set WHERE organization_id = $1 AND created_at < $2`, orgID, cutoff)
+		if err != nil {
+			return 0, fmt.Errorf("delete bulk change sets: %w", err)
+		}
+		return int(tag.RowsAffected()), nil
 	})
 }
 

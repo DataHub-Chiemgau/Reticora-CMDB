@@ -1,9 +1,19 @@
+/**
+ * ConsumableListPage — the quantity items of the warehouse (UI-14, WP-320):
+ * per item the total stock over all bins (stock_level = Σ on_hand), unit,
+ * min_level and the hint when the total is below min_level (WP-285). Each
+ * row links to its detail page, where the stock is booked per bin; the
+ * list itself books nothing. The list follows the scope (SCOPED_LISTS,
+ * client_id) and the filter low_stock.
+ */
 import { Boxes, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { consumableApi } from '../api/client';
-import type { Consumable } from '../api/client';
+import { Link } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ApiError, consumableApi, type CreateConsumableRequest } from '../api/client';
+import { useConsumableList } from '../api/hooks';
+import { accessErrorMessage } from '../components/pickers/ObjectPicker';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -26,6 +36,31 @@ import {
 import { cn } from '../components/ui/utils';
 import { ScrollRegion } from '../components/ScrollRegion';
 import { TableEmptyRow } from './ListParts';
+import { isBelowMinimum } from './ConsumableDetailPage';
+
+const EMPTY_FORM = { name: '', sku: '', unit: '', category: '', min_level: '0', barcode: '' };
+
+/** createRequest is the body of POST /consumables: no initial stock, no free-text location. */
+function createRequest(form: typeof EMPTY_FORM): CreateConsumableRequest {
+  const text = (value: string) => value.trim() || undefined;
+  const minLevel = Number(form.min_level);
+  return {
+    name: form.name.trim(),
+    sku: text(form.sku),
+    unit: text(form.unit),
+    category: text(form.category),
+    min_level: Number.isFinite(minLevel) && minLevel > 0 ? minLevel : 0,
+    barcode: text(form.barcode),
+  };
+}
+
+/** violationOf is the message of a refused create at one input. */
+function violationOf(error: unknown, field: string): string | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  const violation = error.violations.find((v) => v.field === field);
+  if (violation) return violation.detail;
+  return error.field === field ? error.detail : undefined;
+}
 
 export function ConsumableListPage() {
   const { t } = useTranslation();
@@ -33,46 +68,47 @@ export function ConsumableListPage() {
   const [search, setSearch] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: '', sku: '', min_level: 0 });
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['consumables', search, lowStockOnly],
-    queryFn: () => consumableApi.list({ search, low_stock: lowStockOnly, limit: 100 }),
+  const { data, isLoading, error, refetch } = useConsumableList({
+    search,
+    low_stock: lowStockOnly || undefined,
+    limit: 100,
   });
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      consumableApi.create({ name: form.name, sku: form.sku, min_level: form.min_level }),
+    mutationFn: () => consumableApi.create(createRequest(form)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['consumables'] });
-      setShowCreate(false);
-      setForm({ name: '', sku: '', min_level: 0 });
+      void queryClient.invalidateQueries({ queryKey: ['consumables'] });
+      closeCreate(false);
     },
   });
 
-  const moveMutation = useMutation({
-    mutationFn: ({
-      id,
-      direction,
-      quantity,
-    }: {
-      id: string;
-      direction: 'in' | 'out';
-      quantity: number;
-    }) => consumableApi.addMovement(id, { direction, quantity }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consumables'] }),
-  });
+  const closeCreate = (open: boolean) => {
+    if (!open) {
+      setForm(EMPTY_FORM);
+      createMutation.reset();
+    }
+    setShowCreate(open);
+  };
 
   const consumables = data?.data ?? [];
+  const createError = createMutation.error;
+  const field = (name: keyof typeof EMPTY_FORM) => ({
+    value: form[name],
+    onChange: (event: { target: { value: string } }) =>
+      setForm({ ...form, [name]: event.target.value }),
+    error: violationOf(createError, name),
+  });
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title={t('nav.consumables', 'Lagerverwaltung')}
-        description={t('consumables.summary', 'Verbrauchsmaterial mit Bestand und Mindestbestand.')}
+        title={t('nav.consumables')}
+        description={t('consumables.summary')}
         actions={
           <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
-            {t('consumables.create', 'Artikel anlegen')}
+            {t('consumables.create')}
           </Button>
         }
       />
@@ -83,9 +119,9 @@ export function ConsumableListPage() {
           icon={<Search />}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('common.search', 'Suchen')}
+          placeholder={t('common.search')}
           className="w-full sm:w-64"
-          aria-label={t('common.search', 'Suchen')}
+          aria-label={t('common.search')}
         />
         <label className="inline-flex h-9 items-center gap-2 text-sm text-fg">
           <input
@@ -93,7 +129,7 @@ export function ConsumableListPage() {
             checked={lowStockOnly}
             onChange={(e) => setLowStockOnly(e.target.checked)}
           />
-          {t('consumables.lowStockOnly', 'Nur Mindestbestand unterschritten')}
+          {t('consumables.lowStockOnly')}
         </label>
         {data ? (
           <ToolbarEnd>
@@ -108,7 +144,7 @@ export function ConsumableListPage() {
       {error ? (
         <ErrorState
           title={t('app.error')}
-          description={error instanceof Error ? error.message : undefined}
+          description={accessErrorMessage(error, t)}
           retryLabel={t('common.retry')}
           onRetry={() => void refetch()}
         />
@@ -116,76 +152,55 @@ export function ConsumableListPage() {
 
       {data ? (
         <Card className="p-0 overflow-hidden">
-          <ScrollRegion label={t('nav.consumables', 'Lagerverwaltung')}>
+          <ScrollRegion label={t('nav.consumables')}>
             <table className={tableClasses}>
               <thead className={theadClasses}>
                 <tr>
                   <th scope="col" className={thClasses}>
-                    {t('common.name', 'Name')}
+                    {t('common.name')}
                   </th>
                   <th scope="col" className={thClasses}>
-                    SKU
+                    {t('inventory.sku')}
                   </th>
                   <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('consumables.stock')}
+                    {t('consumables.totalStock')}
                   </th>
                   <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('consumables.minLevel', 'Mindestbestand')}
+                    {t('consumables.minLevel')}
                   </th>
                   <th scope="col" className={thClasses}>
-                    {t('ci.status', 'Status')}
-                  </th>
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
-                    {t('common.actions', 'Aktionen')}
+                    {t('ci.status')}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {consumables.map((c: Consumable) => (
+                {consumables.map((c) => (
                   <tr key={c.id} className={trClasses}>
-                    <td className={tdPrimaryClasses}>{c.name}</td>
+                    <td className={tdPrimaryClasses}>
+                      <Link
+                        to={`/consumables/${c.id}`}
+                        className="font-medium text-accent-strong underline-offset-2 hover:underline"
+                      >
+                        {c.name}
+                      </Link>
+                    </td>
                     <td className={tdMonoClasses}>{c.sku || '—'}</td>
                     <td className={cn(tdNumericClasses, 'whitespace-nowrap text-fg')}>
-                      {c.stock_level} {c.unit}
+                      {t('consumables.quantityWithUnit', { quantity: c.stock_level, unit: c.unit })}
                     </td>
                     <td className={tdNumericClasses}>{c.min_level}</td>
                     <td className={tdClasses}>
-                      {c.stock_level < c.min_level ? (
-                        <Badge variant="danger">{t('consumables.low', 'niedrig')}</Badge>
+                      {isBelowMinimum(c) ? (
+                        <Badge variant="danger">{t('consumables.low')}</Badge>
                       ) : (
-                        <Badge variant="success">{t('consumables.ok', 'OK')}</Badge>
+                        <Badge variant="success">{t('consumables.ok')}</Badge>
                       )}
-                    </td>
-                    <td className={cn(tdClasses, 'text-right')}>
-                      <div className="flex justify-end gap-1">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          aria-label={`+1 ${c.name}`}
-                          onClick={() =>
-                            moveMutation.mutate({ id: c.id, direction: 'in', quantity: 1 })
-                          }
-                        >
-                          +1
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          aria-label={`−1 ${c.name}`}
-                          onClick={() =>
-                            moveMutation.mutate({ id: c.id, direction: 'out', quantity: 1 })
-                          }
-                          disabled={c.stock_level <= 0}
-                        >
-                          −1
-                        </Button>
-                      </div>
                     </td>
                   </tr>
                 ))}
                 {consumables.length === 0 ? (
                   <TableEmptyRow
-                    colSpan={6}
+                    colSpan={5}
                     icon={<Boxes />}
                     title={
                       search || lowStockOnly ? t('common.noResults') : t('consumables.emptyTitle')
@@ -203,40 +218,34 @@ export function ConsumableListPage() {
         </Card>
       ) : null}
 
-      <Modal
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        title={t('consumables.create', 'Artikel anlegen')}
-      >
-        <div className="space-y-4">
-          <Input
-            label={t('common.name', 'Name')}
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-          <Input
-            label="SKU"
-            value={form.sku}
-            onChange={(e) => setForm({ ...form, sku: e.target.value })}
-          />
-          <Input
-            label={t('consumables.minLevel', 'Mindestbestand')}
-            type="number"
-            value={form.min_level}
-            onChange={(e) => setForm({ ...form, min_level: Number(e.target.value) })}
-          />
+      <Modal open={showCreate} onOpenChange={closeCreate} title={t('consumables.create')}>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (form.name.trim()) createMutation.mutate();
+          }}
+        >
+          <Input label={t('common.name')} required {...field('name')} />
+          <Input label={t('inventory.sku')} {...field('sku')} />
+          <Input label={t('consumables.unit')} {...field('unit')} />
+          <Input label={t('consumables.category')} {...field('category')} />
+          <Input label={t('consumables.minLevel')} type="number" min={0} {...field('min_level')} />
+          <Input label={t('consumables.barcodeOptional')} {...field('barcode')} />
+          {createError ? (
+            <p role="alert" className="text-sm text-danger">
+              {accessErrorMessage(createError, t)}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setShowCreate(false)}>
-              {t('common.cancel', 'Abbrechen')}
+            <Button type="button" variant="secondary" onClick={() => closeCreate(false)}>
+              {t('common.cancel')}
             </Button>
-            <Button
-              onClick={() => createMutation.mutate()}
-              disabled={!form.name || createMutation.isPending}
-            >
-              {t('common.create', 'Anlegen')}
+            <Button type="submit" disabled={!form.name.trim() || createMutation.isPending}>
+              {t('common.create')}
             </Button>
           </div>
-        </div>
+        </form>
       </Modal>
     </div>
   );

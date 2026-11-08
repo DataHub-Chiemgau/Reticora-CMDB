@@ -51,9 +51,15 @@ export type AppPage =
   | 'jobs'
   // Enterprise CMDB + asset/inventory extension (Phase E).
   | 'ci-types'
+  | 'rules'
+  | 'relationship-types'
   | 'locations'
   | 'inventory'
-  | 'saved-views';
+  | 'saved-views'
+  // Tag catalog (CI-08, WP-817): core without a module gate (E-105).
+  | 'tags'
+  // Import assistant (UI-11, WP-322): the nav page of the module import (E-105).
+  | 'import';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -93,9 +99,13 @@ export const pageToPath: Record<AppPage, string> = {
   reviews: '/reviews',
   jobs: '/jobs',
   'ci-types': '/ci-types',
+  rules: '/rules',
+  'relationship-types': '/relationship-types',
   locations: '/locations',
   inventory: '/inventory',
   'saved-views': '/saved-views',
+  tags: '/tags',
+  import: '/imports',
 };
 
 interface CommandPaletteProps {
@@ -121,6 +131,12 @@ interface CommandPaletteProps {
    * (WP-214). Defaults to always-true like isFeatureEnabled.
    */
   isPageEnabled?: (page: AppPage) => boolean;
+  /**
+   * onScan opens the scan dialog (INV-03, WP-807). The caller passes it only
+   * with the feature barcode and the module inventory; without it the
+   * palette has no "Scan" command.
+   */
+  onScan?: () => void;
 }
 
 interface CommandItem {
@@ -203,12 +219,12 @@ type FocusAfterClose = 'restore' | 'main' | 'none';
 /** The page's main landmark (App.tsx); a navigation command lands there. */
 const MAIN_CONTENT_ID = 'main-content';
 
-/** focusAfterCommand: navigation lands on the new page, create-ci opens a dialog. */
+/** focusAfterCommand: navigation lands on the new page, create-ci and scan open a dialog. */
 function focusAfterCommand(id: string): FocusAfterClose {
   if (id.startsWith('nav-')) {
     return 'main';
   }
-  if (id === 'create-ci') {
+  if (id === 'create-ci' || id === 'scan') {
     return 'none';
   }
   return 'restore';
@@ -246,6 +262,7 @@ export function CommandPalette({
   themeToggleLabel,
   isFeatureEnabled = () => true,
   isPageEnabled = () => true,
+  onScan,
 }: CommandPaletteProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -307,6 +324,16 @@ export function CommandPalette({
         keywords: ['theme dark light system appearance farbschema hell dunkel'],
         action: onToggleDarkMode,
       },
+      ...(onScan
+        ? [
+            {
+              id: 'scan',
+              label: t('commandPalette.commands.scan'),
+              keywords: ['scan scannen barcode qr code etikett label kamera camera'],
+              action: onScan,
+            },
+          ]
+        : []),
       {
         id: 'nav-assets',
         label: t('commandPalette.commands.assets', 'Inventar öffnen'),
@@ -392,6 +419,12 @@ export function CommandPalette({
         action: () => onNavigate('webhooks'),
       },
       {
+        id: 'nav-import',
+        label: t('commandPalette.commands.import'),
+        keywords: ['import csv xlsx excel upload mapping profil dry run'],
+        action: () => onNavigate('import'),
+      },
+      {
         id: 'nav-export',
         label: t('commandPalette.commands.export'),
         keywords: ['export csv datev json download'],
@@ -422,10 +455,22 @@ export function CommandPalette({
         action: () => onNavigate('map'),
       },
       {
+        id: 'nav-tags',
+        label: t('commandPalette.commands.tags'),
+        keywords: ['tags schlagwörter labels katalog catalog'],
+        action: () => onNavigate('tags'),
+      },
+      {
         id: 'nav-roomplan',
         label: t('commandPalette.commands.roomplan', 'Raumplan öffnen'),
         keywords: ['roomplan raumplan floorplan raum position'],
         action: () => onNavigate('roomplan'),
+      },
+      {
+        id: 'nav-rules',
+        label: t('commandPalette.commands.rules'),
+        keywords: ['rules regeln regelkatalog validation validierung bedingung condition'],
+        action: () => onNavigate('rules'),
       },
     ];
     const writtenIds = new Set(written.map((command) => command.id));
@@ -448,6 +493,7 @@ export function CommandPalette({
     });
   }, [
     onCreateCI,
+    onScan,
     onNavigate,
     onToggleDarkMode,
     themeToggleLabel,

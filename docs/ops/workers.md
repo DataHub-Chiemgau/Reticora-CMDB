@@ -92,6 +92,7 @@ audit entry (`retention.*`).
 | `retention.soft_deleted` (03:37) | soft-deleted CIs | 90 days | `RETICORA_RETENTION_SOFT_DELETE_DAYS` (90) |
 | `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
 | `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |
+| `retention.bulk_change_set` (04:07) | `bulk_change_set` (change sets of bulk jobs, the basis of their revert) | 30 days | none: fixed period |
 
 A value below the minimum stops the start. The audit log keeps its chain
 verifiable: the run removes the oldest entries of a chain (never the newest)

@@ -109,6 +109,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   assistant: 'ai',
   webhooks: 'webhooks',
   export: 'export_csv',
+  // The import assistant (WP-322, E-44).
+  import: 'import',
   monitoring: 'monitoring',
   audit: undefined,
   security: undefined,

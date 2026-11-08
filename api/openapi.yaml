@@ -2983,7 +2983,24 @@ paths:
         urn:reticora:problem:lifecycle-guard); change_template restores the
         template list and removes the defaults the migration filled unless
         they changed since. export is not revertible: its export job has no
-        revert. Every other kind (bulk.revert and export among them), a bulk
+        revert. The bulk kind asset.bulk (WP-784; every asset bulk is a job,
+        below 100 ids one of the request whose id the 200 report names as
+        bulk_job_id) is reverted the same way with asset:write, also from
+        the creator, and only while the module inventory is on (otherwise
+        409, kind without revert); each asset needs the right of the
+        original action (set_location asset:move, assign assignment:write,
+        lifecycle_transition and archive lifecycle:transition), otherwise it
+        is skipped with 403. The revert per asset bulk action:
+        set_status and set_fields write the old values back through the
+        path of PATCH /assets/{id} (a field changed since is skipped);
+        set_location books the transfer back to the former location as a
+        movement; assign books the return movement, with a former holder
+        the transfer back to it (an asset moved or assigned otherwise since
+        is skipped with 409); add_tags and remove_tags take back each tag
+        the bulk changed on asset_tag_link; lifecycle_transition and archive
+        run the transition back with the guards of the model and the system
+        guards (archive also removes the tag archived); export is not
+        revertible. Every other kind (bulk.revert and export among them), a bulk
         job without change set rows the caller sees and a job that did not
         succeed are 409. A revert is recorded on the job (reverted_at, reverted_by); a
         further revert is 409 "the job is already reverted" (F-329). The
@@ -3006,9 +3023,9 @@ paths:
         '202':
           description: >-
             The revert of a bulk job runs as the job bulk.revert; its result
-            reports each CI as reverted, skipped (with the fields changed
-            since the bulk, or 404/403 for a CI no longer visible or
-            refused) or error, each with its RFC 7807 code.
+            reports each CI or asset as reverted, skipped (with the fields
+            changed since the bulk, or 404/403 for an object no longer
+            visible or refused) or error, each with its RFC 7807 code.
           headers:
             Location:
               description: The revert job, /api/v1/jobs/{revert_id}.
@@ -19578,13 +19595,24 @@ paths:
         unknown action, an invalid status, a status outside set_status and
         unknown, missing or invalid parameters are 422 for the whole
         request (params.<name>) before any change, so is a tag key the
-        catalog lacks (params.tags). The action export is unknown (422 on
-        action) until the asset export is wired (WP-782). Requires
-        asset:write; archive also lifecycle:transition, set_location
-        asset:move, assign assignment:write and lifecycle_transition
-        lifecycle:transition: without it the whole request is 403 before
+        catalog lacks (params.tags). export (WP-782) creates exactly one
+        export job with filters.entity asset and filters.ids of the
+        canonical ids and answers 202 with it whatever the number of ids,
+        Location /api/v1/exports/{id}; params.format is csv or json, it
+        needs the entitlement export_csv (403 feature-not-entitled) and an
+        id that is no UUID is 422 on ids. The job renders the assets among
+        ids that the scope snapshot of the creator shows and that are not
+        deleted, sorted by created_at and id: CSV (UTF-8 with BOM,
+        semicolons) with the JSON names of the asset DTO as columns
+        without custom_fields, JSON with the asset DTO per asset; fields
+        the creator may not read are missing and listed in the manifest
+        with reason field_permission. Requires asset:write; archive also
+        lifecycle:transition, set_location asset:move, assign
+        assignment:write, lifecycle_transition lifecycle:transition and
+        export export:run: without it the whole request is 403 before
         any change. An action whose service this deployment lacks (no
-        database) is 503 for the whole request. An asset outside the scope
+        database, no blob storage for export) is 503 for the whole
+        request. An asset outside the scope
         of the caller is 404 for its id. An id that occurs more than once
         counts once, also in another letter case; the report names it in
         its canonical lower-case form; an id that is no UUID is 400 for
@@ -19618,7 +19646,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AssetBulkRequest'
+              oneOf:
+                - $ref: '#/components/schemas/AssetBulkRequest'
+                - $ref: '#/components/schemas/AssetBulkExport'
       responses:
         '200':
           description: The report per id
@@ -19627,10 +19657,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/BulkResult'
         '202':
-          description: The bulk change runs as a job asset.bulk (Location /api/v1/jobs/{id}).
+          description: >-
+            The bulk change runs as a job asset.bulk (Location
+            /api/v1/jobs/{id}), or the action export created its export job
+            (kind export, Location /api/v1/exports/{id}).
           headers:
             Location:
-              description: The job asset.bulk.
+              description: The job asset.bulk or the export job.
               schema: { type: string }
           content:
             application/json:
@@ -19640,7 +19673,9 @@ paths:
                 properties:
                   job_id: { type: string }
                   status: { type: string }
-                  kind: { type: string }
+                  kind:
+                    type: string
+                    description: asset.bulk, or export for the action export.
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -19648,7 +19683,8 @@ paths:
         '403':
           description: >-
             The right of the action is missing (lifecycle:transition,
-            asset:move, assignment:write).
+            asset:move, assignment:write, export:run), or the organization
+            is not entitled to export_csv (type feature-not-entitled).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -24979,9 +25015,10 @@ components:
         bulk_job_id:
           type: string
           description: >-
-            The job ci.bulk of a bulk on CIs that ran in the request (below
-            100 ids, WP-305); POST /jobs/{id}/revert undoes it within 24
-            hours. Absent without a job service.
+            The job ci.bulk of a bulk on CIs (WP-305) or asset.bulk of a
+            bulk on assets (WP-784) that ran in the request (below 100 ids);
+            POST /jobs/{id}/revert undoes it within 24 hours. Absent without
+            a job service.
         action: { type: string }
         total: { type: integer }
         succeeded: { type: integer }
@@ -25087,6 +25124,31 @@ components:
               type: object
               additionalProperties: true
             reason: { type: string }
+    AssetBulkExport:
+      type: object
+      required: [action, ids, params]
+      additionalProperties: false
+      description: >-
+        One export job of the assets in ids (filters.entity asset and
+        filters.ids, WP-782); 202 with the export job.
+      properties:
+        action:
+          type: string
+          enum: [export]
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string }
+        params:
+          type: object
+          required: [format]
+          additionalProperties: false
+          properties:
+            format:
+              type: string
+              enum: [csv, json]
+              description: datev is 422; DATEV exports assets through POST /api/v1/exports.
     CIBulkRequest:
       description: >-
         Body of POST /api/v1/cis/bulk (WP-304): one variant per action.
@@ -27977,10 +28039,20 @@ components:
       type: object
       description: >-
         Filters of the export. csv and json export CIs (status, ci_type_id,
-        client_id); datev exports assets (client_id, lifecycle_state), and
-        status or ci_type_id with datev, lifecycle_state with csv or json
-        are 400.
+        client_id) or, with entity asset, a selection of assets by ids;
+        datev exports assets (client_id, lifecycle_state), and status or
+        ci_type_id with datev, lifecycle_state with csv or json are 400.
       properties:
+        entity:
+          type: string
+          enum: [ci, asset]
+          default: ci
+          description: >-
+            What a csv or json export renders (WP-782). asset is set by the
+            action export of POST /api/v1/assets/bulk only, with ids and
+            without another filter; POST /api/v1/exports with entity asset
+            is 400, so the asset export stays behind the module inventory
+            and the entitlement of /api/v1/assets.
         status:
           type: string
         ci_type_id:
@@ -27997,8 +28069,9 @@ components:
           maxItems: 500
           items: { type: string, format: uuid }
           description: >-
-            Selection of CIs by id for csv and json (WP-780): the visible,
-            not deleted CIs among them, sorted by created_at and id. Not
+            Selection of CIs (with entity asset: of assets, WP-782) by id
+            for csv and json (WP-780): the visible, not deleted ones among
+            them, sorted by created_at and id. Not
             combinable with the other filters; more than 500 ids, an id
             that is no UUID and ids with datev are 400.
 

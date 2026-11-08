@@ -107,6 +107,7 @@ const storedCI: CI = {
   status: 'active',
   version: 3,
   attributes: { rack_units: 2, airflow: 'front_to_back', discovered_only: 'keep' },
+  tags: [],
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-02T00:00:00Z',
 };

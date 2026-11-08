@@ -9,11 +9,14 @@ import {
   CI_ID,
   DRAFT_HANDLERS,
   DRAFT_ID,
+  FORM_BUILDER_HANDLERS,
+  FORM_TYPE_ID,
+  RULE_HANDLERS,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
 } from './support/a11y-fixtures';
-import { EMPTY_LIST, mockBackend, signIn } from './support/backend';
+import { AT, EMPTY_LIST, ORG_ID, list, mockBackend, signIn } from './support/backend';
 import type { Handler } from './support/backend';
 
 // UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
@@ -79,6 +82,505 @@ interface A11yRoute {
 // violation is a new finding with its own WP (plan convention 16), not a mark.
 
 const text = (value: string) => (page: Page) => page.getByText(value, { exact: false }).first();
+
+// WP-323: a system and an organization type of the relationship type
+// administration, the organization type with an attribute schema.
+const relationshipType = (key: string, extra: Record<string, unknown>) => ({
+  id: `a11y-rt-${key}`,
+  key,
+  display_name: key,
+  reverse_name: key,
+  directed: true,
+  category: 'logical',
+  impact_direction: 'source_depends_on_target',
+  redundant: false,
+  allowed_source_types: [],
+  allowed_target_types: [],
+  cardinality: 'many_to_many',
+  is_system: true,
+  metadata_schema: [],
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+// WP-321: the document of the fixtures with a clean and an infected
+// version, a link to the fixture CI and the storage usage of the
+// organization near its limit (warning from 90 %).
+const DOCUMENT_ID = 'da000000-0000-4000-8000-000000000001';
+const documentVersion = (version: number, scan: string) => ({
+  id: `da100000-0000-4000-8000-00000000000${version}`,
+  organization_id: ORG_ID,
+  document_id: DOCUMENT_ID,
+  version,
+  size: 102400 * version,
+  mime_type: 'application/pdf',
+  checksum_sha256: `${version}`.repeat(64),
+  scan_status: scan,
+  ...(scan === 'pending_scan' ? {} : { scanned_at: AT }),
+  created_at: AT,
+});
+// WP-320: the detail page of the fixture consumable with its stock and
+// availability in one bin and the rights that show the booking and
+// reservation actions.
+const CONSUMABLE_ID = 'e1000000-0000-4000-8000-000000000001';
+const CONSUMABLE_BIN = 'e1100000-0000-4000-8000-000000000001';
+const CONSUMABLE_HANDLERS: Handler[] = [
+  {
+    path: `/consumables/${CONSUMABLE_ID}`,
+    reply: () => ({
+      body: {
+        id: CONSUMABLE_ID,
+        organization_id: ORG_ID,
+        name: M.consumable,
+        sku: 'TN-1',
+        barcode: '4006381333931',
+        category: 'printer',
+        unit: 'pcs',
+        stock_level: 2,
+        min_level: 4,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/consumables/${CONSUMABLE_ID}/stock`,
+    reply: () => ({
+      body: list([
+        {
+          consumable_id: CONSUMABLE_ID,
+          location_id: CONSUMABLE_BIN,
+          on_hand: 2,
+          reserved: 1,
+          updated_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/consumables/${CONSUMABLE_ID}/availability`,
+    reply: () => ({
+      body: list([{ location_id: CONSUMABLE_BIN, on_hand: 2, reserved: 1, available: 1 }]),
+    }),
+  },
+  {
+    path: '/me/permissions',
+    reply: () => ({
+      body: {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        permissions: ['stock:read', 'stock:write', 'reservation:write'],
+      },
+    }),
+  },
+];
+const DOCUMENT_HANDLERS: Handler[] = [
+  {
+    path: '/documents/usage',
+    reply: () => ({ body: { storage_bytes: 950 * 1024 * 1024, limit_mb: 1024 } }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}`,
+    reply: () => ({
+      body: {
+        id: DOCUMENT_ID,
+        organization_id: ORG_ID,
+        title: M.document,
+        description: 'a11y Betrieb',
+        file_name: 'handbuch.pdf',
+        file_size: 204800,
+        mime_type: 'application/pdf',
+        storage_key: `org/${ORG_ID}/documents/${DOCUMENT_ID}/2`,
+        version: 2,
+        category: 'manual',
+        tags: ['betrieb'],
+        uploaded_by: '00000000-0000-0000-0000-000000000001',
+        created_at: AT,
+        updated_at: AT,
+        scan_status: 'clean',
+        scanned_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}/versions`,
+    reply: () => ({ body: list([documentVersion(2, 'clean'), documentVersion(1, 'infected')]) }),
+  },
+  {
+    path: `/documents/${DOCUMENT_ID}/links`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'da200000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          document_id: DOCUMENT_ID,
+          entity_type: 'ci',
+          entity_id: CI_ID,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
+// WP-814: the fixture ticket with its primary CI, a link to that CI, an
+// external and a system comment, a clean attachment and a breached SLA.
+const TICKET_ID = 'dc000000-0000-4000-8000-000000000001';
+const TICKET_USER = '00000000-0000-0000-0000-000000000001';
+const ticketComment = (id: number, extra: Record<string, unknown>) => ({
+  id: `dc100000-0000-4000-8000-00000000000${id}`,
+  organization_id: ORG_ID,
+  ticket_id: TICKET_ID,
+  content: `a11y Kommentar ${id}`,
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+const TICKET_HANDLERS: Handler[] = [
+  {
+    path: `/tickets/${TICKET_ID}`,
+    reply: () => ({
+      body: {
+        id: TICKET_ID,
+        organization_id: ORG_ID,
+        ticket_number: 42,
+        title: M.ticket,
+        description: 'a11y Papierstau',
+        status: 'open',
+        priority: 'high',
+        category: 'incident',
+        reporter_id: TICKET_USER,
+        assignee_id: TICKET_USER,
+        related_ci_id: CI_ID,
+        due_date: AT,
+        tags: [],
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/comments`,
+    reply: () => ({
+      body: list([
+        ticketComment(1, { author_id: TICKET_USER, author_type: 'user', is_internal: false }),
+        ticketComment(2, { author_id: null, author_type: 'system', is_internal: true }),
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/links`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'dc200000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          ticket_id: TICKET_ID,
+          entity_type: 'ci',
+          entity_id: CI_ID,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/attachments`,
+    reply: () => ({
+      body: list([
+        {
+          id: DOCUMENT_ID,
+          organization_id: ORG_ID,
+          title: M.document,
+          file_name: 'handbuch.pdf',
+          file_size: 204800,
+          mime_type: 'application/pdf',
+          storage_key: `org/${ORG_ID}/documents/${DOCUMENT_ID}/2`,
+          version: 2,
+          category: 'manual',
+          tags: [],
+          uploaded_by: TICKET_USER,
+          created_at: AT,
+          updated_at: AT,
+          scan_status: 'clean',
+          scanned_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/tickets/${TICKET_ID}/sla`,
+    reply: () => ({
+      body: {
+        id: 'dc300000-0000-4000-8000-000000000001',
+        organization_id: ORG_ID,
+        ticket_id: TICKET_ID,
+        sla_id: 'dc400000-0000-4000-8000-000000000001',
+        response_due_at: AT,
+        resolution_due_at: AT,
+        response_breached: true,
+        resolution_breached: false,
+        calendar_id: null,
+        response_remaining_minutes: -90,
+        resolution_remaining_minutes: 125,
+        paused: false,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+];
+
+// WP-813: the stocktake of the fixtures in progress, with an area, a frozen
+// asset and consumable, one scan per kind and a difference of each kind.
+// The area and bins lie outside the fixture tree, so the page names them by
+// id; the page reads the names of asset and consumable one by one.
+const STOCKTAKE_ID = 'db000000-0000-4000-8000-000000000001';
+const STOCKTAKE_AREA = 'db100000-0000-4000-8000-000000000001';
+const STOCKTAKE_BIN = 'db100000-0000-4000-8000-000000000002';
+const STOCKTAKE_ASSET = 'db200000-0000-4000-8000-000000000001';
+const STOCKTAKE_CONSUMABLE = 'db300000-0000-4000-8000-000000000001';
+const STOCKTAKE_USER = '00000000-0000-0000-0000-000000000001';
+const STOCKTAKE_HANDLERS: Handler[] = [
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_ID,
+        organization_id: ORG_ID,
+        title: M.stocktake,
+        status: 'in_progress',
+        scope: 'full',
+        location_id: STOCKTAKE_AREA,
+        started_at: AT,
+        total_expected: 2,
+        total_scanned: 2,
+        total_missing: 0,
+        total_surplus: 0,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/items`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'db400000-0000-4000-8000-000000000001',
+          stocktake_id: STOCKTAKE_ID,
+          item_kind: 'asset',
+          asset_id: STOCKTAKE_ASSET,
+          location_id: STOCKTAKE_AREA,
+          expected_quantity: 1,
+          created_at: AT,
+        },
+        {
+          id: 'db400000-0000-4000-8000-000000000002',
+          stocktake_id: STOCKTAKE_ID,
+          item_kind: 'consumable',
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          location_id: STOCKTAKE_BIN,
+          expected_quantity: 5,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/scans`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'db500000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          stocktake_id: STOCKTAKE_ID,
+          asset_id: STOCKTAKE_ASSET,
+          location_id: STOCKTAKE_BIN,
+          scanned_by: STOCKTAKE_USER,
+          scan_method: 'barcode',
+          scan_result: 'found',
+          code: 'AT-0002',
+          scanned_at: AT,
+        },
+        {
+          id: 'db500000-0000-4000-8000-000000000002',
+          organization_id: ORG_ID,
+          stocktake_id: STOCKTAKE_ID,
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          quantity: 3,
+          location_id: STOCKTAKE_BIN,
+          scanned_by: STOCKTAKE_USER,
+          scan_method: 'manual',
+          scan_result: 'found',
+          scanned_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/differences`,
+    reply: () => ({
+      body: list([
+        {
+          item_kind: 'asset',
+          asset_id: STOCKTAKE_ASSET,
+          classification: 'found',
+          expected_location_id: STOCKTAKE_AREA,
+          found_location_id: STOCKTAKE_BIN,
+          expected_quantity: 1,
+          counted_quantity: 1,
+          asset: { id: STOCKTAKE_ASSET, name: 'a11y Scanner' },
+        },
+        {
+          item_kind: 'consumable',
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          classification: 'found',
+          expected_location_id: STOCKTAKE_BIN,
+          found_location_id: STOCKTAKE_BIN,
+          expected_quantity: 5,
+          counted_quantity: 3,
+          consumable: { id: STOCKTAKE_CONSUMABLE, name: 'a11y Toner' },
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/assets/${STOCKTAKE_ASSET}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_ASSET,
+        organization_id: ORG_ID,
+        inventory_no: 'AT-0002',
+        name: 'a11y Scanner',
+        category: 'hardware',
+        status: 'in_stock',
+        custom_fields: {},
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/consumables/${STOCKTAKE_CONSUMABLE}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_CONSUMABLE,
+        organization_id: ORG_ID,
+        name: 'a11y Toner',
+        sku: 'TN-2',
+        category: 'printer',
+        unit: 'pcs',
+        stock_level: 3,
+        min_level: 1,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+];
+
+const RELATIONSHIP_TYPES: Handler = {
+  path: '/relationship-types',
+  reply: () => ({
+    body: list([
+      relationshipType('a11y_depends_on', {
+        display_name: 'a11y depends on',
+        reverse_name: 'a11y required by',
+      }),
+      relationshipType('a11y_backs_up', {
+        organization_id: ORG_ID,
+        is_system: false,
+        display_name: 'a11y backs up',
+        reverse_name: 'a11y backed up by',
+        category: 'hosting',
+        cardinality: 'one_to_many',
+        metadata_schema: [
+          {
+            key: 'a11y_schedule',
+            display_name: { de: 'Zeitplan', en: 'Schedule' },
+            data_type: 'text',
+            required: true,
+          },
+        ],
+      }),
+    ]),
+  }),
+};
+
+// WP-817: a system tag and an own tag with a color in the tag catalog.
+const TAG_HANDLERS: Handler[] = [
+  {
+    path: '/tags',
+    reply: () => ({
+      body: list(
+        [
+          { key: 'archived', is_system: true, display_name: { de: 'Archiviert', en: 'Archived' } },
+          {
+            key: 'a11y-backup',
+            is_system: false,
+            display_name: { de: 'a11y Sicherung', en: 'a11y backup' },
+            color: '#1f6feb',
+          },
+        ].map((tag, i) => ({
+          id: `fa000000-0000-4000-8000-00000000000${i + 1}`,
+          organization_id: ORG_ID,
+          color: null,
+          created_at: AT,
+          updated_at: AT,
+          ...tag,
+        })),
+      ),
+    }),
+  },
+];
+
+// WP-322: an uploaded CSV file whose scan is clean and its column preview;
+// the check opens the mapping step of the import assistant.
+const IMPORT_DOCUMENT = {
+  id: 'fb000000-0000-4000-8000-000000000001',
+  organization_id: ORG_ID,
+  title: 'a11y-import',
+  file_name: 'a11y-import.csv',
+  file_size: 32,
+  mime_type: 'text/csv',
+  storage_key: '',
+  version: 1,
+  category: 'general',
+  tags: [],
+  uploaded_by: '00000000-0000-0000-0000-000000000001',
+  created_at: AT,
+  updated_at: AT,
+  scan_status: 'clean',
+};
+const IMPORT_HANDLERS: Handler[] = [
+  {
+    path: '/me/permissions',
+    reply: () => ({
+      body: {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        permissions: ['ci:read', 'import:run', 'import:manage'],
+      },
+    }),
+  },
+  { method: 'POST', path: '/documents', reply: () => ({ status: 201, body: IMPORT_DOCUMENT }) },
+  {
+    method: 'PUT',
+    path: `/documents/${IMPORT_DOCUMENT.id}/content`,
+    reply: () => ({ body: IMPORT_DOCUMENT }),
+  },
+  { path: `/documents/${IMPORT_DOCUMENT.id}`, reply: () => ({ body: IMPORT_DOCUMENT }) },
+  {
+    method: 'POST',
+    path: '/imports/preview',
+    reply: () => ({
+      body: {
+        format: 'csv',
+        sheets: [],
+        columns: ['Hostname', 'Seriennummer'],
+        sample_rows: [['a11y-import-srv', 'SN-1']],
+      },
+    }),
+  },
+];
 
 // One entry per route of src/App.tsx; the parity test below fails when a
 // route is added there without an entry here.
@@ -158,6 +660,13 @@ const ROUTES: A11yRoute[] = [
   { path: '/locations', url: '/locations', ready: text(M.location) },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
   {
+    // WP-817: the tag catalog, read-only without tag:manage.
+    path: '/tags',
+    url: '/tags',
+    handlers: TAG_HANDLERS,
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-backup' }),
+  },
+  {
     path: '/ci-types',
     url: '/ci-types',
     // WP-313: the type tree with parent and child; the child is selected, so
@@ -176,6 +685,14 @@ const ROUTES: A11yRoute[] = [
       await expect(editor.getByText('a11y_set_speed')).toBeVisible();
     },
     ready: (page) => page.locator('#main-content li').filter({ hasText: 'a11y_inventory' }),
+  },
+  {
+    // WP-323: a system type (read-only) and an organization type with its
+    // edit and delete actions.
+    path: '/relationship-types',
+    url: '/relationship-types',
+    handlers: [RELATIONSHIP_TYPES],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y backs up' }),
   },
   {
     // WP-314: own and system template, with the rights to edit and publish.
@@ -215,10 +732,62 @@ const ROUTES: A11yRoute[] = [
     },
     ready: (page) => page.locator('#main-content').getByText('a11y value required'),
   },
+  {
+    // WP-316: the form builder of the child type without a role: the copy of
+    // the resolved form, inherited from the layout of the parent, with the
+    // field palette, a section with its fields and widths and the catalog
+    // rules for visible_when.
+    path: '/ci-types/:id/form-builder',
+    url: `/ci-types/${FORM_TYPE_ID}/form-builder`,
+    handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS, ...FORM_BUILDER_HANDLERS],
+    prepare: async (page) => {
+      await expect(page.locator('[data-section-key="a11y_main"]')).toBeVisible();
+      await expect(page.locator('[data-field-name="a11y_serial"]')).toBeVisible();
+    },
+    ready: (page) => page.locator('[data-palette-field="a11y_cost_center"]'),
+  },
+  {
+    // WP-801: the rule catalog with an own rule (condition, edit and delete),
+    // a validation of a template version and a read-only system rule.
+    path: '/rules',
+    url: '/rules',
+    handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
+  },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
-  { path: '/documents', url: '/documents', ready: text(M.document) },
+  {
+    path: '/documents',
+    url: '/documents',
+    handlers: DOCUMENT_HANDLERS,
+    ready: text(M.document),
+  },
+  {
+    // WP-321: metadata, versions with scan status and download, the links.
+    path: '/documents/:id',
+    url: `/documents/${DOCUMENT_ID}`,
+    handlers: DOCUMENT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content table').getByText('v1')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content').getByRole('link', { name: M.ci }),
+  },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
+  {
+    path: '/stocktake/:id',
+    url: `/stocktake/${STOCKTAKE_ID}`,
+    handlers: STOCKTAKE_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Toner').first()).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content h1').getByText(M.stocktake),
+  },
   { path: '/consumables', url: '/consumables', ready: text(M.consumable) },
+  {
+    path: '/consumables/:id',
+    url: `/consumables/${CONSUMABLE_ID}`,
+    handlers: CONSUMABLE_HANDLERS,
+    ready: (page) => page.getByRole('heading', { name: M.consumable }),
+  },
   { path: '/orders', url: '/orders', ready: text(M.order) },
   { path: '/maintenance', url: '/maintenance', ready: text(M.maintenance) },
   { path: '/disposal', url: '/disposal', ready: text(M.disposal) },
@@ -230,6 +799,18 @@ const ROUTES: A11yRoute[] = [
   { path: '/reviews', url: '/reviews', ready: text(M.review) },
   { path: '/jobs', url: '/jobs', ready: text(M.job) },
   { path: '/tickets', url: '/tickets', ready: text(M.ticket) },
+  {
+    // WP-814: head, status changes, assignment, links, comments, attachments and SLA.
+    path: '/tickets/:id',
+    url: `/tickets/${TICKET_ID}`,
+    handlers: TICKET_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Kommentar 2')).toBeVisible();
+      await expect(page.locator('#main-content').getByText(M.document)).toBeVisible();
+    },
+    ready: (page) =>
+      page.locator('#main-content').getByRole('list').getByRole('link', { name: M.ci }).first(),
+  },
   {
     path: '/users',
     url: '/users',
@@ -252,6 +833,21 @@ const ROUTES: A11yRoute[] = [
     url: '/export',
     ready: (page) => page.locator('#main-content tbody td', { hasText: 'csv' }).first(),
   },
+  {
+    // WP-322: the import assistant after the upload, with preview and mapping.
+    path: '/imports',
+    url: '/imports',
+    handlers: IMPORT_HANDLERS,
+    prepare: async (page) => {
+      await page.locator('#main-content input[type="file"]').setInputFiles({
+        name: 'a11y-import.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from('Hostname;Seriennummer\na11y-import-srv;SN-1\n'),
+      });
+      await page.getByRole('button', { name: /Weiter zur Zuordnung|Continue to mapping/ }).click();
+    },
+    ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
+  },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
   { path: '/security', url: '/security', ready: text(M.compliance) },
@@ -261,11 +857,11 @@ const ROUTES: A11yRoute[] = [
 
 // The list pages of F-172 whose empty state had too little contrast: they are
 // checked with an empty list as well.
-const EMPTY_PAGES: { url: string; endpoint: string }[] = [
+const EMPTY_PAGES: { url: string; endpoint: string; handlers?: Handler[] }[] = [
   { url: '/assets', endpoint: '/assets' },
   { url: '/stocktake', endpoint: '/stocktakes' },
   { url: '/assignments', endpoint: '/assignments' },
-  { url: '/documents', endpoint: '/documents' },
+  { url: '/documents', endpoint: '/documents', handlers: DOCUMENT_HANDLERS },
   { url: '/tickets', endpoint: '/tickets' },
 ];
 
@@ -448,6 +1044,104 @@ const DIALOGS: {
   },
 ];
 
+// WP-806 (UI-15): the flow dialogs of the inventory page and the assign
+// dialog of WP-318 with their pickers. The flows need the modules inventory
+// and stocktake and the features stock and assets_basic (E-44); the handlers
+// say so explicitly and go ahead of A11Y_HANDLERS.
+const FLOW_HANDLERS: Handler[] = [
+  {
+    path: '/modules',
+    reply: () => ({
+      body: {
+        data: [
+          { key: 'inventory', phase: 'P2', nav: ['assets'], enabled: true },
+          { key: 'stocktake', phase: 'P2', nav: ['stocktake'], enabled: true },
+        ],
+      },
+    }),
+  },
+  {
+    path: '/entitlements',
+    reply: () => ({
+      body: list(
+        ['assets_basic', 'stock'].map((feature_key) => ({
+          organization_id: ORG_ID,
+          feature_key,
+          plan: 'standard',
+          enabled: true,
+          limits: {},
+          source: 'manual',
+        })),
+      ),
+    }),
+  },
+];
+
+const FLOW_DIALOGS: { name: string; url: string; button: RegExp }[] = [
+  { name: 'inventory receive', url: '/inventory', button: /^(empfangen|receive)$/i },
+  { name: 'inventory move', url: '/inventory', button: /^(verschieben|move)$/i },
+  { name: 'inventory reserve', url: '/inventory', button: /^(reservieren|reserve)$/i },
+  { name: 'assignments assign', url: '/assignments', button: /^(zuweisen|assign)$/i },
+];
+
+// WP-807 (UI-15, INV-03): the scan dialog in manual entry and the assign
+// dialog with the signature field. Both need the features barcode and
+// signature (E-44) besides those of the flows; the entitlements say so ahead
+// of A11Y_HANDLERS.
+const SCAN_HANDLERS: Handler[] = [
+  FLOW_HANDLERS[0]!,
+  {
+    path: '/entitlements',
+    reply: () => ({
+      body: list(
+        ['assets_basic', 'stock', 'barcode', 'signature'].map((feature_key) => ({
+          organization_id: ORG_ID,
+          feature_key,
+          plan: 'standard',
+          enabled: true,
+          limits: {},
+          source: 'manual',
+        })),
+      ),
+    }),
+  },
+];
+
+const SCAN_DIALOGS: { name: string; prepare: (page: Page) => Promise<void> }[] = [
+  {
+    name: 'scan (manual entry)',
+    prepare: async (page) => {
+      // No camera: the dialog reads codes from the text field only.
+      await page.evaluate(() =>
+        Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true }),
+      );
+      await expect(page.getByRole('button', { name: /^(zuweisen|assign)$/i })).toBeVisible();
+      await page.keyboard.press('Control+k');
+      await page.getByRole('combobox').fill('Scan');
+      await page.getByRole('option', { name: /^(scannen|scan)/i }).click();
+      await expect(
+        page.getByRole('dialog').getByLabel(/^(code \(handscanner|code \(handheld)/i),
+      ).toBeVisible();
+      // The command palette closes while the scan dialog opens: the check
+      // waits until the palette is gone and every transition has ended, so
+      // axe does not measure the contrast of a half-faded dialog.
+      await expect(page.getByRole('dialog')).toHaveCount(1);
+      await page.waitForFunction(() =>
+        document.getAnimations().every((a) => a.playState !== 'running'),
+      );
+    },
+  },
+  {
+    name: 'assignments assign with signature',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /^(zuweisen|assign)$/i }).click();
+      await expect(
+        page.getByRole('dialog').getByRole('img', { name: /^(unterschrift|signature)/i }),
+      ).toBeVisible();
+    },
+  },
+];
+
 test.describe('accessibility (WCAG 2.1 AA)', () => {
   test('every route of the router has a check', () => {
     const covered = ROUTES.map((route) => route.path).sort();
@@ -546,6 +1240,47 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
         }
       }
 
+      for (const dialog of FLOW_DIALOGS) {
+        for (const theme of THEMES) {
+          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url: dialog.url,
+                handlers: FLOW_HANDLERS,
+                prepare: async (p) => {
+                  await p.getByRole('button', { name: dialog.button }).click();
+                  await expect(p.getByRole('dialog').getByRole('combobox').first()).toBeVisible();
+                },
+                ready: (p) => p.getByRole('dialog'),
+                include: '[role="dialog"]',
+              },
+              theme,
+              language,
+            );
+          });
+        }
+      }
+
+      for (const dialog of SCAN_DIALOGS) {
+        for (const theme of THEMES) {
+          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(
+              page,
+              {
+                url: '/assignments',
+                handlers: SCAN_HANDLERS,
+                prepare: dialog.prepare,
+                ready: (p) => p.getByRole('dialog'),
+                include: '[role="dialog"]',
+              },
+              theme,
+              language,
+            );
+          });
+        }
+      }
+
       // WP-524 (E-87): the CI detail of a CI outside the client chosen in the
       // scope control, with the notice, the counter of the hidden relationships
       // and, after "show all", the outside badge.
@@ -579,14 +1314,14 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
         });
       }
 
-      for (const { url, endpoint } of EMPTY_PAGES) {
+      for (const { url, endpoint, handlers = [] } of EMPTY_PAGES) {
         for (const theme of THEMES) {
           test(`empty state ${url} (${themeName(theme)})`, async ({ page }) => {
             await checkPage(
               page,
               {
                 url,
-                handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }],
+                handlers: [{ path: endpoint, reply: () => ({ body: EMPTY_LIST }) }, ...handlers],
                 ready: (p) => p.locator('#main-content td[colspan]'),
               },
               theme,

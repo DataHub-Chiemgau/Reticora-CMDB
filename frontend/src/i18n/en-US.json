@@ -44,8 +44,12 @@
     "saved-views": "Saved views",
     "locations": "Locations",
     "ci-types": "CI Types",
+    "relationship-types": "Relationship types",
     "reviews": "Reviews",
-    "jobs": "Jobs"
+    "jobs": "Jobs",
+    "tags": "Tags",
+    "rules": "Rule catalog",
+    "import": "Import"
   },
   "common": {
     "save": "Save",
@@ -105,7 +109,11 @@
       "audit": "Open audit log",
       "security": "Open security & privacy",
       "map": "Open map",
-      "roomplan": "Open room plan"
+      "roomplan": "Open room plan",
+      "tags": "Open tags",
+      "rules": "Open rule catalog",
+      "scan": "Scan",
+      "import": "Open import assistant"
     },
     "contact": {
       "label": "Contact",
@@ -314,7 +322,21 @@
       "decommissioned": "Decommissioned",
       "unknown": "Unknown"
     },
-    "timeline": "Timeline"
+    "timeline": "Timeline",
+    "tags": {
+      "title": "Tags",
+      "none": "No tags.",
+      "edit": "Edit tags",
+      "select": "Tags from the catalog",
+      "catalogEmpty": "The catalog holds no tags yet.",
+      "catalogError": "The tag catalog cannot be loaded.",
+      "unknown": "not in the catalog",
+      "conflict": "The tags changed in the meantime ({{fields}}). Reload the CI.",
+      "precondition": "The version of the CI is unknown. Reload the CI.",
+      "invalid": "Unknown tags: {{detail}}",
+      "forbidden": "You lack the permission to change the CI.",
+      "reason": "The tags could not be saved: {{detail}}"
+    }
   },
   "form": {
     "createCI": "Create CI",
@@ -684,7 +706,7 @@
     "category": "Category",
     "size": "Size",
     "version": "Version",
-    "upload": "Create Document",
+    "upload": "Upload document",
     "categories": {
       "general": "General",
       "contract": "Contract",
@@ -697,7 +719,89 @@
     },
     "summary": "Manage contracts, invoices and manuals as documents.",
     "emptyTitle": "No documents yet",
-    "emptyHint": "Create a document to collect contracts, invoices and manuals."
+    "emptyHint": "Upload a document to collect contracts, invoices and manuals.",
+    "scanStatus": "Scan status",
+    "scanStatuses": {
+      "pending_scan": "Scanning",
+      "clean": "Clean",
+      "infected": "Infected",
+      "scan_failed": "Scan failed"
+    },
+    "scan": {
+      "none": "No content",
+      "pending": "The content is being scanned for malware. Download is locked until the scan has finished.",
+      "quarantined": "Quarantine: malware was found in the content. Download and new links are locked.",
+      "failed": "Locked, will be scanned again."
+    },
+    "versionLabel": "v{{version}}",
+    "download": "Download",
+    "downloadNamed": "Download {{name}}",
+    "downloadVersion": "Download version {{version}}",
+    "downloadLocked": "Locked",
+    "add": "Add document",
+    "linkExisting": "Link existing",
+    "searchDocument": "Search document",
+    "noLinkedDocuments": "No documents linked yet.",
+    "usage": {
+      "title": "Storage usage",
+      "ofLimit": "{{used}} of {{limit}} ({{percent}} %)",
+      "unlimited": "{{used}} used",
+      "nearLimit": "The storage of the organization is almost full.",
+      "limitReached": "The storage limit of the organization has been reached. Delete documents or extend the plan."
+    },
+    "metadata": "Metadata",
+    "description": "Description",
+    "saved": "Saved.",
+    "versions": "Versions",
+    "newVersion": "New version",
+    "newVersionFile": "File of the new version",
+    "mimeType": "File type",
+    "checksum": "Checksum (SHA-256)",
+    "uploadedAt": "Uploaded at",
+    "noChecksum": "None",
+    "noVersions": "No content uploaded yet.",
+    "moreVersions": "Load more versions",
+    "links": "Links",
+    "addLink": "Add link",
+    "noLinks": "No links yet.",
+    "linkTypes": {
+      "ci": "CI",
+      "asset": "Asset",
+      "ticket": "Ticket",
+      "location": "Location",
+      "disposal_record": "Disposal",
+      "stocktake": "Stocktake",
+      "contract": "Contract",
+      "stock_movement": "Stock movement"
+    },
+    "unlink": "Remove link ({{type}})",
+    "linkTarget": "Target",
+    "linkKinds": {
+      "object": "CI or asset",
+      "location": "Location"
+    },
+    "linkObject": "Object",
+    "link": "Link"
+  },
+  "upload": {
+    "label": "Upload file",
+    "hint": "Drag a file here or choose one, at most {{max}}.",
+    "choose": "Choose file",
+    "percent": "{{percent}} %",
+    "progress": "Upload of {{name}}",
+    "done": "{{name}} uploaded.",
+    "retry": "Upload again",
+    "discard": "Discard",
+    "errors": {
+      "tooLarge": "The file is too large for the upload limit of the server.",
+      "tooLargeLocal": "The file is too large (at most {{max}}).",
+      "unsupportedType": "This file type is not allowed.",
+      "mimeMismatch": "The content does not match the file type.",
+      "storageLimit": "The storage limit of the organization has been reached.",
+      "unavailable": "Uploading is not possible right now. Please try again later.",
+      "network": "The connection was interrupted. Please try again.",
+      "withTrace": "{{detail}} (trace ID: {{traceId}})"
+    }
   },
   "stocktake": {
     "title": "Stocktake",
@@ -723,7 +827,116 @@
     },
     "summary": "Start stocktakes and follow progress and missing items.",
     "emptyTitle": "No stocktakes yet",
-    "emptyHint": "Start a stocktake to compare stock against the expected count."
+    "emptyHint": "Start a stocktake to compare stock against the expected count.",
+    "area": "Area",
+    "overview": "Overview",
+    "startedAt": "Started at",
+    "completedAt": "Completed at",
+    "start": "Start",
+    "cancel": "Cancel stocktake",
+    "complete": "Complete",
+    "edit": "Edit",
+    "labels": "Print labels",
+    "labelFor": "Label for {{name}}",
+    "deleteNamed": "Delete {{name}}",
+    "open": "Open",
+    "legacyHint": "This stocktake has no area (earlier release). It can neither be started nor scanned, only cancelled.",
+    "readOnlyCompleted": "The stocktake is completed and read-only.",
+    "readOnlyCancelled": "The stocktake is cancelled and read-only.",
+    "recentScans": "Recent scans",
+    "results": {
+      "found": "Found",
+      "missing": "Missing",
+      "unexpected": "Unexpected"
+    },
+    "scanMethods": {
+      "barcode": "Barcode",
+      "qrcode": "QR code",
+      "rfid": "RFID",
+      "manual": "Manual"
+    },
+    "counters": {
+      "label": "Count",
+      "expected": "Expected",
+      "found": "Found",
+      "unexpected": "Unexpected",
+      "open": "Still open",
+      "missing": "Missing"
+    },
+    "columns": {
+      "asset": "Asset",
+      "consumable": "Consumable",
+      "bin": "Bin",
+      "expected": "Expected",
+      "counted": "Counted",
+      "difference": "Difference",
+      "count": "Count",
+      "expectedLocation": "Expected location",
+      "foundLocation": "Place found",
+      "result": "Result",
+      "scannedAt": "Time",
+      "object": "Object",
+      "method": "Method"
+    },
+    "snapshot": {
+      "assets": "Expected stock: assets",
+      "consumables": "Expected stock: consumables per bin",
+      "noAssets": "No assets in the expected stock.",
+      "noConsumables": "No consumables in the expected stock."
+    },
+    "quantities": {
+      "countedSoFar": "Counted so far: {{sum}}",
+      "additional": "Additional quantity",
+      "additionalFor": "Additional quantity for {{name}} in {{bin}}",
+      "count": "Count"
+    },
+    "scan": {
+      "title": "Scanning",
+      "open": "Open scanner",
+      "dialogTitle": "Scan stocktake",
+      "dialogDescription": "A location label sets the place found; assets and consumables are recorded there.",
+      "place": "Place found",
+      "currentPlace": "Current place found: {{name}}",
+      "noPlace": "Choose a place found or scan a location label first.",
+      "placeSet": "Place found set: {{name}}",
+      "needBin": "Consumables are counted in a bin. Please choose a bin as the place found.",
+      "recorded": "{{name}}: {{result}}",
+      "tally": "Found {{found}} · Unexpected {{unexpected}} · Still open {{open}}",
+      "countIn": "Count {{name}} in {{bin}}",
+      "manualTitle": "Record a find without scanner",
+      "manualObject": "Object found",
+      "quantity": "Quantity",
+      "record": "Record find"
+    },
+    "differences": {
+      "title": "Difference list",
+      "assets": "Assets",
+      "quantities": "Quantities",
+      "moved": "Other location",
+      "none": "No differences."
+    },
+    "confirmStart": {
+      "title": "Start stocktake?",
+      "body": "Starting freezes the expected stock of the area {{area}}. Later movements no longer change it."
+    },
+    "confirmCancel": {
+      "title": "Cancel stocktake?",
+      "body": "The stocktake is cancelled and read-only afterwards. No corrections are booked."
+    },
+    "confirmComplete": {
+      "title": "Complete stocktake?",
+      "body": "The completion is expected to book these movements; open entries count as missing afterwards.",
+      "movements": "Expected movements",
+      "none": "No movements to book.",
+      "transfer": "{{type}}: {{name}} from {{from}} to {{to}}",
+      "correction": "{{type}}: {{name}} in {{bin}} ({{delta}})",
+      "note": "The stock at completion decides; the answer shows the booked movements."
+    },
+    "completion": {
+      "title": "Booked movements",
+      "summary": "Booked corrections: {{number}}",
+      "movement": "{{type}}: {{name}} ({{from}} → {{to}}, quantity {{quantity}})"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -754,7 +967,88 @@
       "high": "High",
       "critical": "Critical"
     },
-    "allPriorities": "All priorities"
+    "allPriorities": "All priorities",
+    "allCategories": "All categories",
+    "myTeams": "My teams",
+    "assignment": "Assign to a person or team",
+    "relatedObject": "Related object (CI or asset)",
+    "detail": {
+      "notFound": "Ticket not found",
+      "edit": "Edit",
+      "details": "Details",
+      "dueDate": "Due",
+      "noDueDate": "no due date",
+      "noDescription": "No description",
+      "noRelated": "No related object",
+      "updatedAt": "Updated",
+      "resolvedAt": "Resolved at",
+      "closedAt": "Closed at"
+    },
+    "workflow": {
+      "title": "Status",
+      "current": "Current status:",
+      "moveTo": "→ {{status}}",
+      "reopen": "Reopen",
+      "none": "No further status change possible.",
+      "conflict": "Status change refused: {{detail}} The ticket was reloaded."
+    },
+    "assign": {
+      "title": "Assignment",
+      "user": "Person",
+      "team": "Team",
+      "none": "unassigned",
+      "submit": "Assign"
+    },
+    "links": {
+      "title": "Linked objects",
+      "add": "Link object",
+      "submit": "Link",
+      "remove": "Remove link: {{type}}",
+      "empty": "No linked objects.",
+      "more": "Load more",
+      "kind": "Kind of target",
+      "object": "CI or asset",
+      "duplicate": "This object is already linked to the ticket.",
+      "notFound": "Ticket or object not found.",
+      "kinds": {
+        "object": "CI or asset",
+        "location": "Location"
+      },
+      "types": {
+        "asset": "Asset",
+        "ci": "CI",
+        "contract": "Contract",
+        "location": "Location",
+        "review_item": "Review item"
+      }
+    },
+    "comments": {
+      "title": "Comments",
+      "empty": "No comments yet.",
+      "more": "Load older",
+      "new": "New comment",
+      "internalToggle": "Internal comment",
+      "internal": "Internal",
+      "external": "External",
+      "system": "System",
+      "submit": "Comment"
+    },
+    "attachments": {
+      "title": "Attachments ({{count}})"
+    },
+    "sla": {
+      "title": "SLA",
+      "response": "Response",
+      "resolution": "Resolution",
+      "due": "Due",
+      "remaining": "{{duration}} left",
+      "overdue": "overdue by {{duration}}",
+      "met": "met",
+      "duration": "{{hours}} h {{minutes}} min",
+      "paused": "paused",
+      "breached": "breached",
+      "none": "No SLA assigned."
+    }
   },
   "userMgmt": {
     "title": "Users & Teams",
@@ -1194,6 +1488,154 @@
     "startHint": "Choose a format; the file is ready to download once the job completes.",
     "jobsHint": "Finished exports stay available for 24 hours."
   },
+  "import": {
+    "title": "Import",
+    "subtitle": "Upload a CSV or XLSX file, map its columns, check it in a dry run and import it.",
+    "steps": {
+      "label": "Import steps",
+      "item": "{{index}}. {{name}}",
+      "file": "File",
+      "mapping": "Mapping",
+      "check": "Check",
+      "run": "Run"
+    },
+    "back": "Back",
+    "next": {
+      "mapping": "Continue to mapping",
+      "check": "Continue to check",
+      "run": "Continue to run"
+    },
+    "file": {
+      "title": "File",
+      "hint": "CSV or XLSX, at most 50 MB. The file is stored as a document and scanned for malware before the import.",
+      "label": "Upload import file",
+      "scanStatus": "Scan status:",
+      "scanPending": "The file is being scanned for malware …",
+      "infected": "The file is infected and quarantined. The import has been aborted.",
+      "scanFailed": "The scan of the file failed. The import has been aborted.",
+      "notClean": "The file has not been scanned clean yet.",
+      "another": "Upload another file"
+    },
+    "preview": {
+      "title": "Column preview",
+      "loading": "Loading preview …",
+      "summary": "{{format}}, {{columns}} columns, {{rows}} sample rows",
+      "sheet": "Sheet"
+    },
+    "formats": {
+      "csv": "CSV",
+      "xlsx": "XLSX"
+    },
+    "profile": {
+      "title": "Mapping profile",
+      "choose": "Profile",
+      "new": "New profile",
+      "option": "{{name}} ({{entity}})",
+      "name": "Profile name",
+      "entity": "Object kind",
+      "mode": "Mode",
+      "ciType": "CI type",
+      "ciTypeFromColumn": "From a column (CI type)",
+      "format": "Format of the profile: {{format}}",
+      "identityKeys": "Identity keys",
+      "identityHint": "Mapping targets that identify an existing object.",
+      "identityEmpty": "Map columns first.",
+      "create": "Create profile",
+      "update": "Save profile",
+      "delete": "Delete profile",
+      "saved": "Profile “{{name}}” saved.",
+      "unsaved": "Unsaved changes: save before the check."
+    },
+    "entities": {
+      "ci": "CIs",
+      "asset": "Assets",
+      "contract": "Contracts",
+      "consumable": "Consumables",
+      "location": "Locations",
+      "relationship": "Relationships"
+    },
+    "modes": {
+      "create_missing": "Create missing only",
+      "update_existing": "Update existing only",
+      "both": "Create and update"
+    },
+    "transforms": {
+      "trim": "Trim spaces",
+      "date_format": "Date format",
+      "enum_map": "Map values",
+      "split": "Split list",
+      "constant": "Fixed value"
+    },
+    "mapping": {
+      "title": "Column mapping",
+      "target": "Target of {{column}}",
+      "default": "Default for {{name}}",
+      "examples": "Examples: {{values}}",
+      "transformsOf": "Transformations of {{column}}",
+      "step": "{{index}}. {{name}}",
+      "addTransform": "Add transformation to {{column}}",
+      "chooseTransform": "Choose transformation",
+      "removeTransform": "Remove {{name}} from {{column}}",
+      "layout": "Layout ({{name}})",
+      "values": "Mapping ({{name}})",
+      "separator": "Separator ({{name}})",
+      "constant": "Value ({{name}})",
+      "enumMapPlaceholder": "source=target, source2=target2"
+    },
+    "check": {
+      "title": "Check (dry run)",
+      "hint": "The dry run reads the file with the profile “{{name}}” and checks every row without writing anything.",
+      "start": "Start dry run"
+    },
+    "run": {
+      "title": "Run",
+      "hint": "The import writes in the mode “{{mode}}” of the profile.",
+      "start": "Run import",
+      "again": "Start a new import"
+    },
+    "report": {
+      "title": "Report",
+      "loading": "Loading report …",
+      "running": "{{status}}: {{progress}} %",
+      "progress": "Progress of the import",
+      "ok": "No errors",
+      "partial": "Partial success: {{failed}} of {{total}} rows failed",
+      "allFailed": "All rows failed",
+      "dryRun": "Dry run",
+      "dryRunNote": "The dry run wrote nothing; the numbers show what the import would do.",
+      "rowErrors": "Rows with errors: {{count}}. Row, field, code and message of every row are in the report.",
+      "failed": "The import failed.",
+      "cancelled": "The import was cancelled; there is no report.",
+      "download": "Download report",
+      "notReady": "The report is not ready yet.",
+      "unknown": "–",
+      "counters": {
+        "total": "Total",
+        "created": "Created",
+        "updated": "Updated",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      }
+    },
+    "errors": {
+      "import-format-unsupported": "The file format is not supported (CSV and XLSX only).",
+      "import-sheet-not-found": "The sheet does not exist in the file.",
+      "import-file-too-complex": "The file is too complex (at most 500 columns and 1 MiB per row).",
+      "import-file-too-large": "The file is larger than 50 MB.",
+      "import-row-limit": "The file has more than 50,000 data rows.",
+      "notEntitled": "Import is not enabled for the organization.",
+      "forbidden": "You lack the permission for this.",
+      "field": "{{field}}: {{detail}}"
+    },
+    "permissions": {
+      "run": "Checking and running need the permission import:run.",
+      "manage": "Saving profiles needs the permission import:manage."
+    },
+    "api": {
+      "title": "Import through the API",
+      "hint": "Without a file: POST /api/v1/imports with rows (at most {{max}} rows per request), a profile of format json and an Idempotency-Key against duplicate runs."
+    }
+  },
   "monitoring": {
     "title": "Monitoring",
     "subtitle": "Query metrics and manage alert rules.",
@@ -1322,9 +1764,36 @@
     "low": "low",
     "ok": "OK",
     "minLevel": "Minimum level",
-    "stock": "Stock",
     "emptyTitle": "No items yet",
-    "emptyHint": "Create an item to monitor its stock and minimum level."
+    "emptyHint": "Create an item to monitor its stock and minimum level.",
+    "movementTypes": {
+      "receipt": "Goods receipt",
+      "retrieval": "Retrieval",
+      "correction": "Correction",
+      "transfer": "Transfer"
+    },
+    "book": "Book",
+    "correctionDirection": "Direction",
+    "correctionIncrease": "Increase (into a bin)",
+    "correctionDecrease": "Decrease (out of a bin)",
+    "bin": "Bin",
+    "reasonRequired": "Reason (required)",
+    "reserveTitle": "Reserve a quantity",
+    "masterData": "Master data",
+    "barcode": "Barcode",
+    "barcodeOptional": "Barcode (optional)",
+    "category": "Category",
+    "unit": "Unit",
+    "totalStock": "Total stock",
+    "quantityWithUnit": "{{quantity}} {{unit}}",
+    "belowMinimum": "Total stock {{stock}} is below the minimum level {{min}}.",
+    "movements": "Movements",
+    "stockPerBin": "Stock per bin",
+    "onHand": "On hand",
+    "updatedAt": "Updated",
+    "noBinsTitle": "No stock yet",
+    "noBinsHint": "Once goods are booked into a bin, the stock per bin appears here.",
+    "loadMoreBins": "Load more bins"
   },
   "orders": {
     "summary": "Internal orders with approval workflow.",
@@ -1733,55 +2202,32 @@
     }
   },
   "inventory": {
-    "assigned": "Assigned",
     "movementType": "Movement type",
     "reserved": "Reserved",
-    "assetId": "Asset ID (serialized)",
-    "itemId": "Quantity item ID",
     "allTypes": "All types",
     "movements": "Movements",
-    "repair": "Repair",
     "reservations": "Reservations",
     "reason": "Reason",
-    "availability": "Availability",
     "item": "Item",
     "quantity": "Quantity",
     "noMovements": "No movements.",
-    "items": "Quantity items",
-    "toLocation": "Target location ID",
     "release": "Release",
     "title": "Inventory",
     "noReservations": "No active reservations.",
-    "record": "Record movement",
-    "total": "Total",
     "available": "Available",
-    "subtitle": "Movement ledger, quantity items, reservations and availability.",
-    "objectKind": "Object kind",
-    "kindAsset": "Asset (serialized)",
+    "subtitle": "Movement ledger and reservations; quantity items with stock per bin in the warehouse.",
     "occurredAt": "Time",
     "project": "Project",
     "expiresAt": "Valid until",
     "emptyMovementsTitle": "No movements yet",
     "emptyMovementsHint": "Record a movement to trace stock coming in and going out.",
-    "emptyItemsTitle": "No quantity items yet",
-    "emptyItemsHint": "Quantity items appear here once they are created.",
     "emptyReservationsTitle": "No active reservations",
     "emptyReservationsHint": "Reserved assets and items appear here until they are released.",
-    "emptyAvailabilityTitle": "No availability yet",
-    "emptyAvailabilityHint": "Once stock is booked, this overview shows what is available, reserved and assigned.",
-    "movementTypes": {
-      "receipt": "Goods receipt",
-      "transfer": "Transfer",
-      "assignment": "Assignment",
-      "return": "Return",
-      "deployment": "Deployment",
-      "retrieval": "Retrieval",
-      "reservation": "Reservation",
-      "release": "Release",
-      "repair": "Repair",
-      "disposal": "Disposal",
-      "correction": "Correction"
-    }
+    "reservedUntil": "until {{date}}",
+    "sku": "SKU",
+    "openHistory": "Open history: {{object}}",
+    "historyOf": "History: {{object}}",
+    "toConsumables": "Quantity items"
   },
   "impact": {
     "affectedList": "Affected:",
@@ -1880,14 +2326,14 @@
   "savedviews": {
     "sharedWithRoles": "for {{count}} roles",
     "title": "Saved views",
-    "presets": "Presets",
+    "presets": "System views",
     "hint": "Select a view on the left.",
     "noResults": "No results.",
-    "subtitle": "Presets and custom filters — e.g. “Production servers without backup”.",
-    "none": "No custom views yet.",
+    "subtitle": "System views such as “My devices”, “Warranty expiring soon” and “Servers without monitoring”, plus your own and shared filters.",
+    "none": "No own or shared views yet.",
     "results": "Results",
     "shared": "shared",
-    "mine": "My views",
+    "mine": "My and shared views",
     "save": "Save as view",
     "namePrompt": "View name",
     "forbidden": "No permission for this view",
@@ -1937,7 +2383,84 @@
       "rfid_tag": "RFID tag",
       "purchase_cost": "Purchase cost",
       "purchase_date": "Purchase date",
-      "warranty_end": "Warranty end"
+      "warranty_end": "Warranty end",
+      "inventory_no": "Inventory number",
+      "purchase_price": "Purchase price",
+      "warranty_until": "Warranty until",
+      "cost_center": "Cost center",
+      "currency": "Currency",
+      "supplier_id": "Supplier (ID)",
+      "contract_id": "Contract (ID)",
+      "owner_user_id": "Owner (person)",
+      "owner_team_id": "Owner (team)",
+      "firmware_version": "Firmware version",
+      "primary_mac": "Primary MAC address",
+      "hardware_uuid": "Hardware UUID",
+      "sys_object_id": "SNMP sysObjectID",
+      "vrf_id": "VRF",
+      "location": "Location (path)",
+      "location_kind": "Location kind",
+      "observed_at": "Observed at",
+      "invoice_number": "Invoice number",
+      "notes": "Notes",
+      "primary_ci_id": "Primary CI",
+      "number": "Contract number",
+      "kind": "Kind",
+      "start_date": "Start",
+      "end_date": "End",
+      "notice_period_days": "Notice period (days)",
+      "value": "Value",
+      "sku": "Article number (SKU)",
+      "unit": "Unit",
+      "parent": "Parent location (path)",
+      "path": "Location path",
+      "rel_type": "Relationship type",
+      "source_ci_id": "Source CI",
+      "target_ci_id": "Target CI",
+      "source_serial_number": "Serial number of the source",
+      "target_serial_number": "Serial number of the target",
+      "source_hardware_uuid": "Hardware UUID of the source",
+      "target_hardware_uuid": "Hardware UUID of the target",
+      "source_primary_mac": "MAC address of the source",
+      "target_primary_mac": "MAC address of the target",
+      "source_management_ip": "Management IP of the source",
+      "target_management_ip": "Management IP of the target",
+      "source_interface_id": "Interface of the source",
+      "target_interface_id": "Interface of the target",
+      "confidence": "Confidence"
+    },
+    "editor": {
+      "newView": "New view",
+      "editFilter": "Edit filter",
+      "title": "Filter",
+      "name": "Name of the view",
+      "entityKind": "Object kind",
+      "flat": "Further criteria",
+      "flatHint": "These criteria of the view are kept on saving; the builder does not edit them.",
+      "preview": "Preview",
+      "previewTitle": "Preview",
+      "previewTotal": "{{count}} hits",
+      "save": "Save filter",
+      "saveNew": "Save as new view",
+      "saveAsNew": "You cannot change this view; it is saved as a new view of your own.",
+      "incomplete": "The filter is incomplete; the marked nodes are still missing something.",
+      "invalid": "The server refused the filter; the node is marked.",
+      "forbiddenFields": "No permission for the fields: {{fields}}. The conditions are marked.",
+      "noWritePermission": "No write permission for this view.",
+      "nameRequired": "Enter a name for the view."
+    },
+    "readOnlyBadge": "read-only",
+    "cloneLabel": "Clone: {{name}}",
+    "clonePrompt": "Name of the copy",
+    "cloneName": "Copy of {{name}}",
+    "cloned": "“{{name}}” was created as your own view.",
+    "editLabel": "Edit: {{name}}",
+    "foreign": "by others",
+    "errors": {
+      "forbidden": "No permission for this action.",
+      "notFound": "The view no longer exists, or you may not change it.",
+      "conflict": "You already have a view with this name.",
+      "reason": "The action failed: {{detail}}"
     }
   },
   "lifecycle": {
@@ -1956,8 +2479,8 @@
     "outgoing": "This CI → target",
     "incoming": "Source → this CI",
     "type": "Relationship type",
-    "targetCi": "CI ID of the other end",
-    "ciNotFound": "No CI with this ID was found.",
+    "targetCi": "Other end",
+    "ciNotFound": "The other end was not found or is not visible.",
     "notes": "Note",
     "verificationState": "Verification state",
     "state": {
@@ -1966,7 +2489,47 @@
       "disputed": "Disputed",
       "stale": "Stale"
     },
-    "projected": "projected (structure)"
+    "projected": "projected (structure)",
+    "typePairRefused": "The relationship type does not allow this combination of CI types.",
+    "cardinalityRefused": "The edge would exceed the cardinality of the relationship type.",
+    "noTypes": "No relationship type fits this CI and this direction.",
+    "attributes": "Attributes",
+    "history": {
+      "title": "Edge history",
+      "empty": "No changes recorded.",
+      "loadError": "The history of the relationship could not be loaded.",
+      "fields": "Changed: {{fields}}",
+      "by": "By {{actor}} via {{source}}"
+    },
+    "changeKinds": {
+      "created": "Created",
+      "updated": "Updated",
+      "verification_changed": "Verification state changed",
+      "refreshed": "Refreshed",
+      "removed": "Removed",
+      "suppressed": "Suppressed",
+      "rewired": "Rewired",
+      "restored": "Restored"
+    },
+    "changedFields": {
+      "attributes": "Attributes",
+      "confidence": "Confidence",
+      "verification_state": "Verification state",
+      "source_system": "Source system",
+      "notes": "Note"
+    },
+    "actorTypes": {
+      "user": "User",
+      "api_key": "API key",
+      "system": "System"
+    },
+    "changeSources": {
+      "ui": "User interface",
+      "api": "API",
+      "collector": "Collector",
+      "import": "Import",
+      "system": "System"
+    }
   },
   "relationshipCard": {
     "suppress": "Remove and suppress",
@@ -1990,6 +2553,94 @@
     "noReason": "No reason given",
     "lift": "Lift",
     "liftHint": "Discovery creates the edge again in its next cycle."
+  },
+  "relationshipTypes": {
+    "title": "Relationship types",
+    "subtitle": "System and own relationship types with direction, impact and attribute schema.",
+    "add": "Create relationship type",
+    "editNamed": "Edit {{name}}",
+    "deleteNamed": "Delete {{name}}",
+    "deleteTitle": "Delete relationship type",
+    "deleteConfirm": "The relationship type {{name}} will be deleted.",
+    "keyFixed": "Key: {{key}} (immutable)",
+    "loadError": "The relationship types could not be loaded.",
+    "empty": "No relationship types.",
+    "system": "System",
+    "own": "Own type",
+    "columns": {
+      "name": "Name (reverse)",
+      "key": "Key",
+      "category": "Category",
+      "impact": "Impact",
+      "cardinality": "Cardinality",
+      "origin": "Origin"
+    },
+    "groups": {
+      "naming": "Naming",
+      "behaviour": "Behaviour"
+    },
+    "fields": {
+      "key": "Key",
+      "displayName": "Name (outgoing)",
+      "reverseName": "Reverse name (incoming)",
+      "description": "Description",
+      "category": "Category",
+      "impactDirection": "Impact direction",
+      "cardinality": "Cardinality",
+      "directed": "Directed",
+      "redundant": "Redundant (impact only when all edges fail)",
+      "allowedSource": "Allowed source types",
+      "allowedTarget": "Allowed target types",
+      "allowedHint": "No selection allows every CI type; subtypes are included."
+    },
+    "categories": {
+      "network": "Network",
+      "power": "Power",
+      "hosting": "Hosting",
+      "logical": "Logical",
+      "physical": "Physical"
+    },
+    "impactDirections": {
+      "source_depends_on_target": "Source depends on target",
+      "target_depends_on_source": "Target depends on source",
+      "none": "No impact",
+      "undirected": "Undirected (both ways, heuristic)"
+    },
+    "cardinalities": {
+      "many_to_many": "Many to many",
+      "one_to_one": "One to one",
+      "one_to_many": "One to many",
+      "many_to_one": "Many to one"
+    },
+    "schema": {
+      "title": "Attribute schema of the edges",
+      "empty": "Edges of this type have no attributes.",
+      "add": "Add attribute",
+      "attribute": "Attribute {{number}}",
+      "remove": "Remove attribute {{number}}",
+      "key": "Key",
+      "labelDe": "Label (German)",
+      "labelEn": "Label (English)",
+      "dataType": "Data type",
+      "required": "Required",
+      "default": "Default value",
+      "enumValues": "Allowed values (comma separated)",
+      "min": "Minimum",
+      "max": "Maximum",
+      "minLength": "Minimum length",
+      "maxLength": "Maximum length",
+      "pattern": "Pattern (regular expression)"
+    },
+    "errors": {
+      "keyTaken": "A relationship type with this key already exists.",
+      "systemKey": "The key belongs to a system type and cannot be used.",
+      "inUse": "The relationship type is used by relationships or suppressions and cannot be deleted.",
+      "invalid": "Invalid definition: {{detail}}",
+      "forbidden": "No permission: relationship types need the permission relationship_type:manage.",
+      "forbiddenList": "No permission to read the relationship types.",
+      "notFound": "The relationship type was not found or is protected.",
+      "reason": "The change was refused: {{detail}}"
+    }
   },
   "scope": {
     "label": "Scope",
@@ -2084,7 +2735,16 @@
     "object": "Object",
     "age": "Age",
     "selectTitle": "Select an item",
-    "selectHint": "Compare the observation with its CI and decide here."
+    "selectHint": "Compare the observation with its CI and decide here.",
+    "ticket": {
+      "create": "Create ticket",
+      "bulkCreate": "Create tickets",
+      "created": "Ticket #{{number}} created.",
+      "result": "{{created}} tickets created, {{failed}} failed.",
+      "failedItem": "{{name}}: {{message}}",
+      "linked": "Tickets",
+      "limit": "At most {{limit}} items per bulk action."
+    }
   },
   "notifications": {
     "title": "Notifications",
@@ -2156,6 +2816,9 @@
       },
       "template": {
         "migrate": "Template migration"
+      },
+      "import": {
+        "run": "Import run"
       }
     },
     "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts."
@@ -2688,5 +3351,544 @@
     "account": "Account",
     "accountMenu": "Account menu of {{name}}",
     "openCount": "{{count}} open"
+  },
+  "rules": {
+    "builder": {
+      "label": "Filter",
+      "chooseField": "Choose a field …",
+      "chooseValue": "Choose a value …",
+      "addCondition": "Add condition",
+      "addGroup": "Add group",
+      "addRelated": "Add relationship",
+      "negate": "Negate {{name}}",
+      "removeNegation": "Remove {{name}}",
+      "delete": "Delete {{name}}",
+      "serverError": "Refused by the server: {{message}}",
+      "forbiddenField": "No permission for the field {{field}}.",
+      "groupName": "Group ({{junction}})",
+      "junction": "Junction",
+      "empty": "No condition yet – the view shows all objects.",
+      "notName": "Negation",
+      "relatedName": "Relationship",
+      "direction": "Direction",
+      "maxDepth": "Depth (1–{{max}})",
+      "relTypes": "Relationship types (none chosen: all)",
+      "relatedWhere": "The related CI matches:",
+      "comparisonName": "Condition {{position}}",
+      "field": "Field",
+      "operator": "Operator",
+      "value": "Value",
+      "valueFrom": "{{label}} from",
+      "valueTo": "{{label}} to",
+      "values": "{{label}}: chosen values",
+      "addValueOf": "Add {{label}}",
+      "addValue": "Add",
+      "removeValue": "Remove {{value}}",
+      "likeHint": "* as a wildcard; without * a substring is searched.",
+      "limits": "{{nodes}} of {{maxNodes}} nodes · depth {{depth}} of {{maxDepth}}",
+      "loadError": "The saved filter cannot be loaded: {{message}}",
+      "conditionLabel": "Condition",
+      "validationLabel": "Value rule",
+      "conditionEmpty": "No condition – the rule always applies."
+    },
+    "junctions": {
+      "and": "AND",
+      "or": "OR"
+    },
+    "junctionHints": {
+      "and": "All conditions (AND)",
+      "or": "At least one (OR)"
+    },
+    "nodeKinds": {
+      "and": "AND group",
+      "or": "OR group",
+      "not": "NOT",
+      "related": "Relationship",
+      "compare": "Condition"
+    },
+    "directions": {
+      "out": "outgoing (the CI is the source)",
+      "in": "incoming (the CI is the target)",
+      "both": "both directions"
+    },
+    "ops": {
+      "eq": "equals",
+      "ne": "does not equal",
+      "lt": "less than",
+      "lte": "less than or equal",
+      "gt": "greater than",
+      "gte": "greater than or equal",
+      "like": "matches (text)",
+      "in": "is one of",
+      "exists": "is set / empty",
+      "between": "is between",
+      "has_any": "has one of the tags",
+      "has_all": "has all tags"
+    },
+    "issues": {
+      "empty_group": "The group is empty.",
+      "no_field": "Choose a field.",
+      "no_value": "Enter a value.",
+      "list_empty": "Enter at least one value.",
+      "two_values": "Enter two values (from and to).",
+      "not_number": "The value must be a number.",
+      "not_time": "The value must be a date or a time.",
+      "no_related_filter": "The relationship needs a condition for the related CI.",
+      "no_pattern": "Enter a pattern.",
+      "bad_pattern": "The pattern is invalid (no lookarounds or backreferences).",
+      "no_bound": "Enter a minimum or a maximum.",
+      "min_above_max": "The minimum is above the maximum."
+    },
+    "exists": {
+      "true": "is set",
+      "false": "is empty"
+    },
+    "bool": {
+      "true": "yes",
+      "false": "no"
+    },
+    "entityKinds": {
+      "ci": "CIs",
+      "asset": "Assets"
+    },
+    "fieldLabels": {
+      "tags": "Tags",
+      "attribute": "Attribute: {{name}}",
+      "assetAttribute": "Asset attribute: {{name}}",
+      "asset": "Asset: {{name}}"
+    },
+    "conditionJunctions": {
+      "all": "AND",
+      "any": "OR"
+    },
+    "conditionJunctionHints": {
+      "all": "All conditions (AND)",
+      "any": "At least one (OR)"
+    },
+    "conditionOps": {
+      "eq": "equals",
+      "ne": "does not equal",
+      "in": "is one of",
+      "not_in": "is none of",
+      "gt": "greater than",
+      "gte": "greater than or equal",
+      "lt": "less than",
+      "lte": "less than or equal",
+      "contains": "contains",
+      "empty": "is empty",
+      "not_empty": "is set"
+    },
+    "validationKinds": {
+      "all": "All rules",
+      "required": "Required",
+      "pattern": "Pattern",
+      "range": "Range",
+      "enum": "Allowed values"
+    },
+    "validation": {
+      "add": {
+        "all": "Add group (all)",
+        "required": "Add required",
+        "pattern": "Add pattern",
+        "range": "Add range",
+        "enum": "Add allowed values"
+      },
+      "nodeName": "{{kind}} {{position}}",
+      "empty": "No value rule yet – add at least one.",
+      "requiredHint": "The value must not be empty.",
+      "pattern": "Regular expression",
+      "of": "Measures",
+      "min": "Minimum",
+      "max": "Maximum",
+      "values": "Allowed value"
+    },
+    "rangeOf": {
+      "value": "the value (number)",
+      "length": "the length (characters)"
+    },
+    "preview": {
+      "conditionTitle": "Preview with a sample object",
+      "validationTitle": "Preview with a sample value",
+      "noFields": "The condition names no field yet.",
+      "sampleOf": "Sample: {{field}}",
+      "sampleValue": "Sample value",
+      "absent": "(not set)",
+      "incomplete": "The rule is not complete yet.",
+      "always": "Without a condition the rule always applies.",
+      "holds": "The condition holds – the rule applies.",
+      "notHolds": "The condition does not hold – the rule does not apply.",
+      "noRule": "No value rule yet.",
+      "valid": "The value passes the rule.",
+      "violations": "Violations"
+    }
+  },
+  "movement": {
+    "types": {
+      "receipt": "Goods receipt",
+      "transfer": "Transfer",
+      "assignment": "Assignment",
+      "return": "Return",
+      "deployment": "Deployment",
+      "retrieval": "Retrieval",
+      "reservation": "Reservation",
+      "release": "Release",
+      "repair": "Repair",
+      "disposal": "Disposal",
+      "correction": "Correction"
+    }
+  },
+  "stockFlow": {
+    "receive": "Receive",
+    "receiveTitle": "Receive stock",
+    "move": "Move",
+    "moveTitle": "Move stock",
+    "moveAsset": "Move asset",
+    "moveAssetTitle": "Move an asset to a location",
+    "reserve": "Reserve",
+    "reserveTitle": "Reserve asset",
+    "consumable": "Consumable",
+    "asset": "Asset",
+    "toBin": "Target bin",
+    "fromBin": "Source bin",
+    "toLocation": "Target location",
+    "chooseBin": "Choose a bin",
+    "binOption": "{{bin}} – on hand {{onHand}}, reserved {{reserved}}",
+    "loadingStock": "Loading stock …",
+    "noStock": "The consumable lies in no bin.",
+    "stockLoadError": "The stock per bin could not be loaded.",
+    "quantity": "Quantity",
+    "reason": "Reason",
+    "quantityPositive": "The quantity must be greater than 0.",
+    "maxQuantity": "At most {{max}} available (on hand less reservations).",
+    "sameBin": "Target bin and source bin must differ.",
+    "reservedUntil": "Reserved until",
+    "expiresAt": "Expires on (optional)",
+    "reserveFor": "Reserved for",
+    "forUser": "Person",
+    "forProject": "Project",
+    "assignee": "Person",
+    "projectRef": "Project",
+    "receivePending": "{{quantity}} × “{{item}}” is being booked into {{bin}}",
+    "receiveFailed": "Receiving “{{item}}” failed: {{message}}",
+    "movePending": "{{quantity}} × “{{item}}” is being moved to {{bin}}",
+    "moveFailed": "Moving “{{item}}” failed: {{message}}",
+    "moveAssetPending": "“{{asset}}” is being moved to {{location}}",
+    "reservePending": "“{{asset}}” is being reserved",
+    "reserveFailed": "Reserving “{{asset}}” failed: {{message}}",
+    "convert": "Convert",
+    "convertOf": "Convert into an assignment: {{item}}",
+    "releaseOf": "Release: {{item}}",
+    "convertTitle": "Convert reservation into an assignment",
+    "convertDescription": "The reservation for the project “{{project}}” is assigned to a person or a team.",
+    "recipient": "Recipient",
+    "errors": {
+      "insufficientStock": "The stock of the bin is not sufficient.",
+      "assetReserved": "The asset is reserved already.",
+      "assetAssigned": "The asset is assigned already.",
+      "notActive": "The reservation is no longer active."
+    }
+  },
+  "objectHistory": {
+    "title": "History",
+    "empty": "No changes or movements yet.",
+    "loadError": "The history could not be loaded.",
+    "movementsLoadError": "The movements could not be loaded.",
+    "quantity": "Quantity {{quantity}}",
+    "from": "from {{location}}",
+    "to": "to {{location}}",
+    "reason": "Reason: {{reason}}"
+  },
+  "tags": {
+    "title": "Tags",
+    "subtitle": "The tag catalog of the organization: keys, names and colors of the tags CIs carry.",
+    "readOnly": "You can read the catalog; creating, changing and deleting require the permission tag:manage.",
+    "create": "Create tag",
+    "createTitle": "Create tag",
+    "editTitle": "Edit tag",
+    "editLabel": "Edit: {{name}}",
+    "deleteLabel": "Delete: {{name}}",
+    "deleteTitle": "Delete tag",
+    "deleteConfirm": "Delete the tag “{{name}}” permanently?",
+    "empty": "No tags yet.",
+    "loadError": "The tags cannot be loaded.",
+    "system": "System",
+    "custom": "Custom",
+    "keyHint": "Lower case letters, digits, _ and -, at most 63 characters; not changeable after creation.",
+    "keyFixed": "The key cannot be changed.",
+    "colorHint": "Optional, as #rrggbb; empty removes the color.",
+    "fields": {
+      "name": "Name",
+      "key": "Key",
+      "nameDe": "Name (German)",
+      "nameEn": "Name (English)",
+      "color": "Color",
+      "kind": "Kind"
+    },
+    "errors": {
+      "keyFormat": "The key is invalid: lower case letters, digits, _ and -, starting with a letter or digit.",
+      "colorFormat": "The color must have the format #rrggbb.",
+      "nameRequired": "Enter at least one name.",
+      "keyTaken": "A tag with this key already exists.",
+      "inUse": "The tag is still assigned or a system tag and cannot be deleted.",
+      "forbidden": "You lack the permission tag:manage.",
+      "forbiddenRead": "No permission to read the tags.",
+      "notFound": "The tag no longer exists.",
+      "invalid": "Invalid values: {{detail}}",
+      "reason": "The action failed: {{detail}}"
+    }
+  },
+  "ruleCatalog": {
+    "title": "Rule catalog",
+    "subtitle": "Validations and conditions per type, attribute set or template version",
+    "hint": "A rule applies to an attribute of exactly one target. Without a condition it always applies; required, read-only and visibility rules set the state of the attribute while the condition holds. The rules of the attribute definitions remain beside them.",
+    "moduleOff": "The metamodel module is not active in this release.",
+    "create": "Create rule",
+    "createTitle": "Create rule",
+    "editTitle": "Edit rule {{key}}",
+    "edit": "Edit rule {{key}}",
+    "deleteRule": "Delete rule {{key}}",
+    "deleteTitle": "Delete rule",
+    "deleteConfirm": "The rule {{key}} will be deleted.",
+    "delete": "Delete",
+    "save": "Save",
+    "notDeleted": "Not deleted: {{reason}}",
+    "empty": "No rules for these filters.",
+    "listLabel": "Rules",
+    "loadMore": "Load more",
+    "always": "always",
+    "system": "System",
+    "readOnly": "read-only",
+    "active": "active",
+    "inactive": "inactive",
+    "noTarget": "no target",
+    "targetLine": "{{kind}}: {{name}}",
+    "versionLabel": "{{template}} · version {{version}} ({{status}})",
+    "kinds": {
+      "validation": "Validation",
+      "required": "Required",
+      "readonly": "Read-only",
+      "visible": "Visible"
+    },
+    "targets": {
+      "ci_type": "CI type",
+      "attribute_set": "Attribute set",
+      "template_version": "Template version"
+    },
+    "filters": {
+      "ci_type": "CI type",
+      "attribute_set": "Attribute set",
+      "template_version": "Template version",
+      "attribute_key": "Attribute key",
+      "kind": "Rule kind"
+    },
+    "columns": {
+      "key": "Key",
+      "attribute": "Attribute",
+      "kind": "Kind",
+      "target": "Target",
+      "condition": "Condition",
+      "active": "Status",
+      "version": "Version",
+      "actions": "Actions"
+    },
+    "form": {
+      "key": "Key",
+      "kind": "Rule kind",
+      "targetKind": "Target kind",
+      "target": "Target",
+      "chooseTarget": "Choose target …",
+      "attribute": "Attribute",
+      "chooseAttribute": "Choose attribute …",
+      "isActive": "Active",
+      "lockedVersion": "The template version is published or retired; the server refuses changes to its rules.",
+      "conditionHint": "Leave empty for a rule that always applies.",
+      "condition": "Condition",
+      "ast": "Value rule of the validation",
+      "astRequired": "A validation needs at least one value rule.",
+      "message": "Message (optional)",
+      "messageDe": "Message German",
+      "messageEn": "Message English"
+    },
+    "errors": {
+      "forbidden": "Not permitted: system rules are read-only, changes need the permission citype:manage.",
+      "conflict": "Conflict: {{detail}} (e.g. the template version is published or retired, or the key is taken).",
+      "notFound": "The rule no longer exists.",
+      "reason": "Refused: {{detail}}"
+    }
+  },
+  "scan": {
+    "title": "Scan code",
+    "description": "Camera, handheld scanner or typing: inventory number, barcode or label.",
+    "scanFor": "Choose {{field}} by scan",
+    "camera": "Camera image",
+    "codeLabel": "Code (handheld scanner or typing)",
+    "resolve": "Apply",
+    "close": "Close",
+    "manualMode": "Enter manually",
+    "useCamera": "Use camera",
+    "starting": "Starting camera …",
+    "scanning": "Hold the code in front of the camera or read it with the handheld scanner.",
+    "reasons": {
+      "insecure": "The camera is available over HTTPS or localhost only. Read the code with the handheld scanner or type it and press Enter.",
+      "denied": "Access to the camera is not allowed. Read the code with the handheld scanner or type it and press Enter.",
+      "noCamera": "No camera found. Read the code with the handheld scanner or type it and press Enter.",
+      "error": "The camera could not be started. Read the code with the handheld scanner or type it and press Enter.",
+      "chosen": "Manual entry: read the code with the handheld scanner or type it and press Enter."
+    },
+    "resolving": "Resolving code …",
+    "notFound": "“{{code}}” not found.",
+    "wrongKind": "The code names {{kind}}; this field does not take it.",
+    "kinds": {
+      "asset": "an asset",
+      "consumable": "a consumable",
+      "location": "a location that does not fit here"
+    },
+    "kindLabels": {
+      "asset": "Asset",
+      "consumable": "Consumable",
+      "location": "Location"
+    },
+    "result": "Scanned object",
+    "kind": "Kind",
+    "name": "Name",
+    "inventoryNo": "Inventory number",
+    "code": "Code",
+    "path": "Path",
+    "actions": {
+      "assign": "Assign",
+      "return": "Return",
+      "reserve": "Reserve",
+      "receive": "Receive",
+      "move": "Move",
+      "history": "History"
+    },
+    "notAssigned": "The asset is not assigned to anyone.",
+    "scanAgain": "Scan again"
+  },
+  "signature": {
+    "handover": "Signature on handover",
+    "return": "Signature on return",
+    "hint": "Sign in the field with mouse, pen or finger. “Clear” empties the field. Without a signature the movement is booked unsigned.",
+    "signed": "Signature captured. “Clear” empties the field.",
+    "clear": "Clear",
+    "signer": "Name of the person signing (optional; needed when a team holds the asset)",
+    "tooLarge": "The signature is too large and was not sent. Please clear it and sign again."
+  },
+  "labels": {
+    "title": "Print labels",
+    "assetDescription": "Label for {{name}} as PDF.",
+    "batchDescription": "Labels for the inventory area {{name}} as PDF.",
+    "template": "Template",
+    "kind": "Object kind",
+    "templates": {
+      "asset_50x25": "Asset label 50 × 25 mm",
+      "bin_100x50": "Bin label 100 × 50 mm",
+      "a4_24": "A4 sheet with 24 labels"
+    },
+    "kinds": {
+      "asset": "Assets",
+      "consumable": "Consumables",
+      "location": "Locations"
+    },
+    "printAsset": "Open PDF",
+    "startBatch": "Create labels",
+    "download": "Download PDF",
+    "openPdf": "Open PDF",
+    "queued": "Job created …",
+    "progress": "Status: {{status}} ({{progress}} %)",
+    "result": "{{labels}} labels on {{pages}} pages, available until {{expires}}",
+    "close": "Close"
+  },
+  "formBuilder": {
+    "open": "Design form",
+    "title": "Form builder",
+    "titleOf": "Design form: {{name}}",
+    "description": "Arranges the fields of the form per type, template and role. The data model stays unchanged.",
+    "breadcrumb": "CI types",
+    "back": "Back to the CI types",
+    "typeError": "The CI type could not be loaded",
+    "layoutsError": "The layouts could not be loaded",
+    "resolveError": "The resolved form could not be loaded",
+    "moduleOff": "The metamodel module is switched off. Layouts can be edited once it is switched on again.",
+    "selection": "Target and role",
+    "target": "Target",
+    "targetType": "Type {{name}}",
+    "targetTemplate": "Template {{name}}",
+    "role": "Role",
+    "noRole": "No role",
+    "state": "Layout state",
+    "ownLayout": "Own layout {{key}}, version {{version}}",
+    "source": {
+      "default": "Standard layout",
+      "inherited": "Inherited from {{name}}",
+      "inheritedUnknown": "Inherited layout"
+    },
+    "copiedRole": "Copy of the form for the role {{role}}",
+    "copyHint": "The editor starts with a copy. Saving creates an own layout.",
+    "draftHint": "Changes go into the draft {{name}}.",
+    "key": "Layout key",
+    "publish": "Publish",
+    "saveInDraft": "Save in draft",
+    "removeOwn": "Remove own layout",
+    "published": "The layout is published.",
+    "removed": "The own layout is removed. The inherited layout applies again.",
+    "savedInDraft": "Saved in the draft {{name}}.",
+    "titlesRequired": "Every section needs a title in German and English.",
+    "confirmPublish": {
+      "title": "Publish the layout?",
+      "description": "The layout applies at once to every form of this target and role."
+    },
+    "confirmRemove": {
+      "title": "Remove the own layout?",
+      "description": "The inherited layout or the standard layout applies again."
+    },
+    "errors": {
+      "forbidden": "No permission to edit forms (citype:manage). Trace ID: {{traceId}}",
+      "resolveForbidden": "The form of this role can only be loaded with the permission citype:manage. Trace ID: {{traceId}}",
+      "conflict": "There already is a layout for this target and role, or the key is taken.",
+      "conflictKey": "The key or the target and role are already taken.",
+      "stale": "The layout was changed in the meantime and has been reloaded. Please make your changes again.",
+      "invalid": "The server refused the layout.",
+      "invalidAt": "The server refused a value. It is marked."
+    },
+    "origin": {
+      "own": "own",
+      "inherited": "inherited from {{type}}",
+      "set": "Set {{name}}",
+      "global": "global"
+    },
+    "editor": {
+      "palette": "Field palette",
+      "paletteHint": "Attributes of the target. Data type and required are shown only.",
+      "paletteEmpty": "Every attribute is placed.",
+      "targetSection": "Target section",
+      "noSectionForPalette": "Add a section before placing fields.",
+      "place": "Place: {{name}}",
+      "placed": "{{name}} placed in section {{section}}.",
+      "required": "Required",
+      "unknownField": "No attribute of the target",
+      "requiredHint": "Required fields without a place in the layout: {{names}}. The server appends them in the section “Required fields”.",
+      "sections": "Sections",
+      "addSection": "Add section",
+      "noSections": "No sections yet.",
+      "sectionAdded": "Section {{key}} added.",
+      "sectionRemoved": "Section {{name}} deleted.",
+      "removeSection": "Delete section: {{name}}",
+      "titleDe": "Title (DE) of {{key}}",
+      "titleEn": "Title (EN) of {{key}}",
+      "titleMissing": "Title missing",
+      "visibleWhen": "Visible when the rules hold: {{name}}",
+      "noRules": "The type has no catalog rules.",
+      "ruleUnknown": "not in the catalog",
+      "noFields": "No fields in this section yet.",
+      "fieldsOf": "Fields of {{name}}",
+      "width": "Width: {{name}}",
+      "moveToSection": "Move to section: {{name}}",
+      "chooseSection": "Choose section",
+      "movedToSection": "{{name}} moved to section {{section}}, position {{position}} of {{total}}.",
+      "removeField": "Remove: {{name}}",
+      "fieldRemoved": "{{name}} removed from the layout.",
+      "refused": "Refused by the server."
+    }
   }
 }

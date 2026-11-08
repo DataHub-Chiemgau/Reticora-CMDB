@@ -8,6 +8,8 @@ import deDE from './de-DE.json';
 import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
+import { SCAN_METHODS, SCAN_RESULTS } from '../pages/StocktakeDetailPage';
+import { LABEL_KINDS, LABEL_TEMPLATES } from '../components/flows/LabelPrintDialog';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
@@ -17,9 +19,46 @@ import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
+import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
-import { TICKET_CATEGORIES, TICKET_STATUSES } from '../pages/TicketListPage';
-import { NODE_KINDS } from '../api/client';
+import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
+import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from '../pages/TicketListPage';
+import { TICKET_TRANSITIONS } from '../pages/TicketDetailPage';
+import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
+import { CONSUMABLE_BOOKING_TYPES } from '../api/cmdb';
+import {
+  CARDINALITIES,
+  IMPACT_DIRECTIONS,
+  RELATIONSHIP_ATTRIBUTE_TYPES,
+  RELATIONSHIP_CATEGORIES,
+} from '../pages/RelationshipTypesPage';
+import {
+  CONDITION_COLUMNS,
+  CONDITION_JUNCTIONS,
+  CONDITION_MODE,
+  FILTER_ENTITY_KINDS,
+  FILTER_FIELDS,
+  FILTER_MODE,
+  FILTER_NODE_KINDS,
+  GROUP_JUNCTIONS,
+  NODE_ISSUES,
+  RANGE_OF,
+  RELATED_DIRECTIONS,
+  RULE_KINDS,
+  VALIDATION_ISSUES,
+  VALIDATION_NODE_KINDS,
+} from '../rules/builderModes';
+import { filterOps } from '../rules/filter';
+import { compareOps } from '../rules/rules';
+import { RULE_TARGETS } from '../pages/RulesPage';
+import { IMPORT_STEPS } from '../pages/ImportPage';
+import {
+  IMPORT_ENTITIES,
+  IMPORT_FILE_FORMATS,
+  IMPORT_MODES,
+  IMPORT_TARGETS,
+  IMPORT_TRANSFORMS,
+} from '../components/import/MappingEditor';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -48,8 +87,38 @@ const flowSources = import.meta.glob(
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
+// WP-315: the components of the click builder, without tests.
+const ruleSources = import.meta.glob(
+  ['../components/rules/**/*.tsx', '!../components/rules/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
 const metamodelSources = import.meta.glob(
   ['../components/metamodel/**/*.tsx', '!../components/metamodel/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-323: the edge dialog of the CI detail page.
+const cardSources = import.meta.glob('../components/cmdb/CIRelationshipsCard.tsx', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+// WP-321: the upload component and the document components.
+const documentSources = import.meta.glob(
+  [
+    '../components/upload/**/*.tsx',
+    '../components/documents/**/*.tsx',
+    '!../components/upload/**/*.test.tsx',
+    '!../components/documents/**/*.test.tsx',
+  ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-322: the components of the import assistant, without tests.
+const importSources = import.meta.glob(
+  ['../components/import/**/*.tsx', '!../components/import/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -143,6 +212,10 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['document.categories', BACKEND_ENUMS.documentCategories],
   ['ticket.statuses', BACKEND_ENUMS.ticketStatuses],
   ['ticket.categories', BACKEND_ENUMS.ticketCategories],
+  // WP-814: the ticket priorities (WP-290) and the targets of a ticket link (WP-764).
+  ['ticket.priorities', TICKET_PRIORITIES],
+  ['ticket.priorities', specEnum('TicketPriority')],
+  ['ticket.links.types', specEnum('TicketLink', 'entity_type')],
   ['orders.statuses', specEnum('Order', 'status')],
   ['keys.statuses', specEnum('KeyItem', 'status')],
   ['ci.statuses', specEnum('CIStatus')],
@@ -174,6 +247,17 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['dashboard.roles', DASHBOARD_ROLES],
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
+  // WP-813: the scan results and methods of the stocktake (StockScan of
+  // WP-287) and the templates and kinds of the labels (WP-763).
+  ['stocktake.results', SCAN_RESULTS],
+  ['stocktake.results', specEnum('StockScan', 'scan_result')],
+  ['stocktake.scanMethods', SCAN_METHODS],
+  ['stocktake.scanMethods', specEnum('StockScan', 'scan_method')],
+  ['stocktake.statuses', specEnum('Stocktake', 'status')],
+  ['labels.templates', LABEL_TEMPLATES],
+  ['labels.templates', specEnum('LabelBatchRequest', 'template')],
+  ['labels.kinds', LABEL_KINDS],
+  ['labels.kinds', specEnum('LabelBatchRequest', 'kind')],
   ['citypes.dataTypes', FIELD_TYPES],
   // WP-314: template versions, the changes of MetamodelDiff, the job states
   // and the index state none of WP-313.
@@ -193,8 +277,78 @@ const enumerations: Array<[string, readonly string[]]> = [
   // reasons of stale items of a refused publication (metamodel.StaleItem).
   ['jobs.kinds.metamodel', ['test']],
   ['metamodelDrafts.page.staleReasons', ['changed', 'missing']],
+  // WP-323: category, impact direction and cardinality of a relationship
+  // type, the kinds of a change of an edge and the parts of a history row.
+  ['relationshipTypes.categories', RELATIONSHIP_CATEGORIES],
+  ['relationshipTypes.categories', specEnum('RelationshipTypeCategory')],
+  ['relationshipTypes.impactDirections', IMPACT_DIRECTIONS],
+  ['relationshipTypes.impactDirections', specEnum('RelationshipImpactDirection')],
+  ['relationshipTypes.cardinalities', CARDINALITIES],
+  ['relationshipTypes.cardinalities', specEnum('RelationshipTypeCardinality')],
+  ['relationship.changeKinds', relationshipChangeKinds],
+  ['relationship.changeKinds', specEnum('RelationshipChange', 'change_kind')],
+  ['relationship.changeSources', specEnum('RelationshipChange', 'source')],
+  ['relationship.actorTypes', specEnum('RelationshipChange', 'actor_type')],
+  // WP-315: the operators, junctions, node kinds, directions and issues of
+  // the click builder (filter mode) and the fields of its whitelist.
+  ['rules.ops', FILTER_MODE.ops],
+  ['rules.ops', filterOps],
+  ['rules.ops', specEnum('FilterExpr', 'op')],
+  ['rules.junctions', GROUP_JUNCTIONS],
+  ['rules.junctionHints', GROUP_JUNCTIONS],
+  ['rules.nodeKinds', FILTER_NODE_KINDS],
+  ['rules.directions', RELATED_DIRECTIONS],
+  ['rules.directions', specEnum('FilterRelated', 'direction')],
+  ['rules.issues', NODE_ISSUES],
+  ['rules.entityKinds', FILTER_ENTITY_KINDS],
+  ['rules.entityKinds', specEnum('SavedView', 'entity_kind')],
+  // WP-801: the rule kinds and targets of the rule catalog, the operators
+  // and junctions of the condition mode, the node kinds, range measures and
+  // issues of the validation mode and the typed CI columns of a condition.
+  ['ruleCatalog.kinds', RULE_KINDS],
+  ['ruleCatalog.kinds', specEnum('MetamodelRuleKind')],
+  ['ruleCatalog.targets', RULE_TARGETS],
+  ['ruleCatalog.filters', RULE_TARGETS],
+  ['rules.conditionOps', CONDITION_MODE.ops],
+  ['rules.conditionOps', compareOps],
+  ['rules.conditionJunctions', CONDITION_JUNCTIONS],
+  ['rules.conditionJunctionHints', CONDITION_JUNCTIONS],
+  ['rules.validationKinds', VALIDATION_NODE_KINDS],
+  ['rules.validation.add', VALIDATION_NODE_KINDS],
+  ['rules.rangeOf', RANGE_OF],
+  ['rules.issues', VALIDATION_ISSUES],
+  ['savedviews.fields', CONDITION_COLUMNS],
+  ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
+  ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
+  // WP-321: the scan states of a document version (WP-733) and the link targets (WP-267).
+  ['document.scanStatuses', SCAN_STATUSES],
+  ['document.scanStatuses', specEnum('DocumentVersion', 'scan_status')],
+  ['document.linkTypes', LINK_ENTITY_TYPES],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
+  // WP-806: the movement types of the ledger (STK-04, WP-274).
+  ['movement.types', MOVEMENT_TYPES],
+  ['movement.types', specEnum('MovementType')],
+  // WP-320: the quantity bookings of a consumable (WP-756).
+  ['consumables.movementTypes', CONSUMABLE_BOOKING_TYPES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
+  // WP-322: the entities, modes and transformations of an import profile,
+  // the formats and steps of the assistant, the job kind import.run (nested
+  // like metamodel.test) and the core targets of each entity, labelled as
+  // fields like the filter whitelist.
+  ['import.entities', IMPORT_ENTITIES],
+  ['import.entities', specEnum('ImportProfile', 'entity')],
+  ['import.modes', IMPORT_MODES],
+  ['import.modes', specEnum('ImportProfile', 'mode')],
+  ['import.transforms', IMPORT_TRANSFORMS],
+  ['import.transforms', specEnum('ImportTransform', 'op')],
+  ['import.formats', IMPORT_FILE_FORMATS],
+  ['import.formats', specEnum('ImportPreview', 'format')],
+  ['import.steps', IMPORT_STEPS],
+  ['jobs.kinds.import', ['run']],
+  ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
+    'savedviews.fields',
+    targets,
+  ]),
   ...pageEnumerations,
 ];
 
@@ -282,6 +436,18 @@ describe('i18n catalog', () => {
     expect([...DOCUMENT_CATEGORIES]).toEqual(BACKEND_ENUMS.documentCategories);
     expect([...TICKET_STATUSES]).toEqual(BACKEND_ENUMS.ticketStatuses);
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
+    expect([...TICKET_PRIORITIES]).toEqual(specEnum('TicketPriority'));
+  });
+
+  it('labels the ticket priorities and mirrors the state machine (WP-814)', () => {
+    expect(lookup(deDE, 'ticket.priorities.critical')).toBe('Kritisch');
+    expect(lookup(enUS, 'ticket.priorities.critical')).toBe('Critical');
+    // backend/internal/ticket/states.go: every state has its next states,
+    // each of them a state of the machine.
+    expect(Object.keys(TICKET_TRANSITIONS)).toEqual(BACKEND_ENUMS.ticketStatuses);
+    for (const next of Object.values(TICKET_TRANSITIONS)) {
+      for (const status of next) expect(BACKEND_ENUMS.ticketStatuses).toContain(status);
+    }
   });
 
   it('lists the pickers and the flow dialogs (WP-318)', () => {
@@ -291,9 +457,30 @@ describe('i18n catalog', () => {
         '../components/pickers/LocationPicker.tsx',
         '../components/pickers/UserTeamPicker.tsx',
         '../components/flows/AssignDialogs.tsx',
+        '../components/flows/StockFlowDialogs.tsx',
       ]),
     );
     expect(Object.keys(flowSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
+    expect([...MOVEMENT_TYPES]).toEqual(specEnum('MovementType'));
+    // The quantity bookings are movement types of the ledger (WP-320).
+    expect(specEnum('MovementType')).toEqual(expect.arrayContaining([...CONSUMABLE_BOOKING_TYPES]));
+    // The former key inventory.movementTypes is gone: one label per type.
+    expect(lookup(deDE, 'inventory.movementTypes')).toBeUndefined();
+    expect(lookup(enUS, 'inventory.movementTypes')).toBeUndefined();
+  });
+
+  it('offers exactly the scan states of the OpenAPI types and lists the document components (WP-321)', () => {
+    expect([...SCAN_STATUSES]).toEqual(specEnum('DocumentVersion', 'scan_status'));
+    expect(Object.keys(documentSources)).toEqual(
+      expect.arrayContaining([
+        '../components/upload/FileUpload.tsx',
+        '../components/documents/LinkedDocuments.tsx',
+      ]),
+    );
+    expect(Object.keys(documentSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
   });
 
   it('offers exactly the template version states of the OpenAPI types (WP-314)', () => {
@@ -306,6 +493,60 @@ describe('i18n catalog', () => {
     expect([...DRAFT_ITEM_KINDS]).toEqual(specEnum('MetamodelDraftItem', 'kind'));
     expect([...DRAFT_OPS]).toEqual(specEnum('MetamodelDraftItem', 'op'));
     expect([...DRAFT_STATUSES]).toEqual(specEnum('MetamodelDraft', 'status'));
+  });
+
+  it('offers exactly the relationship enums of the OpenAPI types (WP-323)', () => {
+    expect([...RELATIONSHIP_CATEGORIES]).toEqual(specEnum('RelationshipTypeCategory'));
+    expect([...IMPACT_DIRECTIONS]).toEqual(specEnum('RelationshipImpactDirection'));
+    expect([...CARDINALITIES].sort()).toEqual(specEnum('RelationshipTypeCardinality').sort());
+    expect([...relationshipChangeKinds]).toEqual(specEnum('RelationshipChange', 'change_kind'));
+    // The attribute types are the values of FIELD_TYPES that WP-295 accepts:
+    // no json, file or reference type.
+    expect([...RELATIONSHIP_ATTRIBUTE_TYPES]).toEqual(
+      specEnum('RelationshipAttributeDefinition', 'data_type'),
+    );
+    expect(FIELD_TYPES).toEqual(expect.arrayContaining([...RELATIONSHIP_ATTRIBUTE_TYPES]));
+  });
+
+  it('labels the relationship type page in the navigation (WP-323)', () => {
+    expect(lookup(deDE, 'nav.relationship-types')).toBe('Beziehungstypen');
+    expect(lookup(enUS, 'nav.relationship-types')).toBe('Relationship types');
+  });
+
+  it('labels the rule catalog in the navigation and the palette (WP-801)', () => {
+    expect(lookup(deDE, 'nav.rules')).toBe('Regelkatalog');
+    expect(lookup(enUS, 'nav.rules')).toBe('Rule catalog');
+    expect(lookup(deDE, 'commandPalette.commands.rules')).toBe('Regelkatalog öffnen');
+    expect(lookup(enUS, 'commandPalette.commands.rules')).toBe('Open rule catalog');
+    expect([...RULE_KINDS]).toEqual(specEnum('MetamodelRuleKind'));
+  });
+
+  it('offers exactly the import enums of the OpenAPI types and labels the page (WP-322)', () => {
+    expect([...IMPORT_ENTITIES]).toEqual(specEnum('ImportProfile', 'entity'));
+    expect([...IMPORT_MODES]).toEqual(specEnum('ImportProfile', 'mode'));
+    expect([...IMPORT_TRANSFORMS]).toEqual(specEnum('ImportTransform', 'op'));
+    expect([...IMPORT_FILE_FORMATS]).toEqual(specEnum('ImportPreview', 'format'));
+    expect(lookup(deDE, 'nav.import')).toBe('Import');
+    expect(lookup(enUS, 'nav.import')).toBe('Import');
+    expect(lookup(deDE, 'commandPalette.commands.import')).toBe('Import-Assistent öffnen');
+    expect(lookup(enUS, 'commandPalette.commands.import')).toBe('Open import assistant');
+    expect(lookup(deDE, 'jobs.kinds.import.run')).toBe('Import-Lauf');
+    expect(lookup(enUS, 'jobs.kinds.import.run')).toBe('Import run');
+    expect(Object.keys(importSources)).toEqual(['../components/import/MappingEditor.tsx']);
+  });
+
+  it('offers exactly the operators, directions and entity kinds of FilterExpr (WP-315)', () => {
+    expect([...FILTER_MODE.ops].sort()).toEqual([...specEnum('FilterExpr', 'op')].sort());
+    expect([...RELATED_DIRECTIONS]).toEqual(specEnum('FilterRelated', 'direction'));
+    expect([...FILTER_ENTITY_KINDS]).toEqual(specEnum('SavedView', 'entity_kind'));
+    expect(Object.keys(ruleSources)).toEqual(
+      expect.arrayContaining([
+        '../components/rules/RuleBuilder.tsx',
+        '../components/rules/AttributePicker.tsx',
+        '../components/rules/ValueEditor.tsx',
+      ]),
+    );
+    expect(Object.keys(ruleSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
   });
 
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
@@ -329,6 +570,8 @@ describe('i18n catalog', () => {
     '../pages/DashboardPage.tsx',
     '../pages/DiscoveryPage.tsx',
     '../pages/StocktakeListPage.tsx',
+    // WP-813: the stocktake detail (the label dialog is a flowSource).
+    '../pages/StocktakeDetailPage.tsx',
     '../pages/CITypeAdminPage.tsx',
     '../pages/TopologyPage.tsx',
     '../pages/TemplatesPage.tsx',
@@ -336,10 +579,42 @@ describe('i18n catalog', () => {
     '../pages/MetamodelDraftsPage.tsx',
     // WP-318: the assignment page, the pickers and the flow dialogs.
     '../pages/AssignmentListPage.tsx',
+    // WP-323: the relationship type administration and the edge dialog.
+    '../pages/RelationshipTypesPage.tsx',
+    '../components/cmdb/CIRelationshipsCard.tsx',
+    // WP-315: the saved views page and the click builder.
+    '../pages/SavedViewsPage.tsx',
+    // WP-801: the rule catalog.
+    '../pages/RulesPage.tsx',
+    // WP-316: the form builder (LayoutEditor is a metamodelSource).
+    '../pages/FormBuilderPage.tsx',
+    // WP-806: the inventory page (the stock flow dialogs are flowSources).
+    '../pages/InventoryPage.tsx',
+    // WP-320: the list and the detail page of the quantity items.
+    '../pages/ConsumableListPage.tsx',
+    '../pages/ConsumableDetailPage.tsx',
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
+    ...Object.keys(ruleSources),
+    // WP-321: the document pages, the upload and the document components.
+    '../pages/DocumentListPage.tsx',
+    '../pages/DocumentDetailPage.tsx',
+    ...Object.keys(documentSources),
+    // WP-814: the ticket pages.
+    '../pages/TicketListPage.tsx',
+    '../pages/TicketDetailPage.tsx',
+    // WP-322: the import assistant and its mapping editor.
+    '../pages/ImportPage.tsx',
+    ...Object.keys(importSources),
   ])('%s has no literal option labels', (file) => {
-    const source = pageSources[file] ?? metamodelSources[file] ?? flowSources[file];
+    const source =
+      pageSources[file] ??
+      metamodelSources[file] ??
+      flowSources[file] ??
+      cardSources[file] ??
+      ruleSources[file] ??
+      documentSources[file] ??
+      importSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

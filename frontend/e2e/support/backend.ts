@@ -66,6 +66,8 @@ const DETAIL_PANEL = 'panel of the CI detail page the spec does not look at';
 const CI_DETAIL_PANELS: Unused[] = [
   { method: 'GET', path: /^\/cis\/[^/]+\/parent$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/relationships$/, why: DETAIL_PANEL },
+  // The relationship types the relationship panel labels its edges with (WP-323).
+  { method: 'GET', path: '/relationship-types', why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/field-definitions$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/provenance$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/history\/ci\/[^/]+$/, why: DETAIL_PANEL },
@@ -281,6 +283,19 @@ async function fulfillProblem(route: Route, status: number, body: unknown) {
   });
 }
 
+/** BINARY_BODY stands for a binary request body the browser did not expose. */
+const BINARY_BODY = '<binary body>';
+
+/**
+ * hasBinaryBody reports a write request with a non-JSON content type, i.e.
+ * a file upload whose bytes the browser may not expose to Playwright.
+ */
+function hasBinaryBody(request: Request): boolean {
+  if (!['POST', 'PUT', 'PATCH'].includes(request.method())) return false;
+  const type = request.headers()['content-type'] ?? '';
+  return type !== '' && !/json/i.test(type);
+}
+
 /** serve answers one /api/v1 request of the page and records what is wrong with it. */
 async function serve(route: Route, state: State) {
   const request = route.request();
@@ -296,6 +311,12 @@ async function serve(route: Route, state: State) {
     } catch {
       body = raw;
     }
+  } else if (raw === null && hasBinaryBody(request)) {
+    // WebKit does not hand Playwright the body of an XMLHttpRequest that
+    // sends a File or Blob (the upload of FileUpload, WP-321): postData() is
+    // null although the browser sent the bytes. The request declares a
+    // non-JSON content type, so the body counts as sent (binary).
+    body = BINARY_BODY;
   }
   state.calls.push({ method, path, search: url.search, body });
 

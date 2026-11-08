@@ -101,6 +101,69 @@ describe('fetchAPI authentication', () => {
   });
 });
 
+// WP-813: fetchBlob loads a binary answer (the PDF label of an asset) on
+// the session path of fetchResponse.
+describe('fetchBlob', () => {
+  async function importFetchBlob(token: string) {
+    await importClientWithSession(token);
+    const { fetchBlob, ApiError } = await import('./client');
+    const { useAuthStore } = await import('../auth/authStore');
+    return { fetchBlob, ApiError, useAuthStore };
+  }
+
+  const pdf = () =>
+    new Response('%PDF-1.7', { status: 200, headers: { 'Content-Type': 'application/pdf' } });
+
+  it('sets the bearer token and returns a Blob for a 2xx answer', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(pdf());
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchBlob } = await importFetchBlob('blob-token');
+
+    const blob = await fetchBlob('/assets/a1/label?format=pdf&template=asset_50x25');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/assets/a1/label?format=pdf&template=asset_50x25',
+    );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe(['Bearer', 'blob-token'].join(' '));
+    expect(blob.type).toBe('application/pdf');
+    expect(await blob.text()).toBe('%PDF-1.7');
+  });
+
+  it('refreshes once on 401 and repeats the request with the new token', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ detail: 'expired' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ token: 'new-token', expires_at: futureExpiry }))
+      .mockResolvedValueOnce(pdf());
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchBlob } = await importFetchBlob('old-token');
+
+    const blob = await fetchBlob('/assets/a1/label?format=pdf');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/v1/auth/refresh');
+    const retryHeaders = fetchMock.mock.calls[2]?.[1]?.headers as Headers;
+    expect(retryHeaders.get('Authorization')).toBe(['Bearer', 'new-token'].join(' '));
+    expect(blob.type).toBe('application/pdf');
+  });
+
+  it('throws ApiError with the detail of a failure', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ title: 'Service Unavailable', status: 503, detail: 'no blob storage' }, 503),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const { fetchBlob, ApiError } = await importFetchBlob('blob-token');
+
+    const error = await fetchBlob('/assets/a1/label?format=pdf').catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 503, detail: 'no blob storage' });
+  });
+});
+
 describe('logout', () => {
   it('ends the server session with the access token and the cookie, then clears the local session', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));

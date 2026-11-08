@@ -95,10 +95,13 @@ type jobKind struct {
 // import handler (WP-775), the rebuild of the search index on the search
 // handler (WP-786), a label batch on the batch handler (WP-763; without
 // blob storage or a database its handler fails, the route answers 503
-// before), a bulk on assets on the asset handler (WP-781).
+// before), a bulk on assets on the asset handler (WP-781). The revert jobs
+// of asset bulks run on the asset revert (nil while the module inventory
+// is off or without the change set store, WP-784).
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
-	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler) []jobKind {
+	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
+	assetRevert *asset.BulkRevert) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
@@ -107,13 +110,20 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 		{kind: assetBulkJobKind, handler: assets.RunBulkJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
+	}
+	if ciService != nil || assetRevert != nil {
 		// Without the change set store no bulk job is revertible and no
-		// revert job is submitted; a stray one fails.
-		revertHandler := func(context.Context, *jobs.Job) (any, error) { return nil, jobs.ErrNotRevertible }
-		if bulkRevert != nil {
-			revertHandler = bulkRevert.RunJob
-		}
-		kinds = append(kinds, jobKind{kind: bulkRevertJobKind, handler: revertHandler})
+		// revert job is submitted; a stray one fails. A revert job of an
+		// asset bulk runs on the asset revert (asset.IsRevertJob).
+		kinds = append(kinds, jobKind{kind: bulkRevertJobKind, handler: func(ctx context.Context, job *jobs.Job) (any, error) {
+			switch {
+			case asset.IsRevertJob(job) && assetRevert != nil:
+				return assetRevert.RunJob(ctx, job)
+			case !asset.IsRevertJob(job) && bulkRevert != nil:
+				return bulkRevert.RunJob(ctx, job)
+			}
+			return nil, jobs.ErrNotRevertible
+		}})
 	}
 	if templateJobs != nil {
 		kinds = append(kinds, jobKind{kind: templateMigrateJobKind, handler: templateJobs.RunJob})
@@ -143,7 +153,7 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
-	labelBatch *labels.BatchHandler, assets *asset.Handler) {
+	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -156,7 +166,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets) {
+		scanner, searchHandler, labelBatch, assets, assetRevert) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -177,6 +187,9 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		}
 		if bulkRevert != nil {
 			bulkRevert.WithQueue(queue)
+		}
+		if assetRevert != nil {
+			assetRevert.WithQueue(queue)
 		}
 		return
 	}

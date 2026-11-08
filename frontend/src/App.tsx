@@ -50,12 +50,18 @@ const AssignmentListPage = lazyPage(
 );
 const AssistantPage = lazyPage(() => import('./pages/AssistantPage'), 'AssistantPage');
 const CIFormModal = lazyPage(() => import('./pages/CIFormModal'), 'CIFormModal');
+const ScanDialog = lazyPage(() => import('./components/flows/ScanDialog'), 'ScanDialog');
 const CIDetailPage = lazyPage(() => import('./pages/CIDetailPage'), 'CIDetailPage');
 const CIListPage = lazyPage(() => import('./pages/CIListPage'), 'CIListPage');
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage');
 const DiscoveryPage = lazyPage(() => import('./pages/DiscoveryPage'), 'DiscoveryPage');
 const DocumentListPage = lazyPage(() => import('./pages/DocumentListPage'), 'DocumentListPage');
+const DocumentDetailPage = lazyPage(
+  () => import('./pages/DocumentDetailPage'),
+  'DocumentDetailPage',
+);
 const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
+const ImportPage = lazyPage(() => import('./pages/ImportPage'), 'ImportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
 const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
@@ -66,7 +72,12 @@ const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPag
 const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'CompliancePage');
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
 const StocktakeListPage = lazyPage(() => import('./pages/StocktakeListPage'), 'StocktakeListPage');
+const StocktakeDetailPage = lazyPage(
+  () => import('./pages/StocktakeDetailPage'),
+  'StocktakeDetailPage',
+);
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
+const TicketDetailPage = lazyPage(() => import('./pages/TicketDetailPage'), 'TicketDetailPage');
 const UserManagementPage = lazyPage(
   () => import('./pages/UserManagementPage'),
   'UserManagementPage',
@@ -78,11 +89,21 @@ const ConsumableListPage = lazyPage(
   () => import('./pages/ConsumableListPage'),
   'ConsumableListPage',
 );
+const ConsumableDetailPage = lazyPage(
+  () => import('./pages/ConsumableDetailPage'),
+  'ConsumableDetailPage',
+);
 const OrderListPage = lazyPage(() => import('./pages/OrderListPage'), 'OrderListPage');
 const MaintenancePage = lazyPage(() => import('./pages/MaintenancePage'), 'MaintenancePage');
 const DisposalListPage = lazyPage(() => import('./pages/DisposalListPage'), 'DisposalListPage');
 const CITypeAdminPage = lazyPage(() => import('./pages/CITypeAdminPage'), 'CITypeAdminPage');
+const RelationshipTypesPage = lazyPage(
+  () => import('./pages/RelationshipTypesPage'),
+  'RelationshipTypesPage',
+);
 const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
+const RulesPage = lazyPage(() => import('./pages/RulesPage'), 'RulesPage');
+const FormBuilderPage = lazyPage(() => import('./pages/FormBuilderPage'), 'FormBuilderPage');
 const MetamodelDraftsPage = lazyPage(
   () => import('./pages/MetamodelDraftsPage'),
   'MetamodelDraftsPage',
@@ -90,6 +111,7 @@ const MetamodelDraftsPage = lazyPage(
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
+const TagsPage = lazyPage(() => import('./pages/TagsPage'), 'TagsPage');
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
@@ -120,6 +142,10 @@ function App() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isScanOpen, setIsScanOpen] = useState(false);
+  // The scan dialog loads with its first use and stays mounted afterwards:
+  // a handover it started waits out its undo window there.
+  const [scanLoaded, setScanLoaded] = useState(false);
   const mode = useThemeStore((state) => state.mode);
   const resolvedTheme = useThemeStore((state) => state.resolved);
   const osTheme = useThemeStore((state) => state.os);
@@ -128,7 +154,11 @@ function App() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated());
   // Both read only with a session (their queries are enabled by it).
   const { isEnabled } = useEntitlements();
-  const { isPageEnabled } = useModules();
+  const { isPageEnabled, isModuleEnabled } = useModules();
+  // Scanning needs the feature barcode and the module inventory that serves
+  // /api/v1/labels (E-44, E-105, WP-807); without them the palette has no
+  // "Scan" command.
+  const canScan = isEnabled('barcode') && isModuleEnabled('inventory');
 
   // The theme toggle (header and command palette) cycles relative to the OS
   // theme: system -> opposite of the OS -> OS theme -> system, so every click
@@ -160,6 +190,11 @@ function App() {
   function openCreateCI() {
     navigate('/cmdb');
     setIsCreateOpen(true);
+  }
+
+  function openScan() {
+    setScanLoaded(true);
+    setIsScanOpen(true);
   }
 
   // handleLogout ends the Reticora and the IdP session; the IdP returns to
@@ -214,15 +249,22 @@ function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/locations" element={<LocationTreePage />} />
           <Route path="/saved-views" element={<SavedViewsPage />} />
+          <Route path="/tags" element={<TagsPage />} />
           <Route path="/ci-types" element={<CITypeAdminPage />} />
           <Route path="/ci-types/templates" element={<TemplatesPage />} />
           <Route path="/ci-types/templates/:id" element={<TemplatesPage />} />
           <Route path="/ci-types/drafts" element={<MetamodelDraftsPage />} />
           <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
+          <Route path="/ci-types/:id/form-builder" element={<FormBuilderPage />} />
+          <Route path="/rules" element={<RulesPage />} />
+          <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
           <Route path="/documents" element={<DocumentListPage />} />
+          <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />
+          <Route path="/stocktake/:id" element={<StocktakeDetailPage />} />
           <Route path="/consumables" element={<ConsumableListPage />} />
+          <Route path="/consumables/:id" element={<ConsumableDetailPage />} />
           <Route path="/orders" element={<OrderListPage />} />
           <Route path="/maintenance" element={<MaintenancePage />} />
           <Route path="/disposal" element={<DisposalListPage />} />
@@ -234,6 +276,7 @@ function App() {
           <Route path="/reviews" element={<ReviewInboxPage />} />
           <Route path="/jobs" element={<JobCenterPage />} />
           <Route path="/tickets" element={<TicketListPage />} />
+          <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/users" element={<UserManagementPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/slas" element={<SLAPage />} />
@@ -243,6 +286,7 @@ function App() {
           <Route path="/iga" element={<IGAPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/imports" element={<ImportPage />} />
           <Route path="/export" element={<ExportPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/audit" element={<AuditPage />} />
@@ -278,10 +322,16 @@ function App() {
         themeToggleLabel={themeToggleLabel}
         isFeatureEnabled={isEnabled}
         isPageEnabled={isPageEnabled}
+        onScan={canScan ? openScan : undefined}
       />
       <Suspense fallback={null}>
         <CIFormModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
       </Suspense>
+      {scanLoaded ? (
+        <Suspense fallback={null}>
+          <ScanDialog open={isScanOpen} onOpenChange={setIsScanOpen} />
+        </Suspense>
+      ) : null}
       <ToastViewport />
     </>
   );

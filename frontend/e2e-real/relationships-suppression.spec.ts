@@ -93,6 +93,13 @@ interface Relationship {
   last_confirmed_at?: string;
 }
 
+/** An item of GET /relationship-types (WP-323). */
+interface RelationshipType {
+  key: string;
+  display_name?: string;
+  reverse_name?: string;
+}
+
 interface Collector {
   id: string;
   name: string;
@@ -218,6 +225,18 @@ async function lldpEdges(ciId: string): Promise<Relationship[]> {
   return rows(list).filter(
     (r) => !r.projected && r.rel_type === 'connected_to' && r.source === 'discovery',
   );
+}
+
+/**
+ * relTypeLabel is the name the relationship card shows for a type, seen from the CI (WP-323,
+ * relationshipTypeLabel in CIRelationshipsCard.tsx): display_name for an outgoing edge,
+ * reverse_name for an incoming one, the key only while the type is unknown.
+ */
+async function relTypeLabel(key: string, outgoing: boolean): Promise<string> {
+  const types = rows(await get<List<RelationshipType>>('/relationship-types?limit=100'));
+  const type = types.find((candidate) => candidate.key === key);
+  expect(type, `relationship type ${key}`).toBeTruthy();
+  return (outgoing ? type!.display_name : type!.reverse_name) || type!.display_name || key;
 }
 
 /** edgeKeys names the edges by their CI names, sorted. */
@@ -348,13 +367,16 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
     const removed = before.find((r) => r.source_ci_id === access.id && r.target_ci_id === core.id);
     expect(removed, `edge ${CI_NAME} → ${REMOVED_PEER}`).toBeTruthy();
     const kept = before.filter((r) => r.id !== removed!.id);
+    // WP-323: the card names the edge by the display name of its type (outgoing from the CI),
+    // no longer by its key connected_to.
+    const typeLabel = await relTypeLabel('connected_to', true);
     expect(suppressions(access.id, core.id), 'no suppression before the removal').toEqual([]);
 
     await test.step('REL-04: "Entfernen und unterdrücken" in the CI detail deletes the edge with force after the confirmation with a reason', async () => {
       await openCI(page, access);
       const row = relationshipRow(page, core.id);
       await expect(row, `relationship line of ${REMOVED_PEER}`).toHaveCount(1);
-      await expect(row.getByText('connected_to', { exact: true })).toBeVisible();
+      await expect(row.getByText(typeLabel, { exact: true })).toBeVisible();
       const button = row.getByRole('button', { name: 'Entfernen und unterdrücken', exact: true });
       await expect(button).toBeVisible();
       // WP-584: no DELETE leaves the page before the confirmation.
@@ -473,7 +495,7 @@ test.describe('Relationships: remove and suppress a discovery edge (REL-03, REL-
       await page.getByRole('button', { name: 'Unterdrückte Beziehungen anzeigen' }).click();
       const line = suppressionRow(page, core.id);
       await expect(line, `suppression line of ${REMOVED_PEER}`).toHaveCount(1);
-      await expect(line.getByText('connected_to', { exact: true })).toBeVisible();
+      await expect(line.getByText(typeLabel, { exact: true })).toBeVisible();
       await expect(line).toContainText(`Grund: ${REASON}`);
       await expect(line).toContainText(`Unterdrückt von ${t.userId}`);
     });

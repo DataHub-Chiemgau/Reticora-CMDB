@@ -1094,6 +1094,21 @@ func WithRequestInfo(ctx context.Context, info RequestInfo) context.Context {
 	return context.WithValue(ctx, requestInfoKey{}, info)
 }
 
+// WithCorrelationID returns ctx whose audit entries carry correlationID
+// (a bulk job ties its entries to its id, WP-306). It keeps the request
+// context of ctx (request id, source) and its recorded flag, so an entry in
+// the returned context counts as one of the request (Recorded) and the
+// route audit writes none of its own; only the correlation id changes.
+// Without a request context it starts one with only the correlation id.
+func WithCorrelationID(ctx context.Context, correlationID string) context.Context {
+	info, ok := requestInfoFrom(ctx)
+	if !ok {
+		info = RequestInfo{recorded: &atomic.Bool{}}
+	}
+	info.CorrelationID = correlationID
+	return context.WithValue(ctx, requestInfoKey{}, info)
+}
+
 func requestInfoFrom(ctx context.Context) (RequestInfo, bool) {
 	info, ok := ctx.Value(requestInfoKey{}).(RequestInfo)
 	return info, ok && info.recorded != nil

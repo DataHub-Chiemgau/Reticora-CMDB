@@ -50,6 +50,10 @@ export default tseslint.config(
       'src/pages/DashboardPage.tsx',
       'src/pages/DiscoveryPage.tsx',
       'src/pages/StocktakeListPage.tsx',
+      // WP-813: the stocktake detail and the label dialog (also matched by
+      // src/components/flows/**/*.tsx below).
+      'src/pages/StocktakeDetailPage.tsx',
+      'src/components/flows/LabelPrintDialog.tsx',
       'src/pages/CITypeAdminPage.tsx',
       // WP-818: the impact panel and the topology page.
       'src/pages/TopologyPage.tsx',
@@ -63,11 +67,41 @@ export default tseslint.config(
       'src/pages/AssignmentListPage.tsx',
       'src/components/pickers/**/*.tsx',
       'src/components/flows/**/*.tsx',
+      // WP-323: the relationship type administration and the edge dialog.
+      'src/pages/RelationshipTypesPage.tsx',
+      'src/components/cmdb/CIRelationshipsCard.tsx',
+      // WP-315: the click builder and the saved views page.
+      'src/components/rules/**/*.tsx',
+      'src/pages/SavedViewsPage.tsx',
+      // WP-817: the tag administration (the saved views page is listed above).
+      'src/pages/TagsPage.tsx',
+      // WP-801: the rule catalog.
+      'src/pages/RulesPage.tsx',
+      // WP-316: the form builder (LayoutEditor is matched by src/components/metamodel/**).
+      'src/pages/FormBuilderPage.tsx',
+      // WP-806: the inventory page and the object history.
+      'src/pages/InventoryPage.tsx',
+      'src/components/cmdb/ObjectHistory.tsx',
+      // WP-320: the warehouse pages of the quantity items.
+      'src/pages/ConsumableListPage.tsx',
+      'src/pages/ConsumableDetailPage.tsx',
+      // WP-321: the document pages, the upload and the document components.
+      'src/pages/DocumentListPage.tsx',
+      'src/pages/DocumentDetailPage.tsx',
+      'src/components/upload/**/*.tsx',
+      'src/components/documents/**/*.tsx',
+      // WP-322: the import assistant and its mapping editor.
+      'src/pages/ImportPage.tsx',
+      'src/components/import/**/*.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
       'src/components/pickers/**/*.test.tsx',
       'src/components/flows/**/*.test.tsx',
+      'src/components/rules/**/*.test.tsx',
+      'src/components/upload/**/*.test.tsx',
+      'src/components/documents/**/*.test.tsx',
+      'src/components/import/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

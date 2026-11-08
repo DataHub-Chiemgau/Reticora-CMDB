@@ -2,6 +2,7 @@ package asset
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -145,6 +147,12 @@ func (r *PGRepository) ReplaceTags(ctx context.Context, orgID, id string, keys [
 		if err != nil {
 			return err
 		}
+		// The revert of a bulk decides the tags on the locked row (WP-784).
+		revert := tagRevertFrom(ctx)
+		if revert != nil {
+			sorted = revert.decide(current.Tags)
+			keys = sorted
+		}
 		rows, err := tx.Query(ctx, `SELECT key, id::text FROM tag WHERE organization_id = $1 AND key = ANY($2) FOR SHARE`, orgID, sorted)
 		if err != nil {
 			return fmt.Errorf("read catalog tags: %w", err)
@@ -157,6 +165,12 @@ func (r *PGRepository) ReplaceTags(ctx context.Context, orgID, id string, keys [
 		}); err != nil {
 			return fmt.Errorf("read catalog tags: %w", err)
 		}
+		if revert != nil {
+			// A tag deleted from the catalog since the bulk does not come
+			// back.
+			sorted = revert.dropUnknown(sorted, known)
+			keys = sorted
+		}
 		if violations = append(violations, unknownTags(keys, known)...); len(violations) > 0 {
 			return &TagsError{Violations: violations}
 		}
@@ -165,7 +179,7 @@ func (r *PGRepository) ReplaceTags(ctx context.Context, orgID, id string, keys [
 		}
 		if slices.Equal(current.Tags, sorted) {
 			out = current
-			return nil
+			return revert.mark(ctx, tx, orgID)
 		}
 		ids := make([]string, 0, len(sorted))
 		for _, k := range sorted {
@@ -186,12 +200,161 @@ func (r *PGRepository) ReplaceTags(ctx context.Context, orgID, id string, keys [
 		if out, err = r.touchVersion(ctx, tx, orgID, id); err != nil {
 			return err
 		}
+		if csErr := recordTagChanges(ctx, tx, orgID, current, out); csErr != nil {
+			return csErr
+		}
+		if markErr := revert.mark(ctx, tx, orgID); markErr != nil {
+			return markErr
+		}
 		return r.recordUpdate(ctx, tx, orgID, current, out)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// The change set of the tags (BLK-02, WP-784): under a bulk job
+// (jobs.WithChangeSet) ReplaceTags records in its transaction each tag it
+// actually added (op add, the key in new_value) or removed (op remove,
+// the key in old_value), field tags, like the tags of a CI (WP-783). The
+// revert passes the rows of one asset (withTagRevert): ReplaceTags then
+// ignores the keys it is given and decides per row on the locked row; a
+// tag the bulk added goes when the asset still has it, a tag the bulk
+// removed comes back when the asset still lacks it and the catalog still
+// holds it (read FOR SHARE). Each row is marked reverted or skipped in the
+// same transaction.
+
+// recordTagChanges writes the change set rows of a tag change from before
+// to after under a bulk job; nothing outside one.
+func recordTagChanges(ctx context.Context, tx pgx.Tx, orgID string, before, after *Asset) error {
+	jobID, ok := jobs.ChangeSetFrom(ctx)
+	if !ok {
+		return nil
+	}
+	var changes []jobs.Change
+	row := func(op, key string) error {
+		raw, err := json.Marshal(key)
+		if err != nil {
+			return fmt.Errorf("encode bulk change set: %w", err)
+		}
+		c := jobs.Change{JobID: jobID, EntityType: jobs.EntityAsset, EntityID: after.ID, Op: op, FieldName: fieldTags,
+			ClientID: after.ClientID, SiteID: after.SiteID}
+		if op == jobs.OpAdd {
+			c.NewValue = raw
+		} else {
+			c.OldValue = raw
+		}
+		changes = append(changes, c)
+		return nil
+	}
+	for _, key := range after.Tags {
+		if !slices.Contains(before.Tags, key) {
+			if err := row(jobs.OpAdd, key); err != nil {
+				return err
+			}
+		}
+	}
+	for _, key := range before.Tags {
+		if !slices.Contains(after.Tags, key) {
+			if err := row(jobs.OpRemove, key); err != nil {
+				return err
+			}
+		}
+	}
+	return jobs.RecordChangeTx(ctx, tx, orgID, changes)
+}
+
+// tagRevert is the revert of the tag rows of one asset: the rows, the
+// outcome per row and the keys each row brings back.
+type tagRevert struct {
+	rows     []jobs.Change
+	marks    []jobs.ChangeMark
+	reverted []string
+	skipped  []string
+}
+
+type tagRevertKey struct{}
+
+// withTagRevert returns ctx whose ReplaceTags reverts the tag rows of e.
+func withTagRevert(ctx context.Context, e *tagRevert) context.Context {
+	return context.WithValue(ctx, tagRevertKey{}, e)
+}
+
+func tagRevertFrom(ctx context.Context) *tagRevert {
+	e, _ := ctx.Value(tagRevertKey{}).(*tagRevert)
+	return e
+}
+
+// rowKey is the tag key of a tag row.
+func rowKey(row *jobs.Change) string {
+	raw := row.NewValue
+	if row.Op == jobs.OpRemove {
+		raw = row.OldValue
+	}
+	var key string
+	if json.Unmarshal(raw, &key) != nil {
+		return ""
+	}
+	return key
+}
+
+// decide returns the sorted keys after the revert of the rows on the tags
+// of the locked row and records each row's outcome.
+func (e *tagRevert) decide(tags []string) []string {
+	e.marks, e.reverted, e.skipped = nil, nil, nil
+	out := slices.Clone(tags)
+	for i := range e.rows {
+		row := &e.rows[i]
+		key := rowKey(row)
+		has := key != "" && slices.Contains(out, key)
+		outcome := jobs.OutcomeSkipped
+		switch {
+		case row.Op == jobs.OpAdd && has:
+			out = slices.DeleteFunc(out, func(k string) bool { return k == key })
+			outcome = jobs.OutcomeReverted
+		case row.Op == jobs.OpRemove && key != "" && !has:
+			out = append(out, key)
+			outcome = jobs.OutcomeReverted
+		}
+		e.marks = append(e.marks, jobs.ChangeMark{ID: row.ID, Outcome: outcome})
+	}
+	slices.Sort(out)
+	e.tally()
+	return out
+}
+
+// dropUnknown removes from keys the tags the catalog no longer holds and
+// marks the rows that would have brought them back skipped.
+func (e *tagRevert) dropUnknown(keys []string, known map[string]string) []string {
+	out := slices.DeleteFunc(slices.Clone(keys), func(k string) bool { _, ok := known[k]; return !ok })
+	for i := range e.rows {
+		if _, ok := known[rowKey(&e.rows[i])]; !ok && e.rows[i].Op == jobs.OpRemove {
+			e.marks[i].Outcome = jobs.OutcomeSkipped
+		}
+	}
+	e.tally()
+	return out
+}
+
+// tally lists the keys of the reverted and of the skipped rows.
+func (e *tagRevert) tally() {
+	e.reverted, e.skipped = nil, nil
+	for i := range e.marks {
+		if e.marks[i].Outcome == jobs.OutcomeReverted {
+			e.reverted = append(e.reverted, fieldTags)
+		} else {
+			e.skipped = append(e.skipped, fieldTags)
+		}
+	}
+}
+
+// mark records the outcome of the rows in tx; nothing for nil.
+func (e *tagRevert) mark(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if e == nil {
+		return nil
+	}
+	return jobs.MarkChangeTx(ctx, tx, orgID, e.marks)
 }
 
 // touchVersion raises the version of asset id by one although no column

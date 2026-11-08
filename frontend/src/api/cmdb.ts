@@ -6,13 +6,15 @@
  */
 import {
   ApiError,
+  assetApi,
   buildQuery as qs,
+  consumableApi,
   fetchAllPages,
   fetchAPI,
   type CI,
   type PaginatedResponse,
 } from './client';
-import type { FieldDefinition } from '../lib/fieldmeta';
+import type { FieldDefinition, ValidationRules } from '../lib/fieldmeta';
 import type { components } from './generated/schema';
 
 // ─── Metamodel drafts (MET-53, WP-260, WP-720, WP-798) ──────────────────────
@@ -296,6 +298,71 @@ export const ciTypeApi = {
   listFields(id: string): Promise<{ data: FieldDefinition[] }> {
     return fetchAPI(`/ci-types/${id}/fields`);
   },
+  /**
+   * The resolved form of the type (WP-719) for a target and a role: the
+   * template replaces the templates of the type, preview resolves as the
+   * role (citype:manage). Without role_id the server resolves with the
+   * roles of the caller (WP-316).
+   */
+  form(id: string, params: ResolvedFormParams = {}): Promise<ResolvedForm> {
+    return fetchAPI(`/ci-types/${id}/form${qs(params)}`);
+  },
+};
+
+/** The parameters of GET /ci-types/{id}/form (WP-719). */
+export interface ResolvedFormParams {
+  template_id?: string;
+  role_id?: string;
+  preview?: boolean;
+}
+
+// ─── Form layouts (MET-50, WP-259, WP-316) ───────────────────────────────────
+
+/** The layout of a form for one CI type or template and optionally one role. */
+export type FormLayout = components['schemas']['FormLayout'];
+export type FormLayoutDocument = components['schemas']['FormLayoutDocument'];
+export type FormLayoutSection = components['schemas']['FormLayoutSection'];
+export type FormLayoutField = components['schemas']['FormLayoutField'];
+export type FormLayoutCreate = components['schemas']['FormLayoutCreate'];
+export type FormLayoutPatch = components['schemas']['FormLayoutPatch'];
+/** A resolved form (WP-719): sections with fields, definitions and states. */
+export type ResolvedForm = components['schemas']['ResolvedForm'];
+export type ResolvedFormSection = components['schemas']['ResolvedFormSection'];
+
+/** The filters of GET /layouts: exactly one target, optionally a role. */
+export interface LayoutFilter {
+  ci_type_id?: string;
+  template_id?: string;
+  role_id?: string;
+}
+
+export const layoutApi = {
+  /** Every layout of the filter, all pages over next_cursor (API-02). */
+  async list(filter: LayoutFilter): Promise<{ data: FormLayout[] }> {
+    return { data: await fetchAllPages<FormLayout>('/layouts', filter) };
+  },
+  get(id: string): Promise<FormLayout> {
+    return fetchAPI(`/layouts/${id}`);
+  },
+  /** A new layout; with an active draft the answer is the draft item (202). */
+  create(data: FormLayoutCreate): Promise<Drafted<FormLayout>> {
+    return fetchAPI('/layouts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /**
+   * Changes a layout; version (form_layout.version) is sent as If-Match, so
+   * a change in between is refused with 412 (API-07).
+   */
+  update(id: string, data: FormLayoutPatch, version?: number): Promise<Drafted<FormLayout>> {
+    return fetchAPI(`/layouts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  /** 204, or the draft item (202) while a draft is active. */
+  remove(id: string, version?: number): Promise<MetamodelDraftItem | undefined> {
+    return fetchAPI(`/layouts/${id}`, { method: 'DELETE', headers: ifMatch(version) });
+  },
 };
 
 // Index flags of an attribute definition (MET-15, DB-04): a change queues
@@ -456,6 +523,54 @@ export const templateApi = {
   },
 };
 
+// ─── Rule catalog (MET-45, WP-716, WP-801) ───────────────────────────────────
+
+/**
+ * A named rule of the rule catalog for one attribute of exactly one target
+ * (CI type, attribute set or template version); a system rule
+ * (is_system, no organization_id) is read-only.
+ */
+export type MetamodelRule = components['schemas']['MetamodelRule'];
+export type MetamodelRuleCreate = components['schemas']['MetamodelRuleCreate'];
+export type MetamodelRulePatch = components['schemas']['MetamodelRulePatch'];
+export type MetamodelRuleKind = components['schemas']['MetamodelRuleKind'];
+export type MetamodelRuleListResponse = components['schemas']['MetamodelRuleListResponse'];
+
+/** The filters of GET /rules; the catalog is organization-wide (no client or site). */
+export interface RuleFilter {
+  ci_type_id?: string;
+  attribute_set_id?: string;
+  template_version_id?: string;
+  attribute_key?: string;
+  kind?: MetamodelRuleKind;
+}
+
+export const ruleApi = {
+  /** One page of the catalog, newest first; next_cursor names the next one (API-02). */
+  list(filter: RuleFilter, cursor?: string): Promise<MetamodelRuleListResponse> {
+    return fetchAPI(`/rules${qs({ ...filter, limit: 50, cursor })}`);
+  },
+  get(id: string): Promise<MetamodelRule> {
+    return fetchAPI(`/rules/${id}`);
+  },
+  /**
+   * Creates a rule; with an active draft withDraft adds ?draft and the
+   * answer is the draft item (202), which names no rule: the caller does
+   * not ask for it by an id.
+   */
+  create(data: MetamodelRuleCreate): Promise<Drafted<MetamodelRule>> {
+    return fetchAPI('/rules', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** attribute_key, kind, condition, ast, message and is_active; null removes. */
+  update(id: string, data: MetamodelRulePatch): Promise<Drafted<MetamodelRule>> {
+    return fetchAPI(`/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** 204, or the draft item (202) while a draft is active. */
+  delete(id: string): Promise<MetamodelDraftItem | undefined> {
+    return fetchAPI(`/rules/${id}`, { method: 'DELETE' });
+  },
+};
+
 // ─── Templates at the CI, template migration, metamodel transfer (WP-800) ──
 
 /** A template assigned to a CI with the version it uses and its position (WP-710). */
@@ -572,21 +687,107 @@ export const ciFieldApi = {
 
 // ─── Relationship types (§11) ────────────────────────────────────────────────
 
-/** Relationship type metadata (REL-01, CH27). */
-export interface RelationshipType {
-  id: string;
-  key: string;
-  display_name: string;
-  reverse_name: string;
-  directed: boolean;
-  category: 'network' | 'power' | 'hosting' | 'logical' | 'physical';
-  impact_direction: 'source_depends_on_target' | 'target_depends_on_source' | 'none' | 'undirected';
-  redundant: boolean;
-  allowed_source_types: string[];
-  allowed_target_types: string[];
-  cardinality: string;
-  is_system: boolean;
-  description?: string;
+/**
+ * Relationship type metadata (REL-01, CH27) with the attribute schema of its
+ * edges (REL-07, WP-295); derived from the OpenAPI schema (K27), so it
+ * carries organization_id (empty for a system type) and metadata_schema.
+ */
+export type RelationshipType = components['schemas']['RelationshipTypeDefinition'];
+/** One definition of the attribute schema of a relationship type (WP-295). */
+export type RelationshipAttributeDefinition =
+  components['schemas']['RelationshipAttributeDefinition'];
+/** The body of POST and PATCH /relationship-types. */
+export type RelationshipTypeUpsert = components['schemas']['RelationshipTypeUpsert'];
+export type RelationshipTypeCategory = components['schemas']['RelationshipTypeCategory'];
+export type RelationshipImpactDirection = components['schemas']['RelationshipImpactDirection'];
+export type RelationshipTypeCardinality = components['schemas']['RelationshipTypeCardinality'];
+
+/**
+ * validationRulesOf turns the validation of an attribute definition (the
+ * rule AST of MET-45 the server returns, or the legacy form) into the
+ * ValidationRules of a form field, as fieldmeta.ValidationFromRule does on
+ * the server: pattern, range of value (min, max) and of length
+ * (min_length, max_length) and enum (options). required is a flag of the
+ * definition and not repeated here.
+ */
+export function validationRulesOf(validation: unknown): ValidationRules | undefined {
+  if (typeof validation !== 'object' || validation === null) return undefined;
+  const v = validation as Record<string, unknown>;
+  if (typeof v.op !== 'string') {
+    // The legacy form is already the structure of a form field.
+    const legacy = v as ValidationRules;
+    return Object.keys(legacy).length > 0 ? legacy : undefined;
+  }
+  const out: ValidationRules = {};
+  const patterns: string[] = [];
+  const visit = (rule: Record<string, unknown>) => {
+    switch (rule.op) {
+      case 'all':
+        for (const child of (rule.rules as unknown[]) ?? []) {
+          if (typeof child === 'object' && child !== null) visit(child as Record<string, unknown>);
+        }
+        return;
+      case 'pattern':
+        if (typeof rule.pattern === 'string') patterns.push(rule.pattern);
+        return;
+      case 'range': {
+        const length = rule.of === 'length';
+        if (typeof rule.min === 'number') out[length ? 'min_length' : 'min'] = rule.min;
+        if (typeof rule.max === 'number') out[length ? 'max_length' : 'max'] = rule.max;
+        return;
+      }
+      case 'enum':
+        if (Array.isArray(rule.values)) out.options = rule.values.map(String);
+        return;
+      default:
+    }
+  };
+  visit(v);
+  if (patterns.length > 0) out.pattern = patterns[0];
+  if (patterns.length > 1) out.patterns = patterns.slice(1);
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * relationshipAttributeFields maps the attribute schema of a relationship
+ * type onto the field definitions of DynamicForm (WP-323): key → name,
+ * display_name in the UI language → label, default → default_value; the
+ * validation as ValidationRules, conditional as it is.
+ */
+export function relationshipAttributeFields(
+  schema: readonly RelationshipAttributeDefinition[] | undefined,
+  language: string,
+): FieldDefinition[] {
+  return (schema ?? []).map((def, index) => ({
+    name: def.key,
+    label: localizedText(def.display_name, language) || def.key,
+    data_type: def.data_type,
+    required: def.required ?? false,
+    default_value:
+      def.default === undefined || def.default === null
+        ? undefined
+        : typeof def.default === 'string'
+          ? def.default
+          : JSON.stringify(def.default),
+    enum_values: def.enum_values,
+    validation: validationRulesOf(def.validation),
+    conditional: def.conditional as FieldDefinition['conditional'],
+    sort_order: index,
+  }));
+}
+
+/**
+ * relationshipAttributeDefaults are the values a new edge starts with: the
+ * default of each definition that has one (the server does not set it).
+ */
+export function relationshipAttributeDefaults(
+  schema: readonly RelationshipAttributeDefinition[] | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const def of schema ?? []) {
+    if (def.default !== undefined && def.default !== null) out[def.key] = def.default;
+  }
+  return out;
 }
 
 export const relationshipTypeApi = {
@@ -597,11 +798,11 @@ export const relationshipTypeApi = {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`);
   },
   create(
-    data: Partial<RelationshipType> & { key: string; display_name: string; reverse_name: string },
-  ) {
+    data: RelationshipTypeUpsert & { key: string; display_name: string; reverse_name: string },
+  ): Promise<RelationshipType> {
     return fetchAPI('/relationship-types', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(key: string, data: Partial<RelationshipType>) {
+  update(key: string, data: RelationshipTypeUpsert): Promise<RelationshipType> {
     return fetchAPI(`/relationship-types/${encodeURIComponent(key)}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -762,14 +963,102 @@ export const locationApi = {
   },
 };
 
-// ─── Movements + quantity items (§9, §6) ─────────────────────────────────────
+// ─── Scanned codes (INV-03, E-52, WP-762, WP-807) ────────────────────────────
+
+/** LabelLookupResult is the object GET /labels/lookup names: kind, id and name. */
+export type LabelLookupResult = components['schemas']['LabelLookupResult'];
+
+/** ScanKind is the kind of object a label names (E-52). */
+export type ScanKind = LabelLookupResult['kind'];
+
+/**
+ * ScannedObject is the object a scanned code resolves to: kind, id and
+ * name, the inventory number of an asset or the SKU of a consumable as
+ * code, and for a location its node (kind and ltree path of ids).
+ */
+export interface ScannedObject {
+  kind: ScanKind;
+  id: string;
+  name: string;
+  code?: string;
+  location?: Location;
+}
+
+const OBJECT_URN =
+  /^urn:reticora:(asset|consumable|location):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/**
+ * parseObjectUrn splits the URN of a label,
+ * urn:reticora:<asset|consumable|location>:<uuid> (E-52, WP-289), into kind
+ * and id; any other code gives undefined.
+ */
+export function parseObjectUrn(code: string): { kind: ScanKind; id: string } | undefined {
+  const match = OBJECT_URN.exec(code.trim());
+  if (!match) return undefined;
+  return { kind: match[1]!.toLowerCase() as ScanKind, id: match[2]!.toLowerCase() };
+}
+
+export const labelApi = {
+  /**
+   * lookup resolves a code that is no object URN: a barcode or an
+   * inventory number (GET /labels/lookup?code=, WP-762). An unknown code
+   * and an object outside the caller's scope, rights or plan answer 404
+   * alike.
+   */
+  lookup(code: string) {
+    return fetchAPI<LabelLookupResult>(`/labels/lookup${qs({ code })}`);
+  },
+};
+
+/**
+ * resolveScannedCode turns a scanned code into its object. A URN is split
+ * locally and the object read through GET /assets/{id}, /consumables/{id}
+ * or /locations/{id}, without a lookup. Every other code goes to GET
+ * /labels/lookup; a location found there is read once more for its kind
+ * and path (a flow takes only bins).
+ */
+export async function resolveScannedCode(code: string): Promise<ScannedObject> {
+  const urn = parseObjectUrn(code);
+  if (urn?.kind === 'asset') {
+    const asset = await assetApi.get(urn.id);
+    return {
+      kind: 'asset',
+      id: asset.id,
+      name: asset.name,
+      code: asset.inventory_no ?? asset.asset_tag,
+    };
+  }
+  if (urn?.kind === 'consumable') {
+    const item = await consumableApi.get(urn.id);
+    return { kind: 'consumable', id: item.id, name: item.name, code: item.sku };
+  }
+  let locationId = urn?.id;
+  if (!locationId) {
+    const hit = await labelApi.lookup(code.trim());
+    if (hit.kind !== 'location') return { kind: hit.kind, id: hit.id, name: hit.name };
+    locationId = hit.id;
+  }
+  const location = await locationApi.get(locationId);
+  return { kind: 'location', id: location.id, name: location.name, location };
+}
+
+// ─── Movements and stock of consumables (§9, §6) ─────────────────────────────
+
+/**
+ * CONSUMABLE_BOOKING_TYPES are the quantity bookings of a consumable over
+ * POST /stock-movements (WP-756), labelled by consumables.movementTypes.*:
+ * receipt into a bin (to_location_id), retrieval from a bin
+ * (from_location_id), correction of one bin (to_location_id raises,
+ * from_location_id lowers) and transfer between two different bins.
+ */
+export const CONSUMABLE_BOOKING_TYPES = ['receipt', 'retrieval', 'correction', 'transfer'] as const;
+export type ConsumableBookingType = (typeof CONSUMABLE_BOOKING_TYPES)[number];
 
 export interface StockMovement {
   id: string;
   item_kind: string;
   asset_id?: string;
   consumable_id?: string;
-  quantity_item_id?: string;
   movement_type: string;
   from_location_id?: string;
   to_location_id?: string;
@@ -781,16 +1070,31 @@ export interface StockMovement {
   created_at: string;
 }
 
-export interface QuantityItem {
-  id: string;
-  sku?: string;
-  name: string;
-  category: string;
-  unit: string;
-  stock_level: number;
-  min_level: number;
-  location_id?: string;
-}
+/**
+ * StockBooking is the body of POST /stock-movements as the flows send it:
+ * a quantity booking of a consumable in bins, or the transfer of a serial
+ * asset to a location (E-142). Other movement types of an asset arise only
+ * in their domain paths (assign, reserve, dispose).
+ */
+export type StockBooking =
+  | {
+      consumable_id: string;
+      movement_type: ConsumableBookingType;
+      from_location_id?: string;
+      to_location_id?: string;
+      quantity: number;
+      reason?: string;
+    }
+  | {
+      asset_id: string;
+      movement_type: 'transfer';
+      to_location_id: string;
+      reason?: string;
+    };
+
+/** The stock of a consumable in one bin: on_hand and reserved (STK-02, WP-283). */
+export type ConsumableStock = components['schemas']['ConsumableStock'];
+export type ConsumableStockList = components['schemas']['ConsumableStockListResponse'];
 
 export const inventoryApi = {
   listMovements(
@@ -808,58 +1112,29 @@ export const inventoryApi = {
   ) {
     return fetchAPI<PaginatedResponse<StockMovement>>(`/stock-movements${qs(params)}`);
   },
-  record(data: {
-    item_kind?: string;
-    asset_id?: string;
-    quantity_item_id?: string;
-    movement_type: string;
-    from_location_id?: string;
-    to_location_id?: string;
-    quantity?: number;
-    reason?: string;
-  }) {
-    return fetchAPI('/stock-movements', { method: 'POST', body: JSON.stringify(data) });
-  },
-  listItems(params: { limit?: number; offset?: number } = {}) {
-    return fetchAPI<PaginatedResponse<QuantityItem>>(`/inventory/items${qs(params)}`);
-  },
-  createItem(data: {
-    name: string;
-    sku?: string;
-    category?: string;
-    unit?: string;
-    stock_level?: number;
-    min_level?: number;
-    location_id?: string;
-  }) {
-    return fetchAPI('/inventory/items', { method: 'POST', body: JSON.stringify(data) });
-  },
-  convertToAsset(itemId: string, data: { asset_tag: string; serial_number?: string }) {
-    return fetchAPI<{ asset_id: string }>(`/inventory/items/${itemId}/convert`, {
+  /**
+   * book records a physical movement through POST /stock-movements (WP-274,
+   * WP-756, E-38): a consumable books receipt, retrieval, correction or
+   * transfer with quantity on its stock per bin; a serial asset only moves
+   * by transfer to to_location_id (E-142). Movements are never changed or
+   * deleted; a correction is a counter-booking (Convention 14).
+   */
+  book(data: StockBooking) {
+    return fetchAPI<StockMovement>('/stock-movements', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
-  availability(params: { item_kind?: string; item_id?: string } = {}) {
-    return fetchAPI<{ data: Availability[] }>(`/inventory/availability${qs(params)}`);
+  /**
+   * The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283);
+   * cursor is the next_cursor of the page before.
+   */
+  stockLevels(consumableId: string, cursor?: string) {
+    return fetchAPI<ConsumableStockList>(
+      `/consumables/${consumableId}/stock${qs({ limit: 200, cursor })}`,
+    );
   },
 };
-
-/**
- * A row of the org-wide projection `GET /inventory/availability`; a
- * consumable sums its stock rows per bin (WP-284). The path stays an alias
- * (E-38); the successor per bin is `GET /consumables/{id}/availability`.
- */
-export interface Availability {
-  item_kind: 'asset' | 'consumable';
-  item_id: string;
-  total: number;
-  available: number;
-  reserved: number;
-  assigned: number;
-  repair: number;
-  unavailable: number;
-}
 
 // ─── Reservations (§10) ──────────────────────────────────────────────────────
 
@@ -880,13 +1155,20 @@ export interface Reservation {
   reason?: string;
 }
 
+export type ReserveAssetRequest = components['schemas']['ReserveAssetRequest'];
+export type ConvertReservationRequest = components['schemas']['ConvertReservationRequest'];
+
 export const reservationApi = {
   list(params: { state?: string; limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<Reservation>>(`/reservations${qs(params)}`);
   },
+  /**
+   * create reserves a quantity of a consumable in a bin (WP-759). Assets are
+   * reserved only through reserve (POST /assets/{id}/reserve, WP-277).
+   */
   create(data: {
-    asset_id?: string;
-    consumable_id?: string;
+    item_kind?: 'consumable';
+    consumable_id: string;
     /** The bin; without it the only bin of the consumable (WP-284). */
     location_id?: string;
     quantity?: number;
@@ -896,7 +1178,29 @@ export const reservationApi = {
     project_ref?: string;
     reason?: string;
   }) {
-    return fetchAPI('/reservations', { method: 'POST', body: JSON.stringify(data) });
+    return fetchAPI<Reservation>('/reservations', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /**
+   * reserve reserves an asset for a user (assignee_id) or a project
+   * (project_ref) until reserved_until (POST /assets/{id}/reserve, AST-06,
+   * WP-277); 409 asset-reserved or asset-assigned when it is taken.
+   */
+  reserve(assetId: string, data: ReserveAssetRequest) {
+    return fetchAPI<Reservation>(`/assets/${assetId}/reserve`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /**
+   * convert turns an active asset reservation into an assignment (POST
+   * /reservations/{id}/convert, WP-277): to assignee_id or team_id, else to
+   * the user of the reservation. 409 when it is no longer active.
+   */
+  convert(id: string, data: ConvertReservationRequest = {}) {
+    return fetchAPI<components['schemas']['ConvertReservationResponse']>(
+      `/reservations/${id}/convert`,
+      { method: 'POST', body: JSON.stringify(data) },
+    );
   },
   release(id: string): Promise<Reservation> {
     return fetchAPI(`/reservations/${id}/release`, { method: 'POST', body: '{}' });
@@ -1209,12 +1513,47 @@ export const VIEW_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/**
+ * A system view (VIE-02, WP-307): a code preset with a stable key, a name
+ * per language and no row in saved_view. It is read-only; a caller clones it
+ * with savedViewApi.clonePreset.
+ */
+export interface SavedViewPreset {
+  key: string;
+  /** English name. */
+  name: string;
+  display_name: { de: string; en: string };
+  entity_kind: string;
+  filter_spec: Record<string, unknown>;
+  sort?: SavedViewSortKey[];
+  columns?: string[];
+  /** Always true. */
+  system: boolean;
+}
+
+/** presetName is the name of a system view in the UI language, else English. */
+export function presetName(preset: SavedViewPreset, language: string): string {
+  const lang = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  return preset.display_name?.[lang] || preset.display_name?.en || preset.name || preset.key;
+}
+
 export const savedViewApi = {
   list(params: { limit?: number; offset?: number } = {}) {
     return fetchAPI<PaginatedResponse<SavedView>>(`/saved-views${qs(params)}`);
   },
-  presets(): Promise<{ data: SavedView[] }> {
+  presets(): Promise<{ data: SavedViewPreset[] }> {
     return fetchAPI('/saved-views/presets');
+  },
+  /**
+   * clonePreset creates an own view from a system view (POST /saved-views
+   * with from_preset, VIE-02): the server takes over its entity kind,
+   * filter, sort and columns; the clone is not shared.
+   */
+  clonePreset(key: string, name: string): Promise<SavedView> {
+    return fetchAPI('/saved-views', {
+      method: 'POST',
+      body: JSON.stringify({ name, from_preset: key }),
+    });
   },
   create(data: {
     name: string;
@@ -1249,6 +1588,51 @@ export const savedViewApi = {
       method: 'POST',
       body: JSON.stringify(spec),
     });
+  },
+};
+
+// ─── Tags (CI-08, WP-753, WP-817) ────────────────────────────────────────────
+
+/** A catalog tag of the organization; CI.tags lists its key. */
+export type Tag = components['schemas']['Tag'];
+/** The name of a tag in de and/or en. */
+export type TagDisplayName = components['schemas']['TagDisplayName'];
+
+/** The changeable fields of a tag; color null removes the color. */
+export interface TagWrite {
+  display_name?: TagDisplayName;
+  color?: string | null;
+}
+
+/** tagLabel is the name of a tag in the UI language, else the other one, else its key. */
+export function tagLabel(tag: Pick<Tag, 'key' | 'display_name'>, language: string): string {
+  const lang = language.toLowerCase().startsWith('de') ? 'de' : 'en';
+  return tag.display_name?.[lang] || tag.display_name?.en || tag.display_name?.de || tag.key;
+}
+
+/**
+ * tagApi is the tag catalog (WP-753): org-wide, core without a module gate
+ * (E-105), read with ci:read and written with tag:manage (E-106). The list
+ * pages by the signed keyset cursor (next_cursor, API-02).
+ */
+export const tagApi = {
+  list(params: { limit?: number; cursor?: string } = {}): Promise<PaginatedResponse<Tag>> {
+    return fetchAPI(`/tags${qs(params)}`);
+  },
+  /** all reads the whole catalog, page by page over next_cursor. */
+  all(): Promise<Tag[]> {
+    return fetchAllPages<Tag>('/tags');
+  },
+  create(data: { key: string } & TagWrite): Promise<Tag> {
+    return fetchAPI('/tags', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update changes name and color; the key is unchangeable (422). */
+  update(id: string, data: TagWrite): Promise<Tag> {
+    return fetchAPI(`/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** delete removes a tag no CI carries; an assigned or system tag is 409. */
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/tags/${id}`, { method: 'DELETE' });
   },
 };
 

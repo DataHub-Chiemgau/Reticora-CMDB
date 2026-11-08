@@ -27,13 +27,18 @@ import {
   historyApi,
   impactApi,
   isDraftItem,
+  layoutApi,
   metamodelDraftApi,
   metamodelTransferApi,
+  ruleApi,
+  resolveScannedCode,
   savedViewApi,
   sensitiveFieldApi,
+  tagApi,
   templateApi,
   templateMigrationApi,
   type AttributeDefinition,
+  type RelationshipTypeUpsert,
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
   type AttributeDefinitionPatch,
@@ -43,17 +48,29 @@ import {
   type CITemplateRef,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
+  type FormLayoutCreate,
+  type FormLayoutPatch,
+  type LayoutFilter,
+  type ResolvedFormParams,
   type LocationUpdateRequest,
+  type ConvertReservationRequest,
+  type ReserveAssetRequest,
+  type StockBooking,
   type MetamodelDraftItem,
+  type MetamodelRuleCreate,
+  type MetamodelRuleListResponse,
+  type MetamodelRulePatch,
   type MetamodelTestReportPage,
+  type RuleFilter,
   type SavedView,
+  type TagWrite,
   type TemplateClone,
   type TemplateCreate,
   type TemplateMigrationRequest,
   type TemplatePatch,
   type TemplateVersionItemsUpdate,
 } from './cmdb';
-import { ApiError } from './client';
+import { ApiError, ciApi } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
@@ -185,6 +202,19 @@ function attributeDefinitionsQuery(filter: AttributeDefinitionFilter) {
     refetchInterval: (query: { state: { data?: { data: AttributeDefinition[] } } }) =>
       indexPending(query.state.data) ? INDEX_POLL_INTERVAL_MS : false,
   };
+}
+
+/**
+ * The searchable attribute definitions (GET /attribute-definitions, every
+ * scope), the attributes.<key> the filter builder offers (WP-315); loaded
+ * only while the builder is open.
+ */
+export function useSearchableAttributeDefinitions(enabled = true) {
+  return useQuery({
+    ...attributeDefinitionsQuery({}),
+    enabled,
+    select: (data: { data: AttributeDefinition[] }) => data.data.filter((d) => d.searchable),
+  });
 }
 
 /** The global attribute definitions of the organization and the system (MET-13). */
@@ -583,6 +613,165 @@ export function usePublishTemplateVersion() {
   });
 }
 
+/**
+ * The versions of each of the given templates (WP-314 list hook per
+ * template): the rule catalog names and offers template versions as
+ * targets (WP-801).
+ */
+export function useVersionsOfTemplates(templateIds: string[], options: QueryControl = {}) {
+  return useQueries({
+    queries: templateIds.map((id) => ({
+      queryKey: [...TEMPLATES_KEY, id, 'versions'],
+      queryFn: () => templateApi.versions(id),
+      enabled: options.enabled ?? true,
+      retry: false,
+    })),
+  });
+}
+
+// ─── Rule catalog (MET-45, WP-716, WP-801) ───────────────────────────────────
+
+const RULES_KEY = ['rules'];
+
+/**
+ * The catalog rules of a filter, page by page over next_cursor ("load
+ * more", API-02); a 404 is the switched-off module (E-105), no retry.
+ */
+export function useRules(filter: RuleFilter, options: QueryControl = {}) {
+  return useInfiniteQuery({
+    queryKey: [...RULES_KEY, 'list', filter],
+    queryFn: ({ pageParam }) => ruleApi.list(filter, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: MetamodelRuleListResponse) => last.next_cursor || undefined,
+    ...options,
+    retry: false,
+  });
+}
+
+/**
+ * A write of the catalog: a captured write (202 with the draft item) leaves
+ * the productive rules as they are, so the list is not read again; the
+ * item list of the draft follows itemRevision (WP-798).
+ */
+function onRuleWrite(qc: QueryClient) {
+  return (saved: unknown) => {
+    if (!isDraftItem(saved)) void qc.invalidateQueries({ queryKey: RULES_KEY });
+  };
+}
+
+/** POST /rules. */
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: MetamodelRuleCreate) => ruleApi.create(data),
+    onSuccess: onRuleWrite(qc),
+  });
+}
+
+/** PATCH /rules/{id}; system rules are read-only (403). */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: MetamodelRulePatch }) =>
+      ruleApi.update(id, patch),
+    onSuccess: onRuleWrite(qc),
+  });
+}
+
+/** DELETE /rules/{id}. */
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ruleApi.delete(id),
+    onSuccess: onRuleWrite(qc),
+  });
+}
+
+// ─── Form layouts and the resolved form (MET-50, WP-259, WP-719, WP-316) ────
+
+const LAYOUTS_KEY = ['layouts'];
+const RESOLVED_FORM_KEY = ['ci-type-form'];
+
+/**
+ * The layouts of one target (CI type or template); a 404 is the
+ * switched-off module metamodel (E-105), no retry.
+ */
+export function useLayouts(filter: LayoutFilter, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...LAYOUTS_KEY, 'list', filter],
+    queryFn: () => layoutApi.list(filter),
+    ...options,
+    enabled: (!!filter.ci_type_id || !!filter.template_id) && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/** One layout (GET /layouts/{id}), e.g. the source of an inherited form. */
+export function useLayout(id: string | undefined, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: [...LAYOUTS_KEY, id],
+    queryFn: () => layoutApi.get(id!),
+    ...options,
+    enabled: !!id && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
+/** A save of the form builder: a new layout (POST) or a change with If-Match (PATCH). */
+export type LayoutSave =
+  | { mode: 'create'; data: FormLayoutCreate }
+  | { mode: 'update'; id: string; version: number; patch: FormLayoutPatch };
+
+/**
+ * A write of the layouts: a captured write (202 with the draft item)
+ * leaves the productive layouts as they are, so nothing is read again; the
+ * item list of the draft follows itemRevision (WP-798).
+ */
+function onLayoutWrite(qc: QueryClient) {
+  return (saved: unknown) => {
+    if (isDraftItem(saved)) return;
+    void qc.invalidateQueries({ queryKey: LAYOUTS_KEY });
+    void qc.invalidateQueries({ queryKey: RESOLVED_FORM_KEY });
+  };
+}
+
+/** POST /layouts or PATCH /layouts/{id} with If-Match (WP-316). */
+export function useSaveLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (save: LayoutSave) =>
+      save.mode === 'create'
+        ? layoutApi.create(save.data)
+        : layoutApi.update(save.id, save.patch, save.version),
+    onSuccess: onLayoutWrite(qc),
+  });
+}
+
+/** DELETE /layouts/{id} with If-Match: the target falls back to the inherited layout. */
+export function useDeleteLayout() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: string; version?: number }) =>
+      layoutApi.remove(id, version),
+    onSuccess: onLayoutWrite(qc),
+  });
+}
+
+/** The resolved form of a CI type for a template and a role (GET /ci-types/{id}/form). */
+export function useResolvedTypeForm(
+  ciTypeId: string | undefined,
+  params: ResolvedFormParams = {},
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: [...RESOLVED_FORM_KEY, ciTypeId, params],
+    queryFn: () => ciTypeApi.form(ciTypeId!, params),
+    ...options,
+    enabled: !!ciTypeId && (options.enabled ?? true),
+    retry: false,
+  });
+}
+
 // ─── Templates at the CI, template migration, transfer (WP-800) ─────────────
 
 /** GET /cis/{id}/templates; the CI page reads it only with citype:manage. */
@@ -696,6 +885,35 @@ export function useRelationshipTypes(enabled = true) {
   });
 }
 
+// The writes of the relationship type administration (WP-323); each
+// invalidates the catalog, which the edge dialog and the topology read.
+export function useCreateRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (
+      data: RelationshipTypeUpsert & { key: string; display_name: string; reverse_name: string },
+    ) => relationshipTypeApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
+  });
+}
+
+export function useUpdateRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, data }: { key: string; data: RelationshipTypeUpsert }) =>
+      relationshipTypeApi.update(key, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
+  });
+}
+
+export function useDeleteRelationshipType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => relationshipTypeApi.delete(key),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-types'] }),
+  });
+}
+
 // Lifecycle
 export function useLifecycleDefinitions() {
   return useQuery({
@@ -740,6 +958,16 @@ export function useLocationTree({ enabled = true }: { enabled?: boolean } = {}) 
   return useQuery({ queryKey: ['locations', 'tree'], queryFn: () => locationApi.tree(), enabled });
 }
 
+/**
+ * useScanLookup resolves a scanned or typed code (INV-03, E-52, WP-807):
+ * an object URN locally through the GET of its kind, any other code through
+ * GET /labels/lookup (resolveScannedCode). Each scan is one call of mutate;
+ * a 404 is an unknown code.
+ */
+export function useScanLookup() {
+  return useMutation({ mutationFn: (code: string) => resolveScannedCode(code) });
+}
+
 export function useCreateLocation() {
   const qc = useQueryClient();
   return useMutation({
@@ -778,24 +1006,54 @@ export function useClients(enabled = true) {
 }
 
 // Inventory movements + items
-export function useMovements(params: { asset_id?: string; movement_type?: string } = {}) {
+/** The movements of the ledger, newest first; asset_id or consumable_id narrow them to one object. */
+export function useMovements(
+  params: { asset_id?: string; consumable_id?: string; movement_type?: string } = {},
+  { enabled = true }: { enabled?: boolean } = {},
+) {
   return useQuery({
     queryKey: ['stock-movements', params],
     queryFn: () => inventoryApi.listMovements(params),
+    enabled,
   });
 }
 
-export function useQuantityItems() {
+/** The stock of a consumable per bin (GET /consumables/{id}/stock, WP-283). */
+export function useStockLevels(consumableId: string | undefined) {
   return useQuery({
-    queryKey: ['inventory-items'],
-    queryFn: () => inventoryApi.listItems({ limit: 100 }),
+    queryKey: ['consumable-stock', consumableId],
+    queryFn: () => inventoryApi.stockLevels(consumableId!),
+    enabled: !!consumableId,
   });
 }
 
-export function useAvailability(params: { item_kind?: string; item_id?: string } = {}) {
-  return useQuery({
-    queryKey: ['inventory-availability', params],
-    queryFn: () => inventoryApi.availability(params),
+/**
+ * invalidateStock reads again what a booking, a reservation or its end
+ * changes: the ledger, the reservations, the history of the object, the
+ * consumables with their total stock and the stock and availability per bin
+ * (WP-320).
+ */
+function invalidateStock(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['stock-movements'] }),
+    qc.invalidateQueries({ queryKey: ['reservations'] }),
+    qc.invalidateQueries({ queryKey: ['history'] }),
+    qc.invalidateQueries({ queryKey: ['consumables'] }),
+    qc.invalidateQueries({ queryKey: ['consumable-stock'] }),
+    qc.invalidateQueries({ queryKey: ['consumable-availability'] }),
+  ]);
+}
+
+/**
+ * useStockBooking books a movement through POST /stock-movements: receipt
+ * and transfer of a consumable between bins, transfer of a serial asset
+ * (WP-756, E-142).
+ */
+export function useStockBooking() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StockBooking) => inventoryApi.book(data),
+    onSuccess: () => invalidateStock(qc),
   });
 }
 
@@ -807,11 +1065,41 @@ export function useReservations(state?: string) {
   });
 }
 
-export function useCreateReservation() {
+/** useReserveAsset reserves an asset through POST /assets/{id}/reserve (WP-277). */
+export function useReserveAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: reservationApi.create,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reservations'] }),
+    mutationFn: ({ assetId, data }: { assetId: string; data: ReserveAssetRequest }) =>
+      reservationApi.reserve(assetId, data),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+/**
+ * useReserveConsumable reserves a quantity of a consumable in a bin (POST
+ * /reservations with item_kind consumable, WP-759); 409 insufficient-stock
+ * when the bin holds less than on_hand − reserved.
+ */
+export function useReserveConsumable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Parameters<typeof reservationApi.create>[0]) => reservationApi.create(data),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+/**
+ * useConvertReservation turns an active asset reservation into an
+ * assignment (POST /reservations/{id}/convert, WP-277); the assignment list
+ * is read again as well.
+ */
+export function useConvertReservation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data?: ConvertReservationRequest }) =>
+      reservationApi.convert(id, data),
+    onSuccess: () =>
+      Promise.all([invalidateStock(qc), qc.invalidateQueries({ queryKey: ['assignments'] })]),
   });
 }
 
@@ -819,7 +1107,7 @@ export function useReleaseReservation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => reservationApi.release(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['reservations'] }),
+    onSuccess: () => invalidateStock(qc),
   });
 }
 
@@ -937,13 +1225,46 @@ export function useSaveView() {
   });
 }
 
-/** Changes an own view (PATCH, owner only, E-86): sort, columns, sharing. */
+/**
+ * Changes a writable view (PATCH /saved-views/{id}): an own view (E-86) or,
+ * with saved_view:manage, one the caller may read (WP-307). The filter
+ * builder (WP-315) sends the complete state (name, entity_kind,
+ * filter_spec, sort, columns, shared, shared_with_roles) because the server
+ * replaces filter_spec as a whole; a 404 means no write permission.
+ */
 export function useUpdateSavedView() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<SavedView> }) =>
       savedViewApi.update(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
+/**
+ * Clones a system view into an own view (POST /saved-views with
+ * from_preset, VIE-02, WP-817); the server takes over its filter, sort and
+ * columns.
+ */
+export function useClonePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, name }: { key: string; name: string }) =>
+      savedViewApi.clonePreset(key, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
+/**
+ * The preview of the filter builder (WP-315): POST /search/query?limit=10
+ * under RLS and field permissions, answering total and the first hits. A
+ * mutation, run by the button; a 422 names the node (field where…), a 403
+ * the fields (conflictFields).
+ */
+export function useFilterPreview() {
+  return useMutation({
+    mutationFn: (spec: Record<string, unknown> & { entity_kind?: string }) =>
+      savedViewApi.query(spec, { limit: 10 }),
   });
 }
 
@@ -970,5 +1291,64 @@ export function useFilterQuery(spec: (Record<string, unknown> & { entity_kind?: 
     // the wait.
     staleTime: 0,
     retry: false,
+  });
+}
+
+// Tags (CI-08, WP-753, WP-817): org-wide, so the queries carry no scope.
+
+/**
+ * useTags reads the tag catalog: without `page` the whole catalog (every
+ * page over next_cursor) for a selection such as the CI detail page and the
+ * bulk bar (WP-816); with `page` one page of `limit` from `cursor`, as the
+ * tag administration pages through it.
+ */
+export function useTags(page?: { limit?: number; cursor?: string }, options: QueryControl = {}) {
+  return useQuery({
+    queryKey: ['tags', page ?? 'all'],
+    queryFn: async () =>
+      page ? tagApi.list(page) : { data: await tagApi.all(), has_more: false as boolean },
+    ...options,
+  });
+}
+
+export function useCreateTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { key: string } & TagWrite) => tagApi.create(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+export function useUpdateTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: TagWrite }) => tagApi.update(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+export function useDeleteTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => tagApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+}
+
+/**
+ * Replaces the tags of a CI (PUT /cis/{id}/tags with If-Match of `version`,
+ * API-07); the answer is the CI with its new version, which replaces the
+ * cached one.
+ */
+export function useSetCITags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, tags, version }: { id: string; tags: string[]; version?: number }) =>
+      ciApi.setTags(id, tags, version),
+    onSuccess: (ci, variables) => {
+      qc.setQueryData(['ci', variables.id], ci);
+      void qc.invalidateQueries({ queryKey: ['cis'] });
+      void qc.invalidateQueries({ queryKey: ['ci', variables.id] });
+    },
   });
 }

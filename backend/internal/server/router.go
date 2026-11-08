@@ -574,11 +574,20 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			bulkRevert = ci.NewBulkRevert(opts.CIService, jobService, store)
 			bulkReverter = bulkRevert.Revert
 		}
+		// A bulk job on assets is reverted the same way with asset:write
+		// (WP-784), only while the module inventory is on: /jobs belongs to
+		// no module, so without inventory the kind has no revert (409).
+		var assetRevert *asset.BulkRevert
+		var assetReverter jobs.Reverter
+		if store, ok := repos.Jobs.(jobs.ChangeSetStore); ok && opts.Modules.Enabled(ModuleInventory) {
+			assetRevert = asset.NewBulkRevert(assetHandler, jobService, store)
+			assetReverter = assetRevert.Revert
+		}
 		jobAPI = jobs.NewAPIHandler(jobService).
 			WithKind(ci.BulkJobKind, identity.PermCIWrite, bulkReverter).
 			WithBulkKind(ci.BulkJobKind).
-			// A bulk on assets (WP-781) has no revert yet (WP-784).
-			WithKind(asset.BulkJobKind, identity.PermAssetWrite, nil).
+			WithKind(asset.BulkJobKind, identity.PermAssetWrite, assetReverter).
+			WithBulkKind(asset.BulkJobKind).
 			WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
 			// A running template migration is cancelled with citype:manage
@@ -638,7 +647,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch, assetHandler)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -651,6 +660,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// profile has no asset source and fails them.
 	exportWorker.Assets, _ = repos.Asset.(export.AssetSource)
 	exportWorker.Orgs = repos.TenantHierarchy
+	// Asset jobs of POST /assets/bulk read the selection by id (WP-782);
+	// without the source they fail.
+	exportWorker.AssetRows, _ = repos.Asset.(export.AssetRows)
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -809,8 +821,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			repos.LifecycleResolver, exportJobHandler, opts.Entitlements))
 	}
 	// The movements, assignments and lifecycle transitions of POST
-	// /assets/bulk (WP-781); the export follows with WP-782.
+	// /assets/bulk (WP-781) and its export jobs with entity asset (WP-782).
 	assetDelegates := AssetBulkDelegates(movements, repos.AssignmentService, lifecycleService, repos.LifecycleResolver, opts.Entitlements)
+	assetDelegates.Exporter = AssetBulkExporter(exportJobHandler)
 	assetHandler.WithBulkDelegates(&assetDelegates)
 	registrars := []registrar{
 		identityHandler,

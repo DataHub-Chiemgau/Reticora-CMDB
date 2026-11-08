@@ -233,24 +233,41 @@ function StocktakeWidget() {
   );
 }
 
+/**
+ * sumTotals adds the totals of the lists of the open states; undefined
+ * until every list answered.
+ */
+function sumTotals(totals: (number | undefined)[]): number | undefined {
+  return totals.some((total) => total === undefined)
+    ? undefined
+    : totals.reduce<number>((sum, total) => sum + (total ?? 0), 0);
+}
+
+/**
+ * TicketsWidget counts new and open tickets as open (state machine of
+ * WP-290), also the critical ones; the list filters one state per request.
+ */
 function TicketsWidget() {
   const { t } = useTranslation();
+  const newTickets = useTicketList({ status: 'new', limit: 1 });
   const openTickets = useTicketList({ status: 'open', limit: 1 });
-  const critical = useTicketList({ status: 'open', priority: 'critical', limit: 1 });
-  const criticalTotal = critical.data?.total;
+  const criticalNew = useTicketList({ status: 'new', priority: 'critical', limit: 1 });
+  const criticalOpen = useTicketList({ status: 'open', priority: 'critical', limit: 1 });
+  const openTotal = sumTotals([newTickets.data?.total, openTickets.data?.total]);
+  const criticalTotal = sumTotals([criticalNew.data?.total, criticalOpen.data?.total]);
 
   return (
     <>
       <MetricCard
         label={t('dashboard.widgets.openTickets')}
-        value={openTickets.data?.total}
-        loading={openTickets.isLoading}
+        value={openTotal}
+        loading={newTickets.isLoading || openTickets.isLoading}
         to="/tickets"
       />
       <MetricCard
         label={t('dashboard.widgets.criticalTickets')}
         value={criticalTotal}
-        loading={critical.isLoading}
+        loading={criticalNew.isLoading || criticalOpen.isLoading}
         tone={criticalTotal !== undefined && criticalTotal > 0 ? 'danger' : 'default'}
         to="/tickets"
       />

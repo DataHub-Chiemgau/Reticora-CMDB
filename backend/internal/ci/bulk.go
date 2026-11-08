@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -34,6 +35,10 @@ import (
 // author and raises the version (API-07). It names no version per id, so
 // it is a deliberate overwrite with If-Match "*" and needs none where the
 // organization requires one (E-66 option 1, transition rule of WP-368).
+// The override reason is bulk:<job_id> (with a job service every bulk runs
+// as a job, also below 100 ids), and the audit entry of each changed CI
+// carries the job id as correlation id (WP-306). A revert of the job
+// restores the state of the overrides before it (bulk_revert.go).
 
 // Bulk limits of API-08.
 const (
@@ -434,8 +439,11 @@ func (s *Service) runBulk(ctx context.Context, orgID, author, jobID string, req 
 	op := bulkOp{orgID: orgID, author: author, reason: bulkReason, req: req}
 	if jobID != "" {
 		op.reason, op.jobID = bulkReason+":"+jobID, jobID
-		// The writes of the run record the change set of the job (WP-305).
-		ctx = jobs.WithChangeSet(ctx, jobID)
+		// The writes of the run record the change set of the job (WP-305);
+		// their audit entries carry the job as correlation id, the request
+		// id stays the bulk request's, and an entry counts for the request
+		// (no additional route entry, WP-306).
+		ctx = audit.WithCorrelationID(jobs.WithChangeSet(ctx, jobID), jobID)
 	}
 	// A change under way finishes when ctx ends: its report is accurate.
 	itemCtx := context.WithoutCancel(ctx)

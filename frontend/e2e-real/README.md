@@ -87,7 +87,8 @@ the `.env`; after each test the server runs again with the last keys it started 
 ## SIM-01 demo seed (`demo-seed.spec.ts`, WP-433)
 
 `support/stack.ts` (`seedDemo`) runs the seed `backend/cmd/seed` against `E2E_DATABASE_URL` (built with the Go
-toolchain of the host, or `E2E_SEED_BIN`): the organizations demo and acme with 40 CIs each. The seed is
+toolchain of the host, or `E2E_SEED_BIN`): the organizations demo and acme with 40 CIs each, demo with 2 blade chassis and 8 blades
+of the Phase-2 seed (WP-819) on top, 50 CIs in all. The seed is
 deterministic and inserts only what is missing, so the spec can run again on the same stack. It signs in as
 `admin@demo.local`, a user of `deploy/keycloak/realm-reticora-dev.json`. Keycloak imports a realm only when it does
 not exist yet, and an installed stack imports the production realm without users; then `devRealmAccount` creates

@@ -90,6 +90,12 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	if req.Format == "" {
 		req.Format = "json"
 	}
+	// The asset export runs through POST /api/v1/assets/bulk only, behind
+	// the module inventory and the entitlement of /api/v1/assets (WP-782).
+	if req.Filters.IsAsset() {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", ErrAssetEntityRefused.Error())
+		return
+	}
 	if err := req.Validate(); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
@@ -124,6 +130,10 @@ var (
 	// ErrNoTenantScope: the context carries no tenant scope to snapshot
 	// (401).
 	ErrNoTenantScope = errors.New("missing tenant scope")
+	// ErrAssetEntityRefused: POST /api/v1/exports takes no asset export
+	// (filters.entity asset, 400); it runs through POST
+	// /api/v1/assets/bulk (WP-782).
+	ErrAssetEntityRefused = errors.New("filters.entity asset is created through POST /api/v1/assets/bulk with the action export")
 )
 
 // ExportJobKind is the kind of an export job in the generic job model.
@@ -264,6 +274,10 @@ func (h *JobHandler) manifest(r *http.Request, job *Job, preview *datevPreview) 
 	}
 	if job.Format == FormatDATEV {
 		return h.datevPreviewManifest(r, job.OrganizationID, preview, policy)
+	}
+	// An asset export lists the fields of the asset DTO (WP-782).
+	if job.Filters.IsAsset() {
+		return AssetManifestForPolicy(job.Format, policy), nil
 	}
 	return ManifestForPolicy(job.Format, policy, typeFilter(job.Filters.CITypeID)), nil
 }

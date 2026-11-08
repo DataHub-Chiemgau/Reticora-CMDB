@@ -1416,6 +1416,8 @@ AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 BLK-02;[P2];C;backend/internal/jobs/revert_integration_test.go;WP-305
 BLK-02;[P2];C;backend/internal/ci/bulk_delegate_integration_test.go;WP-780
 BLK-02;[P2];C;backend/internal/ci/bulk_revert_ext_integration_test.go;WP-783
+OVR-03;[P2];C;backend/internal/ci/bulk_override_integration_test.go;WP-306
+BLK-02;[P2];C;backend/internal/ci/bulk_override_integration_test.go;WP-306
 JOB-03;[B];C;backend/internal/jobs/revert_integration_test.go;WP-305
 STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
@@ -1497,3 +1499,32 @@ UI-15;[P2];C;frontend/src/components/pickers/pickers.test.tsx;WP-318
 IMP-IO-01;[P2];C;backend/internal/importer/api_integration_test.go;WP-303
 BLK-02;[P2];C;backend/internal/asset/bulk_integration_test.go;WP-781
 BLK-01;[B];C;backend/internal/asset/bulk_integration_test.go;WP-781
+SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-819
+SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-820
+SIM-01;[B], Teilumfang [P2];G2;backend/cmd/seed/seed_integration_test.go;WP-821
+UI-14;[P2–P4, A];C;frontend/src/pages/RelationshipTypesPage.test.tsx;WP-323
+UI-15;[P2];C;frontend/src/components/cmdb/CIRelationshipsCard.test.tsx;WP-323
+BLK-02;[P2];C;backend/internal/export/asset_export_integration_test.go;WP-782
+SRC-03;[P2], Textsyntax [O];C;frontend/src/components/rules/RuleBuilder.test.tsx;WP-315
+MET-45;Phase 1 im Fokus, voller Tag fehlt;C;frontend/src/components/rules/RuleBuilder.test.tsx;WP-315
+UI-15;[P2];C;frontend/src/components/flows/flows.test.tsx;WP-806
+UI-14;[P2–P4, A];C;frontend/src/pages/DocumentDetailPage.test.tsx;WP-321
+BLK-02;[P2];C;backend/internal/asset/bulk_revert_integration_test.go;WP-784
+TEN-09;[Q];G2;backend/internal/tenant/rls/channel_matrix_p2_integration_test.go;WP-828
+ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/phase2_matrix_integration_test.go;WP-328
+ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/cycles_integration_test.go;WP-825
+UI-14;[P2–P4, A];C;frontend/src/pages/TagsPage.test.tsx;WP-817
+VIE-02;[P2];C;frontend/src/pages/SavedViewsPage.test.tsx;WP-817
+UI-11;[P2];C;frontend/src/pages/RulesPage.test.tsx;WP-801
+ABN-02;[Q];G2;backend/internal/asset/querybudget_integration_test.go;WP-824
+UI-15;[P2];C;frontend/src/components/flows/scan.test.tsx;WP-807
+INV-03;[P2], RFID/Direct-Access [P4];C;frontend/src/components/flows/scan.test.tsx;WP-807
+UI-14;[P2–P4, A];C;frontend/src/pages/TicketDetailPage.test.tsx;WP-814
+UI-14;[P2–P4, A];C;frontend/src/pages/ConsumableDetailPage.test.tsx;WP-320
+UI-11;[P2];C;frontend/src/pages/ImportPage.test.tsx;WP-322
+UI-14;[P2–P4, A];C;frontend/src/pages/ImportPage.test.tsx;WP-322
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/import.spec.ts;WP-322
+UI-14;[P2–P4, A];C;frontend/src/pages/StocktakeDetailPage.test.tsx;WP-813
+ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/writers_integration_test.go;WP-826
+MET-50;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
+UI-11;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316

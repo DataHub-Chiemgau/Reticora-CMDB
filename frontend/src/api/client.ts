@@ -49,6 +49,11 @@ export interface CI {
   management_ip?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
+  /**
+   * Keys of the catalog tags of the CI (CI-07, CI-08), sorted; [] without
+   * tags. Read-only here: PUT /cis/{id}/tags (ciApi.setTags) writes them.
+   */
+  tags: string[];
   discovery_source?: string;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -135,6 +140,21 @@ export type RelationshipSuppression = components['schemas']['RelationshipSuppres
 export const verificationStates = ['unverified', 'verified', 'disputed', 'stale'] as const;
 
 export type VerificationState = (typeof verificationStates)[number];
+
+/** One row of the history of a relationship (REL-09, WP-296), derived from the schema (K27). */
+export type RelationshipChange = components['schemas']['RelationshipChange'];
+
+/** The kinds of a change of a relationship (WP-296), as change_kind names them. */
+export const relationshipChangeKinds = [
+  'created',
+  'updated',
+  'verification_changed',
+  'refreshed',
+  'removed',
+  'suppressed',
+  'rewired',
+  'restored',
+] as const satisfies readonly RelationshipChange['change_kind'][];
 
 export interface RelationshipCreateRequest {
   source_ci_id: string;
@@ -310,7 +330,14 @@ export class ApiError extends Error {
   readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
-  /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
+  /**
+   * conflictFields are the fields of the problem member fields: of a 409 the
+   * fields changed since the If-Match version (API-07), of a 403
+   * urn:reticora:problem:forbidden the fields the field permissions refuse
+   * (RBA-07, WP-729), e.g. hostname or attributes.cost_center of a filter;
+   * the filter builder marks those comparisons (WP-315). The problem type
+   * is type (WP-318).
+   */
   readonly conflictFields: string[];
   /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
   readonly field?: string;
@@ -577,6 +604,16 @@ export async function fetchAPIVersioned<T>(
   return { data, etag: res.headers.get('ETag') ?? undefined };
 }
 
+/**
+ * fetchBlob reads a binary answer of an API path, e.g. a PDF label: with the
+ * bearer token, one refresh after a 401 and a failure as ApiError, as
+ * fetchResponse does (WP-526). A link with the URL alone would carry no token.
+ */
+export async function fetchBlob(path: string, options?: RequestInit): Promise<Blob> {
+  const res = await fetchResponse(apiURL(path, options?.method), options);
+  return res.blob();
+}
+
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetchResponse(url, options);
   if (res.status === 204) {
@@ -753,6 +790,20 @@ export const ciApi = {
   },
 
   /**
+   * setTags replaces the tags of a CI with catalog keys (PUT /cis/{id}/tags,
+   * CI-08); [] removes every tag, an unknown key is 422 and is not created.
+   * With `version` the request carries If-Match like update: 412 when the
+   * version is unknown, 409 when the tags changed since (API-07).
+   */
+  setTags(id: string, tags: string[], version?: number): Promise<CI> {
+    return fetchAPI(`/cis/${id}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
+  },
+
+  /**
    * bulk changes the status of up to 500 CIs (API-08): below 100 ids the
    * answer is the report per id, from 100 ids on the job that produces it.
    */
@@ -781,6 +832,14 @@ export const relationshipApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
+  },
+
+  /**
+   * The history of an edge, newest first (GET /relationships/{id}/changes,
+   * WP-296); the rows stay after the edge is deleted.
+   */
+  changes(id: string): Promise<PaginatedResponse<RelationshipChange>> {
+    return fetchAPI(`/relationships/${id}/changes?limit=100`);
   },
 
   /**
@@ -1175,32 +1234,34 @@ export const assignmentApi = {
 
 // --- Phase 2: Document Management ---
 
-export interface Document {
-  id: string;
-  organization_id: string;
-  title: string;
-  description?: string;
-  file_name: string;
-  file_size: number;
-  mime_type: string;
-  storage_key: string;
-  version: number;
-  category: string;
-  tags: string[];
-  uploaded_by: string;
-  created_at: string;
-  updated_at: string;
-}
+/** A document with the scan status of its current version (WP-731, WP-733), from the schema (K27). */
+export type Document = components['schemas']['Document'];
 
-export interface DocumentCreateRequest {
-  title: string;
-  description?: string;
-  file_name: string;
-  file_size: number;
-  mime_type?: string;
-  category?: string;
-  tags?: string[];
-}
+/** One stored version of a document's content (WP-731). */
+export type DocumentVersion = components['schemas']['DocumentVersion'];
+
+/** The stored bytes of the organization and its limit max_storage_mb (WP-731). */
+export type DocumentUsage = components['schemas']['DocumentUsage'];
+
+/** The malware scan status of a document version (SEC-09, WP-733). */
+export type ScanStatus = DocumentVersion['scan_status'];
+
+/** The scan states of a version; only clean is downloadable (E-42). */
+export const SCAN_STATUSES = [
+  'pending_scan',
+  'clean',
+  'infected',
+  'scan_failed',
+] as const satisfies readonly ScanStatus[];
+
+/** The problem type of a 409 for a download of a version whose scan is pending or failed. */
+export const PROBLEM_DOCUMENT_PENDING_SCAN = 'https://reticora.io/problems/document-pending-scan';
+/** The problem type of a 409 for a download or link of a quarantined (infected) document. */
+export const PROBLEM_DOCUMENT_QUARANTINED = 'https://reticora.io/problems/document-quarantined';
+/** The problem type of a 422 for content that does not match its declared type (WP-268). */
+export const PROBLEM_MIME_MISMATCH = 'https://reticora.io/problems/mime-mismatch';
+
+export type DocumentCreateRequest = components['schemas']['CreateDocumentRequest'];
 
 export interface DocumentListParams {
   limit?: number;
@@ -1208,14 +1269,85 @@ export interface DocumentListParams {
   cursor?: string;
   category?: string;
   search?: string;
+  /** Only documents linked to this target (WP-811); requires entity_id. */
+  entity_type?: string;
+  entity_id?: string;
 }
 
-export interface DocumentLink {
-  id: string;
-  document_id: string;
-  entity_type: string;
-  entity_id: string;
-  created_at: string;
+export type DocumentLink = components['schemas']['DocumentLink'];
+
+/** The target of a document link (CreateDocumentLinkRequest). */
+export type DocumentLinkTarget = components['schemas']['CreateDocumentLinkRequest'];
+
+/** UploadOptions follow the transfer of a document's content. */
+export interface UploadOptions {
+  /** onProgress receives the sent and the total bytes of the body. */
+  onProgress?: (loaded: number, total: number) => void;
+  /** signal aborts the transfer. */
+  signal?: AbortSignal;
+}
+
+/** parseBody reads the JSON body of an XMLHttpRequest; anything else is null. */
+function parseBody(xhr: XMLHttpRequest): unknown {
+  try {
+    return xhr.responseText ? (JSON.parse(xhr.responseText) as unknown) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * sendFile sends a file as the raw body of a request per XMLHttpRequest,
+ * because fetch reports no upload progress: Content-Type is the type of the
+ * file, the session token goes as Bearer. A 401 refreshes the session once
+ * and repeats the transfer, as fetchResponse does (WP-526); a failure is an
+ * ApiError from the problem body (with type and traceId).
+ */
+async function sendFile<T>(
+  method: 'PUT' | 'POST',
+  path: string,
+  file: Blob,
+  options: UploadOptions = {},
+): Promise<T> {
+  const url = apiURL(path, method);
+  const send = (token: string | null) =>
+    new Promise<XMLHttpRequest>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      if (token) xhr.setRequestHeader('Authorization', ['Bearer', token].join(' '));
+      xhr.upload.onprogress = (event) => {
+        options.onProgress?.(event.loaded, event.lengthComputable ? event.total : file.size);
+      };
+      xhr.onload = () => resolve(xhr);
+      xhr.onerror = () => reject(new ApiError(0, 'Network error'));
+      xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
+      if (options.signal) {
+        if (options.signal.aborted) {
+          reject(new DOMException('Aborted', 'AbortError'));
+          return;
+        }
+        options.signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      }
+      xhr.send(file);
+    });
+
+  const token = getSessionToken();
+  let xhr = await send(token);
+  if (xhr.status === 401) {
+    const current = getSessionToken();
+    const renewed = (current !== null && current !== token) || (await refreshSession());
+    if (renewed) {
+      xhr = await send(getSessionToken());
+      if (xhr.status === 401) {
+        clearSession();
+      }
+    }
+  }
+  if (xhr.status < 200 || xhr.status >= 300) {
+    throw ApiError.fromProblem(xhr.status, xhr.statusText, parseBody(xhr));
+  }
+  return parseBody(xhr) as T;
 }
 
 export const documentApi = {
@@ -1228,64 +1360,160 @@ export const documentApi = {
   create(data: DocumentCreateRequest): Promise<Document> {
     return fetchAPI('/documents', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(
-    id: string,
-    data: { title?: string; description?: string; category?: string; tags?: string[] },
-  ): Promise<Document> {
+  update(id: string, data: components['schemas']['UpdateDocumentRequest']): Promise<Document> {
     return fetchAPI(`/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/documents/${id}`, { method: 'DELETE' });
   },
-  link(id: string, data: { entity_type: string; entity_id: string }): Promise<DocumentLink> {
+  /** PUT /documents/{id}/content: the first content of a new document (WP-268). */
+  uploadContent(id: string, file: Blob, options?: UploadOptions): Promise<Document> {
+    return sendFile('PUT', `/documents/${id}/content`, file, options);
+  },
+  /** POST /documents/{id}/versions: a new version of a document (WP-731). */
+  createVersion(id: string, file: Blob, options?: UploadOptions): Promise<DocumentVersion> {
+    return sendFile('POST', `/documents/${id}/versions`, file, options);
+  },
+  /** One page of the versions of a document, newest first (WP-731). */
+  listVersions(id: string, cursor?: string): Promise<PaginatedResponse<DocumentVersion>> {
+    return fetchAPI(`/documents/${id}/versions${buildQuery({ cursor })}`);
+  },
+  /** The presigned download URL of a version (default the current one); 409 unless clean. */
+  contentUrl(id: string, version?: number): Promise<{ download_url: string }> {
+    return fetchAPI(`/documents/${id}/content${buildQuery({ version })}`);
+  },
+  link(id: string, data: DocumentLinkTarget): Promise<DocumentLink> {
     return fetchAPI(`/documents/${id}/links`, { method: 'POST', body: JSON.stringify(data) });
   },
   getLinks(id: string): Promise<DocumentLink[]> {
     return fetchAllPages(`/documents/${id}/links`);
   },
+  /** DELETE /documents/{id}/links/{link_id} (WP-267). */
+  unlink(id: string, linkId: string): Promise<void> {
+    return fetchAPI(`/documents/${id}/links/${linkId}`, { method: 'DELETE' });
+  },
+  /** The storage usage of the organization (WP-731). */
+  usage(): Promise<DocumentUsage> {
+    return fetchAPI('/documents/usage');
+  },
+};
+
+// --- Phase 2: Import (IMP-IO-01, WP-322) ---
+
+// The import profiles, runs and the preview come from the OpenAPI contract
+// (K27, WP-774, WP-301, WP-302). Import profiles and runs are organization
+// wide: no list takes client_id or site_id, SCOPED_LISTS stays unchanged.
+export type ImportProfile = components['schemas']['ImportProfile'];
+export type ImportMapping = components['schemas']['ImportMapping'];
+export type ImportColumnMapping = components['schemas']['ImportColumnMapping'];
+export type ImportTransform = components['schemas']['ImportTransform'];
+export type CreateImportProfileRequest = components['schemas']['CreateImportProfileRequest'];
+export type UpdateImportProfileRequest = components['schemas']['UpdateImportProfileRequest'];
+export type ImportPreview = components['schemas']['ImportPreview'];
+export type ImportPreviewRequest = components['schemas']['ImportPreviewRequest'];
+export type ImportStartDocumentRequest = components['schemas']['ImportStartDocumentRequest'];
+export type ImportJobAccepted = components['schemas']['ImportJobAccepted'];
+export type ImportRun = components['schemas']['ImportRun'];
+
+/** The problem types of a refused import file (422) and of an unfinished report (409). */
+export const PROBLEM_IMPORT_FORMAT_UNSUPPORTED =
+  'https://reticora.io/problems/import-format-unsupported';
+export const PROBLEM_IMPORT_SHEET_NOT_FOUND = 'https://reticora.io/problems/import-sheet-not-found';
+export const PROBLEM_IMPORT_FILE_TOO_COMPLEX =
+  'https://reticora.io/problems/import-file-too-complex';
+export const PROBLEM_IMPORT_FILE_TOO_LARGE = 'https://reticora.io/problems/import-file-too-large';
+export const PROBLEM_IMPORT_REPORT_NOT_READY =
+  'https://reticora.io/problems/import-report-not-ready';
+
+/**
+ * ImportJobResult is the result of a finished import.run job (GET
+ * /jobs/{id}, importer.JobResult): the data rows read and the rows per
+ * outcome; a dry run writes nothing but counts the same way.
+ */
+export interface ImportJobResult {
+  dry_run: boolean;
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+}
+
+/** importJobResult reads the counters of a job result; undefined while there are none. */
+export function importJobResult(result: unknown): ImportJobResult | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const r = result as Record<string, unknown>;
+  const n = (key: string) => (typeof r[key] === 'number' ? (r[key] as number) : 0);
+  if (typeof r.total !== 'number') return undefined;
+  return {
+    dry_run: r.dry_run === true,
+    total: n('total'),
+    created: n('created'),
+    updated: n('updated'),
+    skipped: n('skipped'),
+    failed: n('failed'),
+  };
+}
+
+/**
+ * importApi reads and writes the mapping profiles (/import-profiles,
+ * WP-774), previews a file (POST /imports/preview, WP-301), starts a run
+ * (POST /imports with document_id, WP-301/WP-302) and reads its projection
+ * and the download link of its CSV report (GET /imports/{id}[/report]).
+ * The progress of a run is the job (GET /jobs/{id}, useImportRun).
+ */
+export const importApi = {
+  listProfiles(
+    params: { limit?: number; cursor?: string } = {},
+  ): Promise<PaginatedResponse<ImportProfile>> {
+    return fetchAPI(`/import-profiles${buildQuery(params)}`);
+  },
+  getProfile(id: string): Promise<ImportProfile> {
+    return fetchAPI(`/import-profiles/${id}`);
+  },
+  createProfile(data: CreateImportProfileRequest): Promise<ImportProfile> {
+    return fetchAPI('/import-profiles', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateProfile(id: string, data: UpdateImportProfileRequest): Promise<ImportProfile> {
+    return fetchAPI(`/import-profiles/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteProfile(id: string): Promise<void> {
+    return fetchAPI(`/import-profiles/${id}`, { method: 'DELETE' });
+  },
+  /** The header and at most 20 rows of a scanned file; no job (422 for a refused file). */
+  preview(data: ImportPreviewRequest): Promise<ImportPreview> {
+    return fetchAPI('/imports/preview', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** Starts a run as job import.run (202); dry_run only checks and counts. */
+  start(data: ImportStartDocumentRequest): Promise<ImportJobAccepted> {
+    return fetchAPI('/imports', { method: 'POST', body: JSON.stringify(data) });
+  },
+  get(id: string): Promise<ImportRun> {
+    return fetchAPI(`/imports/${id}`);
+  },
+  /** The presigned link (15 min) of the CSV report of a finished run; 409 while it runs. */
+  reportUrl(id: string): Promise<{ download_url: string }> {
+    return fetchAPI(`/imports/${id}/report`);
+  },
 };
 
 // --- Phase 2: Stocktake / Inventur ---
+// The types come from the OpenAPI schema (K27): area location_id, frozen
+// expected stock (items), scans classified by the server, the difference
+// list and the movements booked by the completion (WP-287, WP-761).
 
-export interface Stocktake {
-  id: string;
-  organization_id: string;
-  title: string;
-  description?: string;
-  status: string;
-  scope: string;
-  started_by?: string;
-  started_at?: string;
-  completed_at?: string;
-  due_date?: string;
-  total_expected: number;
-  total_scanned: number;
-  total_missing: number;
-  total_surplus: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface StockScan {
-  id: string;
-  stocktake_id: string;
-  asset_id?: string;
-  ci_id?: string;
-  scanned_by: string;
-  scan_method: string;
-  scan_result: string;
-  location_found?: string;
-  notes?: string;
-  scanned_at: string;
-}
-
-export interface StocktakeCreateRequest {
-  title: string;
-  description?: string;
-  scope?: string;
-  due_date?: string;
-  total_expected?: number;
-}
+export type Stocktake = components['schemas']['Stocktake'];
+export type StocktakeStatus = Stocktake['status'];
+export type StockScan = components['schemas']['StockScan'];
+export type StockScanCreateRequest = components['schemas']['CreateStockScanRequest'];
+export type ScanMethod = StockScan['scan_method'];
+export type ScanResult = StockScan['scan_result'];
+export type StocktakeItem = components['schemas']['StocktakeItem'];
+export type StocktakeDifference = components['schemas']['StocktakeDifference'];
+export type StocktakeCorrection = components['schemas']['StocktakeCorrection'];
+export type StocktakeCompletion = components['schemas']['StocktakeCompletion'];
+export type StocktakeCreateRequest = components['schemas']['CreateStocktakeRequest'];
+export type StocktakeUpdateRequest = components['schemas']['UpdateStocktakeRequest'];
 
 export interface StocktakeListParams {
   limit?: number;
@@ -1296,6 +1524,12 @@ export interface StocktakeListParams {
   search?: string;
 }
 
+/** CursorParams page a cursor list (API-02): limit and the cursor of the previous page. */
+export interface CursorParams {
+  limit?: number;
+  cursor?: string;
+}
+
 export const stocktakeApi = {
   list(params: StocktakeListParams = {}): Promise<PaginatedResponse<Stocktake>> {
     return fetchAPI(`/stocktakes${buildQuery(params)}`);
@@ -1303,90 +1537,57 @@ export const stocktakeApi = {
   get(id: string): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`);
   },
+  /** create sends title, description, due_date and the area location_id; scope is deprecated. */
   create(data: StocktakeCreateRequest): Promise<Stocktake> {
     return fetchAPI('/stocktakes', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(
-    id: string,
-    data: {
-      title?: string;
-      description?: string;
-      status?: string;
-      due_date?: string;
-      total_expected?: number;
-    },
-  ): Promise<Stocktake> {
+  update(id: string, data: StocktakeUpdateRequest): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'DELETE' });
   },
-  addScan(
-    stocktakeId: string,
-    data: {
-      asset_id?: string;
-      ci_id?: string;
-      scan_method?: string;
-      scan_result: string;
-      location_found?: string;
-      notes?: string;
-    },
-  ): Promise<StockScan> {
+  /** start moves a planned stocktake to in_progress and freezes the expected stock. */
+  start(id: string): Promise<Stocktake> {
+    return fetchAPI(`/stocktakes/${id}/start`, { method: 'POST' });
+  },
+  /** cancel ends a planned or in-progress stocktake without completion. */
+  cancel(id: string): Promise<Stocktake> {
+    return fetchAPI(`/stocktakes/${id}/cancel`, { method: 'POST' });
+  },
+  /** items is a page of the frozen expected stock (GET …/items, cursor). */
+  items(id: string, params: CursorParams = {}): Promise<PaginatedResponse<StocktakeItem>> {
+    return fetchAPI(`/stocktakes/${id}/items${buildQuery(params)}`);
+  },
+  /** addScan records an asset or a counted quantity; the server classifies it. */
+  addScan(stocktakeId: string, data: StockScanCreateRequest): Promise<StockScan> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
-  listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
+  listScans(stocktakeId: string, params: CursorParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
   },
-  difference(
+  /** differences is a page of the difference list (GET …/differences, cursor). */
+  differences(
     stocktakeId: string,
-    params: ListParams = {},
-  ): Promise<PaginatedResponse<StocktakeDifferenceEntry>> {
+    params: CursorParams = {},
+  ): Promise<PaginatedResponse<StocktakeDifference>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/differences${buildQuery(params)}`);
   },
-  complete(stocktakeId: string, applyCorrections = true): Promise<StocktakeCompletion> {
-    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, {
-      method: 'POST',
-      body: JSON.stringify({ apply_corrections: applyCorrections }),
-    });
+  /** complete books the corrections of the difference list (WP-761); apply_corrections is gone. */
+  complete(stocktakeId: string): Promise<StocktakeCompletion> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, { method: 'POST', body: '{}' });
   },
 };
 
-// One object of the difference list (WP-287, GET …/differences).
-export interface StocktakeDifferenceEntry {
-  item_kind: 'asset' | 'consumable';
-  asset_id?: string;
-  consumable_id?: string;
-  classification: 'found' | 'missing' | 'unexpected';
-  expected_location_id?: string;
-  found_location_id?: string;
-  expected_quantity: number;
-  counted_quantity: number;
-  asset?: Partial<Asset>;
-  consumable?: { id: string; name: string; sku?: string; unit?: string };
-}
-
-export interface StocktakeCorrection {
-  asset_id: string;
-  asset_tag?: string;
-  scan_result: string;
-  previous_status?: string;
-  new_status?: string;
-  previous_location?: string;
-  new_location?: string;
-  applied: boolean;
-  detail?: string;
-}
-
-export interface StocktakeCompletion {
-  stocktake: Stocktake;
-  corrections_applied: number;
-  corrections: StocktakeCorrection[];
-}
-
 // --- Phase 2: Ticket System (Essential) ---
+
+/** The states of the ticket state machine (TKT-01, WP-290); a ticket starts as new. */
+export type TicketStatus = 'new' | 'open' | 'in_progress' | 'waiting' | 'resolved' | 'closed';
+
+export type TicketPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Ticket {
   id: string;
@@ -1394,8 +1595,8 @@ export interface Ticket {
   ticket_number: number;
   title: string;
   description?: string;
-  status: string;
-  priority: string;
+  status: TicketStatus;
+  priority: TicketPriority | string;
   category: string;
   reporter_id: string;
   assignee_id?: string;
@@ -1413,7 +1614,9 @@ export interface Ticket {
 export interface TicketComment {
   id: string;
   ticket_id: string;
-  author_id: string;
+  /** The writing user; null exactly for a system comment (author_type system, WP-291). */
+  author_id: string | null;
+  author_type: 'user' | 'system';
   content: string;
   is_internal: boolean;
   created_at: string;
@@ -1436,7 +1639,7 @@ export interface TicketCreateRequest {
 export interface TicketUpdateRequest {
   title?: string;
   description?: string;
-  status?: string;
+  status?: TicketStatus;
   priority?: string;
   category?: string;
   assignee_id?: string;
@@ -1455,6 +1658,37 @@ export interface TicketListParams {
   assignee_id?: string;
   team_id?: string;
   search?: string;
+}
+
+/** The targets of a ticket link (TicketLink.entity_type, WP-764). */
+export type TicketLinkEntityType = 'asset' | 'ci' | 'contract' | 'location' | 'review_item';
+
+/** TicketLink is an object linked to a ticket besides its primary object (WP-764). */
+export interface TicketLink {
+  id: string;
+  organization_id: string;
+  ticket_id: string;
+  entity_type: TicketLinkEntityType;
+  entity_id: string;
+  created_at: string;
+}
+
+export interface TicketLinkTarget {
+  entity_type: TicketLinkEntityType;
+  entity_id: string;
+}
+
+/** CursorParams page a list over the signed next_cursor (API-02). */
+export interface CursorParams {
+  limit?: number;
+  cursor?: string;
+}
+
+/** ReviewItemTicketRequest opens a ticket for a review item (WP-291). */
+export interface ReviewItemTicketRequest {
+  priority?: TicketPriority;
+  assignee_id?: string;
+  team_id?: string;
 }
 
 export const ticketApi = {
@@ -1487,6 +1721,33 @@ export const ticketApi = {
     params: ListParams = {},
   ): Promise<PaginatedResponse<TicketComment>> {
     return fetchAPI(`/tickets/${ticketId}/comments${buildQuery(params)}`);
+  },
+  /** listLinks reads the object links of a ticket, oldest first (WP-764). */
+  listLinks(ticketId: string, params: CursorParams = {}): Promise<PaginatedResponse<TicketLink>> {
+    return fetchAPI(`/tickets/${ticketId}/links${buildQuery(params)}`);
+  },
+  addLink(ticketId: string, target: TicketLinkTarget): Promise<TicketLink> {
+    return fetchAPI(`/tickets/${ticketId}/links`, {
+      method: 'POST',
+      body: JSON.stringify(target),
+    });
+  },
+  removeLink(ticketId: string, linkId: string): Promise<void> {
+    return fetchAPI(`/tickets/${ticketId}/links/${linkId}`, { method: 'DELETE' });
+  },
+  /** listAttachments reads the documents linked to a ticket, newest first (WP-765). */
+  listAttachments(
+    ticketId: string,
+    params: CursorParams = {},
+  ): Promise<PaginatedResponse<Document>> {
+    return fetchAPI(`/tickets/${ticketId}/attachments${buildQuery(params)}`);
+  },
+  /** createFromReview opens a ticket for an open review item; the item stays open (WP-291). */
+  createFromReview(reviewItemId: string, data: ReviewItemTicketRequest = {}): Promise<Ticket> {
+    return fetchAPI(`/review-items/${reviewItemId}/ticket`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 
@@ -1794,6 +2055,14 @@ export interface TicketSLA {
   resolved_at?: string;
   response_breached: boolean;
   resolution_breached: boolean;
+  /** The business calendar of the due times (TKT-02); null for elapsed time or the standard calendar. */
+  calendar_id?: string | null;
+  /** Business minutes until response_due_at; negative once overdue, null once responded. */
+  response_remaining_minutes?: number | null;
+  /** Business minutes until resolution_due_at; negative once overdue, null once resolved. */
+  resolution_remaining_minutes?: number | null;
+  /** paused: the moment lies outside business hours or on a holiday of the calendar. */
+  paused?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -2586,40 +2855,43 @@ export const roomApi = {
 
 // ─── Block D modules: consumables, orders, maintenance, disposal, keys, trainings, desks ───
 
-export interface Consumable {
-  id: string;
-  organization_id: string;
-  client_id?: string;
-  name: string;
-  sku?: string;
-  category: string;
-  unit: string;
-  stock_level: number;
-  min_level: number;
-  location?: string;
-  notes?: string;
-  created_at: string;
-  updated_at: string;
-}
+/**
+ * Consumable is a quantity item of the warehouse (E-40, WP-283) as the
+ * OpenAPI types describe it: its stock lies per bin (GET
+ * /consumables/{id}/stock); stock_level is the read-only total over all bins.
+ */
+export type Consumable = components['schemas']['Consumable'];
+export type CreateConsumableRequest = components['schemas']['CreateConsumableRequest'];
+export type UpdateConsumableRequest = components['schemas']['UpdateConsumableRequest'];
+/** The availability of a consumable in one bin: on_hand, reserved, available (WP-759). */
+export type ConsumableAvailability = components['schemas']['ConsumableAvailability'];
+export type ConsumableAvailabilityList =
+  components['schemas']['ConsumableAvailabilityListResponse'];
 
 export const consumableApi = {
   list(params: ListParams & { low_stock?: boolean } = {}): Promise<PaginatedResponse<Consumable>> {
     return fetchAPI(`/consumables${buildQuery(params)}`);
   },
-  create(data: Partial<Consumable> & { name: string }): Promise<Consumable> {
+  /** get reads one consumable (GET /consumables/{id}), e.g. the object of a scanned URN (WP-807). */
+  get(id: string): Promise<Consumable> {
+    return fetchAPI(`/consumables/${id}`);
+  },
+  create(data: CreateConsumableRequest): Promise<Consumable> {
     return fetchAPI('/consumables', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: Partial<Consumable>): Promise<Consumable> {
+  update(id: string, data: UpdateConsumableRequest): Promise<Consumable> {
     return fetchAPI(`/consumables/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/consumables/${id}`, { method: 'DELETE' });
   },
-  addMovement(
-    id: string,
-    data: { direction: 'in' | 'out'; quantity: number; reason?: string },
-  ): Promise<unknown> {
-    return fetchAPI(`/consumables/${id}/movements`, { method: 'POST', body: JSON.stringify(data) });
+  /**
+   * availability reads on_hand, reserved and available of a consumable per
+   * bin, page by page over next_cursor (GET /consumables/{id}/availability,
+   * WP-759). It succeeds the deprecated GET /inventory/availability.
+   */
+  availability(id: string, cursor?: string): Promise<ConsumableAvailabilityList> {
+    return fetchAPI(`/consumables/${id}/availability${buildQuery({ limit: 200, cursor })}`);
   },
 };
 
@@ -2864,6 +3136,36 @@ export const deskApi = {
 export function assetLabelURL(assetId: string): string {
   return `${API_BASE}/assets/${assetId}/label?format=svg`;
 }
+
+// The printable labels (INV-03, WP-763, E-52, E-135): the PDF of one asset
+// label and the label batches of an inventory area as job labels.batch.
+
+export type LabelTemplate = components['schemas']['LabelBatchRequest']['template'];
+export type LabelBatchRequest = components['schemas']['LabelBatchRequest'];
+export type LabelBatchResult = components['schemas']['LabelBatchResult'];
+export type LabelBatchDownload = components['schemas']['LabelBatchDownload'];
+
+/** LabelBatchJob is the 202 of POST /labels/batch: the job that renders the batch. */
+export interface LabelBatchJob {
+  job_id: string;
+  status: string;
+  kind: string;
+}
+
+export const labelDownloadApi = {
+  /** assetLabel loads the PDF label of an asset in a template (GET /assets/{id}/label). */
+  assetLabel(assetId: string, template: 'asset_50x25' | 'a4_24'): Promise<Blob> {
+    return fetchBlob(`/assets/${assetId}/label${buildQuery({ format: 'pdf', template })}`);
+  },
+  /** batch starts a label batch job (POST /labels/batch, 202). */
+  batch(data: LabelBatchRequest): Promise<LabelBatchJob> {
+    return fetchAPI('/labels/batch', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** batchDownload names the signed, short-lived URL of a finished batch (E-135). */
+  batchDownload(jobId: string): Promise<LabelBatchDownload> {
+    return fetchAPI(`/labels/batch/${jobId}/download`);
+  },
+};
 
 // ─── Endpoint agents + security findings (Block E) ──────────────────────────
 

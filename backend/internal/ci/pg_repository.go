@@ -1256,8 +1256,19 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 			return err
 		}
 		item = w.after
-		if err := r.recordUpdate(ctx, tx, orgID, id, w); err != nil {
-			return err
+		if recordErr := r.recordUpdate(ctx, tx, orgID, id, w); recordErr != nil {
+			return recordErr
+		}
+		// A bulk revert restores the overrides of the fields it reverted
+		// (WP-306); a version the write did not raise rises per restore.
+		restored, restoreErr := restoreRevertOverrides(ctx, tx, orgID, id, w.after.Version == w.before.Version)
+		if restoreErr != nil {
+			return restoreErr
+		}
+		if restored {
+			if item, err = r.readInTx(ctx, tx, orgID, id); err != nil {
+				return err
+			}
 		}
 		// A bulk revert records which rows of the change set it reverted
 		// and which it skipped, also when no field is left (WP-305).
@@ -1265,6 +1276,23 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateR
 	})
 
 	return item, r.uniqueField(ctx, orgID, err)
+}
+
+// readInTx reads CI id in tx with its templates and asset facts, after a
+// later write of the transaction (the overrides a revert restored, WP-306).
+func (r *PGRepository) readInTx(ctx context.Context, tx pgx.Tx, orgID, id string) (*Item, error) {
+	item, err := scanCIWithTemplates(tx.QueryRow(ctx, fmt.Sprintf(
+		"SELECT %s, %s FROM ci WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL", ciSelectColumns, ciTemplatesColumn), id, orgID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("read ci after the revert: %w", err)
+	}
+	if err := loadAssetFacts(ctx, tx, []*Item{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 // recordUpdate writes history, audit entry and events of the row update w
