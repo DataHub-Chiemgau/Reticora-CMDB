@@ -178,6 +178,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** tableHead is the header row group of the queue once the page is loaded. */
+async function tableHead() {
+  await screen.findByText(/^1–\d+ von \d+$/);
+  return screen.getAllByRole('rowgroup')[0]!;
+}
+
+/** pager is the footer of the queue: the range "x–y von total" and its buttons. */
+const pager = () => within(screen.getByText(/^\d+–\d+ von \d+$/).parentElement!);
+
+/** bulkBar is the bar of the selection with its actions. */
+const bulkBar = () => within(screen.getByRole('group', { name: 'Sammelaktion' }));
+
 describe('reviewDiff', () => {
   it('compares the observed fields with the CI', () => {
     const rows = reviewDiff(ambiguous, ciA);
@@ -514,13 +526,13 @@ describe('ReviewInboxPage', () => {
     renderWithProviders(<ReviewInboxPage />);
 
     expect(await screen.findByText('1–100 von 150')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Nächste Seite' }));
+    expect(pager().getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
+    fireEvent.click(pager().getByRole('button', { name: 'Nächste Seite' }));
 
     expect(await screen.findByText('101–150 von 150')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /10\.1\.0\.149/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /10\.1\.0\.0$/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
+    expect(pager().getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
     const urls = fetchMock.mock.calls
       .map((call) => String(call[0]))
       .filter((url) => url.includes('/review-items?'));
@@ -538,13 +550,20 @@ describe('ReviewInboxPage', () => {
     const fetchMock = stubServer(many);
     renderWithProviders(<ReviewInboxPage />);
 
-    fireEvent.click(await screen.findByLabelText('Alle offenen auswählen (100 auf dieser Seite)'));
+    // The queries keep to the header and the bulk bar: on a page of 100 rows
+    // every name computed over the whole table walks the document once per
+    // row (jsdom resolves the labels of each control by a tree walk).
+    fireEvent.click(
+      await within(await tableHead()).findByLabelText(
+        'Alle offenen auswählen (100 auf dieser Seite)',
+      ),
+    );
     expect(screen.getByText('100 ausgewählt')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Alle 150 offenen auswählen' }));
+    fireEvent.click(bulkBar().getByRole('button', { name: 'Alle 150 offenen auswählen' }));
     expect(await screen.findByText('150 ausgewählt')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText('Aktion'), { target: { value: 'dismiss' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Ausführen' }));
+    fireEvent.change(bulkBar().getByLabelText('Aktion'), { target: { value: 'dismiss' } });
+    fireEvent.click(bulkBar().getByRole('button', { name: 'Ausführen' }));
     expect(await screen.findByText('150 erledigt, 0 fehlgeschlagen.')).toBeInTheDocument();
     const posted = fetchMock.mock.calls
       .filter((call) => call[1]?.method === 'POST')

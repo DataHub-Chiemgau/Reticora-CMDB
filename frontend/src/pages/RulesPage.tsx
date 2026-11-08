@@ -649,7 +649,9 @@ function RuleDialog({
   const create = useCreateRule();
   const update = useUpdateRule();
   const mutation = editing ? update : create;
-  const refusal = refusalOf(mutation.error, t);
+  // Memoized so the builders, which take its condition and ast, keep their
+  // props while the text fields of the dialog change.
+  const refusal = useMemo(() => refusalOf(mutation.error, t), [mutation.error, t]);
 
   // The attribute definitions of the target: of a type (with the global
   // ones that apply), of a set, or the items of a template version.
