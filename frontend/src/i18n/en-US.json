@@ -47,7 +47,8 @@
     "relationship-types": "Relationship types",
     "reviews": "Reviews",
     "jobs": "Jobs",
-    "tags": "Tags"
+    "tags": "Tags",
+    "rules": "Rule catalog"
   },
   "common": {
     "save": "Save",
@@ -108,7 +109,8 @@
       "security": "Open security & privacy",
       "map": "Open map",
       "roomplan": "Open room plan",
-      "tags": "Open tags"
+      "tags": "Open tags",
+      "rules": "Open rule catalog"
     },
     "contact": {
       "label": "Contact",
@@ -2030,7 +2032,11 @@
       "supplier_id": "Supplier (ID)",
       "contract_id": "Contract (ID)",
       "owner_user_id": "Owner (person)",
-      "owner_team_id": "Owner (team)"
+      "owner_team_id": "Owner (team)",
+      "firmware_version": "Firmware version",
+      "primary_mac": "Primary MAC address",
+      "hardware_uuid": "Hardware UUID",
+      "sys_object_id": "SNMP sysObjectID"
     },
     "editor": {
       "newView": "New view",
@@ -2977,7 +2983,10 @@
       "removeValue": "Remove {{value}}",
       "likeHint": "* as a wildcard; without * a substring is searched.",
       "limits": "{{nodes}} of {{maxNodes}} nodes · depth {{depth}} of {{maxDepth}}",
-      "loadError": "The saved filter cannot be loaded: {{message}}"
+      "loadError": "The saved filter cannot be loaded: {{message}}",
+      "conditionLabel": "Condition",
+      "validationLabel": "Value rule",
+      "conditionEmpty": "No condition – the rule always applies."
     },
     "junctions": {
       "and": "AND",
@@ -3021,7 +3030,11 @@
       "two_values": "Enter two values (from and to).",
       "not_number": "The value must be a number.",
       "not_time": "The value must be a date or a time.",
-      "no_related_filter": "The relationship needs a condition for the related CI."
+      "no_related_filter": "The relationship needs a condition for the related CI.",
+      "no_pattern": "Enter a pattern.",
+      "bad_pattern": "The pattern is invalid (no lookarounds or backreferences).",
+      "no_bound": "Enter a minimum or a maximum.",
+      "min_above_max": "The minimum is above the maximum."
     },
     "exists": {
       "true": "is set",
@@ -3040,6 +3053,70 @@
       "attribute": "Attribute: {{name}}",
       "assetAttribute": "Asset attribute: {{name}}",
       "asset": "Asset: {{name}}"
+    },
+    "conditionJunctions": {
+      "all": "AND",
+      "any": "OR"
+    },
+    "conditionJunctionHints": {
+      "all": "All conditions (AND)",
+      "any": "At least one (OR)"
+    },
+    "conditionOps": {
+      "eq": "equals",
+      "ne": "does not equal",
+      "in": "is one of",
+      "not_in": "is none of",
+      "gt": "greater than",
+      "gte": "greater than or equal",
+      "lt": "less than",
+      "lte": "less than or equal",
+      "contains": "contains",
+      "empty": "is empty",
+      "not_empty": "is set"
+    },
+    "validationKinds": {
+      "all": "All rules",
+      "required": "Required",
+      "pattern": "Pattern",
+      "range": "Range",
+      "enum": "Allowed values"
+    },
+    "validation": {
+      "add": {
+        "all": "Add group (all)",
+        "required": "Add required",
+        "pattern": "Add pattern",
+        "range": "Add range",
+        "enum": "Add allowed values"
+      },
+      "nodeName": "{{kind}} {{position}}",
+      "empty": "No value rule yet – add at least one.",
+      "requiredHint": "The value must not be empty.",
+      "pattern": "Regular expression",
+      "of": "Measures",
+      "min": "Minimum",
+      "max": "Maximum",
+      "values": "Allowed value"
+    },
+    "rangeOf": {
+      "value": "the value (number)",
+      "length": "the length (characters)"
+    },
+    "preview": {
+      "conditionTitle": "Preview with a sample object",
+      "validationTitle": "Preview with a sample value",
+      "noFields": "The condition names no field yet.",
+      "sampleOf": "Sample: {{field}}",
+      "sampleValue": "Sample value",
+      "absent": "(not set)",
+      "incomplete": "The rule is not complete yet.",
+      "always": "Without a condition the rule always applies.",
+      "holds": "The condition holds – the rule applies.",
+      "notHolds": "The condition does not hold – the rule does not apply.",
+      "noRule": "No value rule yet.",
+      "valid": "The value passes the rule.",
+      "violations": "Violations"
     }
   },
   "movement": {
@@ -3155,6 +3232,85 @@
       "notFound": "The tag no longer exists.",
       "invalid": "Invalid values: {{detail}}",
       "reason": "The action failed: {{detail}}"
+    }
+  },
+  "ruleCatalog": {
+    "title": "Rule catalog",
+    "subtitle": "Validations and conditions per type, attribute set or template version",
+    "hint": "A rule applies to an attribute of exactly one target. Without a condition it always applies; required, read-only and visibility rules set the state of the attribute while the condition holds. The rules of the attribute definitions remain beside them.",
+    "moduleOff": "The metamodel module is not active in this release.",
+    "create": "Create rule",
+    "createTitle": "Create rule",
+    "editTitle": "Edit rule {{key}}",
+    "edit": "Edit rule {{key}}",
+    "deleteRule": "Delete rule {{key}}",
+    "deleteTitle": "Delete rule",
+    "deleteConfirm": "The rule {{key}} will be deleted.",
+    "delete": "Delete",
+    "save": "Save",
+    "notDeleted": "Not deleted: {{reason}}",
+    "empty": "No rules for these filters.",
+    "listLabel": "Rules",
+    "loadMore": "Load more",
+    "always": "always",
+    "system": "System",
+    "readOnly": "read-only",
+    "active": "active",
+    "inactive": "inactive",
+    "noTarget": "no target",
+    "targetLine": "{{kind}}: {{name}}",
+    "versionLabel": "{{template}} · version {{version}} ({{status}})",
+    "kinds": {
+      "validation": "Validation",
+      "required": "Required",
+      "readonly": "Read-only",
+      "visible": "Visible"
+    },
+    "targets": {
+      "ci_type": "CI type",
+      "attribute_set": "Attribute set",
+      "template_version": "Template version"
+    },
+    "filters": {
+      "ci_type": "CI type",
+      "attribute_set": "Attribute set",
+      "template_version": "Template version",
+      "attribute_key": "Attribute key",
+      "kind": "Rule kind"
+    },
+    "columns": {
+      "key": "Key",
+      "attribute": "Attribute",
+      "kind": "Kind",
+      "target": "Target",
+      "condition": "Condition",
+      "active": "Status",
+      "version": "Version",
+      "actions": "Actions"
+    },
+    "form": {
+      "key": "Key",
+      "kind": "Rule kind",
+      "targetKind": "Target kind",
+      "target": "Target",
+      "chooseTarget": "Choose target …",
+      "attribute": "Attribute",
+      "chooseAttribute": "Choose attribute …",
+      "isActive": "Active",
+      "lockedVersion": "The template version is published or retired; the server refuses changes to its rules.",
+      "conditionHint": "Leave empty for a rule that always applies.",
+      "condition": "Condition",
+      "ast": "Value rule of the validation",
+      "astRequired": "A validation needs at least one value rule.",
+      "message": "Message (optional)",
+      "messageDe": "Message German",
+      "messageEn": "Message English"
+    },
+    "errors": {
+      "forbidden": "Not permitted: system rules are read-only, changes need the permission citype:manage.",
+      "conflict": "Conflict: {{detail}} (e.g. the template version is published or retired, or the key is taken).",
+      "notFound": "The rule no longer exists.",
+      "reason": "Refused: {{detail}}"
     }
   }
 }

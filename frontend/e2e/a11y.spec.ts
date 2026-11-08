@@ -9,6 +9,7 @@ import {
   CI_ID,
   DRAFT_HANDLERS,
   DRAFT_ID,
+  RULE_HANDLERS,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
@@ -369,6 +370,14 @@ const ROUTES: A11yRoute[] = [
       await expect(page.locator('#main-content').getByText('a11y_template').first()).toBeVisible();
     },
     ready: (page) => page.locator('#main-content').getByText('a11y value required'),
+  },
+  {
+    // WP-801: the rule catalog with an own rule (condition, edit and delete),
+    // a validation of a template version and a read-only system rule.
+    path: '/rules',
+    url: '/rules',
+    handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   {

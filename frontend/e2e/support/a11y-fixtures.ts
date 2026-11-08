@@ -47,6 +47,7 @@ export const A11Y_MARKERS = {
   template: 'a11y-template',
   systemTemplate: 'a11y-system-template',
   draft: 'a11y-draft',
+  rule: 'a11y_rule_required',
   consumable: 'a11y-toner',
   order: 'a11y-order-title',
   maintenance: 'a11y-maintenance-window',
@@ -448,6 +449,59 @@ const TEMPLATE_VERSIONS = [
     },
   ]),
 ];
+
+// The rule catalog of WP-801 (MET-45): an own required rule of the child
+// with a condition, a validation of a template version and a read-only
+// system rule of the attribute set.
+function catalogRule(id: string, key: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    organization_id: ORG,
+    key,
+    attribute_key: 'a11y_serial',
+    kind: 'required',
+    ci_type_id: CHILD_TYPE.id,
+    condition: {
+      op: 'all',
+      rules: [
+        { op: 'eq', field: 'a11y_plain', value: 'core' },
+        { op: 'not_empty', field: 'hostname' },
+      ],
+    },
+    ast: null,
+    message: { de: 'a11y Pflicht', en: 'a11y required' },
+    is_system: false,
+    is_active: true,
+    version: 2,
+    created_at: AT,
+    updated_at: AT,
+    ...extra,
+  };
+}
+const CATALOG_RULES = [
+  catalogRule('ru000000-0000-4000-8000-000000000001', M.rule),
+  catalogRule('ru000000-0000-4000-8000-000000000002', 'a11y_rule_pattern', {
+    kind: 'validation',
+    ci_type_id: undefined,
+    template_version_id: TEMPLATE_VERSIONS[0]!.id,
+    condition: null,
+    ast: { op: 'pattern', pattern: '^[A-Z0-9]+$' },
+    message: null,
+    is_active: false,
+  }),
+  catalogRule('ru000000-0000-4000-8000-000000000003', 'a11y_rule_system', {
+    organization_id: '',
+    is_system: true,
+    kind: 'visible',
+    ci_type_id: undefined,
+    attribute_set_id: ATTRIBUTE_SET.id,
+    attribute_key: 'a11y_set_vlan',
+    condition: { op: 'not', rules: [{ op: 'empty', field: 'a11y_set_speed' }] },
+  }),
+];
+
+/** GET /rules: one page of the catalog without a next page. */
+export const RULE_HANDLERS: Handler[] = [{ path: '/rules', reply: fixed({ data: CATALOG_RULES }) }];
 
 /** GET /me/permissions of the template routes: the editor and the publish action are on. */
 export const TEMPLATE_PERMISSIONS: Handler = {

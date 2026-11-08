@@ -47,7 +47,8 @@
     "relationship-types": "Beziehungstypen",
     "reviews": "Reviews",
     "jobs": "Jobs",
-    "tags": "Tags"
+    "tags": "Tags",
+    "rules": "Regelkatalog"
   },
   "common": {
     "save": "Speichern",
@@ -108,7 +109,8 @@
       "security": "Sicherheit & Datenschutz öffnen",
       "map": "Karte öffnen",
       "roomplan": "Raumplan öffnen",
-      "tags": "Tags öffnen"
+      "tags": "Tags öffnen",
+      "rules": "Regelkatalog öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -2030,7 +2032,11 @@
       "supplier_id": "Lieferant (ID)",
       "contract_id": "Vertrag (ID)",
       "owner_user_id": "Verantwortliche Person",
-      "owner_team_id": "Verantwortliches Team"
+      "owner_team_id": "Verantwortliches Team",
+      "firmware_version": "Firmware-Version",
+      "primary_mac": "Primäre MAC-Adresse",
+      "hardware_uuid": "Hardware-UUID",
+      "sys_object_id": "SNMP sysObjectID"
     },
     "editor": {
       "newView": "Neue Ansicht",
@@ -2977,7 +2983,10 @@
       "removeValue": "{{value}} entfernen",
       "likeHint": "* als Platzhalter; ohne * wird nach einer Teilzeichenkette gesucht.",
       "limits": "{{nodes}} von {{maxNodes}} Knoten · Tiefe {{depth}} von {{maxDepth}}",
-      "loadError": "Der gespeicherte Filter lässt sich nicht laden: {{message}}"
+      "loadError": "Der gespeicherte Filter lässt sich nicht laden: {{message}}",
+      "conditionLabel": "Bedingung",
+      "validationLabel": "Wertregel",
+      "conditionEmpty": "Keine Bedingung – die Regel gilt immer."
     },
     "junctions": {
       "and": "UND",
@@ -3021,7 +3030,11 @@
       "two_values": "Geben Sie zwei Werte an (von und bis).",
       "not_number": "Der Wert muss eine Zahl sein.",
       "not_time": "Der Wert muss ein Datum oder eine Zeit sein.",
-      "no_related_filter": "Die Beziehung braucht eine Bedingung für das verbundene CI."
+      "no_related_filter": "Die Beziehung braucht eine Bedingung für das verbundene CI.",
+      "no_pattern": "Geben Sie ein Muster an.",
+      "bad_pattern": "Das Muster ist ungültig (keine Lookarounds und Rückverweise).",
+      "no_bound": "Geben Sie ein Minimum oder ein Maximum an.",
+      "min_above_max": "Das Minimum liegt über dem Maximum."
     },
     "exists": {
       "true": "ist gesetzt",
@@ -3040,6 +3053,70 @@
       "attribute": "Attribut: {{name}}",
       "assetAttribute": "Asset-Attribut: {{name}}",
       "asset": "Asset: {{name}}"
+    },
+    "conditionJunctions": {
+      "all": "UND",
+      "any": "ODER"
+    },
+    "conditionJunctionHints": {
+      "all": "Alle Bedingungen (UND)",
+      "any": "Mindestens eine (ODER)"
+    },
+    "conditionOps": {
+      "eq": "ist gleich",
+      "ne": "ist ungleich",
+      "in": "ist einer von",
+      "not_in": "ist keiner von",
+      "gt": "größer als",
+      "gte": "größer oder gleich",
+      "lt": "kleiner als",
+      "lte": "kleiner oder gleich",
+      "contains": "enthält",
+      "empty": "ist leer",
+      "not_empty": "ist gesetzt"
+    },
+    "validationKinds": {
+      "all": "Alle Regeln",
+      "required": "Pflichtwert",
+      "pattern": "Muster",
+      "range": "Bereich",
+      "enum": "Erlaubte Werte"
+    },
+    "validation": {
+      "add": {
+        "all": "Gruppe (alle) hinzufügen",
+        "required": "Pflichtwert hinzufügen",
+        "pattern": "Muster hinzufügen",
+        "range": "Bereich hinzufügen",
+        "enum": "Erlaubte Werte hinzufügen"
+      },
+      "nodeName": "{{kind}} {{position}}",
+      "empty": "Noch keine Wertregel – fügen Sie mindestens eine hinzu.",
+      "requiredHint": "Der Wert darf nicht leer sein.",
+      "pattern": "Regulärer Ausdruck",
+      "of": "Gemessen wird",
+      "min": "Minimum",
+      "max": "Maximum",
+      "values": "Erlaubter Wert"
+    },
+    "rangeOf": {
+      "value": "der Wert (Zahl)",
+      "length": "die Länge (Zeichen)"
+    },
+    "preview": {
+      "conditionTitle": "Vorschau mit Beispielobjekt",
+      "validationTitle": "Vorschau mit Beispielwert",
+      "noFields": "Die Bedingung nennt noch kein Feld.",
+      "sampleOf": "Beispiel: {{field}}",
+      "sampleValue": "Beispielwert",
+      "absent": "(nicht gesetzt)",
+      "incomplete": "Die Regel ist noch unvollständig.",
+      "always": "Ohne Bedingung gilt die Regel immer.",
+      "holds": "Die Bedingung trifft zu – die Regel greift.",
+      "notHolds": "Die Bedingung trifft nicht zu – die Regel greift nicht.",
+      "noRule": "Noch keine Wertregel.",
+      "valid": "Der Wert erfüllt die Regel.",
+      "violations": "Verletzungen"
     }
   },
   "movement": {
@@ -3155,6 +3232,85 @@
       "notFound": "Den Tag gibt es nicht mehr.",
       "invalid": "Ungültige Angaben: {{detail}}",
       "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "ruleCatalog": {
+    "title": "Regelkatalog",
+    "subtitle": "Validierungen und Bedingungen je Typ, Attribut-Set oder Template-Version",
+    "hint": "Eine Regel gilt für ein Attribut genau eines Ziels. Ohne Bedingung gilt sie immer; Pflicht-, Schreibschutz- und Sichtbarkeitsregeln setzen den Zustand des Attributs, solange die Bedingung zutrifft. Die Regeln der Attributdefinitionen bleiben daneben bestehen.",
+    "moduleOff": "Das Modul Metamodell ist in dieser Version nicht aktiv.",
+    "create": "Regel anlegen",
+    "createTitle": "Regel anlegen",
+    "editTitle": "Regel {{key}} bearbeiten",
+    "edit": "Regel {{key}} bearbeiten",
+    "deleteRule": "Regel {{key}} löschen",
+    "deleteTitle": "Regel löschen",
+    "deleteConfirm": "Die Regel {{key}} wird gelöscht.",
+    "delete": "Löschen",
+    "save": "Speichern",
+    "notDeleted": "Nicht gelöscht: {{reason}}",
+    "empty": "Keine Regeln für diese Filter.",
+    "listLabel": "Regeln",
+    "loadMore": "Weitere laden",
+    "always": "immer",
+    "system": "System",
+    "readOnly": "nur lesbar",
+    "active": "aktiv",
+    "inactive": "inaktiv",
+    "noTarget": "ohne Ziel",
+    "targetLine": "{{kind}}: {{name}}",
+    "versionLabel": "{{template}} · Version {{version}} ({{status}})",
+    "kinds": {
+      "validation": "Validierung",
+      "required": "Pflicht",
+      "readonly": "Schreibgeschützt",
+      "visible": "Sichtbar"
+    },
+    "targets": {
+      "ci_type": "CI-Typ",
+      "attribute_set": "Attribut-Set",
+      "template_version": "Template-Version"
+    },
+    "filters": {
+      "ci_type": "CI-Typ",
+      "attribute_set": "Attribut-Set",
+      "template_version": "Template-Version",
+      "attribute_key": "Attribut-Schlüssel",
+      "kind": "Regelart"
+    },
+    "columns": {
+      "key": "Schlüssel",
+      "attribute": "Attribut",
+      "kind": "Art",
+      "target": "Ziel",
+      "condition": "Bedingung",
+      "active": "Status",
+      "version": "Version",
+      "actions": "Aktionen"
+    },
+    "form": {
+      "key": "Schlüssel",
+      "kind": "Regelart",
+      "targetKind": "Art des Ziels",
+      "target": "Ziel",
+      "chooseTarget": "Ziel wählen …",
+      "attribute": "Attribut",
+      "chooseAttribute": "Attribut wählen …",
+      "isActive": "Aktiv",
+      "lockedVersion": "Die Template-Version ist veröffentlicht oder zurückgezogen; der Server lehnt Änderungen an ihren Regeln ab.",
+      "conditionHint": "Leer lassen, damit die Regel immer gilt.",
+      "condition": "Bedingung",
+      "ast": "Wertregel der Validierung",
+      "astRequired": "Eine Validierung braucht mindestens eine Wertregel.",
+      "message": "Meldung (optional)",
+      "messageDe": "Meldung Deutsch",
+      "messageEn": "Meldung Englisch"
+    },
+    "errors": {
+      "forbidden": "Keine Berechtigung: Systemregeln sind schreibgeschützt, Änderungen brauchen das Recht citype:manage.",
+      "conflict": "Konflikt: {{detail}} (z. B. ist die Template-Version veröffentlicht oder zurückgezogen oder der Schlüssel vergeben).",
+      "notFound": "Die Regel gibt es nicht mehr.",
+      "reason": "Abgelehnt: {{detail}}"
     }
   }
 }

@@ -4,8 +4,12 @@
  * and the fixed output format. This WP delivers the filter mode: it emits
  * FilterExpr of api/openapi.yaml (after WP-309 and WP-789), stored in
  * filter_spec.where of a saved view and sent as where of POST
- * /api/v1/search/query. The condition and validation modes (WP-801) and
- * the expression mode (WP-802) follow; no mode emits nodes of another.
+ * /api/v1/search/query. WP-801 adds the condition mode (the condition
+ * grammar of api/rules.schema.json: all, any, not and comparisons) and the
+ * validation mode (the value rule AST of MET-45: all, required, pattern,
+ * range and enum) for the rule catalog; the expression mode (WP-802)
+ * follows. No mode emits nodes of another: no like in conditions, no
+ * comparison in value rules, no required in a filter.
  *
  * The binding check is the server's (savedview.Expr.Validate,
  * backend/internal/savedview/filter.go); the field whitelist and the
@@ -15,6 +19,15 @@
  */
 
 import type { components } from '../api/generated/schema';
+import {
+  compareOps,
+  parseCondition,
+  parseRule,
+  type CompareOp,
+  type Condition,
+  type Rule,
+  type Scalar,
+} from './rules';
 import {
   MAX_FILTER_DEPTH,
   MAX_FILTER_NODES,
@@ -650,10 +663,14 @@ export function nodePaths(node: BuilderNode | null, path = 'where'): Map<string,
  * (where.and[1].value, filter_spec.where.or[0].related.max_depth …).
  */
 export function nodeAtPath(node: BuilderNode | null, path: string): string | undefined {
-  const p = path.replace(/^filter_spec\./, '');
+  return deepestPath(nodePaths(node), path.replace(/^filter_spec\./, ''));
+}
+
+/** deepestPath returns the id of the longest path of paths that p starts with. */
+function deepestPath(paths: Map<string, string>, p: string): string | undefined {
   let best: string | undefined;
   let bestLength = -1;
-  for (const [candidate, id] of nodePaths(node)) {
+  for (const [candidate, id] of paths) {
     const boundary = p.length === candidate.length || p[candidate.length] === '.';
     if (p.startsWith(candidate) && boundary && candidate.length > bestLength) {
       best = id;
@@ -789,4 +806,670 @@ export function convertValue(value: unknown, from: FilterOp, to: FilterOp): unkn
 /** isFilterExpr reports whether a value of filter_spec.where can be loaded into the builder. */
 export function isFilterExpr(value: unknown): value is FilterExpr {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// ─── Condition mode (WP-801) ─────────────────────────────────────────────────
+
+/**
+ * The typed CI columns a condition may name (typedColumns of
+ * backend/internal/ci/validation.go): the write path evaluates a catalog
+ * rule against the attributes with these columns taking precedence (CI-01).
+ */
+export const CONDITION_COLUMNS: readonly string[] = [
+  'name',
+  'hostname',
+  'fqdn',
+  'serial_number',
+  'manufacturer',
+  'model',
+  'os_name',
+  'os_version',
+  'firmware_version',
+  'management_ip',
+  'primary_mac',
+  'hardware_uuid',
+  'sys_object_id',
+];
+
+/** The junctions of a condition group: all (AND) and any (OR). */
+export const CONDITION_JUNCTIONS = ['all', 'any'] as const;
+export type ConditionJunction = (typeof CONDITION_JUNCTIONS)[number];
+
+/** The node kinds of the condition mode: groups, negation and comparison. */
+export const CONDITION_NODE_KINDS = ['all', 'any', 'not', 'compare'] as const;
+
+/** The comparison operators of the condition grammar (api/rules.schema.json). */
+export const CONDITION_OPS: readonly CompareOp[] = compareOps;
+export type { CompareOp };
+
+/** The operators whose value is a non-empty list. */
+export const CONDITION_LIST_OPS: readonly CompareOp[] = ['in', 'not_in'];
+/** The operators without a value. */
+export const CONDITION_NO_VALUE_OPS: readonly CompareOp[] = ['empty', 'not_empty'];
+/** The operators that compare numbers (a number value). */
+export const CONDITION_NUMBER_OPS: readonly CompareOp[] = ['gt', 'gte', 'lt', 'lte'];
+
+/**
+ * The operators of each field kind: gt, gte, lt and lte compare numbers
+ * only (evaluateCondition reads both sides as numbers), contains reads a
+ * substring of a text or an element of a list.
+ */
+const CONDITION_OPS_BY_KIND: Readonly<Record<FieldKind, readonly CompareOp[]>> = {
+  text: ['eq', 'ne', 'in', 'not_in', 'contains', 'empty', 'not_empty'],
+  number: ['eq', 'ne', 'in', 'not_in', 'gt', 'gte', 'lt', 'lte', 'empty', 'not_empty'],
+  time: ['eq', 'ne', 'in', 'not_in', 'empty', 'not_empty'],
+  uuid: ['eq', 'ne', 'in', 'not_in', 'empty', 'not_empty'],
+  bool: ['eq', 'ne', 'empty', 'not_empty'],
+  tag: ['contains', 'empty', 'not_empty'],
+};
+
+/** The editor of an attribute in a condition: its values are scalars, no picker. */
+function conditionEditor(def: AttributeDefinition): ValueEditorKind {
+  if ((def.enum_values?.length ?? 0) > 0) return 'enum';
+  switch (def.data_type) {
+    case 'integer':
+    case 'decimal':
+    case 'number':
+      return 'number';
+    case 'date':
+      return 'date';
+    case 'datetime':
+      return 'datetime';
+    case 'boolean':
+      return 'bool';
+  }
+  return 'text';
+}
+
+/** The field kind of a condition editor. */
+function editorKind(editor: ValueEditorKind): FieldKind {
+  switch (editor) {
+    case 'number':
+      return 'number';
+    case 'bool':
+      return 'bool';
+    case 'date':
+    case 'datetime':
+      return 'time';
+  }
+  return 'text';
+}
+
+/**
+ * conditionFieldCatalog lists the fields of a condition: the typed CI
+ * columns and the attributes of the target (by key, as the write path
+ * names them). An attribute named like a column is the column.
+ */
+export function conditionFieldCatalog(
+  definitions: readonly AttributeDefinition[] = [],
+): FieldSpec[] {
+  const columns = CONDITION_COLUMNS.map((column): FieldSpec => ({
+    field: column,
+    source: 'column',
+    kind: 'text',
+    editor: 'text',
+    column,
+  }));
+  const seen = new Set<string>(CONDITION_COLUMNS);
+  const attributes = definitions.flatMap((d): FieldSpec[] => {
+    if (seen.has(d.key)) return [];
+    seen.add(d.key);
+    const editor = conditionEditor(d);
+    return [{ field: d.key, source: 'attribute', kind: editorKind(editor), editor, definition: d }];
+  });
+  return [...columns, ...attributes];
+}
+
+/** conditionFieldSpec returns the spec of a field, a text attribute if the catalog lacks it. */
+export function conditionFieldSpec(
+  field: string,
+  catalog: readonly FieldSpec[],
+): FieldSpec | undefined {
+  if (!field) return undefined;
+  return (
+    catalog.find((f) => f.field === field) ?? {
+      field,
+      source: 'attribute',
+      kind: 'text',
+      editor: 'text',
+    }
+  );
+}
+
+/** The operators a field of a condition offers; a choice compares for equality only. */
+export function conditionOpsFor(spec: FieldSpec | undefined): readonly CompareOp[] {
+  if (!spec) return [];
+  if (spec.editor === 'enum') return ['eq', 'ne', 'in', 'not_in', 'empty', 'not_empty'];
+  return CONDITION_OPS_BY_KIND[spec.kind];
+}
+
+/**
+ * convertConditionValue fits a value to another operator: a scalar becomes
+ * the first element of a list and back, empty and not_empty take none, a
+ * number operator keeps a number only.
+ */
+export function convertConditionValue(value: unknown, to: CompareOp): unknown {
+  if (CONDITION_NO_VALUE_OPS.includes(to)) return undefined;
+  const scalar: unknown = Array.isArray(value) ? value[0] : value;
+  if (CONDITION_LIST_OPS.includes(to)) {
+    if (Array.isArray(value)) return value;
+    return scalar === undefined || scalar === '' ? [] : [scalar];
+  }
+  if (CONDITION_NUMBER_OPS.includes(to)) return typeof scalar === 'number' ? scalar : undefined;
+  return scalar;
+}
+
+/**
+ * A node of the condition builder. A group is all or any; implicit marks
+ * the root group the builder adds itself, which emits its only child alone
+ * (a loaded comparison stays a comparison).
+ */
+export type ConditionNode =
+  | {
+      id: string;
+      kind: 'group';
+      junction: ConditionJunction;
+      children: ConditionNode[];
+      implicit?: boolean;
+    }
+  | { id: string; kind: 'not'; child: ConditionNode }
+  | { id: string; kind: 'compare'; field: string; op: CompareOp; value?: unknown };
+
+export function newConditionComparison(): ConditionNode {
+  return { id: newId(), kind: 'compare', field: '', op: 'eq' };
+}
+
+export function newConditionGroup(junction: ConditionJunction = 'all'): ConditionNode {
+  return { id: newId(), kind: 'group', junction, children: [] };
+}
+
+/** The root of an empty condition: an implicit all group (null = applies always). */
+export function emptyConditionRoot(): ConditionNode {
+  return { id: newId(), kind: 'group', junction: 'all', children: [], implicit: true };
+}
+
+function conditionNodeOf(cond: Condition): ConditionNode {
+  if ('rules' in cond) {
+    if (cond.op === 'not') {
+      return { id: newId(), kind: 'not', child: conditionNodeOf(cond.rules[0]!) };
+    }
+    return {
+      id: newId(),
+      kind: 'group',
+      junction: cond.op,
+      children: cond.rules.map(conditionNodeOf),
+    };
+  }
+  const node: ConditionNode = { id: newId(), kind: 'compare', field: cond.field, op: cond.op };
+  if ('value' in cond) node.value = cond.value;
+  return node;
+}
+
+/**
+ * fromCondition turns a condition into the tree of the builder (throws on
+ * an invalid one, parseCondition): a group stays the root, any other node
+ * goes into an implicit all group; null is the empty root.
+ */
+export function fromCondition(input: unknown): ConditionNode {
+  if (input === null || input === undefined) return emptyConditionRoot();
+  const node = conditionNodeOf(parseCondition(input));
+  if (node.kind === 'group') return node;
+  return { id: newId(), kind: 'group', junction: 'all', children: [node], implicit: true };
+}
+
+/**
+ * emittedConditionRoot is the node the root emits: the only child of an
+ * implicit group, else the root itself; null for an empty implicit group.
+ */
+function emittedConditionRoot(root: ConditionNode): ConditionNode | null {
+  if (root.kind === 'group' && root.implicit) {
+    if (root.children.length === 0) return null;
+    if (root.children.length === 1) return root.children[0]!;
+  }
+  return root;
+}
+
+function conditionOf(node: ConditionNode): Condition {
+  switch (node.kind) {
+    case 'group':
+      return { op: node.junction, rules: node.children.map(conditionOf) };
+    case 'not':
+      return { op: 'not', rules: [conditionOf(node.child)] };
+    case 'compare': {
+      const out: Record<string, unknown> = { op: node.op, field: node.field };
+      if (!CONDITION_NO_VALUE_OPS.includes(node.op) && node.value !== undefined) {
+        out.value = node.value;
+      }
+      return out as Condition;
+    }
+  }
+}
+
+/** toCondition emits the condition of a tree; an empty root is none (null, applies always). */
+export function toCondition(root: ConditionNode): Condition | null {
+  const node = emittedConditionRoot(root);
+  if (!node) return null;
+  if (node === root && node.kind === 'group' && node.children.length === 0) return null;
+  return conditionOf(node);
+}
+
+/** conditionChildren returns the nodes directly below a node. */
+export function conditionChildren(node: ConditionNode): ConditionNode[] {
+  if (node.kind === 'group') return node.children;
+  if (node.kind === 'not') return [node.child];
+  return [];
+}
+
+/** conditionStats counts the nodes and the depth of what a tree emits. */
+export function conditionStats(root: ConditionNode): { nodes: number; depth: number } {
+  const count = (node: ConditionNode): { nodes: number; depth: number } => {
+    let nodes = 1;
+    let depth = 0;
+    for (const c of conditionChildren(node)) {
+      const s = count(c);
+      nodes += s.nodes;
+      depth = Math.max(depth, s.depth);
+    }
+    return { nodes, depth: depth + 1 };
+  };
+  const node = emittedConditionRoot(root);
+  return node ? count(node) : { nodes: 0, depth: 0 };
+}
+
+/**
+ * conditionPaths maps the path of each node, as the server names it in a
+ * 422 (condition, condition.rules[1], condition.rules[0].rules[0] …), to
+ * its id.
+ */
+export function conditionPaths(root: ConditionNode, base = 'condition'): Map<string, string> {
+  const paths = new Map<string, string>();
+  const walk = (node: ConditionNode, path: string) => {
+    paths.set(path, node.id);
+    conditionChildren(node).forEach((c, i) => walk(c, `${path}.rules[${i}]`));
+  };
+  const node = emittedConditionRoot(root);
+  if (node) walk(node, base);
+  if (!paths.has(base)) paths.set(base, root.id);
+  return paths;
+}
+
+/** conditionNodeAtPath returns the id of the deepest node a server path names. */
+export function conditionNodeAtPath(root: ConditionNode, path: string): string | undefined {
+  return deepestPath(conditionPaths(root), path);
+}
+
+/** conditionFields lists the fields the comparisons of a tree name, in order. */
+export function conditionFields(root: ConditionNode): string[] {
+  const out: string[] = [];
+  const walk = (node: ConditionNode) => {
+    if (node.kind === 'compare' && node.field && !out.includes(node.field)) out.push(node.field);
+    conditionChildren(node).forEach(walk);
+  };
+  walk(root);
+  return out;
+}
+
+/** conditionIssues checks each node for what the builder must complete before it goes out. */
+export function conditionIssues(root: ConditionNode): Map<string, NodeIssue> {
+  const issues = new Map<string, NodeIssue>();
+  const walk = (node: ConditionNode, isRoot: boolean) => {
+    switch (node.kind) {
+      case 'group':
+        if (!isRoot && node.children.length === 0) issues.set(node.id, 'empty_group');
+        node.children.forEach((c) => walk(c, false));
+        return;
+      case 'not':
+        walk(node.child, false);
+        return;
+      case 'compare': {
+        let issue: NodeIssue | undefined;
+        const v = node.value;
+        if (!node.field) issue = 'no_field';
+        else if (CONDITION_NO_VALUE_OPS.includes(node.op)) issue = undefined;
+        else if (CONDITION_LIST_OPS.includes(node.op)) {
+          if (!Array.isArray(v) || v.length === 0) issue = 'list_empty';
+        } else if (v === undefined || v === null || v === '') issue = 'no_value';
+        else if (CONDITION_NUMBER_OPS.includes(node.op) && typeof v !== 'number') {
+          issue = 'not_number';
+        }
+        if (issue) issues.set(node.id, issue);
+      }
+    }
+  };
+  walk(root, true);
+  return issues;
+}
+
+/** The result of checking a condition tree: the condition to send or the node and its problem. */
+export type ConditionCheck =
+  | { ok: true; condition: Condition | null }
+  | { ok: false; nodeId?: string; issue?: NodeIssue; message?: string };
+
+/**
+ * checkCondition completes conditionIssues with parseCondition, so only a
+ * condition of the grammar goes out (null: none, the rule applies always).
+ */
+export function checkCondition(root: ConditionNode): ConditionCheck {
+  const first = conditionIssues(root).entries().next();
+  if (!first.done) return { ok: false, nodeId: first.value[0], issue: first.value[1] };
+  const condition = toCondition(root);
+  if (condition === null) return { ok: true, condition };
+  try {
+    return { ok: true, condition: parseCondition(condition) };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const local = message.split(': ', 1)[0] ?? '';
+    const path = /^(rules\[|op$|field$|value)/.test(local) ? `condition.${local}` : 'condition';
+    return { ok: false, nodeId: conditionNodeAtPath(root, path), message };
+  }
+}
+
+/** mapConditionNode replaces the node of id by fn(node) (null removes it). */
+export function mapConditionNode(
+  node: ConditionNode,
+  id: string,
+  fn: (n: ConditionNode) => ConditionNode | null,
+): ConditionNode | null {
+  if (node.id === id) return fn(node);
+  if (node.kind === 'group') {
+    const children = node.children.flatMap((c) => {
+      const next = mapConditionNode(c, id, fn);
+      return next ? [next] : [];
+    });
+    return { ...node, children };
+  }
+  if (node.kind === 'not') {
+    const child = mapConditionNode(node.child, id, fn);
+    return child ? { ...node, child } : null;
+  }
+  return node;
+}
+
+// ─── Validation mode (WP-801) ────────────────────────────────────────────────
+
+/** The node kinds of the validation mode: the value rule AST of MET-45. */
+export const VALIDATION_NODE_KINDS = ['all', 'required', 'pattern', 'range', 'enum'] as const;
+export type ValidationNodeKind = (typeof VALIDATION_NODE_KINDS)[number];
+
+/** What a range measures: the value (a number) or the length of a text. */
+export const RANGE_OF = ['value', 'length'] as const;
+export type RangeOf = (typeof RANGE_OF)[number];
+
+/** The problems the validation mode reports at a node. */
+export const VALIDATION_ISSUES = [
+  'empty_group',
+  'no_pattern',
+  'bad_pattern',
+  'no_bound',
+  'min_above_max',
+  'list_empty',
+] as const;
+export type ValidationIssue = (typeof VALIDATION_ISSUES)[number];
+
+/**
+ * A node of the validation builder. implicit marks the root all the
+ * builder adds itself, which emits its only child alone.
+ */
+export type ValidationNode =
+  | { id: string; kind: 'all'; children: ValidationNode[]; implicit?: boolean }
+  | { id: string; kind: 'required' }
+  | { id: string; kind: 'pattern'; pattern: string }
+  | { id: string; kind: 'range'; of: RangeOf; min?: number; max?: number }
+  | { id: string; kind: 'enum'; values: Scalar[] };
+
+/** newValidationNode returns an empty node of a kind; a range measures by the field kind. */
+export function newValidationNode(
+  kind: ValidationNodeKind,
+  fieldKind: FieldKind = 'text',
+): ValidationNode {
+  switch (kind) {
+    case 'all':
+      return { id: newId(), kind, children: [] };
+    case 'required':
+      return { id: newId(), kind };
+    case 'pattern':
+      return { id: newId(), kind, pattern: '' };
+    case 'range':
+      return { id: newId(), kind, of: fieldKind === 'number' ? 'value' : 'length' };
+    case 'enum':
+      return { id: newId(), kind, values: [] };
+  }
+}
+
+/** The root of an empty validation: an implicit all. */
+export function emptyValidationRoot(): ValidationNode {
+  return { id: newId(), kind: 'all', children: [], implicit: true };
+}
+
+function validationNodeOf(rule: Rule): ValidationNode {
+  switch (rule.op) {
+    case 'all':
+      return { id: newId(), kind: 'all', children: rule.rules.map(validationNodeOf) };
+    case 'required':
+      return { id: newId(), kind: 'required' };
+    case 'pattern':
+      return { id: newId(), kind: 'pattern', pattern: rule.pattern };
+    case 'range': {
+      const node: ValidationNode = { id: newId(), kind: 'range', of: rule.of ?? 'value' };
+      if (rule.min !== undefined) node.min = rule.min;
+      if (rule.max !== undefined) node.max = rule.max;
+      return node;
+    }
+    case 'enum':
+      return { id: newId(), kind: 'enum', values: [...rule.values] };
+  }
+}
+
+/** fromValidation turns a value rule into the tree of the builder (throws on an invalid one). */
+export function fromValidation(input: unknown): ValidationNode {
+  if (input === null || input === undefined) return emptyValidationRoot();
+  const node = validationNodeOf(parseRule(input));
+  if (node.kind === 'all') return node;
+  return { id: newId(), kind: 'all', children: [node], implicit: true };
+}
+
+function emittedValidationRoot(root: ValidationNode): ValidationNode | null {
+  if (root.kind === 'all' && root.implicit) {
+    if (root.children.length === 0) return null;
+    if (root.children.length === 1) return root.children[0]!;
+  }
+  return root;
+}
+
+function ruleOf(node: ValidationNode): Rule {
+  switch (node.kind) {
+    case 'all':
+      return { op: 'all', rules: node.children.map(ruleOf) };
+    case 'required':
+      return { op: 'required' };
+    case 'pattern':
+      return { op: 'pattern', pattern: node.pattern };
+    case 'range': {
+      const out: Extract<Rule, { op: 'range' }> = { op: 'range', of: node.of };
+      if (node.min !== undefined) out.min = node.min;
+      if (node.max !== undefined) out.max = node.max;
+      return out;
+    }
+    case 'enum':
+      return { op: 'enum', values: node.values };
+  }
+}
+
+/** toValidation emits the value rule of a tree; an empty root is none (null). */
+export function toValidation(root: ValidationNode): Rule | null {
+  const node = emittedValidationRoot(root);
+  if (!node) return null;
+  if (node === root && node.kind === 'all' && node.children.length === 0) return null;
+  return ruleOf(node);
+}
+
+/** validationChildren returns the nodes directly below a node. */
+export function validationChildren(node: ValidationNode): ValidationNode[] {
+  return node.kind === 'all' ? node.children : [];
+}
+
+/** validationStats counts the nodes and the depth of what a tree emits. */
+export function validationStats(root: ValidationNode): { nodes: number; depth: number } {
+  const count = (node: ValidationNode): { nodes: number; depth: number } => {
+    let nodes = 1;
+    let depth = 0;
+    for (const c of validationChildren(node)) {
+      const s = count(c);
+      nodes += s.nodes;
+      depth = Math.max(depth, s.depth);
+    }
+    return { nodes, depth: depth + 1 };
+  };
+  const node = emittedValidationRoot(root);
+  return node ? count(node) : { nodes: 0, depth: 0 };
+}
+
+/** validationPaths maps the server path of each node (ast, ast.rules[1] …) to its id. */
+export function validationPaths(root: ValidationNode, base = 'ast'): Map<string, string> {
+  const paths = new Map<string, string>();
+  const walk = (node: ValidationNode, path: string) => {
+    paths.set(path, node.id);
+    validationChildren(node).forEach((c, i) => walk(c, `${path}.rules[${i}]`));
+  };
+  const node = emittedValidationRoot(root);
+  if (node) walk(node, base);
+  if (!paths.has(base)) paths.set(base, root.id);
+  return paths;
+}
+
+/** validationNodeAtPath returns the id of the deepest node a server path names. */
+export function validationNodeAtPath(root: ValidationNode, path: string): string | undefined {
+  return deepestPath(validationPaths(root), path);
+}
+
+/** patternIssue checks a pattern as parseRule does (common subset of RE2 and ECMAScript). */
+function patternIssue(pattern: string): ValidationIssue | undefined {
+  if (pattern === '') return 'no_pattern';
+  if (/\(\?<?[=!]|\\[1-9]/.test(pattern)) return 'bad_pattern';
+  try {
+    new RegExp(pattern, 'u');
+  } catch {
+    return 'bad_pattern';
+  }
+  return undefined;
+}
+
+/** validationIssues checks each node for what the builder must complete before it goes out. */
+export function validationIssues(root: ValidationNode): Map<string, ValidationIssue> {
+  const issues = new Map<string, ValidationIssue>();
+  const walk = (node: ValidationNode, isRoot: boolean) => {
+    let issue: ValidationIssue | undefined;
+    switch (node.kind) {
+      case 'all':
+        if (!isRoot && node.children.length === 0) issue = 'empty_group';
+        node.children.forEach((c) => walk(c, false));
+        break;
+      case 'pattern':
+        issue = patternIssue(node.pattern);
+        break;
+      case 'range':
+        if (node.min === undefined && node.max === undefined) issue = 'no_bound';
+        else if (node.min !== undefined && node.max !== undefined && node.min > node.max) {
+          issue = 'min_above_max';
+        }
+        break;
+      case 'enum':
+        if (node.values.length === 0) issue = 'list_empty';
+        break;
+    }
+    if (issue) issues.set(node.id, issue);
+  };
+  walk(root, true);
+  return issues;
+}
+
+/** The result of checking a validation tree: the rule to send or the node and its problem. */
+export type ValidationCheck =
+  | { ok: true; ast: Rule | null }
+  | { ok: false; nodeId?: string; issue?: ValidationIssue; message?: string };
+
+/** checkValidation completes validationIssues with parseRule, so only a value rule goes out. */
+export function checkValidation(root: ValidationNode): ValidationCheck {
+  const first = validationIssues(root).entries().next();
+  if (!first.done) return { ok: false, nodeId: first.value[0], issue: first.value[1] };
+  const ast = toValidation(root);
+  if (ast === null) return { ok: true, ast };
+  try {
+    return { ok: true, ast: parseRule(ast) };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** mapValidationNode replaces the node of id by fn(node) (null removes it). */
+export function mapValidationNode(
+  node: ValidationNode,
+  id: string,
+  fn: (n: ValidationNode) => ValidationNode | null,
+): ValidationNode | null {
+  if (node.id === id) return fn(node);
+  if (node.kind !== 'all') return node;
+  const children = node.children.flatMap((c) => {
+    const next = mapValidationNode(c, id, fn);
+    return next ? [next] : [];
+  });
+  return { ...node, children };
+}
+
+// ─── The modes of the rule catalog ───────────────────────────────────────────
+
+/** The condition mode (WP-801): the condition grammar of api/rules.schema.json. */
+export interface ConditionMode {
+  id: 'condition';
+  nodeKinds: readonly (typeof CONDITION_NODE_KINDS)[number][];
+  junctions: readonly ConditionJunction[];
+  ops: readonly CompareOp[];
+  maxDepth: number;
+  maxNodes: number;
+}
+
+/** The validation mode (WP-801): the value rule AST (all, required, pattern, range, enum). */
+export interface ValidationMode {
+  id: 'validation';
+  nodeKinds: readonly ValidationNodeKind[];
+  maxDepth: number;
+  maxNodes: number;
+}
+
+/**
+ * The limits of the two modes: the server sets none for rules; the builder
+ * keeps those of the filter mode so a rule stays readable.
+ */
+export const CONDITION_MODE: ConditionMode = {
+  id: 'condition',
+  nodeKinds: CONDITION_NODE_KINDS,
+  junctions: CONDITION_JUNCTIONS,
+  ops: CONDITION_OPS,
+  maxDepth: MAX_FILTER_DEPTH,
+  maxNodes: MAX_FILTER_NODES,
+};
+
+export const VALIDATION_MODE: ValidationMode = {
+  id: 'validation',
+  nodeKinds: VALIDATION_NODE_KINDS,
+  maxDepth: MAX_FILTER_DEPTH,
+  maxNodes: MAX_FILTER_NODES,
+};
+
+/** The kinds of a catalog rule (MetamodelRuleKind). */
+export const RULE_KINDS = ['validation', 'required', 'readonly', 'visible'] as const;
+export type RuleKind = (typeof RULE_KINDS)[number];
+
+/**
+ * previewValue reads an input of the preview as a value of the field kind:
+ * a number for number fields, a boolean for bool fields; empty is absent.
+ */
+export function previewValue(kind: FieldKind | undefined, input: string): unknown {
+  if (input === '') return undefined;
+  if (kind === 'number') {
+    const n = Number(input);
+    return input.trim() !== '' && Number.isFinite(n) ? n : input;
+  }
+  if (kind === 'bool') return input === 'true';
+  return input;
 }

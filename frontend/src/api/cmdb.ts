@@ -456,6 +456,54 @@ export const templateApi = {
   },
 };
 
+// ─── Rule catalog (MET-45, WP-716, WP-801) ───────────────────────────────────
+
+/**
+ * A named rule of the rule catalog for one attribute of exactly one target
+ * (CI type, attribute set or template version); a system rule
+ * (is_system, no organization_id) is read-only.
+ */
+export type MetamodelRule = components['schemas']['MetamodelRule'];
+export type MetamodelRuleCreate = components['schemas']['MetamodelRuleCreate'];
+export type MetamodelRulePatch = components['schemas']['MetamodelRulePatch'];
+export type MetamodelRuleKind = components['schemas']['MetamodelRuleKind'];
+export type MetamodelRuleListResponse = components['schemas']['MetamodelRuleListResponse'];
+
+/** The filters of GET /rules; the catalog is organization-wide (no client or site). */
+export interface RuleFilter {
+  ci_type_id?: string;
+  attribute_set_id?: string;
+  template_version_id?: string;
+  attribute_key?: string;
+  kind?: MetamodelRuleKind;
+}
+
+export const ruleApi = {
+  /** One page of the catalog, newest first; next_cursor names the next one (API-02). */
+  list(filter: RuleFilter, cursor?: string): Promise<MetamodelRuleListResponse> {
+    return fetchAPI(`/rules${qs({ ...filter, limit: 50, cursor })}`);
+  },
+  get(id: string): Promise<MetamodelRule> {
+    return fetchAPI(`/rules/${id}`);
+  },
+  /**
+   * Creates a rule; with an active draft withDraft adds ?draft and the
+   * answer is the draft item (202), which names no rule: the caller does
+   * not ask for it by an id.
+   */
+  create(data: MetamodelRuleCreate): Promise<Drafted<MetamodelRule>> {
+    return fetchAPI('/rules', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** attribute_key, kind, condition, ast, message and is_active; null removes. */
+  update(id: string, data: MetamodelRulePatch): Promise<Drafted<MetamodelRule>> {
+    return fetchAPI(`/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** 204, or the draft item (202) while a draft is active. */
+  delete(id: string): Promise<MetamodelDraftItem | undefined> {
+    return fetchAPI(`/rules/${id}`, { method: 'DELETE' });
+  },
+};
+
 // ─── Templates at the CI, template migration, metamodel transfer (WP-800) ──
 
 /** A template assigned to a CI with the version it uses and its position (WP-710). */

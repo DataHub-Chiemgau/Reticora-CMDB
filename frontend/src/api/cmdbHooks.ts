@@ -29,6 +29,7 @@ import {
   isDraftItem,
   metamodelDraftApi,
   metamodelTransferApi,
+  ruleApi,
   savedViewApi,
   sensitiveFieldApi,
   tagApi,
@@ -50,7 +51,11 @@ import {
   type ReserveAssetRequest,
   type StockBooking,
   type MetamodelDraftItem,
+  type MetamodelRuleCreate,
+  type MetamodelRuleListResponse,
+  type MetamodelRulePatch,
   type MetamodelTestReportPage,
+  type RuleFilter,
   type SavedView,
   type TagWrite,
   type TemplateClone,
@@ -599,6 +604,80 @@ export function usePublishTemplateVersion() {
       templateApi.publishVersion(id, version),
     // current_version of the template changes as well.
     onSuccess: () => qc.invalidateQueries({ queryKey: TEMPLATES_KEY }),
+  });
+}
+
+/**
+ * The versions of each of the given templates (WP-314 list hook per
+ * template): the rule catalog names and offers template versions as
+ * targets (WP-801).
+ */
+export function useVersionsOfTemplates(templateIds: string[], options: QueryControl = {}) {
+  return useQueries({
+    queries: templateIds.map((id) => ({
+      queryKey: [...TEMPLATES_KEY, id, 'versions'],
+      queryFn: () => templateApi.versions(id),
+      enabled: options.enabled ?? true,
+      retry: false,
+    })),
+  });
+}
+
+// ─── Rule catalog (MET-45, WP-716, WP-801) ───────────────────────────────────
+
+const RULES_KEY = ['rules'];
+
+/**
+ * The catalog rules of a filter, page by page over next_cursor ("load
+ * more", API-02); a 404 is the switched-off module (E-105), no retry.
+ */
+export function useRules(filter: RuleFilter, options: QueryControl = {}) {
+  return useInfiniteQuery({
+    queryKey: [...RULES_KEY, 'list', filter],
+    queryFn: ({ pageParam }) => ruleApi.list(filter, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: MetamodelRuleListResponse) => last.next_cursor || undefined,
+    ...options,
+    retry: false,
+  });
+}
+
+/**
+ * A write of the catalog: a captured write (202 with the draft item) leaves
+ * the productive rules as they are, so the list is not read again; the
+ * item list of the draft follows itemRevision (WP-798).
+ */
+function onRuleWrite(qc: QueryClient) {
+  return (saved: unknown) => {
+    if (!isDraftItem(saved)) void qc.invalidateQueries({ queryKey: RULES_KEY });
+  };
+}
+
+/** POST /rules. */
+export function useCreateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: MetamodelRuleCreate) => ruleApi.create(data),
+    onSuccess: onRuleWrite(qc),
+  });
+}
+
+/** PATCH /rules/{id}; system rules are read-only (403). */
+export function useUpdateRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: MetamodelRulePatch }) =>
+      ruleApi.update(id, patch),
+    onSuccess: onRuleWrite(qc),
+  });
+}
+
+/** DELETE /rules/{id}. */
+export function useDeleteRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ruleApi.delete(id),
+    onSuccess: onRuleWrite(qc),
   });
 }
 

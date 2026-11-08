@@ -71,6 +71,8 @@ export default tseslint.config(
       'src/pages/SavedViewsPage.tsx',
       // WP-817: the tag administration (the saved views page is listed above).
       'src/pages/TagsPage.tsx',
+      // WP-801: the rule catalog.
+      'src/pages/RulesPage.tsx',
       // WP-806: the inventory page and the object history.
       'src/pages/InventoryPage.tsx',
       'src/components/cmdb/ObjectHistory.tsx',

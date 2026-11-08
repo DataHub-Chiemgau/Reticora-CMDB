@@ -29,15 +29,24 @@ import {
   RELATIONSHIP_CATEGORIES,
 } from '../pages/RelationshipTypesPage';
 import {
+  CONDITION_COLUMNS,
+  CONDITION_JUNCTIONS,
+  CONDITION_MODE,
   FILTER_ENTITY_KINDS,
   FILTER_FIELDS,
   FILTER_MODE,
   FILTER_NODE_KINDS,
   GROUP_JUNCTIONS,
   NODE_ISSUES,
+  RANGE_OF,
   RELATED_DIRECTIONS,
+  RULE_KINDS,
+  VALIDATION_ISSUES,
+  VALIDATION_NODE_KINDS,
 } from '../rules/builderModes';
 import { filterOps } from '../rules/filter';
+import { compareOps } from '../rules/rules';
+import { RULE_TARGETS } from '../pages/RulesPage';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -260,6 +269,22 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['rules.issues', NODE_ISSUES],
   ['rules.entityKinds', FILTER_ENTITY_KINDS],
   ['rules.entityKinds', specEnum('SavedView', 'entity_kind')],
+  // WP-801: the rule kinds and targets of the rule catalog, the operators
+  // and junctions of the condition mode, the node kinds, range measures and
+  // issues of the validation mode and the typed CI columns of a condition.
+  ['ruleCatalog.kinds', RULE_KINDS],
+  ['ruleCatalog.kinds', specEnum('MetamodelRuleKind')],
+  ['ruleCatalog.targets', RULE_TARGETS],
+  ['ruleCatalog.filters', RULE_TARGETS],
+  ['rules.conditionOps', CONDITION_MODE.ops],
+  ['rules.conditionOps', compareOps],
+  ['rules.conditionJunctions', CONDITION_JUNCTIONS],
+  ['rules.conditionJunctionHints', CONDITION_JUNCTIONS],
+  ['rules.validationKinds', VALIDATION_NODE_KINDS],
+  ['rules.validation.add', VALIDATION_NODE_KINDS],
+  ['rules.rangeOf', RANGE_OF],
+  ['rules.issues', VALIDATION_ISSUES],
+  ['savedviews.fields', CONDITION_COLUMNS],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
   ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
   // WP-321: the scan states of a document version (WP-733) and the link targets (WP-267).
@@ -421,6 +446,14 @@ describe('i18n catalog', () => {
     expect(lookup(enUS, 'nav.relationship-types')).toBe('Relationship types');
   });
 
+  it('labels the rule catalog in the navigation and the palette (WP-801)', () => {
+    expect(lookup(deDE, 'nav.rules')).toBe('Regelkatalog');
+    expect(lookup(enUS, 'nav.rules')).toBe('Rule catalog');
+    expect(lookup(deDE, 'commandPalette.commands.rules')).toBe('Regelkatalog öffnen');
+    expect(lookup(enUS, 'commandPalette.commands.rules')).toBe('Open rule catalog');
+    expect([...RULE_KINDS]).toEqual(specEnum('MetamodelRuleKind'));
+  });
+
   it('offers exactly the operators, directions and entity kinds of FilterExpr (WP-315)', () => {
     expect([...FILTER_MODE.ops].sort()).toEqual([...specEnum('FilterExpr', 'op')].sort());
     expect([...RELATED_DIRECTIONS]).toEqual(specEnum('FilterRelated', 'direction'));
@@ -468,6 +501,8 @@ describe('i18n catalog', () => {
     '../components/cmdb/CIRelationshipsCard.tsx',
     // WP-315: the saved views page and the click builder.
     '../pages/SavedViewsPage.tsx',
+    // WP-801: the rule catalog.
+    '../pages/RulesPage.tsx',
     // WP-806: the inventory page (the stock flow dialogs are flowSources).
     '../pages/InventoryPage.tsx',
     ...Object.keys(metamodelSources),

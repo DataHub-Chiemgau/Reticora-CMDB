@@ -62,11 +62,12 @@ var LateModules = []Module{
 	// templates (WP-251), rules (WP-716), layouts (WP-259), drafts, their
 	// test run and publication (WP-260, WP-721, WP-261) and the field
 	// permissions (WP-726). No feature key (cmdb_core, E-44); the page
-	// follows with WP-313.
+	// follows with WP-313. The rule catalog /rules (WP-801) is a page of
+	// its own and hides with the module.
 	{Key: ModuleMetamodel, Phase: "P2", Prefixes: []string{
 		"/api/v1/attribute-sets", "/api/v1/ci-types/{id}/attribute-sets", "/api/v1/templates", "/api/v1/rules",
 		"/api/v1/layouts", "/api/v1/metamodel", "/api/v1/field-permissions",
-	}, Nav: []string{"metamodel"}},
+	}, Nav: []string{"metamodel", "rules"}},
 	// Import of CSV/XLSX files (IMP-IO-01, E-105; feature key import).
 	{Key: "import", Phase: "P2", Prefixes: []string{"/api/v1/imports", "/api/v1/import-profiles"}, Nav: []string{"import"}},
 	{Key: "stocktake", Phase: "P2", Prefixes: []string{"/api/v1/stocktakes", "/api/v1/consumables", "/api/v1/orders"},
