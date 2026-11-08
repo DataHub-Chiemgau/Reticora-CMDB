@@ -900,12 +900,12 @@ func TestFilterASTTypedAttributes(t *testing.T) {
 	for _, c := range []struct{ kind, raw, want string }{
 		// The string "16" is a number by the definition.
 		{"ci", `{"field": "attributes.ram_gb", "op": "gte", "value": "16"}`,
-			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END >= $2::numeric`},
+			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(ci.attributes, 'ram_gb'))::numeric END >= $2::numeric`},
 		{"ci", `{"field": "attributes.ram_gb", "op": "between", "value": ["8", 64]}`,
-			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END BETWEEN $2::numeric AND $3::numeric`},
+			`CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(ci.attributes, 'ram_gb'))::numeric END BETWEEN $2::numeric AND $3::numeric`},
 		// Equality on text is the index expression with the key as a literal.
 		{"ci", `{"field": "attributes.env", "op": "eq", "value": "prod"}`,
-			`(ci.ci_type_id = ANY($2::uuid[]) AND reticora_attr_text(attributes, 'env') = $3)`},
+			`(ci.ci_type_id = ANY($2::uuid[]) AND reticora_attr_text(ci.attributes, 'env') = $3)`},
 		{"ci", `{"field": "asset.attributes.room", "op": "eq", "value": "R1"}`,
 			`EXISTS (SELECT 1 FROM asset sa WHERE sa.id = ci.asset_id AND sa.custom_fields->>$2 = $3)`},
 		{"ci", `{"field": "asset.attributes.acquired", "op": "between", "value": ["2024-01-01", "2024-12-31"]}`,
@@ -936,7 +936,7 @@ func TestFilterASTTypedAttributes(t *testing.T) {
 	// The flat attributes are eq comparisons of the AST under the catalog.
 	spec := FilterSpec{Attributes: map[string]any{"ram_gb": "16"}}
 	where, args, err := spec.compile("ci", cat, []any{"org"}, 2)
-	if want := `CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(attributes, 'ram_gb'))::numeric END = $2::numeric`; err != nil ||
+	if want := `CASE WHEN jsonb_typeof(ci.attributes->'ram_gb') = 'number' THEN (reticora_attr_text(ci.attributes, 'ram_gb'))::numeric END = $2::numeric`; err != nil ||
 		where != want || len(args) != 2 {
 		t.Errorf("flat attribute: %s %v (%v), want %s", where, args, err, want)
 	}
@@ -1085,9 +1085,9 @@ func TestFilterASTRelatedCatalog(t *testing.T) {
 		{"related": {"direction": "out", "where": {"field": "attributes.days", "op": "lt", "value": "30"}}}]}`).compile("ci", "ci", cat, []any{"org"}, 2)
 	got := squash(sql)
 	for _, want := range []string{
-		`(reticora_attr_text(attributes, 'days') = $2 AND ci.id IN`,
+		`(reticora_attr_text(ci.attributes, 'days') = $2 AND ci.id IN`,
 		`WHERE rn1.deleted_at IS NULL AND (rn1.ci_type_id = ANY($3::uuid[]) AND CASE WHEN jsonb_typeof(rn1.attributes->'days') = 'number' ` +
-			`THEN (reticora_attr_text(attributes, 'days'))::numeric END < $4::numeric)`,
+			`THEN (reticora_attr_text(rn1.attributes, 'days'))::numeric END < $4::numeric)`,
 	} {
 		if err != nil || !strings.Contains(got, want) {
 			t.Errorf("%q missing in %s (%v)", want, got, err)

@@ -345,7 +345,7 @@ func initialSnapshot(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
 	var version int64
 	var deleted bool
 	var mergedInto string
-	if err := tx.QueryRow(ctx, `SELECT jsonb_strip_nulls(to_jsonb(c) - 'hostname_lc' - 'fqdn_lc' - 'serial_number_lc'),
+	if err := tx.QueryRow(ctx, `SELECT jsonb_strip_nulls(to_jsonb(c) - 'hostname_lc' - 'fqdn_lc' - 'serial_number_lc' - 'warranty_days_left_num'),
 			c.version, c.deleted_at IS NOT NULL, COALESCE(c.merged_into_id::text, '')
 		FROM ci c WHERE c.organization_id = $1 AND c.id = $2::uuid`, orgID, ciID).Scan(&raw, &version, &deleted, &mergedInto); err != nil {
 		return fmt.Errorf("read ci: %w", err)

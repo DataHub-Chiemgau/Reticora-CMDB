@@ -2,6 +2,7 @@ package savedview_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -39,10 +40,11 @@ import (
 //     CIs. Without the index the check names it (negative case, dropped in
 //     a transaction that is rolled back).
 //   - The attribute filter on warranty_days_left (WP-718, the preset
-//     warranty_expiring) compares the computed system attribute, for which
-//     no index is built (000225, K22, SR-04), under row level security
-//     (E-133): its plan as the application role is logged without an
-//     assertion; WP-327 rates it with the p95 of ci_attr_filter.
+//     warranty_expiring) compares the computed system attribute under row
+//     level security (E-133): count and page read the hits through
+//     idx_ci_warranty_days_left over the stored column
+//     ci.warranty_days_left_num (000274, finding of WP-824) and at most
+//     1 % of the organization's CIs; without the index the check names it.
 //     TestCIQueryBudget covers the attribute filter of the CI list.
 //
 // The checks run with organization A alone and again with 5,000 CIs,
@@ -227,6 +229,7 @@ func TestSavedViewQueryBudget(t *testing.T) {
 	}
 	warranty := &savedview.FilterSpec{EntityKind: "ci", Where: &savedview.Expr{Field: "attributes.warranty_days_left", Op: savedview.OpLte,
 		Value: float64(savedview.WarrantyExpiringDays)}}
+	warrantyBudget := &scopetest.QueryBudget{Tables: []string{"ci"}, Indexes: [][]string{{"idx_ci_warranty_days_left"}}, MaxRows: maxRows}
 	orgWide := database.OrgWideScope(f.OrgA, f.User)
 	check := func(state string) {
 		t.Helper()
@@ -245,7 +248,8 @@ func TestSavedViewQueryBudget(t *testing.T) {
 			scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, c.name+" (page)", scopetest.Statement(t, stmts, " ORDER BY "), c.budget)
 		}
 
-		// The attribute filter on warranty_days_left: logged only (E-133).
+		// The attribute filter on warranty_days_left: the hits (every
+		// hundredth CI) through idx_ci_warranty_days_left (000274).
 		var got []string
 		stmts := trace.Run(t, func() error {
 			var err error
@@ -255,10 +259,9 @@ func TestSavedViewQueryBudget(t *testing.T) {
 		if len(got) != orgCIs/100 {
 			t.Errorf("%s, warranty_days_left <= %d: %d CIs, want %d", state, savedview.WarrantyExpiringDays, len(got), orgCIs/100)
 		}
-		page := scopetest.Statement(t, stmts, " ORDER BY ")
-		reads := scopetest.ReadPlan(t, scopetest.AnalyzeAsApp(t, f.App, &orgWide, page))
-		t.Logf("%s, attribute filter warranty_days_left (E-133, rated by WP-327 with ci_attr_filter): %d rows of ci read: %s",
-			state, reads.Rows["ci"], reads.Plan)
+		name := fmt.Sprintf("attribute filter warranty_days_left <= %d", savedview.WarrantyExpiringDays)
+		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, name+" (count)", scopetest.Statement(t, stmts, "SELECT COUNT(*) FROM ci"), warrantyBudget)
+		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, name+" (page)", scopetest.Statement(t, stmts, " ORDER BY "), warrantyBudget)
 	}
 	check("organization A alone")
 	seed(f.OrgB, []any{nil, nil}, 5000, 2500)

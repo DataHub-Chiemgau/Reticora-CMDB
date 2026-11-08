@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000273_ci_parent_cycle_lock
+Stand: Migration 000274_ci_warranty_days_left_index
 
 ## Prüfung
 
@@ -81,6 +81,14 @@ Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_name ON ci (organization_id, name, id) WHERE deleted_at IS NULL;
+```
+
+Ebenso der Index des Filters auf `warranty_days_left` (Befund WP-824,
+Migration 000274; die gespeicherte Spalte `warranty_days_left_num` legt die
+Migration an, der Index kann danach vor dem übrigen Update gebaut werden):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_warranty_days_left ON ci (organization_id, warranty_days_left_num) WHERE deleted_at IS NULL AND warranty_days_left_num IS NOT NULL;
 ```
 
 Ebenso der Index der Adressen einer Schnittstelle (WP-608, NFR-03):
@@ -497,6 +505,18 @@ für jede Tabelle mit RLS:
   text)` (000162, E-73 Korrekturplan); die Indizes `idx_attr_*` sind damit
   unter RLS nutzbar. Nach E-133 setzt keine weitere Migration eine Funktion
   `LEAKPROOF`.
+- Zahlenvergleiche (`numeric`) eines Attributs sind damit nicht indexfähig.
+  Für das berechnete Systemattribut `warranty_days_left` (000225) legt
+  Migration 000274 die gespeicherte Spalte `ci.warranty_days_left_num`
+  (`double precision GENERATED ALWAYS AS … STORED`, NULL außer für eine
+  JSON-Zahl, begrenzt auf ±Infinity bzw. 0, wirft nie) mit dem Index
+  `idx_ci_warranty_days_left (organization_id, warranty_days_left_num)
+  WHERE deleted_at IS NULL AND warranty_days_left_num IS NOT NULL` an. Der
+  Filter der gespeicherten Sichten vergleicht die Spalte mit den leakproof
+  `float8`-Operatoren als grobe Indexbedingung (Operand mit derselben
+  monotonen Abbildung) und behält den exakten `numeric`-Vergleich daneben,
+  die Treffer bleiben gleich (`TestWarrantyDaysLeftIndexKeepsResults`,
+  `TestSavedViewQueryBudget`). `ne` und `exists` bleiben ohne Index.
 
 Migration 000191 entfernt `idx_ci_fts` (`to_tsvector` über `ci`, 000021): Keine
 Abfrage nutzte den Ausdruck, die Volltextsuche liest
