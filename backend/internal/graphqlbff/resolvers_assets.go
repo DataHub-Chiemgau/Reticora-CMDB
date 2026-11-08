@@ -336,3 +336,71 @@ func (a *assetResolver) Tags(ctx context.Context, obj *asset.Asset) ([]string, e
 	}
 	return obj.Tags, nil
 }
+
+// Field permissions of the document (RBA-07, WP-267, finding F-1 of
+// WP-326): the fields of the document policy resolve with the policy of
+// the request like the REST projection (document.Project), an unreadable
+// one is null. The structural members (id, title, version, scanStatus,
+// timestamps) stay.
+
+type documentResolver struct{ *Resolver }
+
+// documentReadable reports whether the principal may read the document
+// field at the DTO path.
+func documentReadable(ctx context.Context, obj *document.Document, path string) (bool, error) {
+	p, err := policy(ctx)
+	if err != nil {
+		return false, err
+	}
+	return document.Readable(p, obj, path), nil
+}
+
+// documentField returns value when the field at path is readable, null
+// otherwise.
+func documentField[T any](ctx context.Context, obj *document.Document, path string, value T) (*T, error) {
+	ok, err := documentReadable(ctx, obj, path)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func (d *documentResolver) Description(ctx context.Context, obj *document.Document) (*string, error) {
+	return documentField(ctx, obj, "description", obj.Description)
+}
+
+func (d *documentResolver) FileName(ctx context.Context, obj *document.Document) (*string, error) {
+	return documentField(ctx, obj, "file_name", obj.FileName)
+}
+
+func (d *documentResolver) FileSize(ctx context.Context, obj *document.Document) (*int, error) {
+	return documentField(ctx, obj, "file_size", int(obj.FileSize))
+}
+
+func (d *documentResolver) MimeType(ctx context.Context, obj *document.Document) (*string, error) {
+	return documentField(ctx, obj, "mime_type", obj.MimeType)
+}
+
+func (d *documentResolver) Category(ctx context.Context, obj *document.Document) (*string, error) {
+	return documentField(ctx, obj, "category", obj.Category)
+}
+
+// Tags returns the tag keys; null when the document policy hides them.
+func (d *documentResolver) Tags(ctx context.Context, obj *document.Document) ([]string, error) {
+	ok, err := documentReadable(ctx, obj, "tags")
+	if err != nil || !ok {
+		return nil, err
+	}
+	if obj.Tags == nil {
+		return []string{}, nil
+	}
+	return obj.Tags, nil
+}
+
+// UploadedBy returns the uploader; null when unreadable or unknown.
+func (d *documentResolver) UploadedBy(ctx context.Context, obj *document.Document) (*string, error) {
+	if obj.UploadedBy == "" {
+		return nil, nil //nolint:nilnil // GraphQL null for an unknown uploader
+	}
+	return documentField(ctx, obj, "uploaded_by", obj.UploadedBy)
+}

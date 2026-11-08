@@ -7,6 +7,7 @@
 import { ChevronRight, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import {
   useInstanceFields,
   useUpsertInstanceField,
@@ -478,10 +479,16 @@ export function LifecycleSection({
   entityType,
   entityId,
   currentState,
+  onAssign,
+  onReserve,
 }: {
   entityType: 'assets' | 'cis';
   entityId: string;
   currentState?: string;
+  /** onAssign opens the assignment of an asset for a missing assignee (WP-809). */
+  onAssign?: () => void;
+  /** onReserve opens the reservation of an asset for a missing reservation (WP-809). */
+  onReserve?: () => void;
 }) {
   const { t } = useTranslation();
   const options = useLifecycleOptions(entityType, entityId);
@@ -574,13 +581,112 @@ export function LifecycleSection({
           {t('lifecycle.apply', 'Anwenden')}
         </Button>
       </div>
-      {error ? (
+      {error && entityType === 'assets' && assetRefusal(error) ? (
+        <AssetLifecycleRefusal
+          error={error as ApiError}
+          onAssign={onAssign}
+          onReserve={onReserve}
+        />
+      ) : error ? (
         <p role="alert" className="mt-2 text-sm text-danger">
           {String(error.message || error)}
           {violated.length > 0 ? `: ${violated.join(', ')}` : null}
         </p>
       ) : null}
     </Section>
+  );
+}
+
+/** The problem type of a failed guard of a lifecycle transition (WP-279). */
+export const PROBLEM_LIFECYCLE_GUARD = 'urn:reticora:problem:lifecycle-guard';
+/** The problem type of a transition the model does not allow (WP-724). */
+export const PROBLEM_INVALID_TRANSITION = 'urn:reticora:problem:invalid-transition';
+
+/** LIFECYCLE_GUARDS are the system guards of an asset (LCY-03, WP-279), labelled under lifecycle.guards. */
+export const LIFECYCLE_GUARDS = [
+  'storage_location',
+  'operations_location_or_holder',
+  'disposal_record',
+  'active_reservation',
+] as const;
+
+/** LIFECYCLE_MISSING are the references a failed guard misses, labelled under lifecycle.missing. */
+export const LIFECYCLE_MISSING = [
+  'location_id',
+  'assignee',
+  'disposal_record',
+  'reservation',
+] as const;
+
+/**
+ * assetRefusal tells whether a refused asset transition is worded by
+ * AssetLifecycleRefusal: a failed system guard (lifecycle-guard with
+ * guard) or a transition the model does not allow (invalid-transition).
+ * Guard rules of the model keep the message with the violated fields.
+ */
+function assetRefusal(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 422) return false;
+  if (error.type === PROBLEM_INVALID_TRANSITION) return true;
+  return (
+    error.type === PROBLEM_LIFECYCLE_GUARD &&
+    (LIFECYCLE_GUARDS as readonly string[]).includes(error.guard ?? '')
+  );
+}
+
+/**
+ * AssetLifecycleRefusal words a refused transition of an asset (WP-809):
+ * the translated guard instead of the raw problem, and for every missing
+ * reference what is missing, with the way to supply it: the assignment or
+ * the reservation dialog of the page, a link to the disposal records.
+ */
+function AssetLifecycleRefusal({
+  error,
+  onAssign,
+  onReserve,
+}: {
+  error: ApiError;
+  onAssign?: () => void;
+  onReserve?: () => void;
+}) {
+  const { t } = useTranslation();
+  if (error.type === PROBLEM_INVALID_TRANSITION) {
+    return (
+      <p role="alert" className="mt-2 text-sm text-danger">
+        {t('lifecycle.invalidTransition')}
+      </p>
+    );
+  }
+  const missing = error.missing.filter((ref) =>
+    (LIFECYCLE_MISSING as readonly string[]).includes(ref),
+  );
+  return (
+    <div role="alert" className="mt-2 space-y-1.5 text-sm">
+      <p className="text-danger">{t(`lifecycle.guards.${error.guard}`)}</p>
+      {missing.length > 0 ? (
+        <ul className="space-y-1.5">
+          {missing.map((ref) => (
+            <li key={ref} className="flex flex-wrap items-center gap-2 text-fg">
+              <span>{t(`lifecycle.missing.${ref}`)}</span>
+              {ref === 'assignee' && onAssign ? (
+                <Button size="sm" variant="secondary" onClick={onAssign}>
+                  {t('lifecycle.actions.assign')}
+                </Button>
+              ) : null}
+              {ref === 'reservation' && onReserve ? (
+                <Button size="sm" variant="secondary" onClick={onReserve}>
+                  {t('lifecycle.actions.reserve')}
+                </Button>
+              ) : null}
+              {ref === 'disposal_record' ? (
+                <Link to="/disposal" className="font-medium text-accent underline">
+                  {t('lifecycle.actions.disposal')}
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

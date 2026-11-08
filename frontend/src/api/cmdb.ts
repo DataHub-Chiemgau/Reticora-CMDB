@@ -310,6 +310,62 @@ export const ciTypeApi = {
   },
 };
 
+// ─── Value suggestions of the guided creation (MET-51, WP-317) ───────────────
+
+/** SUGGESTION_LIMIT is the page of CIs a suggestion request reads. */
+export const SUGGESTION_LIMIT = 50;
+
+/** The request of value suggestions for manufacturer or model of one CI type. */
+export interface CIValueSuggestionQuery {
+  ciTypeId: string;
+  field: 'manufacturer' | 'model';
+  /** input is the typed prefix; empty suggests every stored value. */
+  input: string;
+  /** manufacturer narrows the model suggestions to the chosen manufacturer. */
+  manufacturer?: string;
+}
+
+/**
+ * likePrefix is the prefix filter of an input: * is the only wildcard of
+ * like (API-02) and cannot be escaped, so a typed * is dropped.
+ */
+function likePrefix(input: string) {
+  return `${input.split('*').join('')}*`;
+}
+
+export const ciValueApi = {
+  /**
+   * suggestions reads the stored values of manufacturer or model of the
+   * CIs of one type: GET /cis with the type, a prefix filter and the sparse
+   * fieldset manufacturer,model (limit 50), deduplicated by value in the
+   * order of the answer. There is no distinct endpoint; /cis is a scoped
+   * list, so the suggestions follow the chosen scope.
+   */
+  async suggestions({ ciTypeId, field, input, manufacturer }: CIValueSuggestionQuery) {
+    const params: Record<string, string | number> = {
+      'filter[ci_type_id]': ciTypeId,
+      fields: 'manufacturer,model',
+      limit: SUGGESTION_LIMIT,
+    };
+    if (field === 'manufacturer') {
+      params['filter[manufacturer][like]'] = likePrefix(input.trim());
+    } else {
+      if (manufacturer?.trim()) params['filter[manufacturer]'] = manufacturer.trim();
+      params['filter[model][like]'] = likePrefix(input.trim());
+    }
+    const page = await fetchAPI<PaginatedResponse<CI>>(`/cis${qs(params)}`);
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const row of page.data ?? []) {
+      const value = row[field]?.trim();
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      values.push(value);
+    }
+    return values;
+  },
+};
+
 /** The parameters of GET /ci-types/{id}/form (WP-719). */
 export interface ResolvedFormParams {
   template_id?: string;
@@ -1028,7 +1084,7 @@ export async function resolveScannedCode(code: string): Promise<ScannedObject> {
       kind: 'asset',
       id: asset.id,
       name: asset.name,
-      code: asset.inventory_no ?? asset.asset_tag,
+      code: asset.inventory_no,
     };
   }
   if (urn?.kind === 'consumable') {

@@ -85,6 +85,9 @@ export const navFeatureFor: Record<string, string | undefined> = {
   discovery: 'discovery',
   assets: 'assets_basic',
   assignments: 'assets_basic',
+  // Contracts and suppliers (MGT-12, WP-808) follow assets_basic (E-44, WP-244).
+  contracts: 'assets_basic',
+  suppliers: 'assets_basic',
   documents: 'documents',
   stocktake: 'stocktake_standard',
   consumables: 'stock',

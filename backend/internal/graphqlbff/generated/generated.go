@@ -45,6 +45,7 @@ type ResolverRoot interface {
 	Asset() AssetResolver
 	CI() CIResolver
 	CIForm() CIFormResolver
+	Document() DocumentResolver
 	FormField() FormFieldResolver
 	FormRule() FormRuleResolver
 	FormSection() FormSectionResolver
@@ -433,6 +434,16 @@ type CIFormResolver interface {
 	LayoutID(ctx context.Context, obj *citype.ResolvedForm) (*string, error)
 
 	RequiredFields(ctx context.Context, obj *citype.ResolvedForm) ([]string, error)
+}
+type DocumentResolver interface {
+	Description(ctx context.Context, obj *document.Document) (*string, error)
+	FileName(ctx context.Context, obj *document.Document) (*string, error)
+	FileSize(ctx context.Context, obj *document.Document) (*int, error)
+	MimeType(ctx context.Context, obj *document.Document) (*string, error)
+
+	Category(ctx context.Context, obj *document.Document) (*string, error)
+	Tags(ctx context.Context, obj *document.Document) ([]string, error)
+	UploadedBy(ctx context.Context, obj *document.Document) (*string, error)
 }
 type FormFieldResolver interface {
 	Definition(ctx context.Context, obj *citype.FormField) (map[string]any, error)
@@ -2452,16 +2463,19 @@ type Movement {
   createdAt: Time!
 }
 
+# The fields under field permissions (RBA-07, object kind document,
+# WP-267): description, fileName, fileSize, mimeType, category, tags and
+# uploadedBy are null when the principal may not read them.
 type Document {
   id: ID!
   title: String!
   description: String
-  fileName: String!
-  fileSize: Int!
-  mimeType: String!
+  fileName: String
+  fileSize: Int
+  mimeType: String
   version: Int!
-  category: String!
-  tags: [String!]!
+  category: String
+  tags: [String!]
   uploadedBy: ID
   scanStatus: String
   createdAt: Time!
@@ -5564,18 +5578,18 @@ func (ec *executionContext) _Document_description(ctx context.Context, field gra
 			return ec.fieldContext_Document_description(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Description, nil
+			return ec.Resolvers.Document().Description(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_description(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Document_fileName(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5587,18 +5601,18 @@ func (ec *executionContext) _Document_fileName(ctx context.Context, field graphq
 			return ec.fieldContext_Document_fileName(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.FileName, nil
+			return ec.Resolvers.Document().FileName(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalNString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
-		true,
+		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_fileName(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Document_fileSize(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5610,18 +5624,18 @@ func (ec *executionContext) _Document_fileSize(ctx context.Context, field graphq
 			return ec.fieldContext_Document_fileSize(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.FileSize, nil
+			return ec.Resolvers.Document().FileSize(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v int64) graphql.Marshaler {
-			return ec.marshalNInt2int64(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *int) graphql.Marshaler {
+			return ec.marshalOInt2ᚖint(ctx, selections, v)
 		},
 		true,
-		true,
+		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_fileSize(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type Int does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type Int does not have child fields"))
 }
 
 func (ec *executionContext) _Document_mimeType(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5633,18 +5647,18 @@ func (ec *executionContext) _Document_mimeType(ctx context.Context, field graphq
 			return ec.fieldContext_Document_mimeType(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.MimeType, nil
+			return ec.Resolvers.Document().MimeType(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalNString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
-		true,
+		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_mimeType(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Document_version(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5679,18 +5693,18 @@ func (ec *executionContext) _Document_category(ctx context.Context, field graphq
 			return ec.fieldContext_Document_category(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Category, nil
+			return ec.Resolvers.Document().Category(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalNString2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOString2ᚖstring(ctx, selections, v)
 		},
 		true,
-		true,
+		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_category(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Document_tags(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5702,18 +5716,18 @@ func (ec *executionContext) _Document_tags(ctx context.Context, field graphql.Co
 			return ec.fieldContext_Document_tags(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.Tags, nil
+			return ec.Resolvers.Document().Tags(ctx, obj)
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []string) graphql.Marshaler {
-			return ec.marshalNString2ᚕstringᚄ(ctx, selections, v)
+			return ec.marshalOString2ᚕstringᚄ(ctx, selections, v)
 		},
 		true,
-		true,
+		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_tags(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type String does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type String does not have child fields"))
 }
 
 func (ec *executionContext) _Document_uploadedBy(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -5725,18 +5739,18 @@ func (ec *executionContext) _Document_uploadedBy(ctx context.Context, field grap
 			return ec.fieldContext_Document_uploadedBy(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return obj.UploadedBy, nil
+			return ec.Resolvers.Document().UploadedBy(ctx, obj)
 		},
 		nil,
-		func(ctx context.Context, selections ast.SelectionSet, v string) graphql.Marshaler {
-			return ec.marshalOID2string(ctx, selections, v)
+		func(ctx context.Context, selections ast.SelectionSet, v *string) graphql.Marshaler {
+			return ec.marshalOID2ᚖstring(ctx, selections, v)
 		},
 		true,
 		false,
 	)
 }
 func (ec *executionContext) fieldContext_Document_uploadedBy(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	return graphql.NewScalarFieldContext("Document", field, false, false, errors.New("field of type ID does not have child fields"))
+	return graphql.NewScalarFieldContext("Document", field, true, true, errors.New("field of type ID does not have child fields"))
 }
 
 func (ec *executionContext) _Document_scanStatus(ctx context.Context, field graphql.CollectedField, obj *document.Document) (ret graphql.Marshaler) {
@@ -12554,67 +12568,298 @@ func (ec *executionContext) _Document(ctx context.Context, sel ast.SelectionSet,
 		case "id":
 			out.Values[i] = ec._Document_id(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "title":
 			out.Values[i] = ec._Document_title(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "description":
-			out.Values[i] = ec._Document_description(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_description(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "fileName":
-			out.Values[i] = ec._Document_fileName(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_fileName(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "fileSize":
-			out.Values[i] = ec._Document_fileSize(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_fileSize(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "mimeType":
-			out.Values[i] = ec._Document_mimeType(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_mimeType(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "version":
 			out.Values[i] = ec._Document_version(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "category":
-			out.Values[i] = ec._Document_category(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_category(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "tags":
-			out.Values[i] = ec._Document_tags(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_tags(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "uploadedBy":
-			out.Values[i] = ec._Document_uploadedBy(ctx, field, obj)
-			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+			field := field
+
+			innerFunc := func(ctx context.Context, fs *graphql.FieldSet) (res graphql.Marshaler) {
+				defer func() {
+					if r := recover(); r != nil {
+						ec.Error(ctx, ec.Recover(ctx, r))
+					}
+				}()
+				res = ec._Document_uploadedBy(ctx, field, obj)
+				if res == graphql.RequiredNull {
+					atomic.AddUint32(&fs.Invalids, 1)
+				}
+				return res
 			}
+
+			if field.IsDeferred() {
+				deferredFieldSet.AddField(field)
+				fieldIndex := len(deferredFieldSet.Values) - 1
+				deferredFieldSet.Concurrently(fieldIndex, func(ctx context.Context) graphql.Marshaler {
+					return innerFunc(ctx, deferredFieldSet)
+				})
+
+				for _, deferrable := range field.Deferrables {
+					view, ok := deferLabelToView[deferrable.Label]
+					if !ok {
+						view = deferredFieldSet.NewView()
+						deferLabelToView[deferrable.Label] = view
+					}
+					view.AddIndices(fieldIndex)
+				}
+
+				// don't run the out.Concurrently() call below
+				out.Values[i] = graphql.Null
+				continue
+			}
+
+			out.Concurrently(i, func(ctx context.Context) graphql.Marshaler { return innerFunc(ctx, out) })
 		case "scanStatus":
 			out.Values[i] = ec._Document_scanStatus(ctx, field, obj)
 			if out.Values[i] == graphql.RequiredNull {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "createdAt":
 			out.Values[i] = ec._Document_createdAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		case "updatedAt":
 			out.Values[i] = ec._Document_updatedAt(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
-				out.Invalids++
+				atomic.AddUint32(&out.Invalids, 1)
 			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))

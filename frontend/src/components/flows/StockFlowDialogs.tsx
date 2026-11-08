@@ -481,11 +481,19 @@ export function MoveStockDialog({
  * POST /assets/{id}/transfer changes the holder; neither is used here.
  * Offer it only with useStockFlowGates().moveAsset.
  */
-export function MoveAssetDialog({ open, onOpenChange }: StockFlowDialogProps) {
+export function MoveAssetDialog({
+  open,
+  onOpenChange,
+  initialAsset,
+}: StockFlowDialogProps & {
+  /** initialAsset is the asset of the asset detail page (WP-809); the dialog opens with it. */
+  initialAsset?: PickedObject;
+}) {
   const { t } = useTranslation();
   const booking = useStockBooking();
   const { scheduleSubmit } = useUndoableSubmit();
   const [asset, setAsset] = useState<PickedObject[]>([]);
+  useInitialObject(open, initialAsset, setAsset);
   const [to, setTo] = useState<PickedLocation | null>(null);
   const [reason, setReason] = useState('');
 

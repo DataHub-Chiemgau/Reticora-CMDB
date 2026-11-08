@@ -14,15 +14,20 @@
 # (result-<job>.txt), the seed duration and the seeded volumes, the
 # integrity check, the database cost report, the summaries of the slow
 # plans and of the CPU profile, /readyz and the failed requests by name and
-# status (failed-<job>.txt, tests/load/failed-requests.sh, F-388). Server and PostgreSQL logs and
-# the binary profile stay in the artifacts of the run.
+# status (failed-<job>.txt, tests/load/failed-requests.sh, F-388). A write
+# job of writes.js (WP-823) also leaves the summary and output of the
+# ingest beside it (<job>-ingest.json, <job>-ingest.txt), its failed
+# requests (failed-<job>-ingest.txt) and the size of the organization at
+# its end (size-<job>.txt). Server and PostgreSQL logs and the binary
+# profile stay in the artifacts of the run.
 #
 # <archive>/ergebnis.md lists the run (from the environment of the
 # workflow: GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, GITHUB_SHA, GITHUB_REF_NAME,
 # GITHUB_EVENT_NAME, RUN_URL, SERVER_SHA, INPUT_OBJECTS, INPUT_DURATION,
 # INPUT_SCENARIOS, INPUT_SERVER_REF), whether every selected job left an
 # artifact and is green, and per job its outcome, host, configuration and
-# every k6 threshold with the measured value; <archive>/SHA256SUMS holds
+# every k6 threshold with the measured value, for a write job also those
+# of the ingest beside it; <archive>/SHA256SUMS holds
 # the checksums of the archive. A job without an artifact is listed as
 # missing. The script fails only on wrong arguments: a red or missing job
 # is a result the archive records.
@@ -56,7 +61,7 @@ mkdir -p "$archive"
 
 # The files of a job the archive keeps (%s is the job).
 keep=(%s.json %s.txt run-%s.txt result-%s.txt seed-%s.txt volumes-%s.txt integrity-%s.txt statements-%s.txt
-	slow-plans-%s.txt cpu-%s.txt readyz-%s.json failed-%s.txt)
+	slow-plans-%s.txt cpu-%s.txt readyz-%s.json failed-%s.txt %s-ingest.json %s-ingest.txt failed-%s-ingest.txt size-%s.txt)
 
 # field FILE KEY: the value after "KEY:" in a record file, else "–".
 field() {
@@ -94,7 +99,8 @@ failed() {
 }
 
 # measures JSON: the measures of the scenarios without a threshold
-# (ingest_*, bulk_*) and the totals of the run.
+# (ingest_*, bulk_*, the write jobs import_*, template_*, computed_*) and
+# the totals of the run.
 measures() {
 	jq -r '
 		def num: if type == "number" then ((. * 10 | round) / 10 | tostring) else "–" end;
@@ -102,7 +108,7 @@ measures() {
 			elif has("p(95)") then "p(95) \(.["p(95)"] | num), max \(.max | num), count \(.count | num)"
 			else "count \(.count | num)" end;
 		.metrics as $all
-		| ($all | to_entries | sort_by(.key)[] | select((.key | test("^(ingest|bulk)_")) and (.value.thresholds | not))
+		| ($all | to_entries | sort_by(.key)[] | select((.key | test("^(ingest|bulk|import|template|computed)_")) and (.value.thresholds | not))
 			| "| `\(.key)` | \(.value | stats) |"),
 		"| `checks` | \($all.checks.passes // 0) bestanden, \($all.checks.fails // 0) fehlgeschlagen |",
 		"| `http_reqs` | \($all.http_reqs.count // 0) |",
@@ -124,7 +130,7 @@ for job in "${jobs[@]}"; do
 		if [ ! -f "$src/$f" ]; then
 			continue
 		fi
-		if [ "$f" = "$job.txt" ]; then
+		if [ "$f" = "$job.txt" ] || [ "$f" = "$job-ingest.txt" ]; then
 			# The k6 output without its progress lines (one block per
 			# second of the run); the full output stays in the artifact.
 			grep -vE '^running \(|^[[:alnum:]_]+ +(✓ |✗ )?\[ *[0-9]+% \]' "$src/$f" | cat -s >"$archive/$job/$f" || true
@@ -192,6 +198,12 @@ join() {
 		if [ -f "$dir/failed-$job.txt" ]; then
 			echo "| Fehlgeschlagene Anfragen | $(failed "$dir/failed-$job.txt") |"
 		fi
+		if [ -f "$dir/failed-$job-ingest.txt" ]; then
+			echo "| Fehlgeschlagene Anfragen des Ingest | $(failed "$dir/failed-$job-ingest.txt") |"
+		fi
+		if [ -f "$dir/size-$job.txt" ]; then
+			echo "| Größe am Jobende | $(tr '\n' ';' <"$dir/size-$job.txt" | sed 's/|/ /g; s/;$//; s/;/, /g') |"
+		fi
 		if [ -f "$dir/integrity-$job.txt" ]; then
 			echo "| Integritätsprüfung | $(awk -F'|' '{s += $2; n++} END {print s + 0 " Verletzungen in " n + 0 " Prüfungen"}' "$dir/integrity-$job.txt") |"
 		fi
@@ -207,6 +219,19 @@ join() {
 		echo "| Messgröße | Wert |"
 		echo "|---|---|"
 		measures "$dir/$job.json"
+		# The ingest beside a write job (WP-823).
+		if [ -f "$dir/$job-ingest.json" ]; then
+			echo
+			echo "Paralleler Ingest (\`$job-ingest.json\`):"
+			echo
+			echo "| Metrik | Schwelle | gemessen | Ergebnis |"
+			echo "|---|---|---:|---|"
+			thresholds "$dir/$job-ingest.json"
+			echo
+			echo "| Messgröße | Wert |"
+			echo "|---|---|"
+			measures "$dir/$job-ingest.json"
+		fi
 	done
 } >"$archive/ergebnis.md"
 

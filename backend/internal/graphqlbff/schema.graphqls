@@ -391,16 +391,19 @@ type Movement {
   createdAt: Time!
 }
 
+# The fields under field permissions (RBA-07, object kind document,
+# WP-267): description, fileName, fileSize, mimeType, category, tags and
+# uploadedBy are null when the principal may not read them.
 type Document {
   id: ID!
   title: String!
   description: String
-  fileName: String!
-  fileSize: Int!
-  mimeType: String!
+  fileName: String
+  fileSize: Int
+  mimeType: String
   version: Int!
-  category: String!
-  tags: [String!]!
+  category: String
+  tags: [String!]
   uploadedBy: ID
   scanStatus: String
   createdAt: Time!

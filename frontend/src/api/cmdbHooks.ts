@@ -15,6 +15,7 @@ import {
   attributeSetApi,
   ciTemplateApi,
   ciTypeApi,
+  ciValueApi,
   ciFieldApi,
   relationshipTypeApi,
   lifecycleApi,
@@ -38,6 +39,7 @@ import {
   templateApi,
   templateMigrationApi,
   type AttributeDefinition,
+  type CIValueSuggestionQuery,
   type RelationshipTypeUpsert,
   type AttributeDefinitionCreate,
   type AttributeDefinitionFilter,
@@ -772,6 +774,25 @@ export function useResolvedTypeForm(
     ...options,
     enabled: !!ciTypeId && (options.enabled ?? true),
     retry: false,
+  });
+}
+
+/**
+ * useCIValueSuggestions are the stored manufacturer or model values of the
+ * CIs of a type for the guided creation (MET-51, WP-317), deduplicated;
+ * GET /cis follows the chosen scope (SCOPED_LISTS).
+ */
+export function useCIValueSuggestions(
+  query: CIValueSuggestionQuery | undefined,
+  options: QueryControl = {},
+) {
+  return useQuery({
+    queryKey: ['cis', 'value-suggestions', query],
+    queryFn: () => ciValueApi.suggestions(query!),
+    ...options,
+    enabled: !!query?.ciTypeId && (options.enabled ?? true),
+    retry: false,
+    staleTime: options.staleTime ?? 30_000,
   });
 }
 

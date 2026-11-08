@@ -54,6 +54,13 @@ export interface CI {
    * tags. Read-only here: PUT /cis/{id}/tags (ciApi.setTags) writes them.
    */
   tags: string[];
+  /**
+   * Owner of the CI (CI-07, WP-280): the responsible user (app_user.id) and
+   * team. With asset_id both mirror the asset's owner and cannot be written
+   * (422 ci_owner_from_asset, DB-05). Not the contact role owner.
+   */
+  owner_user_id?: string;
+  owner_team_id?: string;
   discovery_source?: string;
   first_seen_at?: string;
   last_seen_at?: string;
@@ -75,20 +82,38 @@ export interface CIAssetFacts {
   warranty_end?: string;
   supplier?: string;
   invoice_number?: string;
+  /** Owning user and team of the asset (WP-271); the CI mirrors them. */
+  owner_user_id?: string;
+  owner_team_id?: string;
 }
 
 export interface CICreateRequest {
   ci_type_id: string;
   client_id?: string;
+  /** Node of the location tree; site and room follow from it (WP-317). */
+  location_id?: string;
   name: string;
   status?: string;
   manufacturer?: string;
   model?: string;
   serial_number?: string;
+  hardware_uuid?: string;
   management_ip?: string;
+  primary_mac?: string;
+  hostname?: string;
+  fqdn?: string;
+  os_name?: string;
+  os_version?: string;
   firmware_version?: string;
+  sys_object_id?: string;
   attributes?: Record<string, unknown>;
   discovery_source?: string;
+  /** Templates assigned with the CI in this order (MET-16, WP-710). */
+  templates?: Array<{ template_id: string; version?: number }>;
+  /** Owning user (WP-280); 422 on owner_user_id for an unknown user. */
+  owner_user_id?: string;
+  /** Owning team (WP-280); outside the team scope 403 (TEN-05, E-11). */
+  owner_team_id?: string;
 }
 
 /**
@@ -104,6 +129,10 @@ export interface CIUpdateRequest {
   management_ip?: string | null;
   firmware_version?: string | null;
   attributes?: Record<string, unknown>;
+  /** Owning user; "" clears it (WP-280). Not with asset_id (422). */
+  owner_user_id?: string | null;
+  /** Owning team; "" clears it (WP-280). Not with asset_id (422). */
+  owner_team_id?: string | null;
   discovery_source?: string;
   last_seen_at?: string;
 }
@@ -277,6 +306,13 @@ export interface CIListParams {
   sort_dir?: string;
   /** Allowed CI types, comma-separated (API-02 field filter; the ObjectPicker, WP-318). */
   'filter[ci_type_id][in]'?: string;
+  /** The value suggestions of the guided creation (WP-317): one type, prefix filters. */
+  'filter[ci_type_id]'?: string;
+  'filter[manufacturer]'?: string;
+  'filter[manufacturer][like]'?: string;
+  'filter[model][like]'?: string;
+  /** Sparse fieldset, comma-separated (API-02); id is always returned. */
+  fields?: string;
 }
 
 export interface ListParams {
@@ -307,6 +343,17 @@ function mergeHeaders(options: RequestInit | undefined, token: string | null) {
 export interface FieldViolation {
   field: string;
   detail: string;
+}
+
+/**
+ * FieldErrorInfo is the error of one form field (ApiError.fieldErrors):
+ * invalid (a violation, 400/422), conflict (409, e.g. a taken
+ * inventory_no or a field changed since the read version) or forbidden
+ * (403, refused by the field permissions).
+ */
+export interface FieldErrorInfo {
+  kind: 'invalid' | 'conflict' | 'forbidden';
+  message: string;
 }
 
 /**
@@ -351,6 +398,18 @@ export class ApiError extends Error {
    * PROBLEM_FEATURE_NOT_ENTITLED; undefined without a problem body.
    */
   readonly type?: string;
+  /**
+   * currentVersion is current_version of a 409 version conflict (API-07):
+   * the version the object has now, to reload it before a new attempt.
+   */
+  readonly currentVersion?: number;
+  /**
+   * guard is the failed system guard of a refused lifecycle transition
+   * (422 lifecycle-guard, WP-279), e.g. storage_location.
+   */
+  readonly guard?: string;
+  /** missing are the references the failed guard misses, e.g. location_id. */
+  readonly missing: string[];
 
   constructor(
     status: number,
@@ -365,6 +424,9 @@ export class ApiError extends Error {
       field?: string;
       problem?: Record<string, unknown>;
       type?: string;
+      currentVersion?: number;
+      guard?: string;
+      missing?: string[];
     } = {},
   ) {
     super(message);
@@ -379,6 +441,33 @@ export class ApiError extends Error {
     this.field = options.field;
     this.problem = options.problem ?? {};
     this.type = options.type;
+    this.currentVersion = options.currentVersion;
+    this.guard = options.guard;
+    this.missing = options.missing ?? [];
+  }
+
+  /**
+   * fieldErrors joins what a form shows at its inputs (WP-319): the
+   * violations (first message per field), the field of a FieldProblem with
+   * the detail, and the conflictFields of a 409 (changed since the read
+   * version) or of a 403 (refused by the field permissions, RBA-07). A
+   * field keeps its first message; the summary of the error stays message.
+   */
+  fieldErrors(): Record<string, FieldErrorInfo> {
+    const errors: Record<string, FieldErrorInfo> = {};
+    const kind: FieldErrorInfo['kind'] =
+      this.status === 403 ? 'forbidden' : this.status === 409 ? 'conflict' : 'invalid';
+    const add = (field: string, entry: FieldErrorInfo) => {
+      if (field !== '' && !(field in errors)) errors[field] = entry;
+    };
+    for (const [field, detail] of Object.entries(this.violationsByField())) {
+      add(field, { kind: 'invalid', message: detail || this.message });
+    }
+    if (this.field) add(this.field, { kind, message: this.detail || this.message });
+    for (const field of this.conflictFields) {
+      add(field, { kind, message: this.detail || this.message });
+    }
+    return errors;
   }
 
   /** Whether the failure carries per-field violations that a form can render. */
@@ -414,6 +503,9 @@ export class ApiError extends Error {
       trace_id?: unknown;
       fields?: unknown;
       field?: unknown;
+      current_version?: unknown;
+      guard?: unknown;
+      missing?: unknown;
     };
 
     const title = typeof problem.title === 'string' ? problem.title : undefined;
@@ -426,14 +518,20 @@ export class ApiError extends Error {
     const violations: FieldViolation[] = Array.isArray(problem.violations)
       ? problem.violations.flatMap((entry) => {
           if (typeof entry !== 'object' || entry === null) return [];
-          const { field, detail: violationDetail } = entry as Record<string, unknown>;
+          const {
+            field,
+            detail: violationDetail,
+            message: violationMessage,
+          } = entry as Record<string, unknown>;
           if (typeof field !== 'string' || field === '') return [];
-          return [
-            {
-              field,
-              detail: typeof violationDetail === 'string' ? violationDetail : '',
-            },
-          ];
+          // A lifecycle problem names the text message (LifecycleProblem).
+          const text =
+            typeof violationDetail === 'string'
+              ? violationDetail
+              : typeof violationMessage === 'string'
+                ? violationMessage
+                : '';
+          return [{ field, detail: text }];
         })
       : [];
 
@@ -444,6 +542,15 @@ export class ApiError extends Error {
       : [];
     const conflictFields = Array.isArray(problem.fields)
       ? problem.fields.filter((field): field is string => typeof field === 'string')
+      : [];
+    const currentVersion =
+      typeof problem.current_version === 'number' ? problem.current_version : undefined;
+    const guard =
+      typeof problem.guard === 'string' && problem.guard !== '' ? problem.guard : undefined;
+    const missing = Array.isArray(problem.missing)
+      ? problem.missing.filter(
+          (entry): entry is string => typeof entry === 'string' && entry !== '',
+        )
       : [];
 
     return new ApiError(status, detail || title || statusText, {
@@ -456,6 +563,9 @@ export class ApiError extends Error {
       field,
       problem: body as Record<string, unknown>,
       type,
+      currentVersion,
+      guard,
+      missing,
     });
   }
 }
@@ -464,6 +574,23 @@ export class ApiError extends Error {
 export const PROBLEM_FEATURE_NOT_ENTITLED = 'https://reticora.io/problems/feature-not-entitled';
 /** The problem type of a 403 for a reached limit of the plan (ENT-06, E-44). */
 export const PROBLEM_ENTITLEMENT_LIMIT = 'https://reticora.io/problems/entitlement-limit';
+/** The problem type of a 422 for a deactivated CI type (MET-05, WP-249, WP-317). */
+export const PROBLEM_TYPE_INACTIVE = 'https://reticora.io/problems/type-inactive';
+/** The violation text of POST /cis on ci_type_id for a deactivated type (WP-249). */
+export const TYPE_INACTIVE_DETAIL = 'the CI type is deactivated';
+
+/**
+ * isTypeInactive reports a refused creation of a deactivated CI type: the
+ * problem type type-inactive, or a 422 whose violation on ci_type_id names
+ * the deactivated type (the form POST /cis answers today).
+ */
+export function isTypeInactive(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 422) return false;
+  if (error.type === PROBLEM_TYPE_INACTIVE) return true;
+  return error.violations.some(
+    (v) => v.field === 'ci_type_id' && v.detail.startsWith(TYPE_INACTIVE_DETAIL),
+  );
+}
 
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the
@@ -661,7 +788,22 @@ export const BFF_PATH = '/bff/graphql';
 
 interface GraphQLResult<T> {
   data?: T | null;
-  errors?: { message: string; extensions?: { code?: string } }[];
+  errors?: { message: string; path?: (string | number)[]; extensions?: { code?: string } }[];
+}
+
+/** BffFieldError is one GraphQL error of a partial answer: the field path and the code. */
+export interface BffFieldError {
+  message: string;
+  /** path is the field path of the error, e.g. ['asset', 'documents']; empty for the query. */
+  path: (string | number)[];
+  /** code is extensions.code, e.g. FORBIDDEN or UNAVAILABLE. */
+  code?: string;
+}
+
+/** BffPartialResult is the data of a BFF query with the errors of its fields. */
+export interface BffPartialResult<T> {
+  data: T | null;
+  errors: BffFieldError[];
 }
 
 /**
@@ -681,6 +823,31 @@ export async function bffQuery<T>(query: string, variables?: Record<string, unkn
     throw new Error(result.errors.map((error) => error.message).join('; '));
   }
   return result.data as T;
+}
+
+/**
+ * bffQueryPartial runs a read query like bffQuery, but a partial answer is
+ * not thrown (WP-809): the data comes back with the errors of the failed
+ * fields (path and extensions.code), so a page hides only the section whose
+ * field the server refused (FORBIDDEN) or left out (UNAVAILABLE, module
+ * off). A failed request (HTTP status) is still thrown as ApiError.
+ */
+export async function bffQueryPartial<T>(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<BffPartialResult<T>> {
+  const result = await fetchURL<GraphQLResult<T>>(BFF_PATH, {
+    method: 'POST',
+    body: JSON.stringify({ query, variables }),
+  });
+  return {
+    data: result.data ?? null,
+    errors: (result.errors ?? []).map((error) => ({
+      message: error.message,
+      path: error.path ?? [],
+      code: error.extensions?.code,
+    })),
+  };
 }
 
 /** The largest page a list endpoint answers (API-02, parameter Limit). */
@@ -737,23 +904,49 @@ export function buildQuery(params: object) {
 
 export interface CIBulkItemResult {
   id: string;
-  result: 'ok' | 'error';
+  result: 'ok' | 'error' | 'skipped';
   code: number;
   error?: string;
+  /** Problem type of an error (RFC 7807). */
+  type?: string;
+  /** Fields the error names. */
+  fields?: string[];
 }
 
+/** The partial failure report of a bulk on CIs or assets (BulkResult, API-08). */
 export interface CIBulkResult {
   action: string;
   total: number;
   succeeded: number;
   failed: number;
+  skipped?: number;
+  cancelled?: boolean;
+  /**
+   * The job ci.bulk or asset.bulk the change ran in within the request
+   * (below 100 ids, WP-305, WP-784); POST /jobs/{id}/revert undoes it.
+   */
+  bulk_job_id?: string;
   items: CIBulkItemResult[];
 }
 
+/** The 202 of a bulk: the bulk job (from 100 ids on) or, for export, the export job. */
 export interface CIBulkJob {
   job_id: string;
   status: string;
   kind: string;
+}
+
+/**
+ * A bulk request (BLK-02): POST /cis/bulk (CIBulkRequest, WP-304, WP-780)
+ * or POST /assets/bulk (AssetBulkRequest and AssetBulkExport, WP-781). The
+ * BLK-01 form {action: 'set_status', ids, status} stays valid; every other
+ * action carries its parameters in params.
+ */
+export interface BulkRequest {
+  action: string;
+  ids: string[];
+  status?: string;
+  params?: Record<string, unknown>;
 }
 
 export const ciApi = {
@@ -804,14 +997,16 @@ export const ciApi = {
   },
 
   /**
-   * bulk changes the status of up to 500 CIs (API-08): below 100 ids the
-   * answer is the report per id, from 100 ids on the job that produces it.
+   * bulk applies one action to up to 500 CIs (API-08, BLK-02): below 100 ids
+   * the answer is the report per id (with the bulk_job_id to revert it),
+   * from 100 ids on the job that produces it; export answers its export
+   * job. bulk(ids, status) is the BLK-01 status change.
    */
-  bulk(ids: string[], status: string): Promise<CIBulkResult | CIBulkJob> {
-    return fetchAPI('/cis/bulk', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'set_status', ids, status }),
-    });
+  bulk(request: string[] | BulkRequest, status?: string): Promise<CIBulkResult | CIBulkJob> {
+    const body: BulkRequest = Array.isArray(request)
+      ? { action: 'set_status', ids: request, status }
+      : request;
+    return fetchAPI('/cis/bulk', { method: 'POST', body: JSON.stringify(body) });
   },
 
   relationships(id: string): Promise<PaginatedResponse<Relationship>> {
@@ -1095,82 +1290,73 @@ export interface RackLayout {
 
 // --- Phase 2: Asset Management ---
 
-export interface Asset {
-  id: string;
-  organization_id: string;
-  client_id?: string;
-  ci_id?: string;
-  asset_tag: string;
-  /** Inventory number of AST-01 (WP-739); the API name of asset_tag. */
-  inventory_no?: string;
-  name: string;
-  category: string;
-  status: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  custom_fields: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-}
+// Asset and the request types of the writes come from the OpenAPI contract
+// (K27, WP-319) with the AST-01 names (inventory_no, purchase_price,
+// warranty_until, supplier_id, primary_ci_id; WP-739, WP-272) and version
+// (WP-740). The deprecated status and location stay in the contract until
+// E-120 removes them; the UI shows lifecycle_state and location_id.
+export type Asset = components['schemas']['Asset'];
+export type AssetCreateRequest = components['schemas']['CreateAssetRequest'];
+export type AssetUpdateRequest = components['schemas']['UpdateAssetRequest'];
 
-export interface AssetCreateRequest {
-  asset_tag: string;
-  name: string;
-  category?: string;
-  status?: string;
-  client_id?: string;
-  ci_id?: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  custom_fields?: Record<string, unknown>;
-}
+/** AssetFilterOperator is an operator of filter[field][op] (API-02). */
+export type AssetFilterOperator = 'gte' | 'lte' | 'like' | 'in';
 
-export interface AssetUpdateRequest {
-  name?: string;
-  category?: string;
-  status?: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  warranty_end?: string;
-  supplier?: string;
-  invoice_number?: string;
-  serial_number?: string;
-  location?: string;
-  notes?: string;
-  ci_id?: string;
-  custom_fields?: Record<string, unknown>;
+/** AssetFilter is one field filter of GET /assets: a value, optionally with an operator. */
+export interface AssetFilter {
+  field: string;
+  value: string;
+  op?: AssetFilterOperator;
 }
 
 export interface AssetListParams {
   limit?: number;
   offset?: number;
   cursor?: string;
+  /** Deprecated status filter of the dashboard widget (E-120). */
   status?: string;
   category?: string;
   client_id?: string;
   search?: string;
   sort_by?: string;
   sort_dir?: string;
+  /** sort is a field of the sort whitelist, a leading - sorts descending (API-02). */
+  sort?: string;
+  /** fields are the response fields; id is always returned (API-02). */
+  fields?: readonly string[];
+  /** filter are the field filters, sent as filter[field] or filter[field][op]. */
+  filter?: readonly AssetFilter[];
+}
+
+/**
+ * assetListQuery builds the query of GET /assets after api.ParseListQuery:
+ * the plain parameters, sort, fields (comma-separated) and every filter as
+ * filter[<field>] or filter[<field>][<op>].
+ */
+export function assetListQuery(params: AssetListParams): string {
+  const { fields, filter, ...plain } = params;
+  const query: Record<string, string | number | undefined> = { ...plain };
+  if (fields && fields.length > 0) query.fields = fields.join(',');
+  for (const entry of filter ?? []) {
+    if (entry.value === '') continue;
+    query[entry.op ? `filter[${entry.field}][${entry.op}]` : `filter[${entry.field}]`] =
+      entry.value;
+  }
+  return buildQuery(query);
 }
 
 export const assetApi = {
   list(params: AssetListParams = {}): Promise<PaginatedResponse<Asset>> {
-    return fetchAPI(`/assets${buildQuery(params)}`);
+    return fetchAPI(`/assets${assetListQuery(params)}`);
+  },
+  /**
+   * bulk applies one action to up to 500 assets (POST /assets/bulk, WP-781):
+   * set_status among them instead of parallel PATCHes. Every asset bulk is
+   * a job asset.bulk; below 100 ids it runs in the request and the report
+   * names it as bulk_job_id, from 100 ids on the answer is 202 with it.
+   */
+  bulk(request: BulkRequest): Promise<CIBulkResult | CIBulkJob> {
+    return fetchAPI('/assets/bulk', { method: 'POST', body: JSON.stringify(request) });
   },
   get(id: string): Promise<Asset> {
     return fetchAPI(`/assets/${id}`);
@@ -1178,13 +1364,36 @@ export const assetApi = {
   create(data: AssetCreateRequest): Promise<Asset> {
     return fetchAPI('/assets', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(id: string, data: AssetUpdateRequest): Promise<Asset> {
-    return fetchAPI(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  /**
+   * update patches an asset. With `version` (the asset version the editor
+   * read, WP-740) the request carries If-Match like ciApi.update, so a
+   * concurrent change is refused with 409 instead of being overwritten.
+   */
+  update(id: string, data: AssetUpdateRequest, version?: number): Promise<Asset> {
+    return fetchAPI(`/assets/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/assets/${id}`, { method: 'DELETE' });
   },
+  /**
+   * linkCI links a CI to the asset (AST-04, WP-272): primary true makes it
+   * the primary CI, false clears the primary CI when it is this one.
+   */
+  linkCI(id: string, data: LinkAssetCIRequest): Promise<AssetCILink> {
+    return fetchAPI(`/assets/${id}/cis`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** unlinkCI releases the CI from the asset (DELETE /assets/{id}/cis/{ci_id}). */
+  unlinkCI(id: string, ciId: string): Promise<void> {
+    return fetchAPI(`/assets/${id}/cis/${ciId}`, { method: 'DELETE' });
+  },
 };
+
+export type LinkAssetCIRequest = components['schemas']['LinkAssetCIRequest'];
+export type AssetCILink = components['schemas']['AssetCILink'];
 
 // --- Phase 2: Assignment Management ---
 
@@ -1395,6 +1604,93 @@ export const documentApi = {
   /** The storage usage of the organization (WP-731). */
   usage(): Promise<DocumentUsage> {
     return fetchAPI('/documents/usage');
+  },
+};
+
+// --- Phase 2: Suppliers and contracts (MGT-12, WP-808) ---
+
+// Supplier, contract and contact and the request types come from the
+// OpenAPI contract (K27; WP-736, WP-269). Both lists read api.ParseListQuery
+// (filter[field][op], sort, cursor) and take no client_id parameter, so they
+// are not in SCOPED_LISTS: ContractsPage sends the chosen client itself as
+// filter[client_id], the suppliers stay without a scope filter.
+export type Supplier = components['schemas']['Supplier'];
+export type SupplierCreateRequest = components['schemas']['CreateSupplierRequest'];
+export type SupplierUpdateRequest = components['schemas']['UpdateSupplierRequest'];
+export type Contract = components['schemas']['Contract'];
+export type ContractCreateRequest = components['schemas']['CreateContractRequest'];
+export type ContractUpdateRequest = components['schemas']['UpdateContractRequest'];
+export type Contact = components['schemas']['Contact'];
+
+/** FilteredListParams is a page of a list read with api.ParseListQuery (API-02). */
+export interface FilteredListParams {
+  limit?: number;
+  cursor?: string;
+  /** sort is a field of the sort whitelist, a leading - sorts descending. */
+  sort?: string;
+  /** filter are the field filters, sent as filter[field] or filter[field][op]. */
+  filter?: readonly AssetFilter[];
+}
+
+/** ifMatch is the If-Match header of a change based on version (API-07). */
+function ifMatch(version?: number): HeadersInit | undefined {
+  return version !== undefined ? { 'If-Match': `"${version}"` } : undefined;
+}
+
+export const supplierApi = {
+  list(params: FilteredListParams = {}): Promise<PaginatedResponse<Supplier>> {
+    return fetchAPI(`/suppliers${assetListQuery(params)}`);
+  },
+  get(id: string): Promise<Supplier> {
+    return fetchAPI(`/suppliers/${id}`);
+  },
+  create(data: SupplierCreateRequest): Promise<Supplier> {
+    return fetchAPI('/suppliers', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update patches a supplier; with version the request carries If-Match (412 when stale). */
+  update(id: string, data: SupplierUpdateRequest, version?: number): Promise<Supplier> {
+    return fetchAPI(`/suppliers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  /** delete removes a supplier; one still referenced by a contract is 422. */
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/suppliers/${id}`, { method: 'DELETE' });
+  },
+};
+
+export const contractApi = {
+  list(params: FilteredListParams = {}): Promise<PaginatedResponse<Contract>> {
+    return fetchAPI(`/contracts${assetListQuery(params)}`);
+  },
+  get(id: string): Promise<Contract> {
+    return fetchAPI(`/contracts/${id}`);
+  },
+  create(data: ContractCreateRequest): Promise<Contract> {
+    return fetchAPI('/contracts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update patches a contract; with version the request carries If-Match (412 when stale). */
+  update(id: string, data: ContractUpdateRequest, version?: number): Promise<Contract> {
+    return fetchAPI(`/contracts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/contracts/${id}`, { method: 'DELETE' });
+  },
+};
+
+/**
+ * contactApi reads the contacts (AUD-01); name, phone and e-mail come from
+ * the PII vault (WP-242). /contacts is a scoped list (client_id).
+ */
+export const contactApi = {
+  list(params: { limit?: number; cursor?: string } = {}): Promise<PaginatedResponse<Contact>> {
+    return fetchAPI(`/contacts${buildQuery(params)}`);
   },
 };
 
@@ -2047,6 +2343,8 @@ export interface SLAPolicy {
   response_target_minutes: number;
   resolution_target_minutes: number;
   business_calendar: boolean;
+  /** The business calendar of the policy (TKT-02); null lets the calendar chain decide (WP-292). */
+  calendar_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2080,7 +2378,13 @@ export interface SLAPolicyRequest {
   priority: string;
   response_target_minutes: number;
   resolution_target_minutes: number;
+  /** business_calendar applies business hours (switch of the form, WP-815). */
   business_calendar?: boolean;
+  /**
+   * calendar_id names a business calendar without client or of the policy's
+   * client (TKT-02); null or absent lets the calendar chain decide (WP-292).
+   */
+  calendar_id?: string | null;
 }
 
 export interface SLAListParams extends ListParams {
@@ -2116,6 +2420,48 @@ export const slaApi = {
       method: 'POST',
       body: JSON.stringify({ sla_id }),
     });
+  },
+};
+
+// --- Business calendars (TKT-02, E-38, WP-768) ---
+
+// The business calendars come from the OpenAPI contract (K27). The list
+// takes client_id, but follows no scope switcher: the calendar choice of a
+// policy needs the org-wide calendars (client_id null) too, so
+// SCOPED_LISTS stays unchanged (WP-815).
+export type BusinessCalendar = components['schemas']['BusinessCalendar'];
+export type BusinessCalendarWindow = components['schemas']['BusinessCalendarWindow'];
+export type BusinessCalendarHoliday = components['schemas']['BusinessCalendarHoliday'];
+export type CreateBusinessCalendarRequest = components['schemas']['CreateBusinessCalendarRequest'];
+export type UpdateBusinessCalendarRequest = components['schemas']['UpdateBusinessCalendarRequest'];
+
+export interface BusinessCalendarListParams {
+  limit?: number;
+  cursor?: string;
+  client_id?: string;
+}
+
+export const businessCalendarApi = {
+  /** One page of the calendars sorted by name; the next one over next_cursor (API-02). */
+  list(params: BusinessCalendarListParams = {}): Promise<PaginatedResponse<BusinessCalendar>> {
+    return fetchAPI(`/business-calendars${buildQuery(params)}`);
+  },
+  /** listAll reads every calendar visible under the scope (calendar choice of a policy). */
+  listAll(): Promise<BusinessCalendar[]> {
+    return fetchAllPages('/business-calendars');
+  },
+  get(id: string): Promise<BusinessCalendar> {
+    return fetchAPI(`/business-calendars/${id}`);
+  },
+  create(data: CreateBusinessCalendarRequest): Promise<BusinessCalendar> {
+    return fetchAPI('/business-calendars', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** PATCH sends the changed fields; client_id cannot change (400 on client_id). */
+  update(id: string, data: UpdateBusinessCalendarRequest): Promise<BusinessCalendar> {
+    return fetchAPI(`/business-calendars/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/business-calendars/${id}`, { method: 'DELETE' });
   },
 };
 
@@ -2902,40 +3248,69 @@ export const consumableApi = {
   },
 };
 
-export interface Order {
-  id: string;
-  organization_id: string;
-  order_number: string;
-  title: string;
-  status: string;
-  supplier?: string;
-  total_cost?: number;
-  currency?: string;
-  items?: { id: string; description: string; quantity: number; unit_price?: number }[];
-  created_at: string;
-}
+/**
+ * Order is an internal order with its state machine of nine states, the
+ * supplier record (supplier_id, supplier_name, E-41), the target bin of the
+ * goods receipt and its positions (WP-286, WP-760) as the OpenAPI types
+ * describe it (K27). The deprecated free-text supplier is no longer sent.
+ */
+export type Order = components['schemas']['Order'];
+/** OrderItem is a position: a consumable (consumable_id) or an asset description. */
+export type OrderItem = components['schemas']['OrderItem'];
+export type OrderStatus = Order['status'];
+export type CreateOrderRequest = Omit<components['schemas']['CreateOrderRequest'], 'supplier'>;
+export type UpdateOrderRequest = Omit<components['schemas']['UpdateOrderRequest'], 'supplier'>;
+export type CreateOrderItemRequest = components['schemas']['CreateOrderItemRequest'];
+/** ReceiveOrderRequest is the goods receipt: items[{item_id, quantity, location_id, asset_ids}]. */
+export type ReceiveOrderRequest = components['schemas']['ReceiveOrderRequest'];
 
 export const orderApi = {
   list(params: ListParams & { status?: string } = {}): Promise<PaginatedResponse<Order>> {
     return fetchAPI(`/orders${buildQuery(params)}`);
   },
-  create(data: { title: string; supplier?: string; notes?: string }): Promise<Order> {
+  get(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}`);
+  },
+  create(data: CreateOrderRequest): Promise<Order> {
     return fetchAPI('/orders', { method: 'POST', body: JSON.stringify(data) });
   },
-  addItem(
-    id: string,
-    data: { description: string; quantity: number; unit_price?: number },
-  ): Promise<Order> {
+  /** update changes an order in status draft (PATCH /orders/{id}; 409 otherwise). */
+  update(id: string, data: UpdateOrderRequest): Promise<Order> {
+    return fetchAPI(`/orders/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  addItem(id: string, data: CreateOrderItemRequest): Promise<Order> {
     return fetchAPI(`/orders/${id}/items`, { method: 'POST', body: JSON.stringify(data) });
   },
   submit(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/submit`, { method: 'POST', body: '{}' });
   },
+  /** approve and reject need order:approve and another user than the requester (403). */
   approve(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/approve`, { method: 'POST', body: '{}' });
   },
   reject(id: string): Promise<Order> {
     return fetchAPI(`/orders/${id}/reject`, { method: 'POST', body: '{}' });
+  },
+  place(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/place`, { method: 'POST', body: '{}' });
+  },
+  cancel(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/cancel`, { method: 'POST', body: '{}' });
+  },
+  close(id: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/close`, { method: 'POST', body: '{}' });
+  },
+  /**
+   * receive books a goods receipt (POST /orders/{id}/receive, WP-760). The
+   * idempotencyKey is created once per dialog, so a repeated send of the
+   * same receipt is answered from the stored result.
+   */
+  receive(id: string, data: ReceiveOrderRequest, idempotencyKey: string): Promise<Order> {
+    return fetchAPI(`/orders/${id}/receive`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      headers: { 'Idempotency-Key': idempotencyKey },
+    });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/orders/${id}`, { method: 'DELETE' });
@@ -3005,31 +3380,33 @@ export const maintenanceApi = {
   },
 };
 
-export interface DisposalRecord {
-  id: string;
-  organization_id: string;
+/**
+ * A revision-safe disposal record after E-55 (WP-751) from the schema
+ * (K27): append-only, with the DIN 66399 fields, the evidence document and
+ * record_hash set by the database.
+ */
+export type DisposalRecord = components['schemas']['DisposalRecord'];
+
+/** The payload of POST /disposal-records; the required fields depend on the method. */
+export type CreateDisposalRecordRequest = components['schemas']['CreateDisposalRecordRequest'];
+
+export type DisposalMethod = CreateDisposalRecordRequest['method'];
+
+export interface DisposalListParams extends ListParams {
+  method?: string;
   asset_id?: string;
   ci_id?: string;
-  method: string;
-  certificate_ref?: string;
-  data_carrier?: string;
-  performed_by?: string;
-  performed_at: string;
-  created_at: string;
 }
 
 export const disposalApi = {
-  list(params: ListParams & { method?: string } = {}): Promise<PaginatedResponse<DisposalRecord>> {
+  list(params: DisposalListParams = {}): Promise<PaginatedResponse<DisposalRecord>> {
     return fetchAPI(`/disposal-records${buildQuery(params)}`);
   },
-  create(data: {
-    method: string;
-    asset_id?: string;
-    ci_id?: string;
-    certificate_ref?: string;
-    data_carrier?: string;
-    notes?: string;
-  }): Promise<DisposalRecord> {
+  get(id: string): Promise<DisposalRecord> {
+    return fetchAPI(`/disposal-records/${id}`);
+  },
+  /** 400 names the missing or invalid field, 422 a refused lifecycle source state. */
+  create(data: CreateDisposalRecordRequest): Promise<DisposalRecord> {
     return fetchAPI('/disposal-records', { method: 'POST', body: JSON.stringify(data) });
   },
 };

@@ -44,6 +44,7 @@ function lazyPage(loader: () => Promise<Record<string, unknown>>, name: string) 
 }
 
 const AssetListPage = lazyPage(() => import('./pages/AssetListPage'), 'AssetListPage');
+const AssetDetailPage = lazyPage(() => import('./pages/AssetDetailPage'), 'AssetDetailPage');
 const AssignmentListPage = lazyPage(
   () => import('./pages/AssignmentListPage'),
   'AssignmentListPage',
@@ -112,6 +113,8 @@ const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'Loc
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
 const TagsPage = lazyPage(() => import('./pages/TagsPage'), 'TagsPage');
+const ContractsPage = lazyPage(() => import('./pages/ContractsPage'), 'ContractsPage');
+const SuppliersPage = lazyPage(() => import('./pages/SuppliersPage'), 'SuppliersPage');
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
@@ -246,6 +249,7 @@ function App() {
           <Route path="/racks" element={<RackPage />} />
           <Route path="/discovery" element={<DiscoveryPage />} />
           <Route path="/assets" element={<AssetListPage />} />
+          <Route path="/assets/:id" element={<AssetDetailPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/locations" element={<LocationTreePage />} />
           <Route path="/saved-views" element={<SavedViewsPage />} />
@@ -259,6 +263,9 @@ function App() {
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
+          <Route path="/contracts" element={<ContractsPage />} />
+          <Route path="/contracts/:id" element={<ContractsPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/documents" element={<DocumentListPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />

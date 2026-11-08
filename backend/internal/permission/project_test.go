@@ -148,8 +148,8 @@ func TestProjectUnrestrictedPassThrough(t *testing.T) {
 	if _, ok := got["name"]; !ok {
 		t.Errorf("nil policy must keep structural name")
 	}
-	if _, err := Project(policy, KindDocument, "", ObjectRef{}, in); !errors.Is(err, ErrUnsupportedKind) {
-		t.Errorf("document projection: %v, want ErrUnsupportedKind", err)
+	if _, err := Project(policy, KindRelationship, "", ObjectRef{}, in); !errors.Is(err, ErrUnsupportedKind) {
+		t.Errorf("relationship projection: %v, want ErrUnsupportedKind", err)
 	}
 }
 
@@ -411,5 +411,42 @@ func TestProjectTicket(t *testing.T) {
 	var forbiddenErr *api.FieldForbiddenError
 	if !errors.As(err, &forbiddenErr) || !slices.Equal(forbiddenErr.Fields, []string{"description", "priority"}) {
 		t.Fatalf("check write: %v, want description and priority refused", err)
+	}
+}
+
+// TestProjectDocument covers the document DTO (WP-267, finding F-1 of
+// WP-326): a core field the role may not read is left out, a sensitive
+// one without grant too, structural members stay, a write of a read-only
+// or unreadable field is refused with its DTO path.
+func TestProjectDocument(t *testing.T) {
+	repo, _ := fixture(t)
+	role := ptr(tRoleA)
+	addField(t, repo, FieldGrant{RoleID: role, ObjectKind: KindDocument, FieldKey: ptr("core.tags"), Level: LevelNone})
+	addField(t, repo, FieldGrant{RoleID: role, ObjectKind: KindDocument, FieldKey: ptr("core.category"), Level: LevelRead})
+	addSensitive(t, repo, SensitiveField{ObjectKind: KindDocument, FieldKey: "core.file_name"})
+	policy := policyFor(t, repo, []identity.Grant{roleGrant(tRoleA, "document:read", "document:write")}, nil)
+	doc := map[string]any{
+		"id": tObject, "organization_id": tOrg, "title": "Vertrag", "description": "offen", "file_name": "geheim.pdf",
+		"file_size": 12, "mime_type": "application/pdf", "storage_key": "org/x", "version": 2, "category": "general",
+		"tags": []string{"t"}, "uploaded_by": "u", "scan_status": "clean", "created_at": "2026-01-01T00:00:00Z",
+	}
+	got, err := Project(policy, KindDocument, "", ObjectRef{ID: tObject}, doc)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	for _, member := range []string{"tags", "file_name"} {
+		if _, ok := got[member]; ok {
+			t.Errorf("%s must be left out: %v", member, got)
+		}
+	}
+	for _, member := range []string{"id", "title", "description", "category", "file_size", "mime_type", "version", "scan_status", "created_at"} {
+		if _, ok := got[member]; !ok {
+			t.Errorf("member %s missing: %v", member, got)
+		}
+	}
+	err = CheckWrite(policy, KindDocument, "", ObjectRef{ID: tObject}, []string{"title", "description", "category", "tags", "file_name"})
+	var forbiddenErr *api.FieldForbiddenError
+	if !errors.As(err, &forbiddenErr) || !slices.Equal(forbiddenErr.Fields, []string{"category", "file_name", "tags"}) {
+		t.Fatalf("check write: %v, want category, file_name and tags refused", err)
 	}
 }

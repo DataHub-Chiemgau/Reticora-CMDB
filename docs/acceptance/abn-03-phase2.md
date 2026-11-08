@@ -52,11 +52,11 @@ Skriptzeile. Eine Prüfung ohne Fall lässt ihn scheitern.
 
 | Teil | Skriptzeilen in `tests/integrity-check.sql` | Weitere Nachweise | WP |
 |---|---|---|---|
-| Keine Orphans | `orphan: relationship to a deleted or merged CI`, `orphan: merged CI still active`, `orphan: rack mount of a deleted CI` | — | WP-207, WP-437 |
+| Keine Orphans | `orphan: relationship to a deleted or merged CI`, `orphan: merged CI still active`, `orphan: rack mount of a deleted CI`, neu `orphan: document link without target`, `orphan: CI reference attribute without target` (WP-827) | Trigger `<tabelle>_document_links` (`delete_target_document_links`, 000275); `TestForeignReferencesP2`, Teil `deleted link targets` | WP-207, WP-437, WP-827 |
 | Keine Duplikate | `duplicate: serial number of active CIs`, `duplicate: management IP and sysObjectID of weak identities in one VRF`, `duplicate: hostname or FQDN of weak identities without review`, neu `duplicate: normalized serial number of assets not disposed` (AST-03) | Schema: `uq_ci_org_serial`, `uq_ci_org_hardware_uuid`, `uq_ci_org_primary_mac`; `idx_reservation_one_active_per_asset`; `idx_asset_tag_org`, `idx_asset_rfid`, `idx_asset_barcode_org` (WP-271); `consumable.sku` und `consumable.barcode` je Org (WP-283); `stock_level (consumable_id, location_id)` | WP-437, WP-328 |
 | Keine negativen Bestände | neu `stock: negative on_hand`, `stock: reserved below zero or above on_hand`, `stock: reserved other than the active quantity reservations` (WP-284) | CHECKs `stock_level_on_hand_check`, `stock_level_reserved_check` (WP-283); Fälle 2, 3 und 5 der Matrix | WP-328 |
 | Reservierung und Zuweisung konsistent | neu `reservation: active reservation of an asset held by another holder` (WP-277), `assignment: holder cache other than the assignment and return movements` (WP-275, WP-274) | Fälle 1 und 4 der Matrix | WP-328 |
-| Keine Cross-Tenant-Referenzen | `cross-tenant: …` (Beziehungen, Rack-Montage, Schnittstellen, IP-Adressen, Feldwerte, Client, Location, Site, Raum, Typ, Rack-Raum) | Zusammengesetzte Fremdschlüssel mit Organisation (WP-838, u. a. `ci_asset_id_fkey`, 000088); Katalogtest `TestTenantReferencesCarryOrganization` | WP-437, WP-838 |
+| Keine Cross-Tenant-Referenzen | `cross-tenant: …` (Beziehungen, Rack-Montage, Schnittstellen, IP-Adressen, Feldwerte, Client, Location, Site, Raum, Typ, Rack-Raum), neu `cross-tenant: asset type`, `cross-tenant: document link document`, `cross-tenant: document link target`, `cross-tenant: CI reference attribute`, `cross-tenant: reference without the organization`, `cross-tenant: stock movement context` (WP-827) | Zusammengesetzte Fremdschlüssel mit Organisation (WP-838, u. a. `ci_asset_id_fkey`, 000088; `reservation_*_fkey` aus 000275); Katalogtest `TestTenantReferencesCarryOrganization`; API-Matrix `TestForeignReferencesP2` (siehe unten) | WP-437, WP-838, WP-827 |
 | Keine Typzyklen | `cycle: CI type lineage` (`cloned_from_id`), neu `cycle: CI type inheritance` (`parent_type_id`, WP-248) | Advisory-Lock `ci_type_tree` (WP-248); `TestCycles`, Fälle `type sequential` und `type parallel` (`backend/internal/tenant/integrity/cycles_integration_test.go`) | WP-437, WP-328, WP-825 |
 | Keine Location-Zyklen | `cycle: location tree` | Phase-1-Nachweis: `TestLocationTreeMoveAndCycle` (`backend/internal/locations/pg_repository_integration_test.go`), Advisory-Lock `location_tree`, `location_no_cycle` und Elternmatrix `location_parent_kind` in 000062 (WP-026); kein neuer Fall in Phase 2 (siehe unten) | WP-207 |
 | Keine Kompositionszyklen | `cycle: composition` | Trigger `trg_ci_parent_cycle` mit Advisory-Lock `ci_parent_tree` (000273); `TestCycles`, Fälle `composition sequential`, `composition parallel` und `composition three parties deterministic`; kein Konfigurationskind mit eigenem Asset: CHECK `ci_configuration_child_asset` (WP-273) | WP-437, WP-825 |
@@ -105,11 +105,61 @@ zu, und der Advisory-Lock `location_tree` serialisiert Umzüge. Nachweis
 bleiben `TestLocationTreeMoveAndCycle` und die Skriptzeile
 `cycle: location tree`.
 
+## Cross-Tenant-Referenzen (WP-827)
+
+Fremdschlüssel prüft PostgreSQL ohne RLS (000136, SR-01). Jeder
+P2-Schreibpfad muss deshalb einen Verweis in eine fremde Organisation selbst
+abweisen, genau wie eine unbekannte ID (kein Existenzorakel, Muster WP-639).
+Die Datenbank ist die zweite Linie (SR-03).
+
+| Teil | Nachweis | Ergebnis |
+|---|---|---|
+| API-Matrix | `TestForeignReferencesP2` (`backend/internal/tenant/rls/foreign_refs_p2_integration_test.go`, Tag `e5`, Router mit den P2-Optionen aus WP-828 über `newChannelEnvWithBlobs`): Organisation B schreibt mit Verweisen auf Objekte von A über Reservierung (`POST /api/v1/assets/{id}/reserve`, `POST /api/v1/reservations` mit Asset, Mengenartikel, Bin, Nutzer, Ticket, Bestellung), Zuweisung und Transfer (`…/assign`, `…/transfer` mit Nutzer bzw. Team), Mengenbuchung (`POST /api/v1/stock-movements` mit Mengenartikel, Bin, Asset, Standort, Ticket, Bestellung, Dokument), Dokumentlink (fremdes Dokument im Pfad, fremdes Ziel je Art `ci`, `asset`, `ticket`, `location`, `contract`), Referenzattribute (`PATCH /api/v1/cis/{id}` mit je einem Wert von `reference`, `ci_ref`, `asset_ref`, `contract_ref`, `user`, `team`, `location`, `file`), Asset↔CI-Link (`POST /api/v1/assets/{id}/cis`), Asset mit fremdem `supplier_id`/`contract_id` (`POST /api/v1/assets`), Import (`POST /api/v1/imports` mit `rows`: fremder Client, Lieferant, Vertrag, Eigentümer-Nutzer, Eigentümer-Team), Bulk (`POST /api/v1/cis/bulk`, `POST /api/v1/assets/bulk`: fremde IDs, fremder Standort bei `set_location`), Ticket-Objektbezug (`POST /api/v1/tickets/{id}/links`), Bestellposition (`POST /api/v1/orders/{id}/items` mit Mengenartikel, Asset, fremder Bestellung im Pfad) und Inventurbereich (`POST /api/v1/stocktakes`) | Jeder fremde Verweis endet mit demselben Status wie eine unbekannte ID, die Antwort nennt die fremde ID nicht; 404 für ein fremdes Objekt im Pfad. Der Import führt jede betroffene Zeile im Fehlerbericht (`invalid_value`) und legt sie nicht an, Bulk führt jede fremde ID mit 404 und jede ID mit fremdem Standort mit 422 auf dem Standortfeld im Partial-Failure-Report. Je Pfad gelingt derselbe Schreibvorgang mit eigenen Verweisen. Danach hält keine Zeile beider Organisationen einen Verweis auf die andere |
+| Zweite Linie (SR-03) | Teil `composite foreign keys`: Insert über `scopetest.Fixture.App` in einer Transaktion von B (`database.WithTenant`) mit einer ID aus A | 23503 auf `reservation_stock_level_fkey` (fremder Mengenartikel bzw. fremder Bin), `stock_level_consumable_fkey`, `stock_level_location_fkey`, `reservation_asset_id_fkey`, `reservation_assignee_id_fkey`, `reservation_ticket_id_fkey`, `reservation_order_id_fkey`, `stock_movement_consumable_id_fkey`, `asset_supplier_id_fkey`, `asset_contract_id_fkey`, `ticket_link_asset_fkey`, `internal_order_item_consumable_id_fkey`, `stocktake_location_fkey`; mit eigenem Objekt angenommen |
+| Katalog | `TestTenantReferencesCarryOrganization` (WP-838) nach allen P2-Migrationen grün; die neuen Fremdschlüssel aus 000275 tragen die Organisation | Allowlist `rls.ReferencesWithoutOrganization` unverändert |
+| Prüfskript | `scopetest.IntegrityViolations` für beide Organisationen nach der Matrix; Selbsttest `TestIntegrityCheckCountsEveryViolation` mit je einem injizierten Verstoß der neuen Zeilen | Keine Cross-Tenant- und keine Orphan-Verletzung |
+
+Gefundene Lücken, behoben mit Migration 000275 (`p2_reference_integrity`):
+
+- `reservation.ticket_id` und `reservation.order_id` hatten keinen
+  Fremdschlüssel (000055): `POST /api/v1/reservations` speicherte die ID
+  eines Tickets bzw. einer Bestellung von A (und jede unbekannte ID) mit 201.
+  Keine Cross-Org-Exposition (die Antwort enthält nur die übergebene ID, das
+  Ticket wird nicht gelesen), aber ein Cross-Tenant-Verweis. Seit 000275
+  zusammengesetzte Fremdschlüssel auf `ticket` bzw. `internal_order` (neu
+  `UNIQUE (id, organization_id)`), ebenso `reservation.assignee_id` auf
+  `app_user`; das Repository antwortet mit 422 auf dem Feld. Bestehende
+  Verweise ohne Zeile der eigenen Organisation stehen in
+  `migration_quarantine` und sind auf NULL gesetzt.
+- Links von Dokumenten überlebten ihr Ziel: Nur ein gelöschter Vertrag nahm
+  seine Links mit (000238). Nach `DELETE` eines Tickets, Assets oder
+  Standorts (und dem endgültigen Löschen eines CIs durch die Retention)
+  zeigte der Link auf keine Zeile. Seit 000275 entfernen AFTER-DELETE-Trigger
+  die Links aller Linkziele; bestehende verwaiste Links stehen in
+  `migration_quarantine`.
+
+Abweichung vom Status der Matrixzeile `reference` (WP-409), als Befund
+**SR-P2-01** (Low) an WP-329 übergeben: Folgende Pfade antworten auf einen
+fremden Verweis im Body mit 404 statt 422, für einen fremden und einen
+unbekannten Verweis gleich, also ohne Existenzorakel und ohne Exposition:
+`POST /api/v1/reservations` mit `asset_id`, `consumable_id` bzw.
+`location_id` (`asset not found`, `inventory item not found`,
+`bin not found`), `POST /api/v1/stock-movements` mit `consumable_id` bzw.
+`asset_id`, `POST /api/v1/assets/{id}/cis` mit `ci_id`,
+`POST /api/v1/documents/{id}/links` mit fremdem Ziel
+(`document or linked object not found`) und
+`POST /api/v1/tickets/{id}/links` mit fremdem Objekt (`ticket not found`).
+Der Test hält diese Status fest (`deviation`); eine Vereinheitlichung auf 422
+ändert den API-Vertrag dieser Pfade und liegt bei WP-329. Die Reservierung
+mit fremdem `assignee_id` endete vor 000275 erst am Fremdschlüssel der
+Bewegung (`stock_movement_assignee_user_id_fkey`) mit 422 und einer
+WARN-Zeile; seit 000275 scheitert sie am eigenen Fremdschlüssel mit einem
+Feldfehler.
+
 ## Offene Teile anderer WPs
 
 | Teil | WP |
 |---|---|
-| Cross-Tenant-Referenzen aller P2-Schreibpfade, Datenbank-Fremdschlüssel und Prüfskript | WP-827 |
 | Kanalmatrix nach TEN-09 | WP-828 |
 
 Diese WPs ergänzen ihre Zeilen in diesem Dokument.

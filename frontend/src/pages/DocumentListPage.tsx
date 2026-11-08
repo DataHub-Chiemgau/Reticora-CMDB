@@ -213,14 +213,21 @@ export function DocumentListPage() {
                         {doc.title}
                       </Link>
                     </td>
-                    <td className={tdMonoClasses}>{doc.file_name}</td>
+                    {/* A field the field permissions leave out (RBA-07) is absent. */}
+                    <td className={tdMonoClasses}>{doc.file_name ?? '—'}</td>
                     <td className={tdClasses}>
-                      <Badge variant="neutral">
-                        {t(`document.categories.${doc.category}`, doc.category)}
-                      </Badge>
+                      {doc.category ? (
+                        <Badge variant="neutral">
+                          {t(`document.categories.${doc.category}`, doc.category)}
+                        </Badge>
+                      ) : (
+                        '—'
+                      )}
                     </td>
                     <td className={cn(tdClasses, 'whitespace-nowrap text-right tabular-nums')}>
-                      {formatBytes(doc.file_size, i18n.language)}
+                      {doc.file_size === undefined
+                        ? '—'
+                        : formatBytes(doc.file_size, i18n.language)}
                     </td>
                     <td className={cn(tdClasses, 'tabular-nums')}>
                       {t('document.versionLabel', { version: doc.version })}

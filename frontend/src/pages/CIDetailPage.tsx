@@ -5,7 +5,14 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, TopologyGraphData } from '../api/client';
-import { useCI, useCINeighbors, useHasPermission, useUpdateCI } from '../api/hooks';
+import {
+  useCI,
+  useCINeighbors,
+  useHasPermission,
+  useTeam,
+  useUpdateCI,
+  useUser,
+} from '../api/hooks';
 import { localizedText, tagLabel } from '../api/cmdb';
 import { useCIType, useCITypes, useSetCITags, useTags } from '../api/cmdbHooks';
 import { Badge } from '../components/ui/Badge';
@@ -256,6 +263,9 @@ export function CIDetailPage() {
                 <DetailRow label={t('ci.room')} value={locations.name(ci.room_id)} />
               </dl>
               <dl>
+                <CIOwnerRow ci={ci} />
+              </dl>
+              <dl>
                 <DetailRow label="ID" value={ci.id} mono />
                 <DetailRow label={t('ci.source')} value={ci.discovery_source} />
               </dl>
@@ -396,6 +406,33 @@ export function CIDetailPage() {
       <CIFormModal open={isEditOpen} onOpenChange={setIsEditOpen} ci={ci} />
     </div>
   );
+}
+
+/**
+ * CIOwnerRow shows the owner of the CI (CI-07, WP-805): the responsible
+ * user and team by name (GET /users/{id}, GET /teams/{id}); without
+ * user:read only their kind. A CI with an asset has the asset's owner
+ * (DB-05), marked as such. Not the contact role owner of ci_contact.
+ */
+function CIOwnerRow({ ci }: { ci: CI }) {
+  const { t } = useTranslation();
+  const mayRead = useHasPermission('user:read') === true;
+  const user = useUser(ci.owner_user_id, { enabled: mayRead });
+  const team = useTeam(ci.owner_team_id, { enabled: mayRead });
+  const parts: string[] = [];
+  const named = (kind: string, name?: string) =>
+    name ? t('ci.owner.named', { kind, name }) : kind;
+  if (ci.owner_user_id) {
+    const name = user.data?.id === ci.owner_user_id ? user.data.display_name : undefined;
+    parts.push(named(t('ci.owner.user'), mayRead ? name : undefined));
+  }
+  if (ci.owner_team_id) {
+    const name = team.data?.id === ci.owner_team_id ? team.data.name : undefined;
+    parts.push(named(t('ci.owner.team'), mayRead ? name : undefined));
+  }
+  let value = parts.join(' · ');
+  if (value && ci.asset_id) value = t('ci.owner.fromAssetMark', { value });
+  return <DetailRow label={t('ci.owner.title')} value={value || undefined} />;
 }
 
 /** tagRefusal words a refused PUT /cis/{id}/tags like the refusal of a PATCH. */

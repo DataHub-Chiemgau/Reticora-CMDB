@@ -10,9 +10,12 @@
  * OR-combined with the live evaluation (required, read only); its
  * visibility applies to fields without a conditional visibility rule.
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { localizedText, type LocalizedText } from '../../api/cmdb';
 import { useTranslation } from 'react-i18next';
+import { LocationPicker } from '../pickers/LocationPicker';
+import { ObjectPicker, type ObjectKind } from '../pickers/ObjectPicker';
+import { UserTeamPicker, type HolderKind } from '../pickers/UserTeamPicker';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { Textarea } from '../ui/Textarea';
@@ -265,6 +268,24 @@ function DynamicFieldControl({ def, state, value, error, options, onChange }: Dy
 
   const textValue = value === undefined || value === null ? '' : String(value);
 
+  // References are chosen by name through the pickers of WP-318, never
+  // typed as an id (WP-317): reference takes the picker of its
+  // reference_target (WP-254); contract_ref stays a select.
+  const picker = pickerOf(def);
+  if (picker) {
+    return (
+      <ReferenceField
+        picker={picker}
+        label={label}
+        value={textValue}
+        error={error}
+        readOnly={state.readOnly}
+        required={state.required}
+        onChange={onChange}
+      />
+    );
+  }
+
   switch (def.data_type) {
     case 'multiline':
     case 'textarea':
@@ -294,10 +315,12 @@ function DynamicFieldControl({ def, state, value, error, options, onChange }: Dy
     case 'location':
     case 'ci_ref':
     case 'asset_ref':
+    case 'reference':
     case 'contract_ref': {
-      // Reference and enum fields render as selects; reference options come
-      // from the caller (autocomplete selectors), enum options from the
-      // definition or the conditional allowed-values rule.
+      // Enum fields and references without a picker (contract_ref) render
+      // as selects; reference
+      // options come from the caller, enum options from the definition or
+      // the conditional allowed-values rule.
       const enumOptions = (state.allowedValues ?? def.enum_values ?? []).map((v) => ({
         value: v,
         label: v,
@@ -377,6 +400,109 @@ function DynamicFieldControl({ def, state, value, error, options, onChange }: Dy
         />
       );
   }
+}
+
+/** The picker of a reference field: object kinds, holder kinds or the location tree. */
+type ReferencePicker =
+  | { kind: 'object'; kinds: readonly ObjectKind[] }
+  | { kind: 'holder'; kinds: readonly HolderKind[] }
+  | { kind: 'location' };
+
+const TARGET_PICKERS: Record<string, ReferencePicker> = {
+  ci: { kind: 'object', kinds: ['ci'] },
+  asset: { kind: 'object', kinds: ['asset'] },
+  location: { kind: 'location' },
+  user: { kind: 'holder', kinds: ['user'] },
+  team: { kind: 'holder', kinds: ['team'] },
+};
+
+const TYPE_TARGETS: Record<string, string> = {
+  ci_ref: 'ci',
+  asset_ref: 'asset',
+  location: 'location',
+  user: 'user',
+  team: 'team',
+};
+
+function pickerOf(def: FieldDefinition): ReferencePicker | undefined {
+  const target = def.data_type === 'reference' ? def.reference_target : TYPE_TARGETS[def.data_type];
+  return target ? TARGET_PICKERS[target] : undefined;
+}
+
+interface ReferenceFieldProps {
+  picker: ReferencePicker;
+  label: string;
+  /** value is the id of the chosen target, '' without one. */
+  value: string;
+  error?: string;
+  readOnly: boolean;
+  required: boolean;
+  onChange: (value: unknown) => void;
+}
+
+/**
+ * ReferenceField stores the id of the target a picker chose and shows its
+ * name; a stored id whose name the form does not know is shown as a stored
+ * reference.
+ */
+function ReferenceField({
+  picker,
+  label,
+  value,
+  error,
+  readOnly,
+  required,
+  onChange,
+}: ReferenceFieldProps) {
+  const { t } = useTranslation();
+  const [names, setNames] = useState<Record<string, string>>({});
+  const name = value ? (names[value] ?? t('form.storedReference')) : '';
+  const choose = (id: string | undefined, picked?: string) => {
+    if (id && picked) setNames((current) => ({ ...current, [id]: picked }));
+    onChange(id || undefined);
+  };
+
+  let control;
+  if (readOnly) {
+    control = <Input label={label} value={name} disabled />;
+  } else if (picker.kind === 'location') {
+    control = (
+      <LocationPicker
+        label={label}
+        value={value || null}
+        onChange={(picked) => choose(picked?.id, picked?.name)}
+      />
+    );
+  } else if (picker.kind === 'holder') {
+    control = (
+      <UserTeamPicker
+        label={label}
+        kinds={picker.kinds}
+        required={required}
+        value={value ? { kind: picker.kinds[0]!, id: value, name } : null}
+        onChange={(picked) => choose(picked?.id, picked?.name)}
+      />
+    );
+  } else {
+    control = (
+      <ObjectPicker
+        label={label}
+        kinds={picker.kinds}
+        required={required}
+        value={value ? [{ kind: picker.kinds[0]!, id: value, name }] : []}
+        onChange={(picked) => {
+          const last = picked[picked.length - 1];
+          choose(last?.id, last?.name);
+        }}
+      />
+    );
+  }
+  return (
+    <div className="space-y-1">
+      {control}
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+    </div>
+  );
 }
 
 /**

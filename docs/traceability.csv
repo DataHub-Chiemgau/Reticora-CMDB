@@ -1529,6 +1529,7 @@ UI-14;[P2–P4, A];C;frontend/src/pages/ImportPage.test.tsx;WP-322
 TST-03;[B], Teilumfang [P2];C;frontend/e2e/import.spec.ts;WP-322
 UI-14;[P2–P4, A];C;frontend/src/pages/StocktakeDetailPage.test.tsx;WP-813
 ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/writers_integration_test.go;WP-826
+ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/rls/foreign_refs_p2_integration_test.go;WP-827
 MET-50;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
 UI-11;[P2];C;frontend/src/pages/FormBuilderPage.test.tsx;WP-316
 SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
@@ -1539,3 +1540,23 @@ ABN-02;[Q];G2;tests/load/phase2.js;WP-822
 NFR-02;[B];G2;tests/load/phase2.js;WP-822
 UI-11;[P2];C;frontend/src/components/rules/ComputedEditor.test.tsx;WP-802
 MET-45;Phase 1 im Fokus, voller Tag fehlt;C;frontend/src/rules/rules.test.ts;WP-802
+UI-12;[P2];C;frontend/src/components/create/GuidedCreate.test.tsx;WP-317
+MET-51;P2/G2;C;frontend/src/components/create/GuidedCreate.test.tsx;WP-317
+TST-03;[B], Teilumfang [P2];C;frontend/e2e/guided-create.spec.ts;WP-317
+UI-14;[P2–P4, A];C;frontend/src/pages/AssetListPage.test.tsx;WP-319
+UI-12;[P2];C;frontend/src/pages/AssetListPage.test.tsx;WP-319
+TST-01;[B], Teilumfang [P2];G2;backend/internal/citype/inherit_test.go;WP-326
+MET-06;[P2];G2;backend/internal/citype/inherit_test.go;WP-326
+MET-45;Phase 1 im Fokus, voller Tag fehlt;G2;backend/internal/citype/inherit_test.go;WP-326
+CI-07;[P2];C;frontend/src/pages/CIDetailPage.test.tsx;WP-805
+ABN-02;[Q];G2;tests/load/writes.js;WP-823
+NFR-03;[B], Teilumfang [P5];G2;tests/load/writes.js;WP-823
+UI-14;[P2–P4, A];C;frontend/src/pages/ContractsPage.test.tsx;WP-808
+UI-14;[P2–P4, A];C;frontend/src/components/bulk/BulkBar.test.tsx;WP-816
+RBA-07;[P2];B;backend/internal/document/fieldrights_test.go;WP-267
+RBA-07;[P2];B;backend/internal/tenant/rls/fieldrights_matrix_integration_test.go;WP-267
+MET-45;Phase 1 im Fokus, voller Tag fehlt;B;backend/internal/rules/rules_test.go;WP-254
+UI-14;[P2–P4, A];C;frontend/src/pages/DisposalListPage.test.tsx;WP-815
+UI-14;[P2–P4, A];C;frontend/src/pages/OrderListPage.test.tsx;WP-812
+UI-14;[P2–P4, A];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809
+AST-04;[P2];C;frontend/src/pages/AssetDetailPage.test.tsx;WP-809

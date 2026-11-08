@@ -49,7 +49,9 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Rule catalog",
-    "import": "Import"
+    "import": "Import",
+    "contracts": "Contracts",
+    "suppliers": "Suppliers"
   },
   "common": {
     "save": "Save",
@@ -113,7 +115,9 @@
       "tags": "Open tags",
       "rules": "Open rule catalog",
       "scan": "Scan",
-      "import": "Open import assistant"
+      "import": "Open import assistant",
+      "contracts": "Open contracts",
+      "suppliers": "Open suppliers"
     },
     "contact": {
       "label": "Contact",
@@ -259,9 +263,12 @@
       "results": {
         "ok": "OK",
         "error": "Error",
-        "skipped": "Skipped"
+        "skipped": "Skipped",
+        "reverted": "Reverted"
       },
-      "closeReport": "Close report"
+      "closeReport": "Close report",
+      "queuedOther": "Bulk change for {{count}} CIs runs as a job",
+      "successOther": "{{count}} CIs changed"
     },
     "overrideReason": "Reason",
     "addInstanceField": "Add instance field",
@@ -336,6 +343,19 @@
       "invalid": "Unknown tags: {{detail}}",
       "forbidden": "You lack the permission to change the CI.",
       "reason": "The tags could not be saved: {{detail}}"
+    },
+    "owner": {
+      "title": "Responsible",
+      "user": "User",
+      "team": "Team",
+      "userLabel": "Responsible user",
+      "teamLabel": "Responsible team",
+      "named": "{{kind}}: {{name}}",
+      "fromAsset": "taken from the asset",
+      "fromAssetMark": "{{value}} (from the asset)",
+      "hint": "User or team responsible for the CI in the system; not the contact with the role owner.",
+      "teamForbidden": "This team is outside your team scope.",
+      "forbidden": "You may not set the responsible owner."
     }
   },
   "form": {
@@ -384,6 +404,81 @@
         "textExpected": "{{label}} must be a text",
         "invalid": "{{label}} is invalid"
       }
+    },
+    "storedReference": "Stored reference"
+  },
+  "create": {
+    "description": "Choose what to create, then complete the details.",
+    "steps": {
+      "label": "Creation steps",
+      "type": "Type",
+      "device": "Manufacturer and model",
+      "fields": "Details"
+    },
+    "typeIntro": "What would you like to create?",
+    "typesLoading": "Loading types …",
+    "typesLoadFailed": "The CI types could not be loaded.",
+    "typeInactive": "This type has been deactivated in the meantime. Please choose another type.",
+    "tiles": {
+      "subtypes": "Show subtypes of {{name}}",
+      "subtypesOf": "Subtypes of {{name}}"
+    },
+    "fields": {
+      "name": "Name",
+      "status": "Status",
+      "location": "Location",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "variant": "Variant"
+    },
+    "suggestions": "Suggestions for {{field}}",
+    "selectPlaceholder": "Please select",
+    "variantUnnamed": "Variant {{number}}",
+    "formLoading": "Loading fields …",
+    "formLoadFailed": "The fields of this type could not be loaded.",
+    "prefilled": "prefilled",
+    "sourceHint": "Values entered by hand are stored with the source “manual”. Automatic discovery does not overwrite them silently; the detail page shows where each value comes from.",
+    "serverRejected": "Please correct the marked fields.",
+    "validation": {
+      "nameRequired": "Name is required.",
+      "variantRequired": "Please choose a variant."
+    },
+    "back": "Back",
+    "next": "Next",
+    "groups": {
+      "general": "General",
+      "required": "Further required fields",
+      "instance": "Further fields of this CI",
+      "identity": "Identity",
+      "placement": "Placement",
+      "management": "Management",
+      "virtualization": "Virtualization",
+      "hardware": "Hardware",
+      "software": "Software",
+      "assignment": "Assignment",
+      "wireless": "Wireless",
+      "connectivity": "Connectivity",
+      "access": "Access",
+      "classification": "Classification",
+      "capacity": "Capacity",
+      "resilience": "Resilience",
+      "ownership": "Ownership",
+      "cloud": "Cloud"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "end_user": "End-user devices",
+      "network": "Network",
+      "power": "Power",
+      "storage": "Storage",
+      "peripheral": "Peripherals",
+      "iot": "IoT",
+      "software": "Software",
+      "infrastructure": "Infrastructure",
+      "service": "Services",
+      "cloud": "Cloud",
+      "generic": "Generic devices",
+      "other": "Other"
     }
   },
   "discovery": {
@@ -596,17 +691,6 @@
     "location": "Location",
     "supplier": "Supplier",
     "create": "Create Asset",
-    "bulk": {
-      "selected": "{{count}} selected",
-      "setStatus": "Set status…",
-      "apply": "Apply",
-      "clearSelection": "Clear selection",
-      "selectAll": "Select all visible assets",
-      "selectRow": "Select {{name}}",
-      "toolbarLabel": "Bulk edit",
-      "success": "Updated status of {{count}} assets",
-      "error": "The bulk change could not be fully applied"
-    },
     "barcode": "Barcode",
     "rfidTag": "RFID tag",
     "purchaseDate": "Purchase date",
@@ -614,14 +698,6 @@
     "invoiceNumber": "Invoice number",
     "warrantyEnd": "Warranty end",
     "status": "Status",
-    "statuses": {
-      "in_stock": "In stock",
-      "assigned": "Assigned",
-      "maintenance": "Maintenance",
-      "retired": "Retired",
-      "disposed": "Disposed",
-      "lost": "Lost"
-    },
     "categories": {
       "hardware": "Hardware",
       "software": "Software",
@@ -630,9 +706,182 @@
       "accessory": "Accessory",
       "other": "Other"
     },
-    "summary": "Manage assets with their category, status and location.",
+    "summary": "Manage assets with their category, lifecycle and location.",
     "emptyTitle": "No assets yet",
-    "emptyHint": "Create the first asset to track stock, status and location."
+    "emptyHint": "Create the first asset to track stock, lifecycle and location.",
+    "columns": {
+      "inventory_no": "Inventory number",
+      "name": "Name",
+      "category": "Category",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "serial_number": "Serial number",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID tag",
+      "lifecycle_state": "Lifecycle",
+      "location_id": "Location",
+      "cost_center": "Cost center",
+      "purchase_date": "Purchase date",
+      "purchase_price": "Purchase price",
+      "currency": "Currency",
+      "warranty_until": "Warranty until"
+    },
+    "columnsButton": "Columns",
+    "columnsLegend": "Shown columns",
+    "allLifecycleStates": "All states",
+    "lifecycleFilter": "Lifecycle",
+    "sortBy": "Sort by {{column}}",
+    "totalCapped": "more than {{count}}",
+    "pagination": "Pages",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "deleteConflict": "The asset cannot be deleted.",
+    "views": {
+      "label": "View",
+      "none": "No view",
+      "extended": "{{name}} (extended)",
+      "extendedHint": "This view has further conditions. It runs in the saved views.",
+      "open": "Open in saved views",
+      "save": "Save as view",
+      "name": "View name",
+      "saveTitle": "Save view",
+      "saved": "View \"{{name}}\" saved",
+      "saveError": "The view could not be saved."
+    },
+    "guided": {
+      "categories": "Category",
+      "chooseCategory": "What kind of asset are you creating?",
+      "change": "Change category",
+      "chosen": "Category: {{category}}",
+      "more": "More details",
+      "less": "Fewer details",
+      "submitError": "The asset could not be created."
+    },
+    "bulk": {
+      "selected": "{{count}} selected",
+      "setStatus": "Set status…",
+      "apply": "Apply",
+      "clearSelection": "Clear selection",
+      "selectAll": "Select all visible assets",
+      "selectRow": "Select {{name}}",
+      "toolbarLabel": "Bulk edit",
+      "queued": "Status change for {{count}} assets runs as a job",
+      "queuedOther": "Bulk change for {{count}} assets runs as a job",
+      "partial": "{{succeeded}} assets updated, {{failed}} failed",
+      "failures": "Failed assets",
+      "success": "Updated status of {{count}} assets",
+      "successOther": "{{count}} assets changed",
+      "error": "The bulk change could not be fully applied",
+      "selectAllMatches": "Select all {{count}} matches of the filter",
+      "selectFirstMatches": "Select the first {{count}} matches of the filter",
+      "collectError": "The matches of the filter could not be loaded",
+      "capped": "A bulk change covers at most {{max}} assets: the filter has {{total}} matches, the first {{max}} are selected.",
+      "tooMany": "A bulk change covers at most {{max}} assets; {{count}} are selected.",
+      "jobHint": "From {{count}} assets on the change runs as a job; its report appears here.",
+      "jobTitle": "Bulk change as a job",
+      "jobProgress": "Progress of the bulk change",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job finished: {{succeeded}} of {{total}} assets updated, {{failed}} failed",
+      "jobCancelled": "Job cancelled: {{succeeded}} of {{total}} assets updated, {{failed}} failed, {{skipped}} skipped",
+      "jobFailed": "The job failed: {{error}}",
+      "jobLoadError": "The job could not be read",
+      "report": "Report per asset",
+      "reportCI": "Asset",
+      "reportResult": "Result",
+      "reportCode": "HTTP status",
+      "reportError": "Error",
+      "closeReport": "Close report",
+      "statuses": {
+        "in_stock": "In stock",
+        "assigned": "Assigned",
+        "maintenance": "In maintenance",
+        "retired": "Retired",
+        "disposed": "Disposed",
+        "lost": "Lost"
+      }
+    },
+    "childModes": {
+      "configuration": "Configuration",
+      "standalone": "Standalone"
+    },
+    "detail": {
+      "notFound": "The asset was not found or is not visible.",
+      "loadError": "The asset could not be loaded.",
+      "masterData": "Master data",
+      "locationReadOnly": "Location (via movements)",
+      "lifecycleReadOnly": "Lifecycle (via transitions)",
+      "notes": "Notes",
+      "history": "Movements and changes",
+      "listError": "The list could not be loaded.",
+      "fields": {
+        "name": "Name",
+        "inventory_no": "Inventory number",
+        "manufacturer": "Manufacturer",
+        "model": "Model",
+        "serial_number": "Serial number",
+        "barcode": "Barcode",
+        "rfid_tag": "RFID tag",
+        "purchase_date": "Purchase date",
+        "purchase_price": "Purchase price",
+        "currency": "Currency",
+        "warranty_until": "Warranty until",
+        "cost_center": "Cost center",
+        "invoice_number": "Invoice number",
+        "supplier_id": "Supplier",
+        "contract_id": "Contract"
+      },
+      "edit": {
+        "title": "Edit asset",
+        "conflict": "The asset was changed meanwhile ({{fields}}). Reload it and make the change again.",
+        "precondition": "The version of the asset you read is no longer valid. Please reload.",
+        "reload": "Reload",
+        "failed": "The asset could not be saved."
+      },
+      "warranty": {
+        "notice": "The warranty ends on {{date}} (in {{count}} days).",
+        "warning": "The warranty ends soon: on {{date}} (in {{count}} days).",
+        "expired": "Warranty expired (since {{date}})."
+      },
+      "contract": {
+        "title": "Contract and supplier",
+        "supplier": "Supplier",
+        "number": "Contract",
+        "term": "Term",
+        "noticeDate": "Notice by",
+        "unnamedSupplier": "Show supplier",
+        "unnamedContract": "Show contract"
+      },
+      "holder": {
+        "title": "Holder and reservation",
+        "current": "Holder",
+        "due": "Due back"
+      },
+      "reservation": {
+        "title": "Active reservation",
+        "until": "Reserved until",
+        "for": "Reserved for",
+        "release": "Release reservation"
+      },
+      "cis": {
+        "title": "Linked CIs",
+        "none": "No CI is linked to this asset.",
+        "primary": "Primary CI",
+        "provenance": "Show the fields of {{name}} derived from the asset",
+        "provenanceError": "The provenance of the fields could not be loaded.",
+        "noDerived": "No field of this CI comes from the asset.",
+        "unlink": "Unlink",
+        "unlinkNamed": "Unlink {{name}} from the asset",
+        "pick": "Link CI",
+        "makePrimary": "Set as primary CI",
+        "link": "Link",
+        "linkRefused": "The CI cannot be linked: {{detail}}"
+      },
+      "children": {
+        "title": "Children",
+        "none": "This asset has no children.",
+        "fromAsset": "(from the asset)"
+      }
+    }
   },
   "assignment": {
     "title": "Assignments",
@@ -1306,7 +1555,71 @@
     "responseDue": "Response due",
     "resolutionDue": "Resolution due",
     "ticket": "Ticket",
-    "status": "Status"
+    "status": "Status",
+    "client": "Client",
+    "noClient": "No client (organization)",
+    "calendarField": "Business calendar",
+    "calendarChain": "Calendar chain (client, org default)",
+    "businessHours": "Apply business hours",
+    "elapsedTime": "Elapsed time (around the clock)",
+    "calendar": {
+      "title": "Business calendars",
+      "hint": "Weekly hours and holidays by which SLA deadlines count in business time. An empty time zone is derived from the client or the organization.",
+      "loading": "Loading business calendars",
+      "errorTitle": "Business calendars could not be loaded",
+      "emptyTitle": "No business calendars available",
+      "emptyHint": "Without a calendar of your own the standard Monday to Friday, 08:00–18:00 applies.",
+      "create": "Create calendar",
+      "editTitle": "Edit calendar",
+      "edit": "Edit calendar {{name}}",
+      "delete": "Delete calendar {{name}}",
+      "deleteTitle": "Delete calendar",
+      "deleteConfirm": "Delete calendar “{{name}}”? Policies naming it then follow the calendar chain.",
+      "more": "Load more",
+      "name": "Name",
+      "client": "Client",
+      "organizationWide": "Organization (all clients)",
+      "clientFixed": "The client of a calendar cannot be changed; create a new calendar for another client.",
+      "timezone": "Time zone",
+      "timezonePlaceholder": "e.g. Europe/Berlin",
+      "timezoneHint": "IANA name; empty = derived from the client or the organization.",
+      "timezoneDerived": "derived",
+      "weeklyHours": "Weekly hours",
+      "windowStart": "{{day}}, window {{n}}: start",
+      "windowEnd": "{{day}}, window {{n}}: end",
+      "removeWindow": "Remove {{day}}, window {{n}}",
+      "addWindow": "Window",
+      "addWindowFor": "Add window for {{day}}",
+      "holidays": "Holidays",
+      "holidayDate": "Holiday {{n}}: date",
+      "holidayName": "Holiday {{n}}: name",
+      "removeHoliday": "Remove holiday {{n}}",
+      "addHoliday": "Add holiday",
+      "isDefault": "Default calendar (of the organization or client)",
+      "default": "Default",
+      "weekdays": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      },
+      "weekdaysShort": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
+      },
+      "errors": {
+        "secondDefault": "This organization or client already has a default calendar.",
+        "forbidden": "Not permitted: only a user without client restriction can maintain organization-wide calendars."
+      }
+    }
   },
   "forms": {
     "title": "Forms",
@@ -1830,7 +2143,58 @@
     },
     "number": "Number",
     "emptyTitle": "No orders yet",
-    "emptyHint": "Create an order to follow procurement and approval."
+    "emptyHint": "Create an order to follow procurement and approval.",
+    "filterStatus": "Filter by status",
+    "editTitle": "Edit order",
+    "client": "Client",
+    "orgWide": "No client (organization-wide)",
+    "noSupplier": "No supplier",
+    "targetBin": "Target bin",
+    "actions": {
+      "submit": "Submit",
+      "items": "Items",
+      "edit": "Edit",
+      "delete": "Delete",
+      "approve": "Approve",
+      "reject": "Reject",
+      "place": "Place order",
+      "receive": "Goods receipt",
+      "close": "Close",
+      "cancel": "Cancel order"
+    },
+    "items": {
+      "title": "Items of {{number}}",
+      "add": "Add item",
+      "kind": "Kind",
+      "kinds": {
+        "consumable": "Consumable",
+        "asset": "Asset"
+      },
+      "consumable": "Consumable",
+      "quantity": "Quantity",
+      "unitPrice": "Unit price",
+      "received": "Received",
+      "none": "No items yet."
+    },
+    "receive": {
+      "title": "Goods receipt for {{number}}",
+      "remaining": "open: {{count}}",
+      "quantity": "Received quantity ({{name}})",
+      "bin": "Target bin ({{name}})",
+      "assets": "Received assets ({{name}})",
+      "submit": "Book goods receipt",
+      "tooMany": "At most {{count}} open – over-delivery is not possible.",
+      "invalidQuantity": "Enter a whole number from 0.",
+      "binRequired": "Choose a target bin.",
+      "assetsMismatch": "Choose exactly {{count}} assets.",
+      "nothingOpen": "All items have been received in full."
+    },
+    "confirm": {
+      "cancelTitle": "Cancel order {{number}}?",
+      "cancelBody": "“{{title}}” will be cancelled. Partial deliveries already booked stay in stock.",
+      "deleteTitle": "Delete order {{number}}?",
+      "deleteBody": "The draft “{{title}}” and its items will be deleted."
+    }
   },
   "maintenance": {
     "summary": "Schedule maintenance and notify affected customers.",
@@ -1893,6 +2257,42 @@
       "secure_erasure": "Secure erasure",
       "physical_destruction": "Physical destruction",
       "return_to_vendor": "Return to vendor"
+    },
+    "fields": {
+      "method": "Method",
+      "object": "Asset or CI",
+      "asset_id": "Asset",
+      "ci_id": "CI",
+      "protection_class": "Protection class (DIN 66399)",
+      "security_level": "Security level (DIN 66399)",
+      "data_carrier": "Data carrier",
+      "supplier_id": "Service provider",
+      "performed_by": "Performed by",
+      "witness": "Witness",
+      "performed_at": "Performed at",
+      "certificate_ref": "Certificate reference",
+      "notes": "Notes",
+      "evidence_document_id": "Evidence"
+    },
+    "requiredHint": "Fields marked * are required for the chosen method (E-55).",
+    "noValue": "Not specified",
+    "noSupplier": "No service provider",
+    "protectionClass": "Protection class {{value}}",
+    "securityLevelPlaceholder": "e.g. P-4",
+    "supplierOrWitness": "A service provider or a witness is sufficient.",
+    "suppliersUnavailable": "Suppliers cannot be read; name a witness.",
+    "evidenceUpload": "Upload evidence",
+    "evidenceRemove": "Remove evidence",
+    "evidenceInfected": "The evidence is infected and quarantined; submitting is blocked. Upload another evidence.",
+    "evidenceDownload": "Download evidence",
+    "recordHash": "Checksum (record_hash)",
+    "detail": "Details",
+    "detailTitle": "Disposal record",
+    "showDetail": "Details of {{name}}",
+    "errors": {
+      "required": "Required for this method",
+      "sourceState": "Disposal is not allowed in the current lifecycle state: {{detail}}",
+      "notFound": "Not found: {{detail}}"
     }
   },
   "keys": {
@@ -2493,7 +2893,36 @@
     "reason": "Reason",
     "title": "Lifecycle",
     "current": "Current",
-    "apply": "Apply"
+    "apply": "Apply",
+    "states": {
+      "ordered": "Ordered",
+      "received": "Received",
+      "in_stock": "In stock",
+      "reserved": "Reserved",
+      "preparing": "Preparing",
+      "deployed": "Deployed",
+      "repair": "Repair",
+      "retired": "Retired",
+      "disposed": "Disposed"
+    },
+    "invalidTransition": "Transition not allowed.",
+    "guards": {
+      "storage_location": "For \"In stock\" the asset must be at a storage location (warehouse, zone, shelf or bin).",
+      "operations_location_or_holder": "For \"Deployed\" the asset needs an operations location (site, building, room or rack) or a holder.",
+      "disposal_record": "For \"Disposed\" the asset needs a disposal record.",
+      "active_reservation": "For \"Reserved\" the asset needs an active reservation."
+    },
+    "missing": {
+      "location_id": "A matching location is missing: move the asset.",
+      "assignee": "A holder (person or team) is missing.",
+      "disposal_record": "A disposal record is missing.",
+      "reservation": "An active reservation is missing."
+    },
+    "actions": {
+      "assign": "Assign",
+      "reserve": "Reserve",
+      "disposal": "Go to disposal"
+    }
   },
   "relationship": {
     "add": "Add relationship",
@@ -2834,7 +3263,10 @@
     "partialReportSummary": "Partial report: {{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped",
     "kinds": {
       "attribute": {
-        "index": "Attribute index"
+        "index": "Attribute index",
+        "index.rebuild": "Attribute index rebuild",
+        "index.key": "Attribute index by key",
+        "computed_backfill": "Backfill of computed attributes"
       },
       "metamodel": {
         "test": "Metamodel test"
@@ -2844,9 +3276,42 @@
       },
       "import": {
         "run": "Import run"
+      },
+      "ci": {
+        "bulk": "Bulk change of CIs",
+        "merge": "CI merge"
+      },
+      "asset": {
+        "bulk": "Bulk change of assets"
+      },
+      "bulk": {
+        "revert": "Undo of a bulk change"
+      },
+      "export": "Export",
+      "history": {
+        "snapshot": "State snapshot"
+      },
+      "document": {
+        "scan": "Document malware scan"
+      },
+      "search": {
+        "reindex": "Search index rebuild"
+      },
+      "labels": {
+        "batch": "Label printing"
       }
     },
-    "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts."
+    "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts.",
+    "kindKey": "Technical key: {{kind}}",
+    "revert": "Undo",
+    "revertUntil": "Undo until {{until}}",
+    "revertDone": "The job was undone.",
+    "revertQueued": "The undo runs as job {{kind}}.",
+    "revertConflict": "The job cannot be undone: {{detail}}",
+    "revertForbidden": "You may not undo this job.",
+    "revertFailed": "The job could not be undone: {{error}}",
+    "reverted": "Undone",
+    "resultSummary": "{{succeeded}} of {{total}} succeeded, {{failed}} failed, {{skipped}} skipped"
   },
   "provenance": {
     "show": "Provenance of {{field}}",
@@ -3983,5 +4448,206 @@
       "unsaved": "The editor has unsaved changes. The preview shows the saved state.",
       "error": "The preview could not be loaded"
     }
+  },
+  "contract": {
+    "title": "Contracts",
+    "subtitle": "Maintenance, support, lease and licence contracts with term and notice period.",
+    "create": "Create contract",
+    "createTitle": "Create contract",
+    "editTitle": "Edit contract",
+    "editLabel": "Edit contract {{name}}",
+    "deleteLabel": "Delete contract {{name}}",
+    "deleteTitle": "Delete contract",
+    "deleteConfirm": "Really delete contract {{name}}?",
+    "empty": "No contracts yet.",
+    "loadError": "The contracts could not be loaded.",
+    "forbiddenRead": "You lack the read permission for contracts (contract:read).",
+    "readOnly": "You can view contracts but not change them (contract:write missing).",
+    "notFound": "The contract was not found.",
+    "backToList": "Back to the contracts",
+    "details": "Master data",
+    "documents": "Contract documents",
+    "orgWide": "Organization-wide",
+    "none": "Not set",
+    "currencyHint": "Empty means the currency of the organization.",
+    "clientFixed": "The client cannot be changed after creation.",
+    "supplierHint": "Offered are organization-wide suppliers and those of the chosen client.",
+    "fields": {
+      "number": "Number",
+      "kind": "Kind",
+      "supplier": "Supplier",
+      "client": "Client",
+      "term": "Term",
+      "startDate": "Start",
+      "endDate": "End",
+      "noticePeriodDays": "Notice period (days)",
+      "noticeDate": "Notice deadline",
+      "status": "Status",
+      "value": "Value",
+      "currency": "Currency",
+      "notes": "Notes"
+    },
+    "filters": {
+      "status": "Status",
+      "kind": "Kind",
+      "supplier": "Supplier",
+      "sort": "Sort",
+      "allKinds": "All kinds",
+      "allSuppliers": "All suppliers"
+    },
+    "sorts": {
+      "number": "Number",
+      "start_date": "Start",
+      "end_date": "End"
+    },
+    "statuses": {
+      "draft": "Draft",
+      "active": "Active",
+      "terminated": "Terminated",
+      "ended": "Ended"
+    },
+    "kinds": {
+      "maintenance": "Maintenance",
+      "support": "Support",
+      "lease": "Lease",
+      "license": "Licence",
+      "purchase": "Purchase",
+      "service": "Service",
+      "other": "Other"
+    },
+    "expiry": {
+      "title": "Expiry overview",
+      "subtitle": "Running contracts whose notice deadline falls within the next 30 days or has passed.",
+      "empty": "No notice deadline within the next 30 days.",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "inDays": "In {{count}} days",
+      "passed": "Notice deadline passed",
+      "passedHint": "The notice deadline on {{date}} has passed; the contract ends on {{end}}.",
+      "ends": "Ends {{date}}"
+    },
+    "errors": {
+      "stale": "The contract has changed meanwhile. Reload it before you save.",
+      "reload": "Reload",
+      "numberTaken": "Another contract already has this number.",
+      "forbidden": "You lack the permission for this.",
+      "forbiddenFields": "You may not change some fields; they are marked.",
+      "invalid": "Please check the marked fields.",
+      "notFound": "The contract no longer exists.",
+      "reason": "Error: {{detail}}"
+    }
+  },
+  "supplier": {
+    "title": "Suppliers",
+    "subtitle": "Suppliers and service providers with a contact person; contracts and assets refer to them.",
+    "create": "Create supplier",
+    "createTitle": "Create supplier",
+    "editTitle": "Edit supplier",
+    "editLabel": "Edit supplier {{name}}",
+    "deleteLabel": "Delete supplier {{name}}",
+    "deleteTitle": "Delete supplier",
+    "deleteConfirm": "Really delete supplier {{name}}?",
+    "empty": "No suppliers yet.",
+    "loadError": "The suppliers could not be loaded.",
+    "forbiddenRead": "You lack the read permission for suppliers (contract:read).",
+    "readOnly": "You can view suppliers but not change them (contract:write missing).",
+    "search": "Search suppliers",
+    "orgWide": "Organization-wide",
+    "noContact": "No contact person",
+    "clientFixed": "The client cannot be changed after creation.",
+    "fields": {
+      "name": "Name",
+      "externalRef": "External reference",
+      "client": "Client",
+      "contact": "Contact person",
+      "notes": "Notes"
+    },
+    "errors": {
+      "stale": "The supplier has changed meanwhile. Reload it before you save.",
+      "reload": "Reload",
+      "nameTaken": "Another supplier already has this name.",
+      "inUse": "The supplier is still in use (contract, asset or order) and cannot be deleted.",
+      "forbidden": "You lack the permission for this.",
+      "invalid": "Please check the marked fields.",
+      "notFound": "The supplier no longer exists.",
+      "reason": "Error: {{detail}}"
+    }
+  },
+  "bulk": {
+    "operation": "Action",
+    "operations": {
+      "set_status": "Set status",
+      "set_fields": "Set field",
+      "set_location": "Set location",
+      "add_tags": "Add tags",
+      "remove_tags": "Remove tags",
+      "change_template": "Change template",
+      "add_relationship": "Add relationship",
+      "remove_relationship": "Remove relationship",
+      "assign": "Assign",
+      "lifecycle_transition": "Lifecycle transition",
+      "archive": "Archive",
+      "export": "Export"
+    },
+    "choose": "Please choose…",
+    "field": "Field",
+    "value": "New value",
+    "valueHint": "Empty clears the field",
+    "ciFields": {
+      "name": "Name",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "serial_number": "Serial number",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "management_ip": "Management IP",
+      "os_name": "Operating system",
+      "os_version": "OS version",
+      "firmware_version": "Firmware version"
+    },
+    "location": "New location",
+    "tags": "Tags",
+    "noTags": "The tag catalog is empty.",
+    "template": "Template",
+    "templateVersion": "Target version",
+    "currentVersion": "Current version",
+    "version": "Version {{version}}",
+    "relType": "Relationship type",
+    "direction": "Direction",
+    "directions": {
+      "outgoing": "Outgoing (CI → target)",
+      "incoming": "Incoming (target → CI)"
+    },
+    "target": "Target CI",
+    "owner": "Owner (user or team)",
+    "holder": "Assign to (user or team)",
+    "toState": "Target state",
+    "reason": "Reason (optional)",
+    "archiveHint": "Sets the status inactive and the tag archived.",
+    "format": "Format",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON"
+    },
+    "exportQueued": "Export of {{count}} objects started; the file appears under Export.",
+    "invalid": "The bulk change was refused: {{detail}}",
+    "forbidden": "You lack the permission for this action.",
+    "jobFinished": "Bulk change finished.",
+    "undo": "Undo",
+    "undoDone": "The change was undone.",
+    "undoQueued": "The undo runs as a job.",
+    "undoConflict": "Undo not possible: {{detail}}",
+    "undoForbidden": "You may not undo this change.",
+    "undoFailed": "The change could not be undone.",
+    "revertTitle": "Undo as a job",
+    "revertQueued": "Undo for {{count}} objects runs as a job",
+    "revertDone": "Undo finished: {{succeeded}} of {{total}} reverted, {{skipped}} skipped, {{failed}} failed",
+    "selectByFilter": "Select by filter…",
+    "filterTitle": "Select by filter",
+    "filterHint": "The matches of the filter are selected, at most {{max}}.",
+    "filterApply": "Select matches",
+    "filterError": "The matches of the filter could not be loaded.",
+    "filterEmpty": "The filter has no matches.",
+    "filterCapped": "The filter has {{total}} matches; a bulk change covers at most {{max}}, the first {{max}} are selected. Narrow the filter or use the export."
   }
 }

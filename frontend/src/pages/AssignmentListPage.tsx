@@ -98,7 +98,7 @@ function useRowNames(rows: Assignment[]) {
   assets.forEach((query, index) => {
     const asset = query.data;
     if (typeof asset?.name !== 'string') return;
-    const code = asset.inventory_no ?? asset.asset_tag;
+    const code = asset.inventory_no;
     assetNames.set(assetIds[index]!, code ? `${asset.name} (${code})` : asset.name);
   });
   const holderNames = new Map<string, string>();

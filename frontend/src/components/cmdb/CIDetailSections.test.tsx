@@ -13,7 +13,10 @@
  * LifecycleSection (LCY-02, WP-724) offers the targets of GET
  * /cis/{id}/lifecycle-transitions, sends the transition with its required
  * fields to POST /cis/{id}/lifecycle-transitions and renders nothing for a
- * CI type without lifecycle model (422).
+ * CI type without lifecycle model (422). For an asset (WP-809) a 422
+ * lifecycle-guard shows the translated guard and every missing reference
+ * with its way out (assign, reserve, disposal), invalid-transition shows
+ * "Übergang nicht erlaubt"; the CI path keeps the raw message.
  *
  * Retest:
  *   cd frontend && npx vitest run src/components/cmdb/CIDetailSections.test.tsx
@@ -203,5 +206,116 @@ describe('LifecycleSection (LCY-02, WP-724)', () => {
     expect(
       fetchMock.mock.calls.some(([input]) => String(input).includes('/lifecycle-models')),
     ).toBe(false);
+  });
+});
+
+describe('LifecycleSection of an asset: guard messages (WP-809)', () => {
+  const ASSET_ID = 'asset-1';
+  const OPTIONS = {
+    model: { id: 'model-1', key: 'physical_asset', name: 'Physical asset' },
+    current_state: 'in_stock',
+    transitions: [
+      { to_state: 'deployed', key: 'deploy', label: 'Deploy', required_fields: [] },
+      { to_state: 'disposed', key: 'dispose', label: 'Dispose', required_fields: [] },
+    ],
+  };
+
+  function stubRefusal(problem: object) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes(`/assets/${ASSET_ID}/lifecycle-transitions`) && init?.method === 'POST') {
+        return new Response(JSON.stringify(problem), {
+          status: 422,
+          headers: { 'Content-Type': 'application/problem+json' },
+        });
+      }
+      if (url.includes(`/assets/${ASSET_ID}/lifecycle-transitions`)) {
+        return new Response(JSON.stringify(OPTIONS), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ detail: `unexpected request: ${url}` }), {
+        status: 404,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  async function apply(target: string) {
+    const user = userEvent.setup();
+    const select = (await screen.findByLabelText('Übergang nach')) as HTMLSelectElement;
+    await user.selectOptions(select, target);
+    await user.click(screen.getByRole('button', { name: 'Anwenden' }));
+    return user;
+  }
+
+  it('names the failed guard and every missing reference with its action', async () => {
+    stubRefusal({
+      type: 'urn:reticora:problem:lifecycle-guard',
+      title: 'Lifecycle guard failed',
+      status: 422,
+      detail: 'guard operations_location_or_holder failed',
+      guard: 'operations_location_or_holder',
+      missing: ['location_id', 'assignee'],
+      violations: [
+        { field: 'location_id', code: 'guard.operations_location_or_holder', message: 'x' },
+        { field: 'assignee', code: 'guard.operations_location_or_holder', message: 'x' },
+      ],
+    });
+    const onAssign = vi.fn();
+    const onReserve = vi.fn();
+    renderWithProviders(
+      <LifecycleSection
+        entityType="assets"
+        entityId={ASSET_ID}
+        onAssign={onAssign}
+        onReserve={onReserve}
+      />,
+    );
+    const user = await apply('deployed');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Für „Im Einsatz“ braucht das Asset einen Betriebsstandort');
+    expect(alert).toHaveTextContent('Es fehlt ein passender Standort');
+    expect(alert).toHaveTextContent('Es fehlt ein Halter (Person oder Team).');
+    expect(alert).not.toHaveTextContent('guard operations_location_or_holder failed');
+    await user.click(screen.getByRole('button', { name: 'Zuweisen' }));
+    expect(onAssign).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: 'Reservieren' })).not.toBeInTheDocument();
+  });
+
+  it('links a missing disposal record to the disposal page', async () => {
+    stubRefusal({
+      type: 'urn:reticora:problem:lifecycle-guard',
+      status: 422,
+      detail: 'guard disposal_record failed',
+      guard: 'disposal_record',
+      missing: ['disposal_record'],
+    });
+    renderWithProviders(<LifecycleSection entityType="assets" entityId={ASSET_ID} />);
+    await apply('disposed');
+
+    expect(await screen.findByText('Es fehlt ein Entsorgungsnachweis.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zur Entsorgung' })).toHaveAttribute(
+      'href',
+      '/disposal',
+    );
+  });
+
+  it('shows "Übergang nicht erlaubt" for invalid-transition', async () => {
+    stubRefusal({
+      type: 'urn:reticora:problem:invalid-transition',
+      status: 422,
+      detail: 'no transition from in_stock to disposed',
+      from_state: 'in_stock',
+      to_state: 'disposed',
+    });
+    renderWithProviders(<LifecycleSection entityType="assets" entityId={ASSET_ID} />);
+    await apply('disposed');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Übergang nicht erlaubt.');
+    expect(screen.queryByText(/no transition from/)).not.toBeInTheDocument();
   });
 });

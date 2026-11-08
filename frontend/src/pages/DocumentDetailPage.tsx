@@ -118,15 +118,20 @@ function DocumentDetail({ document: doc }: { document: Document }) {
 function MetadataCard({ document: doc }: { document: Document }) {
   const { t } = useTranslation();
   const update = useUpdateDocument(doc.id);
+  // A field the field permissions leave out (RBA-07) is absent: the
+  // category select is hidden then, and the save sends only the fields the
+  // user changed, so a hidden field is never written back.
+  const categoryReadable = doc.category !== undefined;
   const [form, setForm] = useState({
     title: doc.title,
     description: doc.description ?? '',
-    category: doc.category,
+    category: doc.category ?? '',
   });
-  const changed =
-    form.title !== doc.title ||
-    form.description !== (doc.description ?? '') ||
-    form.category !== doc.category;
+  const changes: { title?: string; description?: string; category?: string } = {};
+  if (form.title !== doc.title) changes.title = form.title.trim();
+  if (form.description !== (doc.description ?? '')) changes.description = form.description;
+  if (categoryReadable && form.category !== doc.category) changes.category = form.category;
+  const changed = Object.keys(changes).length > 0;
 
   return (
     <Card title={t('document.metadata')}>
@@ -135,11 +140,7 @@ function MetadataCard({ document: doc }: { document: Document }) {
         onSubmit={(event) => {
           event.preventDefault();
           if (!form.title.trim()) return;
-          update.mutate({
-            title: form.title.trim(),
-            description: form.description,
-            category: form.category,
-          });
+          update.mutate(changes);
         }}
       >
         <Input
@@ -148,15 +149,17 @@ function MetadataCard({ document: doc }: { document: Document }) {
           onChange={(event) => setForm({ ...form, title: event.target.value })}
           required
         />
-        <Select
-          label={t('document.category')}
-          value={form.category}
-          onChange={(event) => setForm({ ...form, category: event.target.value })}
-          options={DOCUMENT_CATEGORIES.map((value) => ({
-            value,
-            label: t(`document.categories.${value}`),
-          }))}
-        />
+        {categoryReadable ? (
+          <Select
+            label={t('document.category')}
+            value={form.category}
+            onChange={(event) => setForm({ ...form, category: event.target.value })}
+            options={DOCUMENT_CATEGORIES.map((value) => ({
+              value,
+              label: t(`document.categories.${value}`),
+            }))}
+          />
+        ) : null}
         <div className="sm:col-span-2">
           <Textarea
             label={t('document.description')}
@@ -247,10 +250,11 @@ function VersionsCard({ document: doc }: { document: Document }) {
                 <td className={cn(tdClasses, 'tabular-nums')}>
                   {t('document.versionLabel', { version: version.version })}
                 </td>
+                {/* A field the field permissions leave out (RBA-07) is absent. */}
                 <td className={cn(tdClasses, 'whitespace-nowrap text-right tabular-nums')}>
-                  {formatBytes(version.size, i18n.language)}
+                  {version.size === undefined ? '—' : formatBytes(version.size, i18n.language)}
                 </td>
-                <td className={tdMonoClasses}>{version.mime_type}</td>
+                <td className={tdMonoClasses}>{version.mime_type ?? '—'}</td>
                 <td className={tdMonoClasses}>
                   {version.checksum_sha256 ? (
                     <span title={version.checksum_sha256}>

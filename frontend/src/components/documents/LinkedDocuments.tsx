@@ -247,7 +247,8 @@ function LinkExistingDocument({
         onQueryChange={setQuery}
         options={hits.map((doc) => ({
           key: doc.id,
-          kindLabel: t(`document.categories.${doc.category}`, doc.category),
+          // A field the field permissions leave out (RBA-07) is absent.
+          kindLabel: doc.category ? t(`document.categories.${doc.category}`, doc.category) : '—',
           name: doc.title,
           code: doc.file_name,
         }))}

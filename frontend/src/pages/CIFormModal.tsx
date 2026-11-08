@@ -5,9 +5,17 @@ import { ApiError } from '../api/client';
 import type { CI, CICreateRequest, CIUpdateRequest } from '../api/client';
 import { localizedText } from '../api/cmdb';
 import { useAllCITypes, useCIType, useGlobalFields } from '../api/cmdbHooks';
-import { useCreateCI, useUpdateCI } from '../api/hooks';
+import { useCreateCI, useTeam, useUpdateCI, useUser } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
+import {
+  CI_TYPED_COLUMNS,
+  GuidedCreate,
+  ownerFieldErrors,
+  type CreateType,
+  type GuidedCreateDraft,
+} from '../components/create/GuidedCreate';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
+import { UserTeamPicker, type PickedHolder } from '../components/pickers/UserTeamPicker';
 import { Button } from '../components/ui/Button';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Input } from '../components/ui/Input';
@@ -66,9 +74,97 @@ function isBlank(value: unknown) {
   return value === undefined || value === null || (typeof value === 'string' && !value.trim());
 }
 
-export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
+/**
+ * CIFormModal creates a CI through the guided creation (GuidedCreate:
+ * type tiles, manufacturer and model, the fields of the resolved form;
+ * MET-51, WP-317) and edits one in a single-step form with master fields
+ * and type attributes (WP-397, WP-477).
+ */
+export function CIFormModal(props: CIFormModalProps) {
+  return props.ci ? <CIEditModal {...props} /> : <CICreateModal {...props} />;
+}
+
+function statusLabel(value: string) {
+  return `ci.status${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+/** The request of POST /cis for a draft of the guided creation (WP-317). */
+export function createRequest(draft: GuidedCreateDraft): CICreateRequest {
+  return {
+    ...draft.columns,
+    name: draft.name,
+    ci_type_id: draft.typeId,
+    status: draft.status,
+    ...(draft.locationId ? { location_id: draft.locationId } : {}),
+    ...(draft.ownerUserId ? { owner_user_id: draft.ownerUserId } : {}),
+    ...(draft.ownerTeamId ? { owner_team_id: draft.ownerTeamId } : {}),
+    ...(Object.keys(draft.attributes).length > 0 ? { attributes: draft.attributes } : {}),
+    ...(draft.templateId ? { templates: [{ template_id: draft.templateId }] } : {}),
+    discovery_source: 'manual',
+  };
+}
+
+function CICreateModal({ open, onOpenChange, onSuccess }: CIFormModalProps) {
   const { t, i18n } = useTranslation();
   const createMutation = useCreateCI();
+  // The types come from the metamodel (GET /ci-types: the active system types
+  // and the organization's own, MET-04), read again at every opening so a type
+  // created at runtime is offered without a reload or release; all pages
+  // (WP-804). The tiles carry the type id, which POST /cis expects (CI-03).
+  const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
+  const types = useMemo<CreateType[]>(
+    () =>
+      (ciTypes.data ?? []).map((ty) => ({
+        id: ty.id,
+        label: localizedText(ty.display_name, i18n.language) || ty.key,
+        category: ty.category,
+        icon: ty.icon,
+        parentId: ty.parent_type_id,
+        isLogical: ty.is_logical,
+      })),
+    [ciTypes.data, i18n.language],
+  );
+  const statusOptions = useMemo(
+    () => statusValues.map((value) => ({ value, label: t(statusLabel(value)) })),
+    [t],
+  );
+
+  async function submit(draft: GuidedCreateDraft) {
+    const saved = await createMutation.mutateAsync(createRequest(draft));
+    onSuccess?.(saved);
+    onOpenChange(false);
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={t('form.createCI')}
+      description={t('create.description')}
+    >
+      {open ? (
+        <GuidedCreate
+          resource="ci"
+          typeSource={{
+            types,
+            loading: ciTypes.isLoading,
+            failed: ciTypes.isError,
+            retrying: ciTypes.isFetching,
+            onRetry: () => void ciTypes.refetch(),
+          }}
+          typedColumns={CI_TYPED_COLUMNS}
+          statusOptions={statusOptions}
+          onSubmit={submit}
+          onCancel={() => onOpenChange(false)}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
+  const { t, i18n } = useTranslation();
   const updateMutation = useUpdateCI();
   const isEditMode = Boolean(ci);
   // A CI linked to an asset takes serial number and location from the asset
@@ -78,10 +174,18 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const assetLocation = ci?.asset?.location_id || ci?.location_id;
   const locations = useLocationNames(open && assetManaged && !!assetLocation);
   const assetHintId = useId();
+  const ownerGroupId = useId();
   const [values, setValues] = useState<CIFormValues>(() => toFormValues(ci));
   const [errors, setErrors] = useState<Partial<Record<keyof CIFormValues, string>>>({});
   const [attributes, setAttributes] = useState<Record<string, unknown>>(() => ci?.attributes ?? {});
   const [attributeErrors, setAttributeErrors] = useState<Record<string, FieldError | null>>({});
+  // The owner (CI-07, WP-805): undefined keeps the stored one, null removes
+  // it. The stored owner is shown by its name where the user may read it
+  // (user:read); otherwise by its kind.
+  const [ownerUser, setOwnerUser] = useState<PickedHolder | null | undefined>(undefined);
+  const [ownerTeam, setOwnerTeam] = useState<PickedHolder | null | undefined>(undefined);
+  const storedUser = useUser(ci?.owner_user_id, { enabled: open });
+  const storedTeam = useTeam(ci?.owner_team_id, { enabled: open });
 
   useEffect(() => {
     if (open) {
@@ -89,18 +193,26 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       setErrors({});
       setAttributes(ci?.attributes ?? {});
       setAttributeErrors({});
+      setOwnerUser(undefined);
+      setOwnerTeam(undefined);
     }
   }, [ci, open]);
 
-  // The types come from the metamodel (GET /ci-types: the active system types
-  // and the organization's own, MET-04), read again at every opening so a type
-  // created at runtime is offered without a reload or release. The option value
-  // is the type id, which POST /cis expects as ci_type_id (CI-03). All pages
-  // are read (MET-51, WP-804): the first page alone hid types beyond 200.
+  const userName =
+    storedUser.data?.id === ci?.owner_user_id ? storedUser.data?.display_name : undefined;
+  const teamName = storedTeam.data?.id === ci?.owner_team_id ? storedTeam.data?.name : undefined;
+  const storedUserHolder: PickedHolder | null = ci?.owner_user_id
+    ? { kind: 'user', id: ci.owner_user_id, name: userName || t('ci.owner.user') }
+    : null;
+  const storedTeamHolder: PickedHolder | null = ci?.owner_team_id
+    ? { kind: 'team', id: ci.owner_team_id, name: teamName || t('ci.owner.team') }
+    : null;
+  const shownUser = ownerUser === undefined ? storedUserHolder : ownerUser;
+  const shownTeam = ownerTeam === undefined ? storedTeamHolder : ownerTeam;
+
+  // The type is shown read-only (WP-804); the list labels it (all pages,
+  // WP-804) and the stored type is added when it was deactivated.
   const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
-  // Without the type list a new CI cannot be created: the dialog offers a
-  // retry and blocks 'Create' until the types are loaded (WP-804).
-  const typesUnavailable = !isEditMode && ciTypes.isError;
   // The chosen type's schema: its attributes are rendered below the fields.
   const selectedType = useCIType(values.ci_type_id || undefined, { enabled: open, staleTime: 0 });
   // The organization-wide fields (GET /ci-fields/global, MET-13) apply to
@@ -149,8 +261,8 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     [t],
   );
 
-  const serverError = (createMutation.error || updateMutation.error) as Error | null;
-  const isSubmitting = createMutation.isPending || updateMutation.isPending;
+  const serverError = updateMutation.error as Error | null;
+  const isSubmitting = updateMutation.isPending;
 
   // Server-side field validation (RFC 7807 + `violations`) is authoritative:
   // the CI type's field metadata is only fully known to the backend, so a
@@ -166,9 +278,12 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const attributeFieldErrors: Record<string, FieldError | null> = { ...attributeErrors };
   const attributeNames = new Set(typeFields.map((field) => field.name));
   const unmappedViolations: string[] = [];
+  const ownerError = ownerFieldErrors(serverError, !!shownTeam, t);
   for (const [field, detail] of Object.entries(serverViolations)) {
     const attribute = field.startsWith('attributes.') ? field.slice('attributes.'.length) : field;
-    if (field in values) {
+    if (field === 'owner_user_id' || field === 'owner_team_id') {
+      // Shown at the owner field (ownerError).
+    } else if (field in values) {
       const key = field as keyof CIFormValues;
       if (!fieldErrors[key]) fieldErrors[key] = detail;
     } else if (attributeNames.has(attribute)) {
@@ -181,7 +296,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
   const bannerMessage = serverError
     ? unmappedViolations.length > 0
       ? unmappedViolations.join('; ')
-      : Object.keys(serverViolations).length > 0
+      : Object.keys(serverViolations).length > 0 || ownerError.mapped
         ? t('form.validation.serverRejected', 'Bitte korrigieren Sie die markierten Felder.')
         : serverError.message
     : null;
@@ -235,6 +350,14 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     }
     const attrs = attributePayload();
     if (attrs) payload.attributes = attrs;
+    // The owner of a CI with an asset is the asset's (DB-05): never sent,
+    // the server refuses it (422 ci_owner_from_asset). Removing sends "".
+    if (!assetManaged) {
+      const nextUser = shownUser?.id ?? '';
+      if (nextUser !== (ci?.owner_user_id ?? '')) payload.owner_user_id = nextUser;
+      const nextTeam = shownTeam?.id ?? '';
+      if (nextTeam !== (ci?.owner_team_id ?? '')) payload.owner_team_id = nextTeam;
+    }
     return payload;
   }
 
@@ -265,35 +388,20 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       return;
     }
 
-    const createPayload: CICreateRequest = {
-      name: values.name.trim(),
-      ci_type_id: values.ci_type_id,
-      status: values.status,
-      manufacturer: optionalValue(values.manufacturer),
-      model: optionalValue(values.model),
-      serial_number: optionalValue(values.serial_number),
-      management_ip: optionalValue(values.management_ip),
-      firmware_version: optionalValue(values.firmware_version),
-      attributes: attributePayload(),
-      discovery_source: 'manual',
-    };
-
-    const changes = isEditMode ? updatePayload() : {};
-    if (isEditMode && Object.keys(changes).length === 0) {
+    if (!ci) return;
+    const changes = updatePayload();
+    if (Object.keys(changes).length === 0) {
       // Nothing changed: no request, no new version.
       onOpenChange(false);
       return;
     }
 
     try {
-      const saved =
-        isEditMode && ci
-          ? await updateMutation.mutateAsync({
-              id: ci.id,
-              data: changes,
-              version: ci.version,
-            })
-          : await createMutation.mutateAsync(createPayload);
+      const saved = await updateMutation.mutateAsync({
+        id: ci.id,
+        data: changes,
+        version: ci.version,
+      });
       onSuccess?.(saved);
       onOpenChange(false);
     } catch {
@@ -306,7 +414,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       open={open}
       onOpenChange={onOpenChange}
       size="lg"
-      title={isEditMode ? t('form.editCI') : t('form.createCI')}
+      title={t('form.editCI')}
       description={t('form.ciDescription')}
     >
       <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
@@ -344,18 +452,6 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             options={statusOptions}
             error={fieldErrors.status}
           />
-          {typesUnavailable ? (
-            <div className="flex sm:col-span-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                loading={ciTypes.isFetching}
-                onClick={() => void ciTypes.refetch()}
-              >
-                {t('common.retry')}
-              </Button>
-            </div>
-          ) : null}
         </div>
 
         {/* The optional master data of the device. */}
@@ -422,6 +518,68 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           ) : null}
         </div>
 
+        {/* The owner (CI-07, WP-805); taken from the asset when linked. */}
+        <div className="border-t border-line pt-5">
+          <div role="group" aria-labelledby={`${ownerGroupId}-title`} className="min-w-0 space-y-3">
+            <h3 id={`${ownerGroupId}-title`} className="text-sm font-semibold text-fg">
+              {t('ci.owner.title')}
+            </h3>
+            <p className="text-xs text-fg-muted">{t('ci.owner.hint')}</p>
+            {assetManaged ? (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Input
+                    label={t('ci.owner.userLabel')}
+                    value={storedUserHolder?.name ?? ''}
+                    disabled
+                    aria-describedby={`${assetHintId}-owner`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Input
+                    label={t('ci.owner.teamLabel')}
+                    value={storedTeamHolder?.name ?? ''}
+                    disabled
+                    aria-describedby={`${assetHintId}-owner`}
+                  />
+                </div>
+                <p id={`${assetHintId}-owner`} className="text-xs text-fg-muted sm:col-span-2">
+                  {t('ci.owner.fromAsset')}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <UserTeamPicker
+                    label={t('ci.owner.userLabel')}
+                    kinds={['user']}
+                    value={shownUser}
+                    onChange={setOwnerUser}
+                  />
+                  {ownerError.owner_user_id ? (
+                    <p role="alert" className="mt-1 text-sm text-danger">
+                      {ownerError.owner_user_id}
+                    </p>
+                  ) : null}
+                </div>
+                <div>
+                  <UserTeamPicker
+                    label={t('ci.owner.teamLabel')}
+                    kinds={['team']}
+                    value={shownTeam}
+                    onChange={setOwnerTeam}
+                  />
+                  {ownerError.owner_team_id ? (
+                    <p role="alert" className="mt-1 text-sm text-danger">
+                      {ownerError.owner_team_id}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
         {typeFields.length > 0 ? (
           <div className="space-y-4 border-t border-line pt-5">
             <h3 className="text-sm font-semibold text-fg">{t('form.typeAttributes')}</h3>
@@ -444,8 +602,8 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>
-          <Button type="submit" loading={isSubmitting} disabled={typesUnavailable}>
-            {isEditMode ? t('common.save') : t('common.create')}
+          <Button type="submit" loading={isSubmitting}>
+            {t('common.save')}
           </Button>
         </div>
       </form>

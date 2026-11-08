@@ -7,6 +7,7 @@ import {
   type Response,
 } from '@playwright/test';
 import { api, signupTenant, stamp, uiLogin, BASE } from './support/stack';
+import { createButton, startGuidedCreate } from './support/guided-create';
 
 /*
  * Index flags of attribute definitions in the CI type admin on the real stack (WP-511,
@@ -194,15 +195,12 @@ test.describe('CI type admin: index flags of attributes with visible refusals an
       attributes: { [key]: `INV-${w.s}` },
     });
     await page.goto('/cmdb');
-    await page.getByRole('button', { name: 'CI anlegen' }).first().click();
-    const form = page.getByRole('dialog');
-    await expect(form.getByRole('heading', { name: 'CI anlegen' })).toBeVisible();
-    await form.getByLabel('Name', { exact: true }).fill(`flags-b-${w.s}`);
-    await form.getByLabel('CI-Typ').selectOption({ label: w.typeName });
+    // The guided creation (WP-317): the tile of the type, then its fields.
+    const form = await startGuidedCreate(page, w.typeName, `flags-b-${w.s}`);
     const input = form.getByLabel(key, { exact: true });
     await input.fill(`INV-${w.s}`);
     const posted = waitFor(page, /^\/api\/v1\/cis$/, 'POST');
-    await form.getByRole('button', { name: 'Anlegen' }).click();
+    await createButton(form).click();
     const refused = await posted;
     expect(refused.status(), `POST /cis with a taken value: ${await refused.text()}`).toBe(409);
     expect(await refused.json()).toMatchObject({

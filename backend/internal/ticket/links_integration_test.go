@@ -460,6 +460,9 @@ func TestTicketTagsMigration(t *testing.T) {
 	}
 	exec("ticket tag", `INSERT INTO ticket_tag (organization_id, ticket_id, tag_id) SELECT $1, $2, id FROM tag WHERE organization_id = $1 AND key = 'netz'`, f.OrgA, kept)
 
+	// 000275 hangs reservation.ticket_id on the key the down drops; the
+	// later migration goes first, as a real rollback would order it.
+	exec("later fk", `ALTER TABLE reservation DROP CONSTRAINT reservation_ticket_id_fkey`)
 	exec("down", read("down"))
 	var tags []string
 	if err = tx.QueryRow(bg, `SELECT tags FROM ticket WHERE id = $1`, kept).Scan(&tags); err != nil || !slices.Equal(tags, []string{"netz"}) {

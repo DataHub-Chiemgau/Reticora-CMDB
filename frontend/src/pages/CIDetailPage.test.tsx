@@ -822,3 +822,111 @@ describe('CIDetailPage tags (WP-817)', () => {
     expect(screen.queryByRole('button', { name: 'Tags bearbeiten' })).toBeNull();
   });
 });
+
+/**
+ * CI-07 (WP-805): the overview shows 'Verantwortlich', the owner of the CI
+ * (owner_user_id, owner_team_id), by name from GET /users/{id} and GET
+ * /teams/{id}; without user:read only the kind. A CI with an asset has the
+ * asset's owner (DB-05), marked 'vom Asset'. Not the contact role owner.
+ */
+describe('CIDetailPage owner (CI-07, WP-805)', () => {
+  const USER = '0a000000-0000-4000-8000-0000000000a1';
+  const TEAM = '0e000000-0000-4000-8000-0000000000a1';
+  const ownedCI = { ...ci, version: 2, tags: [], owner_user_id: USER, owner_team_id: TEAM };
+
+  function mockOwnerApi(shown: Record<string, unknown>, permissions: string[]) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const { pathname } = new URL(String(input), 'http://localhost');
+      const ok = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      if (pathname.endsWith('/me/permissions')) return ok({ user_id: 'user-1', permissions });
+      if (pathname.endsWith(`/users/${USER}`)) {
+        return ok({ id: USER, display_name: 'Erika Muster', email: 'erika@example.test' });
+      }
+      if (pathname.endsWith(`/teams/${TEAM}`)) {
+        return ok({ id: TEAM, name: 'Netzbetrieb', member_count: 3 });
+      }
+      if (pathname.endsWith('/cis/ci-1')) return ok(shown);
+      return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const ownerReads = (fetchMock: ReturnType<typeof mockOwnerApi>) =>
+    fetchMock.mock.calls
+      .map(([input]) => new URL(String(input), 'http://localhost').pathname)
+      .filter((path) => /\/(users|teams)\//.test(path));
+
+  it('shows the user and the team by name with user:read', async () => {
+    mockOwnerApi(ownedCI, ['ci:read', 'user:read']);
+    renderDetail();
+
+    await screen.findByText('Verantwortlich', { selector: 'dt' });
+    await waitFor(() =>
+      expect(detailValue('Verantwortlich')).toHaveTextContent(
+        'Nutzer: Erika Muster · Team: Netzbetrieb',
+      ),
+    );
+    expect(detailValue('Verantwortlich')).not.toHaveTextContent('vom Asset');
+  });
+
+  it('shows only the kind without user:read and reads no names', async () => {
+    const fetchMock = mockOwnerApi(ownedCI, ['ci:read']);
+    renderDetail();
+
+    await screen.findByText('Verantwortlich', { selector: 'dt' });
+    await waitFor(() => expect(detailValue('Verantwortlich')).toHaveTextContent('Nutzer · Team'));
+    expect(detailValue('Verantwortlich')).not.toHaveTextContent('Erika Muster');
+    expect(ownerReads(fetchMock)).toEqual([]);
+  });
+
+  it('marks the owner of a CI with an asset as taken from the asset', async () => {
+    mockOwnerApi(
+      {
+        ...ownedCI,
+        owner_team_id: undefined,
+        asset_id: ASSET,
+        asset: { id: ASSET, asset_tag: 'INV-1', name: 'hw', status: 'assigned' },
+      },
+      ['ci:read', 'user:read'],
+    );
+    renderDetail();
+
+    await screen.findByText('Verantwortlich', { selector: 'dt' });
+    await waitFor(() =>
+      expect(detailValue('Verantwortlich')).toHaveTextContent('Nutzer: Erika Muster (vom Asset)'),
+    );
+  });
+
+  it('shows a dash without an owner and reads nothing', async () => {
+    const fetchMock = mockOwnerApi({ ...ci, version: 2, tags: [] }, ['ci:read', 'user:read']);
+    renderDetail();
+
+    await screen.findByText('Verantwortlich', { selector: 'dt' });
+    expect(detailValue('Verantwortlich')).toHaveTextContent('—');
+    expect(ownerReads(fetchMock)).toEqual([]);
+  });
+
+  it('labels the owner in English', async () => {
+    await act(async () => {
+      await i18n.changeLanguage('en-US');
+    });
+    try {
+      mockOwnerApi({ ...ownedCI, asset_id: ASSET }, ['ci:read']);
+      renderDetail();
+
+      await screen.findByText('Responsible', { selector: 'dt' });
+      await waitFor(() =>
+        expect(detailValue('Responsible')).toHaveTextContent('User · Team (from the asset)'),
+      );
+    } finally {
+      await act(async () => {
+        await i18n.changeLanguage('de-DE');
+      });
+    }
+  });
+});

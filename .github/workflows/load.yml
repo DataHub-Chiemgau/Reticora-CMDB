@@ -51,6 +51,22 @@
 # (API_KEY_RESTRICTED). The job api keeps its thresholds against the
 # extended seed: OBJECTS stays the CI count objects.
 #
+# Mass write jobs beside the ingest (WP-823, ABN-02, NFR-03): the jobs
+# import, template and computed run tests/load/writes.js with SCENARIO =
+# the job, each with a fresh database, the seed, ANALYZE, four ingest
+# lanes and the P2 modules. The preparation of the scenario is a k6 run of
+# its own (PHASE=prepare) before the ingest starts; then ingest.js
+# (SCENARIO=load, 200 records/s for INGEST_DURATION_S = 120 s, every record
+# a new CI: 24,000 CIs, about 44,000 with seed and import) runs in the
+# background beside writes.js. The job fails when either run fails, so
+# NFR-03 (ingest_visible_delay < 30 s, ingest_records_missing = 0) holds
+# beside the write job too. The ingest summary is <job>-ingest.json beside
+# <job>.json; size-<job>.txt holds the size of the organization at the end
+# of the job. The import over JSON rows stages them in the object storage
+# (WP-303), so these jobs start MinIO (the image of ci.yml) and the server
+# with RETICORA_S3_*; the import of documents with the clamd scan is not
+# measured.
+#
 # The job archive gathers the k6 summaries, run records (commit, lscpu,
 # memory, configuration) and outcomes of all jobs into one artifact,
 # load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
@@ -81,7 +97,7 @@ on:
         description: "Consumables of the demo organization (Phase 2, cmd/seed -consumables; WP-822: 10000)"
         default: "10000"
       scenarios:
-        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large, phase2), or all"
+        description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large, phase2, import, template, computed), or all"
         default: "all"
   schedule:
     - cron: "17 2 * * *"
@@ -155,11 +171,14 @@ jobs:
                  "seed_args":"-interfaces-per-ci 5 -ips-per-ci 20 -relationships-per-ci 10 -orgs 500","objects":"","latency_budgets":"all","group":"","phase2_volumes":"inputs"},
                 {"scenario":"api-large-28000","script":"api.js","k6_scenario":"","seed_args":"","objects":"28000","latency_budgets":"lists","group":"api-large","phase2_volumes":"inputs"},
                 {"scenario":"api-large-50000","script":"api.js","k6_scenario":"","seed_args":"","objects":"50000","latency_budgets":"none","group":"api-large","phase2_volumes":"sim01"},
-                {"scenario":"phase2","script":"phase2.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"}]'
+                {"scenario":"phase2","script":"phase2.js","k6_scenario":"","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
+                {"scenario":"import","script":"writes.js","k6_scenario":"import","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
+                {"scenario":"template","script":"writes.js","k6_scenario":"template","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"},
+                {"scenario":"computed","script":"writes.js","k6_scenario":"computed","seed_args":"","objects":"","latency_budgets":"","group":"","phase2_volumes":"inputs"}]'
           want="$(jq -cn --arg s "$SCENARIOS" '$s | gsub("\\s"; "") | split(",") | map(select(. != ""))')"
           unknown="$(jq -rn --argjson all "$all" --argjson want "$want" '$want - ["all"] - [$all[].scenario] - [$all[].group] | join(", ")')"
           if [ -n "$unknown" ] || [ "$want" = "[]" ]; then
-            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large (api-large-28000, api-large-50000), phase2 or all"
+            echo "::error title=scenarios::unknown or no scenario '${unknown:-$SCENARIOS}': api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large (api-large-28000, api-large-50000), phase2, import, template, computed or all"
             exit 1
           fi
           matrix="$(jq -cn --argjson all "$all" --argjson want "$want" \
@@ -170,7 +189,9 @@ jobs:
     name: Load (${{ matrix.scenario }})
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The write jobs (WP-823) add the preparation and up to two imports of
+    # 10,000 rows to the seed.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -202,6 +223,8 @@ jobs:
       # The release configuration of G2 (WP-822): every module of phase P2
       # (server.ParseModules).
       MODULES: "P2"
+      # The ingest beside writes.js (WP-823): 200 records/s for 120 s.
+      INGEST_DURATION_S: "120"
       RATE_LIMIT_RPM: "1000000"
       RATE_LIMIT_ORG_RPM: "1000000"
     steps:
@@ -238,6 +261,20 @@ jobs:
 
       - name: Start NATS with JetStream
         run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+
+      # writes.js (WP-823): the import over JSON rows stages them in the
+      # object storage (WP-303; without it POST /imports is 503). The image
+      # of ci.yml and deploy/docker-compose; a service container takes no
+      # arguments ("server /data").
+      - name: Start MinIO
+        if: matrix.script == 'writes.js'
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
+            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            server /data
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
+          docker logs minio; exit 1
 
       - name: Migrate
         run: |
@@ -318,10 +355,16 @@ jobs:
 
       # RETICORA_PPROF_ADDR (WP-438): the CPU profile of the api.js run, on
       # the loopback address only (development, the server's default
-      # environment here). A server_ref before WP-438 ignores it.
+      # environment here). A server_ref before WP-438 ignores it. writes.js
+      # (WP-823) gets the object storage of the step Start MinIO.
       - name: Start the server
+        env:
+          K6_SCRIPT: ${{ matrix.script }}
         run: |
           openssl genrsa -out "$RUNNER_TEMP/session.pem" 2048
+          if [ "$K6_SCRIPT" = writes.js ]; then
+            export RETICORA_S3_ENDPOINT=localhost:9000 RETICORA_S3_ACCESS_KEY=reticora RETICORA_S3_SECRET_KEY=reticora_dev
+          fi
           RETICORA_DATABASE_URL="$RUNTIME_DATABASE_URL" \
           RETICORA_REDIS_URL=redis://localhost:6379/0 \
           RETICORA_NATS_URL=nats://localhost:4222 \
@@ -430,10 +473,40 @@ jobs:
               echo "::warning title=pprof::no CPU profile: DURATION=$DURATION is not h/m/s of at least 30 s"
             fi
           fi
+          # writes.js (WP-823): the preparation as a k6 run of its own, then
+          # ingest.js (load, INGEST_DURATION_S) in the background beside the
+          # measured write job.
+          ingest=""
+          if [ "$K6_SCRIPT" = writes.js ]; then
+            k6 run "${args[@]}" -e PHASE=prepare --console-output "load-results/console-$SCENARIO_NAME-prepare.log" \
+              tests/load/writes.js | tee "load-results/$SCENARIO_NAME-prepare.txt" || {
+              status=$?
+              cat "load-results/console-$SCENARIO_NAME-prepare.log" > "load-results/console-$SCENARIO_NAME.log" 2>/dev/null || true
+              echo "::error title=writes::the preparation of $SCENARIO_NAME failed"
+              exit "$status"
+            }
+            k6 run -e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e SCENARIO=load \
+              -e DURATION_S="$INGEST_DURATION_S" -e OBJECTS="$OBJECTS" \
+              --summary-export "load-results/$SCENARIO_NAME-ingest.json" \
+              --console-output "load-results/console-$SCENARIO_NAME-ingest.log" tests/load/ingest.js \
+              > "load-results/$SCENARIO_NAME-ingest.txt" 2>&1 &
+            ingest=$!
+          fi
           status=0
           k6 run "${args[@]}" --summary-export "load-results/$SCENARIO_NAME.json" \
             --console-output "load-results/console-$SCENARIO_NAME.log" "tests/load/$K6_SCRIPT" \
             | tee "load-results/$SCENARIO_NAME.txt" || status=$?
+          if [ -n "$ingest" ]; then
+            ingest_status=0
+            wait "$ingest" || ingest_status=$?
+            cat "load-results/$SCENARIO_NAME-ingest.txt"
+            # The failed requests of the preparation count with the job.
+            cat "load-results/console-$SCENARIO_NAME-prepare.log" >> "load-results/console-$SCENARIO_NAME.log" 2>/dev/null || true
+            if [ "$ingest_status" -ne 0 ]; then
+              echo "::error title=ingest::the ingest beside $SCENARIO_NAME failed (k6 exit $ingest_status)"
+              [ "$status" -ne 0 ] || status=$ingest_status
+            fi
+          fi
           wait
           exit "$status"
 
@@ -441,6 +514,8 @@ jobs:
       # tests/load/lib.js) in the job summary and for the archive.
       - name: Failed requests
         if: always() && steps.k6.outcome != 'skipped'
+        env:
+          K6_SCRIPT: ${{ matrix.script }}
         run: |
           mkdir -p load-results
           tests/load/failed-requests.sh "load-results/console-$SCENARIO_NAME.log" | tee "load-results/failed-$SCENARIO_NAME.txt"
@@ -449,6 +524,17 @@ jobs:
             echo
             cat "load-results/failed-$SCENARIO_NAME.txt"
           } >> "$GITHUB_STEP_SUMMARY"
+          # The ingest beside writes.js (WP-823).
+          if [ "$K6_SCRIPT" = writes.js ]; then
+            tests/load/failed-requests.sh "load-results/console-$SCENARIO_NAME-ingest.log" \
+              | tee "load-results/failed-$SCENARIO_NAME-ingest.txt"
+            {
+              echo
+              echo "#### Ingest beside $SCENARIO_NAME"
+              echo
+              cat "load-results/failed-$SCENARIO_NAME-ingest.txt"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # F-117 (WP-438): auto_explain off again, so the checks below do not
       # add plans; the PostgreSQL log, the plans of the statements over
@@ -467,6 +553,23 @@ jobs:
             tests/load/cpu-profile-report.sh "load-results/cpu-$SCENARIO_NAME.pprof" > "load-results/cpu-$SCENARIO_NAME.txt" \
               || echo "::warning title=pprof::the profile summary failed"
           fi
+
+      # WP-823: the size of the organization at the end of a write job
+      # (seed, import and the CIs of the ingest beside it), for the report
+      # of WP-327 (the headroom of NFR-01 is 50,000 objects).
+      - name: Size of the organization at the end
+        if: always() && steps.k6.outcome != 'skipped' && matrix.script == 'writes.js'
+        run: |
+          set -o pipefail
+          mkdir -p load-results
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -At -F '|' <<'SQL' | tee "load-results/size-$SCENARIO_NAME.txt"
+          WITH demo AS (SELECT id FROM organization WHERE slug = 'demo')
+          SELECT 'CIs of demo', count(*) FROM ci WHERE organization_id = (SELECT id FROM demo) AND deleted_at IS NULL
+          UNION ALL SELECT 'assets of demo', count(*) FROM asset WHERE organization_id = (SELECT id FROM demo)
+          UNION ALL SELECT 'objects of demo (CIs and assets)',
+            (SELECT count(*) FROM ci WHERE organization_id = (SELECT id FROM demo) AND deleted_at IS NULL)
+            + (SELECT count(*) FROM asset WHERE organization_id = (SELECT id FROM demo))
+          SQL
 
       # ABN-03, F-281: the data after the run, every check 0.
       - name: Integrity check
@@ -491,7 +594,12 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p load-results
-          records="$(jq -r '.metrics.ingest_records_accepted.count // 0' "load-results/$SCENARIO_NAME.json" 2>/dev/null || echo 0)"
+          # writes.js (WP-823): the records of the ingest beside it.
+          summary="load-results/$SCENARIO_NAME.json"
+          if [ -f "load-results/$SCENARIO_NAME-ingest.json" ]; then
+            summary="load-results/$SCENARIO_NAME-ingest.json"
+          fi
+          records="$(jq -r '.metrics.ingest_records_accepted.count // 0' "$summary" 2>/dev/null || echo 0)"
           org="$(psql "$DATABASE_URL" -Atc "SELECT id FROM organization WHERE slug = 'demo'")"
           psql "$DATABASE_URL" -v records="$records" -v org="$org" -f tests/load/statement-costs.sql \
             | tee "load-results/statements-$SCENARIO_NAME.txt" \
@@ -539,6 +647,9 @@ jobs:
             echo "seed options: ${SEED_ARGS:-none}"
             echo "phase-2 volumes: ${ASSETS:-SIM-01} assets, ${TICKETS:-SIM-01} tickets, ${CONSUMABLES:-SIM-01} consumables"
             echo "modules: $MODULES"
+            if [ "$K6_SCRIPT" = writes.js ]; then
+              echo "parallel ingest: ingest.js load, 200 records/s for $INGEST_DURATION_S s"
+            fi
             echo "ingest lanes: $INGEST_LANES"
             echo "rate limit rpm: $RATE_LIMIT_RPM"
             echo "rate limit org rpm: $RATE_LIMIT_ORG_RPM"

@@ -129,6 +129,10 @@ test('undoes a delete within the undo window', async ({ page }) => {
   };
   const calls = await mockBackend(page, [
     { path: '/assets', reply: () => ({ body: list([asset]) }) },
+    // The asset list offers the saved views of entity_kind asset and names
+    // the locations from the tree (WP-319).
+    { path: '/saved-views', reply: () => ({ body: list([]) }) },
+    { path: '/locations/tree', reply: () => ({ body: { data: [] } }) },
   ]);
   await signIn(page);
   await page.goto('/assets');

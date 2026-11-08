@@ -935,13 +935,41 @@ test.describe('Bulk operations, jobs, notifications, saved views, export, webhoo
       await main.getByLabel('Status', { exact: true }).selectOption('succeeded');
       await expect(row).toBeVisible();
 
-      // The result of the job in the UI names the per-id errors.
+      // The result of the job in the UI names the per-id errors: since WP-816 a summary
+      // and the report table per CI (CI, Ergebnis, HTTP-Status, Fehler) instead of JSON.
       await row.getByRole('button', { name: 'Ergebnis' }).click();
-      const dialog = page.getByRole('dialog');
-      await expect(dialog).toContainText('"succeeded": 98');
-      await expect(dialog).toContainText('"failed": 2');
-      await expect(dialog).toContainText(missing);
-      await expect(dialog).toContainText('CI not found');
+      const dialog = page.getByRole('dialog', { name: 'Ergebnis' });
+      await expect(dialog.getByRole('status')).toHaveText(
+        '98 von 100 erfolgreich, 2 fehlgeschlagen, 0 übersprungen',
+      );
+      const report = dialog.getByRole('table', { name: 'Bericht je CI' });
+      await expect(report.getByRole('columnheader')).toHaveText([
+        'CI',
+        'Ergebnis',
+        'HTTP-Status',
+        'Fehler',
+      ]);
+      const reportRows = report.locator('tbody tr');
+      await expect(reportRows).toHaveCount(100);
+      await expect(reportRows.filter({ has: page.getByText('OK', { exact: true }) })).toHaveCount(
+        98,
+      );
+      const failedRows = reportRows.filter({
+        has: page.getByRole('cell', { name: 'Fehler', exact: true }),
+      });
+      await expect(failedRows).toHaveCount(2);
+      await expect(reportRows.filter({ hasText: missing }).getByRole('cell')).toHaveText([
+        missing,
+        'Fehler',
+        '404',
+        'CI not found',
+      ]);
+      await expect(reportRows.filter({ hasText: victim.id }).getByRole('cell')).toHaveText([
+        victim.id,
+        'Fehler',
+        '404',
+        /\S/,
+      ]);
       await page.keyboard.press('Escape');
 
       // API: job record (JOB-01) and its result: one entry per id.

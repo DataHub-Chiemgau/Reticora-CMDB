@@ -115,8 +115,25 @@ models:
         resolver: true
   Movement:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement.Movement
+  # The fields under field permissions (RBA-07, WP-267) resolve in
+  # resolvers_assets.go with the document policy of the request.
   Document:
     model: github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document.Document
+    fields:
+      description:
+        resolver: true
+      fileName:
+        resolver: true
+      fileSize:
+        resolver: true
+      mimeType:
+        resolver: true
+      category:
+        resolver: true
+      tags:
+        resolver: true
+      uploadedBy:
+        resolver: true
   # The CI aggregates (GQL-03, WP-792): the resolved form of WP-719, the
   # unified history of the CI with its relationship changes, its metric
   # series. The optional strings of a history entry and the JSON members of

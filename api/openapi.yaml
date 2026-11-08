@@ -3599,6 +3599,12 @@ paths:
       operationId: listDocuments
       tags: [Documents]
       summary: List documents
+      description: >-
+        Each document carries only the fields the field permissions let the
+        caller read (object kind document, field keys core.<field>, RBA-07,
+        WP-267). A `category` filter or sort and a `search` (it also matches
+        file_name) on a field the caller cannot read in every scope answer
+        403 with the fields.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
@@ -3638,6 +3644,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission or the field permissions
+            (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -3658,7 +3674,10 @@ paths:
         so does a link whose target lies outside its write scope. With links
         the audit log records document.created with the new document and one
         document.linked per link (link_id, entity_type, entity_id) in the
-        transaction of the creation.
+        transaction of the creation. Every sent field must be editable under
+        the field permissions (object kind document, RBA-07, WP-267),
+        otherwise 403 with the fields; the answer carries only the readable
+        fields.
       requestBody:
         required: true
         content:
@@ -3677,7 +3696,16 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Forbidden: the route permission, the scope (a document without
+            links or a link outside the write scope) or the field
+            permissions (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -3701,6 +3729,9 @@ paths:
       operationId: getDocument
       tags: [Documents]
       summary: Get a document
+      description: >-
+        The document with the fields the field permissions let the caller
+        read (object kind document, RBA-07, WP-267).
       responses:
         '200':
           description: Document details
@@ -3716,7 +3747,14 @@ paths:
       operationId: updateDocument
       tags: [Documents]
       summary: Update a document
-      description: A principal restricted to some clients or sites changes only documents whose links it sees completely; a shared or unlinked (org-wide) document answers 404 (TEN-05, E-09).
+      description: >-
+        A principal restricted to some clients or sites changes only
+        documents whose links it sees completely; a shared or unlinked
+        (org-wide) document answers 404 (TEN-05, E-09). A sent field the
+        caller may not read, or a readable one whose value changes, must be
+        editable under the field permissions (object kind document, RBA-07,
+        WP-267), otherwise 403 with the fields; the answer carries only the
+        readable fields.
       requestBody:
         required: true
         content:
@@ -3734,6 +3772,16 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >-
+            Forbidden: the route permission or the field permissions
+            (FieldForbiddenProblem with `fields`).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -10255,6 +10303,12 @@ paths:
         upload that would take the stored bytes of the organization above
         max_storage_mb answers 403 entitlement-limit and stores nothing
         (MGT-01, E-44). The audit log records document.version_created.
+        An upload writes file_size and mime_type of the document: a caller
+        who may not edit them under the field permissions (object kind
+        document, RBA-07, WP-267) is refused with 403 and the fields before
+        anything is stored; the answer carries only the readable fields, and
+        the download names the file by the document id when file_name is
+        not readable.
       requestBody:
         required: true
         description: >-
@@ -10346,7 +10400,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/EntitlementLimit'
+          description: >-
+            Forbidden: a missing permission, the plan (feature-not-entitled),
+            the storage limit max_storage_mb (entitlement-limit, MGT-01, E-44)
+            or the field permissions of file_size and mime_type
+            (FieldForbiddenProblem with `fields`, RBA-07, WP-267).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -20860,7 +20924,8 @@ paths:
         Version, size, MIME type, checksum and scan status of every version
         of a visible document, highest version first, paged with `limit` and
         the signed `cursor` (API-02). A document outside the caller's scope
-        answers 404.
+        answers 404. size, mime_type and uploaded_by follow the field
+        permissions of the document (RBA-07, WP-267).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -20988,7 +21053,17 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/EntitlementLimit'
+          description: >-
+            Forbidden: a missing permission, the plan (feature-not-entitled),
+            the storage limit max_storage_mb (entitlement-limit, MGT-01, E-44)
+            or the field permissions of file_size and mime_type
+            (FieldForbiddenProblem with `fields`, RBA-07, WP-267).
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/ProblemDetail' }
+                  - { $ref: '#/components/schemas/FieldForbiddenProblem' }
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -21200,7 +21275,9 @@ paths:
         lies outside the caller's scope answers 404; of its documents the
         caller sees those whose link to the ticket it sees. Upload, scan and
         linking stay with the documents (POST /api/v1/documents/{id}/links
-        with entity_type ticket). Requires document:read.
+        with entity_type ticket). Each document carries only the fields the
+        field permissions let the caller read (object kind document, RBA-07,
+        WP-267). Requires document:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -29182,7 +29259,14 @@ components:
 
     Document:
       type: object
-      required: [id, organization_id, title, file_name, file_size, mime_type, storage_key, version, category, tags, uploaded_by, created_at, updated_at]
+      description: >-
+        A document. The fields id, organization_id, title, storage_key,
+        version, scan_status, scanned_at and the timestamps are always
+        present (scan_status and scanned_at once there is content); the
+        others are left out when the field permissions do not let the caller
+        read them (object kind document, field keys core.<field>, RBA-07,
+        WP-267).
+      required: [id, organization_id, title, storage_key, version, created_at, updated_at]
       properties:
         id:
           type: string
@@ -35259,7 +35343,12 @@ components:
 
     DocumentVersion:
       type: object
-      required: [id, organization_id, document_id, version, size, mime_type, checksum_sha256, scan_status, created_at]
+      description: >-
+        A version of a document. size, mime_type and uploaded_by are those
+        of the document (file_size, mime_type, uploaded_by) and are left out
+        when the field permissions do not let the caller read them (RBA-07,
+        WP-267).
+      required: [id, organization_id, document_id, version, checksum_sha256, scan_status, created_at]
       properties:
         id:
           type: string

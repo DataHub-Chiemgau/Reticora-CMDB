@@ -9,16 +9,27 @@ import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
 import { SCAN_METHODS, SCAN_RESULTS } from '../pages/StocktakeDetailPage';
+import { ORDER_STATUSES } from '../pages/OrderListPage';
 import { LABEL_KINDS, LABEL_TEMPLATES } from '../components/flows/LabelPrintDialog';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
 import { DRAFT_ITEM_KINDS, DRAFT_OPS } from '../stores/metamodelDraft';
 import { DRAFT_STATUSES } from '../pages/MetamodelDraftsPage';
-import { JOB_STATUSES } from '../hooks/useJobs';
+import { JOB_KINDS, JOB_STATUSES } from '../hooks/useJobs';
+import {
+  BULK_DIRECTIONS,
+  BULK_EXPORT_FORMATS,
+  BULK_FIELDS,
+  BULK_OPERATIONS,
+  BULK_STATUSES,
+} from '../components/bulk/BulkBar';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
-import { ASSET_CATEGORIES, ASSET_STATUSES } from '../pages/AssetListPage';
+import { ASSET_CATEGORIES, ASSET_LIFECYCLE_STATES } from '../pages/AssetListPage';
+import { CHILD_MODES } from '../pages/AssetDetailPage';
+import { LIFECYCLE_GUARDS, LIFECYCLE_MISSING } from '../components/cmdb/CIDetailSections';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
+import { CONTRACT_KINDS, CONTRACT_STATUSES } from '../pages/ContractsPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
@@ -64,6 +75,11 @@ import {
   IMPORT_TARGETS,
   IMPORT_TRANSFORMS,
 } from '../components/import/MappingEditor';
+import { TYPE_CATEGORIES } from '../components/create/TypeTiles';
+import { FORM_GROUPS } from '../components/create/GuidedCreate';
+import { WEEKDAYS, WEEKDAY_NUMBERS } from '../components/sla/BusinessCalendarSection';
+import { SLA_PRIORITIES } from '../pages/SLAPage';
+import { DISPOSAL_METHODS, DISPOSAL_REQUIRED_FIELDS } from '../pages/DisposalListPage';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -91,6 +107,30 @@ const flowSources = import.meta.glob(
   ],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
+
+// WP-816: the bulk bar, without tests.
+const bulkSources = import.meta.glob(
+  ['../components/bulk/**/*.tsx', '!../components/bulk/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+/**
+ * resolve looks a key up like i18next (ResourceStore with
+ * ignoreJSONStructure): nested first, else a member whose name holds the
+ * separator, as jobs.kinds.attribute["index.rebuild"] beside the string
+ * jobs.kinds.attribute.index.
+ */
+function resolve(node: unknown, parts: string[]): unknown {
+  if (parts.length === 0) return node;
+  if (typeof node !== 'object' || node === null) return undefined;
+  for (let n = parts.length; n >= 1; n--) {
+    const value = (node as Catalog)[parts.slice(0, n).join('.')];
+    if (value === undefined) continue;
+    const found = resolve(value, parts.slice(n));
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
 
 // WP-315: the components of the click builder, without tests.
 const ruleSources = import.meta.glob(
@@ -127,6 +167,18 @@ const importSources = import.meta.glob(
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
+// WP-815: the business calendar section of the SLA page, without tests.
+const slaSources = import.meta.glob(
+  ['../components/sla/**/*.tsx', '!../components/sla/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-317: the guided creation, without tests.
+const createSources = import.meta.glob(
+  ['../components/create/**/*.tsx', '!../components/create/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
 const COLLECTOR_STATUSES = ['pending', 'active', 'offline', 'disabled', 'paused'];
 
 // specEnum reads the string enum of a schema (or of one of its properties)
@@ -158,10 +210,20 @@ function specEnum(schema: string, property?: string): string[] {
 // the value lists come from the backend module (CHECK constraint or
 // constants) named next to each.
 const BACKEND_ENUMS = {
-  // backend/migrations/000009_phase2_assets.up.sql asset_status_check; the
-  // constraint was dropped in 000055 ("asset.status keeps the legacy
-  // vocabulary"), the default stays in_stock (internal/asset/handler.go).
-  assetStatuses: ['in_stock', 'assigned', 'maintenance', 'retired', 'disposed', 'lost'],
+  // The states of the system lifecycle model physical_asset
+  // (backend/migrations/000055_cmdb_extensions.up.sql); the asset list
+  // shows lifecycle_state instead of the legacy status (E-120, WP-319).
+  assetLifecycleStates: [
+    'ordered',
+    'received',
+    'in_stock',
+    'reserved',
+    'preparing',
+    'deployed',
+    'repair',
+    'retired',
+    'disposed',
+  ],
   // backend/migrations/000009_phase2_assets.up.sql asset_category_check.
   assetCategories: ['hardware', 'software', 'license', 'cloud_resource', 'accessory', 'other'],
   // backend/migrations/000257_assignment_projection.up.sql: the status of
@@ -169,6 +231,9 @@ const BACKEND_ENUMS = {
   // assignment with its status check is gone (000266), cancelled no longer
   // occurs (WP-318).
   assignmentStatuses: ['active', 'returned', 'transferred', 'overdue'],
+  // backend/migrations/000227_contract.up.sql contract_kind_check (E-119);
+  // the OpenAPI enum of Contract.kind also names null.
+  contractKinds: ['maintenance', 'support', 'lease', 'license', 'purchase', 'service', 'other'],
   // backend/migrations/000011_phase2_documents.up.sql document_category_check.
   documentCategories: [
     'general',
@@ -209,12 +274,19 @@ const BACKEND_ENUMS = {
 
 // WP-525: the enums the inventory, ticket, order and room plan pages show.
 const pageEnumerations: Array<[string, readonly string[]]> = [
-  ['asset.statuses', BACKEND_ENUMS.assetStatuses],
+  ['lifecycle.states', BACKEND_ENUMS.assetLifecycleStates],
   ['asset.categories', BACKEND_ENUMS.assetCategories],
   ['assignment.statuses', BACKEND_ENUMS.assignmentStatuses],
   // assignment_type of the projection (000257): assignment or transfer.
   ['assignment.types', ['assignment', 'transfer']],
   ['document.categories', BACKEND_ENUMS.documentCategories],
+  // WP-809: the child contracts of a child CI (AST-05) and the system
+  // guards of an asset transition with their missing references (WP-279).
+  ['asset.childModes', CHILD_MODES],
+  ['asset.childModes', specEnum('CI', 'child_mode')],
+  ['lifecycle.guards', LIFECYCLE_GUARDS],
+  ['lifecycle.guards', specEnum('LifecycleGuardProblem', 'guard')],
+  ['lifecycle.missing', LIFECYCLE_MISSING],
   ['ticket.statuses', BACKEND_ENUMS.ticketStatuses],
   ['ticket.categories', BACKEND_ENUMS.ticketCategories],
   // WP-814: the ticket priorities (WP-290) and the targets of a ticket link (WP-764).
@@ -241,6 +313,10 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['iga.requestStatuses', BACKEND_ENUMS.igaRequestStatuses],
   ['iga.reviewStatuses', BACKEND_ENUMS.igaReviewStatuses],
   ['iga.severities', BACKEND_ENUMS.igaSeverities],
+  // WP-808: contract.status of WP-269 and contract.kind after E-119.
+  ['contract.statuses', specEnum('Contract', 'status')],
+  ['contract.statuses', CONTRACT_STATUSES],
+  ['contract.kinds', BACKEND_ENUMS.contractKinds],
 ];
 
 const enumerations: Array<[string, readonly string[]]> = [
@@ -250,6 +326,8 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['topology.nodeKinds', specEnum('TopologyNode', 'node_kind')],
   ['impact.categories', specEnum('RelationshipTypeCategory')],
   ['dashboard.roles', DASHBOARD_ROLES],
+  // WP-812: the order states of the state machine (WP-286, WP-760).
+  ['orders.statuses', ORDER_STATUSES],
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
   // WP-813: the scan results and methods of the stocktake (StockScan of
@@ -360,6 +438,28 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['import.formats', specEnum('ImportPreview', 'format')],
   ['import.steps', IMPORT_STEPS],
   ['jobs.kinds.import', ['run']],
+  // WP-816: the operations, status values, fields, directions and export
+  // formats of the bulk bar.
+  ['bulk.operations', BULK_OPERATIONS.ci],
+  ['bulk.operations', BULK_OPERATIONS.asset],
+  ['ci.statuses', BULK_STATUSES.ci],
+  ['asset.bulk.statuses', BULK_STATUSES.asset],
+  ['bulk.ciFields', BULK_FIELDS.ci],
+  ['asset.columns', BULK_FIELDS.asset],
+  ['bulk.directions', BULK_DIRECTIONS],
+  ['bulk.formats', BULK_EXPORT_FORMATS],
+  // WP-317: the tile categories (citype.Templates() and other) and the
+  // field groups of the guided creation.
+  ['create.categories', TYPE_CATEGORIES],
+  ['create.groups', FORM_GROUPS],
+  // WP-815: the disposal methods (E-55), the SLA priorities and the
+  // weekdays of the business calendars.
+  ['disposal.methods', DISPOSAL_METHODS],
+  ['disposal.methods', specEnum('CreateDisposalRecordRequest', 'method')],
+  ['ticket.priorities', SLA_PRIORITIES],
+  ['ticket.priorities', specEnum('CreateSLAPolicyRequest', 'priority')],
+  ['sla.calendar.weekdays', WEEKDAYS],
+  ['sla.calendar.weekdaysShort', WEEKDAYS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
     'savedviews.fields',
     targets,
@@ -382,6 +482,21 @@ describe('i18n catalog', () => {
     }
   });
 
+  // WP-816: the job kinds hold a dot, so the lower-case check below does not
+  // apply; each has a label of its own in both catalogs.
+  it.each(JOB_KINDS)('labels the job kind %s under jobs.kinds in both languages', (kind) => {
+    for (const [lang, catalog] of [
+      ['de-DE', deDE],
+      ['en-US', enUS],
+    ] as const) {
+      const label = resolve(catalog, `jobs.kinds.${kind}`.split('.'));
+      expect(typeof label === 'string' && label.length > 0, `${lang} jobs.kinds.${kind}`).toBe(
+        true,
+      );
+      expect(label, `${lang} ${kind}`).not.toBe(kind);
+    }
+  });
+
   it('keeps enumeration values as lower-case English keys', () => {
     for (const [, values] of enumerations) {
       for (const value of values) {
@@ -392,6 +507,7 @@ describe('i18n catalog', () => {
   });
 
   it('reads the status enums from the OpenAPI types', () => {
+    expect([...ORDER_STATUSES]).toEqual(specEnum('Order', 'status'));
     expect(specEnum('Order', 'status')).toEqual([
       'draft',
       'submitted',
@@ -445,13 +561,16 @@ describe('i18n catalog', () => {
   });
 
   it('offers exactly the backend values in the page filters', () => {
-    expect([...ASSET_STATUSES]).toEqual(BACKEND_ENUMS.assetStatuses);
+    expect([...ASSET_LIFECYCLE_STATES]).toEqual(BACKEND_ENUMS.assetLifecycleStates);
     expect([...ASSET_CATEGORIES]).toEqual(BACKEND_ENUMS.assetCategories);
     expect([...ASSIGNMENT_STATUSES]).toEqual(BACKEND_ENUMS.assignmentStatuses);
     expect([...DOCUMENT_CATEGORIES]).toEqual(BACKEND_ENUMS.documentCategories);
     expect([...TICKET_STATUSES]).toEqual(BACKEND_ENUMS.ticketStatuses);
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
     expect([...TICKET_PRIORITIES]).toEqual(specEnum('TicketPriority'));
+    // WP-808: the contract filters and the dialog.
+    expect([...CONTRACT_STATUSES]).toEqual(specEnum('Contract', 'status'));
+    expect([...CONTRACT_KINDS]).toEqual(BACKEND_ENUMS.contractKinds);
   });
 
   it('labels the ticket priorities and mirrors the state machine (WP-814)', () => {
@@ -476,6 +595,29 @@ describe('i18n catalog', () => {
       ]),
     );
     expect(Object.keys(flowSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('lists the components of the guided creation (WP-317)', () => {
+    expect(Object.keys(createSources)).toEqual(
+      expect.arrayContaining([
+        '../components/create/GuidedCreate.tsx',
+        '../components/create/TypeTiles.tsx',
+      ]),
+    );
+    expect(Object.keys(createSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('mirrors the disposal methods, priorities and weekdays (WP-815)', () => {
+    expect([...DISPOSAL_METHODS]).toEqual(specEnum('CreateDisposalRecordRequest', 'method'));
+    expect(Object.keys(DISPOSAL_REQUIRED_FIELDS).sort()).toEqual([...DISPOSAL_METHODS].sort());
+    expect([...SLA_PRIORITIES]).toEqual(specEnum('CreateSLAPolicyRequest', 'priority'));
+    // weekday of weekly_hours: 1 (Monday) to 7 (Sunday), backend/internal/sla/calendar.go.
+    expect(WEEKDAYS.map((day) => WEEKDAY_NUMBERS[day])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(lookup(deDE, 'sla.calendar.weekdays.mon')).toBe('Montag');
+    expect(lookup(enUS, 'sla.calendar.weekdays.sun')).toBe('Sunday');
+    expect(lookup(deDE, 'disposal.methods.secure_erasure')).toBe('Sichere Löschung');
+    expect(lookup(enUS, 'disposal.methods.physical_destruction')).toBe('Physical destruction');
+    expect(Object.keys(slaSources)).toEqual(['../components/sla/BusinessCalendarSection.tsx']);
   });
 
   it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
@@ -603,9 +745,19 @@ describe('i18n catalog', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
 
+  it('offers exactly the guards and missing references of the OpenAPI types (WP-809)', () => {
+    expect([...CHILD_MODES]).toEqual(specEnum('CI', 'child_mode'));
+    expect([...LIFECYCLE_GUARDS]).toEqual(specEnum('LifecycleGuardProblem', 'guard'));
+    // missing is an array of an enum: its union is read from the item type.
+    const missing = spec.match(/^ {6}missing\?: \(([^)]*)\)\[\];/m)?.[1] ?? '';
+    expect([...LIFECYCLE_MISSING]).toEqual([...missing.matchAll(/'([^']*)'/g)].map((m) => m[1]));
+    expect(lookup(deDE, 'lifecycle.invalidTransition')).toBe('Übergang nicht erlaubt.');
+    expect(lookup(enUS, 'lifecycle.invalidTransition')).toBe('Transition not allowed.');
+  });
+
   it('labels in_stock as "Auf Lager" in de and "In stock" in en', () => {
-    expect(lookup(deDE, 'asset.statuses.in_stock')).toBe('Auf Lager');
-    expect(lookup(enUS, 'asset.statuses.in_stock')).toBe('In stock');
+    expect(lookup(deDE, 'lifecycle.states.in_stock')).toBe('Auf Lager');
+    expect(lookup(enUS, 'lifecycle.states.in_stock')).toBe('In stock');
   });
 
   it('maps the stored German dashboard roles onto the English values', () => {
@@ -656,6 +808,24 @@ describe('i18n catalog', () => {
     // WP-322: the import assistant and its mapping editor.
     '../pages/ImportPage.tsx',
     ...Object.keys(importSources),
+    // WP-317: the guided creation.
+    ...Object.keys(createSources),
+    // WP-319: the asset list with the guided asset creation.
+    '../pages/AssetListPage.tsx',
+    // WP-808: the contract and the supplier pages.
+    '../pages/ContractsPage.tsx',
+    '../pages/SuppliersPage.tsx',
+    // WP-816: the bulk bar and the job center.
+    ...Object.keys(bulkSources),
+    '../pages/JobCenterPage.tsx',
+    // WP-815: the SLA page with the business calendars and the disposal page.
+    '../pages/SLAPage.tsx',
+    '../pages/DisposalListPage.tsx',
+    ...Object.keys(slaSources),
+    // WP-812: the orders.
+    '../pages/OrderListPage.tsx',
+    // WP-809: the asset detail page.
+    '../pages/AssetDetailPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
@@ -664,7 +834,10 @@ describe('i18n catalog', () => {
       cardSources[file] ??
       ruleSources[file] ??
       documentSources[file] ??
-      importSources[file];
+      importSources[file] ??
+      createSources[file] ??
+      bulkSources[file] ??
+      slaSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

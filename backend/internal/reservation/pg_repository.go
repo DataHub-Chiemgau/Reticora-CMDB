@@ -22,6 +22,27 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// referenceFieldError is the 422 of the request field behind a composite
+// foreign key of reservation on app_user, ticket and internal_order (000275,
+// WP-827), nil for any other constraint. The field and the message are fixed
+// texts per constraint; nothing of the database error reaches the response.
+//
+// validation: fixed texts per known constraint.
+func referenceFieldError(constraint string) *api.FieldError {
+	var field string
+	switch constraint {
+	case "reservation_assignee_id_fkey":
+		field = "assignee_id"
+	case "reservation_ticket_id_fkey":
+		field = "ticket_id"
+	case "reservation_order_id_fkey":
+		field = "order_id"
+	default:
+		return nil
+	}
+	return &api.FieldError{Field: field, Message: field + " not found", Status: http.StatusUnprocessableEntity}
+}
+
 const selectColumns = `
 	id::text, organization_id::text, item_kind, COALESCE(asset_id::text, ''),
 	COALESCE(consumable_id::text, ''), COALESCE(location_id::text, ''), COALESCE(client_id::text, ''),
@@ -380,6 +401,11 @@ func (r *PGRepository) Create(ctx context.Context, res *Reservation) error {
 			switch {
 			case errors.As(err, &pgErr) && pgErr.ConstraintName == "idx_reservation_one_active_per_asset":
 				return ErrConflict
+			case errors.As(err, &pgErr) && pgErr.Code == "23503" && referenceFieldError(pgErr.ConstraintName) != nil:
+				// A holder, ticket or order that is unknown or of another
+				// organization (composite foreign keys of 000275, WP-827):
+				// 422 on the field, the same for both (no existence oracle).
+				return referenceFieldError(pgErr.ConstraintName)
 			case errors.As(err, &pgErr) && pgErr.Code == "42501":
 				// WITH CHECK of reservation_isolation: the derived client
 				// or site lies outside the caller's write scope, e.g. an

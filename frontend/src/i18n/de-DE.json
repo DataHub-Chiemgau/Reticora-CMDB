@@ -49,7 +49,9 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Regelkatalog",
-    "import": "Import"
+    "import": "Import",
+    "contracts": "Verträge",
+    "suppliers": "Lieferanten"
   },
   "common": {
     "save": "Speichern",
@@ -113,7 +115,9 @@
       "tags": "Tags öffnen",
       "rules": "Regelkatalog öffnen",
       "scan": "Scannen",
-      "import": "Import-Assistent öffnen"
+      "import": "Import-Assistent öffnen",
+      "contracts": "Verträge öffnen",
+      "suppliers": "Lieferanten öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -259,9 +263,12 @@
       "results": {
         "ok": "OK",
         "error": "Fehler",
-        "skipped": "Übersprungen"
+        "skipped": "Übersprungen",
+        "reverted": "Zurückgesetzt"
       },
-      "closeReport": "Bericht schließen"
+      "closeReport": "Bericht schließen",
+      "queuedOther": "Massenänderung für {{count}} CIs läuft als Job",
+      "successOther": "{{count}} CIs geändert"
     },
     "overrideReason": "Begründung",
     "addInstanceField": "Instanzfeld hinzufügen",
@@ -336,6 +343,19 @@
       "invalid": "Unbekannte Tags: {{detail}}",
       "forbidden": "Ihnen fehlt das Recht, das CI zu ändern.",
       "reason": "Die Tags konnten nicht gespeichert werden: {{detail}}"
+    },
+    "owner": {
+      "title": "Verantwortlich",
+      "user": "Nutzer",
+      "team": "Team",
+      "userLabel": "Verantwortlicher Nutzer",
+      "teamLabel": "Verantwortliches Team",
+      "named": "{{kind}}: {{name}}",
+      "fromAsset": "vom Asset übernommen",
+      "fromAssetMark": "{{value}} (vom Asset)",
+      "hint": "Nutzer oder Team, das im System für das CI verantwortlich ist; nicht der Kontakt mit der Rolle ‚Owner‘.",
+      "teamForbidden": "Dieses Team liegt außerhalb Ihres Team-Bereichs.",
+      "forbidden": "Keine Berechtigung, den Verantwortlichen zu setzen."
     }
   },
   "form": {
@@ -384,6 +404,81 @@
         "textExpected": "{{label}} muss ein Text sein",
         "invalid": "{{label}} ist ungültig"
       }
+    },
+    "storedReference": "Gespeicherter Verweis"
+  },
+  "create": {
+    "description": "Wählen Sie, was Sie anlegen möchten, und ergänzen Sie dann die Angaben.",
+    "steps": {
+      "label": "Schritte der Anlage",
+      "type": "Typ",
+      "device": "Hersteller und Modell",
+      "fields": "Angaben"
+    },
+    "typeIntro": "Was möchten Sie anlegen?",
+    "typesLoading": "Typen werden geladen …",
+    "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
+    "typeInactive": "Dieser Typ wurde inzwischen deaktiviert. Bitte wählen Sie einen anderen Typ.",
+    "tiles": {
+      "subtypes": "Untertypen von {{name}} anzeigen",
+      "subtypesOf": "Untertypen von {{name}}"
+    },
+    "fields": {
+      "name": "Name",
+      "status": "Status",
+      "location": "Standort",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "variant": "Ausführung"
+    },
+    "suggestions": "Vorschläge für {{field}}",
+    "selectPlaceholder": "Bitte auswählen",
+    "variantUnnamed": "Ausführung {{number}}",
+    "formLoading": "Felder werden geladen …",
+    "formLoadFailed": "Die Felder dieses Typs konnten nicht geladen werden.",
+    "prefilled": "vorbelegt",
+    "sourceHint": "Manuell erfasste Werte werden mit der Quelle „manuell“ gespeichert. Eine automatische Erkennung überschreibt sie nicht stillschweigend; die Herkunft jedes Werts zeigt die Detailseite.",
+    "serverRejected": "Bitte korrigieren Sie die markierten Felder.",
+    "validation": {
+      "nameRequired": "Name ist erforderlich.",
+      "variantRequired": "Bitte wählen Sie eine Ausführung."
+    },
+    "back": "Zurück",
+    "next": "Weiter",
+    "groups": {
+      "general": "Allgemein",
+      "required": "Weitere Pflichtfelder",
+      "instance": "Weitere Felder dieses CIs",
+      "identity": "Identität",
+      "placement": "Aufstellung",
+      "management": "Verwaltung",
+      "virtualization": "Virtualisierung",
+      "hardware": "Hardware",
+      "software": "Software",
+      "assignment": "Zuordnung",
+      "wireless": "Funk",
+      "connectivity": "Anbindung",
+      "access": "Zugriff",
+      "classification": "Einstufung",
+      "capacity": "Kapazität",
+      "resilience": "Ausfallsicherheit",
+      "ownership": "Verantwortung",
+      "cloud": "Cloud"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "end_user": "Endgeräte",
+      "network": "Netzwerk",
+      "power": "Stromversorgung",
+      "storage": "Speicher",
+      "peripheral": "Peripherie",
+      "iot": "IoT",
+      "software": "Software",
+      "infrastructure": "Infrastruktur",
+      "service": "Dienste",
+      "cloud": "Cloud",
+      "generic": "Allgemeine Geräte",
+      "other": "Weitere"
     }
   },
   "discovery": {
@@ -596,17 +691,6 @@
     "location": "Standort",
     "supplier": "Lieferant",
     "create": "Asset anlegen",
-    "bulk": {
-      "selected": "{{count}} ausgewählt",
-      "setStatus": "Status setzen…",
-      "apply": "Anwenden",
-      "clearSelection": "Auswahl aufheben",
-      "selectAll": "Alle sichtbaren Assets auswählen",
-      "selectRow": "{{name}} auswählen",
-      "toolbarLabel": "Massenbearbeitung",
-      "success": "Status von {{count}} Assets aktualisiert",
-      "error": "Die Massenänderung konnte nicht vollständig angewendet werden"
-    },
     "barcode": "Barcode",
     "rfidTag": "RFID-Tag",
     "purchaseDate": "Kaufdatum",
@@ -614,14 +698,6 @@
     "invoiceNumber": "Rechnungsnummer",
     "warrantyEnd": "Garantie bis",
     "status": "Status",
-    "statuses": {
-      "in_stock": "Auf Lager",
-      "assigned": "Zugewiesen",
-      "maintenance": "Wartung",
-      "retired": "Ausgemustert",
-      "disposed": "Entsorgt",
-      "lost": "Verloren"
-    },
     "categories": {
       "hardware": "Hardware",
       "software": "Software",
@@ -630,9 +706,182 @@
       "accessory": "Zubehör",
       "other": "Sonstiges"
     },
-    "summary": "Assets mit Kategorie, Status und Standort verwalten.",
+    "summary": "Assets mit Kategorie, Lebenszyklus und Standort verwalten.",
     "emptyTitle": "Noch keine Assets",
-    "emptyHint": "Lege das erste Asset an, um Bestand, Status und Standort zu verfolgen."
+    "emptyHint": "Lege das erste Asset an, um Bestand, Lebenszyklus und Standort zu verfolgen.",
+    "columns": {
+      "inventory_no": "Inventarnummer",
+      "name": "Name",
+      "category": "Kategorie",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serial_number": "Seriennummer",
+      "barcode": "Barcode",
+      "rfid_tag": "RFID-Tag",
+      "lifecycle_state": "Lebenszyklus",
+      "location_id": "Standort",
+      "cost_center": "Kostenstelle",
+      "purchase_date": "Kaufdatum",
+      "purchase_price": "Kaufpreis",
+      "currency": "Währung",
+      "warranty_until": "Garantie bis"
+    },
+    "columnsButton": "Spalten",
+    "columnsLegend": "Angezeigte Spalten",
+    "allLifecycleStates": "Alle Zustände",
+    "lifecycleFilter": "Lebenszyklus",
+    "sortBy": "Nach {{column}} sortieren",
+    "totalCapped": "mehr als {{count}}",
+    "pagination": "Seiten",
+    "previousPage": "Vorherige Seite",
+    "nextPage": "Nächste Seite",
+    "deleteConflict": "Das Asset kann nicht gelöscht werden.",
+    "views": {
+      "label": "Sicht",
+      "none": "Keine Sicht",
+      "extended": "{{name}} (erweitert)",
+      "extendedHint": "Diese Sicht enthält weitere Bedingungen. Sie läuft in den gespeicherten Sichten.",
+      "open": "In Sichten öffnen",
+      "save": "Als Sicht speichern",
+      "name": "Name der Sicht",
+      "saveTitle": "Sicht speichern",
+      "saved": "Sicht „{{name}}“ gespeichert",
+      "saveError": "Die Sicht konnte nicht gespeichert werden."
+    },
+    "guided": {
+      "categories": "Kategorie",
+      "chooseCategory": "Welche Art von Asset legst du an?",
+      "change": "Kategorie ändern",
+      "chosen": "Kategorie: {{category}}",
+      "more": "Weitere Angaben",
+      "less": "Weniger Angaben",
+      "submitError": "Das Asset konnte nicht angelegt werden."
+    },
+    "bulk": {
+      "selected": "{{count}} ausgewählt",
+      "setStatus": "Status setzen…",
+      "apply": "Anwenden",
+      "clearSelection": "Auswahl aufheben",
+      "selectAll": "Alle sichtbaren Assets auswählen",
+      "selectRow": "{{name}} auswählen",
+      "toolbarLabel": "Massenbearbeitung",
+      "queued": "Statusänderung für {{count}} Assets läuft als Job",
+      "queuedOther": "Massenänderung für {{count}} Assets läuft als Job",
+      "partial": "{{succeeded}} Assets aktualisiert, {{failed}} fehlgeschlagen",
+      "failures": "Fehlgeschlagene Assets",
+      "success": "Status von {{count}} Assets aktualisiert",
+      "successOther": "{{count}} Assets geändert",
+      "error": "Die Massenänderung konnte nicht vollständig angewendet werden",
+      "selectAllMatches": "Alle {{count}} Treffer des Filters auswählen",
+      "selectFirstMatches": "Die ersten {{count}} Treffer des Filters auswählen",
+      "collectError": "Die Treffer des Filters konnten nicht geladen werden",
+      "capped": "Eine Massenänderung umfasst höchstens {{max}} Assets: der Filter hat {{total}} Treffer, die ersten {{max}} sind ausgewählt.",
+      "tooMany": "Eine Massenänderung umfasst höchstens {{max}} Assets; {{count}} sind ausgewählt.",
+      "jobHint": "Ab {{count}} Assets läuft die Änderung als Job; sein Bericht erscheint hier.",
+      "jobTitle": "Massenänderung als Job",
+      "jobProgress": "Fortschritt der Massenänderung",
+      "jobState": "Job: {{status}} ({{progress}} %)",
+      "jobDone": "Job abgeschlossen: {{succeeded}} von {{total}} Assets aktualisiert, {{failed}} fehlgeschlagen",
+      "jobCancelled": "Job abgebrochen: {{succeeded}} von {{total}} Assets aktualisiert, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
+      "jobFailed": "Der Job ist fehlgeschlagen: {{error}}",
+      "jobLoadError": "Der Job konnte nicht gelesen werden",
+      "report": "Bericht je Asset",
+      "reportCI": "Asset",
+      "reportResult": "Ergebnis",
+      "reportCode": "HTTP-Status",
+      "reportError": "Fehler",
+      "closeReport": "Bericht schließen",
+      "statuses": {
+        "in_stock": "Auf Lager",
+        "assigned": "Zugewiesen",
+        "maintenance": "In Wartung",
+        "retired": "Ausgemustert",
+        "disposed": "Entsorgt",
+        "lost": "Verloren"
+      }
+    },
+    "childModes": {
+      "configuration": "Konfiguration",
+      "standalone": "Eigenständig"
+    },
+    "detail": {
+      "notFound": "Das Asset wurde nicht gefunden oder ist nicht sichtbar.",
+      "loadError": "Das Asset konnte nicht geladen werden.",
+      "masterData": "Stammdaten",
+      "locationReadOnly": "Standort (über Bewegungen)",
+      "lifecycleReadOnly": "Lebenszyklus (über Übergänge)",
+      "notes": "Notizen",
+      "history": "Bewegungen und Änderungen",
+      "listError": "Die Liste konnte nicht geladen werden.",
+      "fields": {
+        "name": "Name",
+        "inventory_no": "Inventarnummer",
+        "manufacturer": "Hersteller",
+        "model": "Modell",
+        "serial_number": "Seriennummer",
+        "barcode": "Barcode",
+        "rfid_tag": "RFID-Tag",
+        "purchase_date": "Kaufdatum",
+        "purchase_price": "Kaufpreis",
+        "currency": "Währung",
+        "warranty_until": "Garantie bis",
+        "cost_center": "Kostenstelle",
+        "invoice_number": "Rechnungsnummer",
+        "supplier_id": "Lieferant",
+        "contract_id": "Vertrag"
+      },
+      "edit": {
+        "title": "Asset bearbeiten",
+        "conflict": "Das Asset wurde zwischenzeitlich geändert ({{fields}}). Bitte neu laden und die Änderung erneut vornehmen.",
+        "precondition": "Die gelesene Version des Assets ist nicht mehr gültig. Bitte neu laden.",
+        "reload": "Neu laden",
+        "failed": "Das Asset konnte nicht gespeichert werden."
+      },
+      "warranty": {
+        "notice": "Die Garantie endet am {{date}} (in {{count}} Tagen).",
+        "warning": "Die Garantie endet bald: am {{date}} (in {{count}} Tagen).",
+        "expired": "Garantie abgelaufen (seit {{date}})."
+      },
+      "contract": {
+        "title": "Vertrag und Lieferant",
+        "supplier": "Lieferant",
+        "number": "Vertrag",
+        "term": "Laufzeit",
+        "noticeDate": "Kündigung bis",
+        "unnamedSupplier": "Lieferant anzeigen",
+        "unnamedContract": "Vertrag anzeigen"
+      },
+      "holder": {
+        "title": "Halter und Reservierung",
+        "current": "Halter",
+        "due": "Rückgabe bis"
+      },
+      "reservation": {
+        "title": "Aktive Reservierung",
+        "until": "Reserviert bis",
+        "for": "Reserviert für",
+        "release": "Reservierung freigeben"
+      },
+      "cis": {
+        "title": "Verknüpfte CIs",
+        "none": "Mit diesem Asset ist kein CI verknüpft.",
+        "primary": "Primär-CI",
+        "provenance": "Vom Asset abgeleitete Felder von {{name}} anzeigen",
+        "provenanceError": "Die Herkunft der Felder konnte nicht geladen werden.",
+        "noDerived": "Kein Feld dieses CI kommt vom Asset.",
+        "unlink": "Lösen",
+        "unlinkNamed": "{{name}} vom Asset lösen",
+        "pick": "CI verknüpfen",
+        "makePrimary": "Als Primär-CI setzen",
+        "link": "Verknüpfen",
+        "linkRefused": "Das CI kann nicht verknüpft werden: {{detail}}"
+      },
+      "children": {
+        "title": "Kinder",
+        "none": "Dieses Asset hat keine Kinder.",
+        "fromAsset": "(vom Asset)"
+      }
+    }
   },
   "assignment": {
     "title": "Zuweisungen",
@@ -1306,7 +1555,71 @@
     "responseDue": "Reaktion fällig",
     "resolutionDue": "Lösung fällig",
     "ticket": "Ticket",
-    "status": "Status"
+    "status": "Status",
+    "client": "Client",
+    "noClient": "Kein Client (Organisation)",
+    "calendarField": "Business-Kalender",
+    "calendarChain": "Kalenderkette (Client-, Org-Standard)",
+    "businessHours": "Geschäftszeiten anwenden",
+    "elapsedTime": "Laufzeit (rund um die Uhr)",
+    "calendar": {
+      "title": "Business-Kalender",
+      "hint": "Wochenzeiten und Feiertage, nach denen SLA-Fristen in Geschäftszeit gezählt werden. Leere Zeitzone wird aus Client bzw. Organisation abgeleitet.",
+      "loading": "Business-Kalender werden geladen",
+      "errorTitle": "Business-Kalender konnten nicht geladen werden",
+      "emptyTitle": "Keine Business-Kalender vorhanden",
+      "emptyHint": "Ohne eigenen Kalender gilt der Standard Montag bis Freitag, 08:00–18:00.",
+      "create": "Kalender anlegen",
+      "editTitle": "Kalender bearbeiten",
+      "edit": "Kalender {{name}} bearbeiten",
+      "delete": "Kalender {{name}} löschen",
+      "deleteTitle": "Kalender löschen",
+      "deleteConfirm": "Kalender „{{name}}“ löschen? Richtlinien, die ihn nennen, folgen danach der Kalenderkette.",
+      "more": "Weitere laden",
+      "name": "Name",
+      "client": "Client",
+      "organizationWide": "Organisation (alle Clients)",
+      "clientFixed": "Der Client eines Kalenders lässt sich nicht ändern; legen Sie für einen anderen Client einen neuen Kalender an.",
+      "timezone": "Zeitzone",
+      "timezonePlaceholder": "z. B. Europe/Berlin",
+      "timezoneHint": "IANA-Name; leer = abgeleitet aus Client bzw. Organisation.",
+      "timezoneDerived": "abgeleitet",
+      "weeklyHours": "Wochenzeiten",
+      "windowStart": "{{day}}, Zeitfenster {{n}}: Beginn",
+      "windowEnd": "{{day}}, Zeitfenster {{n}}: Ende",
+      "removeWindow": "{{day}}, Zeitfenster {{n}} entfernen",
+      "addWindow": "Zeitfenster",
+      "addWindowFor": "Zeitfenster für {{day}} hinzufügen",
+      "holidays": "Feiertage",
+      "holidayDate": "Feiertag {{n}}: Datum",
+      "holidayName": "Feiertag {{n}}: Name",
+      "removeHoliday": "Feiertag {{n}} entfernen",
+      "addHoliday": "Feiertag hinzufügen",
+      "isDefault": "Standardkalender (für Organisation bzw. Client)",
+      "default": "Standard",
+      "weekdays": {
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag"
+      },
+      "weekdaysShort": {
+        "mon": "Mo",
+        "tue": "Di",
+        "wed": "Mi",
+        "thu": "Do",
+        "fri": "Fr",
+        "sat": "Sa",
+        "sun": "So"
+      },
+      "errors": {
+        "secondDefault": "Für diese Organisation bzw. diesen Client gibt es bereits einen Standardkalender.",
+        "forbidden": "Keine Berechtigung: Organisationsweite Kalender kann nur ein Nutzer ohne Client-Beschränkung pflegen."
+      }
+    }
   },
   "forms": {
     "title": "Formulare",
@@ -1830,7 +2143,58 @@
     },
     "number": "Nummer",
     "emptyTitle": "Noch keine Bestellungen",
-    "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen."
+    "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen.",
+    "filterStatus": "Status filtern",
+    "editTitle": "Bestellung bearbeiten",
+    "client": "Mandant",
+    "orgWide": "Ohne Mandant (organisationsweit)",
+    "noSupplier": "Kein Lieferant",
+    "targetBin": "Ziel-Fach",
+    "actions": {
+      "submit": "Einreichen",
+      "items": "Positionen",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "approve": "Genehmigen",
+      "reject": "Ablehnen",
+      "place": "Bestellen",
+      "receive": "Wareneingang",
+      "close": "Abschließen",
+      "cancel": "Stornieren"
+    },
+    "items": {
+      "title": "Positionen von {{number}}",
+      "add": "Position hinzufügen",
+      "kind": "Art",
+      "kinds": {
+        "consumable": "Mengenartikel",
+        "asset": "Asset"
+      },
+      "consumable": "Mengenartikel",
+      "quantity": "Menge",
+      "unitPrice": "Einzelpreis",
+      "received": "Geliefert",
+      "none": "Noch keine Positionen."
+    },
+    "receive": {
+      "title": "Wareneingang zu {{number}}",
+      "remaining": "offen: {{count}}",
+      "quantity": "Gelieferte Menge ({{name}})",
+      "bin": "Ziel-Fach ({{name}})",
+      "assets": "Gelieferte Assets ({{name}})",
+      "submit": "Wareneingang buchen",
+      "tooMany": "Höchstens {{count}} offen – Überlieferung ist nicht möglich.",
+      "invalidQuantity": "Ganze Zahl ab 0 eingeben.",
+      "binRequired": "Ziel-Fach wählen.",
+      "assetsMismatch": "Genau {{count}} Assets wählen.",
+      "nothingOpen": "Alle Positionen sind vollständig geliefert."
+    },
+    "confirm": {
+      "cancelTitle": "Bestellung {{number}} stornieren?",
+      "cancelBody": "„{{title}}“ wird storniert. Bereits gebuchte Teillieferungen bleiben im Lager.",
+      "deleteTitle": "Bestellung {{number}} löschen?",
+      "deleteBody": "Der Entwurf „{{title}}“ wird mit seinen Positionen gelöscht."
+    }
   },
   "maintenance": {
     "summary": "Wartungen planen und betroffene Kunden benachrichtigen.",
@@ -1893,6 +2257,42 @@
       "secure_erasure": "Sichere Löschung",
       "physical_destruction": "Physische Vernichtung",
       "return_to_vendor": "Rückgabe an Hersteller"
+    },
+    "fields": {
+      "method": "Methode",
+      "object": "Asset oder CI",
+      "asset_id": "Asset",
+      "ci_id": "CI",
+      "protection_class": "Schutzklasse (DIN 66399)",
+      "security_level": "Sicherheitsstufe (DIN 66399)",
+      "data_carrier": "Datenträger",
+      "supplier_id": "Dienstleister",
+      "performed_by": "Durchgeführt von",
+      "witness": "Zeuge",
+      "performed_at": "Durchgeführt am",
+      "certificate_ref": "Zertifikats-Referenz",
+      "notes": "Notizen",
+      "evidence_document_id": "Nachweis"
+    },
+    "requiredHint": "Mit * markierte Felder sind für die gewählte Methode Pflicht (E-55).",
+    "noValue": "Keine Angabe",
+    "noSupplier": "Kein Dienstleister",
+    "protectionClass": "Schutzklasse {{value}}",
+    "securityLevelPlaceholder": "z. B. P-4",
+    "supplierOrWitness": "Dienstleister oder Zeuge genügt.",
+    "suppliersUnavailable": "Lieferanten sind nicht abrufbar; geben Sie einen Zeugen an.",
+    "evidenceUpload": "Nachweis hochladen",
+    "evidenceRemove": "Nachweis entfernen",
+    "evidenceInfected": "Der Nachweis ist infiziert und in Quarantäne; Absenden ist gesperrt. Laden Sie einen anderen Nachweis hoch.",
+    "evidenceDownload": "Nachweis herunterladen",
+    "recordHash": "Prüfsumme (record_hash)",
+    "detail": "Details",
+    "detailTitle": "Entsorgungsdatensatz",
+    "showDetail": "Details zu {{name}}",
+    "errors": {
+      "required": "Pflichtfeld für diese Methode",
+      "sourceState": "Entsorgung im aktuellen Lebenszyklus-Zustand nicht zulässig: {{detail}}",
+      "notFound": "Nicht gefunden: {{detail}}"
     }
   },
   "keys": {
@@ -2493,7 +2893,36 @@
     "reason": "Grund",
     "title": "Lebenszyklus",
     "current": "Aktuell",
-    "apply": "Anwenden"
+    "apply": "Anwenden",
+    "states": {
+      "ordered": "Bestellt",
+      "received": "Eingegangen",
+      "in_stock": "Auf Lager",
+      "reserved": "Reserviert",
+      "preparing": "In Vorbereitung",
+      "deployed": "Im Einsatz",
+      "repair": "In Reparatur",
+      "retired": "Ausgemustert",
+      "disposed": "Entsorgt"
+    },
+    "invalidTransition": "Übergang nicht erlaubt.",
+    "guards": {
+      "storage_location": "Für „Auf Lager“ muss das Asset an einem Lagerort stehen (Lager, Zone, Regal oder Fach).",
+      "operations_location_or_holder": "Für „Im Einsatz“ braucht das Asset einen Betriebsstandort (Standort, Gebäude, Raum oder Rack) oder einen Halter.",
+      "disposal_record": "Für „Entsorgt“ braucht das Asset einen Entsorgungsnachweis.",
+      "active_reservation": "Für „Reserviert“ braucht das Asset eine aktive Reservierung."
+    },
+    "missing": {
+      "location_id": "Es fehlt ein passender Standort: das Asset verschieben.",
+      "assignee": "Es fehlt ein Halter (Person oder Team).",
+      "disposal_record": "Es fehlt ein Entsorgungsnachweis.",
+      "reservation": "Es fehlt eine aktive Reservierung."
+    },
+    "actions": {
+      "assign": "Zuweisen",
+      "reserve": "Reservieren",
+      "disposal": "Zur Entsorgung"
+    }
   },
   "relationship": {
     "add": "Beziehung hinzufügen",
@@ -2834,7 +3263,10 @@
     "partialReportSummary": "Teilbericht: {{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen",
     "kinds": {
       "attribute": {
-        "index": "Attributindex"
+        "index": "Attributindex",
+        "index.rebuild": "Neuaufbau Attributindex",
+        "index.key": "Attributindex über Schlüssel",
+        "computed_backfill": "Nachberechnung berechneter Attribute"
       },
       "metamodel": {
         "test": "Metamodell-Test"
@@ -2844,9 +3276,42 @@
       },
       "import": {
         "run": "Import-Lauf"
+      },
+      "ci": {
+        "bulk": "Massenänderung CIs",
+        "merge": "CI-Zusammenführung"
+      },
+      "asset": {
+        "bulk": "Massenänderung Assets"
+      },
+      "bulk": {
+        "revert": "Rückgängig einer Massenänderung"
+      },
+      "export": "Export",
+      "history": {
+        "snapshot": "Zustands-Snapshot"
+      },
+      "document": {
+        "scan": "Malware-Prüfung Dokument"
+      },
+      "search": {
+        "reindex": "Neuaufbau Suchindex"
+      },
+      "labels": {
+        "batch": "Etikettendruck"
       }
     },
-    "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet."
+    "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet.",
+    "kindKey": "Technischer Schlüssel: {{kind}}",
+    "revert": "Rückgängig",
+    "revertUntil": "Rückgängig bis {{until}}",
+    "revertDone": "Der Job wurde rückgängig gemacht.",
+    "revertQueued": "Das Rückgängigmachen läuft als Job {{kind}}.",
+    "revertConflict": "Der Job lässt sich nicht rückgängig machen: {{detail}}",
+    "revertForbidden": "Sie dürfen diesen Job nicht rückgängig machen.",
+    "revertFailed": "Der Job konnte nicht rückgängig gemacht werden: {{error}}",
+    "reverted": "Rückgängig gemacht",
+    "resultSummary": "{{succeeded}} von {{total}} erfolgreich, {{failed}} fehlgeschlagen, {{skipped}} übersprungen"
   },
   "provenance": {
     "show": "Herkunft von {{field}}",
@@ -3983,5 +4448,206 @@
       "unsaved": "Der Editor enthält ungespeicherte Änderungen. Die Vorschau zeigt den gespeicherten Stand.",
       "error": "Die Vorschau konnte nicht geladen werden"
     }
+  },
+  "contract": {
+    "title": "Verträge",
+    "subtitle": "Wartungs-, Support-, Leasing- und Lizenzverträge mit Laufzeit und Kündigungsfrist.",
+    "create": "Vertrag anlegen",
+    "createTitle": "Vertrag anlegen",
+    "editTitle": "Vertrag bearbeiten",
+    "editLabel": "Vertrag {{name}} bearbeiten",
+    "deleteLabel": "Vertrag {{name}} löschen",
+    "deleteTitle": "Vertrag löschen",
+    "deleteConfirm": "Vertrag {{name}} wirklich löschen?",
+    "empty": "Keine Verträge vorhanden.",
+    "loadError": "Die Verträge konnten nicht geladen werden.",
+    "forbiddenRead": "Für Verträge fehlt dir das Leserecht (contract:read).",
+    "readOnly": "Du kannst Verträge ansehen, aber nicht ändern (contract:write fehlt).",
+    "notFound": "Der Vertrag wurde nicht gefunden.",
+    "backToList": "Zur Vertragsliste",
+    "details": "Stammdaten",
+    "documents": "Vertragsdokumente",
+    "orgWide": "Organisationsweit",
+    "none": "Keine Angabe",
+    "currencyHint": "Leer bedeutet die Währung der Organisation.",
+    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Clients.",
+    "fields": {
+      "number": "Nummer",
+      "kind": "Art",
+      "supplier": "Lieferant",
+      "client": "Client",
+      "term": "Laufzeit",
+      "startDate": "Beginn",
+      "endDate": "Ende",
+      "noticePeriodDays": "Kündigungsfrist (Tage)",
+      "noticeDate": "Kündigungstermin",
+      "status": "Status",
+      "value": "Wert",
+      "currency": "Währung",
+      "notes": "Notizen"
+    },
+    "filters": {
+      "status": "Status",
+      "kind": "Art",
+      "supplier": "Lieferant",
+      "sort": "Sortierung",
+      "allKinds": "Alle Arten",
+      "allSuppliers": "Alle Lieferanten"
+    },
+    "sorts": {
+      "number": "Nummer",
+      "start_date": "Beginn",
+      "end_date": "Ende"
+    },
+    "statuses": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "terminated": "Gekündigt",
+      "ended": "Beendet"
+    },
+    "kinds": {
+      "maintenance": "Wartung",
+      "support": "Support",
+      "lease": "Leasing",
+      "license": "Lizenz",
+      "purchase": "Kauf",
+      "service": "Dienstleistung",
+      "other": "Sonstiges"
+    },
+    "expiry": {
+      "title": "Ablaufübersicht",
+      "subtitle": "Laufende Verträge, deren Kündigungstermin in den nächsten 30 Tagen liegt oder verstrichen ist.",
+      "empty": "In den nächsten 30 Tagen steht kein Kündigungstermin an.",
+      "today": "Heute",
+      "tomorrow": "Morgen",
+      "inDays": "In {{count}} Tagen",
+      "passed": "Kündigungstermin verstrichen",
+      "passedHint": "Der Kündigungstermin am {{date}} ist verstrichen; der Vertrag endet am {{end}}.",
+      "ends": "Ende {{date}}"
+    },
+    "errors": {
+      "stale": "Der Vertrag wurde inzwischen geändert. Lade ihn neu, bevor du speicherst.",
+      "reload": "Neu laden",
+      "numberTaken": "Diese Nummer hat bereits ein anderer Vertrag.",
+      "forbidden": "Dafür fehlt dir das Recht.",
+      "forbiddenFields": "Einzelne Felder darfst du nicht ändern; sie sind markiert.",
+      "invalid": "Bitte prüfe die markierten Felder.",
+      "notFound": "Der Vertrag existiert nicht mehr.",
+      "reason": "Fehler: {{detail}}"
+    }
+  },
+  "supplier": {
+    "title": "Lieferanten",
+    "subtitle": "Lieferanten und Dienstleister mit Kontaktperson; Verträge und Assets verweisen auf sie.",
+    "create": "Lieferant anlegen",
+    "createTitle": "Lieferant anlegen",
+    "editTitle": "Lieferant bearbeiten",
+    "editLabel": "Lieferant {{name}} bearbeiten",
+    "deleteLabel": "Lieferant {{name}} löschen",
+    "deleteTitle": "Lieferant löschen",
+    "deleteConfirm": "Lieferant {{name}} wirklich löschen?",
+    "empty": "Keine Lieferanten vorhanden.",
+    "loadError": "Die Lieferanten konnten nicht geladen werden.",
+    "forbiddenRead": "Für Lieferanten fehlt dir das Leserecht (contract:read).",
+    "readOnly": "Du kannst Lieferanten ansehen, aber nicht ändern (contract:write fehlt).",
+    "search": "Lieferanten suchen",
+    "orgWide": "Organisationsweit",
+    "noContact": "Keine Kontaktperson",
+    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "fields": {
+      "name": "Name",
+      "externalRef": "Externe Referenz",
+      "client": "Client",
+      "contact": "Kontaktperson",
+      "notes": "Notizen"
+    },
+    "errors": {
+      "stale": "Der Lieferant wurde inzwischen geändert. Lade ihn neu, bevor du speicherst.",
+      "reload": "Neu laden",
+      "nameTaken": "Diesen Namen hat bereits ein anderer Lieferant.",
+      "inUse": "Der Lieferant wird noch verwendet (Vertrag, Asset oder Bestellung) und kann nicht gelöscht werden.",
+      "forbidden": "Dafür fehlt dir das Recht.",
+      "invalid": "Bitte prüfe die markierten Felder.",
+      "notFound": "Der Lieferant existiert nicht mehr.",
+      "reason": "Fehler: {{detail}}"
+    }
+  },
+  "bulk": {
+    "operation": "Aktion",
+    "operations": {
+      "set_status": "Status setzen",
+      "set_fields": "Feld setzen",
+      "set_location": "Standort setzen",
+      "add_tags": "Tags hinzufügen",
+      "remove_tags": "Tags entfernen",
+      "change_template": "Template wechseln",
+      "add_relationship": "Beziehung anlegen",
+      "remove_relationship": "Beziehung entfernen",
+      "assign": "Zuweisen",
+      "lifecycle_transition": "Lebenszyklus-Übergang",
+      "archive": "Archivieren",
+      "export": "Exportieren"
+    },
+    "choose": "Bitte wählen…",
+    "field": "Feld",
+    "value": "Neuer Wert",
+    "valueHint": "Leer leert das Feld",
+    "ciFields": {
+      "name": "Name",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "serial_number": "Seriennummer",
+      "hostname": "Hostname",
+      "fqdn": "FQDN",
+      "management_ip": "Management-IP",
+      "os_name": "Betriebssystem",
+      "os_version": "OS-Version",
+      "firmware_version": "Firmware-Version"
+    },
+    "location": "Neuer Standort",
+    "tags": "Tags",
+    "noTags": "Der Tag-Katalog ist leer.",
+    "template": "Template",
+    "templateVersion": "Zielversion",
+    "currentVersion": "Aktuelle Version",
+    "version": "Version {{version}}",
+    "relType": "Beziehungstyp",
+    "direction": "Richtung",
+    "directions": {
+      "outgoing": "Ausgehend (CI → Ziel)",
+      "incoming": "Eingehend (Ziel → CI)"
+    },
+    "target": "Ziel-CI",
+    "owner": "Verantwortlich (Benutzer oder Team)",
+    "holder": "Zuweisen an (Benutzer oder Team)",
+    "toState": "Zielzustand",
+    "reason": "Begründung (optional)",
+    "archiveHint": "Setzt den Status inaktiv und das Tag archived.",
+    "format": "Format",
+    "formats": {
+      "csv": "CSV",
+      "json": "JSON"
+    },
+    "exportQueued": "Export von {{count}} Objekten gestartet; die Datei erscheint unter Export.",
+    "invalid": "Die Massenänderung wurde abgelehnt: {{detail}}",
+    "forbidden": "Ihnen fehlt das Recht für diese Aktion.",
+    "jobFinished": "Massenänderung abgeschlossen.",
+    "undo": "Rückgängig",
+    "undoDone": "Die Änderung wurde rückgängig gemacht.",
+    "undoQueued": "Das Rückgängigmachen läuft als Job.",
+    "undoConflict": "Rückgängig nicht möglich: {{detail}}",
+    "undoForbidden": "Sie dürfen diese Änderung nicht rückgängig machen.",
+    "undoFailed": "Die Änderung konnte nicht rückgängig gemacht werden.",
+    "revertTitle": "Rückgängig als Job",
+    "revertQueued": "Rückgängigmachen für {{count}} Objekte läuft als Job",
+    "revertDone": "Rückgängig abgeschlossen: {{succeeded}} von {{total}} zurückgesetzt, {{skipped}} übersprungen, {{failed}} fehlgeschlagen",
+    "selectByFilter": "Auswahl per Filter…",
+    "filterTitle": "Auswahl per Filter",
+    "filterHint": "Die Treffer des Filters werden ausgewählt, höchstens {{max}}.",
+    "filterApply": "Treffer auswählen",
+    "filterError": "Die Treffer des Filters konnten nicht geladen werden.",
+    "filterEmpty": "Der Filter hat keine Treffer.",
+    "filterCapped": "Der Filter hat {{total}} Treffer; eine Massenänderung umfasst höchstens {{max}}, die ersten {{max}} sind ausgewählt. Schränken Sie den Filter ein oder nutzen Sie den Export."
   }
 }

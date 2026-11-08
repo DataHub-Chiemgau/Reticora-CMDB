@@ -154,6 +154,19 @@ describe('DocumentListPage upload', () => {
     expect(screen.getByText('Sauber')).toBeInTheDocument();
     expect(screen.getByText('v2')).toBeInTheDocument();
   });
+
+  it('shows fields left out by the field permissions as missing', async () => {
+    // RBA-07 (WP-267): file_name, category and file_size are not readable.
+    const hidden: Record<string, unknown> = { ...DOCUMENT };
+    for (const key of ['file_name', 'category', 'file_size']) delete hidden[key];
+    stubDocumentApi(undefined, [hidden]);
+    renderWithProviders(<DocumentListPage />, { route: '/documents' });
+    const link = await screen.findByRole('link', { name: 'Wartungsvertrag' });
+    const row = link.closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getAllByText('—')).toHaveLength(3);
+    expect(within(row as HTMLElement).queryByText('wartungsvertrag.pdf')).toBeNull();
+  });
 });
 
 describe('DocumentListPage storage usage', () => {

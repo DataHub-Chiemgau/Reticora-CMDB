@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000274_ci_warranty_days_left_index
+Stand: Migration 000275_p2_reference_integrity
 
 ## Prüfung
 
@@ -320,6 +320,17 @@ das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
 nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
 bzw. setzen auch `app.team_scope`.
 
+Seit Migration 000275 (WP-827, ABN-03) überlebt kein Link sein Ziel: Die
+AFTER-DELETE-Trigger `<tabelle>_document_links` auf `ci`, `asset`,
+`ticket`, `location`, `disposal_record`, `stocktake` und `stock_movement`
+rufen `delete_target_document_links(<entity_type>)` und entfernen die Links
+des gelöschten Ziels in derselben Transaktion (wie
+`contract_document_links` aus 000238; `document.link_count` folgt über
+`count_document_links`, die Dokumente bleiben; erweiterter Scope über
+`app_scope_widen`, fester `search_path`). Links, die beim Upgrade auf kein
+Ziel zeigen, stehen mit Grund `dropped: link target missing` in
+`migration_quarantine` und werden entfernt.
+
 ### Dokumentversionen und Speichernutzung (WP-731)
 
 `document_version` (Migration 000220) hält je Upload eine Version
@@ -622,6 +633,16 @@ gesetzt, die ganze Zeile ist protokolliert; Reservierungen sind verschoben
 `location_maintain` seit 000062 nicht zu; findet die Migration doch einen,
 bricht sie mit der Liste ab (Muster 000177). Die Down-Migration stellt die
 einfachen Fremdschlüssel und die Zeilen wieder her.
+
+Migration 000275 (WP-827) legt `UNIQUE (id, organization_id)`
+(`internal_order_id_organization_key`) auf `internal_order` an und gibt den
+bis dahin ungebundenen Spalten `reservation.assignee_id`,
+`reservation.ticket_id` und `reservation.order_id` zusammengesetzte
+Fremdschlüssel (`reservation_assignee_id_fkey` auf `app_user`,
+`reservation_ticket_id_fkey` auf `ticket`, `reservation_order_id_fkey` auf
+`internal_order`, je `ON DELETE SET NULL (spalte)`). Bestehende Verweise ohne
+Zeile in der eigenen Organisation stehen in `migration_quarantine`
+(Migration `000275`) und sind auf NULL gesetzt.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft

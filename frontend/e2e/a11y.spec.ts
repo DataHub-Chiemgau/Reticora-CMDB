@@ -71,6 +71,8 @@ interface A11yRoute {
   ready: (page: Page) => Locator;
   /** Steps that bring the page into its data view (selections). */
   prepare?: (page: Page) => Promise<void>;
+  /** The answer of the GraphQL BFF (POST /bff/graphql) for a page that reads it. */
+  bff?: unknown;
 }
 
 // Every route passes without exception (WP-531, F-172/F-173). The findings
@@ -119,6 +121,101 @@ const documentVersion = (version: number, scan: string) => ({
   ...(scan === 'pending_scan' ? {} : { scanned_at: AT }),
   created_at: AT,
 });
+// WP-809: the detail page of an asset with a primary CI, a configuration
+// and a standalone child, a document (BFF aggregate asset(id)), a holder, an
+// active reservation and a warranty that ends in two weeks.
+const DETAIL_ASSET_ID = 'a5000000-0000-4000-8000-000000000009';
+const DETAIL_ASSET_CI = 'a5100000-0000-4000-8000-000000000001';
+const inDays = (days: number) =>
+  new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+const ASSET_DETAIL_HANDLERS: Handler[] = [
+  {
+    path: `/assets/${DETAIL_ASSET_ID}`,
+    reply: () => ({
+      body: {
+        id: DETAIL_ASSET_ID,
+        organization_id: ORG_ID,
+        inventory_no: 'AT-0009',
+        name: M.asset,
+        category: 'hardware',
+        manufacturer: 'Lenovo',
+        model: 'T14',
+        serial_number: 'SN-A-9',
+        lifecycle_state: 'deployed',
+        warranty_until: inDays(14),
+        primary_ci_id: DETAIL_ASSET_CI,
+        active_reservation: {
+          id: 'a5200000-0000-4000-8000-000000000001',
+          reserved_until: inDays(30),
+          project_ref: 'PRJ-a11y',
+        },
+        custom_fields: {},
+        version: 2,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/assets/${DETAIL_ASSET_ID}/lifecycle-transitions`,
+    reply: () => ({
+      body: {
+        model: { id: 'a5300000-0000-4000-8000-000000000001', key: 'physical_asset', name: 'Asset' },
+        current_state: 'deployed',
+        transitions: [{ to_state: 'repair', key: 'repair', label: 'Repair', required_fields: [] }],
+      },
+    }),
+  },
+];
+const assetDetailCI = (id: string, name: string, extra: Record<string, unknown>) => ({
+  id,
+  name,
+  status: 'active',
+  lifecycleState: 'deployed',
+  serialNumber: 'SN-A-9',
+  locationId: null,
+  assetId: null,
+  parentCiId: null,
+  childMode: null,
+  ...extra,
+});
+const ASSET_DETAIL_BFF = {
+  data: {
+    asset: {
+      id: DETAIL_ASSET_ID,
+      primaryCiId: DETAIL_ASSET_CI,
+      cis: [assetDetailCI(DETAIL_ASSET_CI, M.ci, { assetId: DETAIL_ASSET_ID })],
+      children: [
+        assetDetailCI('a5100000-0000-4000-8000-000000000002', 'a11y-ssd', {
+          parentCiId: DETAIL_ASSET_CI,
+          childMode: 'configuration',
+        }),
+        assetDetailCI('a5100000-0000-4000-8000-000000000003', 'a11y-monitor', {
+          parentCiId: DETAIL_ASSET_CI,
+          assetId: 'a5000000-0000-4000-8000-000000000010',
+          childMode: 'standalone',
+        }),
+      ],
+      documents: [
+        {
+          id: DOCUMENT_ID,
+          title: M.document,
+          description: null,
+          fileName: 'a11y.pdf',
+          fileSize: 102400,
+          mimeType: 'application/pdf',
+          version: 1,
+          category: 'manual',
+          tags: [],
+          uploadedBy: null,
+          scanStatus: 'clean',
+          createdAt: AT,
+          updatedAt: AT,
+        },
+      ],
+    },
+  },
+};
 // WP-320: the detail page of the fixture consumable with its stock and
 // availability in one bin and the rights that show the booking and
 // reservation actions.
@@ -533,6 +630,70 @@ const TAG_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-808: two contracts of a supplier, one whose notice deadline is in 7 days
+// and one whose deadline has passed (the expiry overview shows both), and
+// the supplier with its contact person.
+const CONTRACT_ID = 'fc000000-0000-4000-8000-000000000001';
+const SUPPLIER_ID = 'fd000000-0000-4000-8000-000000000001';
+const CONTACT_ID = 'fe000000-0000-4000-8000-000000000001';
+/** day is today plus the given days as YYYY-MM-DD. */
+const day = (offset: number) =>
+  new Date(Date.now() + offset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const contractRow = (n: number, extra: Record<string, unknown>) => ({
+  id: `fc000000-0000-4000-8000-00000000000${n}`,
+  organization_id: ORG_ID,
+  client_id: null,
+  supplier_id: SUPPLIER_ID,
+  number: `a11y-V-${n}`,
+  kind: 'maintenance',
+  start_date: '2026-01-01',
+  notice_period_days: 30,
+  value: 1200.5,
+  currency: 'EUR',
+  status: 'active',
+  notes: null,
+  version: 1,
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+const CONTRACTS = [
+  contractRow(1, { end_date: day(37) }),
+  contractRow(2, { end_date: day(20), kind: 'license' }),
+];
+const SUPPLIER = {
+  id: SUPPLIER_ID,
+  organization_id: ORG_ID,
+  client_id: null,
+  name: 'a11y Wartung GmbH',
+  external_ref: 'K-100',
+  contact_id: CONTACT_ID,
+  notes: null,
+  version: 1,
+  created_at: AT,
+  updated_at: AT,
+};
+const CONTRACT_HANDLERS: Handler[] = [
+  { path: `/contracts/${CONTRACT_ID}`, reply: () => ({ body: CONTRACTS[0] }) },
+  { path: '/contracts', reply: () => ({ body: list(CONTRACTS) }) },
+  { path: '/suppliers', reply: () => ({ body: list([SUPPLIER]) }) },
+  {
+    path: '/contacts',
+    reply: () => ({
+      body: list([
+        {
+          id: CONTACT_ID,
+          organization_id: ORG_ID,
+          display_name: 'a11y Erika Muster',
+          is_24_7: false,
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
 // WP-322: an uploaded CSV file whose scan is clean and its column preview;
 // the check opens the mapping step of the import assistant.
 const IMPORT_DOCUMENT = {
@@ -760,6 +921,18 @@ const ROUTES: A11yRoute[] = [
   { path: '/racks', url: '/racks', ready: text(M.ci) },
   { path: '/discovery', url: '/discovery', ready: text(M.collector) },
   { path: '/assets', url: '/assets', ready: text(M.asset) },
+  {
+    // WP-809: master data, CIs, children, documents, holder, reservation and warranty.
+    path: '/assets/:id',
+    url: `/assets/${DETAIL_ASSET_ID}`,
+    handlers: ASSET_DETAIL_HANDLERS,
+    bff: ASSET_DETAIL_BFF,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y-monitor')).toBeVisible();
+      await expect(page.locator('#main-content').getByText(M.document)).toBeVisible();
+    },
+    ready: (page) => page.getByRole('heading', { name: M.asset, level: 1 }),
+  },
   { path: '/inventory', url: '/inventory', ready: text('a11y-move') },
   { path: '/locations', url: '/locations', ready: text(M.location) },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
@@ -859,6 +1032,32 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
+  {
+    // WP-808: the contract list with the expiry overview (a deadline in 7
+    // days, a passed one), the contract with its documents and the suppliers.
+    path: '/contracts',
+    url: '/contracts',
+    handlers: CONTRACT_HANDLERS,
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-V-1' }),
+  },
+  {
+    path: '/contracts/:id',
+    url: `/contracts/${CONTRACT_ID}`,
+    handlers: CONTRACT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Wartung GmbH')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content').getByRole('link', { name: M.document }),
+  },
+  {
+    path: '/suppliers',
+    url: '/suppliers',
+    handlers: CONTRACT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Erika Muster')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y Wartung GmbH' }),
+  },
   {
     path: '/documents',
     url: '/documents',
@@ -1076,7 +1275,7 @@ async function expectNoViolations(page: Page, include?: string) {
  */
 async function checkPage(
   page: Page,
-  route: Pick<A11yRoute, 'url' | 'signedIn' | 'handlers' | 'ready' | 'prepare'> & {
+  route: Pick<A11yRoute, 'url' | 'signedIn' | 'handlers' | 'ready' | 'prepare' | 'bff'> & {
     include?: string;
   },
   { theme, os }: ThemeCase,
@@ -1084,6 +1283,12 @@ async function checkPage(
 ) {
   const diagnostics = pageDiagnostics(page);
   await mockBackend(page, [...(route.handlers ?? []), ...A11Y_HANDLERS]);
+  if (route.bff !== undefined) {
+    const bff = route.bff;
+    await page.route('**/bff/graphql', (request) =>
+      request.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(bff) }),
+    );
+  }
   if (route.signedIn !== false) await signIn(page);
   await storeTheme(page, theme);
   await page.emulateMedia({ colorScheme: os });

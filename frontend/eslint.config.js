@@ -93,6 +93,24 @@ export default tseslint.config(
       // WP-322: the import assistant and its mapping editor.
       'src/pages/ImportPage.tsx',
       'src/components/import/**/*.tsx',
+      // WP-317: the guided creation (type tiles and steps).
+      'src/components/create/**/*.tsx',
+      // WP-319: the asset list and its guided creation.
+      'src/pages/AssetListPage.tsx',
+      // WP-808: the contract and the supplier pages.
+      'src/pages/ContractsPage.tsx',
+      'src/pages/SuppliersPage.tsx',
+      // WP-816: the bulk bar of the CI and the asset list and the job center.
+      'src/components/bulk/**/*.tsx',
+      'src/pages/JobCenterPage.tsx',
+      // WP-815: the SLA page with the business calendars and the disposal page.
+      'src/pages/SLAPage.tsx',
+      'src/pages/DisposalListPage.tsx',
+      'src/components/sla/**/*.tsx',
+      // WP-812: the orders with positions, approval and goods receipt.
+      'src/pages/OrderListPage.tsx',
+      // WP-809: the asset detail page.
+      'src/pages/AssetDetailPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
@@ -102,6 +120,9 @@ export default tseslint.config(
       'src/components/upload/**/*.test.tsx',
       'src/components/documents/**/*.test.tsx',
       'src/components/import/**/*.test.tsx',
+      'src/components/create/**/*.test.tsx',
+      'src/components/bulk/**/*.test.tsx',
+      'src/components/sla/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [
