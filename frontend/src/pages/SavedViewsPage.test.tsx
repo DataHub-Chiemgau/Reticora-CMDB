@@ -55,6 +55,7 @@ function mockApi(
     search?: (n: number) => Response;
     me?: string | null;
     permissions?: string[];
+    patch?: () => Response;
   } = {},
 ) {
   let searches = 0;
@@ -69,12 +70,16 @@ function mockApi(
             permissions: overrides.permissions ?? ['saved_view:write', 'role:read'],
           });
     if (url.includes('/roles')) return json({ data: roles, total: roles.length });
+    if (url.includes('/attribute-definitions')) return json({ data: [] });
+    if (url.includes('/relationship-types')) return json({ data: [], total: 0 });
     if (url.includes('/saved-views/presets')) return json({ data: [preset] });
     if (url.includes('/search/query'))
       return overrides.search ? overrides.search(searches++) : json({ data: [], total: 0 });
     if (url.includes('/saved-views') && method === 'POST') return json({ id: 'new' }, 201);
     if (url.includes('/saved-views/') && method === 'PATCH')
-      return json({ ...ownView, ...JSON.parse(String(init?.body)) });
+      return overrides.patch
+        ? overrides.patch()
+        : json({ ...ownView, ...JSON.parse(String(init?.body)) });
     if (url.includes('/saved-views') && method === 'DELETE')
       return new Response(null, { status: 204 });
     return json({ data: overrides.views ?? [], total: 0, limit: 50, offset: 0, has_more: false });
@@ -504,5 +509,301 @@ describe('SavedViewsPage sort, columns and sharing (F-336)', () => {
 
     expect(await screen.findByText('Die Rollen können nicht geladen werden.')).toBeInTheDocument();
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/roles'))).toBe(false);
+  });
+});
+
+/**
+ * WP-315 (SRC-03, CH18): the filter of a view is edited with the click
+ * builder; saving sends the complete state, the preview runs on the server
+ * with limit 10, and the answers 422, 403 and 404 appear at the node or as
+ * a hint.
+ */
+describe('SavedViewsPage filter builder (WP-315)', () => {
+  const calls = (fetchMock: ReturnType<typeof mockApi>, method: string, path: string) =>
+    fetchMock.mock.calls.filter(
+      (call) => (call[1]?.method ?? 'GET') === method && String(call[0]).includes(path),
+    );
+  const bodyOf = (call: unknown[] | undefined) =>
+    JSON.parse(String((call?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
+
+  const sharedView = {
+    ...ownView,
+    id: 'view-9',
+    name: 'Org servers',
+    shared: true,
+    shared_with_roles: ['role-1'],
+    sort: [{ field: 'name', dir: 'desc' }],
+    columns: ['name', 'status'],
+    filter_spec: {
+      lacks_relationship: 'backup',
+      where: {
+        and: [
+          { field: 'status', op: 'eq', value: 'active' },
+          { field: 'hostname', op: 'like', value: 'srv-*' },
+        ],
+      },
+    },
+  };
+
+  async function addNameCondition(value: string) {
+    const root = await screen.findByRole('group', { name: 'Gruppe (UND)' });
+    fireEvent.click(
+      within(root).getAllByRole('button', { name: 'Bedingung hinzufügen' }).slice(-1)[0]!,
+    );
+    const added = screen.getAllByRole('group', { name: /^Bedingung \d+$/ }).slice(-1)[0]!;
+    fireEvent.change(within(added).getByLabelText('Feld'), { target: { value: 'name' } });
+    fireEvent.change(within(added).getByLabelText('Wert'), { target: { value } });
+  }
+
+  async function editView(name: RegExp) {
+    fireEvent.click(await screen.findByRole('button', { name }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter bearbeiten' }));
+  }
+
+  it('creates a new view by POST', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    fireEvent.change(screen.getByLabelText('Name der Ansicht'), {
+      target: { value: 'Web servers' },
+    });
+    expect(screen.getByLabelText('Objektart')).toHaveValue('ci');
+    await addNameCondition('web-01');
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'POST', '/saved-views')[0])).toEqual({
+      name: 'Web servers',
+      entity_kind: 'ci',
+      filter_spec: { where: { and: [{ field: 'name', op: 'eq', value: 'web-01' }] } },
+      sort: [],
+      columns: [],
+      shared: false,
+      shared_with_roles: [],
+    });
+    expect(calls(fetchMock, 'PATCH', '/saved-views')).toHaveLength(0);
+    // The saved view runs at once.
+    await waitFor(() =>
+      expect(bodyOf(calls(fetchMock, 'POST', '/search/query').slice(-1)[0])).toEqual({
+        where: { and: [{ field: 'name', op: 'eq', value: 'web-01' }] },
+        entity_kind: 'ci',
+      }),
+    );
+  });
+
+  it('saves an own org-shared view by PATCH with its complete state and keeps the flat keys', async () => {
+    const fetchMock = mockApi({ views: [sharedView] });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+
+    // The flat key is shown next to the builder, not editable.
+    expect(screen.getByRole('list', { name: 'Weitere Kriterien' })).toHaveTextContent(
+      'lacks_relationship: "backup"',
+    );
+    expect(screen.getByLabelText('Name der Ansicht')).toHaveValue('Org servers');
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    fireEvent.change(within(second).getByLabelText('Wert'), { target: { value: 'db-*' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'PATCH', '/saved-views/view-9')).toHaveLength(1));
+    expect(bodyOf(calls(fetchMock, 'PATCH', '/saved-views/view-9')[0])).toEqual({
+      name: 'Org servers',
+      entity_kind: 'ci',
+      filter_spec: {
+        lacks_relationship: 'backup',
+        where: {
+          and: [
+            { field: 'status', op: 'eq', value: 'active' },
+            { field: 'hostname', op: 'like', value: 'db-*' },
+          ],
+        },
+      },
+      sort: [{ field: 'name', dir: 'desc' }],
+      columns: ['name', 'status'],
+      shared: true,
+      shared_with_roles: ['role-1'],
+    });
+    expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(0);
+  });
+
+  it('saves a preset as a new view by POST without from_preset and keeps its flat keys', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(new RegExp(preset.name, 'i'));
+
+    expect(screen.getByLabelText('Objektart')).toHaveValue('asset');
+    expect(screen.getByRole('list', { name: 'Weitere Kriterien' })).toHaveTextContent(
+      'warranty_within_days: 90',
+    );
+    expect(screen.queryByRole('button', { name: 'Filter speichern' })).toBeNull();
+    await addNameCondition('laptop-*');
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    const body = bodyOf(calls(fetchMock, 'POST', '/saved-views')[0]);
+    expect(body).toEqual({
+      name: preset.name,
+      entity_kind: 'asset',
+      filter_spec: {
+        warranty_within_days: 90,
+        where: { and: [{ field: 'name', op: 'eq', value: 'laptop-*' }] },
+      },
+      sort: [],
+      columns: [],
+      shared: false,
+      shared_with_roles: [],
+    });
+    expect('from_preset' in body).toBe(false);
+  });
+
+  it('previews on the server with limit 10 and shows total', async () => {
+    const fetchMock = mockApi({
+      search: () =>
+        json({
+          data: [
+            { id: 'ci-1', entity_kind: 'ci', name: 'web-01' },
+            { id: 'ci-2', entity_kind: 'ci', name: 'web-02' },
+          ],
+          total: 37,
+        }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    await addNameCondition('web-*');
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    const previewSection = await screen.findByRole('region', { name: 'Vorschau' });
+    expect(previewSection).toHaveTextContent('37 Treffer');
+    expect(within(previewSection).getByText('web-02')).toBeInTheDocument();
+    const call = calls(fetchMock, 'POST', '/search/query')[0];
+    expect(String(call?.[0])).toContain('/search/query?limit=10');
+    expect(bodyOf(call)).toEqual({
+      where: { and: [{ field: 'name', op: 'eq', value: 'web-*' }] },
+      entity_kind: 'ci',
+    });
+  });
+
+  it('marks the second node on a 422 with the path where.and[1]', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      search: (n) =>
+        n === 0
+          ? json({ data: [], total: 0 })
+          : json(
+              {
+                type: 'urn:reticora:problem:invalid-field',
+                title: 'Unprocessable Entity',
+                status: 422,
+                detail: 'where.and[1]: unknown field "hostnme"',
+                field: 'where.and[1]',
+              },
+              422,
+            ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    await waitFor(() => expect(second).toHaveAttribute('data-invalid', 'true'));
+    expect(second).toHaveAccessibleDescription('Vom Server abgelehnt: unknown field "hostnme"');
+    expect(screen.getByRole('group', { name: 'Bedingung 1' })).not.toHaveAttribute('data-invalid');
+  });
+
+  it('marks the comparisons of a 403 with fields and no longer offers those fields', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      search: (n) =>
+        n === 0
+          ? json({ data: [], total: 0 })
+          : json(
+              {
+                type: 'urn:reticora:problem:forbidden',
+                title: 'Forbidden',
+                status: 403,
+                detail: 'field permissions do not allow this request on: hostname',
+                fields: ['hostname'],
+              },
+              403,
+            ),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    expect(
+      await screen.findByText(/Keine Berechtigung für die Felder: hostname/),
+    ).toBeInTheDocument();
+    const second = screen.getByRole('group', { name: 'Bedingung 2' });
+    expect(second).toHaveAccessibleDescription('Keine Berechtigung für das Feld hostname.');
+    const first = screen.getByRole('group', { name: 'Bedingung 1' });
+    const offered = within(within(first).getByLabelText('Feld'))
+      .getAllByRole('option')
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(offered).not.toContain('hostname');
+    expect(offered).toContain('fqdn');
+  });
+
+  it('says so when saving answers 404 (no write permission)', async () => {
+    const fetchMock = mockApi({
+      views: [sharedView],
+      patch: () => json({ title: 'Not Found', status: 404, detail: 'saved view not found' }, 404),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter speichern' }));
+
+    expect(
+      await screen.findByText('Keine Schreibberechtigung für diese Ansicht.'),
+    ).toBeInTheDocument();
+  });
+
+  it('saves a view shared by somebody else as a new view', async () => {
+    const fetchMock = mockApi({ views: [{ ...sharedView, owner_id: 'user-2' }] });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+
+    expect(screen.queryByRole('button', { name: 'Filter speichern' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Als neue Ansicht speichern' }));
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/saved-views')).toHaveLength(1));
+    expect(calls(fetchMock, 'PATCH', '/saved-views')).toHaveLength(0);
+  });
+
+  it('lets saved_view:manage save a foreign view by PATCH (WP-307)', async () => {
+    const fetchMock = mockApi({
+      views: [{ ...sharedView, owner_id: 'user-2' }],
+      permissions: ['saved_view:write', 'saved_view:manage', 'role:read'],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    await editView(/^Org servers/);
+    fireEvent.click(await screen.findByRole('button', { name: 'Filter speichern' }));
+    await waitFor(() => expect(calls(fetchMock, 'PATCH', '/saved-views/view-9')).toHaveLength(1));
+  });
+
+  it('sends no incomplete filter and marks the node', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<SavedViewsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Neue Ansicht' }));
+    const root = await screen.findByRole('group', { name: 'Gruppe (UND)' });
+    fireEvent.click(within(root).getByRole('button', { name: 'Bedingung hinzufügen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Vorschau' }));
+
+    expect(await screen.findByText(/Der Filter ist unvollständig/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Bedingung 1' })).toHaveAccessibleDescription(
+      'Wählen Sie ein Feld.',
+    );
+    expect(calls(fetchMock, 'POST', '/search/query')).toHaveLength(0);
   });
 });

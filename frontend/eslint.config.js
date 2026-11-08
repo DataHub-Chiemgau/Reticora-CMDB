@@ -66,11 +66,15 @@ export default tseslint.config(
       // WP-323: the relationship type administration and the edge dialog.
       'src/pages/RelationshipTypesPage.tsx',
       'src/components/cmdb/CIRelationshipsCard.tsx',
+      // WP-315: the click builder and the saved views page.
+      'src/components/rules/**/*.tsx',
+      'src/pages/SavedViewsPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
       'src/components/pickers/**/*.test.tsx',
       'src/components/flows/**/*.test.tsx',
+      'src/components/rules/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

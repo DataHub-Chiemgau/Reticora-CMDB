@@ -188,6 +188,19 @@ function attributeDefinitionsQuery(filter: AttributeDefinitionFilter) {
   };
 }
 
+/**
+ * The searchable attribute definitions (GET /attribute-definitions, every
+ * scope), the attributes.<key> the filter builder offers (WP-315); loaded
+ * only while the builder is open.
+ */
+export function useSearchableAttributeDefinitions(enabled = true) {
+  return useQuery({
+    ...attributeDefinitionsQuery({}),
+    enabled,
+    select: (data: { data: AttributeDefinition[] }) => data.data.filter((d) => d.searchable),
+  });
+}
+
 /** The global attribute definitions of the organization and the system (MET-13). */
 export function useGlobalAttributeDefinitions() {
   return useQuery(attributeDefinitionsQuery({ scope: 'global' }));
@@ -967,13 +980,32 @@ export function useSaveView() {
   });
 }
 
-/** Changes an own view (PATCH, owner only, E-86): sort, columns, sharing. */
+/**
+ * Changes a writable view (PATCH /saved-views/{id}): an own view (E-86) or,
+ * with saved_view:manage, one the caller may read (WP-307). The filter
+ * builder (WP-315) sends the complete state (name, entity_kind,
+ * filter_spec, sort, columns, shared, shared_with_roles) because the server
+ * replaces filter_spec as a whole; a 404 means no write permission.
+ */
 export function useUpdateSavedView() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<SavedView> }) =>
       savedViewApi.update(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-views'] }),
+  });
+}
+
+/**
+ * The preview of the filter builder (WP-315): POST /search/query?limit=10
+ * under RLS and field permissions, answering total and the first hits. A
+ * mutation, run by the button; a 422 names the node (field where…), a 403
+ * the fields (conflictFields).
+ */
+export function useFilterPreview() {
+  return useMutation({
+    mutationFn: (spec: Record<string, unknown> & { entity_kind?: string }) =>
+      savedViewApi.query(spec, { limit: 10 }),
   });
 }
 

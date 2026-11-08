@@ -325,7 +325,14 @@ export class ApiError extends Error {
   readonly dependencies: string[];
   /** traceId is the request id of the failed request (API-03), for support. */
   readonly traceId?: string;
-  /** conflictFields are the fields a 409 names as changed since the If-Match version (API-07). */
+  /**
+   * conflictFields are the fields of the problem member fields: of a 409 the
+   * fields changed since the If-Match version (API-07), of a 403
+   * urn:reticora:problem:forbidden the fields the field permissions refuse
+   * (RBA-07, WP-729), e.g. hostname or attributes.cost_center of a filter;
+   * the filter builder marks those comparisons (WP-315). The problem type
+   * is type (WP-318).
+   */
   readonly conflictFields: string[];
   /** field is the request field a FieldProblem names (400, 409 or 422 at one input). */
   readonly field?: string;

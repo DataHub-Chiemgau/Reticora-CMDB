@@ -26,6 +26,16 @@ import {
   RELATIONSHIP_ATTRIBUTE_TYPES,
   RELATIONSHIP_CATEGORIES,
 } from '../pages/RelationshipTypesPage';
+import {
+  FILTER_ENTITY_KINDS,
+  FILTER_FIELDS,
+  FILTER_MODE,
+  FILTER_NODE_KINDS,
+  GROUP_JUNCTIONS,
+  NODE_ISSUES,
+  RELATED_DIRECTIONS,
+} from '../rules/builderModes';
+import { filterOps } from '../rules/filter';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -51,6 +61,12 @@ const flowSources = import.meta.glob(
     '!../components/pickers/**/*.test.tsx',
     '!../components/flows/**/*.test.tsx',
   ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-315: the components of the click builder, without tests.
+const ruleSources = import.meta.glob(
+  ['../components/rules/**/*.tsx', '!../components/rules/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -218,6 +234,21 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['relationship.changeKinds', specEnum('RelationshipChange', 'change_kind')],
   ['relationship.changeSources', specEnum('RelationshipChange', 'source')],
   ['relationship.actorTypes', specEnum('RelationshipChange', 'actor_type')],
+  // WP-315: the operators, junctions, node kinds, directions and issues of
+  // the click builder (filter mode) and the fields of its whitelist.
+  ['rules.ops', FILTER_MODE.ops],
+  ['rules.ops', filterOps],
+  ['rules.ops', specEnum('FilterExpr', 'op')],
+  ['rules.junctions', GROUP_JUNCTIONS],
+  ['rules.junctionHints', GROUP_JUNCTIONS],
+  ['rules.nodeKinds', FILTER_NODE_KINDS],
+  ['rules.directions', RELATED_DIRECTIONS],
+  ['rules.directions', specEnum('FilterRelated', 'direction')],
+  ['rules.issues', NODE_ISSUES],
+  ['rules.entityKinds', FILTER_ENTITY_KINDS],
+  ['rules.entityKinds', specEnum('SavedView', 'entity_kind')],
+  ['savedviews.fields', Object.keys(FILTER_FIELDS.ci)],
+  ['savedviews.fields', Object.keys(FILTER_FIELDS.asset)],
   ['discovery.collectorStatus', COLLECTOR_STATUSES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
   ...pageEnumerations,
@@ -351,6 +382,20 @@ describe('i18n catalog', () => {
     expect(lookup(enUS, 'nav.relationship-types')).toBe('Relationship types');
   });
 
+  it('offers exactly the operators, directions and entity kinds of FilterExpr (WP-315)', () => {
+    expect([...FILTER_MODE.ops].sort()).toEqual([...specEnum('FilterExpr', 'op')].sort());
+    expect([...RELATED_DIRECTIONS]).toEqual(specEnum('FilterRelated', 'direction'));
+    expect([...FILTER_ENTITY_KINDS]).toEqual(specEnum('SavedView', 'entity_kind'));
+    expect(Object.keys(ruleSources)).toEqual(
+      expect.arrayContaining([
+        '../components/rules/RuleBuilder.tsx',
+        '../components/rules/AttributePicker.tsx',
+        '../components/rules/ValueEditor.tsx',
+      ]),
+    );
+    expect(Object.keys(ruleSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
   it('offers exactly the node kinds of the OpenAPI types (WP-818)', () => {
     expect([...NODE_KINDS]).toEqual(specEnum('TopologyNode', 'node_kind'));
   });
@@ -382,11 +427,18 @@ describe('i18n catalog', () => {
     // WP-323: the relationship type administration and the edge dialog.
     '../pages/RelationshipTypesPage.tsx',
     '../components/cmdb/CIRelationshipsCard.tsx',
+    // WP-315: the saved views page and the click builder.
+    '../pages/SavedViewsPage.tsx',
     ...Object.keys(metamodelSources),
     ...Object.keys(flowSources),
+    ...Object.keys(ruleSources),
   ])('%s has no literal option labels', (file) => {
     const source =
-      pageSources[file] ?? metamodelSources[file] ?? flowSources[file] ?? cardSources[file];
+      pageSources[file] ??
+      metamodelSources[file] ??
+      flowSources[file] ??
+      cardSources[file] ??
+      ruleSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

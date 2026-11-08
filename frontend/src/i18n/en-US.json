@@ -1938,7 +1938,36 @@
       "rfid_tag": "RFID tag",
       "purchase_cost": "Purchase cost",
       "purchase_date": "Purchase date",
-      "warranty_end": "Warranty end"
+      "warranty_end": "Warranty end",
+      "inventory_no": "Inventory number",
+      "purchase_price": "Purchase price",
+      "warranty_until": "Warranty until",
+      "cost_center": "Cost center",
+      "currency": "Currency",
+      "supplier_id": "Supplier (ID)",
+      "contract_id": "Contract (ID)",
+      "owner_user_id": "Owner (person)",
+      "owner_team_id": "Owner (team)"
+    },
+    "editor": {
+      "newView": "New view",
+      "editFilter": "Edit filter",
+      "title": "Filter",
+      "name": "Name of the view",
+      "entityKind": "Object kind",
+      "flat": "Further criteria",
+      "flatHint": "These criteria of the view are kept on saving; the builder does not edit them.",
+      "preview": "Preview",
+      "previewTitle": "Preview",
+      "previewTotal": "{{count}} hits",
+      "save": "Save filter",
+      "saveNew": "Save as new view",
+      "saveAsNew": "You cannot change this view; it is saved as a new view of your own.",
+      "incomplete": "The filter is incomplete; the marked nodes are still missing something.",
+      "invalid": "The server refused the filter; the node is marked.",
+      "forbiddenFields": "No permission for the fields: {{fields}}. The conditions are marked.",
+      "noWritePermission": "No write permission for this view.",
+      "nameRequired": "Enter a name for the view."
     }
   },
   "lifecycle": {
@@ -2817,5 +2846,104 @@
     "account": "Account",
     "accountMenu": "Account menu of {{name}}",
     "openCount": "{{count}} open"
+  },
+  "rules": {
+    "builder": {
+      "label": "Filter",
+      "chooseField": "Choose a field …",
+      "chooseValue": "Choose a value …",
+      "addCondition": "Add condition",
+      "addGroup": "Add group",
+      "addRelated": "Add relationship",
+      "negate": "Negate {{name}}",
+      "removeNegation": "Remove {{name}}",
+      "delete": "Delete {{name}}",
+      "serverError": "Refused by the server: {{message}}",
+      "forbiddenField": "No permission for the field {{field}}.",
+      "groupName": "Group ({{junction}})",
+      "junction": "Junction",
+      "empty": "No condition yet – the view shows all objects.",
+      "notName": "Negation",
+      "relatedName": "Relationship",
+      "direction": "Direction",
+      "maxDepth": "Depth (1–{{max}})",
+      "relTypes": "Relationship types (none chosen: all)",
+      "relatedWhere": "The related CI matches:",
+      "comparisonName": "Condition {{position}}",
+      "field": "Field",
+      "operator": "Operator",
+      "value": "Value",
+      "valueFrom": "{{label}} from",
+      "valueTo": "{{label}} to",
+      "values": "{{label}}: chosen values",
+      "addValueOf": "Add {{label}}",
+      "addValue": "Add",
+      "removeValue": "Remove {{value}}",
+      "likeHint": "* as a wildcard; without * a substring is searched.",
+      "limits": "{{nodes}} of {{maxNodes}} nodes · depth {{depth}} of {{maxDepth}}",
+      "loadError": "The saved filter cannot be loaded: {{message}}"
+    },
+    "junctions": {
+      "and": "AND",
+      "or": "OR"
+    },
+    "junctionHints": {
+      "and": "All conditions (AND)",
+      "or": "At least one (OR)"
+    },
+    "nodeKinds": {
+      "and": "AND group",
+      "or": "OR group",
+      "not": "NOT",
+      "related": "Relationship",
+      "compare": "Condition"
+    },
+    "directions": {
+      "out": "outgoing (the CI is the source)",
+      "in": "incoming (the CI is the target)",
+      "both": "both directions"
+    },
+    "ops": {
+      "eq": "equals",
+      "ne": "does not equal",
+      "lt": "less than",
+      "lte": "less than or equal",
+      "gt": "greater than",
+      "gte": "greater than or equal",
+      "like": "matches (text)",
+      "in": "is one of",
+      "exists": "is set / empty",
+      "between": "is between",
+      "has_any": "has one of the tags",
+      "has_all": "has all tags"
+    },
+    "issues": {
+      "empty_group": "The group is empty.",
+      "no_field": "Choose a field.",
+      "no_value": "Enter a value.",
+      "list_empty": "Enter at least one value.",
+      "two_values": "Enter two values (from and to).",
+      "not_number": "The value must be a number.",
+      "not_time": "The value must be a date or a time.",
+      "no_related_filter": "The relationship needs a condition for the related CI."
+    },
+    "exists": {
+      "true": "is set",
+      "false": "is empty"
+    },
+    "bool": {
+      "true": "yes",
+      "false": "no"
+    },
+    "entityKinds": {
+      "ci": "CIs",
+      "asset": "Assets"
+    },
+    "fieldLabels": {
+      "tags": "Tags",
+      "attribute": "Attribute: {{name}}",
+      "assetAttribute": "Asset attribute: {{name}}",
+      "asset": "Asset: {{name}}"
+    }
   }
 }

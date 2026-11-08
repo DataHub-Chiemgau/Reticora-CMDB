@@ -1938,7 +1938,36 @@
       "rfid_tag": "RFID-Tag",
       "purchase_cost": "Anschaffungskosten",
       "purchase_date": "Kaufdatum",
-      "warranty_end": "Garantieende"
+      "warranty_end": "Garantieende",
+      "inventory_no": "Inventarnummer",
+      "purchase_price": "Anschaffungspreis",
+      "warranty_until": "Garantie bis",
+      "cost_center": "Kostenstelle",
+      "currency": "Währung",
+      "supplier_id": "Lieferant (ID)",
+      "contract_id": "Vertrag (ID)",
+      "owner_user_id": "Verantwortliche Person",
+      "owner_team_id": "Verantwortliches Team"
+    },
+    "editor": {
+      "newView": "Neue Ansicht",
+      "editFilter": "Filter bearbeiten",
+      "title": "Filter",
+      "name": "Name der Ansicht",
+      "entityKind": "Objektart",
+      "flat": "Weitere Kriterien",
+      "flatHint": "Diese Kriterien der Ansicht bleiben beim Speichern erhalten; der Builder bearbeitet sie nicht.",
+      "preview": "Vorschau",
+      "previewTitle": "Vorschau",
+      "previewTotal": "{{count}} Treffer",
+      "save": "Filter speichern",
+      "saveNew": "Als neue Ansicht speichern",
+      "saveAsNew": "Sie können diese Ansicht nicht ändern; sie wird als neue eigene Ansicht gespeichert.",
+      "incomplete": "Der Filter ist unvollständig; die markierten Knoten fehlen noch.",
+      "invalid": "Der Server hat den Filter abgelehnt; der Knoten ist markiert.",
+      "forbiddenFields": "Keine Berechtigung für die Felder: {{fields}}. Die Bedingungen sind markiert.",
+      "noWritePermission": "Keine Schreibberechtigung für diese Ansicht.",
+      "nameRequired": "Geben Sie einen Namen für die Ansicht an."
     }
   },
   "lifecycle": {
@@ -2817,5 +2846,104 @@
     "account": "Konto",
     "accountMenu": "Kontomenü von {{name}}",
     "openCount": "{{count}} offen"
+  },
+  "rules": {
+    "builder": {
+      "label": "Filter",
+      "chooseField": "Feld wählen …",
+      "chooseValue": "Wert wählen …",
+      "addCondition": "Bedingung hinzufügen",
+      "addGroup": "Gruppe hinzufügen",
+      "addRelated": "Beziehung hinzufügen",
+      "negate": "{{name}} negieren",
+      "removeNegation": "{{name}} aufheben",
+      "delete": "{{name}} löschen",
+      "serverError": "Vom Server abgelehnt: {{message}}",
+      "forbiddenField": "Keine Berechtigung für das Feld {{field}}.",
+      "groupName": "Gruppe ({{junction}})",
+      "junction": "Verknüpfung",
+      "empty": "Noch keine Bedingung – die Ansicht zeigt alle Objekte.",
+      "notName": "Negation",
+      "relatedName": "Beziehung",
+      "direction": "Richtung",
+      "maxDepth": "Tiefe (1–{{max}})",
+      "relTypes": "Beziehungstypen (keine Auswahl: alle)",
+      "relatedWhere": "Das verbundene CI erfüllt:",
+      "comparisonName": "Bedingung {{position}}",
+      "field": "Feld",
+      "operator": "Operator",
+      "value": "Wert",
+      "valueFrom": "{{label}} von",
+      "valueTo": "{{label}} bis",
+      "values": "{{label}}: gewählte Werte",
+      "addValueOf": "{{label}} hinzufügen",
+      "addValue": "Hinzufügen",
+      "removeValue": "{{value}} entfernen",
+      "likeHint": "* als Platzhalter; ohne * wird nach einer Teilzeichenkette gesucht.",
+      "limits": "{{nodes}} von {{maxNodes}} Knoten · Tiefe {{depth}} von {{maxDepth}}",
+      "loadError": "Der gespeicherte Filter lässt sich nicht laden: {{message}}"
+    },
+    "junctions": {
+      "and": "UND",
+      "or": "ODER"
+    },
+    "junctionHints": {
+      "and": "Alle Bedingungen (UND)",
+      "or": "Mindestens eine (ODER)"
+    },
+    "nodeKinds": {
+      "and": "UND-Gruppe",
+      "or": "ODER-Gruppe",
+      "not": "NICHT",
+      "related": "Beziehung",
+      "compare": "Bedingung"
+    },
+    "directions": {
+      "out": "ausgehend (das CI ist Quelle)",
+      "in": "eingehend (das CI ist Ziel)",
+      "both": "beide Richtungen"
+    },
+    "ops": {
+      "eq": "ist gleich",
+      "ne": "ist ungleich",
+      "lt": "kleiner als",
+      "lte": "kleiner oder gleich",
+      "gt": "größer als",
+      "gte": "größer oder gleich",
+      "like": "passt auf (Text)",
+      "in": "ist einer von",
+      "exists": "ist gesetzt / leer",
+      "between": "liegt zwischen",
+      "has_any": "hat eines der Tags",
+      "has_all": "hat alle Tags"
+    },
+    "issues": {
+      "empty_group": "Die Gruppe ist leer.",
+      "no_field": "Wählen Sie ein Feld.",
+      "no_value": "Geben Sie einen Wert an.",
+      "list_empty": "Geben Sie mindestens einen Wert an.",
+      "two_values": "Geben Sie zwei Werte an (von und bis).",
+      "not_number": "Der Wert muss eine Zahl sein.",
+      "not_time": "Der Wert muss ein Datum oder eine Zeit sein.",
+      "no_related_filter": "Die Beziehung braucht eine Bedingung für das verbundene CI."
+    },
+    "exists": {
+      "true": "ist gesetzt",
+      "false": "ist leer"
+    },
+    "bool": {
+      "true": "ja",
+      "false": "nein"
+    },
+    "entityKinds": {
+      "ci": "CIs",
+      "asset": "Assets"
+    },
+    "fieldLabels": {
+      "tags": "Tags",
+      "attribute": "Attribut: {{name}}",
+      "assetAttribute": "Asset-Attribut: {{name}}",
+      "asset": "Asset: {{name}}"
+    }
   }
 }

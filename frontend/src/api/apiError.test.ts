@@ -227,6 +227,59 @@ describe('ApiError', () => {
     expect(error.type).toBeUndefined();
     expect(ApiError.fromProblem(403, 'Forbidden', { type: '' }).type).toBeUndefined();
   });
+
+  // WP-315: the filter builder marks the node of a 422 by field and the
+  // comparisons of a 403 of the field permissions by fields.
+  it('takes the field of a 422 FieldProblem', async () => {
+    const { ApiError } = await importClientWithSession();
+    const error = ApiError.fromProblem(422, 'Unprocessable Entity', {
+      type: 'urn:reticora:problem:invalid-field',
+      title: 'Unprocessable Entity',
+      status: 422,
+      detail: 'where.and[1]: unknown field "colour"',
+      field: 'where.and[1]',
+      trace_id: 'req-1',
+    });
+    expect(error.field).toBe('where.and[1]');
+    expect(error.detail).toBe('where.and[1]: unknown field "colour"');
+    expect(error.type).toBe('urn:reticora:problem:invalid-field');
+    expect(error.traceId).toBe('req-1');
+    expect(error.violations).toEqual([]);
+    expect(error.conflictFields).toEqual([]);
+    expect(ApiError.fromProblem(422, 'x', { field: '' }).field).toBeUndefined();
+  });
+
+  it('takes the fields of a 403 of the field permissions into conflictFields', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            type: 'urn:reticora:problem:forbidden',
+            title: 'Forbidden',
+            status: 403,
+            detail:
+              'field permissions do not allow this request on: hostname, attributes.cost_center',
+            fields: ['hostname', 'attributes.cost_center', 7],
+            trace_id: 'req-403',
+          },
+          403,
+        ),
+      ),
+    );
+    const { fetchAPI, ApiError } = await importClientWithSession();
+
+    const error = (await fetchAPI('/search/query', { method: 'POST', body: '{}' }).catch(
+      (e: unknown) => e,
+    )) as InstanceType<typeof ApiError>;
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(403);
+    expect(error.type).toBe('urn:reticora:problem:forbidden');
+    expect(error.conflictFields).toEqual(['hostname', 'attributes.cost_center']);
+    expect(error.field).toBeUndefined();
+    expect(error.traceId).toBe('req-403');
+  });
 });
 
 describe('relationshipApi', () => {
