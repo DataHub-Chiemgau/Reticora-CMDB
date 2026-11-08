@@ -8,6 +8,8 @@ import deDE from './de-DE.json';
 import enUS from './en-US.json';
 import { DASHBOARD_ROLES, parseDashboardRole } from '../stores/dashboard';
 import { STOCKTAKE_SCOPES, STOCKTAKE_STATUSES } from '../pages/StocktakeListPage';
+import { SCAN_METHODS, SCAN_RESULTS } from '../pages/StocktakeDetailPage';
+import { LABEL_KINDS, LABEL_TEMPLATES } from '../components/flows/LabelPrintDialog';
 import { FIELD_TYPES } from '../pages/CITypeAdminPage';
 import { TEMPLATE_VERSION_STATUSES } from '../pages/TemplatesPage';
 import { DIFF_CHANGES } from '../components/metamodel/MetamodelDiff';
@@ -245,6 +247,17 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['dashboard.roles', DASHBOARD_ROLES],
   ['stocktake.statuses', STOCKTAKE_STATUSES],
   ['stocktake.scopes', STOCKTAKE_SCOPES],
+  // WP-813: the scan results and methods of the stocktake (StockScan of
+  // WP-287) and the templates and kinds of the labels (WP-763).
+  ['stocktake.results', SCAN_RESULTS],
+  ['stocktake.results', specEnum('StockScan', 'scan_result')],
+  ['stocktake.scanMethods', SCAN_METHODS],
+  ['stocktake.scanMethods', specEnum('StockScan', 'scan_method')],
+  ['stocktake.statuses', specEnum('Stocktake', 'status')],
+  ['labels.templates', LABEL_TEMPLATES],
+  ['labels.templates', specEnum('LabelBatchRequest', 'template')],
+  ['labels.kinds', LABEL_KINDS],
+  ['labels.kinds', specEnum('LabelBatchRequest', 'kind')],
   ['citypes.dataTypes', FIELD_TYPES],
   // WP-314: template versions, the changes of MetamodelDiff, the job states
   // and the index state none of WP-313.
@@ -557,6 +570,8 @@ describe('i18n catalog', () => {
     '../pages/DashboardPage.tsx',
     '../pages/DiscoveryPage.tsx',
     '../pages/StocktakeListPage.tsx',
+    // WP-813: the stocktake detail (the label dialog is a flowSource).
+    '../pages/StocktakeDetailPage.tsx',
     '../pages/CITypeAdminPage.tsx',
     '../pages/TopologyPage.tsx',
     '../pages/TemplatesPage.tsx',

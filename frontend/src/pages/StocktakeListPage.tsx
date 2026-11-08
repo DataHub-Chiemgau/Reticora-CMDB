@@ -1,7 +1,16 @@
 import { ClipboardCheck, Plus, Search } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useStocktakeList, useCreateStocktake, useDeleteStocktake } from '../api/hooks';
+import { Link } from 'react-router-dom';
+import {
+  useStocktakeList,
+  useCreateStocktake,
+  useDeleteStocktake,
+  useHasPermission,
+} from '../api/hooks';
+import { ApiError, type Stocktake } from '../api/client';
+import { useLocationNames } from '../components/cmdb/ObjectHistory';
+import { LocationPicker } from '../components/pickers/LocationPicker';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -22,14 +31,20 @@ import {
   trClasses,
 } from '../components/ui/table';
 import { cn } from '../components/ui/utils';
+import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { ScrollRegion } from '../components/ScrollRegion';
 import { TableEmptyRow } from './ListParts';
 
-/** The stocktake statuses and scopes; their labels come from the catalog. */
+/** The stocktake statuses; their labels come from the catalog. */
 export const STOCKTAKE_STATUSES = ['planned', 'in_progress', 'completed', 'cancelled'] as const;
+/**
+ * STOCKTAKE_SCOPES are the deprecated scopes of stocktakes of earlier
+ * releases; the list shows them for a stocktake without area only. A new
+ * stocktake names its area by location_id (WP-288, WP-813).
+ */
 export const STOCKTAKE_SCOPES = ['full', 'partial', 'site', 'room', 'rack'] as const;
 
-function statusVariant(status: string) {
+export function stocktakeStatusVariant(status: string) {
   switch (status) {
     case 'planned':
       return 'neutral' as const;
@@ -53,20 +68,49 @@ export function StocktakeListPage() {
   const { data, isLoading, error, refetch } = useStocktakeList({ status, search });
   const createMutation = useCreateStocktake();
   const deleteMutation = useDeleteStocktake();
+  const canWrite = useHasPermission('stocktake:write') === true;
+  const { scheduleDelete } = useUndoableDelete();
+  const locations = useLocationNames(true);
+  const [hidden, setHidden] = useState<string[]>([]);
 
-  const [form, setForm] = useState({ title: '', description: '', scope: 'full', due_date: '' });
+  const emptyForm = { title: '', description: '', due_date: '', location_id: '' };
+  const [form, setForm] = useState(emptyForm);
 
+  // The area is a node of the location tree of any kind (WP-288); the
+  // deprecated scope is no longer sent.
   const handleCreate = () => {
-    if (!form.title) return;
-    createMutation.mutate(form, {
-      onSuccess: () => {
-        setShowCreate(false);
-        setForm({ title: '', description: '', scope: 'full', due_date: '' });
+    if (!form.title || !form.location_id) return;
+    createMutation.mutate(
+      {
+        title: form.title,
+        location_id: form.location_id,
+        ...(form.description ? { description: form.description } : {}),
+        ...(form.due_date ? { due_date: form.due_date } : {}),
       },
+      {
+        onSuccess: () => {
+          setShowCreate(false);
+          setForm(emptyForm);
+        },
+      },
+    );
+  };
+
+  // Only a planned stocktake is deleted, behind the undo window.
+  const handleDelete = (st: Stocktake) => {
+    setHidden((current) => [...current, st.id]);
+    scheduleDelete({
+      id: st.id,
+      label: st.title,
+      deleteFn: () => deleteMutation.mutateAsync(st.id),
+      restoreFn: async () => setHidden((current) => current.filter((id) => id !== st.id)),
     });
   };
 
-  const stocktakes = data?.data ?? [];
+  const areaOf = (st: Stocktake) =>
+    st.location_id ? locations.path(st.location_id) : t(`stocktake.scopes.${st.scope}`, st.scope);
+
+  const stocktakes = (data?.data ?? []).filter((st) => !hidden.includes(st.id));
   const filtered = Boolean(search || status);
 
   return (
@@ -75,9 +119,11 @@ export function StocktakeListPage() {
         title={t('stocktake.title', 'Inventur')}
         description={t('stocktake.summary')}
         actions={
-          <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
-            {t('stocktake.create', 'Inventur starten')}
-          </Button>
+          canWrite ? (
+            <Button icon={<Plus />} onClick={() => setShowCreate(true)}>
+              {t('stocktake.create', 'Inventur starten')}
+            </Button>
+          ) : null
         }
       />
 
@@ -136,7 +182,7 @@ export function StocktakeListPage() {
                     {t('ci.status', 'Status')}
                   </th>
                   <th scope="col" className={thClasses}>
-                    {t('stocktake.scope', 'Umfang')}
+                    {t('stocktake.area')}
                   </th>
                   <th scope="col" className={cn(thClasses, 'text-right')}>
                     {t('stocktake.progress', 'Fortschritt')}
@@ -152,13 +198,17 @@ export function StocktakeListPage() {
               <tbody>
                 {stocktakes.map((st) => (
                   <tr key={st.id} className={trClasses}>
-                    <td className={tdPrimaryClasses}>{st.title}</td>
+                    <td className={tdPrimaryClasses}>
+                      <Link to={`/stocktake/${st.id}`} className="hover:underline">
+                        {st.title}
+                      </Link>
+                    </td>
                     <td className={tdClasses}>
-                      <Badge variant={statusVariant(st.status)}>
+                      <Badge variant={stocktakeStatusVariant(st.status)}>
                         {t(`stocktake.statuses.${st.status}`, st.status)}
                       </Badge>
                     </td>
-                    <td className={tdClasses}>{t(`stocktake.scopes.${st.scope}`, st.scope)}</td>
+                    <td className={tdClasses}>{areaOf(st)}</td>
                     <td className={tdNumericClasses}>
                       {st.total_scanned}/{st.total_expected}
                     </td>
@@ -170,13 +220,16 @@ export function StocktakeListPage() {
                       )}
                     </td>
                     <td className={cn(tdClasses, 'text-right')}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(st.id)}
-                      >
-                        {t('common.delete', 'Löschen')}
-                      </Button>
+                      {canWrite && st.status === 'planned' ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t('stocktake.deleteNamed', { name: st.title })}
+                          onClick={() => handleDelete(st)}
+                        >
+                          {t('common.delete', 'Löschen')}
+                        </Button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
@@ -211,25 +264,35 @@ export function StocktakeListPage() {
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
           />
-          <Select
-            label={t('stocktake.scope', 'Umfang')}
-            value={form.scope}
-            onChange={(e) => setForm({ ...form, scope: e.target.value })}
-            options={STOCKTAKE_SCOPES.map((value) => ({
-              value,
-              label: t(`stocktake.scopes.${value}`),
-            }))}
+          <LocationPicker
+            label={t('stocktake.area')}
+            value={form.location_id || null}
+            onChange={(next) => setForm({ ...form, location_id: next?.id ?? '' })}
           />
           <Input
+            type="date"
             label={t('stocktake.dueDate', 'Fällig am')}
             value={form.due_date}
             onChange={(e) => setForm({ ...form, due_date: e.target.value })}
           />
+          {createMutation.error ? (
+            <p role="alert" className="text-sm text-danger">
+              {createMutation.error instanceof ApiError
+                ? (createMutation.error.detail ?? createMutation.error.message)
+                : createMutation.error.message}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setShowCreate(false)}>
               {t('common.cancel', 'Abbrechen')}
             </Button>
-            <Button onClick={handleCreate}>{t('stocktake.create', 'Inventur starten')}</Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!form.title || !form.location_id}
+              loading={createMutation.isPending}
+            >
+              {t('stocktake.create', 'Inventur starten')}
+            </Button>
           </div>
         </div>
       </Modal>

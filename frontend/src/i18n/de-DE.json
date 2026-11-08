@@ -827,7 +827,116 @@
     },
     "summary": "Inventuren starten und Fortschritt und Fehlbestände verfolgen.",
     "emptyTitle": "Noch keine Inventuren",
-    "emptyHint": "Starte eine Inventur, um Bestände mit dem Soll abzugleichen."
+    "emptyHint": "Starte eine Inventur, um Bestände mit dem Soll abzugleichen.",
+    "area": "Bereich",
+    "overview": "Überblick",
+    "startedAt": "Gestartet am",
+    "completedAt": "Abgeschlossen am",
+    "start": "Starten",
+    "cancel": "Inventur abbrechen",
+    "complete": "Abschließen",
+    "edit": "Bearbeiten",
+    "labels": "Etiketten drucken",
+    "labelFor": "Etikett für {{name}}",
+    "deleteNamed": "{{name}} löschen",
+    "open": "Offen",
+    "legacyHint": "Diese Inventur hat keinen Bereich (frühere Version). Sie kann weder gestartet noch gescannt, nur abgebrochen werden.",
+    "readOnlyCompleted": "Die Inventur ist abgeschlossen und nur lesbar.",
+    "readOnlyCancelled": "Die Inventur ist abgebrochen und nur lesbar.",
+    "recentScans": "Letzte Scans",
+    "results": {
+      "found": "Gefunden",
+      "missing": "Fehlend",
+      "unexpected": "Unerwartet"
+    },
+    "scanMethods": {
+      "barcode": "Barcode",
+      "qrcode": "QR-Code",
+      "rfid": "RFID",
+      "manual": "Manuell"
+    },
+    "counters": {
+      "label": "Zählstand",
+      "expected": "Soll",
+      "found": "Gefunden",
+      "unexpected": "Unerwartet",
+      "open": "Noch offen",
+      "missing": "Fehlend"
+    },
+    "columns": {
+      "asset": "Asset",
+      "consumable": "Mengenartikel",
+      "bin": "Lagerplatz",
+      "expected": "Soll",
+      "counted": "Ist",
+      "difference": "Differenz",
+      "count": "Zählen",
+      "expectedLocation": "Erwarteter Standort",
+      "foundLocation": "Fundort",
+      "result": "Ergebnis",
+      "scannedAt": "Zeitpunkt",
+      "object": "Objekt",
+      "method": "Erfassung"
+    },
+    "snapshot": {
+      "assets": "Soll-Bestand: Assets",
+      "consumables": "Soll-Bestand: Mengenartikel je Lagerplatz",
+      "noAssets": "Keine Assets im Soll-Bestand.",
+      "noConsumables": "Keine Mengenartikel im Soll-Bestand."
+    },
+    "quantities": {
+      "countedSoFar": "Bisher gezählt: {{sum}}",
+      "additional": "Zusätzliche Menge",
+      "additionalFor": "Zusätzliche Menge für {{name}} in {{bin}}",
+      "count": "Zählen"
+    },
+    "scan": {
+      "title": "Scannen",
+      "open": "Scanner öffnen",
+      "dialogTitle": "Inventur scannen",
+      "dialogDescription": "Standortetikett setzt den Fundort; Assets und Mengenartikel werden dort erfasst.",
+      "place": "Fundort",
+      "currentPlace": "Aktueller Fundort: {{name}}",
+      "noPlace": "Zuerst einen Fundort wählen oder ein Standortetikett scannen.",
+      "placeSet": "Fundort gesetzt: {{name}}",
+      "needBin": "Mengenartikel werden in einem Lagerplatz (Bin) gezählt. Bitte einen Lagerplatz als Fundort wählen.",
+      "recorded": "{{name}}: {{result}}",
+      "tally": "Gefunden {{found}} · Unerwartet {{unexpected}} · Noch offen {{open}}",
+      "countIn": "{{name}} in {{bin}} zählen",
+      "manualTitle": "Fund ohne Scanner erfassen",
+      "manualObject": "Gefundenes Objekt",
+      "quantity": "Menge",
+      "record": "Fund erfassen"
+    },
+    "differences": {
+      "title": "Differenzliste",
+      "assets": "Assets",
+      "quantities": "Mengen",
+      "moved": "Abweichender Standort",
+      "none": "Keine Differenzen."
+    },
+    "confirmStart": {
+      "title": "Inventur starten?",
+      "body": "Der Start friert den Soll-Bestand des Bereichs {{area}} ein. Spätere Bewegungen ändern ihn nicht mehr."
+    },
+    "confirmCancel": {
+      "title": "Inventur abbrechen?",
+      "body": "Die Inventur wird abgebrochen und ist danach nur noch lesbar. Es werden keine Korrekturen gebucht."
+    },
+    "confirmComplete": {
+      "title": "Inventur abschließen?",
+      "body": "Der Abschluss bucht voraussichtlich diese Bewegungen; noch offene Einträge gelten danach als fehlend.",
+      "movements": "Voraussichtliche Bewegungen",
+      "none": "Keine Bewegungen zu buchen.",
+      "transfer": "{{type}}: {{name}} von {{from}} nach {{to}}",
+      "correction": "{{type}}: {{name}} in {{bin}} ({{delta}})",
+      "note": "Maßgeblich ist der Bestand beim Abschluss; die gebuchten Bewegungen zeigt die Antwort."
+    },
+    "completion": {
+      "title": "Gebuchte Bewegungen",
+      "summary": "Gebuchte Korrekturen: {{number}}",
+      "movement": "{{type}}: {{name}} ({{from}} → {{to}}, Menge {{quantity}})"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -3664,5 +3773,30 @@
     "clear": "Löschen",
     "signer": "Name der unterschreibenden Person (optional; nötig, wenn ein Team hält)",
     "tooLarge": "Die Unterschrift ist zu groß und wurde nicht gesendet. Bitte löschen und neu unterschreiben."
+  },
+  "labels": {
+    "title": "Etiketten drucken",
+    "assetDescription": "Etikett für {{name}} als PDF.",
+    "batchDescription": "Etiketten für den Inventurbereich {{name}} als PDF.",
+    "template": "Vorlage",
+    "kind": "Objektart",
+    "templates": {
+      "asset_50x25": "Asset-Etikett 50 × 25 mm",
+      "bin_100x50": "Lagerplatz-Etikett 100 × 50 mm",
+      "a4_24": "A4-Bogen mit 24 Etiketten"
+    },
+    "kinds": {
+      "asset": "Assets",
+      "consumable": "Mengenartikel",
+      "location": "Standorte"
+    },
+    "printAsset": "PDF öffnen",
+    "startBatch": "Etiketten erzeugen",
+    "download": "PDF herunterladen",
+    "openPdf": "PDF öffnen",
+    "queued": "Auftrag angelegt …",
+    "progress": "Status: {{status}} ({{progress}} %)",
+    "result": "{{labels}} Etiketten auf {{pages}} Seiten, abrufbar bis {{expires}}",
+    "close": "Schließen"
   }
 }

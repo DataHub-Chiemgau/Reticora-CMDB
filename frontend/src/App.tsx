@@ -72,6 +72,10 @@ const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPag
 const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'CompliancePage');
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
 const StocktakeListPage = lazyPage(() => import('./pages/StocktakeListPage'), 'StocktakeListPage');
+const StocktakeDetailPage = lazyPage(
+  () => import('./pages/StocktakeDetailPage'),
+  'StocktakeDetailPage',
+);
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
 const TicketDetailPage = lazyPage(() => import('./pages/TicketDetailPage'), 'TicketDetailPage');
 const UserManagementPage = lazyPage(
@@ -256,6 +260,7 @@ function App() {
           <Route path="/documents" element={<DocumentListPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />
+          <Route path="/stocktake/:id" element={<StocktakeDetailPage />} />
           <Route path="/consumables" element={<ConsumableListPage />} />
           <Route path="/consumables/:id" element={<ConsumableDetailPage />} />
           <Route path="/orders" element={<OrderListPage />} />

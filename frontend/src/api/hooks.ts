@@ -71,6 +71,9 @@ import type {
   ImportStartDocumentRequest,
   UpdateImportProfileRequest,
   StocktakeCreateRequest,
+  StocktakeUpdateRequest,
+  StockScanCreateRequest,
+  CursorParams,
   StocktakeListParams,
   TicketCreateRequest,
   TicketUpdateRequest,
@@ -790,10 +793,84 @@ export function useStocktakeList(params: StocktakeListParams) {
   });
 }
 
+export function useStocktake(id: string) {
+  return useQuery({
+    queryKey: ['stocktakes', id],
+    queryFn: () => stocktakeApi.get(id),
+    enabled: !!id,
+  });
+}
+
+/** STOCKTAKE_PAGE_LIMIT is the page size the stocktake lists are read with (API-02 maximum). */
+export const STOCKTAKE_PAGE_LIMIT = 200;
+/** STOCKTAKE_MAX_PAGES caps how many cursor pages of one list are read. */
+export const STOCKTAKE_MAX_PAGES = 25;
+
+/**
+ * collectPages reads a cursor list page by page (next_cursor) up to
+ * STOCKTAKE_MAX_PAGES and returns all rows; truncated tells that rows are
+ * left unread.
+ */
+async function collectPages<T>(
+  read: (params: CursorParams) => Promise<PaginatedResponse<T>>,
+): Promise<{ data: T[]; truncated: boolean }> {
+  const data: T[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < STOCKTAKE_MAX_PAGES; page += 1) {
+    const res = await read({ limit: STOCKTAKE_PAGE_LIMIT, cursor });
+    data.push(...res.data);
+    if (!res.has_more || !res.next_cursor) return { data, truncated: false };
+    cursor = res.next_cursor;
+  }
+  return { data, truncated: true };
+}
+
+/**
+ * useStocktakeItems reads the frozen expected stock of a stocktake (GET
+ * …/items, all pages). The snapshot does not follow scans or movements, so
+ * its key lies outside ['stocktakes'] and only start and completion read it
+ * again.
+ */
+export function useStocktakeItems(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktake-items', id],
+    queryFn: () => collectPages((params) => stocktakeApi.items(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
+/** useStocktakeScans reads the scans of a stocktake, newest first (GET …/scans, all pages). */
+export function useStocktakeScans(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktakes', id, 'scans'],
+    queryFn: () => collectPages((params) => stocktakeApi.listScans(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
+/** useStocktakeDifferences reads the difference list (GET …/differences, all pages). */
+export function useStocktakeDifferences(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ['stocktakes', id, 'differences'],
+    queryFn: () => collectPages((params) => stocktakeApi.differences(id, params)),
+    enabled: !!id && enabled,
+  });
+}
+
 export function useCreateStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: StocktakeCreateRequest) => stocktakeApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+export function useUpdateStocktake(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StocktakeUpdateRequest) => stocktakeApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
     },
@@ -810,23 +887,49 @@ export function useDeleteStocktake() {
   });
 }
 
-export function useStocktakeDifference(stocktakeId: string, params: ListParams = {}) {
-  return useQuery({
-    queryKey: ['stocktakes', stocktakeId, 'difference', params],
-    queryFn: () => stocktakeApi.difference(stocktakeId, params),
-    enabled: !!stocktakeId,
+/** useStartStocktake starts a planned stocktake; the snapshot is read afresh. */
+export function useStartStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stocktakeApi.start(id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+      queryClient.invalidateQueries({ queryKey: ['stocktake-items', id] });
+    },
   });
 }
 
+export function useCancelStocktake() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => stocktakeApi.cancel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+/** useAddScan records a scan; counters, scans and the difference list are read again. */
+export function useAddScan(stocktakeId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: StockScanCreateRequest) => stocktakeApi.addScan(stocktakeId, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
+    },
+  });
+}
+
+/** useCompleteStocktake completes a stocktake; the server books its corrections (WP-761). */
 export function useCompleteStocktake() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, applyCorrections = true }: { id: string; applyCorrections?: boolean }) =>
-      stocktakeApi.complete(id, applyCorrections),
-    onSuccess: (_data, { id }) => {
+    mutationFn: (id: string) => stocktakeApi.complete(id),
+    onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ['stocktakes'] });
-      queryClient.invalidateQueries({ queryKey: ['stocktakes', id] });
+      queryClient.invalidateQueries({ queryKey: ['stocktake-items', id] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['consumables'] });
     },
   });
 }

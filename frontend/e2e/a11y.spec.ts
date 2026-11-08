@@ -327,6 +327,155 @@ const TICKET_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-813: the stocktake of the fixtures in progress, with an area, a frozen
+// asset and consumable, one scan per kind and a difference of each kind.
+// The area and bins lie outside the fixture tree, so the page names them by
+// id; the page reads the names of asset and consumable one by one.
+const STOCKTAKE_ID = 'db000000-0000-4000-8000-000000000001';
+const STOCKTAKE_AREA = 'db100000-0000-4000-8000-000000000001';
+const STOCKTAKE_BIN = 'db100000-0000-4000-8000-000000000002';
+const STOCKTAKE_ASSET = 'db200000-0000-4000-8000-000000000001';
+const STOCKTAKE_CONSUMABLE = 'db300000-0000-4000-8000-000000000001';
+const STOCKTAKE_USER = '00000000-0000-0000-0000-000000000001';
+const STOCKTAKE_HANDLERS: Handler[] = [
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_ID,
+        organization_id: ORG_ID,
+        title: M.stocktake,
+        status: 'in_progress',
+        scope: 'full',
+        location_id: STOCKTAKE_AREA,
+        started_at: AT,
+        total_expected: 2,
+        total_scanned: 2,
+        total_missing: 0,
+        total_surplus: 0,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/items`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'db400000-0000-4000-8000-000000000001',
+          stocktake_id: STOCKTAKE_ID,
+          item_kind: 'asset',
+          asset_id: STOCKTAKE_ASSET,
+          location_id: STOCKTAKE_AREA,
+          expected_quantity: 1,
+          created_at: AT,
+        },
+        {
+          id: 'db400000-0000-4000-8000-000000000002',
+          stocktake_id: STOCKTAKE_ID,
+          item_kind: 'consumable',
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          location_id: STOCKTAKE_BIN,
+          expected_quantity: 5,
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/scans`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'db500000-0000-4000-8000-000000000001',
+          organization_id: ORG_ID,
+          stocktake_id: STOCKTAKE_ID,
+          asset_id: STOCKTAKE_ASSET,
+          location_id: STOCKTAKE_BIN,
+          scanned_by: STOCKTAKE_USER,
+          scan_method: 'barcode',
+          scan_result: 'found',
+          code: 'AT-0002',
+          scanned_at: AT,
+        },
+        {
+          id: 'db500000-0000-4000-8000-000000000002',
+          organization_id: ORG_ID,
+          stocktake_id: STOCKTAKE_ID,
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          quantity: 3,
+          location_id: STOCKTAKE_BIN,
+          scanned_by: STOCKTAKE_USER,
+          scan_method: 'manual',
+          scan_result: 'found',
+          scanned_at: AT,
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/stocktakes/${STOCKTAKE_ID}/differences`,
+    reply: () => ({
+      body: list([
+        {
+          item_kind: 'asset',
+          asset_id: STOCKTAKE_ASSET,
+          classification: 'found',
+          expected_location_id: STOCKTAKE_AREA,
+          found_location_id: STOCKTAKE_BIN,
+          expected_quantity: 1,
+          counted_quantity: 1,
+          asset: { id: STOCKTAKE_ASSET, name: 'a11y Scanner' },
+        },
+        {
+          item_kind: 'consumable',
+          consumable_id: STOCKTAKE_CONSUMABLE,
+          classification: 'found',
+          expected_location_id: STOCKTAKE_BIN,
+          found_location_id: STOCKTAKE_BIN,
+          expected_quantity: 5,
+          counted_quantity: 3,
+          consumable: { id: STOCKTAKE_CONSUMABLE, name: 'a11y Toner' },
+        },
+      ]),
+    }),
+  },
+  {
+    path: `/assets/${STOCKTAKE_ASSET}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_ASSET,
+        organization_id: ORG_ID,
+        inventory_no: 'AT-0002',
+        name: 'a11y Scanner',
+        category: 'hardware',
+        status: 'in_stock',
+        custom_fields: {},
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/consumables/${STOCKTAKE_CONSUMABLE}`,
+    reply: () => ({
+      body: {
+        id: STOCKTAKE_CONSUMABLE,
+        organization_id: ORG_ID,
+        name: 'a11y Toner',
+        sku: 'TN-2',
+        category: 'printer',
+        unit: 'pcs',
+        stock_level: 3,
+        min_level: 1,
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+];
+
 const RELATIONSHIP_TYPES: Handler = {
   path: '/relationship-types',
   reply: () => ({
@@ -607,6 +756,15 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content').getByRole('link', { name: M.ci }),
   },
   { path: '/stocktake', url: '/stocktake', ready: text(M.stocktake) },
+  {
+    path: '/stocktake/:id',
+    url: `/stocktake/${STOCKTAKE_ID}`,
+    handlers: STOCKTAKE_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Toner').first()).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content h1').getByText(M.stocktake),
+  },
   { path: '/consumables', url: '/consumables', ready: text(M.consumable) },
   {
     path: '/consumables/:id',

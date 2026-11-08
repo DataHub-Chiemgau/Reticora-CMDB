@@ -827,7 +827,116 @@
     },
     "summary": "Start stocktakes and follow progress and missing items.",
     "emptyTitle": "No stocktakes yet",
-    "emptyHint": "Start a stocktake to compare stock against the expected count."
+    "emptyHint": "Start a stocktake to compare stock against the expected count.",
+    "area": "Area",
+    "overview": "Overview",
+    "startedAt": "Started at",
+    "completedAt": "Completed at",
+    "start": "Start",
+    "cancel": "Cancel stocktake",
+    "complete": "Complete",
+    "edit": "Edit",
+    "labels": "Print labels",
+    "labelFor": "Label for {{name}}",
+    "deleteNamed": "Delete {{name}}",
+    "open": "Open",
+    "legacyHint": "This stocktake has no area (earlier release). It can neither be started nor scanned, only cancelled.",
+    "readOnlyCompleted": "The stocktake is completed and read-only.",
+    "readOnlyCancelled": "The stocktake is cancelled and read-only.",
+    "recentScans": "Recent scans",
+    "results": {
+      "found": "Found",
+      "missing": "Missing",
+      "unexpected": "Unexpected"
+    },
+    "scanMethods": {
+      "barcode": "Barcode",
+      "qrcode": "QR code",
+      "rfid": "RFID",
+      "manual": "Manual"
+    },
+    "counters": {
+      "label": "Count",
+      "expected": "Expected",
+      "found": "Found",
+      "unexpected": "Unexpected",
+      "open": "Still open",
+      "missing": "Missing"
+    },
+    "columns": {
+      "asset": "Asset",
+      "consumable": "Consumable",
+      "bin": "Bin",
+      "expected": "Expected",
+      "counted": "Counted",
+      "difference": "Difference",
+      "count": "Count",
+      "expectedLocation": "Expected location",
+      "foundLocation": "Place found",
+      "result": "Result",
+      "scannedAt": "Time",
+      "object": "Object",
+      "method": "Method"
+    },
+    "snapshot": {
+      "assets": "Expected stock: assets",
+      "consumables": "Expected stock: consumables per bin",
+      "noAssets": "No assets in the expected stock.",
+      "noConsumables": "No consumables in the expected stock."
+    },
+    "quantities": {
+      "countedSoFar": "Counted so far: {{sum}}",
+      "additional": "Additional quantity",
+      "additionalFor": "Additional quantity for {{name}} in {{bin}}",
+      "count": "Count"
+    },
+    "scan": {
+      "title": "Scanning",
+      "open": "Open scanner",
+      "dialogTitle": "Scan stocktake",
+      "dialogDescription": "A location label sets the place found; assets and consumables are recorded there.",
+      "place": "Place found",
+      "currentPlace": "Current place found: {{name}}",
+      "noPlace": "Choose a place found or scan a location label first.",
+      "placeSet": "Place found set: {{name}}",
+      "needBin": "Consumables are counted in a bin. Please choose a bin as the place found.",
+      "recorded": "{{name}}: {{result}}",
+      "tally": "Found {{found}} · Unexpected {{unexpected}} · Still open {{open}}",
+      "countIn": "Count {{name}} in {{bin}}",
+      "manualTitle": "Record a find without scanner",
+      "manualObject": "Object found",
+      "quantity": "Quantity",
+      "record": "Record find"
+    },
+    "differences": {
+      "title": "Difference list",
+      "assets": "Assets",
+      "quantities": "Quantities",
+      "moved": "Other location",
+      "none": "No differences."
+    },
+    "confirmStart": {
+      "title": "Start stocktake?",
+      "body": "Starting freezes the expected stock of the area {{area}}. Later movements no longer change it."
+    },
+    "confirmCancel": {
+      "title": "Cancel stocktake?",
+      "body": "The stocktake is cancelled and read-only afterwards. No corrections are booked."
+    },
+    "confirmComplete": {
+      "title": "Complete stocktake?",
+      "body": "The completion is expected to book these movements; open entries count as missing afterwards.",
+      "movements": "Expected movements",
+      "none": "No movements to book.",
+      "transfer": "{{type}}: {{name}} from {{from}} to {{to}}",
+      "correction": "{{type}}: {{name}} in {{bin}} ({{delta}})",
+      "note": "The stock at completion decides; the answer shows the booked movements."
+    },
+    "completion": {
+      "title": "Booked movements",
+      "summary": "Booked corrections: {{number}}",
+      "movement": "{{type}}: {{name}} ({{from}} → {{to}}, quantity {{quantity}})"
+    }
   },
   "ticket": {
     "title": "Tickets",
@@ -3664,5 +3773,30 @@
     "clear": "Clear",
     "signer": "Name of the person signing (optional; needed when a team holds the asset)",
     "tooLarge": "The signature is too large and was not sent. Please clear it and sign again."
+  },
+  "labels": {
+    "title": "Print labels",
+    "assetDescription": "Label for {{name}} as PDF.",
+    "batchDescription": "Labels for the inventory area {{name}} as PDF.",
+    "template": "Template",
+    "kind": "Object kind",
+    "templates": {
+      "asset_50x25": "Asset label 50 × 25 mm",
+      "bin_100x50": "Bin label 100 × 50 mm",
+      "a4_24": "A4 sheet with 24 labels"
+    },
+    "kinds": {
+      "asset": "Assets",
+      "consumable": "Consumables",
+      "location": "Locations"
+    },
+    "printAsset": "Open PDF",
+    "startBatch": "Create labels",
+    "download": "Download PDF",
+    "openPdf": "Open PDF",
+    "queued": "Job created …",
+    "progress": "Status: {{status}} ({{progress}} %)",
+    "result": "{{labels}} labels on {{pages}} pages, available until {{expires}}",
+    "close": "Close"
   }
 }

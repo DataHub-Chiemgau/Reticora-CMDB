@@ -50,6 +50,10 @@ export default tseslint.config(
       'src/pages/DashboardPage.tsx',
       'src/pages/DiscoveryPage.tsx',
       'src/pages/StocktakeListPage.tsx',
+      // WP-813: the stocktake detail and the label dialog (also matched by
+      // src/components/flows/**/*.tsx below).
+      'src/pages/StocktakeDetailPage.tsx',
+      'src/components/flows/LabelPrintDialog.tsx',
       'src/pages/CITypeAdminPage.tsx',
       // WP-818: the impact panel and the topology page.
       'src/pages/TopologyPage.tsx',

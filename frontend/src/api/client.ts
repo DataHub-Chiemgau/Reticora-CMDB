@@ -604,6 +604,16 @@ export async function fetchAPIVersioned<T>(
   return { data, etag: res.headers.get('ETag') ?? undefined };
 }
 
+/**
+ * fetchBlob reads a binary answer of an API path, e.g. a PDF label: with the
+ * bearer token, one refresh after a 401 and a failure as ApiError, as
+ * fetchResponse does (WP-526). A link with the URL alone would carry no token.
+ */
+export async function fetchBlob(path: string, options?: RequestInit): Promise<Blob> {
+  const res = await fetchResponse(apiURL(path, options?.method), options);
+  return res.blob();
+}
+
 async function fetchURL<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetchResponse(url, options);
   if (res.status === 204) {
@@ -1488,46 +1498,22 @@ export const importApi = {
 };
 
 // --- Phase 2: Stocktake / Inventur ---
+// The types come from the OpenAPI schema (K27): area location_id, frozen
+// expected stock (items), scans classified by the server, the difference
+// list and the movements booked by the completion (WP-287, WP-761).
 
-export interface Stocktake {
-  id: string;
-  organization_id: string;
-  title: string;
-  description?: string;
-  status: string;
-  scope: string;
-  started_by?: string;
-  started_at?: string;
-  completed_at?: string;
-  due_date?: string;
-  total_expected: number;
-  total_scanned: number;
-  total_missing: number;
-  total_surplus: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface StockScan {
-  id: string;
-  stocktake_id: string;
-  asset_id?: string;
-  ci_id?: string;
-  scanned_by: string;
-  scan_method: string;
-  scan_result: string;
-  location_found?: string;
-  notes?: string;
-  scanned_at: string;
-}
-
-export interface StocktakeCreateRequest {
-  title: string;
-  description?: string;
-  scope?: string;
-  due_date?: string;
-  total_expected?: number;
-}
+export type Stocktake = components['schemas']['Stocktake'];
+export type StocktakeStatus = Stocktake['status'];
+export type StockScan = components['schemas']['StockScan'];
+export type StockScanCreateRequest = components['schemas']['CreateStockScanRequest'];
+export type ScanMethod = StockScan['scan_method'];
+export type ScanResult = StockScan['scan_result'];
+export type StocktakeItem = components['schemas']['StocktakeItem'];
+export type StocktakeDifference = components['schemas']['StocktakeDifference'];
+export type StocktakeCorrection = components['schemas']['StocktakeCorrection'];
+export type StocktakeCompletion = components['schemas']['StocktakeCompletion'];
+export type StocktakeCreateRequest = components['schemas']['CreateStocktakeRequest'];
+export type StocktakeUpdateRequest = components['schemas']['UpdateStocktakeRequest'];
 
 export interface StocktakeListParams {
   limit?: number;
@@ -1538,6 +1524,12 @@ export interface StocktakeListParams {
   search?: string;
 }
 
+/** CursorParams page a cursor list (API-02): limit and the cursor of the previous page. */
+export interface CursorParams {
+  limit?: number;
+  cursor?: string;
+}
+
 export const stocktakeApi = {
   list(params: StocktakeListParams = {}): Promise<PaginatedResponse<Stocktake>> {
     return fetchAPI(`/stocktakes${buildQuery(params)}`);
@@ -1545,88 +1537,50 @@ export const stocktakeApi = {
   get(id: string): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`);
   },
+  /** create sends title, description, due_date and the area location_id; scope is deprecated. */
   create(data: StocktakeCreateRequest): Promise<Stocktake> {
     return fetchAPI('/stocktakes', { method: 'POST', body: JSON.stringify(data) });
   },
-  update(
-    id: string,
-    data: {
-      title?: string;
-      description?: string;
-      status?: string;
-      due_date?: string;
-      total_expected?: number;
-    },
-  ): Promise<Stocktake> {
+  update(id: string, data: StocktakeUpdateRequest): Promise<Stocktake> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   delete(id: string): Promise<void> {
     return fetchAPI(`/stocktakes/${id}`, { method: 'DELETE' });
   },
-  addScan(
-    stocktakeId: string,
-    data: {
-      asset_id?: string;
-      ci_id?: string;
-      scan_method?: string;
-      scan_result: string;
-      location_found?: string;
-      notes?: string;
-    },
-  ): Promise<StockScan> {
+  /** start moves a planned stocktake to in_progress and freezes the expected stock. */
+  start(id: string): Promise<Stocktake> {
+    return fetchAPI(`/stocktakes/${id}/start`, { method: 'POST' });
+  },
+  /** cancel ends a planned or in-progress stocktake without completion. */
+  cancel(id: string): Promise<Stocktake> {
+    return fetchAPI(`/stocktakes/${id}/cancel`, { method: 'POST' });
+  },
+  /** items is a page of the frozen expected stock (GET …/items, cursor). */
+  items(id: string, params: CursorParams = {}): Promise<PaginatedResponse<StocktakeItem>> {
+    return fetchAPI(`/stocktakes/${id}/items${buildQuery(params)}`);
+  },
+  /** addScan records an asset or a counted quantity; the server classifies it. */
+  addScan(stocktakeId: string, data: StockScanCreateRequest): Promise<StockScan> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
-  listScans(stocktakeId: string, params: ListParams = {}): Promise<PaginatedResponse<StockScan>> {
+  listScans(stocktakeId: string, params: CursorParams = {}): Promise<PaginatedResponse<StockScan>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/scans${buildQuery(params)}`);
   },
-  difference(
+  /** differences is a page of the difference list (GET …/differences, cursor). */
+  differences(
     stocktakeId: string,
-    params: ListParams = {},
-  ): Promise<PaginatedResponse<StocktakeDifferenceEntry>> {
+    params: CursorParams = {},
+  ): Promise<PaginatedResponse<StocktakeDifference>> {
     return fetchAPI(`/stocktakes/${stocktakeId}/differences${buildQuery(params)}`);
   },
-  complete(stocktakeId: string, applyCorrections = true): Promise<StocktakeCompletion> {
-    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, {
-      method: 'POST',
-      body: JSON.stringify({ apply_corrections: applyCorrections }),
-    });
+  /** complete books the corrections of the difference list (WP-761); apply_corrections is gone. */
+  complete(stocktakeId: string): Promise<StocktakeCompletion> {
+    return fetchAPI(`/stocktakes/${stocktakeId}/complete`, { method: 'POST', body: '{}' });
   },
 };
-
-// One object of the difference list (WP-287, GET …/differences).
-export interface StocktakeDifferenceEntry {
-  item_kind: 'asset' | 'consumable';
-  asset_id?: string;
-  consumable_id?: string;
-  classification: 'found' | 'missing' | 'unexpected';
-  expected_location_id?: string;
-  found_location_id?: string;
-  expected_quantity: number;
-  counted_quantity: number;
-  asset?: Partial<Asset>;
-  consumable?: { id: string; name: string; sku?: string; unit?: string };
-}
-
-export interface StocktakeCorrection {
-  asset_id: string;
-  asset_tag?: string;
-  scan_result: string;
-  previous_status?: string;
-  new_status?: string;
-  previous_location?: string;
-  new_location?: string;
-  applied: boolean;
-  detail?: string;
-}
-
-export interface StocktakeCompletion {
-  stocktake: Stocktake;
-  corrections_applied: number;
-  corrections: StocktakeCorrection[];
-}
 
 // --- Phase 2: Ticket System (Essential) ---
 
@@ -3182,6 +3136,36 @@ export const deskApi = {
 export function assetLabelURL(assetId: string): string {
   return `${API_BASE}/assets/${assetId}/label?format=svg`;
 }
+
+// The printable labels (INV-03, WP-763, E-52, E-135): the PDF of one asset
+// label and the label batches of an inventory area as job labels.batch.
+
+export type LabelTemplate = components['schemas']['LabelBatchRequest']['template'];
+export type LabelBatchRequest = components['schemas']['LabelBatchRequest'];
+export type LabelBatchResult = components['schemas']['LabelBatchResult'];
+export type LabelBatchDownload = components['schemas']['LabelBatchDownload'];
+
+/** LabelBatchJob is the 202 of POST /labels/batch: the job that renders the batch. */
+export interface LabelBatchJob {
+  job_id: string;
+  status: string;
+  kind: string;
+}
+
+export const labelDownloadApi = {
+  /** assetLabel loads the PDF label of an asset in a template (GET /assets/{id}/label). */
+  assetLabel(assetId: string, template: 'asset_50x25' | 'a4_24'): Promise<Blob> {
+    return fetchBlob(`/assets/${assetId}/label${buildQuery({ format: 'pdf', template })}`);
+  },
+  /** batch starts a label batch job (POST /labels/batch, 202). */
+  batch(data: LabelBatchRequest): Promise<LabelBatchJob> {
+    return fetchAPI('/labels/batch', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** batchDownload names the signed, short-lived URL of a finished batch (E-135). */
+  batchDownload(jobId: string): Promise<LabelBatchDownload> {
+    return fetchAPI(`/labels/batch/${jobId}/download`);
+  },
+};
 
 // ─── Endpoint agents + security findings (Block E) ──────────────────────────
 

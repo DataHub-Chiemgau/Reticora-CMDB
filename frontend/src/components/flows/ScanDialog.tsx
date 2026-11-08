@@ -17,11 +17,16 @@
  * shown with its history, a consumable received, moved or shown with its
  * history, a location shows its name and path.
  *
+ * In continuous mode (onScan, WP-813) the dialog resolves nothing itself:
+ * every code read goes to onScan with the way it was read, the dialog stays
+ * open and the camera keeps running, and the caller shows its feedback as
+ * children below the scanner (the stocktake scan loop).
+ *
  * Everything is offered only with the feature barcode (E-44) and the module
  * inventory, which serves /api/v1/labels (E-105, useScanGate).
  */
 import { useEffect, useId, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { ScanLine } from 'lucide-react';
@@ -60,6 +65,12 @@ type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => Barc
 const BARCODE_FORMATS = ['code_128', 'qr_code'];
 /** SCAN_INTERVAL_MS is the pause between two frames BarcodeDetector reads. */
 const SCAN_INTERVAL_MS = 200;
+
+/**
+ * ScanSource is how a code was read: a barcode (Code128) or a QR code by
+ * the camera, or the text field a handheld scanner fills like a keyboard.
+ */
+export type ScanSource = 'barcode' | 'qrcode' | 'keyboard';
 
 function barcodeDetector(): BarcodeDetectorConstructor | undefined {
   return (window as unknown as { BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
@@ -106,7 +117,7 @@ function useCamera(
   active: boolean,
   manual: boolean,
   videoRef: React.RefObject<HTMLVideoElement | null>,
-  onCode: (code: string) => void,
+  onCode: (code: string, source: ScanSource) => void,
 ): CameraState {
   const [state, setState] = useState<CameraState>({ mode: 'starting' });
   const onCodeRef = useRef(onCode);
@@ -156,8 +167,10 @@ function useCamera(
         const tick = async () => {
           if (cancelled) return;
           try {
-            const value = (await detector.detect(video))[0]?.rawValue;
-            if (value && !cancelled) onCodeRef.current(value);
+            const hit = (await detector.detect(video))[0];
+            if (hit?.rawValue && !cancelled) {
+              onCodeRef.current(hit.rawValue, hit.format === 'qr_code' ? 'qrcode' : 'barcode');
+            }
           } catch {
             // A frame that cannot be read is skipped.
           }
@@ -169,11 +182,19 @@ function useCamera(
       try {
         // Without BarcodeDetector @zxing/browser decodes the stream; it is a
         // chunk of its own and loaded only here.
-        const { BrowserMultiFormatReader } = await import('@zxing/browser');
+        const zxing = await import('@zxing/browser');
         if (cancelled) return undefined;
-        const reader = new BrowserMultiFormatReader();
+        // The QR format tells a QR code from a barcode; a build without the
+        // enum reads every code as a barcode.
+        const qrFormat = Reflect.has(zxing, 'BarcodeFormat')
+          ? zxing.BarcodeFormat.QR_CODE
+          : undefined;
+        const reader = new zxing.BrowserMultiFormatReader();
         const started = await reader.decodeFromStream(stream, video, (result) => {
-          if (result && !cancelled) onCodeRef.current(result.getText());
+          if (result && !cancelled) {
+            const qr = qrFormat !== undefined && result.getBarcodeFormat?.() === qrFormat;
+            onCodeRef.current(result.getText(), qr ? 'qrcode' : 'barcode');
+          }
         });
         if (cancelled) started.stop();
         else controls = started;
@@ -204,7 +225,7 @@ function useCamera(
 interface CodeScannerProps {
   /** active runs the camera; a shown hit pauses it. */
   active: boolean;
-  onCode: (code: string) => void;
+  onCode: (code: string, source: ScanSource) => void;
   busy: boolean;
 }
 
@@ -220,10 +241,13 @@ function CodeScanner({ active, onCode, busy }: CodeScannerProps) {
   useEffect(() => {
     if (active) lastRef.current = undefined;
   }, [active]);
-  const camera = useCamera(active, manual, videoRef, (value) => {
-    if (value === lastRef.current) return;
+  // A code read while the last one is still handled is not taken as read.
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const camera = useCamera(active, manual, videoRef, (value, source) => {
+    if (busyRef.current || value === lastRef.current) return;
     lastRef.current = value;
-    onCode(value);
+    onCode(value, source);
   });
   const showVideo = active && camera.mode !== 'manual';
 
@@ -232,7 +256,7 @@ function CodeScanner({ active, onCode, busy }: CodeScannerProps) {
     const value = code.trim();
     if (!value || busy) return;
     lastRef.current = undefined;
-    onCode(value);
+    onCode(value, 'keyboard');
     setCode('');
   };
 
@@ -299,6 +323,18 @@ export interface ScanDialogProps {
   accept?: readonly ScanKind[];
   /** locationKinds limit the locations a flow takes, e.g. bins. */
   locationKinds?: readonly LocationKind[];
+  /**
+   * onScan turns on the continuous mode (WP-813): each code read goes here
+   * unresolved, with the way it was read, and the dialog stays open.
+   */
+  onScan?: (code: string, source: ScanSource) => void;
+  /** busy pauses the text field while the caller handles a code (continuous mode). */
+  busy?: boolean;
+  /** children are the caller's feedback below the scanner (continuous mode). */
+  children?: ReactNode;
+  /** title and description replace those of the dialog (continuous mode). */
+  title?: string;
+  description?: string;
 }
 
 function accepts(
@@ -318,7 +354,18 @@ function notFound(error: unknown): boolean {
 
 type Flow = 'assign' | 'return' | 'reserve' | 'receive' | 'move';
 
-export function ScanDialog({ open, onOpenChange, onPick, accept, locationKinds }: ScanDialogProps) {
+export function ScanDialog({
+  open,
+  onOpenChange,
+  onPick,
+  accept,
+  locationKinds,
+  onScan,
+  busy = false,
+  children,
+  title,
+  description,
+}: ScanDialogProps) {
   const { t } = useTranslation();
   const lookup = useScanLookup();
   const [hit, setHit] = useState<{ object: ScannedObject; code: string } | null>(null);
@@ -336,7 +383,11 @@ export function ScanDialog({ open, onOpenChange, onPick, accept, locationKinds }
     onOpenChange(next);
   };
 
-  const resolve = (code: string) => {
+  const resolve = (code: string, source: ScanSource) => {
+    if (onScan) {
+      if (!busy) onScan(code, source);
+      return;
+    }
     if (lookup.isPending) return;
     setHit(null);
     setMessage(undefined);
@@ -371,11 +422,14 @@ export function ScanDialog({ open, onOpenChange, onPick, accept, locationKinds }
       <Modal
         open={open}
         onOpenChange={close}
-        title={t('scan.title')}
-        description={t('scan.description')}
+        title={title ?? t('scan.title')}
+        description={description ?? t('scan.description')}
       >
         <div className="space-y-4">
-          {open ? <CodeScanner active={!hit} onCode={resolve} busy={lookup.isPending} /> : null}
+          {open ? (
+            <CodeScanner active={!hit} onCode={resolve} busy={onScan ? busy : lookup.isPending} />
+          ) : null}
+          {onScan ? children : null}
           {lookup.isPending ? (
             <p role="status" className="text-sm text-fg-muted">
               {t('scan.resolving')}
@@ -401,7 +455,7 @@ export function ScanDialog({ open, onOpenChange, onPick, accept, locationKinds }
           </div>
         </div>
       </Modal>
-      {onPick ? null : (
+      {onPick || onScan ? null : (
         <>
           <AssignDialog
             open={flow?.kind === 'assign'}
