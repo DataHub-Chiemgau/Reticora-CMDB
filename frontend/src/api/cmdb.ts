@@ -302,7 +302,8 @@ export const ciTypeApi = {
    * The resolved form of the type (WP-719) for a target and a role: the
    * template replaces the templates of the type, preview resolves as the
    * role (citype:manage). Without role_id the server resolves with the
-   * roles of the caller (WP-316).
+   * roles of the caller (WP-316). draft resolves the state of a metamodel
+   * draft (E-113, WP-803).
    */
   form(id: string, params: ResolvedFormParams = {}): Promise<ResolvedForm> {
     return fetchAPI(`/ci-types/${id}/form${qs(params)}`);
@@ -314,6 +315,8 @@ export interface ResolvedFormParams {
   template_id?: string;
   role_id?: string;
   preview?: boolean;
+  /** The id of a metamodel draft: the form as the draft would make it (E-113). */
+  draft?: string;
 }
 
 // ─── Form layouts (MET-50, WP-259, WP-316) ───────────────────────────────────

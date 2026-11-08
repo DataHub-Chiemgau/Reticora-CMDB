@@ -3906,6 +3906,22 @@
       "removeField": "Entfernen: {{name}}",
       "fieldRemoved": "{{name}} aus dem Layout entfernt.",
       "refused": "Vom Server abgelehnt."
+    },
+    "preview": {
+      "title": "Vorschau",
+      "open": "Vorschau öffnen",
+      "close": "Vorschau schließen",
+      "template": "Template der Vorschau",
+      "noTemplate": "Ohne Template",
+      "role": "Rolle der Vorschau",
+      "ownRoles": "Eigene Rollen",
+      "form": "Formularvorschau",
+      "publishedState": "Die Vorschau zeigt den veröffentlichten Stand. Eingaben bleiben lokal und werden nicht gespeichert.",
+      "draftState": "Die Vorschau zeigt den Stand des Drafts {{name}}. Eingaben bleiben lokal und werden nicht gespeichert.",
+      "roleLocked": "Die Vorschau als andere Rolle erfordert das Recht citype:manage.",
+      "roleForbidden": "Die Vorschau als diese Rolle wurde abgelehnt (citype:manage). Sie zeigt das Formular für die eigenen Rollen.",
+      "unsaved": "Der Editor enthält ungespeicherte Änderungen. Die Vorschau zeigt den gespeicherten Stand.",
+      "error": "Die Vorschau konnte nicht geladen werden"
     }
   }
 }

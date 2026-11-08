@@ -3906,6 +3906,22 @@
       "removeField": "Remove: {{name}}",
       "fieldRemoved": "{{name}} removed from the layout.",
       "refused": "Refused by the server."
+    },
+    "preview": {
+      "title": "Preview",
+      "open": "Open preview",
+      "close": "Close preview",
+      "template": "Template of the preview",
+      "noTemplate": "No template",
+      "role": "Role of the preview",
+      "ownRoles": "Own roles",
+      "form": "Form preview",
+      "publishedState": "The preview shows the published state. Inputs stay local and are not saved.",
+      "draftState": "The preview shows the state of the draft {{name}}. Inputs stay local and are not saved.",
+      "roleLocked": "The preview as another role requires the permission citype:manage.",
+      "roleForbidden": "The preview as this role was refused (citype:manage). It shows the form for your own roles.",
+      "unsaved": "The editor has unsaved changes. The preview shows the saved state.",
+      "error": "The preview could not be loaded"
     }
   }
 }

@@ -3,8 +3,15 @@
  * definitions (global + type + instance scopes) grouped by ui_group, with
  * conditional visibility/required/read-only evaluated live against the
  * current values. End users see a plain form; the rule model stays hidden.
+ *
+ * With `layout` (WP-803) the form follows the sections of a resolved form
+ * (WP-719): sections and fields in layout order, titles in the UI language,
+ * the width as share of a 12-column grid. The server state of a field is
+ * OR-combined with the live evaluation (required, read only); its
+ * visibility applies to fields without a conditional visibility rule.
  */
 import { useMemo } from 'react';
+import { localizedText, type LocalizedText } from '../../api/cmdb';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -29,11 +36,116 @@ export interface DynamicFormProps {
   errors?: Record<string, FieldError | null | undefined>;
   /** referenceOptions resolves reference-typed fields to selectable options. */
   referenceOptions?: Record<string, Array<{ value: string; label: string }>>;
+  /**
+   * layout arranges the fields in sections (WP-803); without it the fields
+   * are grouped by ui_group and sort_order.
+   */
+  layout?: DynamicFormSection[];
+}
+
+/** The server state of a field in a layout (fieldmeta.FieldState, read_only as readOnly). */
+export interface DynamicFormFieldState {
+  visible: boolean;
+  required: boolean;
+  readOnly: boolean;
+  allowedValues?: string[];
+}
+
+/** A field of a layout section: the name of a definition and its width (1–12). */
+export interface DynamicFormLayoutField {
+  name: string;
+  width: number;
+  state?: DynamicFormFieldState;
+}
+
+/** A section of a layout: key, title DE/EN and the fields in order. */
+export interface DynamicFormSection {
+  key: string;
+  title: LocalizedText;
+  visible: boolean;
+  fields: DynamicFormLayoutField[];
 }
 
 interface RenderedField {
   def: FieldDefinition;
   state: FieldState;
+  /** The width in the 12-column grid of a layout. */
+  width?: number;
+}
+
+interface RenderedGroup {
+  key: string;
+  title: string;
+  fields: RenderedField[];
+}
+
+// The column spans of the 12-column grid, spelled out for Tailwind.
+const SPANS = [
+  'sm:col-span-1',
+  'sm:col-span-2',
+  'sm:col-span-3',
+  'sm:col-span-4',
+  'sm:col-span-5',
+  'sm:col-span-6',
+  'sm:col-span-7',
+  'sm:col-span-8',
+  'sm:col-span-9',
+  'sm:col-span-10',
+  'sm:col-span-11',
+  'sm:col-span-12',
+];
+
+function spanOf(width: number): string {
+  const n = Math.min(12, Math.max(1, Math.round(width) || 12));
+  return SPANS[n - 1] ?? 'sm:col-span-12';
+}
+
+/**
+ * mergeState combines the live evaluation with the server state: required
+ * and read only hold if either says so; the server visibility applies when
+ * the field has no conditional visibility rule of its own.
+ */
+function mergeState(
+  def: FieldDefinition,
+  live: FieldState,
+  server: DynamicFormFieldState | undefined,
+): FieldState {
+  if (!server) return live;
+  const conditional = (def.conditional?.visible_when?.length ?? 0) > 0;
+  return {
+    visible: conditional ? live.visible : server.visible,
+    required: live.required || server.required,
+    readOnly: live.readOnly || server.readOnly,
+    allowedValues: live.allowedValues ?? server.allowedValues,
+  };
+}
+
+function layoutGroups(
+  layout: DynamicFormSection[],
+  fields: FieldDefinition[],
+  values: Record<string, unknown>,
+  language: string,
+): RenderedGroup[] {
+  const byName = new Map(fields.map((f) => [f.name, f]));
+  const groups: RenderedGroup[] = [];
+  for (const section of layout) {
+    if (!section.visible) continue;
+    const rendered: RenderedField[] = [];
+    for (const field of section.fields) {
+      const def = byName.get(field.name);
+      if (!def) continue; // a name without definition is skipped
+      const state = mergeState(def, evaluateField(def, values), field.state);
+      if (!state.visible) continue;
+      rendered.push({ def, state, width: field.width });
+    }
+    if (rendered.length === 0) continue;
+    groups.push({
+      key: section.key,
+      title: localizedText(section.title, language),
+      fields: rendered,
+    });
+  }
+  return groups;
 }
 
 function groupFields(
@@ -58,25 +170,48 @@ export function DynamicForm({
   onChange,
   errors = {},
   referenceOptions = {},
+  layout,
 }: DynamicFormProps) {
-  const { t } = useTranslation();
-  const groups = useMemo(() => groupFields(fields, values), [fields, values]);
+  const { t, i18n } = useTranslation();
+  const language = i18n.language;
+  const groups = useMemo<RenderedGroup[]>(
+    () =>
+      layout
+        ? layoutGroups(layout, fields, values, language)
+        : Array.from(groupFields(fields, values).entries()).map(([group, rendered]) => ({
+            key: group || '_default',
+            title: group,
+            fields: rendered,
+          })),
+    [layout, fields, values, language],
+  );
   const errorText = (error: FieldError | null | undefined) =>
     !error ? undefined : typeof error === 'string' ? error : t(error.key, error.params);
 
   return (
     <div className="space-y-6">
-      {Array.from(groups.entries()).map(([group, rendered]) => (
-        <fieldset key={group || '_default'} className="min-w-0">
-          {group ? (
-            <legend className="mb-3 text-sm font-medium text-fg-muted">{group}</legend>
+      {groups.map((group) => (
+        <fieldset
+          key={group.key}
+          className="min-w-0"
+          data-section-key={layout ? group.key : undefined}
+        >
+          {group.title ? (
+            <legend className="mb-3 text-sm font-medium text-fg-muted">{group.title}</legend>
           ) : null}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {rendered.map(({ def, state }) => (
+          <div
+            className={
+              layout
+                ? 'grid grid-cols-1 gap-4 sm:grid-cols-12'
+                : 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+            }
+          >
+            {group.fields.map(({ def, state, width }) => (
               <DynamicField
                 key={def.name}
                 def={def}
                 state={state}
+                width={layout ? width : undefined}
                 value={values[def.name]}
                 error={errorText(errors[def.name])}
                 options={referenceOptions[def.name]}
@@ -97,14 +232,22 @@ interface DynamicFieldProps {
   error?: string;
   options?: Array<{ value: string; label: string }>;
   onChange: (value: unknown) => void;
+  /** The width in the 12-column grid of a layout; absent outside a layout. */
+  width?: number;
 }
 
 /** Long-form controls take the full row; the others sit two to a row. */
 const WIDE_TYPES = new Set(['multiline', 'textarea', 'json']);
 
 function DynamicField(props: DynamicFieldProps) {
+  const span =
+    props.width !== undefined
+      ? `min-w-0 ${spanOf(props.width)}`
+      : WIDE_TYPES.has(props.def.data_type)
+        ? 'min-w-0 sm:col-span-2'
+        : 'min-w-0';
   return (
-    <div className={WIDE_TYPES.has(props.def.data_type) ? 'min-w-0 sm:col-span-2' : 'min-w-0'}>
+    <div className={span} data-field-name={props.width !== undefined ? props.def.name : undefined}>
       <DynamicFieldControl {...props} />
     </div>
   );
