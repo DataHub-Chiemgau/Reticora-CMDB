@@ -26,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
 // memoryBlobs is an in-memory blob.Store; the test reads the stored
@@ -63,7 +65,7 @@ func (s *memoryBlobs) Delete(_ context.Context, bucket, key string) error {
 	return nil
 }
 
-func (s *memoryBlobs) PresignedGetURL(_ context.Context, bucket, key string) (string, error) {
+func (s *memoryBlobs) PresignedGetURL(_ context.Context, bucket, key string, _ blob.Download) (string, error) {
 	return "https://blob.example/" + bucket + "/" + key, nil
 }
 

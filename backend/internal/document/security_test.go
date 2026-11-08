@@ -35,6 +35,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -44,13 +45,16 @@ type presignRecorder struct {
 	*fakeBlobStore
 	mu     sync.Mutex
 	signed []string
+	// downloads are the Download of each presigned object, in order.
+	downloads []blob.Download
 }
 
-func (s *presignRecorder) PresignedGetURL(ctx context.Context, bucket, key string) (string, error) {
+func (s *presignRecorder) PresignedGetURL(ctx context.Context, bucket, key string, dl blob.Download) (string, error) {
 	s.mu.Lock()
 	s.signed = append(s.signed, bucket+"/"+key)
+	s.downloads = append(s.downloads, dl)
 	s.mu.Unlock()
-	return s.fakeBlobStore.PresignedGetURL(ctx, bucket, key)
+	return s.fakeBlobStore.PresignedGetURL(ctx, bucket, key, dl)
 }
 
 // take returns the objects presigned since the last call.
@@ -208,6 +212,46 @@ func TestPolyglotIsStoredWithTheVerifiedType(t *testing.T) {
 	current, err := repo.GetByID(context.Background(), "org-1", id)
 	if err != nil || current.MimeType != "application/pdf" {
 		t.Fatalf("document type after the attempts: %+v %v", current, err)
+	}
+}
+
+// TestDownloadIsAnAttachmentWithTheVerifiedType (finding of WP-829): the
+// download URL of a document is signed as an attachment with the file name
+// of the document and its verified type; a stored type outside the upload
+// whitelist (legacy data, e.g. text/html) is delivered as
+// application/octet-stream.
+func TestDownloadIsAnAttachmentWithTheVerifiedType(t *testing.T) {
+	repo, blobs, mux := securityFixture(t)
+	id := newDoc(t, repo, "org-1", "Prüfbericht")
+	w := requestAs(t, mux, "org-1", http.MethodPut, "/api/v1/documents/"+id+"/content", "application/pdf", "%PDF-1.7 x")
+	if w.Code != http.StatusOK {
+		t.Fatalf("upload: %d %s", w.Code, w.Body.String())
+	}
+	if err := repo.SetScanResult(context.Background(), "org-1", id, 1, ScanClean, ""); err != nil {
+		t.Fatal(err)
+	}
+	blobs.downloads = nil
+	for _, query := range []string{"", "?version=1"} {
+		if w = requestAs(t, mux, "org-1", http.MethodGet, "/api/v1/documents/"+id+"/content"+query, "", ""); w.Code != http.StatusOK {
+			t.Fatalf("download%s: %d %s", query, w.Code, w.Body.String())
+		}
+	}
+	want := blob.Download{FileName: "Prüfbericht.pdf", ContentType: "application/pdf"}
+	if len(blobs.downloads) != 2 || blobs.downloads[0] != want || blobs.downloads[1] != want {
+		t.Fatalf("signed downloads %+v, want twice %+v", blobs.downloads, want)
+	}
+
+	for stored, wantType := range map[string]string{
+		"text/html":                blob.OctetStream,
+		"image/svg+xml":            blob.OctetStream,
+		"":                         blob.OctetStream,
+		"application/pdf":          "application/pdf",
+		"text/csv; charset=utf-8":  "text/csv",
+		"application/octet-stream": blob.OctetStream,
+	} {
+		if got := downloadOf("x", stored); got.ContentType != wantType || got.FileName != "x" {
+			t.Errorf("downloadOf(%q) = %+v, want type %s", stored, got, wantType)
+		}
 	}
 }
 

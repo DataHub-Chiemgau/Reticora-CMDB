@@ -2,7 +2,10 @@
 // PDF loaded with the bearer token (fetchBlob) and opened as object URL; a
 // batch of the inventory area runs as job labels.batch, its progress comes
 // from GET /jobs?kind=labels.batch and its PDF from the signed download_url
-// of GET /labels/batch/{job_id}/download. 409 and 503 show the detail.
+// of GET /labels/batch/{job_id}/download, loaded without token and opened
+// as application/pdf object URL (the object store answers it only as
+// attachment, WP-829); without it the dialog offers the signed URL as
+// download link. 409 and 503 show the detail.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import i18n from '../../i18n';
@@ -21,6 +24,7 @@ interface Call {
   search: string;
   body: unknown;
   authorization: string | null;
+  credentials?: RequestCredentials;
 }
 
 function json(body: unknown, status = 200) {
@@ -37,10 +41,14 @@ interface Stub {
   label?: () => Response;
   batch?: () => Response;
   download?: () => Response;
+  /** pdf answers the signed URL of the batch PDF (the object store). */
+  pdf?: () => Response;
   jobStatus?: string;
 }
 
-function stubApi({ label, batch, download, jobStatus = 'succeeded' }: Stub = {}) {
+const SIGNED = 'https://cmdb.example/objects/exports/labels.pdf?sig=1';
+
+function stubApi({ label, batch, download, pdf, jobStatus = 'succeeded' }: Stub = {}) {
   const calls: Call[] = [];
   vi.stubGlobal(
     'fetch',
@@ -56,7 +64,21 @@ function stubApi({ label, batch, download, jobStatus = 'succeeded' }: Stub = {})
         search: url.search,
         body,
         authorization: headers.get('Authorization'),
+        credentials: init?.credentials,
       });
+      if (url.origin === 'https://cmdb.example' && path === '/objects/exports/labels.pdf') {
+        // The object store answers the signed URL as attachment, here
+        // without a PDF type: the dialog sets application/pdf itself.
+        return pdf
+          ? pdf()
+          : new Response('%PDF-1.7 batch', {
+              status: 200,
+              headers: {
+                'Content-Type': 'application/octet-stream',
+                'Content-Disposition': 'attachment; filename="labels.pdf"',
+              },
+            });
+      }
       if (path === `/assets/${ASSET}/label`) {
         return label
           ? label()
@@ -98,7 +120,7 @@ function stubApi({ label, batch, download, jobStatus = 'succeeded' }: Stub = {})
               labels: 48,
               pages: 2,
               expires_at: '2026-11-08T10:00:00Z',
-              download_url: 'https://cmdb.example/objects/exports/labels.pdf?sig=1',
+              download_url: SIGNED,
             });
       }
       if (path === '/entitlements') {
@@ -159,9 +181,14 @@ describe('LabelPrintDialog', () => {
     expect(tab.opener).toBeNull();
   });
 
-  it('starts a batch of the area, shows the job progress and opens the download_url', async () => {
+  it('starts a batch of the area, shows the job progress and opens the PDF as object URL', async () => {
     const calls = stubApi();
-    const open = vi.spyOn(window, 'open').mockReturnValue({ opener: null } as Window);
+    const createObjectURL = vi.fn(() => 'blob:batch');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    const tab = { opener: {} as unknown };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as Window);
     renderWithProviders(
       <LabelPrintDialog open onOpenChange={vi.fn()} areaId={AREA} areaName="Werk Nord" />,
     );
@@ -181,13 +208,65 @@ describe('LabelPrintDialog', () => {
     const jobs = calls.find((entry) => entry.path === '/jobs')!;
     expect(new URLSearchParams(jobs.search).get('kind')).toBe('labels.batch');
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'PDF herunterladen' }));
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith(
-        'https://cmdb.example/objects/exports/labels.pdf?sig=1',
-        '_blank',
-      ),
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'PDF herunterladen' }));
+      await waitFor(() => expect(open).toHaveBeenCalledWith('blob:batch', '_blank'));
+      // The signed URL is loaded without bearer token and cookie.
+      const signed = calls.find((entry) => entry.path === '/objects/exports/labels.pdf')!;
+      expect(signed.search).toBe('?sig=1');
+      expect(signed.authorization).toBeNull();
+      expect(signed.credentials).toBe('omit');
+      // The blob is a PDF whatever type the object store named.
+      const blob = (createObjectURL.mock.calls[0] as unknown[])[0] as Blob;
+      expect(blob.type).toBe('application/pdf');
+      expect(blob.size).toBe('%PDF-1.7 batch'.length);
+      expect(tab.opener).toBeNull();
+      expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+      // The object URL is revoked after a delay, not at once.
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:batch');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('offers the download link when the signed PDF cannot be loaded', async () => {
+    stubApi({ pdf: () => new Response('denied', { status: 403 }) });
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
+    const open = vi.spyOn(window, 'open').mockReturnValue({ opener: null } as Window);
+    renderWithProviders(<LabelPrintDialog open onOpenChange={vi.fn()} areaId={AREA} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Etiketten drucken' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Etiketten erzeugen' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'PDF herunterladen' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Das PDF konnte nicht geladen werden (HTTP 403)',
     );
+    expect(
+      within(dialog).getByRole('link', { name: 'PDF über den Download-Link speichern' }),
+    ).toHaveAttribute('href', SIGNED);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('offers the download link when the pop-up is blocked', async () => {
+    stubApi();
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:blocked'),
+      configurable: true,
+    });
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    renderWithProviders(<LabelPrintDialog open onOpenChange={vi.fn()} areaId={AREA} />);
+    const dialog = await screen.findByRole('dialog', { name: 'Etiketten drucken' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Etiketten erzeugen' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'PDF herunterladen' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Pop-up blockiert');
+    expect(
+      within(dialog).getByRole('link', { name: 'PDF über den Download-Link speichern' }),
+    ).toHaveAttribute('href', SIGNED);
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:blocked');
   });
 
   it('shows the detail of a batch whose result is not ready (409)', async () => {

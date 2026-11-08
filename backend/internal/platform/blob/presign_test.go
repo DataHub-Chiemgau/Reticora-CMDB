@@ -93,7 +93,12 @@ func sigV4Valid(t *testing.T, u *url.URL, secret, host string) bool {
 
 func presign(t *testing.T, s *S3Store, bucket, key string) *url.URL {
 	t.Helper()
-	raw, err := s.PresignedGetURL(context.Background(), bucket, key)
+	return presignAs(t, s, bucket, key, Download{})
+}
+
+func presignAs(t *testing.T, s *S3Store, bucket, key string, dl Download) *url.URL {
+	t.Helper()
+	raw, err := s.PresignedGetURL(context.Background(), bucket, key, dl)
 	if err != nil {
 		t.Fatalf("presign %s/%s: %v", bucket, key, err)
 	}
@@ -171,9 +176,6 @@ func TestPresignedGetURLSignsOnlyTheRequestedObject(t *testing.T) {
 // proxy: response-content-disposition=attachment and response-content-type
 // are part of the signed query.
 func TestPresignedGetURLForcesDownload(t *testing.T) {
-	t.Skip("Befund für WP-329 (SEC-09, SEC-11): S3Store.PresignedGetURL (blob.go:353–391) setzt nur X-Amz-*-Parameter, " +
-		"weder response-content-disposition=attachment noch response-content-type, und frontend/objects-proxy.conf " +
-		"setzt weder Content-Disposition noch X-Content-Type-Options: nosniff; das Folge-WP entfernt diesen Skip")
 	s := presignStore(t)
 	for _, obj := range presignObjects {
 		u := presign(t, s, obj.bucket, obj.key)
@@ -187,5 +189,50 @@ func TestPresignedGetURLForcesDownload(t *testing.T) {
 		if !sigV4Valid(t, u, presignSecret, presignHost) {
 			t.Errorf("%s/%s: the response parameters are not signed", obj.bucket, obj.key)
 		}
+	}
+}
+
+// TestPresignedGetURLNamesTheDownload: the signed response parameters
+// carry a safe file name (RFC 6266 with RFC 5987 filename* beyond ASCII,
+// path and control characters removed) and the verified type; a type a
+// browser executes becomes application/octet-stream.
+func TestPresignedGetURLNamesTheDownload(t *testing.T) {
+	s := presignStore(t)
+	cases := []struct {
+		dl               Download
+		disposition, typ string
+	}{
+		{Download{}, "attachment", "application/octet-stream"},
+		{Download{FileName: "Rechnung 2026.pdf", ContentType: "application/pdf"},
+			`attachment; filename="Rechnung 2026.pdf"`, "application/pdf"},
+		{Download{FileName: "Prüfbericht \"final\".csv", ContentType: "text/csv; charset=utf-8; x=1"},
+			`attachment; filename="Pr_fbericht _final_.csv"; filename*=UTF-8''Pr%C3%BCfbericht%20%22final%22.csv`,
+			"text/csv; charset=utf-8"},
+		{Download{FileName: "../../etc/pass\r\nwd.txt", ContentType: "text/plain"},
+			`attachment; filename="passwd.txt"`, "text/plain"},
+		{Download{FileName: `C:\Users\x\100%.png`, ContentType: "image/png"},
+			`attachment; filename="100_.png"; filename*=UTF-8''100%25.png`, "image/png"},
+		{Download{FileName: "..", ContentType: "text/html"}, "attachment", "application/octet-stream"},
+		{Download{FileName: "x.svg", ContentType: "image/svg+xml"}, `attachment; filename="x.svg"`, "application/octet-stream"},
+		{Download{ContentType: "not a type"}, "attachment", "application/octet-stream"},
+	}
+	for _, c := range cases {
+		u := presignAs(t, s, "reticora-documents", "org/org-1/documents/doc-1/ver-1", c.dl)
+		q := u.Query()
+		if got := q.Get("response-content-disposition"); got != c.disposition {
+			t.Errorf("%+v: disposition %q, want %q", c.dl, got, c.disposition)
+		}
+		if got := q.Get("response-content-type"); got != c.typ {
+			t.Errorf("%+v: type %q, want %q", c.dl, got, c.typ)
+		}
+		if !sigV4Valid(t, u, presignSecret, presignHost) {
+			t.Errorf("%+v: the URL does not verify: %s", c.dl, u)
+		}
+	}
+	long := strings.Repeat("ä", 150) + ".pdf"
+	u := presignAs(t, s, "exports", "org-1/x.pdf", Download{FileName: long})
+	d := u.Query().Get("response-content-disposition")
+	if !strings.HasPrefix(d, `attachment; filename="`) || len(d) > 1000 {
+		t.Errorf("long name: %q", d)
 	}
 }

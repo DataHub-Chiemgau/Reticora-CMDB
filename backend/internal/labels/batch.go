@@ -443,7 +443,8 @@ func (h *BatchHandler) Download(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusConflict, "Conflict", "the label batch has no valid result")
 		return
 	}
-	signed, err := h.blobs.PresignedGetURL(r.Context(), BatchBucket, BatchObjectKey(job.OrganizationID, job.ID))
+	signed, err := h.blobs.PresignedGetURL(r.Context(), BatchBucket, BatchObjectKey(job.OrganizationID, job.ID),
+		blob.Download{FileName: "labels-" + job.ID + ".pdf", ContentType: "application/pdf"})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "label batch: sign the download", "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Server Error", "the download could not be signed")

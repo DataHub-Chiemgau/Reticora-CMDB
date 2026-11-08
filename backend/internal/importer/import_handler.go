@@ -715,7 +715,8 @@ func (h *ImportHandler) Report(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "a cancelled import has no report")
 		return
 	}
-	url, err := h.blobs.PresignedGetURL(r.Context(), export.ExportBucket, ReportKey(t.OrganizationID, job.ID))
+	url, err := h.blobs.PresignedGetURL(r.Context(), export.ExportBucket, ReportKey(t.OrganizationID, job.ID),
+		blob.Download{FileName: "import-" + job.ID + "-report.csv", ContentType: "text/csv"})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "import: presign report", "job", job.ID, "error", err)
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a download URL")

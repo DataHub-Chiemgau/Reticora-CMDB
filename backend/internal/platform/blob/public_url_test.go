@@ -22,11 +22,11 @@ func presignPair(t *testing.T, public string) (internal, published *url.URL) {
 		t.Fatalf("SetPublicURL(%q): %v", public, err)
 	}
 	for range 3 {
-		a, err := plain.PresignedGetURL(context.Background(), "exports", "org-1/job-1.csv")
+		a, err := plain.PresignedGetURL(context.Background(), "exports", "org-1/job-1.csv", Download{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := routed.PresignedGetURL(context.Background(), "exports", "org-1/job-1.csv")
+		b, err := routed.PresignedGetURL(context.Background(), "exports", "org-1/job-1.csv", Download{})
 		if err != nil {
 			t.Fatal(err)
 		}

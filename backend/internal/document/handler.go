@@ -3,6 +3,7 @@ package document
 import (
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -456,7 +457,7 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document not found")
 		return
 	}
-	key, scanStatus := doc.StorageKey, doc.ScanStatus
+	key, scanStatus, mimeType := doc.StorageKey, doc.ScanStatus, doc.MimeType
 	if version > 0 {
 		v, verr := h.repo.GetVersion(r.Context(), t.OrganizationID, doc.ID, version)
 		if verr != nil {
@@ -467,7 +468,7 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 			api.WriteRepoError(w, verr)
 			return
 		}
-		key, scanStatus = v.StorageKey, v.ScanStatus
+		key, scanStatus, mimeType = v.StorageKey, v.ScanStatus, v.MimeType
 	}
 	if key == "" {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "document has no stored content")
@@ -481,12 +482,25 @@ func (h *Handler) DownloadContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key)
+	url, err := h.blobs.PresignedGetURL(r.Context(), h.bucket, key, downloadOf(doc.FileName, mimeType))
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "Internal Error", "could not create a download URL")
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]string{"download_url": url})
+}
+
+// downloadOf is how the signed URL delivers a document: as an attachment
+// with the file name of the document and its stored type, which the
+// upload verified against the whitelist (sniff.go); any other type (a
+// document stored before the whitelist) is delivered as
+// application/octet-stream (finding of WP-829).
+func downloadOf(fileName, mimeType string) blob.Download {
+	dl := blob.Download{FileName: fileName, ContentType: blob.OctetStream}
+	if mediaType, _, err := mime.ParseMediaType(mimeType); err == nil && allowedMimeTypes[mediaType] {
+		dl.ContentType = mediaType
+	}
+	return dl
 }
 
 // Link handles POST /api/v1/documents/{id}/links

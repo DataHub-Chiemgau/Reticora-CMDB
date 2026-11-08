@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 )
 
 // TestRetentionRunsAgainstPostgres covers NFR-06 and AUD-09 (WP-135):
@@ -379,7 +380,9 @@ func (b *fakeBlobs) Get(context.Context, string, string) (io.ReadCloser, error) 
 	return nil, errors.New("not stored")
 }
 
-func (b *fakeBlobs) PresignedGetURL(context.Context, string, string) (string, error) { return "", nil }
+func (b *fakeBlobs) PresignedGetURL(context.Context, string, string, blob.Download) (string, error) {
+	return "", nil
+}
 
 func (b *fakeBlobs) Delete(_ context.Context, bucket, key string) error {
 	b.mu.Lock()

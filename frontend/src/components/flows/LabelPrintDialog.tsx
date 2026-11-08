@@ -6,8 +6,11 @@
  * labels of the inventory area as job labels.batch (POST /labels/batch with
  * template, kind and location_id): the progress comes from useJobs, the
  * result {labels, pages, expires_at} from useJobResult, and GET
- * /labels/batch/{job_id}/download names a short-lived signed URL the dialog
- * opens directly. A refused request (409 result not ready, 503 no blob
+ * /labels/batch/{job_id}/download names a short-lived signed URL. The object
+ * store delivers it only as an attachment (WP-829), so the dialog loads the
+ * PDF over that URL, opens it as an application/pdf object URL in a new tab
+ * for the browser's PDF viewer and offers the signed URL as download link
+ * when loading or the tab fails. A refused request (409 result not ready, 503 no blob
  * storage) shows the detail of the problem.
  *
  * The dialog is offered only with the feature barcode (E-44); the caller
@@ -65,6 +68,23 @@ function openURL(url: string): boolean {
   if (!opened) return false;
   opened.opener = null;
   return true;
+}
+
+/**
+ * fetchServerPdf loads the label PDF the server rendered (job labels.batch)
+ * over its signed URL. The object store delivers it only as an attachment
+ * (finding of WP-829), so it is read here and handed to the browser's PDF
+ * viewer as a blob of type application/pdf, whatever type the answer names.
+ * The signed query is the only credential: no bearer token, no cookie. Only
+ * for the server-rendered labels, never for uploaded documents.
+ */
+async function fetchServerPdf(signedURL: string): Promise<Blob> {
+  if (!/^https?:$/.test(new URL(signedURL, window.location.href).protocol)) {
+    throw new Error('download URL is not http(s)');
+  }
+  const res = await fetch(signedURL, { credentials: 'omit' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return new Blob([await res.arrayBuffer()], { type: 'application/pdf' });
 }
 
 export interface LabelPrintDialogProps {
@@ -212,11 +232,27 @@ function BatchLabels({ areaId, onClose }: { areaId: string; onClose: () => void 
     if (!jobId) return;
     setBusy(true);
     setError(undefined);
+    setFallback(undefined);
+    let signed: string;
     try {
-      const res = await labelDownloadApi.batchDownload(jobId);
-      if (!openURL(res.download_url)) setFallback(res.download_url);
+      signed = (await labelDownloadApi.batchDownload(jobId)).download_url;
     } catch (err) {
       setError(errorDetail(err));
+      setBusy(false);
+      return;
+    }
+    try {
+      const url = URL.createObjectURL(await fetchServerPdf(signed));
+      if (openURL(url)) {
+        setTimeout(() => URL.revokeObjectURL(url), OBJECT_URL_TTL_MS);
+      } else {
+        URL.revokeObjectURL(url);
+        setError(t('labels.popupBlocked'));
+        setFallback(signed);
+      }
+    } catch (err) {
+      setError(t('labels.pdfLoadFailed', { detail: errorDetail(err) }));
+      setFallback(signed);
     } finally {
       setBusy(false);
     }
@@ -270,8 +306,8 @@ function BatchLabels({ areaId, onClose }: { areaId: string; onClose: () => void 
       ) : null}
       {fallback ? (
         <p className="text-sm">
-          <a href={fallback} target="_blank" rel="noreferrer" className="text-accent underline">
-            {t('labels.openPdf')}
+          <a href={fallback} rel="noreferrer" className="text-accent underline">
+            {t('labels.downloadLink')}
           </a>
         </p>
       ) : null}
