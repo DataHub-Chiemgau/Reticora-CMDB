@@ -1,0 +1,267 @@
+package savedview_test
+
+import (
+	"context"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/savedview"
+)
+
+// TestSavedViewQueryBudget covers ABN-02 for the filter queries of Phase 2
+// (WP-824, after the pattern of TestCIQueryBudget, WP-436) against
+// PostgreSQL in a database of its own (scopetest.BudgetDatabase) with
+// 10,000 CIs and 10,000 assets of organization A, every CI linked to its
+// asset, and two trees of relationships (depends_on, four sources per
+// target) over seven levels: CIs 1 to 5,000 depend on CI n/4, so the CIs
+// upstream of CI 1 fan out, and CI 5,000 + k/4 depends on CI 5,000 + k, so
+// the CIs downstream of CI 5,001 fan out; within the depth of 5
+// (savedview.MaxRelationshipDepth) each root reaches 1,364 CIs.
+//
+//   - savedview.PGQueryEngine.Query sends the same number of statements for
+//     10 and 200 rows and stays within queryBudget: the filter AST with
+//     asset fields (WP-309) on assets and on the linked asset of CIs, and
+//     upstream_of and downstream_of to depth 5.
+//   - The count and the page of upstream_of and downstream_of, the SQL the
+//     engine really sends (pgx tracer on a copy of the application pool),
+//     are EXPLAINed with ANALYZE as the application role in the tenant
+//     transaction after ANALYZE: the walk reads the edges of ci_relationship
+//     through idx_ci_rel_org_target (upstream_of, target_ci_id) and
+//     idx_ci_rel_org_source or uq_ci_relationship_edge (downstream_of,
+//     source_ci_id; both lead with organization_id, source_ci_id) and reads
+//     at most 1 % of the organization's edges, from a CI that reaches 13
+//     CIs. Without the index the check names it (negative case, dropped in
+//     a transaction that is rolled back).
+//   - The attribute filter on warranty_days_left (WP-718, the preset
+//     warranty_expiring) compares the computed system attribute, for which
+//     no index is built (000225, K22, SR-04), under row level security
+//     (E-133): its plan as the application role is logged without an
+//     assertion; WP-327 rates it with the p95 of ci_attr_filter.
+//     TestCIQueryBudget covers the attribute filter of the CI list.
+//
+// The checks run with organization A alone and again with 5,000 CIs,
+// assets and edges of organization B. With RETICORA_PERF_BUDGET=1 the
+// pages of 200 rows must stay below the 500 ms of NFR-02 (best of five).
+//
+// Retest (locally without TimescaleDB with scopetest.MigrationsDirEnv):
+//
+//	cd backend && go test -count=1 -run TestSavedViewQueryBudget ./internal/savedview/
+func TestSavedViewQueryBudget(t *testing.T) {
+	db := scopetest.BudgetDatabase(t)
+	f := scopetest.Seed(t, "8f")
+	bg := context.Background()
+	// The database goes with the test: CIs and assets are truncated before
+	// the fixture cleanup, which would delete them row by row with their
+	// triggers. Only in that database.
+	t.Cleanup(func() {
+		var current string
+		if err := f.Admin.QueryRow(bg, `SELECT current_database()`).Scan(&current); err != nil || current != db {
+			t.Errorf("truncate: connected to %q, want %s: %v", current, db, err)
+			return
+		}
+		if _, err := f.Admin.Exec(bg, `TRUNCATE ci_relationship, asset, ci CASCADE`); err != nil {
+			t.Errorf("truncate: %v", err)
+		}
+	})
+	var serverType string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci_type WHERE key = 'server' AND organization_id IS NULL`).Scan(&serverType); err != nil {
+		t.Fatal(err)
+	}
+
+	// seed inserts the assets and CIs 1..to of org (asset SV-n with
+	// manufacturer ACME, CI sv-n linked to it, warranty_days_left 5 on every
+	// hundredth CI; in organization A clients 1 and 2 and no client in
+	// turn) and the edges of the two trees of size CIs among them.
+	seed := func(org string, clients []any, to, size int) {
+		t.Helper()
+		stmts := []struct {
+			name string
+			sql  string
+			args []any
+		}{
+			{"assets", `INSERT INTO asset (organization_id, client_id, inventory_no, name, manufacturer, warranty_until)
+				SELECT $1, (ARRAY[$2::uuid, $3::uuid, NULL])[n % 3 + 1], 'SV-' || n, 'sv-asset-' || n, 'ACME', DATE '2027-01-01' + n
+				FROM generate_series(1, $4::int) AS n`, []any{org, clients[0], clients[1], to}},
+			{"CIs", `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, asset_id, attributes)
+				SELECT $1, a.client_id, $2, 'sv-' || n, 'active', a.id,
+					CASE WHEN n % 100 = 0 THEN '{"warranty_days_left": 5}'::jsonb ELSE '{}'::jsonb END
+				FROM generate_series(1, $3::int) AS n JOIN asset a ON a.organization_id = $1 AND a.inventory_no = 'SV-' || n`,
+				[]any{org, serverType, to}},
+			// Tree U: CI n depends on CI n/4; tree D: CI size + k/4
+			// depends on CI size + k.
+			{"edges", `WITH c AS (SELECT substring(name FROM 4)::int AS n, id FROM ci WHERE organization_id = $1)
+				INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+				SELECT $1, src.id, dst.id, 'depends_on' FROM (
+					SELECT n AS src, n / 4 AS dst FROM generate_series(4, $2::int) AS n
+					UNION ALL SELECT $2::int + k / 4, $2::int + k FROM generate_series(4, $2::int) AS k
+				) AS e JOIN c src ON src.n = e.src JOIN c dst ON dst.n = e.dst`, []any{org, size}},
+		}
+		for _, s := range stmts {
+			if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+				t.Fatalf("seed %s of %d CIs: %v", s.name, to, err)
+			}
+		}
+	}
+	const orgCIs = 10000
+	seed(f.OrgA, []any{f.Client1, f.Client2}, orgCIs, orgCIs/2)
+	analyze := func() {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, `ANALYZE ci, asset, ci_relationship`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	analyze()
+	ciOf := func(n int) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND name = 'sv-' || $2::int`, f.OrgA, n).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	var edges int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM ci_relationship WHERE organization_id = $1`, f.OrgA).Scan(&edges); err != nil || edges < orgCIs-10 {
+		t.Fatalf("the fixture has %d edges: %v", edges, err)
+	}
+
+	trace := scopetest.NewQueryTrace(t, f.App)
+	engine := savedview.NewPGQueryEngine(trace.Pool)
+	ctx := f.OrgCtx(f.OrgA)
+	query := func(spec *savedview.FilterSpec, limit int) ([]string, int, error) {
+		rows, total, err := engine.Query(ctx, f.OrgA, spec, api.PaginationParams{Limit: limit})
+		out := make([]string, 0, len(rows))
+		for i := range rows {
+			out = append(out, rows[i].ID)
+		}
+		return out, total, err
+	}
+
+	// Statements (no N+1): begin with the tenant context, count, page,
+	// commit; the specs name no attribute, tag or relationship type that
+	// resolveCatalog would read.
+	const queryBudget = 4
+	upRoot, downRoot := ciOf(1), ciOf(orgCIs/2+1)
+	const reached = 4 + 16 + 64 + 256 + 1024
+	statementCases := []struct {
+		name  string
+		spec  *savedview.FilterSpec
+		total int
+	}{
+		{"filter AST with asset fields on assets", &savedview.FilterSpec{EntityKind: "asset", Where: &savedview.Expr{And: []savedview.Expr{
+			{Field: "manufacturer", Op: savedview.OpEq, Value: "ACME"}, {Field: "inventory_no", Op: savedview.OpLike, Value: "SV-*"},
+		}}}, orgCIs},
+		{"filter AST with a field of the linked asset on CIs", &savedview.FilterSpec{EntityKind: "ci",
+			Where: &savedview.Expr{Field: "asset.manufacturer", Op: savedview.OpEq, Value: "ACME"}}, orgCIs},
+		{"upstream_of to depth 5", &savedview.FilterSpec{EntityKind: "ci", UpstreamOf: upRoot}, reached},
+		{"downstream_of to depth 5", &savedview.FilterSpec{EntityKind: "ci", DownstreamOf: downRoot}, reached},
+	}
+	run := func(spec *savedview.FilterSpec, limit, total int) int {
+		t.Helper()
+		return len(trace.Run(t, func() error {
+			ids, got, err := query(spec, limit)
+			if err == nil && (len(ids) != limit || got != total) {
+				t.Errorf("query %d: %d rows of %d, want %d", limit, len(ids), got, total)
+			}
+			return err
+		}))
+	}
+	// Warm the pool: the first connection switches its role.
+	run(statementCases[0].spec, 10, statementCases[0].total)
+	for _, c := range statementCases {
+		small, large := run(c.spec, 10, c.total), run(c.spec, 200, c.total)
+		if small != large {
+			t.Errorf("%s: %d statements for 10 rows, %d for 200 (N+1)", c.name, small, large)
+		}
+		if large > queryBudget {
+			t.Errorf("%s: %d statements, budget %d", c.name, large, queryBudget)
+		}
+		scopetest.TimeBudget(t, c.name+", page of 200 rows", 5, 500*time.Millisecond, func() error {
+			_, _, err := query(c.spec, 200)
+			return err
+		})
+	}
+
+	// The plans of the walk from CIs that reach 13 CIs within depth 5.
+	const maxRows = orgCIs / 100
+	edgeTables := []string{"ci_relationship"}
+	upBudget := &scopetest.QueryBudget{Tables: edgeTables, Indexes: [][]string{{"idx_ci_rel_org_target"}}, MaxRows: maxRows}
+	downBudget := &scopetest.QueryBudget{Tables: edgeTables, Indexes: [][]string{{"idx_ci_rel_org_source", "uq_ci_relationship_edge"}}, MaxRows: maxRows}
+	// ids returns the CIs of organization A named sv-<n> for the numbers
+	// in [from, to], sorted.
+	ids := func(ranges ...[2]int) []string {
+		t.Helper()
+		var out []string
+		for _, r := range ranges {
+			rows, err := f.Admin.Query(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND name LIKE 'sv-%'
+				AND substring(name FROM 4)::int BETWEEN $2 AND $3`, f.OrgA, r[0], r[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, found...)
+		}
+		slices.Sort(out)
+		return out
+	}
+	// CI 312 of tree U: its sources 1248 to 1251 and theirs 4992 to 5000
+	// (the tree ends at 5000); the same in tree D from CI 5312.
+	half := orgCIs / 2
+	planCases := []struct {
+		name   string
+		spec   *savedview.FilterSpec
+		budget *scopetest.QueryBudget
+		want   []string
+	}{
+		{"upstream_of", &savedview.FilterSpec{EntityKind: "ci", UpstreamOf: ciOf(312)}, upBudget, ids([2]int{1248, 1251}, [2]int{4992, 5000})},
+		{"downstream_of", &savedview.FilterSpec{EntityKind: "ci", DownstreamOf: ciOf(half + 312)}, downBudget,
+			ids([2]int{half + 1248, half + 1251}, [2]int{half + 4992, half + 5000})},
+	}
+	warranty := &savedview.FilterSpec{EntityKind: "ci", Where: &savedview.Expr{Field: "attributes.warranty_days_left", Op: savedview.OpLte,
+		Value: float64(savedview.WarrantyExpiringDays)}}
+	orgWide := database.OrgWideScope(f.OrgA, f.User)
+	check := func(state string) {
+		t.Helper()
+		for _, c := range planCases {
+			var got []string
+			stmts := trace.Run(t, func() error {
+				var err error
+				got, _, err = query(c.spec, 50)
+				return err
+			})
+			slices.Sort(got)
+			if !slices.Equal(got, c.want) {
+				t.Errorf("%s, %s: found %d CIs %v, want %d %v", state, c.name, len(got), got, len(c.want), c.want)
+			}
+			scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, c.name+" (count)", scopetest.Statement(t, stmts, "SELECT COUNT(*) FROM ci"), c.budget)
+			scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, c.name+" (page)", scopetest.Statement(t, stmts, " ORDER BY "), c.budget)
+		}
+
+		// The attribute filter on warranty_days_left: logged only (E-133).
+		var got []string
+		stmts := trace.Run(t, func() error {
+			var err error
+			got, _, err = query(warranty, 200)
+			return err
+		})
+		if len(got) != orgCIs/100 {
+			t.Errorf("%s, warranty_days_left <= %d: %d CIs, want %d", state, savedview.WarrantyExpiringDays, len(got), orgCIs/100)
+		}
+		page := scopetest.Statement(t, stmts, " ORDER BY ")
+		reads := scopetest.ReadPlan(t, scopetest.AnalyzeAsApp(t, f.App, &orgWide, page))
+		t.Logf("%s, attribute filter warranty_days_left (E-133, rated by WP-327 with ci_attr_filter): %d rows of ci read: %s",
+			state, reads.Rows["ci"], reads.Plan)
+	}
+	check("organization A alone")
+	seed(f.OrgB, []any{nil, nil}, 5000, 2500)
+	analyze()
+	check("with 5,000 CIs, assets and edges of organization B")
+}

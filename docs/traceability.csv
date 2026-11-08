@@ -1515,3 +1515,4 @@ ABN-03;[Q], jeweilige Phase;G2;backend/internal/tenant/integrity/phase2_matrix_i
 UI-14;[P2–P4, A];C;frontend/src/pages/TagsPage.test.tsx;WP-817
 VIE-02;[P2];C;frontend/src/pages/SavedViewsPage.test.tsx;WP-817
 UI-11;[P2];C;frontend/src/pages/RulesPage.test.tsx;WP-801
+ABN-02;[Q];G2;backend/internal/asset/querybudget_integration_test.go;WP-824
