@@ -1535,3 +1535,5 @@ SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
 API-06;[P2]/[P3]/[P4]/[A];C;frontend/src/api/deprecatedPaths.test.ts;WP-846
 MET-52;[P2];C;frontend/src/components/metamodel/LayoutPreview.test.tsx;WP-803
 UI-11;[P2];C;frontend/src/components/metamodel/LayoutPreview.test.tsx;WP-803
+ABN-02;[Q];G2;tests/load/phase2.js;WP-822
+NFR-02;[B];G2;tests/load/phase2.js;WP-822

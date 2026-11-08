@@ -8,6 +8,12 @@
 #     SCENARIO load, spool and rediscover have http_req_failed rate==0 for
 #     the run and for every scenario of it; api.js also
 #     bulk_jobs_succeeded count==3 and checks{scenario:bulk} rate==1.
+#   - k6 inspect: phase2.js (job phase2, WP-822) has the same rule, the
+#     p95 budget of 500 ms for each of its ten read scenarios (one name tag
+#     per scenario), bulk_assets_500_duration and bulk_cis_ops_500_duration
+#     p95 < 30 s, the counters of the succeeded bulk jobs count==3 with
+#     three iterations and checks rate==1 of the scenarios bulk_assets and
+#     bulk_cis_ops.
 #   - k6 run of api.js (2 s) against a stub of the API (python3): every
 #     answer as expected → no threshold crossed (the latency budgets aside,
 #     which the stub on a busy host may miss), three bulk jobs with their
@@ -20,6 +26,9 @@
 #   - load.yml writes the k6 console to console-<job>.log, lists the failed
 #     requests in the job summary and keeps them as failed-<job>.txt for
 #     the archive (tests/load/archive-run.sh).
+#   - load.yml has the job phase2, starts every server with
+#     RETICORA_MODULES=P2, seeds the Phase-2 volumes and issues the key of
+#     the role user viewer for API_KEY_RESTRICTED (WP-822).
 #
 # Needs k6 (K6, default k6; load.yml pins 0.54.0), python3 and jq.
 #
@@ -84,7 +93,7 @@ inspect() {
 FAILED_RULE='(.thresholds.http_req_failed // [] | any(. == "rate==0"))
 	and (.thresholds as $t | .scenarios | keys | all(. as $s | $t["http_req_failed{scenario:\($s)}"] // [] | any(. == "rate==0")))'
 for args in "tests/load/api.js" "-e SCENARIO=load tests/load/ingest.js" "-e SCENARIO=spool tests/load/ingest.js" \
-	"-e SCENARIO=rediscover tests/load/ingest.js"; do
+	"-e SCENARIO=rediscover tests/load/ingest.js" "tests/load/phase2.js"; do
 	# shellcheck disable=SC2086 # the arguments are split on purpose
 	opts="$(inspect $args)"
 	expect "k6 inspect $args: http_req_failed rate==0 for the run and every scenario" "$opts" \
@@ -94,6 +103,17 @@ opts="$(inspect tests/load/api.js)"
 expect "api.js: every bulk job succeeds (bulk_jobs_succeeded count==3, checks{scenario:bulk} rate==1)" "$opts" \
 	'(.thresholds.bulk_jobs_succeeded // [] | any(. == "count==3")) and (.thresholds["checks{scenario:bulk}"] // [] | any(. == "rate==1"))
 	and .scenarios.bulk.iterations == 3' '.thresholds'
+opts="$(inspect tests/load/phase2.js)"
+expect "phase2.js: p(95)<500 for each of the ten read scenarios by its name tag" "$opts" \
+	'.thresholds as $t | [.scenarios | keys[] | select(startswith("bulk_") | not)] as $reads | ($reads | length) == 10
+	and ($reads | all(. as $s | $t["http_req_duration{name:\($s)}"] // [] | any(. == "p(95)<500")))' \
+	'{reads: [.scenarios | keys[] | select(startswith("bulk_") | not)], durations: (.thresholds | with_entries(select(.key | test("duration"))))}'
+expect "phase2.js: bulk of 500 ids p(95)<30000, every bulk job succeeds (count==3, checks rate==1)" "$opts" \
+	'. as $o | ["bulk_assets", "bulk_cis_ops"] | all(. as $b
+		| ($o.thresholds["\($b)_500_duration"] // [] | any(. == "p(95)<30000"))
+		and ($o.thresholds["\($b)_jobs_succeeded"] // [] | any(. == "count==3"))
+		and ($o.thresholds["checks{scenario:\($b)}"] // [] | any(. == "rate==1"))
+		and $o.scenarios[$b].iterations == 3)' '{thresholds, scenarios: (.scenarios | with_entries(select(.key | startswith("bulk_"))))}'
 
 # 2. api.js against a stub of the API. MODE: ok, bulk429, bulkfailed,
 # rack503 (the first rack layout 503).
@@ -280,6 +300,13 @@ has "load.yml: the failed requests go to the job summary" "$WF" 'tests/load/fail
 has "load.yml: ... and to failed-<job>.txt" "$WF" 'load-results/failed-\$SCENARIO_NAME\.txt'
 has "archive-run.sh keeps failed-<job>.txt" "$(cat tests/load/archive-run.sh)" 'failed-%s\.txt'
 has "load.yml: the prepare job runs this test" "$WF" 'run: \./tests/load/thresholds\.test\.sh'
+# 4. load.yml: the job phase2 and the release configuration of G2 (WP-822).
+has "load.yml: the job phase2 runs phase2.js" "$WF" '\{"scenario":"phase2","script":"phase2\.js",'
+has "load.yml: every job starts the server with the modules of phase P2" "$WF" '^      MODULES: "P2"$'
+has "load.yml: ... as RETICORA_MODULES" "$WF" 'RETICORA_MODULES="\$MODULES"'
+has "load.yml: the seed issues the key of the role user viewer" "$WF" '-api-key-role viewer -api-key-file "\$RUNNER_TEMP/load-restricted\.key"'
+has "load.yml: phase2.js gets it as API_KEY_RESTRICTED" "$WF" 'API_KEY_RESTRICTED="\$\(cat "\$RUNNER_TEMP/load-restricted\.key"\)"'
+has "load.yml: the seed takes the Phase-2 volumes" "$WF" 'volume\+=\(-assets "\$ASSETS" -tickets "\$TICKETS" -consumables "\$CONSUMABLES"\)'
 
 echo
 echo "$PASS passed, $FAIL failed"

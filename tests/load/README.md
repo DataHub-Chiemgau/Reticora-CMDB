@@ -29,6 +29,8 @@ Laufs wächst damit um etwa ein Fünftel (32 auf 38 VUs).
 
 Der Job `nfr01-volume` von `load.yml` führt `api.js` mit denselben
 Schwellen auf den Volumina von NFR-01 aus (Abschnitt „NFR-01-Volumina“).
+Die Listen, Suche, Filter, Beziehungssuche und Bulk-Operationen der Phase 2
+misst `phase2.js` im Job `phase2` (Abschnitt „Phase 2“).
 
 **Fehlgeschlagene Anfragen (F-388, WP-659):** Kein Lauf ist mit einer
 fehlgeschlagenen Anfrage grün. Jedes Skript hat `http_req_failed: rate==0`
@@ -60,11 +62,15 @@ go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 -api-key-
 
 # 2. Server starten. Das Rate-Limit (600 Anfragen/min je Principal, API-04)
 #    würde den Lastlauf drosseln und wird für den Lauf angehoben.
-RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 ./server
+#    RETICORA_MODULES=P2 ist die Release-Konfiguration G2 (alle Module der
+#    Phase P2); ohne sie sind die Phase-2-Routen nicht registriert.
+RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 RETICORA_MODULES=P2 ./server
 
-# 3. Suchindex neu aufbauen und die Statistik aktualisieren (ohne ANALYZE
+# 3. Suchindex neu aufbauen (Job search.reindex, 202 mit job_id: bis
+#    "succeeded" abwarten) und die Statistik aktualisieren (ohne ANALYZE
 #    hängen die Pläne davon ab, wann Autovacuum den Seed erreicht)
 curl -fsS -X POST -H "X-API-Key: $(cat /tmp/load.key)" http://localhost:8080/api/v1/search/reindex
+curl -fsS -H "X-API-Key: $(cat /tmp/load.key)" http://localhost:8080/api/v1/jobs/<job_id>
 psql "$DATABASE_URL" -c 'ANALYZE'
 
 # 4. Ein Szenario je Lauf, danach die Integritätsprüfung (jede Prüfung 0);
@@ -86,7 +92,12 @@ der Impact-Szenarien und die Seiten der Beziehungssuche), `ATTR_KEY` und
 `PROBE_EVERY_S`, `VISIBLE_BUDGET_S`, `SPOOL_RECORDS`, `SPOOL_BATCH`,
 `SPOOL_BUDGET_S`, `TARGET`, `WAIT_S` und `OBJECTS` (`rediscover`) (ingest.js);
 `SEED_PREFIX` und `SEED_OCTET` (lib.js; Demo-Organisation des Seeds,
-Standard `demo` und 10).
+Standard `demo` und 10); `API_KEY` (lib.js, Schlüssel von org_admin aus
+`-api-key-file`) und `API_KEY_RESTRICTED` (lib.js, Schlüssel des
+Rollennutzers `viewer` aus einem zweiten Seed-Lauf mit `-api-key-role
+viewer`; `params(name, { key: 'restricted' })` wählt ihn, fehlt er, bricht
+der Lauf mit `fail` ab). Die Parameter von `phase2.js` stehen im Abschnitt
+„Phase 2“.
 
 ### NFR-01-Volumina (WP-439)
 
@@ -157,28 +168,113 @@ go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 5000 \
 ```
 
 Lokal (ohne TimescaleDB, ohne Last) dauerte dieser Seed etwa 25 s. Die
-Mengen des Phase-2-Lastlaufs legen WP-822 (Standardeingaben in `load.yml`)
-und WP-327 (Headroom-Läufe) fest. `TestSeedScaled` und
+Mengen des Phase-2-Lastlaufs legen WP-822 (Standardeingaben in `load.yml`,
+Abschnitt „Phase 2“) und WP-327 (Headroom-Läufe) fest. `TestSeedScaled` und
 `TestSeedOptionsAreBounded` in `backend/cmd/seed/seed_integration_test.go`
 prüfen Mengen, Buchungsinvariante, Feldwerte, Beziehungszahl, Grenzen und
 den zweiten Lauf.
+
+### Phase 2 (WP-822, ABN-02)
+
+`phase2.js` misst die Listen, Suche, Filter, Beziehungssuche und
+Bulk-Operationen der Phase 2 gegen den Phase-2-Last-Seed; jede Anfrageart
+ist ein eigenes Szenario mit gleichnamigem Name-Tag und dem Budget aus
+NFR-02 als Schwelle:
+
+| Skript | Prüft | Budget (p95) |
+|---|---|---|
+| `phase2.js` `asset_list` | `GET /assets?limit=50` mit `total` (K23) | < 500 ms |
+| `phase2.js` `asset_list_restricted` | dieselbe Liste mit dem Schlüssel des Rollennutzers `viewer` (`API_KEY_RESTRICTED`); Check: keine Zeile enthält `purchase_price` oder `cost_center` (Feldrechte-Grants aus WP-819, Projektion aus WP-271) | < 500 ms |
+| `phase2.js` `ticket_list` | `GET /tickets?limit=50` mit `total` (mit der Sichtbarkeitsprüfung der Tickets) | < 500 ms |
+| `phase2.js` `consumable_list` | `GET /consumables?limit=50` mit `total` | < 500 ms |
+| `phase2.js` `search_fields` | globale Suche `GET /search?q=…&limit=5` über die Felder aus WP-308: Inventarnummer (Stichprobe der Asset-Liste), Management-IP und MAC von `eth0` (zufällige Seed-CIs, `lib.js` `seedDevice`), den Tag `loadphase2` und das Custom-Feld `cost_center`; Check: mindestens ein Treffer | < 500 ms |
+| `phase2.js` `ci_attr_filter` | `GET /cis?limit=50` im Wechsel mit dem Bereich `filter[attributes.cost_center][gte]=CC-…&…[lte]=CC-…` (drei Werte; den Gleichheitsfilter misst `attr_filter` in `api.js`) und mit dem berechneten Attribut `filter[attributes.warranty_days_left][lte]=30` (WP-718) | < 500 ms |
+| `phase2.js` `ci_tag_filter` | `GET /cis?limit=50&filter[tags][in]=loadphase2,archived` (WP-281; 500 CIs mit dem Tag) | < 500 ms |
+| `phase2.js` `ast_asset_filter` | `POST /search/query?limit=50` im Wechsel: Asset-Abfrage mit `where` auf `manufacturer` und `cost_center`, CI-Abfrage mit `where` auf `asset.manufacturer` und dem berechneten Attribut `attributes.warranty_days_left` (WP-309) | < 500 ms |
+| `phase2.js` `view_presets` | `filter_spec` (mit `sort` und `columns`) der Systemviews `warranty_expiring`, `servers_without_monitoring`, `my_devices_ci` und `my_devices_asset` aus `GET /saved-views/presets` über `POST /search/query?limit=50` (WP-307) | < 500 ms |
+| `phase2.js` `relation_search` | `POST /search/query?limit=50` mit `downstream_of` oder `upstream_of` (Tiefe `MaxRelationshipDepth` = 5) am Core-Switch `sw-00001` (Worst Case: `upstream_of` erreicht etwa die Hälfte der CIs) und am Server `srv-04242` | < 500 ms |
+| `phase2.js` `bulk_assets` | `POST /assets/bulk` `action=set_fields` (`notes`) auf 500 Assets bis Job-Ende über `GET /jobs/{id}` (WP-781), `bulk_assets_500_duration` | < 30 s |
+| `phase2.js` `bulk_cis_ops` | `POST /cis/bulk` `action=add_tags` (je Job ein anderer Tag `loadbulk<n>`) auf 500 CIs bis Job-Ende (WP-304), `bulk_cis_ops_500_duration` | < 30 s |
+
+Die zehn Lese-Szenarien laufen mit je `VUS` (Standard 3) VUs für
+`DURATION`, die Bulk-Szenarien mit einer VU und drei Jobs nacheinander;
+den Statuswechsel per Bulk misst weiter `api.js` (`bulk`). Wie in `api.js`
+gilt `http_req_failed: rate==0` für den Lauf und je Szenario, jeder
+Bulk-Job muss gelingen (`bulk_assets_jobs_succeeded` und
+`bulk_cis_ops_jobs_succeeded` `count==3`, `checks{scenario:bulk_assets}`
+und `checks{scenario:bulk_cis_ops}` `rate==1`), die Bulk-Dauern erfassen nur
+gelungene Jobs, `checks: rate>0.99`. `setup()` bricht mit Hinweis auf
+`RETICORA_MODULES` ab, wenn `/assets`, `/tickets` oder `/consumables` nicht
+200 liefert, ebenso ohne `API_KEY_RESTRICTED`, mit weniger als 500 Assets
+oder 1.000 CIs oder wenn die Suche für einen der Feldtypen nichts findet
+(Suchindex nicht neu aufgebaut). Es sammelt die IDs über `next_cursor`, legt
+die Tags `loadphase2` und `loadbulk1` bis `loadbulk3` im Tag-Katalog an,
+soweit sie fehlen (der Seed hat keine Tags), und setzt `loadphase2` per
+Bulk `add_tags` auf die ersten 500 CIs nach Name; `bulk_cis_ops` schreibt
+die nächsten 500. GraphQL misst der Lauf nicht: Der BFF lehnt API-Schlüssel
+ab.
+
+Parameter: `DURATION`, `VUS`, `OBJECTS` (CIs des Seeds, für die
+Stichproben von IP und MAC), `ATTR_KEY` und `ATTR_VALUES` wie in `api.js`,
+`API_KEY` und `API_KEY_RESTRICTED`.
+
+Ablauf (Schritte 1 bis 3 oben mit dem Phase-2-Last-Seed und
+`RETICORA_MODULES=P2`):
+
+```sh
+# Seed mit den Mengen des Jobs phase2 (Standardeingaben von load.yml) und
+# zweiter Lauf mit denselben Optionen für den Schlüssel von viewer: er
+# ändert keine Zeile und stellt load-test-viewer neben load-test aus
+go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 \
+  -assets 10000 -tickets 10000 -consumables 10000 -api-key-file /tmp/load.key
+go run ./backend/cmd/seed -database-url "$DATABASE_URL" -objects 10000 \
+  -assets 10000 -tickets 10000 -consumables 10000 -api-key-role viewer \
+  -api-key-file /tmp/load-viewer.key
+RETICORA_RATE_LIMIT_RPM=1000000 RETICORA_RATE_LIMIT_ORG_RPM=1000000 RETICORA_MODULES=P2 ./server
+# Suchindex neu aufbauen (Job abwarten), ANALYZE, dann
+k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=$(cat /tmp/load.key) \
+  -e API_KEY_RESTRICTED=$(cat /tmp/load-viewer.key) -e OBJECTS=10000 tests/load/phase2.js
+psql "$DATABASE_URL" -At -F '|' -f tests/integrity-check.sql
+```
+
+Mit 10.000 CIs und 10.000 Assets misst der Lauf 20.000 Objekte nach NFR-01,
+konservativ über der Messbasis von E-17 (10.000 Objekte); die
+Zusammensetzung steht im Bericht von WP-327. Gegen einen lokalen Server
+(ohne TimescaleDB und NATS, 5.000 CIs, je 1.000 Assets, Tickets und
+Mengenartikel) lieferten `setup()` und jede Szenariofunktion nur
+200/201/202, kein Check scheiterte; die Messung selbst ist der Job
+`phase2`.
 
 ### Workflow
 
 `.github/workflows/load.yml` (manuell und nächtlich) führt diese Schritte aus:
 `api.js`, `ingest.js` (`load`), `ingest.js` (`spool`), `ingest.js`
-(`rediscover`) und `api.js` auf den NFR-01-Volumina als getrennte Jobs einer
-Matrix (`api`, `ingest`, `ingest-spool`, `ingest-rediscover`,
-`nfr01-volume`), jeder mit frischer Datenbank, Seed, neu aufgebautem
-Suchindex, `ANALYZE` und einem Server mit 4 Spuren (Standard). Der Schritt
+(`rediscover`), `api.js` auf den NFR-01-Volumina und `phase2.js` als
+getrennte Jobs einer Matrix (`api`, `ingest`, `ingest-spool`,
+`ingest-rediscover`, `nfr01-volume`, `api-large-28000`, `api-large-50000`,
+`phase2`), jeder mit frischer Datenbank, Seed, neu aufgebautem Suchindex
+(der Schritt wartet, bis der Job `search.reindex` gelungen ist),
+`ANALYZE` und einem Server mit 4 Spuren (Standard) und
+`RETICORA_MODULES=P2` (Release-Konfiguration G2: alle Module der Phase P2
+aus `LateModules`, nach E-105 einschließlich `metamodel` und `import`; WP-822).
+Jeder Job seedet `objects` CIs und die Phase-2-Mengen `assets`, `tickets` und
+`consumables` (WP-821); nur `api-large-50000` behält die SIM-01-Mengen, weil
+der Seed höchstens 50.000 CIs und Assets zusammen anlegt. `OBJECTS` bleibt
+die CI-Zahl: `api` läuft mit unveränderten Schwellen gegen den erweiterten
+Seed, die Phase-2-Objekte hängen nicht am Graphen des Core-Switches. Der Job
+`phase2` seedet ein zweites Mal mit denselben Optionen und `-api-key-role
+viewer` und übergibt diesen Schlüssel als `API_KEY_RESTRICTED`. Der Schritt
 „Seeded volumes (NFR-01)“ zählt nach dem Seed CIs, Interfaces, Adressen und
-Beziehungen der Demo-Organisation und die Organisationen
-(`volumes-<job>.txt`); im Job `nfr01-volume` scheitert er unter 10.000,
-50.000, 200.000, 100.000 bzw. 500. Nach dem k6-Lauf prüft ein eigener
+Beziehungen der Demo-Organisation, die Organisationen und die Assets,
+Tickets und Mengenartikel der Demo-Organisation (`volumes-<job>.txt`); im
+Job `nfr01-volume` scheitert er unter 10.000, 50.000, 200.000, 100.000 bzw.
+500. Nach dem k6-Lauf prüft ein eigener
 Schritt die Daten mit `tests/integrity-check.sql`; eine Verletzung lässt den
 Job scheitern (ABN-03, F-281). Eingaben:
 
-- `objects` (`OBJECTS`) und `duration` (`DURATION`, `api.js`);
+- `objects` (`OBJECTS`) und `duration` (`DURATION`, `api.js`, `phase2.js`);
+- `assets`, `tickets` und `consumables`: die Phase-2-Mengen des Seeds
+  (`-assets`, `-tickets`, `-consumables`, Standard je 10.000; WP-822);
 - `scenarios`: die Jobs, kommagetrennt, oder `all` (Standard);
 - `server_ref`: Commit, Tag oder Branch, auch mit Elternsuffix (`<sha>^`),
   aus dem Server, Seed und Migrationen gebaut werden (Standard: der
@@ -191,17 +287,23 @@ Job scheitern (ABN-03, F-281). Eingaben:
   `api.js` ist mit einem solchen `server_ref` nicht aussagekräftig, der
   Vergleich läuft nur mit `ingest-rediscover`. Der Seed eines Commits vor
   WP-439 kennt die Volumen-Optionen nicht; `nfr01-volume` scheitert damit
-  im Schritt „Seed“.
+  im Schritt „Seed“. Vor WP-821 kennt der Seed `-assets`, `-tickets` und
+  `-consumables` nicht, vor WP-325 `-api-key-role` nicht; jeder Job außer
+  `api-large-50000` bzw. der Job `phase2` scheitert damit im Schritt
+  „Seed“.
 
 Jeder Job lädt seine Ergebnisse als eigenes Artefakt hoch
 (`load-results-api`, `load-results-ingest`, `load-results-ingest-spool`,
-`load-results-ingest-rediscover`, `load-results-nfr01-volume`): die
+`load-results-ingest-rediscover`, `load-results-nfr01-volume`,
+`load-results-api-large-28000`, `load-results-api-large-50000`,
+`load-results-phase2`); der Job `archive` übernimmt jeden ausgewählten Job
+ins Archiv. Die Artefakte enthalten die
 k6-Zusammenfassung (`<job>.json`, `<job>.txt`), die Integritätsprüfung
 (`integrity-<job>.txt`), die Datenbankkosten (`statements-<job>.txt`), die
 Seed-Dauer (`seed-<job>.txt`), den Datenbestand nach dem Seed
 (`volumes-<job>.txt`), das Laufprotokoll (`run-<job>.txt`: Lauf- und
 Server-Commit, Lauf-URL, Skript, Szenario,
-`objects`, `duration`, Seed-Optionen, Spurzahl, Rate-Limits, Versionen von
+`objects`, `duration`, Seed-Optionen, Phase-2-Mengen, Module, Spurzahl, Rate-Limits, Versionen von
 k6, Go, PostgreSQL und TimescaleDB, Container-Images, vollständiges `lscpu`,
 `/proc/meminfo` und `free -h`), das Ergebnis des Jobs und seiner Schritte
 (`result-<job>.txt`), `/readyz`, das Server-Log, die k6-Konsole
