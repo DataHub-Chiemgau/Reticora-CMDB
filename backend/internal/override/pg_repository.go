@@ -1,6 +1,7 @@
 package override
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -711,6 +712,161 @@ func (r *PGRepository) ClearOverride(ctx context.Context, orgID, ciID, fieldName
 		return nil
 	})
 	return out, err
+}
+
+// OverrideState is the state of a field's override that RestoreOverrideTx
+// writes back: value (nil: the field is overridden with null), author (a
+// user id, otherwise none), reason, protection and the time it was set.
+type OverrideState struct {
+	Value     any
+	Author    string
+	Reason    string
+	At        time.Time
+	Protected bool
+}
+
+// ClearOverrideTx removes the override of a field in the caller's
+// transaction tx, like ClearOverride: the CI returns to the observed value
+// when there is one and the field is no structural column or instance
+// attribute of the CI, and the change is audited (ci.override_cleared).
+// With raise the CI row is locked first (lockCI), its version rises and a
+// ci_change row override records the change (raiseVersion, WP-412);
+// without, the caller holds the row lock and its write in tx raises the
+// version already (a field update; a second raise would make F-021 again).
+// The computed attributes are not recomputed: a caller whose write feeds
+// them writes the observed value itself. A field without override is no
+// error: it reports false and changes nothing.
+func ClearOverrideTx(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string, raise bool) (bool, error) {
+	if IsReservedName(fieldName) {
+		return false, ErrReservedName
+	}
+	var before any
+	if raise {
+		if _, live, err := lockCI(ctx, tx, ciID); err != nil {
+			return false, err
+		} else if !live {
+			return false, ErrNotFound
+		}
+		var err error
+		if before, err = ciFieldValue(ctx, tx, ciID, fieldName); err != nil {
+			return false, err
+		}
+	}
+	var discoveredRaw []byte
+	var discoveredSource *string
+	var discoveredAt *time.Time
+	err := tx.QueryRow(ctx, `
+		UPDATE ci_field_value SET
+			override_value = NULL, override_author = NULL,
+			override_reason = NULL, override_at = NULL, protected = false
+		WHERE ci_id = $1 AND field_name = $2 AND (override_at IS NOT NULL OR override_value IS NOT NULL)
+		RETURNING discovered_value, discovered_source, discovered_at`, ciID, fieldName).
+		Scan(&discoveredRaw, &discoveredSource, &discoveredAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("clear override %s: %w", fieldName, err)
+	}
+	changes := map[string]any{"field": fieldName}
+	after := before
+	instance := false
+	if !isColumn(fieldName) {
+		var pathErr error
+		if _, instance, pathErr = attributePath(ctx, tx, ciID, fieldName); pathErr != nil {
+			return false, pathErr
+		}
+	}
+	if discoveredAt != nil && !structuralFields[fieldName] && !instance {
+		var discovered any
+		if len(discoveredRaw) > 0 {
+			if decodeErr := json.Unmarshal(discoveredRaw, &discovered); decodeErr != nil {
+				return false, fmt.Errorf("decode discovered %s: %w", fieldName, decodeErr)
+			}
+		}
+		if syncErr := syncCIField(ctx, tx, ciID, fieldName, discovered); syncErr != nil {
+			return false, syncErr
+		}
+		changes["restored_value"] = discovered
+		if discoveredSource != nil {
+			changes["restored_source"] = *discoveredSource
+		}
+		after = discovered
+	}
+	if raise {
+		if _, raiseErr := raiseVersion(ctx, tx, orgID, ciID, fieldName, before, after); raiseErr != nil {
+			return false, raiseErr
+		}
+	}
+	if auditErr := recordAudit(ctx, tx, orgID, ciID, "ci.override_cleared", changes); auditErr != nil {
+		return false, auditErr
+	}
+	return true, nil
+}
+
+// RestoreOverrideTx writes the override state of a field back in the
+// caller's transaction tx: value, author, reason, protection and the
+// explicit time state.At, over whatever override the field has now. The CI
+// takes the value when it holds another one (not for a structural column,
+// which the caller's write sets), and the change is audited
+// (ci.override_set). raise is as in ClearOverrideTx.
+func RestoreOverrideTx(ctx context.Context, tx pgx.Tx, orgID, ciID, fieldName string, state *OverrideState, raise bool) error {
+	if IsReservedName(fieldName) {
+		return ErrReservedName
+	}
+	if strings.TrimSpace(state.Reason) == "" {
+		return fmt.Errorf("override reason is required")
+	}
+	if raise {
+		if _, live, err := lockCI(ctx, tx, ciID); err != nil {
+			return err
+		} else if !live {
+			return ErrNotFound
+		}
+	}
+	at := state.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO ci_field_value (
+			organization_id, ci_id, field_name, override_value,
+			override_author, override_reason, override_at, protected
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (ci_id, field_name) DO UPDATE SET
+			override_value = EXCLUDED.override_value,
+			override_author = EXCLUDED.override_author,
+			override_reason = EXCLUDED.override_reason,
+			override_at = EXCLUDED.override_at,
+			protected = EXCLUDED.protected`,
+		orgID, ciID, fieldName, jsonValue(state.Value), userID(state.Author), state.Reason, at.UTC(), state.Protected); err != nil {
+		return fmt.Errorf("restore override %s: %w", fieldName, err)
+	}
+	before, err := ciFieldValue(ctx, tx, ciID, fieldName)
+	if err != nil {
+		return err
+	}
+	if !structuralFields[fieldName] && !sameValue(before, state.Value) {
+		if syncErr := syncCIField(ctx, tx, ciID, fieldName, state.Value); syncErr != nil {
+			return syncErr
+		}
+	}
+	if raise {
+		if _, raiseErr := raiseVersion(ctx, tx, orgID, ciID, fieldName, before, state.Value); raiseErr != nil {
+			return raiseErr
+		}
+	}
+	return recordAudit(ctx, tx, orgID, ciID, "ci.override_set", map[string]any{
+		"field": fieldName, "value": state.Value, "reason": state.Reason, "protected": state.Protected,
+		"restored_at": at.UTC(),
+	})
+}
+
+// sameValue reports whether two field values have the same JSON.
+func sameValue(a, b any) bool {
+	x, errA := json.Marshal(a)
+	y, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(x, y)
 }
 
 // Conflicts returns field values where discovered and effective diverge.

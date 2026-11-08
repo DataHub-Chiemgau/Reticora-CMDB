@@ -715,3 +715,94 @@ func TestRetentionKeepsTheHistoryAnchor(t *testing.T) {
 		t.Errorf("state after the cut-off: %v based on %v, want wp793-a2 based on the anchor %s", state.Fields, state.BasedOnSnapshotAt, before(20*day))
 	}
 }
+
+// TestRetentionDeletesOldBulkChangeSets covers the retention of the change
+// sets of bulk jobs (BLK-02, WP-306): retention.bulk_change_set, scheduled
+// at 04:07, deletes the rows created more than 30 days before the run's
+// clock (WithClock) and keeps the younger ones; the run of A writes one
+// retention entry with the count, organization B with young rows only gets
+// none.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldBulkChangeSets(t *testing.T) {
+	f := scopetest.Seed(t, "36")
+	bg := context.Background()
+	// The clock of the run is a day ahead: a row of now - 29 days is
+	// 30 days old for it and stays.
+	now := time.Now().UTC().Add(24 * time.Hour)
+	job := func(org string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO job (organization_id, kind, status) VALUES ($1, 'ci.bulk', 'queued')
+			RETURNING id::text`, org).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	row := func(org, jobID string, created time.Time) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO bulk_change_set (organization_id, job_id, entity_type, entity_id, op,
+			field_name, old_value, new_value, created_at)
+			VALUES ($1, $2, 'ci', gen_random_uuid(), 'set', 'status', '"active"', '"inactive"', $3) RETURNING id::text`,
+			org, jobID, created).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	jobA, jobB := job(f.OrgA), job(f.OrgB)
+	old1 := row(f.OrgA, jobA, now.Add(-31*24*time.Hour))
+	old2 := row(f.OrgA, jobA, now.Add(-30*24*time.Hour-time.Minute))
+	young := row(f.OrgA, jobA, now.Add(-29*24*time.Hour))
+	youngB := row(f.OrgB, jobB, now.Add(-29*24*time.Hour))
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now })
+	if !slices.ContainsFunc(r.Schedules(), func(s jobs.Schedule) bool {
+		return s.Kind == jobs.RetentionBulkChangeSet && s.Spec == "7 4 * * *" && s.MaxCatchUp == 1 && s.Timeout == time.Hour
+	}) {
+		t.Fatalf("the schedules lack %s at 04:07", jobs.RetentionBulkChangeSet)
+	}
+	if err := r.RunBulkChangeSet(bg); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM bulk_change_set WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	for name, id := range map[string]string{"31 days old": old1, "30 days and a minute old": old2} {
+		if exists(id) {
+			t.Errorf("row %s stays", name)
+		}
+	}
+	for name, id := range map[string]string{"29 days old": young, "of B 29 days old": youngB} {
+		if !exists(id) {
+			t.Errorf("row %s was deleted", name)
+		}
+	}
+	entries := func(org string) []map[string]any {
+		t.Helper()
+		rows, err := f.Admin.Query(bg, `SELECT changes FROM audit_log WHERE organization_id = $1 AND action = $2 ORDER BY seq`,
+			org, jobs.RetentionBulkChangeSet)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := pgx.CollectRows(rows, pgx.RowTo[map[string]any])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := entries(f.OrgA); len(got) != 1 || got[0]["deleted"] != float64(2) {
+		t.Errorf("%s entries of A: %v, want one with deleted 2", jobs.RetentionBulkChangeSet, got)
+	}
+	if got := entries(f.OrgB); len(got) != 0 {
+		t.Errorf("%s entries of B: %v, want none", jobs.RetentionBulkChangeSet, got)
+	}
+	if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
+		t.Errorf("chain of A after the run: %+v %v", result, err)
+	}
+}

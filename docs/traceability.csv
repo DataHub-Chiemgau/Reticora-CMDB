@@ -1416,6 +1416,8 @@ AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-744
 BLK-02;[P2];C;backend/internal/jobs/revert_integration_test.go;WP-305
 BLK-02;[P2];C;backend/internal/ci/bulk_delegate_integration_test.go;WP-780
 BLK-02;[P2];C;backend/internal/ci/bulk_revert_ext_integration_test.go;WP-783
+OVR-03;[P2];C;backend/internal/ci/bulk_override_integration_test.go;WP-306
+BLK-02;[P2];C;backend/internal/ci/bulk_override_integration_test.go;WP-306
 JOB-03;[B];C;backend/internal/jobs/revert_integration_test.go;WP-305
 STK-05;[P2];B;backend/internal/order/order_target_integration_test.go;WP-847
 AST-07;[P2];B;backend/internal/movement/movement_integration_test.go;WP-842
