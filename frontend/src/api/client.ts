@@ -1388,6 +1388,105 @@ export const documentApi = {
   },
 };
 
+// --- Phase 2: Import (IMP-IO-01, WP-322) ---
+
+// The import profiles, runs and the preview come from the OpenAPI contract
+// (K27, WP-774, WP-301, WP-302). Import profiles and runs are organization
+// wide: no list takes client_id or site_id, SCOPED_LISTS stays unchanged.
+export type ImportProfile = components['schemas']['ImportProfile'];
+export type ImportMapping = components['schemas']['ImportMapping'];
+export type ImportColumnMapping = components['schemas']['ImportColumnMapping'];
+export type ImportTransform = components['schemas']['ImportTransform'];
+export type CreateImportProfileRequest = components['schemas']['CreateImportProfileRequest'];
+export type UpdateImportProfileRequest = components['schemas']['UpdateImportProfileRequest'];
+export type ImportPreview = components['schemas']['ImportPreview'];
+export type ImportPreviewRequest = components['schemas']['ImportPreviewRequest'];
+export type ImportStartDocumentRequest = components['schemas']['ImportStartDocumentRequest'];
+export type ImportJobAccepted = components['schemas']['ImportJobAccepted'];
+export type ImportRun = components['schemas']['ImportRun'];
+
+/** The problem types of a refused import file (422) and of an unfinished report (409). */
+export const PROBLEM_IMPORT_FORMAT_UNSUPPORTED =
+  'https://reticora.io/problems/import-format-unsupported';
+export const PROBLEM_IMPORT_SHEET_NOT_FOUND = 'https://reticora.io/problems/import-sheet-not-found';
+export const PROBLEM_IMPORT_FILE_TOO_COMPLEX =
+  'https://reticora.io/problems/import-file-too-complex';
+export const PROBLEM_IMPORT_FILE_TOO_LARGE = 'https://reticora.io/problems/import-file-too-large';
+export const PROBLEM_IMPORT_REPORT_NOT_READY =
+  'https://reticora.io/problems/import-report-not-ready';
+
+/**
+ * ImportJobResult is the result of a finished import.run job (GET
+ * /jobs/{id}, importer.JobResult): the data rows read and the rows per
+ * outcome; a dry run writes nothing but counts the same way.
+ */
+export interface ImportJobResult {
+  dry_run: boolean;
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+}
+
+/** importJobResult reads the counters of a job result; undefined while there are none. */
+export function importJobResult(result: unknown): ImportJobResult | undefined {
+  if (!result || typeof result !== 'object') return undefined;
+  const r = result as Record<string, unknown>;
+  const n = (key: string) => (typeof r[key] === 'number' ? (r[key] as number) : 0);
+  if (typeof r.total !== 'number') return undefined;
+  return {
+    dry_run: r.dry_run === true,
+    total: n('total'),
+    created: n('created'),
+    updated: n('updated'),
+    skipped: n('skipped'),
+    failed: n('failed'),
+  };
+}
+
+/**
+ * importApi reads and writes the mapping profiles (/import-profiles,
+ * WP-774), previews a file (POST /imports/preview, WP-301), starts a run
+ * (POST /imports with document_id, WP-301/WP-302) and reads its projection
+ * and the download link of its CSV report (GET /imports/{id}[/report]).
+ * The progress of a run is the job (GET /jobs/{id}, useImportRun).
+ */
+export const importApi = {
+  listProfiles(
+    params: { limit?: number; cursor?: string } = {},
+  ): Promise<PaginatedResponse<ImportProfile>> {
+    return fetchAPI(`/import-profiles${buildQuery(params)}`);
+  },
+  getProfile(id: string): Promise<ImportProfile> {
+    return fetchAPI(`/import-profiles/${id}`);
+  },
+  createProfile(data: CreateImportProfileRequest): Promise<ImportProfile> {
+    return fetchAPI('/import-profiles', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateProfile(id: string, data: UpdateImportProfileRequest): Promise<ImportProfile> {
+    return fetchAPI(`/import-profiles/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteProfile(id: string): Promise<void> {
+    return fetchAPI(`/import-profiles/${id}`, { method: 'DELETE' });
+  },
+  /** The header and at most 20 rows of a scanned file; no job (422 for a refused file). */
+  preview(data: ImportPreviewRequest): Promise<ImportPreview> {
+    return fetchAPI('/imports/preview', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** Starts a run as job import.run (202); dry_run only checks and counts. */
+  start(data: ImportStartDocumentRequest): Promise<ImportJobAccepted> {
+    return fetchAPI('/imports', { method: 'POST', body: JSON.stringify(data) });
+  },
+  get(id: string): Promise<ImportRun> {
+    return fetchAPI(`/imports/${id}`);
+  },
+  /** The presigned link (15 min) of the CSV report of a finished run; 409 while it runs. */
+  reportUrl(id: string): Promise<{ download_url: string }> {
+    return fetchAPI(`/imports/${id}/report`);
+  },
+};
+
 // --- Phase 2: Stocktake / Inventur ---
 
 export interface Stocktake {

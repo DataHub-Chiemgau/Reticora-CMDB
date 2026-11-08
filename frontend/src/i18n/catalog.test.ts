@@ -49,6 +49,14 @@ import {
 import { filterOps } from '../rules/filter';
 import { compareOps } from '../rules/rules';
 import { RULE_TARGETS } from '../pages/RulesPage';
+import { IMPORT_STEPS } from '../pages/ImportPage';
+import {
+  IMPORT_ENTITIES,
+  IMPORT_FILE_FORMATS,
+  IMPORT_MODES,
+  IMPORT_TARGETS,
+  IMPORT_TRANSFORMS,
+} from '../components/import/MappingEditor';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -103,6 +111,12 @@ const documentSources = import.meta.glob(
     '!../components/upload/**/*.test.tsx',
     '!../components/documents/**/*.test.tsx',
   ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-322: the components of the import assistant, without tests.
+const importSources = import.meta.glob(
+  ['../components/import/**/*.tsx', '!../components/import/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -304,6 +318,24 @@ const enumerations: Array<[string, readonly string[]]> = [
   // WP-320: the quantity bookings of a consumable (WP-756).
   ['consumables.movementTypes', CONSUMABLE_BOOKING_TYPES],
   ['discovery.scopes.plugin', DISCOVERY_PLUGINS],
+  // WP-322: the entities, modes and transformations of an import profile,
+  // the formats and steps of the assistant, the job kind import.run (nested
+  // like metamodel.test) and the core targets of each entity, labelled as
+  // fields like the filter whitelist.
+  ['import.entities', IMPORT_ENTITIES],
+  ['import.entities', specEnum('ImportProfile', 'entity')],
+  ['import.modes', IMPORT_MODES],
+  ['import.modes', specEnum('ImportProfile', 'mode')],
+  ['import.transforms', IMPORT_TRANSFORMS],
+  ['import.transforms', specEnum('ImportTransform', 'op')],
+  ['import.formats', IMPORT_FILE_FORMATS],
+  ['import.formats', specEnum('ImportPreview', 'format')],
+  ['import.steps', IMPORT_STEPS],
+  ['jobs.kinds.import', ['run']],
+  ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
+    'savedviews.fields',
+    targets,
+  ]),
   ...pageEnumerations,
 ];
 
@@ -476,6 +508,20 @@ describe('i18n catalog', () => {
     expect([...RULE_KINDS]).toEqual(specEnum('MetamodelRuleKind'));
   });
 
+  it('offers exactly the import enums of the OpenAPI types and labels the page (WP-322)', () => {
+    expect([...IMPORT_ENTITIES]).toEqual(specEnum('ImportProfile', 'entity'));
+    expect([...IMPORT_MODES]).toEqual(specEnum('ImportProfile', 'mode'));
+    expect([...IMPORT_TRANSFORMS]).toEqual(specEnum('ImportTransform', 'op'));
+    expect([...IMPORT_FILE_FORMATS]).toEqual(specEnum('ImportPreview', 'format'));
+    expect(lookup(deDE, 'nav.import')).toBe('Import');
+    expect(lookup(enUS, 'nav.import')).toBe('Import');
+    expect(lookup(deDE, 'commandPalette.commands.import')).toBe('Import-Assistent öffnen');
+    expect(lookup(enUS, 'commandPalette.commands.import')).toBe('Open import assistant');
+    expect(lookup(deDE, 'jobs.kinds.import.run')).toBe('Import-Lauf');
+    expect(lookup(enUS, 'jobs.kinds.import.run')).toBe('Import run');
+    expect(Object.keys(importSources)).toEqual(['../components/import/MappingEditor.tsx']);
+  });
+
   it('offers exactly the operators, directions and entity kinds of FilterExpr (WP-315)', () => {
     expect([...FILTER_MODE.ops].sort()).toEqual([...specEnum('FilterExpr', 'op')].sort());
     expect([...RELATED_DIRECTIONS]).toEqual(specEnum('FilterRelated', 'direction'));
@@ -540,6 +586,9 @@ describe('i18n catalog', () => {
     // WP-814: the ticket pages.
     '../pages/TicketListPage.tsx',
     '../pages/TicketDetailPage.tsx',
+    // WP-322: the import assistant and its mapping editor.
+    '../pages/ImportPage.tsx',
+    ...Object.keys(importSources),
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
@@ -547,7 +596,8 @@ describe('i18n catalog', () => {
       flowSources[file] ??
       cardSources[file] ??
       ruleSources[file] ??
-      documentSources[file];
+      documentSources[file] ??
+      importSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

@@ -20,6 +20,8 @@ import {
   assignmentApi,
   consumableApi,
   documentApi,
+  importApi,
+  fetchAPI,
   stocktakeApi,
   ticketApi,
   userApi,
@@ -65,6 +67,9 @@ import type {
   DocumentLinkTarget,
   DocumentListParams,
   DocumentVersion,
+  CreateImportProfileRequest,
+  ImportStartDocumentRequest,
+  UpdateImportProfileRequest,
   StocktakeCreateRequest,
   StocktakeListParams,
   TicketCreateRequest,
@@ -93,6 +98,7 @@ import type {
   MetricQueryParams,
   AlertRuleCreateRequest,
 } from '../api/client';
+import { isActive, type Job } from '../hooks/useJobs';
 
 /**
  * ListQueryOptions switch a list query off, e.g. a picker until the user
@@ -690,6 +696,89 @@ export function useDocumentUsage() {
     queryKey: ['documents', 'usage'],
     queryFn: () => documentApi.usage(),
   });
+}
+
+// --- Import (IMP-IO-01, WP-322) ---
+
+/** useImportProfiles lists the mapping profiles of the organization (sorted by name). */
+export function useImportProfiles(enabled = true) {
+  return useQuery({
+    queryKey: ['import-profiles'],
+    queryFn: () => importApi.listProfiles({ limit: 200 }),
+    enabled,
+  });
+}
+
+export function useCreateImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreateImportProfileRequest) => importApi.createProfile(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+export function useUpdateImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateImportProfileRequest }) =>
+      importApi.updateProfile(id, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+export function useDeleteImportProfile() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => importApi.deleteProfile(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['import-profiles'] }),
+  });
+}
+
+/**
+ * useImportPreview reads the header and up to 20 rows of a scanned file
+ * (POST /imports/preview), for XLSX of the chosen sheet. A refused file
+ * (409, 422) is not retried.
+ */
+export function useImportPreview(documentId: string | undefined, sheet?: string, enabled = true) {
+  return useQuery({
+    queryKey: ['imports', 'preview', documentId, sheet ?? ''],
+    queryFn: () =>
+      importApi.preview({ document_id: documentId ?? '', ...(sheet ? { sheet } : {}) }),
+    enabled: enabled && !!documentId,
+    retry: false,
+  });
+}
+
+/** useStartImport starts a run (POST /imports, 202 with the job). */
+export function useStartImport() {
+  return useMutation({
+    mutationFn: (data: ImportStartDocumentRequest) => importApi.start(data),
+  });
+}
+
+/** IMPORT_POLL_MS is the pause between two reads of a running import job. */
+export const IMPORT_POLL_MS = 3000;
+
+/**
+ * useImportRun follows an import run: the job (GET /jobs/{id}) every 3 s
+ * while isActive holds, then once the projection of the run (GET
+ * /imports/{id}) with its counters and error code.
+ */
+export function useImportRun(id: string | null) {
+  const job = useQuery({
+    queryKey: ['jobs', id, 'import'],
+    queryFn: () => fetchAPI<Job>(`/jobs/${id}`),
+    enabled: !!id,
+    refetchInterval: (query) =>
+      query.state.data && !isActive(query.state.data) ? false : IMPORT_POLL_MS,
+  });
+  const finished = !!job.data && !isActive(job.data);
+  const run = useQuery({
+    queryKey: ['imports', 'run', id],
+    queryFn: () => importApi.get(id ?? ''),
+    enabled: !!id && finished,
+  });
+  return { job, run, finished };
 }
 
 // --- Stocktakes ---

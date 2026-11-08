@@ -61,6 +61,7 @@ const DocumentDetailPage = lazyPage(
   'DocumentDetailPage',
 );
 const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
+const ImportPage = lazyPage(() => import('./pages/ImportPage'), 'ImportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
 const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
@@ -278,6 +279,7 @@ function App() {
           <Route path="/iga" element={<IGAPage />} />
           <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/webhooks" element={<WebhooksPage />} />
+          <Route path="/imports" element={<ImportPage />} />
           <Route path="/export" element={<ExportPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/audit" element={<AuditPage />} />

@@ -48,7 +48,8 @@
     "reviews": "Reviews",
     "jobs": "Jobs",
     "tags": "Tags",
-    "rules": "Rule catalog"
+    "rules": "Rule catalog",
+    "import": "Import"
   },
   "common": {
     "save": "Save",
@@ -111,7 +112,8 @@
       "roomplan": "Open room plan",
       "tags": "Open tags",
       "rules": "Open rule catalog",
-      "scan": "Scan"
+      "scan": "Scan",
+      "import": "Open import assistant"
     },
     "contact": {
       "label": "Contact",
@@ -1377,6 +1379,154 @@
     "startHint": "Choose a format; the file is ready to download once the job completes.",
     "jobsHint": "Finished exports stay available for 24 hours."
   },
+  "import": {
+    "title": "Import",
+    "subtitle": "Upload a CSV or XLSX file, map its columns, check it in a dry run and import it.",
+    "steps": {
+      "label": "Import steps",
+      "item": "{{index}}. {{name}}",
+      "file": "File",
+      "mapping": "Mapping",
+      "check": "Check",
+      "run": "Run"
+    },
+    "back": "Back",
+    "next": {
+      "mapping": "Continue to mapping",
+      "check": "Continue to check",
+      "run": "Continue to run"
+    },
+    "file": {
+      "title": "File",
+      "hint": "CSV or XLSX, at most 50 MB. The file is stored as a document and scanned for malware before the import.",
+      "label": "Upload import file",
+      "scanStatus": "Scan status:",
+      "scanPending": "The file is being scanned for malware …",
+      "infected": "The file is infected and quarantined. The import has been aborted.",
+      "scanFailed": "The scan of the file failed. The import has been aborted.",
+      "notClean": "The file has not been scanned clean yet.",
+      "another": "Upload another file"
+    },
+    "preview": {
+      "title": "Column preview",
+      "loading": "Loading preview …",
+      "summary": "{{format}}, {{columns}} columns, {{rows}} sample rows",
+      "sheet": "Sheet"
+    },
+    "formats": {
+      "csv": "CSV",
+      "xlsx": "XLSX"
+    },
+    "profile": {
+      "title": "Mapping profile",
+      "choose": "Profile",
+      "new": "New profile",
+      "option": "{{name}} ({{entity}})",
+      "name": "Profile name",
+      "entity": "Object kind",
+      "mode": "Mode",
+      "ciType": "CI type",
+      "ciTypeFromColumn": "From a column (CI type)",
+      "format": "Format of the profile: {{format}}",
+      "identityKeys": "Identity keys",
+      "identityHint": "Mapping targets that identify an existing object.",
+      "identityEmpty": "Map columns first.",
+      "create": "Create profile",
+      "update": "Save profile",
+      "delete": "Delete profile",
+      "saved": "Profile “{{name}}” saved.",
+      "unsaved": "Unsaved changes: save before the check."
+    },
+    "entities": {
+      "ci": "CIs",
+      "asset": "Assets",
+      "contract": "Contracts",
+      "consumable": "Consumables",
+      "location": "Locations",
+      "relationship": "Relationships"
+    },
+    "modes": {
+      "create_missing": "Create missing only",
+      "update_existing": "Update existing only",
+      "both": "Create and update"
+    },
+    "transforms": {
+      "trim": "Trim spaces",
+      "date_format": "Date format",
+      "enum_map": "Map values",
+      "split": "Split list",
+      "constant": "Fixed value"
+    },
+    "mapping": {
+      "title": "Column mapping",
+      "target": "Target of {{column}}",
+      "default": "Default for {{name}}",
+      "examples": "Examples: {{values}}",
+      "transformsOf": "Transformations of {{column}}",
+      "step": "{{index}}. {{name}}",
+      "addTransform": "Add transformation to {{column}}",
+      "chooseTransform": "Choose transformation",
+      "removeTransform": "Remove {{name}} from {{column}}",
+      "layout": "Layout ({{name}})",
+      "values": "Mapping ({{name}})",
+      "separator": "Separator ({{name}})",
+      "constant": "Value ({{name}})",
+      "enumMapPlaceholder": "source=target, source2=target2"
+    },
+    "check": {
+      "title": "Check (dry run)",
+      "hint": "The dry run reads the file with the profile “{{name}}” and checks every row without writing anything.",
+      "start": "Start dry run"
+    },
+    "run": {
+      "title": "Run",
+      "hint": "The import writes in the mode “{{mode}}” of the profile.",
+      "start": "Run import",
+      "again": "Start a new import"
+    },
+    "report": {
+      "title": "Report",
+      "loading": "Loading report …",
+      "running": "{{status}}: {{progress}} %",
+      "progress": "Progress of the import",
+      "ok": "No errors",
+      "partial": "Partial success: {{failed}} of {{total}} rows failed",
+      "allFailed": "All rows failed",
+      "dryRun": "Dry run",
+      "dryRunNote": "The dry run wrote nothing; the numbers show what the import would do.",
+      "rowErrors": "Rows with errors: {{count}}. Row, field, code and message of every row are in the report.",
+      "failed": "The import failed.",
+      "cancelled": "The import was cancelled; there is no report.",
+      "download": "Download report",
+      "notReady": "The report is not ready yet.",
+      "unknown": "–",
+      "counters": {
+        "total": "Total",
+        "created": "Created",
+        "updated": "Updated",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      }
+    },
+    "errors": {
+      "import-format-unsupported": "The file format is not supported (CSV and XLSX only).",
+      "import-sheet-not-found": "The sheet does not exist in the file.",
+      "import-file-too-complex": "The file is too complex (at most 500 columns and 1 MiB per row).",
+      "import-file-too-large": "The file is larger than 50 MB.",
+      "import-row-limit": "The file has more than 50,000 data rows.",
+      "notEntitled": "Import is not enabled for the organization.",
+      "forbidden": "You lack the permission for this.",
+      "field": "{{field}}: {{detail}}"
+    },
+    "permissions": {
+      "run": "Checking and running need the permission import:run.",
+      "manage": "Saving profiles needs the permission import:manage."
+    },
+    "api": {
+      "title": "Import through the API",
+      "hint": "Without a file: POST /api/v1/imports with rows (at most {{max}} rows per request), a profile of format json and an Idempotency-Key against duplicate runs."
+    }
+  },
   "monitoring": {
     "title": "Monitoring",
     "subtitle": "Query metrics and manage alert rules.",
@@ -2137,7 +2287,38 @@
       "firmware_version": "Firmware version",
       "primary_mac": "Primary MAC address",
       "hardware_uuid": "Hardware UUID",
-      "sys_object_id": "SNMP sysObjectID"
+      "sys_object_id": "SNMP sysObjectID",
+      "vrf_id": "VRF",
+      "location": "Location (path)",
+      "location_kind": "Location kind",
+      "observed_at": "Observed at",
+      "invoice_number": "Invoice number",
+      "notes": "Notes",
+      "primary_ci_id": "Primary CI",
+      "number": "Contract number",
+      "kind": "Kind",
+      "start_date": "Start",
+      "end_date": "End",
+      "notice_period_days": "Notice period (days)",
+      "value": "Value",
+      "sku": "Article number (SKU)",
+      "unit": "Unit",
+      "parent": "Parent location (path)",
+      "path": "Location path",
+      "rel_type": "Relationship type",
+      "source_ci_id": "Source CI",
+      "target_ci_id": "Target CI",
+      "source_serial_number": "Serial number of the source",
+      "target_serial_number": "Serial number of the target",
+      "source_hardware_uuid": "Hardware UUID of the source",
+      "target_hardware_uuid": "Hardware UUID of the target",
+      "source_primary_mac": "MAC address of the source",
+      "target_primary_mac": "MAC address of the target",
+      "source_management_ip": "Management IP of the source",
+      "target_management_ip": "Management IP of the target",
+      "source_interface_id": "Interface of the source",
+      "target_interface_id": "Interface of the target",
+      "confidence": "Confidence"
     },
     "editor": {
       "newView": "New view",
@@ -2526,6 +2707,9 @@
       },
       "template": {
         "migrate": "Template migration"
+      },
+      "import": {
+        "run": "Import run"
       }
     },
     "emptyHint": "Jobs appear here when an export, bulk change or discovery run starts."

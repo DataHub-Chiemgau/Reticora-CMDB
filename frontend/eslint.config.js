@@ -84,6 +84,9 @@ export default tseslint.config(
       'src/pages/DocumentDetailPage.tsx',
       'src/components/upload/**/*.tsx',
       'src/components/documents/**/*.tsx',
+      // WP-322: the import assistant and its mapping editor.
+      'src/pages/ImportPage.tsx',
+      'src/components/import/**/*.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
@@ -92,6 +95,7 @@ export default tseslint.config(
       'src/components/rules/**/*.test.tsx',
       'src/components/upload/**/*.test.tsx',
       'src/components/documents/**/*.test.tsx',
+      'src/components/import/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

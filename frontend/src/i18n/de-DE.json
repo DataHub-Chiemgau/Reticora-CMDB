@@ -48,7 +48,8 @@
     "reviews": "Reviews",
     "jobs": "Jobs",
     "tags": "Tags",
-    "rules": "Regelkatalog"
+    "rules": "Regelkatalog",
+    "import": "Import"
   },
   "common": {
     "save": "Speichern",
@@ -111,7 +112,8 @@
       "roomplan": "Raumplan öffnen",
       "tags": "Tags öffnen",
       "rules": "Regelkatalog öffnen",
-      "scan": "Scannen"
+      "scan": "Scannen",
+      "import": "Import-Assistent öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -1377,6 +1379,154 @@
     "startHint": "Wählen Sie ein Format; die Datei steht zum Download bereit, sobald der Auftrag abgeschlossen ist.",
     "jobsHint": "Fertige Exporte bleiben 24 Stunden verfügbar."
   },
+  "import": {
+    "title": "Import",
+    "subtitle": "CSV- oder XLSX-Datei hochladen, Spalten zuordnen, im Dry Run prüfen und importieren.",
+    "steps": {
+      "label": "Schritte des Imports",
+      "item": "{{index}}. {{name}}",
+      "file": "Datei",
+      "mapping": "Zuordnung",
+      "check": "Prüfen",
+      "run": "Ausführen"
+    },
+    "back": "Zurück",
+    "next": {
+      "mapping": "Weiter zur Zuordnung",
+      "check": "Weiter zum Prüfen",
+      "run": "Weiter zum Ausführen"
+    },
+    "file": {
+      "title": "Datei",
+      "hint": "CSV oder XLSX, höchstens 50 MB. Die Datei wird als Dokument gespeichert und vor dem Import auf Schadsoftware geprüft.",
+      "label": "Importdatei hochladen",
+      "scanStatus": "Scanstatus:",
+      "scanPending": "Die Datei wird auf Schadsoftware geprüft …",
+      "infected": "Die Datei ist infiziert und in Quarantäne. Der Import ist abgebrochen.",
+      "scanFailed": "Die Prüfung der Datei ist fehlgeschlagen. Der Import ist abgebrochen.",
+      "notClean": "Die Datei ist noch nicht sauber geprüft.",
+      "another": "Andere Datei hochladen"
+    },
+    "preview": {
+      "title": "Spaltenvorschau",
+      "loading": "Vorschau wird geladen …",
+      "summary": "{{format}}, {{columns}} Spalten, {{rows}} Beispielzeilen",
+      "sheet": "Tabellenblatt"
+    },
+    "formats": {
+      "csv": "CSV",
+      "xlsx": "XLSX"
+    },
+    "profile": {
+      "title": "Mapping-Profil",
+      "choose": "Profil",
+      "new": "Neues Profil",
+      "option": "{{name}} ({{entity}})",
+      "name": "Name des Profils",
+      "entity": "Objektart",
+      "mode": "Modus",
+      "ciType": "CI-Typ",
+      "ciTypeFromColumn": "Aus einer Spalte (CI-Typ)",
+      "format": "Format des Profils: {{format}}",
+      "identityKeys": "Identitätsschlüssel",
+      "identityHint": "Zuordnungsziele, an denen ein bestehendes Objekt erkannt wird.",
+      "identityEmpty": "Zuerst Spalten zuordnen.",
+      "create": "Profil anlegen",
+      "update": "Profil speichern",
+      "delete": "Profil löschen",
+      "saved": "Profil „{{name}}“ gespeichert.",
+      "unsaved": "Ungespeicherte Änderungen: vor dem Prüfen speichern."
+    },
+    "entities": {
+      "ci": "CIs",
+      "asset": "Assets",
+      "contract": "Verträge",
+      "consumable": "Verbrauchsmaterial",
+      "location": "Standorte",
+      "relationship": "Beziehungen"
+    },
+    "modes": {
+      "create_missing": "Nur fehlende anlegen",
+      "update_existing": "Nur bestehende aktualisieren",
+      "both": "Anlegen und aktualisieren"
+    },
+    "transforms": {
+      "trim": "Leerzeichen entfernen",
+      "date_format": "Datumsformat",
+      "enum_map": "Werte umsetzen",
+      "split": "Liste trennen",
+      "constant": "Fester Wert"
+    },
+    "mapping": {
+      "title": "Spaltenzuordnung",
+      "target": "Ziel von {{column}}",
+      "default": "Standardwert für {{name}}",
+      "examples": "Beispiele: {{values}}",
+      "transformsOf": "Transformationen von {{column}}",
+      "step": "{{index}}. {{name}}",
+      "addTransform": "Transformation für {{column}} hinzufügen",
+      "chooseTransform": "Transformation wählen",
+      "removeTransform": "{{name}} von {{column}} entfernen",
+      "layout": "Layout ({{name}})",
+      "values": "Zuordnung ({{name}})",
+      "separator": "Trennzeichen ({{name}})",
+      "constant": "Wert ({{name}})",
+      "enumMapPlaceholder": "quelle=ziel, quelle2=ziel2"
+    },
+    "check": {
+      "title": "Prüfen (Dry Run)",
+      "hint": "Der Dry Run liest die Datei mit dem Profil „{{name}}“ und prüft jede Zeile, ohne etwas zu schreiben.",
+      "start": "Dry Run starten"
+    },
+    "run": {
+      "title": "Ausführen",
+      "hint": "Der Import schreibt im Modus „{{mode}}“ des Profils.",
+      "start": "Import ausführen",
+      "again": "Neuen Import beginnen"
+    },
+    "report": {
+      "title": "Bericht",
+      "loading": "Bericht wird geladen …",
+      "running": "{{status}}: {{progress}} %",
+      "progress": "Fortschritt des Imports",
+      "ok": "Ohne Fehler",
+      "partial": "Teilerfolg: {{failed}} von {{total}} Zeilen fehlerhaft",
+      "allFailed": "Alle Zeilen fehlerhaft",
+      "dryRun": "Dry Run",
+      "dryRunNote": "Im Dry Run wurde nichts geschrieben; die Zahlen zeigen, was der Import tun würde.",
+      "rowErrors": "Fehlerhafte Zeilen: {{count}}. Zeile, Feld, Code und Meldung jeder Zeile stehen im Bericht.",
+      "failed": "Der Import ist fehlgeschlagen.",
+      "cancelled": "Der Import wurde abgebrochen; es gibt keinen Bericht.",
+      "download": "Bericht herunterladen",
+      "notReady": "Der Bericht ist noch nicht fertig.",
+      "unknown": "–",
+      "counters": {
+        "total": "Gesamt",
+        "created": "Angelegt",
+        "updated": "Aktualisiert",
+        "skipped": "Übersprungen",
+        "failed": "Fehlerhaft"
+      }
+    },
+    "errors": {
+      "import-format-unsupported": "Das Dateiformat wird nicht unterstützt (nur CSV und XLSX).",
+      "import-sheet-not-found": "Das Tabellenblatt gibt es in der Datei nicht.",
+      "import-file-too-complex": "Die Datei ist zu komplex (höchstens 500 Spalten und 1 MiB je Zeile).",
+      "import-file-too-large": "Die Datei ist größer als 50 MB.",
+      "import-row-limit": "Die Datei hat mehr als 50.000 Datenzeilen.",
+      "notEntitled": "Der Import ist für die Organisation nicht freigeschaltet.",
+      "forbidden": "Dafür fehlt die Berechtigung.",
+      "field": "{{field}}: {{detail}}"
+    },
+    "permissions": {
+      "run": "Prüfen und Ausführen brauchen die Berechtigung import:run.",
+      "manage": "Profile speichern braucht die Berechtigung import:manage."
+    },
+    "api": {
+      "title": "Import über die API",
+      "hint": "Ohne Datei: POST /api/v1/imports mit rows (höchstens {{max}} Zeilen je Anfrage), einem Profil im Format json und einem Idempotency-Key gegen doppelte Läufe."
+    }
+  },
   "monitoring": {
     "title": "Monitoring",
     "subtitle": "Metriken abfragen und Alarmregeln verwalten.",
@@ -2137,7 +2287,38 @@
       "firmware_version": "Firmware-Version",
       "primary_mac": "Primäre MAC-Adresse",
       "hardware_uuid": "Hardware-UUID",
-      "sys_object_id": "SNMP sysObjectID"
+      "sys_object_id": "SNMP sysObjectID",
+      "vrf_id": "VRF",
+      "location": "Standort (Pfad)",
+      "location_kind": "Standortart",
+      "observed_at": "Beobachtet am",
+      "invoice_number": "Rechnungsnummer",
+      "notes": "Notizen",
+      "primary_ci_id": "Primäres CI",
+      "number": "Vertragsnummer",
+      "kind": "Art",
+      "start_date": "Beginn",
+      "end_date": "Ende",
+      "notice_period_days": "Kündigungsfrist (Tage)",
+      "value": "Wert",
+      "sku": "Artikelnummer (SKU)",
+      "unit": "Einheit",
+      "parent": "Übergeordneter Standort (Pfad)",
+      "path": "Standortpfad",
+      "rel_type": "Beziehungstyp",
+      "source_ci_id": "Quell-CI",
+      "target_ci_id": "Ziel-CI",
+      "source_serial_number": "Seriennummer der Quelle",
+      "target_serial_number": "Seriennummer des Ziels",
+      "source_hardware_uuid": "Hardware-UUID der Quelle",
+      "target_hardware_uuid": "Hardware-UUID des Ziels",
+      "source_primary_mac": "MAC-Adresse der Quelle",
+      "target_primary_mac": "MAC-Adresse des Ziels",
+      "source_management_ip": "Management-IP der Quelle",
+      "target_management_ip": "Management-IP des Ziels",
+      "source_interface_id": "Schnittstelle der Quelle",
+      "target_interface_id": "Schnittstelle des Ziels",
+      "confidence": "Konfidenz"
     },
     "editor": {
       "newView": "Neue Ansicht",
@@ -2526,6 +2707,9 @@
       },
       "template": {
         "migrate": "Template-Migration"
+      },
+      "import": {
+        "run": "Import-Lauf"
       }
     },
     "emptyHint": "Jobs erscheinen hier, sobald ein Export, eine Sammeländerung oder ein Discovery-Lauf startet."

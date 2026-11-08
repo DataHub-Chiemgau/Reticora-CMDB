@@ -57,7 +57,9 @@ export type AppPage =
   | 'inventory'
   | 'saved-views'
   // Tag catalog (CI-08, WP-817): core without a module gate (E-105).
-  | 'tags';
+  | 'tags'
+  // Import assistant (UI-11, WP-322): the nav page of the module import (E-105).
+  | 'import';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -103,6 +105,7 @@ export const pageToPath: Record<AppPage, string> = {
   inventory: '/inventory',
   'saved-views': '/saved-views',
   tags: '/tags',
+  import: '/imports',
 };
 
 interface CommandPaletteProps {
@@ -414,6 +417,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.webhooks'),
         keywords: ['webhooks subscriptions deliveries dead letter'],
         action: () => onNavigate('webhooks'),
+      },
+      {
+        id: 'nav-import',
+        label: t('commandPalette.commands.import'),
+        keywords: ['import csv xlsx excel upload mapping profil dry run'],
+        action: () => onNavigate('import'),
       },
       {
         id: 'nav-export',

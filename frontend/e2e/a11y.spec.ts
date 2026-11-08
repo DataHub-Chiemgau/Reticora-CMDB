@@ -382,6 +382,55 @@ const TAG_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-322: an uploaded CSV file whose scan is clean and its column preview;
+// the check opens the mapping step of the import assistant.
+const IMPORT_DOCUMENT = {
+  id: 'fb000000-0000-4000-8000-000000000001',
+  organization_id: ORG_ID,
+  title: 'a11y-import',
+  file_name: 'a11y-import.csv',
+  file_size: 32,
+  mime_type: 'text/csv',
+  storage_key: '',
+  version: 1,
+  category: 'general',
+  tags: [],
+  uploaded_by: '00000000-0000-0000-0000-000000000001',
+  created_at: AT,
+  updated_at: AT,
+  scan_status: 'clean',
+};
+const IMPORT_HANDLERS: Handler[] = [
+  {
+    path: '/me/permissions',
+    reply: () => ({
+      body: {
+        user_id: '00000000-0000-0000-0000-000000000001',
+        permissions: ['ci:read', 'import:run', 'import:manage'],
+      },
+    }),
+  },
+  { method: 'POST', path: '/documents', reply: () => ({ status: 201, body: IMPORT_DOCUMENT }) },
+  {
+    method: 'PUT',
+    path: `/documents/${IMPORT_DOCUMENT.id}/content`,
+    reply: () => ({ body: IMPORT_DOCUMENT }),
+  },
+  { path: `/documents/${IMPORT_DOCUMENT.id}`, reply: () => ({ body: IMPORT_DOCUMENT }) },
+  {
+    method: 'POST',
+    path: '/imports/preview',
+    reply: () => ({
+      body: {
+        format: 'csv',
+        sheets: [],
+        columns: ['Hostname', 'Seriennummer'],
+        sample_rows: [['a11y-import-srv', 'SN-1']],
+      },
+    }),
+  },
+];
+
 // One entry per route of src/App.tsx; the parity test below fails when a
 // route is added there without an entry here.
 const ROUTES: A11yRoute[] = [
@@ -609,6 +658,21 @@ const ROUTES: A11yRoute[] = [
     path: '/export',
     url: '/export',
     ready: (page) => page.locator('#main-content tbody td', { hasText: 'csv' }).first(),
+  },
+  {
+    // WP-322: the import assistant after the upload, with preview and mapping.
+    path: '/imports',
+    url: '/imports',
+    handlers: IMPORT_HANDLERS,
+    prepare: async (page) => {
+      await page.locator('#main-content input[type="file"]').setInputFiles({
+        name: 'a11y-import.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from('Hostname;Seriennummer\na11y-import-srv;SN-1\n'),
+      });
+      await page.getByRole('button', { name: /Weiter zur Zuordnung|Continue to mapping/ }).click();
+    },
+    ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
