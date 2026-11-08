@@ -66,6 +66,8 @@ const DETAIL_PANEL = 'panel of the CI detail page the spec does not look at';
 const CI_DETAIL_PANELS: Unused[] = [
   { method: 'GET', path: /^\/cis\/[^/]+\/parent$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/relationships$/, why: DETAIL_PANEL },
+  // The relationship types the relationship panel labels its edges with (WP-323).
+  { method: 'GET', path: '/relationship-types', why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/field-definitions$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/provenance$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/history\/ci\/[^/]+$/, why: DETAIL_PANEL },
