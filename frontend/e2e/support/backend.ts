@@ -80,6 +80,11 @@ export const UNUSED: Record<string, Unused[]> = {
   'keyboard.spec.ts': CI_DETAIL_PANELS,
   // The provenance panel is the subject of conflict.spec.ts; it has a handler.
   'conflict.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
+  // ABN-01 (c) (WP-330): the templates and the provenance of the reference
+  // CI are the subject of steps 3 and 9; they have handlers.
+  'metamodel-scenario.spec.ts': CI_DETAIL_PANELS.filter(
+    (u) => !String(u.path).includes('provenance'),
+  ),
   // The provenance panel on a phone is the subject of one test there (WP-646).
   'mobile-actions.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
 };
@@ -101,7 +106,7 @@ export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {};
 // and the command palette show all pages: every key of the plan matrix
 // (ENT-06 in the version of E-44) and the add-ons, as the server's
 // entitlement.FeatureKeys (WP-244).
-const FEATURES = [
+export const FEATURES = [
   'cmdb_core',
   'discovery',
   'topology',
@@ -474,21 +479,37 @@ export function takeFailures(page: Page): string[] {
   return state ? state.failures.splice(0) : [];
 }
 
-/** signIn stores a session so the protected pages render. */
-export async function signIn(page: Page) {
-  await page.addInitScript(() => {
+/** The user of a session signIn stores; every field is optional. */
+export interface SessionUser {
+  /** The user id (sub); default 00000000-0000-0000-0000-000000000001. */
+  sub?: string;
+  /** The display name; default "Admin". */
+  name?: string;
+  /** The rights of the session (user.permissions); default none. */
+  permissions?: string[];
+}
+
+/**
+ * signIn stores a session so the protected pages render: by default the
+ * user "Admin" without rights in the session (the effective rights come
+ * from GET /me/permissions). user sets name, rights and id of the session
+ * user, e.g. a normal user with the role engineer (ABN-01 (c), WP-330). A
+ * later call replaces the session from the next navigation on.
+ */
+export async function signIn(page: Page, user: SessionUser = {}) {
+  await page.addInitScript((session) => {
     window.sessionStorage.setItem(
       'reticora-auth-session',
       JSON.stringify({
         token: 'header.payload.signature',
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
         user: {
-          sub: '00000000-0000-0000-0000-000000000001',
-          name: 'Admin',
+          sub: session.sub ?? '00000000-0000-0000-0000-000000000001',
+          name: session.name ?? 'Admin',
           org_id: '00000000-0000-0000-0000-0000000000aa',
-          permissions: [],
+          permissions: session.permissions ?? [],
         },
       }),
     );
-  });
+  }, user);
 }

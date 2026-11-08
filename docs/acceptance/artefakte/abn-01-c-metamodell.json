@@ -1,0 +1,1947 @@
+{
+  "szenario": "ABN-01 (c) Metamodell-Szenario [P2], G2",
+  "arbeitspaket": "WP-330 (g2-abnahme)",
+  "katalog": "docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:97",
+  "protokoll": "docs/acceptance/abn-01.md, Abschnitt (c)",
+  "spec": "frontend/e2e/metamodel-scenario.spec.ts",
+  "seed": {
+    "funktion": "ID in backend/cmd/seed/seed.go: md5(key)::uuid",
+    "praefix": "",
+    "organisation": "demo (Demo, demo.local)",
+    "hinweis": "quelle \"seed\": der Seed von WP-325 vergibt die ID mit diesem Schlüssel selbst. quelle \"schema\": der Seed legt das Objekt über die Dienste an oder es gehört nur zum Szenario; die ID folgt demselben Schema <org>/<art>/<schlüssel>."
+  },
+  "zeit": "2026-10-14T08:00:00Z",
+  "ids": {
+    "organisation": {
+      "schluessel": "/org/demo",
+      "id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+      "quelle": "seed"
+    },
+    "nutzer_org_admin": {
+      "schluessel": "demo/user/admin",
+      "id": "5e248909-906e-6609-c441-933f06c2a3a1",
+      "quelle": "seed"
+    },
+    "nutzer_engineer": {
+      "schluessel": "demo/user/engineer",
+      "id": "41d90636-4149-6540-3b7d-1f019683c8cd",
+      "quelle": "seed"
+    },
+    "client_hq": {
+      "schluessel": "demo/client/hq",
+      "id": "829dba8f-97a4-2375-1e87-7823a4ff2c6e",
+      "quelle": "seed"
+    },
+    "ci_chassis": {
+      "schluessel": "demo/ci/chassis/1",
+      "id": "01a01a83-afe5-aa69-84a5-978565f8bb24",
+      "quelle": "seed"
+    },
+    "referenz_ci": {
+      "schluessel": "demo/ci/blade/1/1",
+      "id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+      "quelle": "seed"
+    },
+    "rolle_org_admin": {
+      "schluessel": "demo/role/org_admin",
+      "id": "898d3684-9733-6307-13f1-f209c24410ca",
+      "quelle": "schema"
+    },
+    "rolle_engineer": {
+      "schluessel": "demo/role/engineer",
+      "id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+      "quelle": "schema"
+    },
+    "rolle_viewer": {
+      "schluessel": "demo/role/viewer",
+      "id": "64669407-4f56-efda-d943-aa3909d4a16f",
+      "quelle": "schema"
+    },
+    "typ_server": {
+      "schluessel": "system/ci_type/server",
+      "id": "94865461-9f6b-9f7f-77d4-6b8e2c718675",
+      "quelle": "schema"
+    },
+    "typ_blade_server": {
+      "schluessel": "demo/ci_type/blade_server",
+      "id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+      "quelle": "schema"
+    },
+    "typ_neu": {
+      "schluessel": "demo/ci_type/abn01_storage_blade",
+      "id": "ee2080ca-2b3f-f8ce-fd70-7a5cc5432e12",
+      "quelle": "schema"
+    },
+    "set_blade_power": {
+      "schluessel": "demo/attribute_set/blade_power",
+      "id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d",
+      "quelle": "schema"
+    },
+    "set_blade_support": {
+      "schluessel": "demo/attribute_set/blade_support",
+      "id": "bf377763-40ba-59eb-cc07-09aad4b05f0f",
+      "quelle": "schema"
+    },
+    "template_compute": {
+      "schluessel": "demo/template/blade_server_compute",
+      "id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+      "quelle": "schema"
+    },
+    "template_storage": {
+      "schluessel": "demo/template/abn01_blade_storage",
+      "id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+      "quelle": "schema"
+    },
+    "regel": {
+      "schluessel": "demo/rule/abn01-storage-slot",
+      "id": "9bddfe99-dbbf-eced-eb74-4949784b0b96",
+      "quelle": "schema"
+    },
+    "layout": {
+      "schluessel": "demo/layout/blade_server_engineer",
+      "id": "c02bbad0-f8f1-8a66-1c7f-706a05854598",
+      "quelle": "schema"
+    },
+    "draft": {
+      "schluessel": "demo/metamodel_draft/abn-01-c",
+      "id": "67d75e2b-0179-0e32-87ef-c8c86c066950",
+      "quelle": "schema"
+    },
+    "draft_item": {
+      "schluessel": "demo/metamodel_draft/abn-01-c/item/1",
+      "id": "1542b306-ae15-148d-d1d5-2eddf7b7a1fd",
+      "quelle": "schema"
+    },
+    "job_test": {
+      "schluessel": "demo/job/metamodel.test/abn-01-c",
+      "id": "625616c4-70ec-f03a-e384-8d4daaac3ac9",
+      "quelle": "schema"
+    },
+    "job_migration_probe": {
+      "schluessel": "demo/job/template.migrate/abn-01-c/dry-run",
+      "id": "8c8c6649-7f55-5855-1a63-89e0fbe091a0",
+      "quelle": "schema"
+    },
+    "job_migration": {
+      "schluessel": "demo/job/template.migrate/abn-01-c/run",
+      "id": "6ecec5f2-426a-0c24-b5ce-765b8dde4a20",
+      "quelle": "schema"
+    },
+    "neues_ci": {
+      "schluessel": "demo/ci/abn01-storage-01",
+      "id": "44ac9e26-0db4-953a-9d5c-52f6dfe7e3b2",
+      "quelle": "schema"
+    },
+    "override": {
+      "schluessel": "demo/ci_field_value/blade/1/1/storage_pool",
+      "id": "42aabd39-6f53-506d-3fc3-d2a130994eb1",
+      "quelle": "schema"
+    },
+    "attribut_blade_slot": {
+      "schluessel": "demo/attribute_definition/blade_slot",
+      "id": "a7802d43-40ba-4072-fdf0-df8952c1eb39",
+      "quelle": "schema"
+    },
+    "attribut_blade_role": {
+      "schluessel": "demo/attribute_definition/blade_role",
+      "id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+      "quelle": "schema"
+    },
+    "attribut_storage_pool": {
+      "schluessel": "demo/attribute_definition/storage_pool",
+      "id": "674b7167-3075-72ad-56d3-34f6b52d0a34",
+      "quelle": "schema"
+    },
+    "attribut_psu_count": {
+      "schluessel": "demo/attribute_definition/psu_count",
+      "id": "25f3fff5-8c68-6fe3-5130-2822bc61bc4e",
+      "quelle": "schema"
+    },
+    "attribut_psu_redundancy": {
+      "schluessel": "demo/attribute_definition/psu_redundancy",
+      "id": "d2d306cb-207b-e04e-456b-ef440f6414db",
+      "quelle": "schema"
+    },
+    "attribut_support_level": {
+      "schluessel": "demo/attribute_definition/support_level",
+      "id": "ff25a9d2-eacb-e5ba-bbde-9e3e152628fe",
+      "quelle": "schema"
+    },
+    "version_blade_server_compute_1": {
+      "schluessel": "demo/template/blade_server_compute/version/1",
+      "id": "f3b8ec0b-f519-73a0-161a-fc77f4868d49",
+      "quelle": "schema"
+    },
+    "version_blade_server_compute_2": {
+      "schluessel": "demo/template/blade_server_compute/version/2",
+      "id": "02efcfa0-aba4-5e35-a1c2-eb7b4cfc5df6",
+      "quelle": "schema"
+    },
+    "version_abn01_blade_storage_1": {
+      "schluessel": "demo/template/abn01_blade_storage/version/1",
+      "id": "dba8f4a0-8d42-e688-0deb-5999c2cff3f9",
+      "quelle": "schema"
+    },
+    "version_abn01_blade_storage_2": {
+      "schluessel": "demo/template/abn01_blade_storage/version/2",
+      "id": "56c8fc08-15c9-acb9-58a1-d0c04f7018ef",
+      "quelle": "schema"
+    }
+  },
+  "sitzungen": {
+    "org_admin": {
+      "user_id": "5e248909-906e-6609-c441-933f06c2a3a1",
+      "name": "admin",
+      "rolle": "org_admin",
+      "permissions": [
+        "agent:manage",
+        "agent:read",
+        "ai:read",
+        "asset:move",
+        "asset:read",
+        "asset:write",
+        "assignment:read",
+        "assignment:write",
+        "ci:delete",
+        "ci:read",
+        "ci:write",
+        "ci_attribute:manage",
+        "ci_instance_attribute:manage",
+        "citype:manage",
+        "collector:manage",
+        "compliance:read",
+        "compliance:write",
+        "contact:read",
+        "contact:write",
+        "contract:read",
+        "contract:write",
+        "credential:manage",
+        "credential:read",
+        "desk:read",
+        "desk:write",
+        "discovery:ingest",
+        "discovery:manage",
+        "discovery:read",
+        "disposal:read",
+        "disposal:write",
+        "document:read",
+        "document:write",
+        "entitlement:read",
+        "export:run",
+        "field_permission:manage",
+        "form:read",
+        "form:write",
+        "iga:read",
+        "import:manage",
+        "import:run",
+        "ipam:read",
+        "ipam:write",
+        "job:read",
+        "key:read",
+        "key:write",
+        "lifecycle:manage",
+        "lifecycle:transition",
+        "location:read",
+        "location:write",
+        "maintenance:read",
+        "maintenance:write",
+        "metamodel:publish",
+        "monitoring:read",
+        "monitoring:write",
+        "order:read",
+        "order:write",
+        "override:write",
+        "permission:read",
+        "rack:read",
+        "rack:write",
+        "reconciliation:manage",
+        "relationship:read",
+        "relationship:write",
+        "relationship_type:manage",
+        "reservation:read",
+        "reservation:write",
+        "review:resolve",
+        "role:read",
+        "saved_view:manage",
+        "saved_view:read",
+        "saved_view:write",
+        "search:read",
+        "search:write",
+        "security:read",
+        "security:write",
+        "sla:read",
+        "stock:read",
+        "stock:write",
+        "stocktake:complete",
+        "stocktake:read",
+        "stocktake:write",
+        "tag:manage",
+        "ticket:read",
+        "ticket:write",
+        "topology:read",
+        "training:read",
+        "training:write",
+        "user:read",
+        "vrf:manage",
+        "webhook:read",
+        "workflow:read",
+        "workflow:write"
+      ],
+      "hinweis": "Auszug aus dem Katalog: die Rechte von engineer und die org_admin vorbehaltenen"
+    },
+    "engineer": {
+      "user_id": "41d90636-4149-6540-3b7d-1f019683c8cd",
+      "name": "engineer",
+      "rolle": "engineer",
+      "permissions": [
+        "agent:manage",
+        "agent:read",
+        "ai:read",
+        "asset:move",
+        "asset:read",
+        "asset:write",
+        "assignment:read",
+        "assignment:write",
+        "ci:delete",
+        "ci:read",
+        "ci:write",
+        "ci_instance_attribute:manage",
+        "collector:manage",
+        "compliance:read",
+        "compliance:write",
+        "contact:read",
+        "contact:write",
+        "contract:read",
+        "contract:write",
+        "credential:manage",
+        "credential:read",
+        "desk:read",
+        "desk:write",
+        "discovery:ingest",
+        "discovery:manage",
+        "discovery:read",
+        "disposal:read",
+        "disposal:write",
+        "document:read",
+        "document:write",
+        "entitlement:read",
+        "export:run",
+        "form:read",
+        "form:write",
+        "iga:read",
+        "import:run",
+        "ipam:read",
+        "ipam:write",
+        "job:read",
+        "key:read",
+        "key:write",
+        "lifecycle:transition",
+        "location:read",
+        "location:write",
+        "maintenance:read",
+        "maintenance:write",
+        "monitoring:read",
+        "monitoring:write",
+        "order:read",
+        "order:write",
+        "override:write",
+        "permission:read",
+        "rack:read",
+        "rack:write",
+        "reconciliation:manage",
+        "relationship:read",
+        "relationship:write",
+        "reservation:read",
+        "reservation:write",
+        "review:resolve",
+        "role:read",
+        "saved_view:read",
+        "saved_view:write",
+        "search:read",
+        "search:write",
+        "security:read",
+        "security:write",
+        "sla:read",
+        "stock:read",
+        "stock:write",
+        "stocktake:complete",
+        "stocktake:read",
+        "stocktake:write",
+        "tag:manage",
+        "ticket:read",
+        "ticket:write",
+        "topology:read",
+        "training:read",
+        "training:write",
+        "user:read",
+        "vrf:manage",
+        "webhook:read",
+        "workflow:read",
+        "workflow:write"
+      ],
+      "quelle": "permission.StandardRoles in backend/internal/permission/role_matrix.go"
+    }
+  },
+  "bestand": {
+    "ci_types": [
+      {
+        "id": "94865461-9f6b-9f7f-77d4-6b8e2c718675",
+        "key": "server",
+        "name": "Server",
+        "display_name": {
+          "de": "Server",
+          "en": "Server"
+        },
+        "category": "hardware",
+        "is_builtin": true,
+        "is_system": true,
+        "is_active": true,
+        "is_logical": false,
+        "is_observable": true,
+        "schema_version": 1,
+        "version": 1,
+        "capabilities": {},
+        "allowed_relationship_types": [],
+        "ui_schema": {},
+        "compliance_rules": [],
+        "discovery_mappings": [],
+        "fields": [],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      },
+      {
+        "id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "blade_server",
+        "name": "Blade server",
+        "display_name": {
+          "de": "Blade-Server",
+          "en": "Blade server"
+        },
+        "category": "hardware",
+        "is_builtin": false,
+        "is_system": false,
+        "is_active": true,
+        "is_logical": false,
+        "is_observable": true,
+        "schema_version": 1,
+        "version": 1,
+        "capabilities": {},
+        "allowed_relationship_types": [],
+        "ui_schema": {},
+        "compliance_rules": [],
+        "discovery_mappings": [],
+        "fields": [],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z",
+        "parent_type_id": "94865461-9f6b-9f7f-77d4-6b8e2c718675"
+      }
+    ],
+    "attribute_definitions": [
+      {
+        "id": "a7802d43-40ba-4072-fdf0-df8952c1eb39",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "scope": "type",
+        "key": "blade_slot",
+        "display_name": {
+          "de": "Einschub",
+          "en": "Slot"
+        },
+        "description": "Seed (WP-325)",
+        "data_type": "integer",
+        "required": false,
+        "multi_value": false,
+        "searchable": false,
+        "unique": false,
+        "unique_scope": "org",
+        "inheritable": true,
+        "order": 0,
+        "is_system": false,
+        "applies_to": "all",
+        "applies_to_categories": [],
+        "applies_to_type_ids": [],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c"
+      },
+      {
+        "id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "scope": "type",
+        "key": "blade_role",
+        "display_name": {
+          "de": "Rolle",
+          "en": "Role"
+        },
+        "description": "Seed (WP-325)",
+        "data_type": "enum",
+        "required": false,
+        "multi_value": false,
+        "searchable": false,
+        "unique": false,
+        "unique_scope": "org",
+        "inheritable": true,
+        "order": 0,
+        "is_system": false,
+        "applies_to": "all",
+        "applies_to_categories": [],
+        "applies_to_type_ids": [],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "enum_values": ["compute", "storage"]
+      },
+      {
+        "id": "674b7167-3075-72ad-56d3-34f6b52d0a34",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "scope": "type",
+        "key": "storage_pool",
+        "display_name": {
+          "de": "Speicherpool",
+          "en": "Storage pool"
+        },
+        "description": "Seed (WP-325)",
+        "data_type": "text",
+        "required": false,
+        "multi_value": false,
+        "searchable": false,
+        "unique": false,
+        "unique_scope": "org",
+        "inheritable": true,
+        "order": 0,
+        "is_system": false,
+        "applies_to": "all",
+        "applies_to_categories": [],
+        "applies_to_type_ids": [],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c"
+      }
+    ],
+    "attribute_sets": [
+      {
+        "id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "blade_power",
+        "display_name": {
+          "de": "Stromversorgung",
+          "en": "Power supply"
+        },
+        "description": "Seed (WP-325)",
+        "is_system": false,
+        "is_active": true,
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      },
+      {
+        "id": "bf377763-40ba-59eb-cc07-09aad4b05f0f",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "blade_support",
+        "display_name": {
+          "de": "Wartungsvertrag",
+          "en": "Support"
+        },
+        "description": "Seed (WP-325)",
+        "is_system": false,
+        "is_active": true,
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      }
+    ],
+    "set_attributes": {
+      "blade_power": [
+        {
+          "id": "25f3fff5-8c68-6fe3-5130-2822bc61bc4e",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "scope": "set",
+          "key": "psu_count",
+          "display_name": {
+            "de": "Netzteile",
+            "en": "Power supplies"
+          },
+          "description": "Seed (WP-325)",
+          "data_type": "integer",
+          "required": false,
+          "multi_value": false,
+          "searchable": false,
+          "unique": false,
+          "unique_scope": "org",
+          "inheritable": true,
+          "order": 0,
+          "is_system": false,
+          "applies_to": "all",
+          "applies_to_categories": [],
+          "applies_to_type_ids": [],
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "attribute_set_id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d"
+        },
+        {
+          "id": "d2d306cb-207b-e04e-456b-ef440f6414db",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "scope": "set",
+          "key": "psu_redundancy",
+          "display_name": {
+            "de": "Redundanz",
+            "en": "Redundancy"
+          },
+          "description": "Seed (WP-325)",
+          "data_type": "enum",
+          "required": false,
+          "multi_value": false,
+          "searchable": false,
+          "unique": false,
+          "unique_scope": "org",
+          "inheritable": true,
+          "order": 0,
+          "is_system": false,
+          "applies_to": "all",
+          "applies_to_categories": [],
+          "applies_to_type_ids": [],
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "attribute_set_id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d",
+          "enum_values": ["n", "n+1", "2n"]
+        }
+      ],
+      "blade_support": [
+        {
+          "id": "ff25a9d2-eacb-e5ba-bbde-9e3e152628fe",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "scope": "set",
+          "key": "support_level",
+          "display_name": {
+            "de": "Servicelevel",
+            "en": "Support level"
+          },
+          "description": "Seed (WP-325)",
+          "data_type": "text",
+          "required": false,
+          "multi_value": false,
+          "searchable": false,
+          "unique": false,
+          "unique_scope": "org",
+          "inheritable": true,
+          "order": 0,
+          "is_system": false,
+          "applies_to": "all",
+          "applies_to_categories": [],
+          "applies_to_type_ids": [],
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "attribute_set_id": "bf377763-40ba-59eb-cc07-09aad4b05f0f"
+        }
+      ]
+    },
+    "type_sets": {
+      "blade_server": ["blade_support"]
+    },
+    "templates": [
+      {
+        "id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "blade_server_compute",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "display_name": {
+          "de": "Blade-Server (Compute)",
+          "en": "Blade server (compute)"
+        },
+        "description": "Blade-Server (Compute)",
+        "is_system": false,
+        "is_active": true,
+        "current_version": 2,
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      },
+      {
+        "id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "abn01_blade_storage",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "display_name": {
+          "de": "Blade-Server (Storage)",
+          "en": "Blade server (storage)"
+        },
+        "description": "Blade-Server (Storage)",
+        "is_system": false,
+        "is_active": true,
+        "current_version": 2,
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      }
+    ],
+    "template_versions": {
+      "blade_server_compute": [
+        {
+          "id": "f3b8ec0b-f519-73a0-161a-fc77f4868d49",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "template_id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+          "version": 1,
+          "status": "published",
+          "published_at": "2026-10-14T08:00:00Z",
+          "published_by": "5e248909-906e-6609-c441-933f06c2a3a1",
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "items": [
+            {
+              "attribute_definition_id": "a7802d43-40ba-4072-fdf0-df8952c1eb39",
+              "key": "blade_slot",
+              "position": 0
+            },
+            {
+              "attribute_definition_id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+              "key": "blade_role",
+              "position": 1
+            }
+          ]
+        },
+        {
+          "id": "02efcfa0-aba4-5e35-a1c2-eb7b4cfc5df6",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "template_id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+          "version": 2,
+          "status": "published",
+          "published_at": "2026-10-14T08:00:00Z",
+          "published_by": "5e248909-906e-6609-c441-933f06c2a3a1",
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "items": [
+            {
+              "attribute_definition_id": "a7802d43-40ba-4072-fdf0-df8952c1eb39",
+              "key": "blade_slot",
+              "position": 0,
+              "required_override": true
+            },
+            {
+              "attribute_definition_id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+              "key": "blade_role",
+              "position": 1
+            },
+            {
+              "attribute_definition_id": "674b7167-3075-72ad-56d3-34f6b52d0a34",
+              "key": "storage_pool",
+              "position": 2
+            }
+          ]
+        }
+      ],
+      "abn01_blade_storage": [
+        {
+          "id": "dba8f4a0-8d42-e688-0deb-5999c2cff3f9",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+          "version": 1,
+          "status": "published",
+          "published_at": "2026-10-14T08:00:00Z",
+          "published_by": "5e248909-906e-6609-c441-933f06c2a3a1",
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "items": [
+            {
+              "attribute_definition_id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+              "key": "blade_role",
+              "position": 0
+            },
+            {
+              "attribute_definition_id": "674b7167-3075-72ad-56d3-34f6b52d0a34",
+              "key": "storage_pool",
+              "position": 1
+            }
+          ]
+        },
+        {
+          "id": "56c8fc08-15c9-acb9-58a1-d0c04f7018ef",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+          "version": 2,
+          "status": "published",
+          "published_at": "2026-10-14T08:00:00Z",
+          "published_by": "5e248909-906e-6609-c441-933f06c2a3a1",
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "items": [
+            {
+              "attribute_definition_id": "a85ab317-3793-bac7-2cff-cff847cdf32b",
+              "key": "blade_role",
+              "position": 0
+            },
+            {
+              "attribute_definition_id": "674b7167-3075-72ad-56d3-34f6b52d0a34",
+              "key": "storage_pool",
+              "position": 1,
+              "required_override": true,
+              "default_override": "pool-a"
+            },
+            {
+              "attribute_definition_id": "ff25a9d2-eacb-e5ba-bbde-9e3e152628fe",
+              "key": "support_level",
+              "position": 2,
+              "default_override": "8x5"
+            }
+          ]
+        }
+      ]
+    },
+    "roles": [
+      {
+        "id": "898d3684-9733-6307-13f1-f209c24410ca",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "name": "org_admin",
+        "description": "Standardrolle org_admin",
+        "is_system": true,
+        "is_builtin": true,
+        "permissions": [
+          "agent:manage",
+          "agent:read",
+          "ai:read",
+          "asset:move",
+          "asset:read",
+          "asset:write",
+          "assignment:read",
+          "assignment:write",
+          "ci:delete",
+          "ci:read",
+          "ci:write",
+          "ci_attribute:manage",
+          "ci_instance_attribute:manage",
+          "citype:manage",
+          "collector:manage",
+          "compliance:read",
+          "compliance:write",
+          "contact:read",
+          "contact:write",
+          "contract:read",
+          "contract:write",
+          "credential:manage",
+          "credential:read",
+          "desk:read",
+          "desk:write",
+          "discovery:ingest",
+          "discovery:manage",
+          "discovery:read",
+          "disposal:read",
+          "disposal:write",
+          "document:read",
+          "document:write",
+          "entitlement:read",
+          "export:run",
+          "field_permission:manage",
+          "form:read",
+          "form:write",
+          "iga:read",
+          "import:manage",
+          "import:run",
+          "ipam:read",
+          "ipam:write",
+          "job:read",
+          "key:read",
+          "key:write",
+          "lifecycle:manage",
+          "lifecycle:transition",
+          "location:read",
+          "location:write",
+          "maintenance:read",
+          "maintenance:write",
+          "metamodel:publish",
+          "monitoring:read",
+          "monitoring:write",
+          "order:read",
+          "order:write",
+          "override:write",
+          "permission:read",
+          "rack:read",
+          "rack:write",
+          "reconciliation:manage",
+          "relationship:read",
+          "relationship:write",
+          "relationship_type:manage",
+          "reservation:read",
+          "reservation:write",
+          "review:resolve",
+          "role:read",
+          "saved_view:manage",
+          "saved_view:read",
+          "saved_view:write",
+          "search:read",
+          "search:write",
+          "security:read",
+          "security:write",
+          "sla:read",
+          "stock:read",
+          "stock:write",
+          "stocktake:complete",
+          "stocktake:read",
+          "stocktake:write",
+          "tag:manage",
+          "ticket:read",
+          "ticket:write",
+          "topology:read",
+          "training:read",
+          "training:write",
+          "user:read",
+          "vrf:manage",
+          "webhook:read",
+          "workflow:read",
+          "workflow:write"
+        ],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      },
+      {
+        "id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "name": "engineer",
+        "description": "Standardrolle engineer",
+        "is_system": true,
+        "is_builtin": true,
+        "permissions": [
+          "agent:manage",
+          "agent:read",
+          "ai:read",
+          "asset:move",
+          "asset:read",
+          "asset:write",
+          "assignment:read",
+          "assignment:write",
+          "ci:delete",
+          "ci:read",
+          "ci:write",
+          "ci_instance_attribute:manage",
+          "collector:manage",
+          "compliance:read",
+          "compliance:write",
+          "contact:read",
+          "contact:write",
+          "contract:read",
+          "contract:write",
+          "credential:manage",
+          "credential:read",
+          "desk:read",
+          "desk:write",
+          "discovery:ingest",
+          "discovery:manage",
+          "discovery:read",
+          "disposal:read",
+          "disposal:write",
+          "document:read",
+          "document:write",
+          "entitlement:read",
+          "export:run",
+          "form:read",
+          "form:write",
+          "iga:read",
+          "import:run",
+          "ipam:read",
+          "ipam:write",
+          "job:read",
+          "key:read",
+          "key:write",
+          "lifecycle:transition",
+          "location:read",
+          "location:write",
+          "maintenance:read",
+          "maintenance:write",
+          "monitoring:read",
+          "monitoring:write",
+          "order:read",
+          "order:write",
+          "override:write",
+          "permission:read",
+          "rack:read",
+          "rack:write",
+          "reconciliation:manage",
+          "relationship:read",
+          "relationship:write",
+          "reservation:read",
+          "reservation:write",
+          "review:resolve",
+          "role:read",
+          "saved_view:read",
+          "saved_view:write",
+          "search:read",
+          "search:write",
+          "security:read",
+          "security:write",
+          "sla:read",
+          "stock:read",
+          "stock:write",
+          "stocktake:complete",
+          "stocktake:read",
+          "stocktake:write",
+          "tag:manage",
+          "ticket:read",
+          "ticket:write",
+          "topology:read",
+          "training:read",
+          "training:write",
+          "user:read",
+          "vrf:manage",
+          "webhook:read",
+          "workflow:read",
+          "workflow:write"
+        ],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      },
+      {
+        "id": "64669407-4f56-efda-d943-aa3909d4a16f",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "name": "viewer",
+        "description": "Standardrolle viewer",
+        "is_system": true,
+        "is_builtin": true,
+        "permissions": ["ci:read"],
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:00:00Z"
+      }
+    ],
+    "referenz_ci": {
+      "id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+      "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+      "client_id": "829dba8f-97a4-2375-1e87-7823a4ff2c6e",
+      "name": "bc-01-blade-1",
+      "hostname": "bc-01-blade-1",
+      "status": "active",
+      "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+      "manufacturer": "Reticora Labs",
+      "model": "BX-B1",
+      "serial_number": "SN7DE2CE9BE9BE",
+      "parent_ci_id": "01a01a83-afe5-aa69-84a5-978565f8bb24",
+      "child_mode": "configuration",
+      "attributes": {
+        "blade_slot": 1,
+        "blade_role": "compute"
+      },
+      "is_manual": false,
+      "version": 1,
+      "created_at": "2026-10-14T08:00:00Z",
+      "updated_at": "2026-10-14T08:00:00Z"
+    }
+  },
+  "schritte": {
+    "1": {
+      "titel": "Typ mit Elterntyp anlegen",
+      "anfrage": {
+        "method": "POST",
+        "path": "/ci-types",
+        "body": {
+          "name": "Storage blade",
+          "key": "abn01_storage_blade",
+          "display_name": {
+            "de": "Storage-Blade",
+            "en": "Storage blade"
+          },
+          "category": "hardware",
+          "parent_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c"
+        }
+      },
+      "antwort": {
+        "status": 201,
+        "body": {
+          "id": "ee2080ca-2b3f-f8ce-fd70-7a5cc5432e12",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "key": "abn01_storage_blade",
+          "name": "Storage blade",
+          "display_name": {
+            "de": "Storage-Blade",
+            "en": "Storage blade"
+          },
+          "category": "hardware",
+          "is_builtin": false,
+          "is_system": false,
+          "is_active": true,
+          "is_logical": false,
+          "is_observable": true,
+          "schema_version": 1,
+          "version": 1,
+          "capabilities": {},
+          "allowed_relationship_types": [],
+          "ui_schema": {},
+          "compliance_rules": [],
+          "discovery_mappings": [],
+          "fields": [],
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z",
+          "parent_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c"
+        }
+      }
+    },
+    "2": {
+      "titel": "Attribute Set zuordnen",
+      "anfrage": {
+        "method": "PUT",
+        "path": "/ci-types/ee2080ca-2b3f-f8ce-fd70-7a5cc5432e12/attribute-sets",
+        "body": {
+          "ci_type_id": "ee2080ca-2b3f-f8ce-fd70-7a5cc5432e12",
+          "attribute_sets": [
+            {
+              "attribute_set_id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d",
+              "position": 1
+            }
+          ]
+        }
+      },
+      "antwort": {
+        "status": 200,
+        "body": {
+          "ci_type_id": "ee2080ca-2b3f-f8ce-fd70-7a5cc5432e12",
+          "attribute_sets": [
+            {
+              "attribute_set_id": "2c27d6fe-2b8d-4a86-b2bb-7d5ff2b7f01d",
+              "position": 1
+            }
+          ]
+        }
+      }
+    },
+    "3": {
+      "titel": "Zwei Templates in definierter Reihenfolge kombinieren",
+      "anfrage": {
+        "method": "PUT",
+        "path": "/cis/36358ef1-4709-21e0-0244-51282c3b4d8c/templates",
+        "if_match": "\"1\"",
+        "body": {
+          "templates": [
+            {
+              "template_id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+              "version": 2
+            },
+            {
+              "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+              "version": 1
+            }
+          ]
+        }
+      },
+      "antwort": {
+        "status": 200,
+        "body": {
+          "id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "client_id": "829dba8f-97a4-2375-1e87-7823a4ff2c6e",
+          "name": "bc-01-blade-1",
+          "hostname": "bc-01-blade-1",
+          "status": "active",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "manufacturer": "Reticora Labs",
+          "model": "BX-B1",
+          "serial_number": "SN7DE2CE9BE9BE",
+          "parent_ci_id": "01a01a83-afe5-aa69-84a5-978565f8bb24",
+          "child_mode": "configuration",
+          "attributes": {
+            "blade_slot": 1,
+            "blade_role": "compute"
+          },
+          "is_manual": false,
+          "version": 2,
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T09:00:00Z",
+          "templates": [
+            {
+              "template_id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+              "key": "blade_server_compute",
+              "version": 2,
+              "position": 0
+            },
+            {
+              "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+              "key": "abn01_blade_storage",
+              "version": 1,
+              "position": 1
+            }
+          ]
+        }
+      }
+    },
+    "4": {
+      "titel": "Regel im Klick-Builder definieren",
+      "anfrage": {
+        "method": "POST",
+        "path": "/rules",
+        "body": {
+          "key": "abn01-storage-slot",
+          "attribute_key": "blade_slot",
+          "kind": "required",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "is_active": true,
+          "condition": {
+            "op": "eq",
+            "field": "blade_role",
+            "value": "storage"
+          },
+          "message": {
+            "de": "Ein Storage-Blade braucht einen Einschub."
+          }
+        }
+      },
+      "antwort": {
+        "status": 201,
+        "body": {
+          "id": "9bddfe99-dbbf-eced-eb74-4949784b0b96",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "key": "abn01-storage-slot",
+          "attribute_key": "blade_slot",
+          "kind": "required",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "condition": {
+            "op": "eq",
+            "field": "blade_role",
+            "value": "storage"
+          },
+          "ast": null,
+          "message": {
+            "de": "Ein Storage-Blade braucht einen Einschub."
+          },
+          "is_system": false,
+          "is_active": true,
+          "version": 1,
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:00:00Z"
+        }
+      }
+    },
+    "5": {
+      "titel": "Layout für die Rolle engineer erstellen (im Draft)",
+      "draft": {
+        "id": "67d75e2b-0179-0e32-87ef-c8c86c066950",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "name": "ABN-01 (c) Layout engineer",
+        "created_by": "5e248909-906e-6609-c441-933f06c2a3a1"
+      },
+      "formular_vorher": {
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+        "source": "default",
+        "sections": [
+          {
+            "key": "hardware",
+            "title": {
+              "de": "hardware",
+              "en": "hardware"
+            },
+            "visible": true,
+            "fields": [
+              {
+                "name": "blade_slot",
+                "width": 12,
+                "definition": {
+                  "name": "blade_slot",
+                  "label": "Einschub",
+                  "data_type": "integer",
+                  "required": false,
+                  "sort_order": 0
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "blade_role",
+                "width": 12,
+                "definition": {
+                  "name": "blade_role",
+                  "label": "Rolle",
+                  "data_type": "enum",
+                  "required": false,
+                  "sort_order": 0,
+                  "enum_values": ["compute", "storage"]
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "storage_pool",
+                "width": 12,
+                "definition": {
+                  "name": "storage_pool",
+                  "label": "Speicherpool",
+                  "data_type": "text",
+                  "required": false,
+                  "sort_order": 0
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "support_level",
+                "width": 12,
+                "definition": {
+                  "name": "support_level",
+                  "label": "Servicelevel",
+                  "data_type": "text",
+                  "required": false,
+                  "sort_order": 0
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              }
+            ]
+          }
+        ],
+        "rules": [
+          {
+            "key": "abn01-storage-slot",
+            "attribute_key": "blade_slot",
+            "kind": "required",
+            "condition": {
+              "op": "eq",
+              "field": "blade_role",
+              "value": "storage"
+            },
+            "message": {
+              "de": "Ein Storage-Blade braucht einen Einschub."
+            }
+          }
+        ]
+      },
+      "anfrage": {
+        "method": "POST",
+        "path": "/layouts",
+        "query": {
+          "draft": "67d75e2b-0179-0e32-87ef-c8c86c066950"
+        },
+        "body": {
+          "key": "blade_server_engineer",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+          "priority": 0,
+          "is_active": true,
+          "layout": {
+            "sections": [
+              {
+                "key": "hardware",
+                "title": {
+                  "de": "Storage und Wartung",
+                  "en": "Storage and support"
+                },
+                "visible_when": [],
+                "fields": [
+                  {
+                    "name": "blade_slot",
+                    "width": 12
+                  },
+                  {
+                    "name": "blade_role",
+                    "width": 12
+                  },
+                  {
+                    "name": "storage_pool",
+                    "width": 12
+                  },
+                  {
+                    "name": "support_level",
+                    "width": 12
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "antwort": {
+        "status": 202,
+        "body": {
+          "id": "1542b306-ae15-148d-d1d5-2eddf7b7a1fd",
+          "kind": "layout",
+          "op": "create",
+          "target_id": null,
+          "target_key": "blade_server_engineer",
+          "payload": {
+            "key": "blade_server_engineer",
+            "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+            "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+            "priority": 0,
+            "is_active": true,
+            "layout": {
+              "sections": [
+                {
+                  "key": "hardware",
+                  "title": {
+                    "de": "Storage und Wartung",
+                    "en": "Storage and support"
+                  },
+                  "visible_when": [],
+                  "fields": [
+                    {
+                      "name": "blade_slot",
+                      "width": 12
+                    },
+                    {
+                      "name": "blade_role",
+                      "width": 12
+                    },
+                    {
+                      "name": "storage_pool",
+                      "width": 12
+                    },
+                    {
+                      "name": "support_level",
+                      "width": 12
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "base": null,
+          "schema_versions": {},
+          "route": "POST /api/v1/layouts",
+          "created_by": "5e248909-906e-6609-c441-933f06c2a3a1",
+          "created_at": "2026-10-14T08:00:00Z"
+        }
+      }
+    },
+    "6": {
+      "titel": "Preview als engineer mit dem Template Blade-Server (Storage)",
+      "anfrage": {
+        "method": "GET",
+        "path": "/ci-types/c184878a-5bb9-2807-adac-e05cddd6f76c/form",
+        "query": {
+          "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+          "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+          "preview": "true",
+          "draft": "67d75e2b-0179-0e32-87ef-c8c86c066950"
+        }
+      },
+      "antwort": {
+        "status": 200,
+        "body": {
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+          "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+          "layout_id": "1542b306-ae15-148d-d1d5-2eddf7b7a1fd",
+          "source": "layout",
+          "sections": [
+            {
+              "key": "hardware",
+              "title": {
+                "de": "Storage und Wartung",
+                "en": "Storage and support"
+              },
+              "visible": true,
+              "fields": [
+                {
+                  "name": "blade_slot",
+                  "width": 12,
+                  "definition": {
+                    "name": "blade_slot",
+                    "label": "Einschub",
+                    "data_type": "integer",
+                    "required": false,
+                    "sort_order": 0
+                  },
+                  "state": {
+                    "visible": true,
+                    "required": false,
+                    "read_only": false
+                  }
+                },
+                {
+                  "name": "blade_role",
+                  "width": 12,
+                  "definition": {
+                    "name": "blade_role",
+                    "label": "Rolle",
+                    "data_type": "enum",
+                    "required": false,
+                    "sort_order": 0,
+                    "enum_values": ["compute", "storage"]
+                  },
+                  "state": {
+                    "visible": true,
+                    "required": false,
+                    "read_only": false
+                  }
+                },
+                {
+                  "name": "storage_pool",
+                  "width": 12,
+                  "definition": {
+                    "name": "storage_pool",
+                    "label": "Speicherpool",
+                    "data_type": "text",
+                    "required": true,
+                    "sort_order": 0,
+                    "default_value": "pool-a"
+                  },
+                  "state": {
+                    "visible": true,
+                    "required": true,
+                    "read_only": false
+                  }
+                },
+                {
+                  "name": "support_level",
+                  "width": 12,
+                  "definition": {
+                    "name": "support_level",
+                    "label": "Servicelevel",
+                    "data_type": "text",
+                    "required": false,
+                    "sort_order": 0,
+                    "default_value": "8x5"
+                  },
+                  "state": {
+                    "visible": true,
+                    "required": false,
+                    "read_only": false
+                  }
+                }
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "key": "abn01-storage-slot",
+              "attribute_key": "blade_slot",
+              "kind": "required",
+              "condition": {
+                "op": "eq",
+                "field": "blade_role",
+                "value": "storage"
+              },
+              "message": {
+                "de": "Ein Storage-Blade braucht einen Einschub."
+              }
+            }
+          ]
+        }
+      }
+    },
+    "7": {
+      "titel": "Publizieren: Draft → Test → Publish",
+      "test_job": "625616c4-70ec-f03a-e384-8d4daaac3ac9",
+      "test_report": {
+        "job_id": "625616c4-70ec-f03a-e384-8d4daaac3ac9",
+        "state": "completed",
+        "draft_version": 2,
+        "started_at": "2026-10-14T08:00:00Z",
+        "finished_at": "2026-10-14T08:00:00Z",
+        "blocked": false,
+        "outdated": false,
+        "conflicts": [],
+        "totals": {
+          "types": 1,
+          "cis": 8,
+          "invalid_cis": 0,
+          "violations": 0
+        },
+        "types": [
+          {
+            "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+            "cis": 8,
+            "invalid_cis": 0,
+            "violations": 0,
+            "attributes": []
+          }
+        ],
+        "truncated": false
+      },
+      "hinweis": "Die Antwort von POST /metamodel/drafts/{id}/publish trägt zusätzlich den Draft mit status published.",
+      "antwort": {
+        "status": 200,
+        "body": {
+          "counts": {
+            "layout": 1
+          },
+          "types": [
+            {
+              "id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+              "schema_version": 2
+            }
+          ]
+        }
+      },
+      "layout": {
+        "id": "c02bbad0-f8f1-8a66-1c7f-706a05854598",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "key": "blade_server_engineer",
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+        "priority": 0,
+        "is_active": true,
+        "layout": {
+          "sections": [
+            {
+              "key": "hardware",
+              "title": {
+                "de": "Storage und Wartung",
+                "en": "Storage and support"
+              },
+              "visible_when": [],
+              "fields": [
+                {
+                  "name": "blade_slot",
+                  "width": 12
+                },
+                {
+                  "name": "blade_role",
+                  "width": 12
+                },
+                {
+                  "name": "storage_pool",
+                  "width": 12
+                },
+                {
+                  "name": "support_level",
+                  "width": 12
+                }
+              ]
+            }
+          ]
+        },
+        "version": 1,
+        "created_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:00:00Z"
+      }
+    },
+    "8": {
+      "titel": "Anlage durch den normalen Nutzer engineer",
+      "formular": {
+        "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+        "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+        "role_id": "5e3ef0ed-beba-bdbc-59ae-3d155429f364",
+        "layout_id": "c02bbad0-f8f1-8a66-1c7f-706a05854598",
+        "source": "layout",
+        "sections": [
+          {
+            "key": "hardware",
+            "title": {
+              "de": "Storage und Wartung",
+              "en": "Storage and support"
+            },
+            "visible": true,
+            "fields": [
+              {
+                "name": "blade_slot",
+                "width": 12,
+                "definition": {
+                  "name": "blade_slot",
+                  "label": "Einschub",
+                  "data_type": "integer",
+                  "required": false,
+                  "sort_order": 0
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "blade_role",
+                "width": 12,
+                "definition": {
+                  "name": "blade_role",
+                  "label": "Rolle",
+                  "data_type": "enum",
+                  "required": false,
+                  "sort_order": 0,
+                  "enum_values": ["compute", "storage"]
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "storage_pool",
+                "width": 12,
+                "definition": {
+                  "name": "storage_pool",
+                  "label": "Speicherpool",
+                  "data_type": "text",
+                  "required": true,
+                  "sort_order": 0,
+                  "default_value": "pool-a"
+                },
+                "state": {
+                  "visible": true,
+                  "required": true,
+                  "read_only": false
+                }
+              },
+              {
+                "name": "support_level",
+                "width": 12,
+                "definition": {
+                  "name": "support_level",
+                  "label": "Servicelevel",
+                  "data_type": "text",
+                  "required": false,
+                  "sort_order": 0,
+                  "default_value": "8x5"
+                },
+                "state": {
+                  "visible": true,
+                  "required": false,
+                  "read_only": false
+                }
+              }
+            ]
+          }
+        ],
+        "rules": [
+          {
+            "key": "abn01-storage-slot",
+            "attribute_key": "blade_slot",
+            "kind": "required",
+            "condition": {
+              "op": "eq",
+              "field": "blade_role",
+              "value": "storage"
+            },
+            "message": {
+              "de": "Ein Storage-Blade braucht einen Einschub."
+            }
+          }
+        ]
+      },
+      "anfrage": {
+        "method": "POST",
+        "path": "/cis",
+        "body": {
+          "name": "abn01-storage-01",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "status": "active",
+          "manufacturer": "Reticora Labs",
+          "model": "BX-B1",
+          "attributes": {
+            "blade_role": "storage",
+            "blade_slot": 5,
+            "storage_pool": "pool-a",
+            "support_level": "8x5"
+          },
+          "templates": [
+            {
+              "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7"
+            }
+          ],
+          "discovery_source": "manual"
+        }
+      },
+      "antwort": {
+        "status": 201,
+        "body": {
+          "id": "44ac9e26-0db4-953a-9d5c-52f6dfe7e3b2",
+          "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+          "name": "abn01-storage-01",
+          "ci_type_id": "c184878a-5bb9-2807-adac-e05cddd6f76c",
+          "status": "active",
+          "manufacturer": "Reticora Labs",
+          "model": "BX-B1",
+          "attributes": {
+            "blade_role": "storage",
+            "blade_slot": 5,
+            "storage_pool": "pool-a",
+            "support_level": "8x5"
+          },
+          "templates": [
+            {
+              "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+              "key": "abn01_blade_storage",
+              "version": 2,
+              "position": 0
+            }
+          ],
+          "is_manual": true,
+          "version": 1,
+          "created_at": "2026-10-14T09:00:00Z",
+          "updated_at": "2026-10-14T09:00:00Z"
+        }
+      },
+      "verweigert": {
+        "anfrage": {
+          "method": "PATCH",
+          "path": "/attribute-definitions/674b7167-3075-72ad-56d3-34f6b52d0a34"
+        },
+        "antwort": {
+          "status": 403,
+          "body": {
+            "type": "https://reticora.io/problems/403",
+            "title": "Forbidden",
+            "status": 403,
+            "detail": "missing required permission: ci_attribute:manage",
+            "trace_id": "abn-01-c"
+          }
+        }
+      }
+    },
+    "9": {
+      "titel": "Template-Version migrieren, Overrides bleiben erhalten",
+      "override": {
+        "field": "storage_pool",
+        "value": "pool-abn01",
+        "reason": "Abnahme ABN-01 (c)"
+      },
+      "herkunft_vorher": {
+        "data": [
+          {
+            "field": "blade_role",
+            "value": "compute",
+            "source": "manual",
+            "rank": 100,
+            "reason": "record",
+            "recorded_at": "2026-10-14T08:00:00Z",
+            "diverged": false
+          },
+          {
+            "field": "storage_pool",
+            "value": null,
+            "source": "manual",
+            "rank": 100,
+            "reason": "record",
+            "diverged": false
+          }
+        ]
+      },
+      "override_antwort": {
+        "id": "42aabd39-6f53-506d-3fc3-d2a130994eb1",
+        "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+        "ci_id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+        "field_name": "storage_pool",
+        "override_value": "pool-abn01",
+        "override_author": "5e248909-906e-6609-c441-933f06c2a3a1",
+        "override_reason": "Abnahme ABN-01 (c)",
+        "override_at": "2026-10-14T09:00:00Z",
+        "protected": true,
+        "effective_value": "pool-abn01",
+        "diverged": false,
+        "created_at": "2026-10-14T09:00:00Z",
+        "updated_at": "2026-10-14T09:00:00Z"
+      },
+      "herkunft_nachher": {
+        "data": [
+          {
+            "field": "blade_role",
+            "value": "compute",
+            "source": "manual",
+            "rank": 100,
+            "reason": "record",
+            "recorded_at": "2026-10-14T08:00:00Z",
+            "diverged": false
+          },
+          {
+            "field": "storage_pool",
+            "value": "pool-abn01",
+            "source": "manual_override",
+            "rank": 100,
+            "reason": "override",
+            "protected": true,
+            "override_author": "5e248909-906e-6609-c441-933f06c2a3a1",
+            "override_reason": "Abnahme ABN-01 (c)",
+            "recorded_at": "2026-10-14T09:00:00Z",
+            "diverged": false
+          }
+        ]
+      },
+      "migration": {
+        "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+        "template_key": "abn01_blade_storage",
+        "version_vorher": "dba8f4a0-8d42-e688-0deb-5999c2cff3f9",
+        "version_nachher": "56c8fc08-15c9-acb9-58a1-d0c04f7018ef",
+        "probelauf": {
+          "from_version": 1,
+          "to_version": 2,
+          "ci_ids": ["36358ef1-4709-21e0-0244-51282c3b4d8c"],
+          "dry_run": true
+        },
+        "lauf": {
+          "from_version": 1,
+          "to_version": 2,
+          "ci_ids": ["36358ef1-4709-21e0-0244-51282c3b4d8c"],
+          "dry_run": false
+        },
+        "job_probelauf": "8c8c6649-7f55-5855-1a63-89e0fbe091a0",
+        "job_lauf": "6ecec5f2-426a-0c24-b5ce-765b8dde4a20",
+        "bericht_probelauf": {
+          "dry_run": true,
+          "totals": {
+            "selected": 1,
+            "migrated": 1,
+            "skipped": 0,
+            "failed": 0,
+            "with_findings": 0
+          },
+          "items": [
+            {
+              "ci_id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+              "outcome": "migrated",
+              "defaults": ["support_level"],
+              "overridden": ["storage_pool"],
+              "findings": []
+            }
+          ],
+          "truncated": false
+        },
+        "bericht": {
+          "dry_run": false,
+          "totals": {
+            "selected": 1,
+            "migrated": 1,
+            "skipped": 0,
+            "failed": 0,
+            "with_findings": 0
+          },
+          "items": [
+            {
+              "ci_id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+              "outcome": "migrated",
+              "defaults": ["support_level"],
+              "overridden": ["storage_pool"],
+              "findings": []
+            }
+          ],
+          "truncated": false
+        }
+      },
+      "felder_nachher": {
+        "data": [
+          {
+            "id": "42aabd39-6f53-506d-3fc3-d2a130994eb1",
+            "organization_id": "9c741956-c776-b03d-6652-27f1f4ae33d2",
+            "ci_id": "36358ef1-4709-21e0-0244-51282c3b4d8c",
+            "field_name": "storage_pool",
+            "override_value": "pool-abn01",
+            "override_author": "5e248909-906e-6609-c441-933f06c2a3a1",
+            "override_reason": "Abnahme ABN-01 (c)",
+            "override_at": "2026-10-14T09:00:00Z",
+            "protected": true,
+            "effective_value": "pool-abn01",
+            "diverged": false,
+            "created_at": "2026-10-14T09:00:00Z",
+            "updated_at": "2026-10-14T09:00:00Z"
+          }
+        ]
+      },
+      "templates_nachher": {
+        "data": [
+          {
+            "template_id": "381c0410-2b6e-966f-7a6b-ccf16d9456ed",
+            "key": "blade_server_compute",
+            "version": 2,
+            "position": 0
+          },
+          {
+            "template_id": "a081100c-e306-5efc-7ff9-6e4a404760f7",
+            "key": "abn01_blade_storage",
+            "version": 2,
+            "position": 1
+          }
+        ]
+      }
+    }
+  }
+}

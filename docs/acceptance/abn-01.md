@@ -1,18 +1,21 @@
-# Abnahme ABN-01 – Protokoll G1
+# Abnahme ABN-01 – Protokoll G1 und G2
 
-WP-212 (`g1-abnahme`). ABN-01 legt die Abnahmeszenarien fest
-(`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md`, Abschnitt 45). Für
-G1 zählen die Szenarien (d) und (e). Beide sind [B] und laufen als
-automatisierte Protokolle gegen eingefrorene Daten. Die Daten liegen in
-`docs/acceptance/artefakte/`.
+WP-212 (`g1-abnahme`), für G2 WP-330 (`g2-abnahme`). ABN-01 legt die
+Abnahmeszenarien fest (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md`,
+Abschnitt 45). Für G1 zählen die Szenarien (d) und (e). Beide sind [B] und
+laufen als automatisierte Protokolle gegen eingefrorene Daten. Für G2 kommt
+das Metamodell-Szenario (c) [P2] hinzu; es läuft nach E-136 als
+Playwright-Ablauf gegen das gemockte Backend mit eingefrorenen Antworten, die
+Wirkung im Backend belegen die Integrationstests der umsetzenden WPs. Die
+Daten liegen in `docs/acceptance/artefakte/`.
 
-| Teil | Szenario | Tag | Status G1 | Nachweis |
-|---|---|---|---|---|
-| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
-| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | Erklärung des Auftraggebers vom 2026-10-15 (B4), Nachweis ausstehend: Originaltext nachzureichen (E-02, A-02; WP-457) |
-| (c) | Metamodell-Szenario | [P2] | nicht G1 | Phase 2 |
-| (d) | Onboarding-Szenario | [B] | **PASS** | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, bestanden in install-smoke Run 40258372749 (2026-10-26) |
-| (e) | Konflikt-Szenario | [B] | **PASS** | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke Run 40258372749, bestanden) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
+| Teil | Szenario | Tag | Status G1 | Status G2 | Nachweis |
+|---|---|---|---|---|---|
+| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); für G1 als „Nachweis ausstehend“ geführt (E-02, A-02; WP-457), nach E-103 Nachweis für G1 und G2 |
+| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); für G1 als „Nachweis ausstehend“ geführt (E-02, A-02; WP-457), nach E-103 Nachweis für G1 und G2 |
+| (c) | Metamodell-Szenario | [P2] | nicht G1 | bestanden im lokalen Lauf (chromium, mobile-chrome, 2026-11-08); Lauf im CI-Job `e2e` in allen sechs Projekten nach dem Merge nachzutragen; siehe [(c) Metamodell-Szenario](#c-metamodell-szenario) | `frontend/e2e/metamodel-scenario.spec.ts` (gemockt) mit `artefakte/abn-01-c-metamodell.json`; Backend-Nachweis je Schritt im Abschnitt (c) |
+| (d) | Onboarding-Szenario | [B] | **PASS** | unverändert eingefrorener Stand von G1 (Prüfsummen in `artefakte/SHA256SUMS`); siehe [(d) Onboarding-Szenario](#d-onboarding-szenario) | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, bestanden in install-smoke Run 40258372749 (2026-10-26) |
+| (e) | Konflikt-Szenario | [B] | **PASS** | unverändert eingefrorener Stand von G1 (Prüfsummen in `artefakte/SHA256SUMS`); siehe [(e) Konflikt-Szenario](#e-konflikt-szenario) | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke Run 40258372749, bestanden) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
 
 ## (a) und (b): v2-Texte nach E-02
 
@@ -37,6 +40,117 @@ steht in `docs/acceptance/g1-gate.md` auf „offen“ und in
 `docs/acceptance/g1-ausnahmen.csv`, bis die Szenariotexte eingefroren und
 Schritt für Schritt protokolliert sind (WP-457). (d) und (e) bleiben durch
 Tests belegt.
+
+Nachtrag 2026-11-08 (WP-330, E-103): Nach dem Beschluss des Auftraggebers
+vom 2026-10-28 gilt die Erklärung vom 2026-10-15 als Nachweis für G1 und G2;
+das löst E-76 (Korrekturplan) in diesem Punkt ab, B4 ist gestrichen. Die
+v2-Texte werden nicht nachgereicht und nicht abgeglichen. Für G2 stehen (a)
+und (b) damit auf PASS; die Gate-Checkliste von G2 führt sie (WP-331).
+
+## (c) Metamodell-Szenario
+
+WP-330 (`g2-abnahme`), für G2. (c) gehört nicht zu G1.
+
+**Ablauf:** in der Reihenfolge des Katalogs
+(`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:97`): Typ mit
+Vererbung anlegen; Attribute Set zuordnen; zwei Templates kombinieren; Regel
+im Klick-Builder definieren; Layout pro Rolle erstellen; Preview prüfen;
+publizieren; Anlage durch einen normalen Nutzer; Template-Version migrieren,
+Overrides bleiben erhalten. Die Schritte 1 bis 7 und 9 laufen als
+`org_admin`, Schritt 8 als Nutzer mit der eingebauten Rolle `engineer`
+(`permission.StandardRoles` in `backend/internal/permission/role_matrix.go`;
+ohne `citype:manage`, `ci_attribute:manage` und `metamodel:publish`, E-106).
+
+**Umgebung:** Nach E-136 nur der gemockte Teil des Musters von (e).
+`frontend/e2e/metamodel-scenario.spec.ts` bedient die SPA und beantwortet
+jede Anfrage unter `/api/v1` aus den eingefrorenen Daten (`mockBackend` in
+`frontend/e2e/support/backend.ts`). Das strikte Mock-Backend (WP-530) prüft
+jede Anfrage und jede Antwort samt Status gegen `api/openapi.yaml`
+(`frontend/e2e/support/contract.ts`), ohne Eintrag in `KNOWN_DEVIATIONS`;
+eine unbeantwortete Anfrage lässt den Test scheitern. `/me/permissions`,
+`/entitlements` und `/modules` beantwortet die Spec selbst (Rechte der
+jeweiligen Sitzung, Modul `metamodel` an). Die Sitzung setzt `signIn` mit
+Name und Rechten des Nutzers (optionaler Parameter, WP-330). Locale
+`de-DE` per `test.use` wie in `conflict.spec.ts` (E-99 (Korrekturplan)). Die
+Spec läuft im CI-Job `e2e` (`.github/workflows/ci.yml`) in allen sechs
+Projekten aus `frontend/playwright.config.ts`: chromium, edge, firefox,
+webkit, mobile-chrome und mobile-safari. Anders als (e) hat (c) keinen Lauf
+gegen eine echte Installation; die Wirkung im Backend belegen die
+Integrationstests in der letzten Spalte der Tabelle.
+
+**Eingefrorene Daten:** `artefakte/abn-01-c-metamodell.json`. Die Spec liest
+die Datei direkt. Sie enthält:
+
+- die Objekt-IDs mit ihrem Schlüssel nach der Funktion `ID` in
+  `backend/cmd/seed/seed.go` (`md5(key)::uuid`, Präfix leer, Organisation
+  `demo`). Organisation (`/org/demo`), Nutzer `admin` und `engineer`, Client
+  `hq` und das Referenz-CI `bc-01-blade-1` (`demo/ci/blade/1/1`) tragen die
+  IDs des Seeds von WP-325. Objekte, die der Seed über die Dienste anlegt
+  (Typ `blade_server`, Sets, Template `blade_server_compute`, Rollen), und
+  die Objekte des Szenarios erhalten ihre ID nach demselben Schema
+  (`demo/<Art>/<Schlüssel>`, `quelle: schema`). Die Spec prüft jede ID gegen
+  ihren Schlüssel;
+- den Bestand: Typ `blade_server` („Blade-Server“, Untertyp von `server`) mit
+  `blade_slot`, `blade_role` und `storage_pool`, die Sets `blade_power`
+  („Stromversorgung“) und `blade_support` („Wartungsvertrag“, `blade_server`
+  zugeordnet), die Templates `blade_server_compute` („Blade-Server
+  (Compute)“) und `abn01_blade_storage` („Blade-Server (Storage)“) mit je
+  zwei publizierten Versionen, die Rollen und das Referenz-CI;
+- die API-Antworten je Schritt im Format von `api/openapi.yaml` und die
+  erwarteten Anfragen (Methode, Pfad, Query, Body);
+- Override-Feld `storage_pool`, Override-Wert `pool-abn01` und Begründung
+  „Abnahme ABN-01 (c)“;
+- die Template-Versionen vor und nach der Migration:
+  `abn01_blade_storage` Version 1 (ohne Default) → Version 2 (Default
+  `pool-a` für `storage_pool`, `8x5` für `support_level`), dazu die Berichte
+  von Probelauf und Migration (`TemplateMigrationReport`, von der Spec gegen
+  das Schema geprüft).
+
+Screenshots kommen nicht ins Repository. Playwright schreibt sie nur bei
+einem Fehlschlag (`screenshot: 'only-on-failure'`) nach
+`frontend/test-results/` (per `.gitignore` ausgeschlossen); sie liegen nur im
+Bericht des CI-Laufs (Artefakt `playwright-report-<Projekt>`).
+
+**Festlegungen der Umsetzung:**
+
+- Typ des Szenarios ab Schritt 3 ist `blade_server`. Die geführte Anlage
+  bietet als Ausführung nur Templates genau des gewählten Typs an
+  (`GET /api/v1/templates?ci_type_id=`); der in Schritt 1 angelegte Typ hat
+  keine. Schritt 1 und 2 zeigen Vererbung und Set-Zuordnung am neuen Typ
+  „Storage-Blade“ (Untertyp von „Blade-Server“).
+- Schritt 3 kombiniert die beiden Templates am Referenz-CI über den
+  Abschnitt „Templates“ der CI-Detailseite (WP-800): Position 1
+  `blade_server_compute` Version 2, Position 2 `abn01_blade_storage`
+  Version 1.
+- Schritt 8: Die geführte Anlage (WP-317) wählt genau eine Ausführung, und
+  `GET /api/v1/ci-types/{id}/form` nimmt genau ein `template_id`. Die Anlage
+  sendet daher `POST /api/v1/cis` mit `templates` = [`abn01_blade_storage`];
+  es greifen die Pflichtfelder und Defaults dieses Templates. Die Anlage mit
+  beiden Templates und deren Pflichtfeldern belegt im Backend
+  `template_assignment_integration_test.go` (Schritt 3).
+- Schritt 9: Die CI-Detailseite liest die Herkunft über
+  `GET /api/v1/cis/{id}/provenance`. `GET /api/v1/cis/{id}/fields` ruft die
+  Spec nach der Migration im Browser selbst ab; die Antwort durchläuft die
+  Vertragsprüfung.
+
+| # | Schritt | Erwartung | Ergebnis | Backend-Nachweis |
+|---|---|---|---|---|
+| 1 | Typ mit Elterntyp anlegen | „Typ anlegen“ mit Elterntyp „Blade-Server“: `POST /api/v1/ci-types` mit `parent_type_id` (201); der Baum zeigt „Storage-Blade“ unter „Blade-Server“, das Detail „Elterntyp: Blade-Server“ und die Attribute als „geerbt von Blade-Server“ | bestanden (lokal) | `backend/internal/citype/inherit_integration_test.go` (WP-248) |
+| 2 | Attribute Set zuordnen | „Stromversorgung“ zuordnen: `PUT /api/v1/ci-types/{id}/attribute-sets` mit `[{attribute_set_id, position: 1}]`; das Set steht in der Liste des Typs | bestanden (lokal) | `backend/internal/citype/attribute_set_integration_test.go` (WP-250) |
+| 3 | Zwei Templates in definierter Reihenfolge kombinieren | Referenz-CI `bc-01-blade-1`, Abschnitt „Templates“: `PUT /api/v1/cis/{id}/templates` mit `If-Match: "1"` und `[{blade_server_compute, 2}, {abn01_blade_storage, 1}]`; Anzeige „Version 2 · Position 1“, „Version 1 · Position 2“ und „Auf Version 2 migrieren“ | bestanden (lokal) | `backend/internal/ci/template_assignment_integration_test.go` (Anlage mit zwei Templates, WP-710) und `backend/internal/citype/compose_test.go` (WP-252) |
+| 4 | Regel im Klick-Builder definieren | Regelkatalog, „Regel anlegen“: Pflicht `blade_slot` auf „Blade-Server“, Bedingung `blade_role` = `storage` aus dem Klick-Builder, Meldung DE; `POST /api/v1/rules` (201), die Regel steht in der Tabelle | bestanden (lokal) | `backend/internal/ci/rules_eval_integration_test.go` (WP-257) |
+| 5 | Layout pro Rolle erstellen | Draft „ABN-01 (c) Layout engineer“ anlegen und aktiv setzen; Form Builder von „Blade-Server“, Rolle `engineer`, Abschnittstitel „Storage und Wartung“: `POST /api/v1/layouts?draft=<id>` mit `role_id` (202, Draft-Item); „Im Draft … gespeichert“ | bestanden (lokal) | `backend/internal/citype/layout_integration_test.go` (Layout je Rolle, WP-259) |
+| 6 | Preview prüfen | Vorschau mit Template „Blade-Server (Storage)“ als Rolle `engineer`: `GET /api/v1/ci-types/{id}/form` mit `template_id`, `role_id`, `preview=true` und `draft=<id>` (E-113); Hinweis „Die Vorschau zeigt den Stand des Drafts …“, Abschnitt „Storage und Wartung“, Defaults `pool-a` und `8x5`; keine schreibende Anfrage | bestanden (lokal) | `backend/internal/citype/form_integration_test.go` (aufgelöstes Formular und Vorschau ohne Schreibwirkung, WP-719) |
+| 7 | Publizieren | Draft testen und publizieren: `POST …/metamodel/drafts/{id}/test` (202, Job `metamodel.test`), Status „Getestet“, `POST …/publish`, Status „Publiziert“ | bestanden (lokal) | `backend/internal/metamodel/publish_job_integration_test.go` (Test-Lauf, WP-721) und `backend/internal/metamodel/publish_integration_test.go` (Publish, WP-261) |
+| 8 | Anlage durch einen normalen Nutzer | als `engineer` über „CI anlegen“: Kachel „Blade-Server“, Ausführung „Blade-Server (Storage)“, Abschnitt „Storage und Wartung“ (Layout aus 5), „Speicherpool“ Pflicht und vorbelegt, „Servicelevel“ vorbelegt; Rolle `storage` macht „Einschub“ zur Pflicht (Regel aus 4); keine Begriffe „Template“, „Attribut-Set“, „Attribute Set“ im Dialog; `POST /api/v1/cis` mit `templates` (201). `PATCH /api/v1/attribute-definitions/{id}` → 403 mit Problem-Body (`title`, `detail`), der Dialog meldet das fehlende Recht `ci_attribute:manage` | bestanden (lokal) | `backend/internal/permission/role_matrix_integration_test.go` (WP-245) |
+| 9 | Template-Version migrieren, Overrides bleiben erhalten | Override auf `storage_pool` (`PUT /api/v1/cis/{id}/fields/storage_pool/override`, „geschützt“); „Auf Version 2 migrieren“: `POST /api/v1/templates/{id}/migrations` mit `dry_run: true`, dann wirksam (Job `template.migrate`); Bericht (`GET /api/v1/jobs/{id}/result`): CI `migrated`, Default `support_level`, `storage_pool` unter „Wegen Override übersprungen“, nicht unter `defaults`; danach Version 2 · Position 2, `storage_pool` „geschützt“ mit `pool-abn01`, `GET /api/v1/cis/{id}/fields` mit `protected: true` und unverändertem `override_value` | bestanden (lokal) | `backend/internal/ci/template_migration_integration_test.go` (WP-253), `backend/internal/ci/template_migration_job_integration_test.go` (WP-712; laut Traceability statt `backend/internal/citype/migrate_job_integration_test.go`) und `backend/internal/ci/bulk_override_integration_test.go` (WP-306) |
+
+Lauf: lokaler Lauf am 2026-11-08 auf dem Stand von WP-330 (Projekte chromium
+und mobile-chrome, `--retries=0`), bestanden; Firefox und WebKit waren lokal
+nicht installiert. Der Lauf im CI-Job `e2e` in allen sechs Projekten
+(chromium, edge, firefox, webkit, mobile-chrome, mobile-safari) mit Run-ID und
+Datum wird nach dem Merge hier nachgetragen (datierter Vermerk); bis dahin
+ist (c) für G2 nicht freigegeben.
 
 ## (d) Onboarding-Szenario
 
@@ -306,7 +420,7 @@ Daten, Schritte und Erwartungen bleiben unverändert; die Prüfsumme der Spec in
 
 **Gemockter Lauf (Regression, Freigabe vom 2026-10-14):**
 `frontend/e2e/conflict.spec.ts` spielt dieselben Daten mit gemocktem Backend
-ab. Der Test läuft in allen Browser-Projekten des CI-Jobs `frontend`:
+ab. Der Test läuft in allen Browser-Projekten des CI-Jobs `e2e`:
 Chromium, Edge, Firefox, WebKit, Mobile Chrome und Mobile Safari.
 
 | # | Schritt | Erwartung | Ergebnis |
@@ -332,3 +446,5 @@ Den Schutz des Overrides bei gleichzeitiger Discovery belegt
 |---|---|---|---|
 | Auftragnehmer | – | 2026-10-14 | (d) und (e) bestanden; (a) und (b) N/P (E-02) |
 | Auftraggeber | – | 2026-10-15 | G1 freigegeben; (a) und (b) laut Erklärung erledigt, Texte nachzureichen (E-02) |
+| Auftragnehmer (G2) | – | ausstehend | G2: (c) nach dem grünen Lauf im CI-Job `e2e` in allen sechs Projekten; (a) und (b) PASS nach E-103; (d) und (e) unverändert eingefroren |
+| Auftraggeber (G2) | – | ausstehend | G2-Freigabe von ABN-01 |
