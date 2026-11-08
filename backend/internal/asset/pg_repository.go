@@ -364,6 +364,36 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Asset, e
 	return asset, nil
 }
 
+// GetByIDs returns the assets of ids in one query under RLS (the bulk
+// export, WP-782, like ci.PGRepository.GetByIDs): ids the scope of ctx
+// does not show and deleted ones are missing; the order is unspecified.
+func (r *PGRepository) GetByIDs(ctx context.Context, orgID string, ids []string) ([]Asset, error) {
+	assets := []Asset{}
+	if len(ids) == 0 {
+		return assets, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM asset WHERE organization_id = $1 AND id = ANY($2::uuid[])",
+			assetSelectColumns), orgID, ids)
+		if err != nil {
+			return fmt.Errorf("get assets by id: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, serr := scanAsset(rows)
+			if serr != nil {
+				return fmt.Errorf("scan asset: %w", serr)
+			}
+			assets = append(assets, *item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return assets, nil
+}
+
 // Create inserts a new asset. A missing currency is the currency of the
 // organization (trigger asset_default_currency); the asset starts in the
 // initial state of its effective lifecycle model (physical_asset without

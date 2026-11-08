@@ -93,6 +93,11 @@ type JobWorker struct {
 	// Orgs reads the currency and the mapping override of the job's
 	// organization for a DATEV job; without it the default mapping applies.
 	Orgs OrganizationReader
+	// AssetRows reads the assets of a csv or json job with entity asset
+	// (WP-782, asset.PGRepository); without it such a job fails with
+	// ErrAssetExportUnavailable (fail closed). Separate from Assets, the
+	// source of DATEV.
+	AssetRows AssetRows
 }
 
 // ManifestKey returns the blob key of the manifest of a rendered job, next
@@ -300,15 +305,19 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		return
 	}
 	// DATEV renders assets with the mapping of the organization and an
-	// error report (WP-310); CSV and JSON render CIs (render.go).
+	// error report (WP-310); CSV and JSON render CIs (render.go) or, with
+	// entity asset, the selected assets (asset_render.go, WP-782).
 	var buf bytes.Buffer
 	var report *bytes.Buffer
 	var rowCount int
 	var manifest Manifest
-	if job.Format == FormatDATEV {
+	switch {
+	case job.Format == FormatDATEV:
 		report = &bytes.Buffer{}
 		rowCount, manifest, err = w.renderDATEV(renderCtx, job, policy, &buf, report)
-	} else {
+	case job.Filters.IsAsset():
+		rowCount, manifest, err = w.renderAssets(renderCtx, job, policy, &buf)
+	default:
 		rowCount, manifest, err = RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
 	}
 	if err != nil {

@@ -8282,7 +8282,7 @@ export interface paths {
     put?: never;
     /**
      * Bulk change of up to 500 assets (API-08, BLK-01, BLK-02)
-     * @description Applies the action to every asset in ids (WP-781): set_status (the default when action is absent; the target in status: in_stock, assigned, maintenance, retired, disposed or lost), set_fields, set_location, add_tags, remove_tags, assign, lifecycle_transition or archive, their parameters in params. Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single operation would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind asset.bulk: 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, an invalid status, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). The action export is unknown (422 on action) until the asset export is wired (WP-782). Requires asset:write; archive also lifecycle:transition, set_location asset:move, assign assignment:write and lifecycle_transition lifecycle:transition: without it the whole request is 403 before any change. An action whose service this deployment lacks (no database) is 503 for the whole request. An asset outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also in another letter case; the report names it in its canonical lower-case form; an id that is no UUID is 400 for that id. Every action runs per asset through the path of its single operation, without writes of its own. set_status and set_fields go through the write path of PATCH /api/v1/assets/{id} (field permissions: 403 with fields; a taken inventory_no, barcode or rfid_tag 409 with the field; invalid values 422 or 400 on the field) with If-Match "*". set_fields takes a merge patch of UpdateAssetRequest without status, location_id, lifecycle_state, tags and the holder cache. set_location books a stock movement of type transfer per asset (as POST /api/v1/stock-movements; a target location the caller cannot see is 422 on to_location_id); linked CIs follow. add_tags and remove_tags write the catalog tags like PUT /api/v1/assets/{id}/tags with the version read (a tag change in between is 409); an asset with nothing to change is ok without a write. assign assigns like POST /api/v1/assets/{id}/assign; an asset with a holder is 409 (asset-assigned). lifecycle_transition runs the transition of POST /api/v1/assets/{id}/lifecycle-transitions with the system guards: a failed guard is 422 of type urn:reticora:problem:lifecycle-guard with the violated fields and the missing references, a missing edge 422 urn:reticora:problem:invalid-transition, another from_state 409. archive sets the system tag archived and enters retired in one transaction; a state from which retired is not reachable is 422 invalid-transition and the asset stays unchanged; an asset in retired with the tag is ok without a change.
+     * @description Applies the action to every asset in ids (WP-781): set_status (the default when action is absent; the target in status: in_stock, assigned, maintenance, retired, disposed or lost), set_fields, set_location, add_tags, remove_tags, assign, lifecycle_transition or archive, their parameters in params. Below 100 ids the answer is the partial failure report (200): every id with ok or its error, the HTTP status the single operation would have answered, its problem type and the fields it names. From 100 ids on the change runs as a job of kind asset.bulk: 202 with the job, whose result is the report (GET /api/v1/jobs/{id}/result). More than 500 ids, an unknown action, an invalid status, a status outside set_status and unknown, missing or invalid parameters are 422 for the whole request (params.<name>) before any change, so is a tag key the catalog lacks (params.tags). export (WP-782) creates exactly one export job with filters.entity asset and filters.ids of the canonical ids and answers 202 with it whatever the number of ids, Location /api/v1/exports/{id}; params.format is csv or json, it needs the entitlement export_csv (403 feature-not-entitled) and an id that is no UUID is 422 on ids. The job renders the assets among ids that the scope snapshot of the creator shows and that are not deleted, sorted by created_at and id: CSV (UTF-8 with BOM, semicolons) with the JSON names of the asset DTO as columns without custom_fields, JSON with the asset DTO per asset; fields the creator may not read are missing and listed in the manifest with reason field_permission. Requires asset:write; archive also lifecycle:transition, set_location asset:move, assign assignment:write, lifecycle_transition lifecycle:transition and export export:run: without it the whole request is 403 before any change. An action whose service this deployment lacks (no database, no blob storage for export) is 503 for the whole request. An asset outside the scope of the caller is 404 for its id. An id that occurs more than once counts once, also in another letter case; the report names it in its canonical lower-case form; an id that is no UUID is 400 for that id. Every action runs per asset through the path of its single operation, without writes of its own. set_status and set_fields go through the write path of PATCH /api/v1/assets/{id} (field permissions: 403 with fields; a taken inventory_no, barcode or rfid_tag 409 with the field; invalid values 422 or 400 on the field) with If-Match "*". set_fields takes a merge patch of UpdateAssetRequest without status, location_id, lifecycle_state, tags and the holder cache. set_location books a stock movement of type transfer per asset (as POST /api/v1/stock-movements; a target location the caller cannot see is 422 on to_location_id); linked CIs follow. add_tags and remove_tags write the catalog tags like PUT /api/v1/assets/{id}/tags with the version read (a tag change in between is 409); an asset with nothing to change is ok without a write. assign assigns like POST /api/v1/assets/{id}/assign; an asset with a holder is 409 (asset-assigned). lifecycle_transition runs the transition of POST /api/v1/assets/{id}/lifecycle-transitions with the system guards: a failed guard is 422 of type urn:reticora:problem:lifecycle-guard with the violated fields and the missing references, a missing edge 422 urn:reticora:problem:invalid-transition, another from_state 409. archive sets the system tag archived and enters retired in one transaction; a state from which retired is not reachable is 422 invalid-transition and the asset stays unchanged; an asset in retired with the tag is ok without a change.
      */
     post: operations['bulkAssets'];
     delete?: never;
@@ -11124,6 +11124,19 @@ export interface components {
         reason?: string;
       };
     };
+    /** @description One export job of the assets in ids (filters.entity asset and filters.ids, WP-782); 202 with the export job. */
+    AssetBulkExport: {
+      /** @enum {string} */
+      action: 'export';
+      ids: string[];
+      params: {
+        /**
+         * @description datev is 422; DATEV exports assets through POST /api/v1/exports.
+         * @enum {string}
+         */
+        format: 'csv' | 'json';
+      };
+    };
     /** @description Body of POST /api/v1/cis/bulk (WP-304): one variant per action. Without action the body is set_status; every other variant names its action. */
     CIBulkRequest:
       | components['schemas']['CIBulkSetStatus']
@@ -12773,15 +12786,21 @@ export interface components {
       data: components['schemas']['CI'][];
       total: number;
     };
-    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id); datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. */
+    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id) or, with entity asset, a selection of assets by ids; datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. */
     ExportJobFilters: {
+      /**
+       * @description What a csv or json export renders (WP-782). asset is set by the action export of POST /api/v1/assets/bulk only, with ids and without another filter; POST /api/v1/exports with entity asset is 400, so the asset export stays behind the module inventory and the entitlement of /api/v1/assets.
+       * @default ci
+       * @enum {string}
+       */
+      entity: 'ci' | 'asset';
       status?: string;
       /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
       client_id?: string;
       /** @description Lifecycle state of the assets of a datev export (E-120); datev only. */
       lifecycle_state?: string;
-      /** @description Selection of CIs by id for csv and json (WP-780): the visible, not deleted CIs among them, sorted by created_at and id. Not combinable with the other filters; more than 500 ids, an id that is no UUID and ids with datev are 400. */
+      /** @description Selection of CIs (with entity asset: of assets, WP-782) by id for csv and json (WP-780): the visible, not deleted ones among them, sorted by created_at and id. Not combinable with the other filters; more than 500 ids, an id that is no UUID and ids with datev are 400. */
       ids?: string[];
     };
     CreateExportJobRequest: {
@@ -39602,7 +39621,8 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['AssetBulkRequest'];
+        'application/json':
+          components['schemas']['AssetBulkRequest'] | components['schemas']['AssetBulkExport'];
       };
     };
     responses: {
@@ -39615,10 +39635,10 @@ export interface operations {
           'application/json': components['schemas']['BulkResult'];
         };
       };
-      /** @description The bulk change runs as a job asset.bulk (Location /api/v1/jobs/{id}). */
+      /** @description The bulk change runs as a job asset.bulk (Location /api/v1/jobs/{id}), or the action export created its export job (kind export, Location /api/v1/exports/{id}). */
       202: {
         headers: {
-          /** @description The job asset.bulk. */
+          /** @description The job asset.bulk or the export job. */
           Location?: string;
           [name: string]: unknown;
         };
@@ -39626,13 +39646,14 @@ export interface operations {
           'application/json': {
             job_id: string;
             status: string;
+            /** @description asset.bulk, or export for the action export. */
             kind: string;
           };
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description The right of the action is missing (lifecycle:transition, asset:move, assignment:write). */
+      /** @description The right of the action is missing (lifecycle:transition, asset:move, assignment:write, export:run), or the organization is not entitled to export_csv (type feature-not-entitled). */
       403: {
         headers: {
           [name: string]: unknown;

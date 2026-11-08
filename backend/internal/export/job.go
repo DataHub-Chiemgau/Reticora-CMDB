@@ -78,9 +78,14 @@ func (s *JobScope) TenantScope(orgID, userID string) database.TenantScope {
 }
 
 // JobFilters narrows an export job to a subset of the tenant's CIs (csv,
-// json: status, ci_type_id, client_id, or a selection of ids) or assets
-// (datev: client_id, lifecycle_state, WP-310).
+// json: status, ci_type_id, client_id, or a selection of ids), a selection
+// of assets (csv, json with entity asset: ids, WP-782) or assets (datev:
+// client_id, lifecycle_state, WP-310).
 type JobFilters struct {
+	// Entity is what a csv or json export renders: EntityCI (the default,
+	// also empty) or EntityAsset, which only POST /api/v1/assets/bulk
+	// creates (WP-782); POST /api/v1/exports refuses it.
+	Entity         string `json:"entity,omitempty"`
 	Status         string `json:"status,omitempty"`
 	CITypeID       string `json:"ci_type_id,omitempty"`
 	ClientID       string `json:"client_id,omitempty"`
@@ -93,6 +98,15 @@ type JobFilters struct {
 
 // MaxExportIDs bounds filters.ids like a bulk request (API-08).
 const MaxExportIDs = 500
+
+// Entities of a csv or json export (filters.entity, WP-782).
+const (
+	EntityCI    = "ci"
+	EntityAsset = "asset"
+)
+
+// IsAsset reports whether the filters export assets by id (entity asset).
+func (f *JobFilters) IsAsset() bool { return f.Entity == EntityAsset }
 
 // CreateJobRequest is the payload for POST /api/v1/export/jobs.
 type CreateJobRequest struct {
@@ -121,12 +135,27 @@ type JobRepository interface {
 }
 
 // Validate checks a create request and returns a human-readable problem.
+// An asset export (entity asset) takes the format csv or json and a
+// selection of ids only; POST /api/v1/exports refuses it beforehand.
 // validation: fixed texts.
 func (r *CreateJobRequest) Validate() error {
 	switch r.Format {
 	case "csv", "datev", "json":
 	default:
 		return fmt.Errorf("format must be 'csv', 'datev' or 'json'")
+	}
+	switch r.Filters.Entity {
+	case "", EntityCI:
+	case EntityAsset:
+		if r.Format == FormatDATEV {
+			return fmt.Errorf("filters.entity asset applies to the formats csv and json only")
+		}
+		if r.Filters.IDs == nil || r.Filters.Status != "" || r.Filters.CITypeID != "" || r.Filters.ClientID != "" ||
+			r.Filters.LifecycleState != "" {
+			return fmt.Errorf("filters.entity asset takes filters.ids only")
+		}
+	default:
+		return fmt.Errorf("filters.entity must be 'ci' or 'asset'")
 	}
 	// DATEV exports assets (WP-310): the CI filters do not apply to it,
 	// lifecycle_state applies to it only.
@@ -165,6 +194,9 @@ func (f *JobFilters) validateIDs(format string) error {
 	ids := make([]string, 0, len(f.IDs))
 	for _, id := range f.IDs {
 		if !api.IsUUID(id) {
+			if f.IsAsset() {
+				return fmt.Errorf("filters.ids must hold asset ids (UUIDs)")
+			}
 			return fmt.Errorf("filters.ids must hold CI ids (UUIDs)")
 		}
 		id = strings.ToLower(id)

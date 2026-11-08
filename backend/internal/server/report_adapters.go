@@ -596,12 +596,43 @@ func (b bulkExports) CreateExport(ctx context.Context, orgID, format string, ids
 	return &ci.BulkExportJob{ID: job.ID, Status: job.Status}, nil
 }
 
+// AssetBulkExporter wires the action export of POST /api/v1/assets/bulk
+// (WP-782): one export job of the asset ids through the creation of POST
+// /api/v1/exports (export.JobHandler.Enqueue, WP-780) with filters.entity
+// asset and filters.ids. nil without export jobs: export stays unknown.
+func AssetBulkExporter(exports *export.JobHandler) asset.BulkExporter {
+	if exports == nil {
+		return nil
+	}
+	return assetExports{jobs: exports}
+}
+
+// assetExports adapts the export jobs to asset.BulkExporter.
+type assetExports struct {
+	jobs *export.JobHandler
+}
+
+func (a assetExports) CreateExport(ctx context.Context, orgID, format string, ids []string) (*ci.BulkExportJob, error) {
+	req := export.CreateJobRequest{Format: format, Filters: export.JobFilters{Entity: export.EntityAsset, IDs: ids}}
+	if err := req.Validate(); err != nil {
+		return nil, &api.FieldError{Field: "ids", Message: fmt.Sprintf("an export takes 1 to %d asset ids", export.MaxExportIDs)}
+	}
+	job, err := a.jobs.Enqueue(ctx, orgID, &req)
+	switch {
+	case errors.Is(err, export.ErrExportUnavailable):
+		return nil, ci.ErrBulkActionUnavailable
+	case err != nil:
+		return nil, err
+	}
+	return &ci.BulkExportJob{ID: job.ID, Status: job.Status}, nil
+}
+
 // AssetBulkDelegates wires the delegating actions of POST
 // /api/v1/assets/bulk (WP-781) onto the services of their single
 // operations: the transfer of the movement service (WP-274), the
 // assignment service (WP-275) and the transactional lifecycle transition
-// with the system guards (WP-279). The exporter follows with WP-782. A nil
-// part leaves its port nil: its action answers 503.
+// with the system guards (WP-279). The exporter is AssetBulkExporter
+// (WP-782). A nil part leaves its port nil: its action answers 503.
 func AssetBulkDelegates(movements *movement.Service, assignments *assignment.Service, transitions *lifecycle.Service,
 	resolver lifecycle.EntityResolver, features *entitlement.Service) asset.BulkDelegates {
 	var d asset.BulkDelegates
