@@ -174,6 +174,15 @@ printf 'curl %s\n' "$*" >>"$STUB_LOG"
 # The read-only object path answers like the object store without a
 # signature (setup-real-stack.sh, F-376).
 case "$*" in *"%{http_code}"*"/objects/exports/"*) printf 403 ;; esac
+# … with the download headers of frontend/objects-proxy.conf (finding of
+# WP-829), which setup-real-stack.sh checks on the same path.
+case "$*" in *"-D -"*"/objects/exports/"*)
+    printf 'HTTP/1.1 403 Forbidden\r\n'
+    printf 'X-Content-Type-Options: nosniff\r\n'
+    printf 'Content-Disposition: attachment\r\n'
+    printf "Content-Security-Policy: sandbox; default-src 'none'\r\n\r\n"
+    ;;
+esac
 exit 0
 STUBEOF
 printf '#!/bin/sh\nexit 0\n' >"$RS_BIN/psql"
