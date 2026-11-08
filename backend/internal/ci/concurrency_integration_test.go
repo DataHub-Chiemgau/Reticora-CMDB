@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // TestOptimisticConcurrency covers WP-061 (API-07, API-03): GET returns the
@@ -306,50 +304,6 @@ func TestAuditT3OverrideWritesRaiseVersion(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// integrityViolations runs tests/integrity-check.sql for one organization
-// and returns the checks with violations (ABN-03).
-func integrityViolations(t *testing.T, pool *pgxpool.Pool, orgID string) map[string]int {
-	t.Helper()
-	script, err := os.ReadFile("../../../tests/integrity-check.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `SELECT set_config('integrity.org', $1, true)`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := tx.Query(ctx, string(script))
-	if err != nil {
-		t.Fatalf("integrity check: %v", err)
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	checks := 0
-	for rows.Next() {
-		var name string
-		var n int
-		if err := rows.Scan(&name, &n); err != nil {
-			t.Fatal(err)
-		}
-		checks++
-		if n > 0 {
-			out[name] = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if checks == 0 {
-		t.Fatal("integrity check returned no checks")
-	}
-	return out
-}
-
 // TestParallelMerge covers the merge part of the concurrency matrix of
 // ABN-03 (WP-207) with real parallel transactions against PostgreSQL: two
 // merges of the same victim into different survivors, and two merges of a
@@ -430,7 +384,7 @@ func TestParallelMerge(t *testing.T) {
 		}
 	}
 
-	if v := integrityViolations(t, f.Admin, f.OrgA); len(v) > 0 {
+	if v := scopetest.IntegrityViolations(t, f.Admin, f.OrgA); len(v) > 0 {
 		t.Errorf("integrity violations after the parallel merges: %v", v)
 	}
 }

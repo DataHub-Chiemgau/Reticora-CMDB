@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/consumable"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 )
 
 // integrityCounts runs tests/integrity-check.sql in tx for one organization
@@ -69,6 +71,16 @@ func sq(sql string, args ...any) stmt { return stmt{sql, args} }
 // what REC-02 allows: a strong identity, another VRF, another sysObjectID
 // and a hostname duplicate under a probable_duplicate review.
 //
+// The checks of phase 2 (WP-328) get their cases as well: reserved of a
+// stock row other than its active quantity reservations, an asset reserved
+// for one user and held by another, a holder cache without the movements
+// that give it, a cycle of the type inheritance and the normalized serial
+// number of two assets. Negative stock and reserved above on_hand are
+// refused by the CHECKs of stock_level; their cases drop the CHECKs in the
+// rolled-back transaction, so the rows still prove they count. A disposed
+// asset and a holder change booked as return and assignment at one
+// occurred_at are spared.
+//
 // It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
 func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 	f := scopetest.Seed(t, "ec")
@@ -116,6 +128,25 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 	foreign := f.CI(t, f.OrgB, clientB, "ic-foreign")
 	ifB := scalar(`INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, 'eth0') RETURNING id::text`, f.OrgB, foreign)
 	typeB := scalar(`INSERT INTO ci_type (organization_id, key, name) VALUES ($1, 'ic-type-b', 'ic-type-b') RETURNING id::text`, f.OrgB)
+
+	// Phase 2 of organization A (WP-328): a bin with a stock row of 5 of a
+	// consumable, 2 of them reserved by an active quantity reservation; an
+	// asset reserved for user 1 and a free asset.
+	bin := icBin(t, f)
+	cons := &consumable.Consumable{OrganizationID: f.OrgA, ClientID: f.Client1, Name: "ic-toner"}
+	if err := consumable.NewPGRepository(f.App).Create(f.OrgCtx(f.OrgA), cons); err != nil {
+		t.Fatalf("consumable: %v", err)
+	}
+	scalar(`INSERT INTO stock_level (organization_id, consumable_id, location_id, on_hand, reserved)
+		VALUES ($1, $2, $3, 5, 2) RETURNING id::text`, f.OrgA, cons.ID, bin)
+	scalar(`INSERT INTO reservation (organization_id, item_kind, consumable_id, location_id, quantity, state, project_ref)
+		VALUES ($1, 'consumable', $2, $3, 2, 'active', 'ic') RETURNING id::text`, f.OrgA, cons.ID, bin)
+	user1 := f.AppUser(t, f.OrgA, "ic-user-1")
+	user2 := f.AppUser(t, f.OrgA, "ic-user-2")
+	reserved := f.Asset(t, f.OrgA, f.Client1, "ic-asset-reserved")
+	scalar(`INSERT INTO reservation (organization_id, item_kind, asset_id, assignee_id, state)
+		VALUES ($1, 'asset', $2, $3, 'active') RETURNING id::text`, f.OrgA, reserved, user1)
+	free := f.Asset(t, f.OrgA, f.Client1, "ic-asset-free")
 
 	// inTx runs fn in a transaction of the owner that is rolled back.
 	inTx := func(t *testing.T, replica bool, fn func(tx pgx.Tx)) {
@@ -175,6 +206,9 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		// Case and blanks differ: the unique index lets both through.
 		{"duplicate: serial number of active CIs", false, weakPair("serial_number", "IC-SN-1", " ic-sn-1")},
 		{"duplicate: management IP and sysObjectID of weak identities in one VRF", false, ipPair},
+		// No unique index on the serial number of assets (AST-03).
+		{"duplicate: normalized serial number of assets not disposed", false, []stmt{
+			sq(`UPDATE asset SET serial_number = 'IC-AS-1' WHERE id = $1`, reserved), sq(`UPDATE asset SET serial_number = ' ic-as-1' WHERE id = $1`, free)}},
 		{"duplicate: hostname or FQDN of weak identities without review", false, weakPair("hostname", "ic-host", "IC-Host")},
 		{"cross-tenant: relationship endpoint", true, []stmt{sq(`INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id,
 			rel_type, source) VALUES ($1, $2, $3, 'connected_to', 'manual')`, f.OrgA, a, foreign)}},
@@ -196,11 +230,25 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		{"cross-tenant: CI room", true, []stmt{sq(`UPDATE ci SET room_id = $2 WHERE id = $1`, a, roomB)}},
 		{"cross-tenant: CI type", true, []stmt{sq(`UPDATE ci SET ci_type_id = $2 WHERE id = $1`, a, typeB)}},
 		{"cross-tenant: rack room", true, []stmt{sq(`UPDATE rack SET room_id = $2 WHERE id = $1`, rackA, roomB)}},
+		{"cycle: CI type inheritance", true, []stmt{sq(`UPDATE ci_type SET parent_type_id = $2 WHERE id = $1`, typeA1, typeA2),
+			sq(`UPDATE ci_type SET parent_type_id = $2 WHERE id = $1`, typeA2, typeA1)}},
 		{"cycle: CI type lineage", true, []stmt{sq(`UPDATE ci_type SET cloned_from_id = $2 WHERE id = $1`, typeA1, typeA2),
 			sq(`UPDATE ci_type SET cloned_from_id = $2 WHERE id = $1`, typeA2, typeA1)}},
 		{"cycle: location tree", true, []stmt{sq(`UPDATE location SET parent_id = $2 WHERE id = $1`, buildingA, roomA)}},
 		{"cycle: composition", true, []stmt{sq(`UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, a, b),
 			sq(`UPDATE ci SET parent_ci_id = $2 WHERE id = $1`, b, a)}},
+		// The CHECKs of stock_level refuse negative stock; the case drops
+		// them in its rolled-back transaction.
+		{"stock: negative on_hand", false, []stmt{sq(`ALTER TABLE stock_level DROP CONSTRAINT stock_level_on_hand_check,
+			DROP CONSTRAINT stock_level_reserved_check`), sq(`UPDATE stock_level SET on_hand = -1, reserved = 0 WHERE consumable_id = $1`, cons.ID)}},
+		{"stock: reserved below zero or above on_hand", false, []stmt{sq(`ALTER TABLE stock_level DROP CONSTRAINT stock_level_reserved_check`),
+			sq(`UPDATE stock_level SET reserved = 6 WHERE consumable_id = $1`, cons.ID)}},
+		{"stock: reserved other than the active quantity reservations", false, []stmt{
+			sq(`UPDATE stock_level SET reserved = 1 WHERE consumable_id = $1`, cons.ID)}},
+		{"reservation: active reservation of an asset held by another holder", false, []stmt{
+			sq(`UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, reserved, user2)}},
+		{"assignment: holder cache other than the assignment and return movements", false, []stmt{
+			sq(`UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, free, user2)}},
 	}
 	covered := map[string]bool{}
 	for _, c := range cases {
@@ -259,6 +307,20 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		{"probable_duplicate review", append(weakPair("hostname", "ic-host", "ic-host"), sq(`INSERT INTO review_item (organization_id, kind, payload,
 			candidate_ci_ids) VALUES ($1, 'probable_duplicate', jsonb_build_object('ci_id', $2::text), ARRAY[$3::uuid])`, f.OrgA, b, a)),
 			"duplicate: hostname or FQDN of weak identities without review"},
+		{"disposed asset", []stmt{sq(`UPDATE asset SET serial_number = 'IC-AS-2' WHERE id = $1`, reserved),
+			sq(`UPDATE asset SET serial_number = 'ic-as-2', status = 'disposed', lifecycle_state = 'disposed' WHERE id = $1`, free)},
+			"duplicate: normalized serial number of assets not disposed"},
+		// A holder change (WP-275) books the return of the old and the
+		// assignment of the new holder at the same occurred_at.
+		{"holder change at one occurred_at", []stmt{
+			sq(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, assignee_user_id, occurred_at)
+				VALUES ($1, 'asset', $2, 'assignment', $3, now() - interval '1 day')`, f.OrgA, free, user1),
+			sq(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, assignee_user_id, occurred_at)
+				VALUES ($1, 'asset', $2, 'return', $3, now())`, f.OrgA, free, user1),
+			sq(`INSERT INTO stock_movement (organization_id, item_kind, asset_id, movement_type, assignee_user_id, occurred_at)
+				VALUES ($1, 'asset', $2, 'assignment', $3, now())`, f.OrgA, free, user2),
+			sq(`UPDATE asset SET assigned_user_id = $2 WHERE id = $1`, free, user2)},
+			"assignment: holder cache other than the assignment and return movements"},
 	} {
 		t.Run("allowed: "+c.name, func(t *testing.T) {
 			inTx(t, false, func(tx pgx.Tx) {
@@ -286,4 +348,25 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// icBin creates a storage branch site > warehouse > zone > shelf > bin of
+// client 1 in organization A through the location repository and returns
+// the bin.
+func icBin(t *testing.T, f *scopetest.Fixture) string {
+	t.Helper()
+	repo := locations.NewPGRepository(f.App)
+	parent := ""
+	for _, kind := range []locations.Kind{locations.KindSite, locations.KindWarehouse, locations.KindZone, locations.KindShelf, locations.KindBin} {
+		req := locations.CreateRequest{Kind: kind, ParentID: parent, Name: "ic-" + string(kind)}
+		if kind == locations.KindSite {
+			req.ClientID = f.Client1
+		}
+		l, err := repo.Create(f.OrgCtx(f.OrgA), f.OrgA, req)
+		if err != nil {
+			t.Fatalf("create %s: %v", kind, err)
+		}
+		parent = l.ID
+	}
+	return parent
 }

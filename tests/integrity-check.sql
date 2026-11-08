@@ -1,10 +1,22 @@
--- Data integrity after a load or concurrency run (ABN-03, WP-207, WP-437).
+-- Data integrity after a load or concurrency run (ABN-03, WP-207, WP-437,
+-- WP-328).
 --
 -- One row per check with the number of violations; every count must be 0.
 -- The checks cover the [B] data model of G1: orphans, duplicates,
 -- cross-tenant references and cycles of types, locations and the
--- composition. Negative stock belongs to the inventory module (P2, off in
--- G1 after E-03) and follows with it.
+-- composition. Phase 2 adds stock, reservation and assignment (WP-328):
+-- negative stock and reserved below zero or above on_hand (stock_level;
+-- the CHECKs of WP-283 refuse both, the rows are the explicit proof of
+-- ABN-03), reserved other than the sum of the active quantity reservations
+-- of the stock row (WP-284), an active asset reservation whose asset is
+-- held by someone other than the reservation's user (WP-277), a holder
+-- cache (asset.assigned_user_id, assigned_team_id; WP-275) other than the
+-- holder the movements assignment and return of the asset give (a holder
+-- change books return and assignment at the same occurred_at; pure
+-- location moves, transfer, do not count; WP-274), cycles of the type
+-- inheritance (ci_type.parent_type_id, WP-248) and the normalized serial
+-- number of more than one asset of an organization that is not disposed
+-- (lower(btrim()) as review_serial_mismatch, 000088; AST-03).
 --
 -- Only what the schema does not already prevent is checked (F-281): the
 -- exact duplicates of serial number, hardware UUID and primary MAC among
@@ -16,16 +28,28 @@
 -- sysObjectID in one VRF, or by hostname/FQDN, which never merges but
 -- opens a probable_duplicate review. Foreign keys without the organization
 -- let a CI point at the location, site, room or custom type of another
--- organization, and a rack at another organization's room.
+-- organization, and a rack at another organization's room. The schema
+-- itself guarantees, so the script does not check: one active reservation
+-- per asset (idx_reservation_one_active_per_asset); inventory number, RFID
+-- and barcode per organization (idx_asset_tag_org, idx_asset_rfid,
+-- idx_asset_barcode_org, WP-271); consumable.sku and consumable.barcode
+-- per organization (WP-283); one stock row per (consumable_id,
+-- location_id) (stock_level); no own asset of a configuration child (CHECK
+-- ci_configuration_child_asset, WP-273); the references with a composite
+-- foreign key that carries the organization (among others
+-- ci_asset_id_fkey, 000088).
 --
 -- Run it as the owner (it reads every organization):
 --   psql "$DATABASE_URL" -f tests/integrity-check.sql
 -- or restricted to one organization:
 --   psql "$DATABASE_URL" -c "SET integrity.org = '<uuid>'" -f tests/integrity-check.sql
 -- .github/workflows/load.yml runs it after every load job; the concurrency
--- tests of backend/internal/ci and backend/internal/discovery and the seed
--- test run it after their runs. backend/internal/ci/integrity_check_integration_test.go
--- injects one violation per check and expects it to be counted.
+-- tests of backend/internal/ci, backend/internal/discovery and
+-- backend/internal/tenant/integrity and the seed test run it after their
+-- runs through scopetest.IntegrityViolations
+-- (backend/internal/database/scopetest/integrity.go).
+-- backend/internal/ci/integrity_check_integration_test.go injects one
+-- violation per check and expects it to be counted.
 WITH RECURSIVE params AS (
     SELECT NULLIF(current_setting('integrity.org', true), '')::uuid AS org
 ),
@@ -55,6 +79,15 @@ type_walk AS (
     FROM type_walk w JOIN ci_type t ON t.id = w.next
     WHERE w.next <> w.start AND w.depth < 100
 ),
+type_parent_walk AS (
+    SELECT t.id AS start, t.parent_type_id AS next, 1 AS depth
+    FROM ci_type t, params p
+    WHERE t.parent_type_id IS NOT NULL AND (p.org IS NULL OR t.organization_id = p.org)
+    UNION ALL
+    SELECT w.start, t.parent_type_id, w.depth + 1
+    FROM type_parent_walk w JOIN ci_type t ON t.id = w.next
+    WHERE w.next <> w.start AND w.depth < 100
+),
 location_walk AS (
     SELECT l.id AS start, l.parent_id AS next, 1 AS depth
     FROM location l, params p
@@ -63,6 +96,28 @@ location_walk AS (
     SELECT w.start, l.parent_id, w.depth + 1
     FROM location_walk w JOIN location l ON l.id = w.next
     WHERE w.next <> w.start AND w.depth < 100
+),
+scoped_asset AS (
+    SELECT a.* FROM asset a, params p WHERE p.org IS NULL OR a.organization_id = p.org
+),
+scoped_stock AS (
+    SELECT s.* FROM stock_level s, params p WHERE p.org IS NULL OR s.organization_id = p.org
+),
+active_reservation AS (
+    SELECT r.* FROM reservation r, params p
+    WHERE r.state = 'active' AND (p.org IS NULL OR r.organization_id = p.org)
+),
+-- The holder the ledger gives each asset: the assignee of its last
+-- assignment, none after a return. A holder change books return and
+-- assignment at the same occurred_at; the assignment is the later one.
+ledger_holder AS (
+    SELECT DISTINCT ON (m.asset_id) m.asset_id,
+           CASE WHEN m.movement_type = 'assignment' THEN m.assignee_user_id END AS user_id,
+           CASE WHEN m.movement_type = 'assignment' THEN m.assignee_team_id END AS team_id
+    FROM stock_movement m, params p
+    WHERE m.asset_id IS NOT NULL AND m.movement_type IN ('assignment', 'return')
+      AND (p.org IS NULL OR m.organization_id = p.org)
+    ORDER BY m.asset_id, m.occurred_at DESC, (m.movement_type = 'assignment') DESC, m.created_at DESC, m.id DESC
 ),
 composition_walk AS (
     SELECT c.id AS start, c.parent_ci_id AS next, 1 AS depth
@@ -103,6 +158,12 @@ WHERE NOT EXISTS (
     WHERE r.organization_id = a.organization_id AND r.kind = 'probable_duplicate'
       AND ((r.payload->>'ci_id' = a.id::text AND b.id = ANY (r.candidate_ci_ids))
         OR (r.payload->>'ci_id' = b.id::text AND a.id = ANY (r.candidate_ci_ids))))
+UNION ALL
+SELECT 'duplicate: normalized serial number of assets not disposed', count(*) FROM (
+    SELECT organization_id, lower(btrim(serial_number)) FROM scoped_asset
+    WHERE btrim(COALESCE(serial_number, '')) <> ''
+      AND status <> 'disposed' AND lifecycle_state IS DISTINCT FROM 'disposed'
+    GROUP BY 1, 2 HAVING count(*) > 1) d
 UNION ALL
 SELECT 'cross-tenant: relationship endpoint', count(*)
 FROM scoped_rel r
@@ -148,6 +209,29 @@ WHERE (p.org IS NULL OR k.organization_id = p.org) AND r.organization_id <> k.or
 UNION ALL
 SELECT 'cycle: CI type lineage', count(*) FROM type_walk WHERE next = start
 UNION ALL
+SELECT 'cycle: CI type inheritance', count(*) FROM type_parent_walk WHERE next = start
+UNION ALL
 SELECT 'cycle: location tree', count(*) FROM location_walk WHERE next = start
 UNION ALL
-SELECT 'cycle: composition', count(*) FROM composition_walk WHERE next = start;
+SELECT 'cycle: composition', count(*) FROM composition_walk WHERE next = start
+UNION ALL
+SELECT 'stock: negative on_hand', count(*) FROM scoped_stock WHERE on_hand < 0
+UNION ALL
+SELECT 'stock: reserved below zero or above on_hand', count(*) FROM scoped_stock WHERE reserved < 0 OR reserved > on_hand
+UNION ALL
+SELECT 'stock: reserved other than the active quantity reservations', count(*)
+FROM scoped_stock s
+FULL JOIN (
+    SELECT organization_id, consumable_id, location_id, sum(quantity) AS quantity FROM active_reservation
+    WHERE item_kind = 'consumable' GROUP BY 1, 2, 3) r
+  ON r.consumable_id = s.consumable_id AND r.location_id = s.location_id
+WHERE COALESCE(s.reserved, 0) <> COALESCE(r.quantity, 0)
+UNION ALL
+SELECT 'reservation: active reservation of an asset held by another holder', count(*)
+FROM active_reservation r JOIN asset a ON a.id = r.asset_id
+WHERE r.item_kind = 'asset'
+  AND (a.assigned_team_id IS NOT NULL OR (a.assigned_user_id IS NOT NULL AND a.assigned_user_id IS DISTINCT FROM r.assignee_id))
+UNION ALL
+SELECT 'assignment: holder cache other than the assignment and return movements', count(*)
+FROM scoped_asset a LEFT JOIN ledger_holder h ON h.asset_id = a.id
+WHERE a.assigned_user_id IS DISTINCT FROM h.user_id OR a.assigned_team_id IS DISTINCT FROM h.team_id;

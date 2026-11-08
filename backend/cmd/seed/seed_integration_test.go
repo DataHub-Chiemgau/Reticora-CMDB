@@ -291,7 +291,7 @@ func TestSeedSIM01(t *testing.T) {
 
 	// Data integrity of the load seed (ABN-03, NFR-10).
 	for _, org := range []string{demo, acme} {
-		if violations := integrityViolations(t, f, org); len(violations) > 0 {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, org); len(violations) > 0 {
 			t.Errorf("integrity check of org %s: %v", org, violations)
 		}
 	}
@@ -472,7 +472,7 @@ func TestSeedNFR01Volumes(t *testing.T) {
 
 	// Data integrity of every organization (ABN-03).
 	for _, o := range summary.Orgs {
-		if violations := integrityViolations(t, f, o.ID); len(violations) > 0 {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, o.ID); len(violations) > 0 {
 			t.Errorf("integrity check of %s: %v", o.Slug, violations)
 		}
 	}
@@ -482,50 +482,6 @@ func TestSeedNFR01Volumes(t *testing.T) {
 		t.Fatalf("second seed: %v", err)
 	}
 	check("second run")
-}
-
-// integrityViolations runs tests/integrity-check.sql for one organization
-// and returns the checks with violations (ABN-03).
-func integrityViolations(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
-	t.Helper()
-	script, err := os.ReadFile("../../../tests/integrity-check.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	tx, err := f.Admin.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err = tx.Exec(ctx, `SELECT set_config('integrity.org', $1, true)`, orgID); err != nil {
-		t.Fatal(err)
-	}
-	rows, err := tx.Query(ctx, string(script))
-	if err != nil {
-		t.Fatalf("integrity check: %v", err)
-	}
-	defer rows.Close()
-	out := map[string]int{}
-	checks := 0
-	for rows.Next() {
-		var name string
-		var n int
-		if err := rows.Scan(&name, &n); err != nil {
-			t.Fatal(err)
-		}
-		checks++
-		if n > 0 {
-			out[name] = n
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if checks == 0 {
-		t.Fatal("integrity check returned no checks")
-	}
-	return out
 }
 
 // TestSeedOptionsAreBounded covers the bounds of the seed, also of the
@@ -849,7 +805,7 @@ func TestSeedSIM01Phase2(t *testing.T) {
 
 	// The Phase-2 data keep the integrity of the data model (ABN-03).
 	for _, org := range []string{demo, acme} {
-		if violations := integrityViolations(t, f, org); len(violations) > 0 {
+		if violations := scopetest.IntegrityViolations(t, f.Admin, org); len(violations) > 0 {
 			t.Errorf("integrity check of org %s: %v", org, violations)
 		}
 	}
