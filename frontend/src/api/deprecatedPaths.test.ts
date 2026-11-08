@@ -105,15 +105,20 @@ describe('frontend API paths (catalogue contract)', () => {
   };
 
   it('uses no path whose every operation is deprecated', () => {
-    const deprecated = deprecatedPaths(spec).filter((path) => !(path in usedUntilSunset));
+    // The patterns are compiled once; only lines that can hold an API path
+    // (fetchAPI(, ${API_BASE} or /api/v1) are matched against them, which
+    // keeps the scan of every source file well inside the test timeout.
+    const deprecated = deprecatedPaths(spec)
+      .filter((path) => !(path in usedUntilSunset))
+      .map((path) => ({ path, pattern: apiPathPattern(path) }));
 
     const uses: string[] = [];
     for (const [file, text] of Object.entries(sources)) {
       if (/\/generated\/|\.test\.tsx?$|\.auditdefect\.tsx?$|\/test\//.test(file)) continue;
       text.split('\n').forEach((line, i) => {
-        for (const path of deprecated) {
-          if (apiPathPattern(path).test(line))
-            uses.push(`${file}:${i + 1} uses deprecated ${path}`);
+        if (!/fetchAPI|\$\{API_BASE\}|\/api\/v1/.test(line)) return;
+        for (const { path, pattern } of deprecated) {
+          if (pattern.test(line)) uses.push(`${file}:${i + 1} uses deprecated ${path}`);
         }
       });
     }
