@@ -59,7 +59,10 @@ export type AppPage =
   // Tag catalog (CI-08, WP-817): core without a module gate (E-105).
   | 'tags'
   // Import assistant (UI-11, WP-322): the nav page of the module import (E-105).
-  | 'import';
+  | 'import'
+  // Contracts and suppliers (MGT-12, WP-808): nav pages of the module inventory (E-105).
+  | 'contracts'
+  | 'suppliers';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -106,6 +109,8 @@ export const pageToPath: Record<AppPage, string> = {
   'saved-views': '/saved-views',
   tags: '/tags',
   import: '/imports',
+  contracts: '/contracts',
+  suppliers: '/suppliers',
 };
 
 interface CommandPaletteProps {
@@ -345,6 +350,18 @@ export function CommandPalette({
         label: t('commandPalette.commands.assignments', 'Zuweisungen öffnen'),
         keywords: ['assignments zuweisungen transfer'],
         action: () => onNavigate('assignments'),
+      },
+      {
+        id: 'nav-contracts',
+        label: t('commandPalette.commands.contracts'),
+        keywords: ['contracts verträge vertrag laufzeit kündigung expiry notice'],
+        action: () => onNavigate('contracts'),
+      },
+      {
+        id: 'nav-suppliers',
+        label: t('commandPalette.commands.suppliers'),
+        keywords: ['suppliers lieferanten dienstleister vendor'],
+        action: () => onNavigate('suppliers'),
       },
       {
         id: 'nav-documents',

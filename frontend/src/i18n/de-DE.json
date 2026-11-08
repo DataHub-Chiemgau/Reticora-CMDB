@@ -49,7 +49,9 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Regelkatalog",
-    "import": "Import"
+    "import": "Import",
+    "contracts": "Verträge",
+    "suppliers": "Lieferanten"
   },
   "common": {
     "save": "Speichern",
@@ -113,7 +115,9 @@
       "tags": "Tags öffnen",
       "rules": "Regelkatalog öffnen",
       "scan": "Scannen",
-      "import": "Import-Assistent öffnen"
+      "import": "Import-Assistent öffnen",
+      "contracts": "Verträge öffnen",
+      "suppliers": "Lieferanten öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -4110,6 +4114,130 @@
       "roleForbidden": "Die Vorschau als diese Rolle wurde abgelehnt (citype:manage). Sie zeigt das Formular für die eigenen Rollen.",
       "unsaved": "Der Editor enthält ungespeicherte Änderungen. Die Vorschau zeigt den gespeicherten Stand.",
       "error": "Die Vorschau konnte nicht geladen werden"
+    }
+  },
+  "contract": {
+    "title": "Verträge",
+    "subtitle": "Wartungs-, Support-, Leasing- und Lizenzverträge mit Laufzeit und Kündigungsfrist.",
+    "create": "Vertrag anlegen",
+    "createTitle": "Vertrag anlegen",
+    "editTitle": "Vertrag bearbeiten",
+    "editLabel": "Vertrag {{name}} bearbeiten",
+    "deleteLabel": "Vertrag {{name}} löschen",
+    "deleteTitle": "Vertrag löschen",
+    "deleteConfirm": "Vertrag {{name}} wirklich löschen?",
+    "empty": "Keine Verträge vorhanden.",
+    "loadError": "Die Verträge konnten nicht geladen werden.",
+    "forbiddenRead": "Für Verträge fehlt dir das Leserecht (contract:read).",
+    "readOnly": "Du kannst Verträge ansehen, aber nicht ändern (contract:write fehlt).",
+    "notFound": "Der Vertrag wurde nicht gefunden.",
+    "backToList": "Zur Vertragsliste",
+    "details": "Stammdaten",
+    "documents": "Vertragsdokumente",
+    "orgWide": "Organisationsweit",
+    "none": "Keine Angabe",
+    "currencyHint": "Leer bedeutet die Währung der Organisation.",
+    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Clients.",
+    "fields": {
+      "number": "Nummer",
+      "kind": "Art",
+      "supplier": "Lieferant",
+      "client": "Client",
+      "term": "Laufzeit",
+      "startDate": "Beginn",
+      "endDate": "Ende",
+      "noticePeriodDays": "Kündigungsfrist (Tage)",
+      "noticeDate": "Kündigungstermin",
+      "status": "Status",
+      "value": "Wert",
+      "currency": "Währung",
+      "notes": "Notizen"
+    },
+    "filters": {
+      "status": "Status",
+      "kind": "Art",
+      "supplier": "Lieferant",
+      "sort": "Sortierung",
+      "allKinds": "Alle Arten",
+      "allSuppliers": "Alle Lieferanten"
+    },
+    "sorts": {
+      "number": "Nummer",
+      "start_date": "Beginn",
+      "end_date": "Ende"
+    },
+    "statuses": {
+      "draft": "Entwurf",
+      "active": "Aktiv",
+      "terminated": "Gekündigt",
+      "ended": "Beendet"
+    },
+    "kinds": {
+      "maintenance": "Wartung",
+      "support": "Support",
+      "lease": "Leasing",
+      "license": "Lizenz",
+      "purchase": "Kauf",
+      "service": "Dienstleistung",
+      "other": "Sonstiges"
+    },
+    "expiry": {
+      "title": "Ablaufübersicht",
+      "subtitle": "Laufende Verträge, deren Kündigungstermin in den nächsten 30 Tagen liegt oder verstrichen ist.",
+      "empty": "In den nächsten 30 Tagen steht kein Kündigungstermin an.",
+      "today": "Heute",
+      "tomorrow": "Morgen",
+      "inDays": "In {{count}} Tagen",
+      "passed": "Kündigungstermin verstrichen",
+      "passedHint": "Der Kündigungstermin am {{date}} ist verstrichen; der Vertrag endet am {{end}}.",
+      "ends": "Ende {{date}}"
+    },
+    "errors": {
+      "stale": "Der Vertrag wurde inzwischen geändert. Lade ihn neu, bevor du speicherst.",
+      "reload": "Neu laden",
+      "numberTaken": "Diese Nummer hat bereits ein anderer Vertrag.",
+      "forbidden": "Dafür fehlt dir das Recht.",
+      "forbiddenFields": "Einzelne Felder darfst du nicht ändern; sie sind markiert.",
+      "invalid": "Bitte prüfe die markierten Felder.",
+      "notFound": "Der Vertrag existiert nicht mehr.",
+      "reason": "Fehler: {{detail}}"
+    }
+  },
+  "supplier": {
+    "title": "Lieferanten",
+    "subtitle": "Lieferanten und Dienstleister mit Kontaktperson; Verträge und Assets verweisen auf sie.",
+    "create": "Lieferant anlegen",
+    "createTitle": "Lieferant anlegen",
+    "editTitle": "Lieferant bearbeiten",
+    "editLabel": "Lieferant {{name}} bearbeiten",
+    "deleteLabel": "Lieferant {{name}} löschen",
+    "deleteTitle": "Lieferant löschen",
+    "deleteConfirm": "Lieferant {{name}} wirklich löschen?",
+    "empty": "Keine Lieferanten vorhanden.",
+    "loadError": "Die Lieferanten konnten nicht geladen werden.",
+    "forbiddenRead": "Für Lieferanten fehlt dir das Leserecht (contract:read).",
+    "readOnly": "Du kannst Lieferanten ansehen, aber nicht ändern (contract:write fehlt).",
+    "search": "Lieferanten suchen",
+    "orgWide": "Organisationsweit",
+    "noContact": "Keine Kontaktperson",
+    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "fields": {
+      "name": "Name",
+      "externalRef": "Externe Referenz",
+      "client": "Client",
+      "contact": "Kontaktperson",
+      "notes": "Notizen"
+    },
+    "errors": {
+      "stale": "Der Lieferant wurde inzwischen geändert. Lade ihn neu, bevor du speicherst.",
+      "reload": "Neu laden",
+      "nameTaken": "Diesen Namen hat bereits ein anderer Lieferant.",
+      "inUse": "Der Lieferant wird noch verwendet (Vertrag, Asset oder Bestellung) und kann nicht gelöscht werden.",
+      "forbidden": "Dafür fehlt dir das Recht.",
+      "invalid": "Bitte prüfe die markierten Felder.",
+      "notFound": "Der Lieferant existiert nicht mehr.",
+      "reason": "Fehler: {{detail}}"
     }
   }
 }

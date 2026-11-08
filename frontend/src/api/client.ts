@@ -1516,6 +1516,93 @@ export const documentApi = {
   },
 };
 
+// --- Phase 2: Suppliers and contracts (MGT-12, WP-808) ---
+
+// Supplier, contract and contact and the request types come from the
+// OpenAPI contract (K27; WP-736, WP-269). Both lists read api.ParseListQuery
+// (filter[field][op], sort, cursor) and take no client_id parameter, so they
+// are not in SCOPED_LISTS: ContractsPage sends the chosen client itself as
+// filter[client_id], the suppliers stay without a scope filter.
+export type Supplier = components['schemas']['Supplier'];
+export type SupplierCreateRequest = components['schemas']['CreateSupplierRequest'];
+export type SupplierUpdateRequest = components['schemas']['UpdateSupplierRequest'];
+export type Contract = components['schemas']['Contract'];
+export type ContractCreateRequest = components['schemas']['CreateContractRequest'];
+export type ContractUpdateRequest = components['schemas']['UpdateContractRequest'];
+export type Contact = components['schemas']['Contact'];
+
+/** FilteredListParams is a page of a list read with api.ParseListQuery (API-02). */
+export interface FilteredListParams {
+  limit?: number;
+  cursor?: string;
+  /** sort is a field of the sort whitelist, a leading - sorts descending. */
+  sort?: string;
+  /** filter are the field filters, sent as filter[field] or filter[field][op]. */
+  filter?: readonly AssetFilter[];
+}
+
+/** ifMatch is the If-Match header of a change based on version (API-07). */
+function ifMatch(version?: number): HeadersInit | undefined {
+  return version !== undefined ? { 'If-Match': `"${version}"` } : undefined;
+}
+
+export const supplierApi = {
+  list(params: FilteredListParams = {}): Promise<PaginatedResponse<Supplier>> {
+    return fetchAPI(`/suppliers${assetListQuery(params)}`);
+  },
+  get(id: string): Promise<Supplier> {
+    return fetchAPI(`/suppliers/${id}`);
+  },
+  create(data: SupplierCreateRequest): Promise<Supplier> {
+    return fetchAPI('/suppliers', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update patches a supplier; with version the request carries If-Match (412 when stale). */
+  update(id: string, data: SupplierUpdateRequest, version?: number): Promise<Supplier> {
+    return fetchAPI(`/suppliers/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  /** delete removes a supplier; one still referenced by a contract is 422. */
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/suppliers/${id}`, { method: 'DELETE' });
+  },
+};
+
+export const contractApi = {
+  list(params: FilteredListParams = {}): Promise<PaginatedResponse<Contract>> {
+    return fetchAPI(`/contracts${assetListQuery(params)}`);
+  },
+  get(id: string): Promise<Contract> {
+    return fetchAPI(`/contracts/${id}`);
+  },
+  create(data: ContractCreateRequest): Promise<Contract> {
+    return fetchAPI('/contracts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update patches a contract; with version the request carries If-Match (412 when stale). */
+  update(id: string, data: ContractUpdateRequest, version?: number): Promise<Contract> {
+    return fetchAPI(`/contracts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: ifMatch(version),
+    });
+  },
+  delete(id: string): Promise<void> {
+    return fetchAPI(`/contracts/${id}`, { method: 'DELETE' });
+  },
+};
+
+/**
+ * contactApi reads the contacts (AUD-01); name, phone and e-mail come from
+ * the PII vault (WP-242). /contacts is a scoped list (client_id).
+ */
+export const contactApi = {
+  list(params: { limit?: number; cursor?: string } = {}): Promise<PaginatedResponse<Contact>> {
+    return fetchAPI(`/contacts${buildQuery(params)}`);
+  },
+};
+
 // --- Phase 2: Import (IMP-IO-01, WP-322) ---
 
 // The import profiles, runs and the preview come from the OpenAPI contract

@@ -49,7 +49,9 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Rule catalog",
-    "import": "Import"
+    "import": "Import",
+    "contracts": "Contracts",
+    "suppliers": "Suppliers"
   },
   "common": {
     "save": "Save",
@@ -113,7 +115,9 @@
       "tags": "Open tags",
       "rules": "Open rule catalog",
       "scan": "Scan",
-      "import": "Open import assistant"
+      "import": "Open import assistant",
+      "contracts": "Open contracts",
+      "suppliers": "Open suppliers"
     },
     "contact": {
       "label": "Contact",
@@ -4110,6 +4114,130 @@
       "roleForbidden": "The preview as this role was refused (citype:manage). It shows the form for your own roles.",
       "unsaved": "The editor has unsaved changes. The preview shows the saved state.",
       "error": "The preview could not be loaded"
+    }
+  },
+  "contract": {
+    "title": "Contracts",
+    "subtitle": "Maintenance, support, lease and licence contracts with term and notice period.",
+    "create": "Create contract",
+    "createTitle": "Create contract",
+    "editTitle": "Edit contract",
+    "editLabel": "Edit contract {{name}}",
+    "deleteLabel": "Delete contract {{name}}",
+    "deleteTitle": "Delete contract",
+    "deleteConfirm": "Really delete contract {{name}}?",
+    "empty": "No contracts yet.",
+    "loadError": "The contracts could not be loaded.",
+    "forbiddenRead": "You lack the read permission for contracts (contract:read).",
+    "readOnly": "You can view contracts but not change them (contract:write missing).",
+    "notFound": "The contract was not found.",
+    "backToList": "Back to the contracts",
+    "details": "Master data",
+    "documents": "Contract documents",
+    "orgWide": "Organization-wide",
+    "none": "Not set",
+    "currencyHint": "Empty means the currency of the organization.",
+    "clientFixed": "The client cannot be changed after creation.",
+    "supplierHint": "Offered are organization-wide suppliers and those of the chosen client.",
+    "fields": {
+      "number": "Number",
+      "kind": "Kind",
+      "supplier": "Supplier",
+      "client": "Client",
+      "term": "Term",
+      "startDate": "Start",
+      "endDate": "End",
+      "noticePeriodDays": "Notice period (days)",
+      "noticeDate": "Notice deadline",
+      "status": "Status",
+      "value": "Value",
+      "currency": "Currency",
+      "notes": "Notes"
+    },
+    "filters": {
+      "status": "Status",
+      "kind": "Kind",
+      "supplier": "Supplier",
+      "sort": "Sort",
+      "allKinds": "All kinds",
+      "allSuppliers": "All suppliers"
+    },
+    "sorts": {
+      "number": "Number",
+      "start_date": "Start",
+      "end_date": "End"
+    },
+    "statuses": {
+      "draft": "Draft",
+      "active": "Active",
+      "terminated": "Terminated",
+      "ended": "Ended"
+    },
+    "kinds": {
+      "maintenance": "Maintenance",
+      "support": "Support",
+      "lease": "Lease",
+      "license": "Licence",
+      "purchase": "Purchase",
+      "service": "Service",
+      "other": "Other"
+    },
+    "expiry": {
+      "title": "Expiry overview",
+      "subtitle": "Running contracts whose notice deadline falls within the next 30 days or has passed.",
+      "empty": "No notice deadline within the next 30 days.",
+      "today": "Today",
+      "tomorrow": "Tomorrow",
+      "inDays": "In {{count}} days",
+      "passed": "Notice deadline passed",
+      "passedHint": "The notice deadline on {{date}} has passed; the contract ends on {{end}}.",
+      "ends": "Ends {{date}}"
+    },
+    "errors": {
+      "stale": "The contract has changed meanwhile. Reload it before you save.",
+      "reload": "Reload",
+      "numberTaken": "Another contract already has this number.",
+      "forbidden": "You lack the permission for this.",
+      "forbiddenFields": "You may not change some fields; they are marked.",
+      "invalid": "Please check the marked fields.",
+      "notFound": "The contract no longer exists.",
+      "reason": "Error: {{detail}}"
+    }
+  },
+  "supplier": {
+    "title": "Suppliers",
+    "subtitle": "Suppliers and service providers with a contact person; contracts and assets refer to them.",
+    "create": "Create supplier",
+    "createTitle": "Create supplier",
+    "editTitle": "Edit supplier",
+    "editLabel": "Edit supplier {{name}}",
+    "deleteLabel": "Delete supplier {{name}}",
+    "deleteTitle": "Delete supplier",
+    "deleteConfirm": "Really delete supplier {{name}}?",
+    "empty": "No suppliers yet.",
+    "loadError": "The suppliers could not be loaded.",
+    "forbiddenRead": "You lack the read permission for suppliers (contract:read).",
+    "readOnly": "You can view suppliers but not change them (contract:write missing).",
+    "search": "Search suppliers",
+    "orgWide": "Organization-wide",
+    "noContact": "No contact person",
+    "clientFixed": "The client cannot be changed after creation.",
+    "fields": {
+      "name": "Name",
+      "externalRef": "External reference",
+      "client": "Client",
+      "contact": "Contact person",
+      "notes": "Notes"
+    },
+    "errors": {
+      "stale": "The supplier has changed meanwhile. Reload it before you save.",
+      "reload": "Reload",
+      "nameTaken": "Another supplier already has this name.",
+      "inUse": "The supplier is still in use (contract, asset or order) and cannot be deleted.",
+      "forbidden": "You lack the permission for this.",
+      "invalid": "Please check the marked fields.",
+      "notFound": "The supplier no longer exists.",
+      "reason": "Error: {{detail}}"
     }
   }
 }

@@ -19,6 +19,9 @@ import {
   rackApi,
   assetApi,
   assignmentApi,
+  supplierApi,
+  contractApi,
+  contactApi,
   consumableApi,
   documentApi,
   importApi,
@@ -63,6 +66,11 @@ import type {
   ReturnAssetRequest,
   TransferAssetRequest,
   AssignmentListParams,
+  FilteredListParams,
+  SupplierCreateRequest,
+  SupplierUpdateRequest,
+  ContractCreateRequest,
+  ContractUpdateRequest,
   Document,
   DocumentCreateRequest,
   DocumentLinkTarget,
@@ -469,6 +477,137 @@ export function useAssetList(
     queryFn: () => assetApi.list(params),
     enabled,
     placeholderData: keepPrevious ? keepPreviousData : undefined,
+  });
+}
+
+// --- Suppliers and contracts (MGT-12, WP-808) ---
+
+/** useSuppliers reads one page of the suppliers (cursor, filter[name][like], sort). */
+export function useSuppliers(
+  params: FilteredListParams = {},
+  { enabled = true, keepPrevious = false }: ListQueryOptions & { keepPrevious?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: ['suppliers', params],
+    queryFn: () => supplierApi.list(params),
+    enabled,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
+  });
+}
+
+export function useSupplier(id: string | undefined) {
+  return useQuery({
+    queryKey: ['suppliers', 'detail', id],
+    queryFn: () => supplierApi.get(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+export function useCreateSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SupplierCreateRequest) => supplierApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+}
+
+/** useUpdateSupplier sends version as If-Match (API-07). */
+export function useUpdateSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      version,
+    }: {
+      id: string;
+      data: SupplierUpdateRequest;
+      version?: number;
+    }) => supplierApi.update(id, data, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+}
+
+export function useDeleteSupplier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => supplierApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+    },
+  });
+}
+
+/** useContracts reads one page of the contracts (cursor, filter[...], sort). */
+export function useContracts(
+  params: FilteredListParams = {},
+  { enabled = true, keepPrevious = false }: ListQueryOptions & { keepPrevious?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: ['contracts', params],
+    queryFn: () => contractApi.list(params),
+    enabled,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
+  });
+}
+
+export function useContract(id: string | undefined) {
+  return useQuery({
+    queryKey: ['contracts', 'detail', id],
+    queryFn: () => contractApi.get(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+export function useCreateContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ContractCreateRequest) => contractApi.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+    },
+  });
+}
+
+/** useUpdateContract sends version as If-Match (API-07). */
+export function useUpdateContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      version,
+    }: {
+      id: string;
+      data: ContractUpdateRequest;
+      version?: number;
+    }) => contractApi.update(id, data, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+    },
+  });
+}
+
+export function useDeleteContract() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => contractApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['contracts'] });
+    },
+  });
+}
+
+/** useContacts reads one page of the contacts for a selection (display_name). */
+export function useContacts({ enabled = true }: ListQueryOptions = {}) {
+  return useQuery({
+    queryKey: ['contacts', 'picker'],
+    queryFn: () => contactApi.list({ limit: 200 }),
+    enabled,
   });
 }
 

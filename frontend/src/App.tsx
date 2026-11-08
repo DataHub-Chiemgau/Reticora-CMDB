@@ -112,6 +112,8 @@ const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'Loc
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
 const TagsPage = lazyPage(() => import('./pages/TagsPage'), 'TagsPage');
+const ContractsPage = lazyPage(() => import('./pages/ContractsPage'), 'ContractsPage');
+const SuppliersPage = lazyPage(() => import('./pages/SuppliersPage'), 'SuppliersPage');
 const KeyListPage = lazyPage(() => import('./pages/KeyListPage'), 'KeyListPage');
 const TrainingListPage = lazyPage(() => import('./pages/TrainingListPage'), 'TrainingListPage');
 const DeskListPage = lazyPage(() => import('./pages/DeskListPage'), 'DeskListPage');
@@ -259,6 +261,9 @@ function App() {
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
+          <Route path="/contracts" element={<ContractsPage />} />
+          <Route path="/contracts/:id" element={<ContractsPage />} />
+          <Route path="/suppliers" element={<SuppliersPage />} />
           <Route path="/documents" element={<DocumentListPage />} />
           <Route path="/documents/:id" element={<DocumentDetailPage />} />
           <Route path="/stocktake" element={<StocktakeListPage />} />

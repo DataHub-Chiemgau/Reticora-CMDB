@@ -97,6 +97,9 @@ export default tseslint.config(
       'src/components/create/**/*.tsx',
       // WP-319: the asset list and its guided creation.
       'src/pages/AssetListPage.tsx',
+      // WP-808: the contract and the supplier pages.
+      'src/pages/ContractsPage.tsx',
+      'src/pages/SuppliersPage.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',

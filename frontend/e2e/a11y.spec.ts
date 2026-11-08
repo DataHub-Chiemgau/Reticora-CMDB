@@ -533,6 +533,70 @@ const TAG_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-808: two contracts of a supplier, one whose notice deadline is in 7 days
+// and one whose deadline has passed (the expiry overview shows both), and
+// the supplier with its contact person.
+const CONTRACT_ID = 'fc000000-0000-4000-8000-000000000001';
+const SUPPLIER_ID = 'fd000000-0000-4000-8000-000000000001';
+const CONTACT_ID = 'fe000000-0000-4000-8000-000000000001';
+/** day is today plus the given days as YYYY-MM-DD. */
+const day = (offset: number) =>
+  new Date(Date.now() + offset * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const contractRow = (n: number, extra: Record<string, unknown>) => ({
+  id: `fc000000-0000-4000-8000-00000000000${n}`,
+  organization_id: ORG_ID,
+  client_id: null,
+  supplier_id: SUPPLIER_ID,
+  number: `a11y-V-${n}`,
+  kind: 'maintenance',
+  start_date: '2026-01-01',
+  notice_period_days: 30,
+  value: 1200.5,
+  currency: 'EUR',
+  status: 'active',
+  notes: null,
+  version: 1,
+  created_at: AT,
+  updated_at: AT,
+  ...extra,
+});
+const CONTRACTS = [
+  contractRow(1, { end_date: day(37) }),
+  contractRow(2, { end_date: day(20), kind: 'license' }),
+];
+const SUPPLIER = {
+  id: SUPPLIER_ID,
+  organization_id: ORG_ID,
+  client_id: null,
+  name: 'a11y Wartung GmbH',
+  external_ref: 'K-100',
+  contact_id: CONTACT_ID,
+  notes: null,
+  version: 1,
+  created_at: AT,
+  updated_at: AT,
+};
+const CONTRACT_HANDLERS: Handler[] = [
+  { path: `/contracts/${CONTRACT_ID}`, reply: () => ({ body: CONTRACTS[0] }) },
+  { path: '/contracts', reply: () => ({ body: list(CONTRACTS) }) },
+  { path: '/suppliers', reply: () => ({ body: list([SUPPLIER]) }) },
+  {
+    path: '/contacts',
+    reply: () => ({
+      body: list([
+        {
+          id: CONTACT_ID,
+          organization_id: ORG_ID,
+          display_name: 'a11y Erika Muster',
+          is_24_7: false,
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
 // WP-322: an uploaded CSV file whose scan is clean and its column preview;
 // the check opens the mapping step of the import assistant.
 const IMPORT_DOCUMENT = {
@@ -859,6 +923,32 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
+  {
+    // WP-808: the contract list with the expiry overview (a deadline in 7
+    // days, a passed one), the contract with its documents and the suppliers.
+    path: '/contracts',
+    url: '/contracts',
+    handlers: CONTRACT_HANDLERS,
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-V-1' }),
+  },
+  {
+    path: '/contracts/:id',
+    url: `/contracts/${CONTRACT_ID}`,
+    handlers: CONTRACT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Wartung GmbH')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content').getByRole('link', { name: M.document }),
+  },
+  {
+    path: '/suppliers',
+    url: '/suppliers',
+    handlers: CONTRACT_HANDLERS,
+    prepare: async (page) => {
+      await expect(page.locator('#main-content').getByText('a11y Erika Muster')).toBeVisible();
+    },
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y Wartung GmbH' }),
+  },
   {
     path: '/documents',
     url: '/documents',

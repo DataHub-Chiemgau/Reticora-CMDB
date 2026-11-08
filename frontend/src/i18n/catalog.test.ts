@@ -19,6 +19,7 @@ import { JOB_STATUSES } from '../hooks/useJobs';
 import { DISCOVERY_PLUGINS } from '../pages/DiscoveryPage';
 import { ASSET_CATEGORIES, ASSET_LIFECYCLE_STATES } from '../pages/AssetListPage';
 import { ASSIGNMENT_STATUSES } from '../pages/AssignmentListPage';
+import { CONTRACT_KINDS, CONTRACT_STATUSES } from '../pages/ContractsPage';
 import { MOVEMENT_TYPES } from '../pages/InventoryPage';
 import { DOCUMENT_CATEGORIES } from '../pages/DocumentListPage';
 import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
@@ -187,6 +188,9 @@ const BACKEND_ENUMS = {
   // assignment with its status check is gone (000266), cancelled no longer
   // occurs (WP-318).
   assignmentStatuses: ['active', 'returned', 'transferred', 'overdue'],
+  // backend/migrations/000227_contract.up.sql contract_kind_check (E-119);
+  // the OpenAPI enum of Contract.kind also names null.
+  contractKinds: ['maintenance', 'support', 'lease', 'license', 'purchase', 'service', 'other'],
   // backend/migrations/000011_phase2_documents.up.sql document_category_check.
   documentCategories: [
     'general',
@@ -259,6 +263,10 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['iga.requestStatuses', BACKEND_ENUMS.igaRequestStatuses],
   ['iga.reviewStatuses', BACKEND_ENUMS.igaReviewStatuses],
   ['iga.severities', BACKEND_ENUMS.igaSeverities],
+  // WP-808: contract.status of WP-269 and contract.kind after E-119.
+  ['contract.statuses', specEnum('Contract', 'status')],
+  ['contract.statuses', CONTRACT_STATUSES],
+  ['contract.kinds', BACKEND_ENUMS.contractKinds],
 ];
 
 const enumerations: Array<[string, readonly string[]]> = [
@@ -474,6 +482,9 @@ describe('i18n catalog', () => {
     expect([...TICKET_STATUSES]).toEqual(BACKEND_ENUMS.ticketStatuses);
     expect([...TICKET_CATEGORIES]).toEqual(BACKEND_ENUMS.ticketCategories);
     expect([...TICKET_PRIORITIES]).toEqual(specEnum('TicketPriority'));
+    // WP-808: the contract filters and the dialog.
+    expect([...CONTRACT_STATUSES]).toEqual(specEnum('Contract', 'status'));
+    expect([...CONTRACT_KINDS]).toEqual(BACKEND_ENUMS.contractKinds);
   });
 
   it('labels the ticket priorities and mirrors the state machine (WP-814)', () => {
@@ -692,6 +703,9 @@ describe('i18n catalog', () => {
     ...Object.keys(createSources),
     // WP-319: the asset list with the guided asset creation.
     '../pages/AssetListPage.tsx',
+    // WP-808: the contract and the supplier pages.
+    '../pages/ContractsPage.tsx',
+    '../pages/SuppliersPage.tsx',
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??

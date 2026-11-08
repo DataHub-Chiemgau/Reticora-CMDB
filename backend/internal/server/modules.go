@@ -56,7 +56,7 @@ var LateModules = []Module{
 		"/api/v1/suppliers", "/api/v1/contracts",
 		// The code lookup and the labels (WP-762, WP-763; E-105).
 		"/api/v1/labels",
-	}, Nav: []string{"assets", "assignments", "inventory"}},
+	}, Nav: []string{"assets", "assignments", "inventory", "contracts", "suppliers"}},
 	{Key: "documents", Phase: "P2", Prefixes: []string{"/api/v1/documents"}, Nav: []string{"documents"}},
 	// Metamodel extensions of phase 2 (E-105): attribute sets (WP-250),
 	// templates (WP-251), rules (WP-716), layouts (WP-259), drafts, their

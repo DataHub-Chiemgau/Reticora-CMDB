@@ -41,6 +41,8 @@ import {
   Webhook,
   Workflow,
   Fingerprint,
+  Handshake,
+  Truck,
   FileSignature,
   Wrench,
 } from 'lucide-react';
@@ -123,6 +125,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { page: 'assets', icon: Archive },
       { page: 'assignments', icon: UserCog },
+      { page: 'contracts', icon: Handshake },
+      { page: 'suppliers', icon: Truck },
       { page: 'documents', icon: FileText },
       { page: 'disposal', icon: Trash2 },
     ],
