@@ -80,15 +80,26 @@ export interface CIAssetFacts {
 export interface CICreateRequest {
   ci_type_id: string;
   client_id?: string;
+  /** Node of the location tree; site and room follow from it (WP-317). */
+  location_id?: string;
   name: string;
   status?: string;
   manufacturer?: string;
   model?: string;
   serial_number?: string;
+  hardware_uuid?: string;
   management_ip?: string;
+  primary_mac?: string;
+  hostname?: string;
+  fqdn?: string;
+  os_name?: string;
+  os_version?: string;
   firmware_version?: string;
+  sys_object_id?: string;
   attributes?: Record<string, unknown>;
   discovery_source?: string;
+  /** Templates assigned with the CI in this order (MET-16, WP-710). */
+  templates?: Array<{ template_id: string; version?: number }>;
 }
 
 /**
@@ -277,6 +288,13 @@ export interface CIListParams {
   sort_dir?: string;
   /** Allowed CI types, comma-separated (API-02 field filter; the ObjectPicker, WP-318). */
   'filter[ci_type_id][in]'?: string;
+  /** The value suggestions of the guided creation (WP-317): one type, prefix filters. */
+  'filter[ci_type_id]'?: string;
+  'filter[manufacturer]'?: string;
+  'filter[manufacturer][like]'?: string;
+  'filter[model][like]'?: string;
+  /** Sparse fieldset, comma-separated (API-02); id is always returned. */
+  fields?: string;
 }
 
 export interface ListParams {
@@ -464,6 +482,23 @@ export class ApiError extends Error {
 export const PROBLEM_FEATURE_NOT_ENTITLED = 'https://reticora.io/problems/feature-not-entitled';
 /** The problem type of a 403 for a reached limit of the plan (ENT-06, E-44). */
 export const PROBLEM_ENTITLEMENT_LIMIT = 'https://reticora.io/problems/entitlement-limit';
+/** The problem type of a 422 for a deactivated CI type (MET-05, WP-249, WP-317). */
+export const PROBLEM_TYPE_INACTIVE = 'https://reticora.io/problems/type-inactive';
+/** The violation text of POST /cis on ci_type_id for a deactivated type (WP-249). */
+export const TYPE_INACTIVE_DETAIL = 'the CI type is deactivated';
+
+/**
+ * isTypeInactive reports a refused creation of a deactivated CI type: the
+ * problem type type-inactive, or a 422 whose violation on ci_type_id names
+ * the deactivated type (the form POST /cis answers today).
+ */
+export function isTypeInactive(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 422) return false;
+  if (error.type === PROBLEM_TYPE_INACTIVE) return true;
+  return error.violations.some(
+    (v) => v.field === 'ci_type_id' && v.detail.startsWith(TYPE_INACTIVE_DETAIL),
+  );
+}
 
 /**
  * SCOPED_LISTS are the list endpoints that filter by client and site; the

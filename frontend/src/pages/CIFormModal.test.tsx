@@ -27,6 +27,11 @@
  *   the regression test the client discarded that array, so the user saw one
  *   opaque sentence and had no idea which field to fix.
  *
+ * - MET-51 (WP-317): a CI is created through the guided creation
+ *   (GuidedCreate): type tiles, manufacturer and model, then the fields of
+ *   the resolved form GET /ci-types/{id}/form; editing stays one step.
+ *   The cases of the type select moved to the tiles.
+ *
  * Retest:
  *   cd frontend && npx vitest run src/pages/CIFormModal.test.tsx
  */
@@ -144,7 +149,7 @@ interface BackendOptions {
   hidden?: TypeFixture[];
   /** Answer of POST /cis; the default stores the body and answers 201. */
   post?: (body: Record<string, unknown>) => Response;
-  /** Answer of GET /locations/tree; without it the request is unexpected. */
+  /** Answer of GET /locations/tree; empty without it. */
   tree?: unknown[];
   /** Answer of GET /ci-fields/global (organization-wide fields, MET-13). */
   globals?: FieldDefinition[];
@@ -195,8 +200,34 @@ function stubBackend({
     if (method === 'GET' && path === '/ci-fields/global') {
       return json({ data: globals });
     }
-    if (method === 'GET' && path === '/locations/tree' && tree) {
-      return json({ data: tree });
+    if (method === 'GET' && path === '/locations/tree') {
+      return json({ data: tree ?? [] });
+    }
+    // The guided creation (WP-317): the resolved form of a type (its fields
+    // in the standard section), no variants and no stored values.
+    const formOf = [...types, ...hidden].find((ty) => path === `/ci-types/${ty.id}/form`);
+    if (method === 'GET' && formOf) {
+      return json({
+        ci_type_id: formOf.id,
+        source: 'default',
+        sections: [
+          {
+            key: '_default',
+            title: { de: 'Allgemein', en: 'General' },
+            visible: true,
+            fields: (formOf.fields ?? []).map((def) => ({
+              name: def.name,
+              width: 12,
+              definition: { required: false, sort_order: 0, ...def },
+              state: { visible: true, required: !!def.required, read_only: false },
+            })),
+          },
+        ],
+        rules: [],
+      });
+    }
+    if (method === 'GET' && (path === '/templates' || path === '/cis')) {
+      return json({ data: [], total: 0, limit: 50, offset: 0, has_more: false });
     }
     if (method === 'POST' && path === '/cis') {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -218,13 +249,6 @@ function typeSelect(): HTMLSelectElement {
   return screen.getByLabelText(/typ|type/i) as HTMLSelectElement;
 }
 
-async function chooseType(id: string) {
-  await waitFor(() => {
-    expect(Array.from(typeSelect().options).map((o) => o.value)).toContain(id);
-  });
-  fireEvent.change(typeSelect(), { target: { value: id } });
-}
-
 function submitButton() {
   return screen.getByRole('button', { name: /anlegen|create|speichern|save/i });
 }
@@ -237,8 +261,34 @@ afterEach(async () => {
   });
 });
 
-describe('CIFormModal CI types come from the metamodel API', () => {
-  it('offers the org type created at runtime (MET-04)', async () => {
+/** The guided creation (WP-317): the button of a type tile. */
+async function typeTile(name: string | RegExp) {
+  return screen.findByRole('button', { name }, { timeout: 2000 });
+}
+
+function tileNames() {
+  return screen
+    .getAllByRole('button', { pressed: false })
+    .concat(screen.queryAllByRole('button', { pressed: true }))
+    .map((button) => button.textContent ?? '');
+}
+
+/** Chooses a type tile and goes on to the fields step of the guided creation. */
+async function chooseTile(name: string | RegExp) {
+  fireEvent.click(await typeTile(name));
+  fireEvent.click(screen.getByRole('button', { name: /^(Weiter|Next)$/ }));
+  // A physical type asks for manufacturer and model first.
+  const next = screen.queryByRole('button', { name: /^(Weiter|Next)$/ });
+  if (next) fireEvent.click(next);
+  return screen.findByLabelText(/^Name \*$/);
+}
+
+function createButton() {
+  return screen.getByRole('button', { name: /^(Anlegen|Create)$/ });
+}
+
+describe('CIFormModal CI types come from the metamodel API (guided creation, WP-317)', () => {
+  it('offers the org type created at runtime as a tile (MET-04)', async () => {
     stubBackend({
       types: [
         ciType(SYSTEM_TYPE_ID, 'server', 'Server', true),
@@ -247,16 +297,11 @@ describe('CIFormModal CI types come from the metamodel API', () => {
     });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    await waitFor(
-      () => {
-        const labels = Array.from(typeSelect().options).map((o) => o.textContent ?? '');
-        expect(labels.some((l) => l.includes('Audit Custom PDU'))).toBe(true);
-      },
-      { timeout: 2000 },
-    );
+    expect(await typeTile('Audit Custom PDU')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Server' })).toBeInTheDocument();
   });
 
-  it('uses the API type ids as option values and posts the selected id (CI-03)', async () => {
+  it('posts the id of the chosen tile as ci_type_id (CI-03)', async () => {
     const { posted } = stubBackend({
       types: [
         ciType(SYSTEM_TYPE_ID, 'server', 'Server', true),
@@ -265,22 +310,17 @@ describe('CIFormModal CI types come from the metamodel API', () => {
     });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    await waitFor(
-      () => {
-        const values = Array.from(typeSelect().options)
-          .map((o) => o.value)
-          .filter((v) => v !== '');
-        expect(values.sort()).toEqual([SYSTEM_TYPE_ID, ORG_TYPE_ID].sort());
-      },
-      { timeout: 2000 },
-    );
-
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-audit-01' } });
-    fireEvent.change(typeSelect(), { target: { value: ORG_TYPE_ID } });
-    fireEvent.click(screen.getByRole('button', { name: /anlegen|create/i }));
+    const name = await chooseTile('Audit Custom PDU');
+    fireEvent.change(name, { target: { value: 'srv-audit-01' } });
+    fireEvent.click(createButton());
 
     await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]?.ci_type_id).toBe(ORG_TYPE_ID);
+    expect(posted[0]).toMatchObject({
+      name: 'srv-audit-01',
+      ci_type_id: ORG_TYPE_ID,
+      status: 'active',
+      discovery_source: 'manual',
+    });
   });
 
   it('requests the active types only while open and reads them again at every opening', async () => {
@@ -305,7 +345,7 @@ describe('CIFormModal CI types come from the metamodel API', () => {
     expect(requests, 'no type request while the dialog is closed').toEqual([]);
 
     view.rerender(<CIFormModal open onOpenChange={() => {}} />);
-    await chooseType(SYSTEM_TYPE_ID);
+    await typeTile('Server');
     expect(requests.filter((r) => r.startsWith('GET /ci-types?'))).toEqual([
       'GET /ci-types?limit=200',
     ]);
@@ -314,42 +354,28 @@ describe('CIFormModal CI types come from the metamodel API', () => {
     types.push(ciType(ORG_TYPE_ID, 'audit-runtime-type', 'Laufzeittyp', false));
     view.rerender(<CIFormModal open={false} onOpenChange={() => {}} />);
     view.rerender(<CIFormModal open onOpenChange={() => {}} />);
-    await waitFor(() => {
-      const labels = Array.from(typeSelect().options).map((o) => o.textContent ?? '');
-      expect(labels).toContain('Laufzeittyp');
-    });
+    expect(await typeTile('Laufzeittyp')).toBeInTheDocument();
   });
 
-  it('labels the types in the UI language and falls back to the key', async () => {
+  it('labels the tiles in the UI language and falls back to the key', async () => {
     stubBackend({
       types: [serverType, { ...ciType(ORG_TYPE_ID, 'org_only_key', 'x', false), display_name: {} }],
     });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    await waitFor(() => {
-      const options = Array.from(typeSelect().options).map((o) => [o.value, o.textContent]);
-      expect(options).toEqual([
-        ['', 'Bitte auswählen'],
-        [ORG_TYPE_ID, 'org_only_key'],
-        [SERVER_TYPE_ID, 'Server (physisch)'],
-      ]);
-    });
+    await typeTile('Server (physisch)');
+    expect(tileNames()).toEqual(expect.arrayContaining(['org_only_key', 'Server (physisch)']));
   });
 
-  it('does not post without a type choice and reports the required type at the field', async () => {
+  it('does not go on or post without a type choice', async () => {
     const { posted } = stubBackend();
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
-    await waitFor(() => expect(typeSelect().options.length).toBe(2));
+    await typeTile('Server (physisch)');
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-no-type' } });
-    // The browser refuses the submit of the required select ...
-    fireEvent.click(submitButton());
-    expect(typeSelect().validity.valueMissing).toBe(true);
-    // ... and the dialog's own check names the field when the submit happens.
-    fireEvent.submit(typeSelect().form!);
-    expect(await screen.findByText('CI-Typ ist erforderlich.')).toBeInTheDocument();
-    expect(typeSelect()).toHaveAttribute('aria-invalid', 'true');
-    expect(typeSelect()).toHaveAccessibleDescription('CI-Typ ist erforderlich.');
+    const next = screen.getByRole('button', { name: 'Weiter' });
+    expect(next).toBeDisabled();
+    fireEvent.submit(next.closest('form')!);
+    expect(screen.queryByLabelText('Name *')).not.toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -363,6 +389,8 @@ describe('CIFormModal CI types come from the metamodel API', () => {
     await waitFor(() => expect(typeSelect().value).toBe(RACK_TYPE_ID));
     expect(typeSelect()).toBeDisabled();
     expect(typeSelect().selectedOptions[0]?.textContent).toBe('Rack-Einheit');
+    // Editing stays one step: no tiles, no step list.
+    expect(screen.queryByRole('list', { name: 'Schritte der Anlage' })).not.toBeInTheDocument();
   });
 });
 
@@ -371,21 +399,10 @@ describe('CI type labels and ids from the metamodel (WP-201 / WP-194)', () => {
     const { posted } = stubBackend();
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    // The user picks the server type, whatever the option is labelled today.
-    let serverOption: HTMLOptionElement | undefined;
-    await waitFor(
-      () => {
-        serverOption = Array.from(typeSelect().options).find((o) =>
-          /server/i.test(o.textContent ?? ''),
-        );
-        expect(serverOption, 'a server option in the CI type select').toBeDefined();
-      },
-      { timeout: 2000 },
-    );
-
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-label-01' } });
-    fireEvent.change(typeSelect(), { target: { value: serverOption?.value } });
-    fireEvent.click(screen.getByRole('button', { name: /anlegen|create|speichern|save/i }));
+    // The user picks the server type, whatever the tile is labelled today.
+    const name = await chooseTile(/server/i);
+    fireEvent.change(name, { target: { value: 'srv-label-01' } });
+    fireEvent.click(createButton());
 
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(
@@ -394,36 +411,32 @@ describe('CI type labels and ids from the metamodel (WP-201 / WP-194)', () => {
     ).toBe(SERVER_TYPE_ID);
   });
 
-  it('labels the type options with display_name in the UI language (WP-194 P2)', async () => {
+  it('labels the tiles with display_name in the UI language (WP-194 P2)', async () => {
     stubBackend();
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    const labels = () => Array.from(typeSelect().options).map((o) => (o.textContent ?? '').trim());
-    await waitFor(() => expect(labels()).toContain('Server (physisch)'), { timeout: 2000 });
-
+    await typeTile('Server (physisch)');
     await act(async () => {
       await i18n.changeLanguage('en-US');
     });
-    await waitFor(() => expect(labels()).toContain('Server (physical)'));
+    expect(await typeTile('Server (physical)')).toBeInTheDocument();
   });
 });
 
 describe('CIFormModal type attributes', () => {
-  it('renders the attributes of the chosen type and posts them in attributes', async () => {
+  it('renders the fields of the resolved form and posts them in attributes', async () => {
     const { posted, requests } = stubBackend({ types: [serverType, rackType] });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'rack-unit-02' } });
-    expect(screen.queryByLabelText(/Höheneinheiten/)).not.toBeInTheDocument();
-    await chooseType(RACK_TYPE_ID);
-
+    const name = await chooseTile('Rack-Einheit');
+    fireEvent.change(name, { target: { value: 'rack-unit-02' } });
     const units = await screen.findByLabelText('Höheneinheiten *');
-    expect(requests).toContain(`GET /ci-types/${RACK_TYPE_ID}`);
-    expect(screen.getByRole('heading', { name: 'Typattribute' })).toBeInTheDocument();
+    expect(requests).toContain(`GET /ci-types/${RACK_TYPE_ID}/form`);
+    expect(screen.getByRole('group', { name: 'Allgemein' })).toBeInTheDocument();
     fireEvent.change(units, { target: { value: '4' } });
     fireEvent.change(screen.getByLabelText('Luftstrom'), { target: { value: 'back_to_front' } });
     fireEvent.click(screen.getByLabelText('Redundantes Netzteil'));
-    fireEvent.click(submitButton());
+    fireEvent.click(createButton());
 
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toMatchObject({
@@ -434,69 +447,36 @@ describe('CIFormModal type attributes', () => {
     });
   });
 
-  it('renders the organization-wide fields also for a system type and posts them (MET-13)', async () => {
-    const { posted } = stubBackend({
-      types: [serverType, rackType],
-      globals: [
-        { name: 'cost_center', label: 'Kostenstelle', data_type: 'text' },
-        // A type field of the same name is the narrower definition and wins.
-        { name: 'rack_units', label: 'Globale Höhe', data_type: 'text' },
-      ],
-    });
-    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
-
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-01' } });
-    await chooseType(SERVER_TYPE_ID);
-    fireEvent.change(await screen.findByLabelText('Kostenstelle'), { target: { value: 'IT-42' } });
-    fireEvent.click(submitButton());
-
-    await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]).toMatchObject({
-      ci_type_id: SERVER_TYPE_ID,
-      attributes: { cost_center: 'IT-42' },
-    });
-
-    await chooseType(RACK_TYPE_ID);
-    expect(await screen.findByLabelText('Höheneinheiten *')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Globale Höhe')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Kostenstelle')).toBeInTheDocument();
-  });
-
   it('sends no attributes of a type the user switched away from', async () => {
     const { posted } = stubBackend({ types: [serverType, rackType] });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-switched' } });
-    await chooseType(RACK_TYPE_ID);
+    fireEvent.change(await chooseTile('Rack-Einheit'), { target: { value: 'srv-switched' } });
     fireEvent.change(await screen.findByLabelText('Höheneinheiten *'), { target: { value: '4' } });
-    await chooseType(SERVER_TYPE_ID);
-    await waitFor(() =>
-      expect(screen.queryByLabelText('Höheneinheiten *')).not.toBeInTheDocument(),
-    );
-    fireEvent.click(submitButton());
+    fireEvent.click(screen.getByRole('button', { name: 'Zurück' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zurück' }));
+    await chooseTile('Server (physisch)');
+    expect(screen.queryByLabelText('Höheneinheiten *')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Name *')).toHaveValue('srv-switched');
+    fireEvent.click(createButton());
 
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]?.ci_type_id).toBe(SERVER_TYPE_ID);
     expect(posted[0]).not.toHaveProperty('attributes');
   });
 
-  it('checks the type attributes before posting and names the invalid field', async () => {
+  it('checks the fields before posting and names the invalid field', async () => {
     const { posted } = stubBackend({ types: [rackType] });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'rack-unit-03' } });
-    await chooseType(RACK_TYPE_ID);
+    fireEvent.change(await chooseTile('Rack-Einheit'), { target: { value: 'rack-unit-03' } });
     const units = await screen.findByLabelText('Höheneinheiten *');
-    // An empty required attribute: the browser refuses the submit ...
-    fireEvent.click(submitButton());
-    expect((units as HTMLInputElement).validity.valueMissing).toBe(true);
-    // ... and the dialog's check marks the field.
-    fireEvent.submit(typeSelect().form!);
+    fireEvent.click(createButton());
     expect(await screen.findByText('Höheneinheiten ist erforderlich')).toBeInTheDocument();
     expect(units).toHaveAttribute('aria-invalid', 'true');
     // A fraction is no integer.
     fireEvent.change(units, { target: { value: '1.5' } });
-    fireEvent.submit(typeSelect().form!);
+    fireEvent.click(createButton());
     expect(await screen.findByText('Höheneinheiten muss eine ganze Zahl sein')).toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -616,18 +596,17 @@ describe('CIFormModal edit sends a merge patch of the changed fields (CI-04, API
 });
 
 describe('CIFormModal server-side validation', () => {
-  /** Fills the two client-required fields and submits the modal. */
+  /** Chooses the server tile, fills the name and submits the creation. */
   async function fillAndSubmit() {
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-01' } });
-    await chooseType(SERVER_TYPE_ID);
-    fireEvent.click(screen.getByRole('button', { name: /anlegen|create/i }));
+    fireEvent.change(await chooseTile('Server (physisch)'), { target: { value: 'srv-01' } });
+    fireEvent.click(createButton());
   }
 
   it('renders a 422 violation on the matching input and unmapped ones in the banner', async () => {
     stubBackend({
       post: () =>
         violations(
-          { field: 'serial_number', detail: 'must match the required format' },
+          { field: 'name', detail: 'must match the required format' },
           { field: 'ram_gb', detail: 'field is required' },
         ),
     });
@@ -638,11 +617,13 @@ describe('CIFormModal server-side validation', () => {
 
     // The violation whose field matches a form input is shown inline.
     await waitFor(() => {
-      expect(screen.getByText('must match the required format')).toBeInTheDocument();
+      expect(screen.getByLabelText('Name *')).toHaveAccessibleDescription(
+        'must match the required format',
+      );
     });
 
-    // `ram_gb` is an attribute the chosen type does not describe, so it has no
-    // input in this modal and must still be reported rather than silently dropped.
+    // `ram_gb` is a field the form does not show, so it has no input in this
+    // modal and must still be reported rather than silently dropped.
     expect(screen.getByRole('alert')).toHaveTextContent('ram_gb: field is required');
   });
 
@@ -658,17 +639,15 @@ describe('CIFormModal server-side validation', () => {
     });
   });
 
-  it('shows a 422 violation of ci_type_id at the type field', async () => {
+  it('reports a 422 violation of ci_type_id in the banner', async () => {
     stubBackend({ post: () => violations({ field: 'ci_type_id', detail: 'CI type not found' }) });
 
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
     await fillAndSubmit();
 
-    await waitFor(() => expect(typeSelect()).toHaveAttribute('aria-invalid', 'true'));
-    expect(typeSelect()).toHaveAccessibleDescription('CI type not found');
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Bitte korrigieren Sie die markierten Felder.',
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('ci_type_id: CI type not found'),
     );
   });
 
@@ -680,11 +659,10 @@ describe('CIFormModal server-side validation', () => {
 
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'rack-unit-04' } });
-    await chooseType(RACK_TYPE_ID);
+    fireEvent.change(await chooseTile('Rack-Einheit'), { target: { value: 'rack-unit-04' } });
     const units = await screen.findByLabelText('Höheneinheiten *');
     fireEvent.change(units, { target: { value: '61' } });
-    fireEvent.click(submitButton());
+    fireEvent.click(createButton());
 
     await waitFor(() => expect(units).toHaveAttribute('aria-invalid', 'true'));
     expect(units).toHaveAccessibleDescription('must be at most 60');
@@ -702,23 +680,22 @@ describe('CIFormModal server-side validation', () => {
     });
     renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
 
-    await waitFor(() => {
-      const labels = Array.from(typeSelect().options).map((o) => o.textContent ?? '');
-      expect(labels).toEqual(['Bitte auswählen', 'Server', 'Typ auf Seite zwei']);
-    });
+    await typeTile('Typ auf Seite zwei');
+    expect(screen.getByRole('button', { name: 'Server' })).toBeInTheDocument();
     expect(requests.filter((r) => r.startsWith('GET /ci-types?'))).toEqual([
       'GET /ci-types?limit=200',
       'GET /ci-types?limit=200&offset=1',
     ]);
 
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-page-two' } });
-    fireEvent.change(typeSelect(), { target: { value: ORG_TYPE_ID } });
-    fireEvent.click(screen.getByRole('button', { name: /anlegen|create/i }));
+    fireEvent.change(await chooseTile('Typ auf Seite zwei'), {
+      target: { value: 'srv-page-two' },
+    });
+    fireEvent.click(createButton());
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]?.ci_type_id).toBe(ORG_TYPE_ID);
   });
 
-  it('offers a retry and blocks create while the types cannot be loaded (WP-804)', async () => {
+  it('offers a retry and blocks going on while the types cannot be loaded (WP-804)', async () => {
     let failing = true;
     const { posted } = stubBackend({
       types: [ciType(SYSTEM_TYPE_ID, 'server', 'Server', true)],
@@ -738,38 +715,18 @@ describe('CIFormModal server-side validation', () => {
 
     const retry = await screen.findByRole('button', { name: 'Erneut versuchen' });
     expect(screen.getByText('Die CI-Typen konnten nicht geladen werden.')).toBeInTheDocument();
-    const create = screen.getByRole('button', { name: 'Anlegen' });
-    expect(create).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'srv-blocked' } });
-    fireEvent.click(create);
-    expect(posted).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Weiter' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Anlegen' })).not.toBeInTheDocument();
 
     failing = false;
     fireEvent.click(retry);
-    await chooseType(SYSTEM_TYPE_ID);
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument(),
-    );
+    fireEvent.change(await chooseTile('Server'), { target: { value: 'srv-retried' } });
     expect(
       screen.queryByText('Die CI-Typen konnten nicht geladen werden.'),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Anlegen' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Anlegen' }));
+    fireEvent.click(createButton());
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]?.ci_type_id).toBe(SYSTEM_TYPE_ID);
-  });
-
-  it('reports types that cannot be loaded at the type field', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => json({ detail: 'unavailable' }, 503)),
-    );
-    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
-
-    expect(
-      await screen.findByText('Die CI-Typen konnten nicht geladen werden.'),
-    ).toBeInTheDocument();
-    expect(typeSelect()).toHaveAttribute('aria-invalid', 'true');
   });
 });
 

@@ -93,6 +93,8 @@ export default tseslint.config(
       // WP-322: the import assistant and its mapping editor.
       'src/pages/ImportPage.tsx',
       'src/components/import/**/*.tsx',
+      // WP-317: the guided creation (type tiles and steps).
+      'src/components/create/**/*.tsx',
     ],
     ignores: [
       'src/components/metamodel/**/*.test.tsx',
@@ -102,6 +104,7 @@ export default tseslint.config(
       'src/components/upload/**/*.test.tsx',
       'src/components/documents/**/*.test.tsx',
       'src/components/import/**/*.test.tsx',
+      'src/components/create/**/*.test.tsx',
     ],
     rules: {
       'no-restricted-syntax': [

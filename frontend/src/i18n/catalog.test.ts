@@ -64,6 +64,8 @@ import {
   IMPORT_TARGETS,
   IMPORT_TRANSFORMS,
 } from '../components/import/MappingEditor';
+import { TYPE_CATEGORIES } from '../components/create/TypeTiles';
+import { FORM_GROUPS } from '../components/create/GuidedCreate';
 import spec from '../api/generated/schema.d.ts?raw';
 
 type Catalog = Record<string, unknown>;
@@ -124,6 +126,12 @@ const documentSources = import.meta.glob(
 // WP-322: the components of the import assistant, without tests.
 const importSources = import.meta.glob(
   ['../components/import/**/*.tsx', '!../components/import/**/*.test.tsx'],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>;
+
+// WP-317: the guided creation, without tests.
+const createSources = import.meta.glob(
+  ['../components/create/**/*.tsx', '!../components/create/**/*.test.tsx'],
   { query: '?raw', import: 'default', eager: true },
 ) as Record<string, string>;
 
@@ -360,6 +368,10 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['import.formats', specEnum('ImportPreview', 'format')],
   ['import.steps', IMPORT_STEPS],
   ['jobs.kinds.import', ['run']],
+  // WP-317: the tile categories (citype.Templates() and other) and the
+  // field groups of the guided creation.
+  ['create.categories', TYPE_CATEGORIES],
+  ['create.groups', FORM_GROUPS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
     'savedviews.fields',
     targets,
@@ -476,6 +488,16 @@ describe('i18n catalog', () => {
       ]),
     );
     expect(Object.keys(flowSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
+  });
+
+  it('lists the components of the guided creation (WP-317)', () => {
+    expect(Object.keys(createSources)).toEqual(
+      expect.arrayContaining([
+        '../components/create/GuidedCreate.tsx',
+        '../components/create/TypeTiles.tsx',
+      ]),
+    );
+    expect(Object.keys(createSources).some((f) => f.endsWith('.test.tsx'))).toBe(false);
   });
 
   it('offers exactly the movement types of the OpenAPI types (WP-806)', () => {
@@ -656,6 +678,8 @@ describe('i18n catalog', () => {
     // WP-322: the import assistant and its mapping editor.
     '../pages/ImportPage.tsx',
     ...Object.keys(importSources),
+    // WP-317: the guided creation.
+    ...Object.keys(createSources),
   ])('%s has no literal option labels', (file) => {
     const source =
       pageSources[file] ??
@@ -664,7 +688,8 @@ describe('i18n catalog', () => {
       cardSources[file] ??
       ruleSources[file] ??
       documentSources[file] ??
-      importSources[file];
+      importSources[file] ??
+      createSources[file];
     expect(source, file).toBeDefined();
     expect(source).not.toMatch(/label:\s*['"][A-Za-zÄÖÜäöüß]{2,}/);
     expect(source).not.toMatch(/'(technik|einkauf)'/);

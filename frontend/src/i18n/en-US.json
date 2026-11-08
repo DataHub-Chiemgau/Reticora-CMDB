@@ -384,6 +384,81 @@
         "textExpected": "{{label}} must be a text",
         "invalid": "{{label}} is invalid"
       }
+    },
+    "storedReference": "Stored reference"
+  },
+  "create": {
+    "description": "Choose what to create, then complete the details.",
+    "steps": {
+      "label": "Creation steps",
+      "type": "Type",
+      "device": "Manufacturer and model",
+      "fields": "Details"
+    },
+    "typeIntro": "What would you like to create?",
+    "typesLoading": "Loading types …",
+    "typesLoadFailed": "The CI types could not be loaded.",
+    "typeInactive": "This type has been deactivated in the meantime. Please choose another type.",
+    "tiles": {
+      "subtypes": "Show subtypes of {{name}}",
+      "subtypesOf": "Subtypes of {{name}}"
+    },
+    "fields": {
+      "name": "Name",
+      "status": "Status",
+      "location": "Location",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "variant": "Variant"
+    },
+    "suggestions": "Suggestions for {{field}}",
+    "selectPlaceholder": "Please select",
+    "variantUnnamed": "Variant {{number}}",
+    "formLoading": "Loading fields …",
+    "formLoadFailed": "The fields of this type could not be loaded.",
+    "prefilled": "prefilled",
+    "sourceHint": "Values entered by hand are stored with the source “manual”. Automatic discovery does not overwrite them silently; the detail page shows where each value comes from.",
+    "serverRejected": "Please correct the marked fields.",
+    "validation": {
+      "nameRequired": "Name is required.",
+      "variantRequired": "Please choose a variant."
+    },
+    "back": "Back",
+    "next": "Next",
+    "groups": {
+      "general": "General",
+      "required": "Further required fields",
+      "instance": "Further fields of this CI",
+      "identity": "Identity",
+      "placement": "Placement",
+      "management": "Management",
+      "virtualization": "Virtualization",
+      "hardware": "Hardware",
+      "software": "Software",
+      "assignment": "Assignment",
+      "wireless": "Wireless",
+      "connectivity": "Connectivity",
+      "access": "Access",
+      "classification": "Classification",
+      "capacity": "Capacity",
+      "resilience": "Resilience",
+      "ownership": "Ownership",
+      "cloud": "Cloud"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "end_user": "End-user devices",
+      "network": "Network",
+      "power": "Power",
+      "storage": "Storage",
+      "peripheral": "Peripherals",
+      "iot": "IoT",
+      "software": "Software",
+      "infrastructure": "Infrastructure",
+      "service": "Services",
+      "cloud": "Cloud",
+      "generic": "Generic devices",
+      "other": "Other"
     }
   },
   "discovery": {

@@ -384,6 +384,81 @@
         "textExpected": "{{label}} muss ein Text sein",
         "invalid": "{{label}} ist ungültig"
       }
+    },
+    "storedReference": "Gespeicherter Verweis"
+  },
+  "create": {
+    "description": "Wählen Sie, was Sie anlegen möchten, und ergänzen Sie dann die Angaben.",
+    "steps": {
+      "label": "Schritte der Anlage",
+      "type": "Typ",
+      "device": "Hersteller und Modell",
+      "fields": "Angaben"
+    },
+    "typeIntro": "Was möchten Sie anlegen?",
+    "typesLoading": "Typen werden geladen …",
+    "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
+    "typeInactive": "Dieser Typ wurde inzwischen deaktiviert. Bitte wählen Sie einen anderen Typ.",
+    "tiles": {
+      "subtypes": "Untertypen von {{name}} anzeigen",
+      "subtypesOf": "Untertypen von {{name}}"
+    },
+    "fields": {
+      "name": "Name",
+      "status": "Status",
+      "location": "Standort",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "variant": "Ausführung"
+    },
+    "suggestions": "Vorschläge für {{field}}",
+    "selectPlaceholder": "Bitte auswählen",
+    "variantUnnamed": "Ausführung {{number}}",
+    "formLoading": "Felder werden geladen …",
+    "formLoadFailed": "Die Felder dieses Typs konnten nicht geladen werden.",
+    "prefilled": "vorbelegt",
+    "sourceHint": "Manuell erfasste Werte werden mit der Quelle „manuell“ gespeichert. Eine automatische Erkennung überschreibt sie nicht stillschweigend; die Herkunft jedes Werts zeigt die Detailseite.",
+    "serverRejected": "Bitte korrigieren Sie die markierten Felder.",
+    "validation": {
+      "nameRequired": "Name ist erforderlich.",
+      "variantRequired": "Bitte wählen Sie eine Ausführung."
+    },
+    "back": "Zurück",
+    "next": "Weiter",
+    "groups": {
+      "general": "Allgemein",
+      "required": "Weitere Pflichtfelder",
+      "instance": "Weitere Felder dieses CIs",
+      "identity": "Identität",
+      "placement": "Aufstellung",
+      "management": "Verwaltung",
+      "virtualization": "Virtualisierung",
+      "hardware": "Hardware",
+      "software": "Software",
+      "assignment": "Zuordnung",
+      "wireless": "Funk",
+      "connectivity": "Anbindung",
+      "access": "Zugriff",
+      "classification": "Einstufung",
+      "capacity": "Kapazität",
+      "resilience": "Ausfallsicherheit",
+      "ownership": "Verantwortung",
+      "cloud": "Cloud"
+    },
+    "categories": {
+      "hardware": "Hardware",
+      "end_user": "Endgeräte",
+      "network": "Netzwerk",
+      "power": "Stromversorgung",
+      "storage": "Speicher",
+      "peripheral": "Peripherie",
+      "iot": "IoT",
+      "software": "Software",
+      "infrastructure": "Infrastruktur",
+      "service": "Dienste",
+      "cloud": "Cloud",
+      "generic": "Allgemeine Geräte",
+      "other": "Weitere"
     }
   },
   "discovery": {

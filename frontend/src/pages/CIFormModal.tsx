@@ -7,6 +7,12 @@ import { localizedText } from '../api/cmdb';
 import { useAllCITypes, useCIType, useGlobalFields } from '../api/cmdbHooks';
 import { useCreateCI, useUpdateCI } from '../api/hooks';
 import { useLocationNames } from '../components/cmdb/CIDetailSections';
+import {
+  CI_TYPED_COLUMNS,
+  GuidedCreate,
+  type CreateType,
+  type GuidedCreateDraft,
+} from '../components/create/GuidedCreate';
 import { DynamicForm, validateAll } from '../components/form/DynamicForm';
 import { Button } from '../components/ui/Button';
 import { ErrorState } from '../components/ui/ErrorState';
@@ -66,9 +72,95 @@ function isBlank(value: unknown) {
   return value === undefined || value === null || (typeof value === 'string' && !value.trim());
 }
 
-export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
+/**
+ * CIFormModal creates a CI through the guided creation (GuidedCreate:
+ * type tiles, manufacturer and model, the fields of the resolved form;
+ * MET-51, WP-317) and edits one in a single-step form with master fields
+ * and type attributes (WP-397, WP-477).
+ */
+export function CIFormModal(props: CIFormModalProps) {
+  return props.ci ? <CIEditModal {...props} /> : <CICreateModal {...props} />;
+}
+
+function statusLabel(value: string) {
+  return `ci.status${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+/** The request of POST /cis for a draft of the guided creation (WP-317). */
+export function createRequest(draft: GuidedCreateDraft): CICreateRequest {
+  return {
+    ...draft.columns,
+    name: draft.name,
+    ci_type_id: draft.typeId,
+    status: draft.status,
+    ...(draft.locationId ? { location_id: draft.locationId } : {}),
+    ...(Object.keys(draft.attributes).length > 0 ? { attributes: draft.attributes } : {}),
+    ...(draft.templateId ? { templates: [{ template_id: draft.templateId }] } : {}),
+    discovery_source: 'manual',
+  };
+}
+
+function CICreateModal({ open, onOpenChange, onSuccess }: CIFormModalProps) {
   const { t, i18n } = useTranslation();
   const createMutation = useCreateCI();
+  // The types come from the metamodel (GET /ci-types: the active system types
+  // and the organization's own, MET-04), read again at every opening so a type
+  // created at runtime is offered without a reload or release; all pages
+  // (WP-804). The tiles carry the type id, which POST /cis expects (CI-03).
+  const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
+  const types = useMemo<CreateType[]>(
+    () =>
+      (ciTypes.data ?? []).map((ty) => ({
+        id: ty.id,
+        label: localizedText(ty.display_name, i18n.language) || ty.key,
+        category: ty.category,
+        icon: ty.icon,
+        parentId: ty.parent_type_id,
+        isLogical: ty.is_logical,
+      })),
+    [ciTypes.data, i18n.language],
+  );
+  const statusOptions = useMemo(
+    () => statusValues.map((value) => ({ value, label: t(statusLabel(value)) })),
+    [t],
+  );
+
+  async function submit(draft: GuidedCreateDraft) {
+    const saved = await createMutation.mutateAsync(createRequest(draft));
+    onSuccess?.(saved);
+    onOpenChange(false);
+  }
+
+  return (
+    <Modal
+      open={open}
+      onOpenChange={onOpenChange}
+      size="lg"
+      title={t('form.createCI')}
+      description={t('create.description')}
+    >
+      {open ? (
+        <GuidedCreate
+          resource="ci"
+          typeSource={{
+            types,
+            loading: ciTypes.isLoading,
+            failed: ciTypes.isError,
+            retrying: ciTypes.isFetching,
+            onRetry: () => void ciTypes.refetch(),
+          }}
+          typedColumns={CI_TYPED_COLUMNS}
+          statusOptions={statusOptions}
+          onSubmit={submit}
+          onCancel={() => onOpenChange(false)}
+        />
+      ) : null}
+    </Modal>
+  );
+}
+
+function CIEditModal({ open, onOpenChange, ci, onSuccess }: CIFormModalProps) {
+  const { t, i18n } = useTranslation();
   const updateMutation = useUpdateCI();
   const isEditMode = Boolean(ci);
   // A CI linked to an asset takes serial number and location from the asset
@@ -92,15 +184,9 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     }
   }, [ci, open]);
 
-  // The types come from the metamodel (GET /ci-types: the active system types
-  // and the organization's own, MET-04), read again at every opening so a type
-  // created at runtime is offered without a reload or release. The option value
-  // is the type id, which POST /cis expects as ci_type_id (CI-03). All pages
-  // are read (MET-51, WP-804): the first page alone hid types beyond 200.
+  // The type is shown read-only (WP-804); the list labels it (all pages,
+  // WP-804) and the stored type is added when it was deactivated.
   const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
-  // Without the type list a new CI cannot be created: the dialog offers a
-  // retry and blocks 'Create' until the types are loaded (WP-804).
-  const typesUnavailable = !isEditMode && ciTypes.isError;
   // The chosen type's schema: its attributes are rendered below the fields.
   const selectedType = useCIType(values.ci_type_id || undefined, { enabled: open, staleTime: 0 });
   // The organization-wide fields (GET /ci-fields/global, MET-13) apply to
@@ -149,8 +235,8 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
     [t],
   );
 
-  const serverError = (createMutation.error || updateMutation.error) as Error | null;
-  const isSubmitting = createMutation.isPending || updateMutation.isPending;
+  const serverError = updateMutation.error as Error | null;
+  const isSubmitting = updateMutation.isPending;
 
   // Server-side field validation (RFC 7807 + `violations`) is authoritative:
   // the CI type's field metadata is only fully known to the backend, so a
@@ -265,35 +351,20 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       return;
     }
 
-    const createPayload: CICreateRequest = {
-      name: values.name.trim(),
-      ci_type_id: values.ci_type_id,
-      status: values.status,
-      manufacturer: optionalValue(values.manufacturer),
-      model: optionalValue(values.model),
-      serial_number: optionalValue(values.serial_number),
-      management_ip: optionalValue(values.management_ip),
-      firmware_version: optionalValue(values.firmware_version),
-      attributes: attributePayload(),
-      discovery_source: 'manual',
-    };
-
-    const changes = isEditMode ? updatePayload() : {};
-    if (isEditMode && Object.keys(changes).length === 0) {
+    if (!ci) return;
+    const changes = updatePayload();
+    if (Object.keys(changes).length === 0) {
       // Nothing changed: no request, no new version.
       onOpenChange(false);
       return;
     }
 
     try {
-      const saved =
-        isEditMode && ci
-          ? await updateMutation.mutateAsync({
-              id: ci.id,
-              data: changes,
-              version: ci.version,
-            })
-          : await createMutation.mutateAsync(createPayload);
+      const saved = await updateMutation.mutateAsync({
+        id: ci.id,
+        data: changes,
+        version: ci.version,
+      });
       onSuccess?.(saved);
       onOpenChange(false);
     } catch {
@@ -306,7 +377,7 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
       open={open}
       onOpenChange={onOpenChange}
       size="lg"
-      title={isEditMode ? t('form.editCI') : t('form.createCI')}
+      title={t('form.editCI')}
       description={t('form.ciDescription')}
     >
       <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
@@ -344,18 +415,6 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
             options={statusOptions}
             error={fieldErrors.status}
           />
-          {typesUnavailable ? (
-            <div className="flex sm:col-span-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                loading={ciTypes.isFetching}
-                onClick={() => void ciTypes.refetch()}
-              >
-                {t('common.retry')}
-              </Button>
-            </div>
-          ) : null}
         </div>
 
         {/* The optional master data of the device. */}
@@ -444,8 +503,8 @@ export function CIFormModal({ open, onOpenChange, ci, onSuccess }: CIFormModalPr
           <Button variant="secondary" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>
-          <Button type="submit" loading={isSubmitting} disabled={typesUnavailable}>
-            {isEditMode ? t('common.save') : t('common.create')}
+          <Button type="submit" loading={isSubmitting}>
+            {t('common.save')}
           </Button>
         </div>
       </form>

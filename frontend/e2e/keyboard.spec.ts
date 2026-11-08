@@ -49,9 +49,7 @@ function row(page: Page, name: string): Locator {
   return page.getByRole('row').filter({ has: page.getByRole('link', { name }) });
 }
 
-test('modal: focus moves in, Shift+Tab stays inside, Escape in a field returns focus', async ({
-  page,
-}) => {
+test('modal: focus moves in, Shift+Tab stays inside, Escape returns focus', async ({ page }) => {
   await openList(page);
   const trigger = page.getByRole('button', { name: 'CI anlegen' }).first();
   await trigger.focus();
@@ -67,9 +65,10 @@ test('modal: focus moves in, Shift+Tab stays inside, Escape in a field returns f
     await expect(dialog.locator(':focus')).toHaveCount(1);
   }
 
-  const name = dialog.getByLabel('Name');
-  await name.focus();
-  await page.keyboard.type('draft');
+  // The guided creation starts with the type tiles (WP-317): Escape on a
+  // tile closes the dialog as well.
+  const tile = dialog.getByRole('button', { name: 'Switch' });
+  await tile.focus();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();

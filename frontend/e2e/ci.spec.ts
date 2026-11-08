@@ -2,8 +2,9 @@ import { AT, CI_TYPES, ORG_ID, expect, list, mockBackend, signIn, test } from '.
 
 // TST-03 (WP-201): a CI is created in the list, appears there and opens in
 // the detail view. Runs in every browser project of playwright.config.ts.
-// The dialog offers the types of GET /ci-types and posts the chosen type's
-// UUID (CI-03, WP-397). The strict mock checks the POST against
+// The dialog offers the types of GET /ci-types as tiles of the guided
+// creation (WP-317) and posts the chosen type's UUID (CI-03, WP-397); the
+// fields come from the resolved form GET /ci-types/{id}/form. The strict mock checks the POST against
 // api/openapi.yaml (WP-530): a type key such as 'server' instead of the UUID
 // breaks the contract (format: uuid) and fails the test (F-178).
 
@@ -58,6 +59,21 @@ test('creates a CI and opens it', async ({ page }) => {
       path: /^\/topology\/cis\/[^/]+\/neighbors$/,
       reply: () => ({ body: { nodes: [], edges: [] } }),
     },
+    // The guided creation: no variants, the resolved form of the switch
+    // without further fields, no locations.
+    { path: '/templates', reply: () => ({ body: list([]) }) },
+    {
+      path: /^\/ci-types\/[0-9a-f-]{36}\/form$/,
+      reply: (_req, url) => ({
+        body: {
+          ci_type_id: /ci-types\/([^/]+)\/form$/.exec(url.pathname)?.[1],
+          source: 'default',
+          sections: [],
+          rules: [],
+        },
+      }),
+    },
+    { path: '/locations/tree', reply: () => ({ body: { data: [] } }) },
     {
       path: /^\/cis\/[^/]+$/,
       reply: (_req, url) => ({ body: cis.find((c) => url.pathname.endsWith(c.id)) }),
@@ -68,11 +84,12 @@ test('creates a CI and opens it', async ({ page }) => {
 
   await page.getByRole('button', { name: 'CI anlegen' }).first().click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('Name').fill('core-sw-e2e');
-  const typeSelect = dialog.getByLabel('CI-Typ');
-  // System types and the organization type, labelled in the UI language.
-  await expect(typeSelect.locator('option', { hasText: 'Org-PDU' })).toHaveCount(1);
-  await typeSelect.selectOption({ label: 'Switch' });
+  // System types and the organization type as tiles, labelled in the UI language.
+  await expect(dialog.getByRole('button', { name: 'Org-PDU' })).toHaveCount(1);
+  await dialog.getByRole('button', { name: 'Switch' }).click();
+  await dialog.getByRole('button', { name: 'Weiter' }).click();
+  await dialog.getByRole('button', { name: 'Weiter' }).click();
+  await dialog.getByLabel('Name *').fill('core-sw-e2e');
   await dialog.getByRole('button', { name: 'Anlegen' }).click();
   await expect(dialog).toBeHidden();
 
