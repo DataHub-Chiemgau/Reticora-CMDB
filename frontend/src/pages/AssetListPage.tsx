@@ -559,7 +559,9 @@ export function AssetListPage() {
                       onSort={() => toggleSort(column)}
                     />
                   ))}
-                  <th scope="col" className={cn(thClasses, 'text-right')}>
+                  {/* relative: the sr-only label is positioned absolutely and
+                      would otherwise widen the page instead of the scroll region. */}
+                  <th scope="col" className={cn(thClasses, 'relative text-right')}>
                     <span className="sr-only">{t('common.actions')}</span>
                   </th>
                 </tr>
