@@ -77,14 +77,19 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 	}
 	if f.CITypeSubtree != "" {
 		// The type of the key or name and every subtype (ci_type_subtree,
-		// WP-248); for an asset through its type or the linked CI.
+		// WP-248); for an asset through its type or the linked CI. The
+		// subtree is an array the query computes once (an init plan): as
+		// IN (subquery) the planner, which estimates one visible CI under
+		// ci_isolation, joined it in a nested loop and walked the type
+		// tree again for every CI (finding of the load run of PR #147,
+		// the preset servers_without_monitoring).
 		p := next()
-		subtree := fmt.Sprintf(`SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = %s OR t.name = %s`, p, p)
+		subtree := fmt.Sprintf(`ARRAY(SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = %s OR t.name = %s)`, p, p)
 		if table == "ci" {
-			add(fmt.Sprintf(`ci.ci_type_id IN (%s)`, subtree), f.CITypeSubtree)
+			add(fmt.Sprintf(`ci.ci_type_id = ANY (%s)`, subtree), f.CITypeSubtree)
 		} else {
-			add(fmt.Sprintf(`(asset.asset_type_id IN (%s)
-				OR asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id IN (%s)))`, subtree, subtree), f.CITypeSubtree)
+			add(fmt.Sprintf(`(asset.asset_type_id = ANY (%s)
+				OR asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id = ANY (%s)))`, subtree, subtree), f.CITypeSubtree)
 		}
 	}
 	if f.OwnedByMe {
@@ -172,10 +177,15 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 	}
 	if f.NoMetricWithinHours > 0 && table == "ci" {
 		// The samples the caller may read (metric_sample_v, scoped like
-		// the CI; idx_metric_sample_ci on ci_id, time).
+		// the CI; idx_metric_sample_ci on ci_id, time). A scalar subquery
+		// per CI, not NOT EXISTS: the security barrier of the view keeps
+		// the join clause ms.ci_id = ci.id out of its scan, so the anti
+		// join the planner made of NOT EXISTS read every sample of the
+		// window once per CI. The subquery probes idx_metric_sample_ci
+		// with the id of the CI; it is NULL exactly when no sample exists.
 		p := next()
-		add(fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id
-			AND ms.time >= now() - make_interval(hours => %s::int))`, p), f.NoMetricWithinHours)
+		add(fmt.Sprintf(`(SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id
+			AND ms.time >= now() - make_interval(hours => %s::int) LIMIT 1) IS NULL`, p), f.NoMetricWithinHours)
 	}
 	if f.UpstreamOf != "" && table == "ci" {
 		// CIs upstream of X: sources of edges pointing (transitively) into X,

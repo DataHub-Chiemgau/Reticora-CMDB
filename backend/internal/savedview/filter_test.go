@@ -294,12 +294,12 @@ func TestCompileSQLSystemViewPredicates(t *testing.T) {
 	}
 	sql := squash(where)
 	for _, part := range []string{
-		"ci.ci_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $2 OR t.name = $2)",
+		"ci.ci_type_id = ANY (ARRAY(SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $2 OR t.name = $2))",
 		"ci.owner_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
 		"ci.owner_team_id IN (SELECT tm.team_id FROM team_member tm WHERE tm.user_id = NULLIF(current_setting('app.user_id', true), '')::uuid)",
 		"NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $3 AND r.source_ci_id = ci.id)",
 		"NOT EXISTS (SELECT 1 FROM ci_relationship r WHERE r.rel_type = $4 AND r.target_ci_id = ci.id)",
-		"NOT EXISTS (SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id AND ms.time >= now() - make_interval(hours => $5::int))",
+		"(SELECT 1 FROM metric_sample_v ms WHERE ms.ci_id = ci.id AND ms.time >= now() - make_interval(hours => $5::int) LIMIT 1) IS NULL",
 	} {
 		if !strings.Contains(sql, part) {
 			t.Errorf("missing %s in %s", part, sql)
@@ -330,8 +330,8 @@ func TestCompileSQLSystemViewPredicates(t *testing.T) {
 	}
 	sql = squash(where)
 	for _, part := range []string{
-		"asset.asset_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $1 OR t.name = $1)",
-		"asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id IN (SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s",
+		"asset.asset_type_id = ANY (ARRAY(SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s WHERE t.key = $1 OR t.name = $1))",
+		"asset.ci_id IN (SELECT id FROM ci WHERE ci_type_id = ANY (ARRAY(SELECT s.id FROM ci_type t CROSS JOIN LATERAL ci_type_subtree(t.id) s",
 		"asset.owner_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
 		"asset.assigned_user_id = NULLIF(current_setting('app.user_id', true), '')::uuid",
 		"asset.assigned_team_id IN (SELECT tm.team_id FROM team_member tm",
