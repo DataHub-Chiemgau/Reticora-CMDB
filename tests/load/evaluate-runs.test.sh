@@ -287,7 +287,7 @@ check "a column per run" "$OUT" '^\| Metrik \| Schwelle \| 1001 \| 1002 \| 1003 
 check "a p95 threshold: the p95 per run and their median, the G2 budget for the recorded G1 bound" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
 check "the budget set named" "$OUT" '^Latenz- und Dauerbudgets \(p95\): Satz G2 aus `tests/load/budgets\.json` \(E-146\)'
 check "a p95 threshold without a budget keeps its bound" "$OUT" '^\| `http_req_duration\{name:ingest\}` \| `p\(95\)<1000` \| 240 ms \| 240 ms \| 240 ms \| 240 ms \| ja \|$'
-check "an unchanged budget of G1 in G2" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<300` \| 120\.1 ms \| 130 ms \| 110 ms \| 120\.1 ms \| ja \|$'
+check "the G2 budget of detail for the recorded G1 bound" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<800` \| 120\.1 ms \| 130 ms \| 110 ms \| 120\.1 ms \| ja \|$'
 check "a rate threshold with its decimals" "$OUT" '^\| `checks` \| `rate>0\.99` \| 1 \| 0\.9953 \| 1 \| 1 \| ja \|$'
 check "a gauge threshold" "$OUT" '^\| `ingest_drain_records_per_s` \| `value>=200` \| 798 Records/s \| 388\.2 Records/s \| 963\.1 Records/s \| 798 Records/s \| ja \|$'
 check "a max threshold" "$OUT" '^\| `ingest_spool_flush` \| `max<300000` \| 15100 ms \| 28720 ms \| 20000 ms \| 20000 ms \| ja \|$'
@@ -447,13 +447,13 @@ check "--gate G1: the overall line names the G1 budget" "$(tail -n 1 <<<"$OUT")"
 N="$TMP_ROOT/noisy"
 for id in 2001 2002 2003; do run "$N/$id" api; done
 result "$N/2001" api success && api "$N/2001" 89.44 120.1 852 1
-result "$N/2002" api failure && api "$N/2002" 504 467 1990 1
+result "$N/2002" api failure && api "$N/2002" 504 912 1990 1
 result "$N/2003" api success && api "$N/2003" 120 110 870.5 1
 evaluate "one noisy run, median held: exit 0" 0 --partial "$N/2001" "$N/2002" "$N/2003"
 check "--partial: the mode named" "$OUT" '^Teilbewertung \(`--partial`\), kein G1-Nachweis: '
 check "--partial: only the jobs of the runs" "$(grep '^## Job' <<<"$OUT" | tr '\n' ' ')" '^## Job `api` $'
 check "the missed value in its run, the median within" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 504 ms \| 120 ms \| 120 ms \| ja \|$'
-check "the second missed value" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<300` \| 120\.1 ms \| 467 ms \| 110 ms \| 120\.1 ms \| ja \|$'
+check "the second missed value" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<800` \| 120\.1 ms \| 912 ms \| 110 ms \| 120\.1 ms \| ja \|$'
 check "the red run" "$OUT" '^\| Status des Jobs \| – \| grün \| \*\*rot\*\* \| grün \| rot in 1 von 3 \| ja \|$'
 check "held although red in one run" "$OUT" '^Urteil: gehalten \(Schwellen im Median: 4 von 4 gehalten; rot in 1 von 3 Läufen\)\.$'
 check "all budgets held, as a partial evaluation" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): alle Budgets gehalten$'
@@ -486,20 +486,20 @@ check "the missing job is red in its run" "$OUT" '^\| Status des Jobs \| – \| 
 # (lower bounds).
 X="$TMP_ROOT/missed"
 for id in 5001 5002 5003; do run "$X/$id" api ingest-spool; done
-result "$X/5001" api failure && api "$X/5001" 89.44 120.1 3100 0.98
+result "$X/5001" api failure && api "$X/5001" 89.44 120.1 4600 0.98
 result "$X/5002" api success && api "$X/5002" 101.2 130 1900 0.995
-result "$X/5003" api failure && api "$X/5003" 95 110 3300 0.97
+result "$X/5003" api failure && api "$X/5003" 95 110 4800 0.97
 result "$X/5001" ingest-spool failure && spool "$X/5001" 150 15100 0
 result "$X/5002" ingest-spool success && spool "$X/5002" 250 16000 0
 result "$X/5003" ingest-spool failure && spool "$X/5003" 180 17000 0
 evaluate "thresholds missed in two runs: exit 1" 1 --partial "$X/5001" "$X/5002" "$X/5003"
-check "a p95 missed in the median" "$OUT" '^\| `http_req_duration\{name:impact\}` \| `p\(95\)<3000` \| 3100 ms \| 1900 ms \| 3300 ms \| 3100 ms \| \*\*nein\*\* \|$'
+check "a p95 missed in the median" "$OUT" '^\| `http_req_duration\{name:impact\}` \| `p\(95\)<4500` \| 4600 ms \| 1900 ms \| 4800 ms \| 4600 ms \| \*\*nein\*\* \|$'
 check "a rate missed in the median" "$OUT" '^\| `checks` \| `rate>0\.99` \| 0\.98 \| 0\.995 \| 0\.97 \| 0\.98 \| \*\*nein\*\* \|$'
 check "a gauge missed in the median" "$OUT" '^\| `ingest_drain_records_per_s` \| `value>=200` \| 150 Records/s \| 250 Records/s \| 180 Records/s \| 180 Records/s \| \*\*nein\*\* \|$'
 check "a threshold held next to them" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
 check "red in two runs fails the job" "$OUT" '^\| Status des Jobs \| – \| \*\*rot\*\* \| grün \| \*\*rot\*\* \| rot in 2 von 3 \| \*\*nein\*\* \|$'
 check "the verdict names both" "$OUT" '^Urteil: \*\*verfehlt\*\* \(Schwellen im Median: 2 von 4 gehalten; rot in 2 von 3 Läufen\)\.$'
-check "the overall line names every miss" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): verfehlt: `api` `checks` `rate>0\.99`; `api` `http_req_duration\{name:impact\}` `p\(95\)<3000`; `api` rot in 2 von 3 Läufen; `ingest-spool` `ingest_drain_records_per_s` `value>=200`; `ingest-spool` rot in 2 von 3 Läufen$'
+check "the overall line names every miss" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): verfehlt: `api` `checks` `rate>0\.99`; `api` `http_req_duration\{name:impact\}` `p\(95\)<4500`; `api` rot in 2 von 3 Läufen; `ingest-spool` `ingest_drain_records_per_s` `value>=200`; `ingest-spool` rot in 2 von 3 Läufen$'
 refute "a held threshold is not named" "$(tail -n 1 <<<"$OUT")" 'name:list'
 
 # A job missing in one run and red in another; a job in only one run.
