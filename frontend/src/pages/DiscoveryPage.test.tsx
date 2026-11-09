@@ -163,7 +163,7 @@ describe('DiscoveryPage scopes (DIS-09)', () => {
     const form = within(dialog);
     // The hints of E-67 (no credential selected) and E-84 (cron time zone).
     expect(
-      form.getByText('Ohne Auswahl gelten die Credentials des Clients und der Organisation.'),
+      form.getByText('Ohne Auswahl gelten die Credentials des Kunden und der Organisation.'),
     ).toBeInTheDocument();
     expect(form.getByText(/Cron in der Zeitzone der Organisation/)).toBeInTheDocument();
 

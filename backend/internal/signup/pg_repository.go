@@ -125,8 +125,10 @@ func (r *PGRepository) CreateOrganization(ctx context.Context, spec *Organizatio
 }
 
 // populate is the creation chain shared by signup and operator: the
-// organization (its triggers seed the standard roles and the default VRF),
-// the first user as org_admin, the entitlements of setup and the default
+// organization (its triggers seed the standard roles, the default VRF, the
+// standard tags and the default client: trg_organization_default_client,
+// slug default, named like the organization, migration 000282, WP-854), the
+// first user as org_admin, the entitlements of setup and the default
 // notification channels (in-app, central_smtp with centralSMTP; F-157). An
 // empty slug is derived from the name.
 func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName string, setup *Setup, centralSMTP bool) (string, error) {

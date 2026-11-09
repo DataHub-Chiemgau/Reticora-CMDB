@@ -57,10 +57,12 @@ func TestForceRowLevelSecurityBindsOwner(t *testing.T) {
 	if _, err := f.Admin.Exec(ctx, `INSERT INTO client (id, organization_id, name, slug) VALUES ($1, $2, 'B', 'scopetest-60-b1')`, f.ID(), f.OrgB); err != nil {
 		t.Fatal(err)
 	}
+	// Without the default client of trg_organization_default_client
+	// (WP-854), which every organization holds.
 	count := func(tx pgx.Tx, org string) int {
 		t.Helper()
 		var n int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM client WHERE organization_id = $1`, org).Scan(&n); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM client WHERE organization_id = $1 AND slug <> 'default'`, org).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n

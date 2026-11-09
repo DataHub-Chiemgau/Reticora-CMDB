@@ -388,7 +388,7 @@ test.describe('tenant isolation (TEN-06, TEN-09)', () => {
     await page.getByRole('button', { name: 'Standort anlegen' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Name', { exact: true }).fill(name);
-    const clientSelect = dialog.getByLabel('Mandant');
+    const clientSelect = dialog.getByLabel('Kunde');
     await expect(clientSelect.locator('option', { hasText: w.client.name })).toHaveCount(1);
     await clientSelect.selectOption({ label: w.client.name });
     const created = waitForApi(page, '/locations', 'POST');

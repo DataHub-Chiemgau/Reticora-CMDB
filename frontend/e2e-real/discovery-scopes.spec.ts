@@ -246,7 +246,7 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(
-      dialog.getByText('Ohne Auswahl gelten die Credentials des Clients und der Organisation.'),
+      dialog.getByText('Ohne Auswahl gelten die Credentials des Kunden und der Organisation.'),
     ).toBeVisible();
     await expect(dialog.getByText(/Cron in der Zeitzone der Organisation/)).toBeVisible();
 

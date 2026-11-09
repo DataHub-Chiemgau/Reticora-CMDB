@@ -1574,3 +1574,4 @@ SEC-09;[P2];G2;backend/internal/config/config_test.go;WP-853
 SRC-02;[P2];G2;backend/internal/ci/list_search_integration_test.go;WP-859
 UI-15;[P2];G2;frontend/src/components/pickers/pickers.test.tsx;WP-859
 UI-14;[P2–P4, A];G2;frontend/src/pages/ClientsPage.test.tsx;WP-855
+UI-15;[P2];G2;backend/internal/signup/default_client_integration_test.go;WP-854

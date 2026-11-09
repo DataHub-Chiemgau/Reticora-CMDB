@@ -26,11 +26,12 @@ import (
 
 // TestSignupCreatesOrganizationAtomically covers WP-111 (TLC-01, API-05)
 // against PostgreSQL with the application role: a verified signup creates
-// the organization with slug, default VRF, the first user as org_admin, the
-// trial entitlements, the default notification channel (WP-509: in-app, no
-// e-mail channel without a central SMTP server) and an operator_audit
-// entry; a taken slug gets a suffix; a failing IdP rolls everything back;
-// signup_request is invisible to tenant transactions.
+// the organization with slug, default VRF, default client (WP-854), the
+// first user as org_admin, the trial entitlements, the default
+// notification channel (WP-509: in-app, no e-mail channel without a central
+// SMTP server) and an operator_audit entry; a taken slug gets a suffix; a
+// failing IdP rolls everything back; signup_request is invisible to tenant
+// transactions.
 //
 // It runs only against PostgreSQL (TEST_DATABASE_URL).
 func TestSignupCreatesOrganizationAtomically(t *testing.T) {
@@ -103,6 +104,10 @@ func TestSignupCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if err = adminPool.QueryRow(ctx, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND is_default`, res.OrganizationID).Scan(&vrfs); err != nil || vrfs != 1 {
 		t.Errorf("default VRFs = %d (%v)", vrfs, err)
+	}
+	// WP-854: the default client, named like the organization.
+	if got := clientsOf(ctx, t, adminPool, res.OrganizationID); len(got) != 1 || got[0] != "default/"+orgName {
+		t.Errorf("clients = %v, want exactly default/%s", got, orgName)
 	}
 
 	// First user: org_admin, linked to the IdP on first login by address.
@@ -350,6 +355,10 @@ func TestOperatorCreatesOrganizationAtomically(t *testing.T) {
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM vrf WHERE organization_id = $1 AND is_default`, created.ID); n != 1 {
 		t.Errorf("default VRFs = %d", n)
+	}
+	// WP-854: the default client, named like the organization.
+	if got := clientsOf(ctx, t, adminPool, created.ID); len(got) != 1 || got[0] != "default/Operator Test" {
+		t.Errorf("clients = %v, want exactly default/Operator Test", got)
 	}
 	if n := countRows(ctx, t, adminPool, `SELECT count(*) FROM app_user u JOIN role_assignment ra ON ra.user_id = u.id
 		JOIN role r ON r.id = ra.role_id WHERE u.organization_id = $1 AND u.email = 'admin@op.example' AND r.name = 'org_admin'`, created.ID); n != 1 {

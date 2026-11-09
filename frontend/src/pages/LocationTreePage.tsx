@@ -315,7 +315,7 @@ export function LocationTreePage() {
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
                 <Select
-                  label={t('locations.client', 'Mandant')}
+                  label={t('locations.client')}
                   options={[{ value: '', label: '—' }, ...clientOptions]}
                   value={draft.client_id}
                   required

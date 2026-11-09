@@ -166,11 +166,13 @@ func TestWithTenantResetsGUCsOnPooledConnections(t *testing.T) {
 // clients, the org-wide marker sees all, and another org sees 0 rows (TEN-06).
 func TestWithTenantScopesRows(t *testing.T) {
 	ctx, pool := seedScopeFixture(t)
+	// The default client every organization gets from
+	// trg_organization_default_client (WP-854) is not part of the fixture.
 	count := func(scope database.TenantScope) int {
 		t.Helper()
 		var n int
 		err := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT count(*) FROM client`).Scan(&n)
+			return tx.QueryRow(ctx, `SELECT count(*) FROM client WHERE slug <> 'default'`).Scan(&n)
 		})
 		if err != nil {
 			t.Fatalf("WithTenant: %v", err)

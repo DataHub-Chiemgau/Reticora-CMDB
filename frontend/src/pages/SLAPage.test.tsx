@@ -181,7 +181,7 @@ describe('SLAPage', () => {
 
     const dialog = await screen.findByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Service Desk' } });
-    fireEvent.change(within(dialog).getByLabelText('Client'), { target: { value: CLIENT_ID } });
+    fireEvent.change(within(dialog).getByLabelText('Kunde'), { target: { value: CLIENT_ID } });
     fireEvent.change(within(dialog).getByLabelText('Zeitzone'), {
       target: { value: 'Europe/Vienna' },
     });
@@ -317,7 +317,7 @@ describe('SLAPage', () => {
     await openCalendars();
     fireEvent.click(await screen.findByRole('button', { name: 'Kalender Kunde Nord bearbeiten' }));
     const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('Client')).toBeDisabled();
+    expect(within(dialog).getByLabelText('Kunde')).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Kunde Nord 2' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
 
@@ -359,7 +359,7 @@ describe('SLAPage', () => {
     });
     renderWithProviders(<SLAPage />, { route: '/slas' });
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Nord kritisch' } });
-    fireEvent.change(screen.getByLabelText('Client'), { target: { value: CLIENT_ID } });
+    fireEvent.change(screen.getByLabelText('Kunde'), { target: { value: CLIENT_ID } });
     fireEvent.change(screen.getByLabelText('Priorität'), { target: { value: 'critical' } });
     const calendar = screen.getByLabelText('Business-Kalender');
     await waitFor(() =>

@@ -573,9 +573,9 @@
         "pluginsRequired": "Wählen Sie mindestens ein Plugin.",
         "targetRequired": "Geben Sie ein Ziel an.",
         "credentials": "Credentials",
-        "credentialsHint": "Ohne Auswahl gelten die Credentials des Clients und der Organisation.",
+        "credentialsHint": "Ohne Auswahl gelten die Credentials des Kunden und der Organisation.",
         "credentialsNone": "Keine passenden Credentials vorhanden.",
-        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Clients und der Organisation."
+        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Kunden und der Organisation."
       },
       "plugin": {
         "sweep": "Ping-Sweep",
@@ -1561,15 +1561,15 @@
     "resolutionDue": "Lösung fällig",
     "ticket": "Ticket",
     "status": "Status",
-    "client": "Client",
-    "noClient": "Kein Client (Organisation)",
+    "client": "Kunde",
+    "noClient": "Kein Kunde (Organisation)",
     "calendarField": "Business-Kalender",
-    "calendarChain": "Kalenderkette (Client-, Org-Standard)",
+    "calendarChain": "Kalenderkette (Kunden-, Org-Standard)",
     "businessHours": "Geschäftszeiten anwenden",
     "elapsedTime": "Laufzeit (rund um die Uhr)",
     "calendar": {
       "title": "Business-Kalender",
-      "hint": "Wochenzeiten und Feiertage, nach denen SLA-Fristen in Geschäftszeit gezählt werden. Leere Zeitzone wird aus Client bzw. Organisation abgeleitet.",
+      "hint": "Wochenzeiten und Feiertage, nach denen SLA-Fristen in Geschäftszeit gezählt werden. Leere Zeitzone wird aus Kunde bzw. Organisation abgeleitet.",
       "loading": "Business-Kalender werden geladen",
       "errorTitle": "Business-Kalender konnten nicht geladen werden",
       "emptyTitle": "Keine Business-Kalender vorhanden",
@@ -1582,12 +1582,12 @@
       "deleteConfirm": "Kalender „{{name}}“ löschen? Richtlinien, die ihn nennen, folgen danach der Kalenderkette.",
       "more": "Weitere laden",
       "name": "Name",
-      "client": "Client",
-      "organizationWide": "Organisation (alle Clients)",
-      "clientFixed": "Der Client eines Kalenders lässt sich nicht ändern; legen Sie für einen anderen Client einen neuen Kalender an.",
+      "client": "Kunde",
+      "organizationWide": "Organisation (alle Kunden)",
+      "clientFixed": "Der Kunde eines Kalenders lässt sich nicht ändern; legen Sie für einen anderen Kunden einen neuen Kalender an.",
       "timezone": "Zeitzone",
       "timezonePlaceholder": "z. B. Europe/Berlin",
-      "timezoneHint": "IANA-Name; leer = abgeleitet aus Client bzw. Organisation.",
+      "timezoneHint": "IANA-Name; leer = abgeleitet aus Kunde bzw. Organisation.",
       "timezoneDerived": "abgeleitet",
       "weeklyHours": "Wochenzeiten",
       "windowStart": "{{day}}, Zeitfenster {{n}}: Beginn",
@@ -1600,7 +1600,7 @@
       "holidayName": "Feiertag {{n}}: Name",
       "removeHoliday": "Feiertag {{n}} entfernen",
       "addHoliday": "Feiertag hinzufügen",
-      "isDefault": "Standardkalender (für Organisation bzw. Client)",
+      "isDefault": "Standardkalender (für Organisation bzw. Kunde)",
       "default": "Standard",
       "weekdays": {
         "mon": "Montag",
@@ -1621,8 +1621,8 @@
         "sun": "So"
       },
       "errors": {
-        "secondDefault": "Für diese Organisation bzw. diesen Client gibt es bereits einen Standardkalender.",
-        "forbidden": "Keine Berechtigung: Organisationsweite Kalender kann nur ein Nutzer ohne Client-Beschränkung pflegen."
+        "secondDefault": "Für diese Organisation bzw. diesen Kunden gibt es bereits einen Standardkalender.",
+        "forbidden": "Keine Berechtigung: Organisationsweite Kalender kann nur ein Nutzer ohne Kundenbeschränkung pflegen."
       }
     }
   },
@@ -2151,8 +2151,8 @@
     "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen.",
     "filterStatus": "Status filtern",
     "editTitle": "Bestellung bearbeiten",
-    "client": "Mandant",
-    "orgWide": "Ohne Mandant (organisationsweit)",
+    "client": "Kunde",
+    "orgWide": "Ohne Kunde (organisationsweit)",
     "noSupplier": "Kein Lieferant",
     "targetBin": "Ziel-Fach",
     "actions": {
@@ -2702,7 +2702,7 @@
     "createRoot": "Standort anlegen",
     "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
     "nodeNotFound": "Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.",
-    "client": "Mandant",
+    "client": "Kunde",
     "deleteFailed": "Löschen nicht möglich",
     "title": "Standorte & Lager",
     "kinds": {
@@ -2789,7 +2789,7 @@
       "discovery_source": "Discovery-Quelle",
       "health": "Zustand",
       "ci_type": "CI-Typ",
-      "client_id": "Mandant (ID)",
+      "client_id": "Kunde (ID)",
       "site_id": "Standort (ID)",
       "location_id": "Ort (ID)",
       "is_manual": "Manuell gepflegt",
@@ -4498,13 +4498,13 @@
     "orgWide": "Organisationsweit",
     "none": "Keine Angabe",
     "currencyHint": "Leer bedeutet die Währung der Organisation.",
-    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
-    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Clients.",
+    "clientFixed": "Der Kunde lässt sich nach dem Anlegen nicht mehr ändern.",
+    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Kunden.",
     "fields": {
       "number": "Nummer",
       "kind": "Art",
       "supplier": "Lieferant",
-      "client": "Client",
+      "client": "Kunde",
       "term": "Laufzeit",
       "startDate": "Beginn",
       "endDate": "Ende",
@@ -4582,11 +4582,11 @@
     "search": "Lieferanten suchen",
     "orgWide": "Organisationsweit",
     "noContact": "Keine Kontaktperson",
-    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "clientFixed": "Der Kunde lässt sich nach dem Anlegen nicht mehr ändern.",
     "fields": {
       "name": "Name",
       "externalRef": "Externe Referenz",
-      "client": "Client",
+      "client": "Kunde",
       "contact": "Kontaktperson",
       "notes": "Notizen"
     },

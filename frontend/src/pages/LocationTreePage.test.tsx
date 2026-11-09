@@ -259,7 +259,10 @@ describe('LocationTreePage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Standort anlegen|Create site/ }));
     const dialog = await screen.findByRole('dialog');
-    const client = within(dialog).getByRole('combobox') as HTMLSelectElement;
+    // The field is called "Kunde" (client = customer of the organization;
+    // "Mandant" is the organization, UI-15, WP-854).
+    const client = within(dialog).getByLabelText(/^Kunde/) as HTMLSelectElement;
+    expect(within(dialog).queryByText(/Mandant/)).toBeNull();
     await waitFor(() => expect(client.options).toHaveLength(2));
     fireEvent.change(client, { target: { value: 'client-1' } });
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Outpost' } });

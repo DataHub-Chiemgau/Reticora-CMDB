@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000281_document_orphaned_scope
+Stand: Migration 000282_default_client
 
 ## Prüfung
 
@@ -1254,6 +1254,18 @@ String-Elemente) nach `ci_tag`, entfernt `attributes.tags` und die Feldwerte
 `tags` ohne Änderung von `version`, `schema_version` und `updated_at`, schließt
 offene `override_conflict`-Reviews zu `tags`, entfernt `tags` aus offenen
 Merge-Snapshots und normalisiert `saved_view.filter_spec.tags` von CI-Sichten.
+
+Standardkunde (UI-15, TEN-01, WP-854, Migration 000282): Jede Organisation
+erhält beim Anlegen einen Kunden (`client`) mit `slug` `default` und dem
+Namen der Organisation über den Trigger `trg_organization_default_client`
+(AFTER INSERT auf `organization`, Funktion `organization_default_client`,
+fester `search_path`; setzt `app.org_id` wie `organization_default_tags` und
+erweitert den Client- und Site-Scope über `app_scope_widen`, ON CONFLICT DO
+NOTHING). Der Backfill gibt jeder Organisation ohne Kunden diesen Kunden,
+auch `00000000-0000-0000-0000-000000000001` („Reticora Demo“);
+Organisationen mit Kunden erhalten keinen weiteren. `client` behält ENABLE +
+FORCE RLS und `client_isolation`. Die Down-Migration entfernt Trigger und
+Funktion; die angelegten Kunden bleiben.
 
 Lieferanten (MGT-12, API-06, WP-736, E-41, Migration 000223): `supplier` hält
 die Stammdaten eines Lieferanten der Organisation oder eines Clients
