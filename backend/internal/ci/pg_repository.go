@@ -469,6 +469,18 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			whereParts = append(whereParts, clause)
 			args = append(args, fargs...)
 			argPos += len(fargs)
+			// An exact hostname or FQDN implies its stored lower-case
+			// column (000134): the implied equality is leakproof, so
+			// idx_ci_hostname_lc or idx_ci_fqdn_lc serves the filter
+			// under row level security, where hostname = $n (a column
+			// without an index) read every CI of the organization
+			// (finding of the load run of PR #147). The exact comparison
+			// stays, the hits are the same.
+			if lc, ok := lowerCaseColumns[f.Field]; ok && f.Op == api.OpExact && len(f.Values) == 1 {
+				whereParts = append(whereParts, fmt.Sprintf("%s = lower($%d::text)", lc, argPos))
+				args = append(args, f.Values[0])
+				argPos++
+			}
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")

@@ -66,14 +66,15 @@ type budgetCall struct {
 // The tag filter (filter[tags][in], WP-754) reads the CIs of its tags
 // through idx_ci_tag_org_tag of ci_tag (WP-281).
 //
+// The list filter on hostname adds the implied equality on hostname_lc
+// and reads idx_ci_hostname_lc (finding of the load run of PR #147; until
+// then a known gap of WP-438), as the identity search does.
+//
 // Known gaps (queryBudget.gap): the name filter of the list (search= with
-// name ILIKE, filter[name]=) and the list filter on hostname have no index
-// the application role can use; they read the organization once. ILIKE
-// (texticlike) is not leakproof, so under row level security no index can
-// serve it (SR-04 class); for filter[name]= an index on
-// (organization_id, name) is missing (WP-438), for filter[hostname]= the
-// filter compares hostname while idx_ci_hostname_lc holds lower(hostname)
-// (WP-438). The hostname lookup of the identity search uses hostname_lc.
+// name ILIKE, filter[name]=) has no index the application role can use; it
+// reads the organization once. ILIKE (texticlike) is not leakproof, so
+// under row level security no index can serve it (SR-04 class); for
+// filter[name]= an index on (organization_id, name) is missing (WP-438).
 //
 // Retest:
 //
@@ -248,7 +249,7 @@ func TestCIQueryBudget(t *testing.T) {
 			budget: queryBudget{gap: "WP-438: no index on (organization_id, name); name = $n (texteq) is leakproof and could use one"},
 			run:    listItems(exact("name", "budget-4242")), want: ids(`name = 'budget-4242'`, "id")},
 		{name: "hostname filter of the list (filter[hostname]=)", match: listPage, statements: listBudget,
-			budget: queryBudget{gap: "WP-438: compares hostname, idx_ci_hostname_lc holds lower(hostname)"},
+			budget: queryBudget{indexes: [][]string{{"idx_ci_hostname_lc"}}, maxRows: maxRows},
 			run:    listItems(exact("hostname", "Budget-Host-4242")), want: ids(`hostname = 'Budget-Host-4242'`, "id")},
 		{name: "attribute filter", match: listPage, statements: listBudget,
 			budget: queryBudget{indexes: [][]string{{rackIndex}}, maxRows: maxRows},

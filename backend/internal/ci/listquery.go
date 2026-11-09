@@ -16,6 +16,11 @@ import (
 // into SQL. The owner (WP-752) compares with = and = ANY, both strict, so
 // the partial indexes idx_ci_owner_user/idx_ci_owner_team (WP-280) carry
 // the filter.
+// lowerCaseColumns are the stored lower-case columns (000134) of the
+// filterable fields compared exactly: the list adds their implied equality
+// so that their indexes serve the filter under row level security.
+var lowerCaseColumns = map[string]string{"hostname": "hostname_lc", "fqdn": "fqdn_lc"}
+
 var filterColumns = map[string]struct{ expr, kind string }{
 	"name":             {"name", api.KindText},
 	"status":           {"status", api.KindText},
