@@ -11,15 +11,15 @@ resources:
 # reticora-postgres and reticora-pgbackrest) and the backups (Epic H2: daily
 # pgBackRest full backup and nightly pg_dump; secrets reticora-pgbackrest and
 # reticora-backup). Point reticora-db-runtime and reticora-db-migrate at the
-# host reticora-db (deploy/README.md). The component clamav runs clamd for the
-# malware scan of the module documents and sets RETICORA_CLAMD_ADDR (SEC-09,
-# E-42, WP-735); the module itself stays off until RETICORA_MODULES enables it.
+# host reticora-db (deploy/README.md). clamd for the malware scan of the
+# module documents (component clamav, RETICORA_CLAMD_ADDR) comes with the
+# base: the release default G2 runs documents without RETICORA_MODULES
+# (WP-830, WP-853).
 components:
   - ../../base/components/opensearch
   - ../../base/components/postgres
   - ../../base/components/backup
   - ../../base/components/nats-edge
-  - ../../base/components/clamav
 
 namespace: reticora
 

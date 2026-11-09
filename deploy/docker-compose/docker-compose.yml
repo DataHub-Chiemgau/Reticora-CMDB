@@ -310,8 +310,9 @@ services:
       start_period: 30s
 
   # Malware scan of document uploads (SEC-09, E-42, WP-735): clamd for the
-  # job kind document.scan of the module documents. Optional like the
-  # module (RETICORA_MODULES, off in the default installation); enable with
+  # job kind document.scan of the module documents, which the release
+  # default G2 runs (RETICORA_MODULES unset, WP-830). The service is in the
+  # profile documents; without it uploads stay pending_scan. Enable with
   #   COMPOSE_PROFILES=documents (in .env or the environment)
   # or docker compose --profile documents up -d. The server reaches it as
   # clamd:3310 (RETICORA_CLAMD_ADDR below); its port is not published. A
@@ -425,8 +426,9 @@ services:
       RETICORA_OPENSEARCH_INDEX: "${RETICORA_OPENSEARCH_INDEX:-reticora-search}"
       # Malware scan of the module documents (SEC-09, E-42): the clamd of
       # the compose profile documents. Outside development the start check
-      # requires it once RETICORA_MODULES enables documents; without the
-      # profile the uploads stay pending_scan.
+      # requires it whenever documents runs, also with the release default
+      # G2 (RETICORA_MODULES unset, WP-853); without the profile the uploads
+      # stay pending_scan.
       RETICORA_CLAMD_ADDR: "clamd:3310"
       # Session-token signature verification is mandatory in production; the
       # RS256 private key is mounted from ./secrets/session-private.pem

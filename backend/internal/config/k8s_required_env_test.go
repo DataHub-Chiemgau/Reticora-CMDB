@@ -23,8 +23,9 @@ package config
 //     the start check of cmd/server accepts it.
 //
 // Negative cases: fixture overlays (written to a temporary directory on top
-// of base or staging) without the issuer, without the accept URL and with an
-// optional master key reference are reported.
+// of base or staging) without the issuer, without the accept URL, without
+// the clamd address (WP-853) and with an optional master key reference are
+// reported.
 //
 // kustomize v5.8.1 as in CI (go install sigs.k8s.io/kustomize/kustomize/v5@v5.8.1);
 // without KUSTOMIZE the test is skipped, in the CI (CI=true) it fails:
@@ -50,10 +51,12 @@ import (
 // k8sRequiredEnv are the keys every rendered overlay must provide: the start
 // check's requiredOutsideDevelopment plus the OIDC client and the accept page
 // of the invitation mail, which the start check does not enforce but without
-// which the login or the invitations do not work (deploy/README.md).
+// which the login or the invitations do not work (deploy/README.md), and the
+// clamd and NATS of the module documents, which the release default G2 runs
+// (documentScanErrors, WP-853, SR-57).
 var k8sRequiredEnv = append(slices.Clone(requiredOutsideDevelopment),
 	"RETICORA_OIDC_CLIENT_ID", "RETICORA_OIDC_CLIENT_SECRET", "RETICORA_OIDC_REDIRECT_URL",
-	"RETICORA_INVITATION_ACCEPT_URL")
+	"RETICORA_INVITATION_ACCEPT_URL", "RETICORA_CLAMD_ADDR", "RETICORA_NATS_URL")
 
 type k8sObject struct {
 	Kind     string `yaml:"kind"`
@@ -315,6 +318,14 @@ func TestAuditT5K8sRenderedEnvSatisfiesStartCheck(t *testing.T) {
 			name: "fixture without RETICORA_INVITATION_ACCEPT_URL", overlay: "deploy/k8s/overlays/staging",
 			patch:   "env:\n  - name: RETICORA_INVITATION_ACCEPT_URL\n    $patch: delete",
 			missing: []string{"RETICORA_INVITATION_ACCEPT_URL"},
+		},
+		{
+			// SR-57 (WP-853): without clamd the release default G2 (module
+			// documents) does not start.
+			name: "fixture without RETICORA_CLAMD_ADDR", overlay: "deploy/k8s/overlays/staging",
+			patch:    "env:\n  - name: RETICORA_CLAMD_ADDR\n    $patch: delete",
+			missing:  []string{"RETICORA_CLAMD_ADDR"},
+			startErr: "RETICORA_ENVIRONMENT=staging with the module documents requires RETICORA_CLAMD_ADDR",
 		},
 		{
 			name: "fixture with an optional master key reference", overlay: "deploy/k8s/overlays/staging",

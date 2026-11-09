@@ -22,6 +22,14 @@ resources:
   - serviceaccount.yaml
   - hpa.yaml
 
+# clamd for the malware scan of the module documents (SEC-09, E-42). The
+# release default G2 (RETICORA_MODULES unset, WP-830) runs documents, and
+# outside development the server refuses to start without
+# RETICORA_CLAMD_ADDR and RETICORA_NATS_URL (WP-853, SR-57). The component
+# sets RETICORA_CLAMD_ADDR; staging and prod inherit it.
+components:
+  - components/clamav
+
 namespace: reticora
 
 commonLabels:
