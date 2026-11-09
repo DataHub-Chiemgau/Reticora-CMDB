@@ -265,13 +265,23 @@ function renderAt(route = '/rules') {
 const rulesTable = () => screen.getByRole('table', { name: 'Regeln' });
 const rowOf = (key: string) => rulesTable().querySelector<HTMLElement>(`[data-rule-key="${key}"]`)!;
 
+/**
+ * enter puts a text into a field as one input (focus by click, then paste),
+ * not key by key: every keystroke re-renders the whole rule dialog, and no
+ * test here is about single keys.
+ */
+async function enter(user: ReturnType<typeof userEvent.setup>, field: HTMLElement, text: string) {
+  await user.click(field);
+  await user.paste(text);
+}
+
 /** Opens the create dialog and chooses the type Netzwerk and the attribute. */
 async function openCreate(user: ReturnType<typeof userEvent.setup>, attribute = 'vendor') {
   await screen.findByText('vendor_required');
   await user.click(screen.getAllByRole('button', { name: 'Regel anlegen' })[0]!);
   const dialog = await screen.findByRole('dialog');
   const d = within(dialog);
-  await user.type(d.getByLabelText('Schlüssel'), 'new_rule');
+  await enter(user, d.getByLabelText('Schlüssel'), 'new_rule');
   await waitFor(() =>
     expect(d.getByRole('combobox', { name: 'Ziel' }).querySelectorAll('option').length).toBe(2),
   );
@@ -417,7 +427,7 @@ describe('RulesPage writes (WP-801)', () => {
       'core',
     );
     await addComparison(user, d, 2, 'ports', 'gte', '24');
-    await user.type(d.getByLabelText('Meldung Deutsch'), 'Hersteller fehlt');
+    await enter(user, d.getByLabelText('Meldung Deutsch'), 'Hersteller fehlt');
     await user.click(d.getByRole('button', { name: 'Speichern' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

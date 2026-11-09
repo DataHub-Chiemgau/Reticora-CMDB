@@ -342,7 +342,8 @@ describe('LocationPicker', () => {
 
     const site = await screen.findByRole('treeitem', { name: /Werk Nord/ });
     expect(calls.some((c) => c.path === '/locations/tree')).toBe(true);
-    expect(site).toHaveAttribute('aria-disabled', 'true');
+    expect(site).not.toHaveAttribute('aria-selected');
+    expect(site).not.toHaveAttribute('aria-disabled');
     expect(site).toHaveAttribute('aria-expanded', 'false');
 
     act(() => site.focus());

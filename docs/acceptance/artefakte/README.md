@@ -1,12 +1,14 @@
 # Eingefrorene Abnahme-Artefakte
 
-Eingefrorener Stand der Abnahmeszenarien ABN-01 (d) und (e) für G1 (WP-212).
-Das Protokoll steht in `docs/acceptance/abn-01.md`.
+Eingefrorener Stand der Abnahmeszenarien ABN-01 (d) und (e) für G1 (WP-212)
+und des Metamodell-Szenarios (c) für G2 (WP-330). Das Protokoll steht in
+`docs/acceptance/abn-01.md`.
 
 | Datei | Inhalt |
 |---|---|
 | `abn-01-e-konflikt.json` | Daten des Konflikt-Szenarios (e). `frontend/e2e-real/abn-01-konflikt.spec.ts` spielt sie gegen den echten Stack ein und schreibt sie aus dem Lauf neu (unten); `frontend/e2e/conflict.spec.ts` liest sie direkt. |
-| `SHA256SUMS` | Prüfsummen des eingefrorenen Stands: Szenario-Tests (Onboarding, Konflikt gemockt und im Real-Stack), Onboarding-Fixture und Daten. Die Pfade sind relativ zum Repository. |
+| `abn-01-c-metamodell.json` | Daten des Metamodell-Szenarios (c) für G2: Objekt-IDs nach `ID` in `backend/cmd/seed/seed.go` (`md5(key)::uuid`, Seed WP-325), Bestand, erwartete Anfragen und API-Antworten je Schritt im Format von `api/openapi.yaml`, Override und Template-Versionen vor und nach der Migration. `frontend/e2e/metamodel-scenario.spec.ts` liest sie direkt (gemockt, E-136). |
+| `SHA256SUMS` | Prüfsummen des eingefrorenen Stands: Szenario-Tests (Onboarding, Konflikt gemockt und im Real-Stack, Metamodell gemockt), Onboarding-Fixture und Daten. Die Pfade sind relativ zum Repository. |
 
 `tests/rep01-structure.test.sh` prüft die Prüfsummen und dass jede dieser
 Dateien in `SHA256SUMS` steht. Ändert sich ein eingefrorenes Szenario,
@@ -18,7 +20,9 @@ beides im selben PR begründen.
 sha256sum frontend/e2e/onboarding.spec.ts frontend/e2e/conflict.spec.ts \
   frontend/e2e-real/abn-01-konflikt.spec.ts \
   frontend/e2e/fixtures/setup-onboarding.sh \
-  docs/acceptance/artefakte/abn-01-e-konflikt.json > docs/acceptance/artefakte/SHA256SUMS
+  docs/acceptance/artefakte/abn-01-e-konflikt.json \
+  frontend/e2e/metamodel-scenario.spec.ts \
+  docs/acceptance/artefakte/abn-01-c-metamodell.json > docs/acceptance/artefakte/SHA256SUMS
 ```
 
 ## `abn-01-e-konflikt.json` aus dem Real-Lauf

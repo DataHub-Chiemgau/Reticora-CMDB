@@ -331,10 +331,8 @@ func TestAssetBulkRevertModuleGateAgainstPostgres(t *testing.T) {
 	bg := context.Background()
 	user := f.AppUser(t, f.OrgA, "wp784-gate")
 	repos := server.PostgresRepositories(f.App, audit.NewPGRecorder())
-	modules, err := server.ParseModules("")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Without the module inventory: the G1 profile (WP-830).
+	modules := server.NoModules()
 	entitlements := entitlement.NewService(repos.Entitlement, entitlement.Options{Enforce: false})
 	key, err := crypto.GenerateMasterKey()
 	if err != nil {

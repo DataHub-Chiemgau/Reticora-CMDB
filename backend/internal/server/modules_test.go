@@ -27,17 +27,22 @@ const readmePath = "../../../docs/README.md"
 // GPS history (LOC-09) has no UI of its own (WP-706).
 var modulesWithoutPages = []string{"gps"}
 
-// TestG1DefaultSwitchesLateModulesOff covers API-06 and RBA-05 (WP-214,
-// E-03): without RETICORA_MODULES every module with a phase tag from P2 or
-// [A] is off; its routes are not registered and its workers do not start.
-func TestG1DefaultSwitchesLateModulesOff(t *testing.T) {
-	g1, err := ParseModules("")
+// TestG2DefaultEnablesP2ModulesOnly covers API-06 and RBA-05 (WP-830,
+// E-03, SEQ-01): without RETICORA_MODULES the release default G2 switches
+// on exactly the modules with phase P2, the same as the phase value P2;
+// the modules of P3, P4 and the add-ons [A] stay off, their routes are not
+// registered and their workers do not start. Release G1 (every late module
+// off, WP-214) stays as the test profile NoModules.
+func TestG2DefaultEnablesP2ModulesOnly(t *testing.T) {
+	g2, err := ParseModules("")
 	if err != nil {
 		t.Fatalf("parse modules: %v", err)
 	}
-	if keys := g1.EnabledKeys(); len(keys) != 0 {
-		t.Fatalf("G1 default enables %v, want none", keys)
+	phase, err := ParseModules(PhaseP2)
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
 	}
+	var want []string
 	for _, m := range LateModules {
 		if !slices.Contains([]string{"P2", "P3", "P4", "A"}, m.Phase) {
 			t.Errorf("module %s: phase %q is not a late phase", m.Key, m.Phase)
@@ -47,38 +52,76 @@ func TestG1DefaultSwitchesLateModulesOff(t *testing.T) {
 		if len(m.Prefixes) == 0 || m.Nav == nil || (len(m.Nav) == 0 && !slices.Contains(modulesWithoutPages, m.Key)) {
 			t.Errorf("module %s: needs route prefixes and navigation pages", m.Key)
 		}
-	}
-
-	mux := testRouterWithModules(t, &audit.Handler{}, g1)
-	for _, path := range []string{"/api/v1/tickets", "/api/v1/assets", "/api/v1/workflows", "/api/v1/monitoring/alerts",
-		"/api/v1/agents", "/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations",
-		"/api/v1/attribute-sets", "/api/v1/ci-types/c0de0000-0000-4000-8000-000000000001/attribute-sets",
-		"/api/v1/templates", "/api/v1/templates/c0de0000-0000-4000-8000-000000000001/versions",
-		"/api/v1/rules", "/api/v1/rules/c0de0000-0000-4000-8000-000000000001",
-		"/api/v1/layouts", "/api/v1/layouts/c0de0000-0000-4000-8000-000000000001"} {
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("GET %s with the G1 default = %d, want 404", path, rec.Code)
+		if m.Phase == PhaseP2 {
+			want = append(want, m.Key)
 		}
 	}
-	// The G1 surface stays: CIs and the metrics of MON-02 are served (401
-	// without a principal, not 404).
-	for _, path := range []string{"/api/v1/cis", "/api/v1/monitoring/metrics"} {
+	slices.Sort(want)
+	if got := g2.EnabledKeys(); !slices.Equal(got, want) || !slices.Equal(got, phase.EnabledKeys()) {
+		t.Fatalf("G2 default enables %v, want the P2 modules %v (RETICORA_MODULES=P2: %v)", got, want, phase.EnabledKeys())
+	}
+	for _, key := range []string{"inventory", "documents", "stocktake", "ticketing", "disposal"} {
+		if !slices.Contains(want, key) {
+			t.Errorf("module %s is not a P2 module", key)
+		}
+	}
+	for _, key := range []string{"maintenance", "workflows", "compliance", "findings", "alerting", "keys",
+		"trainings", "desks", "gps", "agents", "iga", "ai"} {
+		if g2.Enabled(key) {
+			t.Errorf("module %s (P3, P4 or [A]) is on in the G2 default", key)
+		}
+	}
+
+	mux := testRouterWithModules(t, &audit.Handler{}, g2)
+	// The P2 modules are served (401 or 403 without a principal, not 404),
+	// the G1 surface too.
+	for _, path := range []string{"/api/v1/assets", "/api/v1/tickets", "/api/v1/documents", "/api/v1/stocktakes",
+		"/api/v1/disposal-records", "/api/v1/cis", "/api/v1/monitoring/metrics"} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code == http.StatusNotFound {
-			t.Errorf("GET %s with the G1 default = 404, want it served", path)
+			t.Errorf("GET %s with the G2 default = 404, want it served", path)
+		}
+	}
+	for _, path := range []string{"/api/v1/workflows", "/api/v1/maintenance-windows", "/api/v1/monitoring/alerts",
+		"/api/v1/agents", "/api/v1/asset-locations", "/api/v1/assets/c0de0000-0000-4000-8000-000000000001/locations",
+		"/api/v1/iga/connectors", "/scim/v2/Users", "/api/v1/ai/conversations"} {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s with the G2 default = %d, want 404", path, rec.Code)
 		}
 	}
 
-	if g1.WorkerAllowed(config.WorkerMonitoring) {
-		t.Error("the alert evaluator (MON-04, P3) starts with the G1 default")
+	if g2.WorkerAllowed(config.WorkerMonitoring) {
+		t.Error("the alert evaluator (MON-04, P3) starts with the G2 default")
+	}
+	if !g2.Enabled(ModuleInventory) {
+		t.Error("the reservation sweeper (module inventory) does not start with the G2 default")
 	}
 	for _, name := range config.WorkerNames {
-		if name != config.WorkerMonitoring && !g1.WorkerAllowed(name) {
-			t.Errorf("G1 worker %s is switched off by a module", name)
+		if name != config.WorkerMonitoring && !g2.WorkerAllowed(name) {
+			t.Errorf("worker %s is switched off by a module in the G2 default", name)
 		}
+	}
+
+	// The test profile of release G1: every late module off, the P2 paths
+	// of the metamodel included (WP-214, E-105).
+	g1 := NoModules()
+	if keys := g1.EnabledKeys(); len(keys) != 0 {
+		t.Fatalf("the G1 profile enables %v, want none", keys)
+	}
+	g1mux := testRouterWithModules(t, &audit.Handler{}, g1)
+	for _, path := range []string{"/api/v1/tickets", "/api/v1/assets", "/api/v1/attribute-sets",
+		"/api/v1/templates/c0de0000-0000-4000-8000-000000000001/versions", "/api/v1/rules", "/api/v1/layouts"} {
+		rec := httptest.NewRecorder()
+		g1mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s with the G1 profile = %d, want 404", path, rec.Code)
+		}
+	}
+	if g1.WorkerAllowed(config.WorkerMonitoring) || g1.Enabled(ModuleInventory) {
+		t.Error("the G1 profile starts the alert evaluator or the reservation sweeper")
 	}
 }
 
@@ -512,34 +555,46 @@ func TestP2ModulePrefixesAreGated(t *testing.T) {
 }
 
 // TestModulesEndpointListsTheReleaseModules covers GET /api/v1/modules, which
-// the UI reads to hide the navigation of switched-off modules.
+// the UI reads to hide the navigation of switched-off modules: with the
+// release default G2 (WP-830) exactly the P2 modules are enabled, with a
+// list of module keys only the modules named.
 func TestModulesEndpointListsTheReleaseModules(t *testing.T) {
-	some, err := ParseModules("documents")
-	if err != nil {
-		t.Fatalf("parse modules: %v", err)
+	type entry struct {
+		Key     string   `json:"key"`
+		Phase   string   `json:"phase"`
+		Nav     []string `json:"nav"`
+		Enabled bool     `json:"enabled"`
 	}
-	rec := httptest.NewRecorder()
-	modulesHandler{set: some}.list(rec, httptest.NewRequest(http.MethodGet, "/api/v1/modules", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	list := func(spec string) []entry {
+		t.Helper()
+		set, err := ParseModules(spec)
+		if err != nil {
+			t.Fatalf("parse modules %q: %v", spec, err)
+		}
+		rec := httptest.NewRecorder()
+		modulesHandler{set: set}.list(rec, httptest.NewRequest(http.MethodGet, "/api/v1/modules", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("RETICORA_MODULES=%q: status = %d, want 200", spec, rec.Code)
+		}
+		var body struct {
+			Data []entry `json:"data"`
+		}
+		if err = json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(body.Data) != len(LateModules) {
+			t.Fatalf("RETICORA_MODULES=%q: got %d modules, want %d", spec, len(body.Data), len(LateModules))
+		}
+		return body.Data
 	}
-	var body struct {
-		Data []struct {
-			Key     string   `json:"key"`
-			Phase   string   `json:"phase"`
-			Nav     []string `json:"nav"`
-			Enabled bool     `json:"enabled"`
-		} `json:"data"`
+	for _, m := range list("") {
+		if m.Enabled != (m.Phase == PhaseP2) {
+			t.Errorf("G2 default: module %s (%s) enabled = %v, want %v", m.Key, m.Phase, m.Enabled, m.Phase == PhaseP2)
+		}
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Data) != len(LateModules) {
-		t.Fatalf("got %d modules, want %d", len(body.Data), len(LateModules))
-	}
-	for _, m := range body.Data {
+	for _, m := range list("documents") {
 		if m.Enabled != (m.Key == "documents") {
-			t.Errorf("module %s enabled = %v", m.Key, m.Enabled)
+			t.Errorf("documents: module %s enabled = %v", m.Key, m.Enabled)
 		}
 		if m.Key == "documents" && !slices.Equal(m.Nav, []string{"documents"}) {
 			t.Errorf("documents nav = %v", m.Nav)
@@ -549,18 +604,15 @@ func TestModulesEndpointListsTheReleaseModules(t *testing.T) {
 
 // TestBFFFollowsTheModuleGate covers WP-311 (E-03, GQL-04): /bff/graphql
 // belongs to no module prefix, so the BFF gates its fields itself. With
-// the G1 default asset answers UNAVAILABLE; the module keys of the BFF are
-// keys of LateModules.
+// the G1 profile (NoModules) asset answers UNAVAILABLE; the module keys of
+// the BFF are keys of LateModules.
 func TestBFFFollowsTheModuleGate(t *testing.T) {
 	for _, key := range graphqlbff.ModuleKeys {
 		if _, ok := moduleByKey(key); !ok {
 			t.Errorf("BFF module %q is not in LateModules", key)
 		}
 	}
-	g1, err := ParseModules("")
-	if err != nil {
-		t.Fatalf("parse modules: %v", err)
-	}
+	g1 := NoModules()
 	query := func(modules *ModuleSet) map[string]any {
 		mux := testRouterWithModules(t, &audit.Handler{}, modules)
 		req := httptest.NewRequest(http.MethodPost, graphqlbff.Path,
@@ -590,7 +642,7 @@ func TestBFFFollowsTheModuleGate(t *testing.T) {
 		return c
 	}
 	if got := code(query(g1)); got != "UNAVAILABLE" {
-		t.Errorf("asset with the G1 default: code %q, want UNAVAILABLE", got)
+		t.Errorf("asset with the G1 profile: code %q, want UNAVAILABLE", got)
 	}
 	inventory, err := ParseModules(graphqlbff.ModuleInventory)
 	if err != nil {

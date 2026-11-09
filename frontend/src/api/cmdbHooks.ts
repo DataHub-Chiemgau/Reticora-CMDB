@@ -23,7 +23,6 @@ import {
   clientApi,
   inventoryApi,
   reservationApi,
-  compositionApi,
   overrideApi,
   historyApi,
   impactApi,
@@ -1132,21 +1131,6 @@ export function useReleaseReservation() {
   return useMutation({
     mutationFn: (id: string) => reservationApi.release(id),
     onSuccess: () => invalidateStock(qc),
-  });
-}
-
-// Composition
-/**
- * Resolves the parent asset a CI belongs to. A standalone CI legitimately has
- * no parent, so a 404 is an expected answer rather than an error worth
- * retrying.
- */
-export function useCIParent(ciId: string | undefined) {
-  return useQuery({
-    queryKey: ['ci-parent', ciId],
-    queryFn: () => compositionApi.parentOfCI(ciId!),
-    enabled: !!ciId,
-    retry: false,
   });
 }
 

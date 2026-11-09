@@ -36,6 +36,15 @@ export interface CI {
   asset?: CIAssetFacts;
   /** Containing CI (chassis of a blade). */
   parent_ci_id?: string;
+  /**
+   * Child contract of a CI with a parent (AST-05, WP-273), absent without one.
+   * configuration: no asset of its own; asset is the one of the nearest
+   * ancestor with an asset (asset_source_ci_id) and read-only here.
+   * standalone: own asset, serial number, location and lifecycle.
+   */
+  child_mode?: 'configuration' | 'standalone';
+  /** The CI whose asset a configuration child shows under asset (WP-273). */
+  asset_source_ci_id?: string;
   /** Software lifecycle; only for types with a lifecycle model. */
   lifecycle_state?: string;
   /** Computed from monitoring; read-only. */
@@ -68,9 +77,16 @@ export interface CI {
   updated_at: string;
 }
 
+/**
+ * Read-only data of the asset of a CI (DB-05). The deprecated names
+ * asset_tag, warranty_end and supplier (sunset 2028-06-30, E-120 (c)) are
+ * left out on purpose: the frontend reads inventory_no, warranty_until and
+ * supplier_id (AST-01, WP-271, WP-810).
+ */
 export interface CIAssetFacts {
   id: string;
-  asset_tag: string;
+  /** Inventory number of the asset (AST-01, WP-738). */
+  inventory_no: string;
   name: string;
   serial_number?: string;
   location_id?: string;
@@ -79,9 +95,15 @@ export interface CIAssetFacts {
   barcode?: string;
   rfid_tag?: string;
   purchase_date?: string;
-  warranty_end?: string;
-  supplier?: string;
+  /** End of the warranty of the asset (AST-01, WP-738). */
+  warranty_until?: string;
+  /** Supplier record of the asset (E-41); its name comes from GET /suppliers/{id}. */
+  supplier_id?: string;
+  /** Contract of the asset (WP-271). */
+  contract_id?: string;
   invoice_number?: string;
+  manufacturer?: string;
+  model?: string;
   /** Owning user and team of the asset (WP-271); the CI mirrors them. */
   owner_user_id?: string;
   owner_team_id?: string;

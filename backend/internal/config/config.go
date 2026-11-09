@@ -223,8 +223,10 @@ type Config struct {
 	// AirGapped disables every external AI call (AI-02, air-gapped profile).
 	AirGapped bool
 	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
-	// empty switches every module with a phase tag from P2 or [A] off (the
-	// G1 default after E-03), "all" switches them all on.
+	// empty is the release default G2 (WP-830), every module with phase P2
+	// on and the modules of P3, P4 and the add-ons [A] off (E-03), like the
+	// phase value P2; "all" switches them all on, a comma list of module
+	// keys only the modules named (server.ParseModules).
 	Modules string
 
 	// Documents holds the upload limits of the document module (SEC-09,
@@ -777,7 +779,11 @@ func hostPort(addr string) bool {
 }
 
 // documentsEnabled reports whether RETICORA_MODULES switches the module
-// documents on: "all", the phase value P2 or its key (server.ParseModules).
+// documents on explicitly: "all", the phase value P2 or its key
+// (server.ParseModules). The empty release default G2 (WP-830) switches
+// documents on as well but is not checked here: the deploy manifests that
+// leave RETICORA_MODULES unset keep starting without a clamd; their uploads
+// stay pending_scan (fail-closed) until RETICORA_CLAMD_ADDR answers.
 func (c *Config) documentsEnabled() bool {
 	spec := strings.TrimSpace(c.Modules)
 	if strings.EqualFold(spec, "all") {

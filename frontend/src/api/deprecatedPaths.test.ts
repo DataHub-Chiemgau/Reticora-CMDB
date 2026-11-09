@@ -98,11 +98,9 @@ describe('frontend API paths (catalogue contract)', () => {
 
   // Deprecated paths the frontend may still use until their sunset, with the
   // work package that moves it off them.
-  const usedUntilSunset: Record<string, string> = {
-    // WP-742: the CI detail card (CIParentAssetCard) reads the deprecated
-    // parent path until the surfaces move to GET /cis/{id} (M2.9).
-    '/cis/{id}/parent': 'M2.9',
-  };
+  // None at present: WP-810 moved the CI detail page off the deprecated
+  // GET /cis/{id}/parent onto GET /cis/{id} (child_mode, asset).
+  const usedUntilSunset: Record<string, string> = {};
 
   it('uses no path whose every operation is deprecated', () => {
     // The patterns are compiled once; only lines that can hold an API path

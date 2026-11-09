@@ -1266,64 +1266,6 @@ export const reservationApi = {
   },
 };
 
-// ─── Composition (§5, §14) ───────────────────────────────────────────────────
-
-/**
- * The parent link of a child CI in the format of the former composition
- * handler, as the deprecated `GET /cis/{id}/parent` still answers it from
- * `ci.parent_ci_id` (CIParentLegacy, WP-742): `id` and `child_ci_id` are the
- * child CI. `role` is no longer sent; it stays optional for the detail card.
- */
-export interface Composition {
-  id: string;
-  organization_id: string;
-  parent_asset_id: string;
-  child_ci_id: string;
-  role?: string;
-  configuration_only: boolean;
-  independently_serialized: boolean;
-  independently_assignable: boolean;
-  independently_locatable: boolean;
-  independently_lifecycle_managed: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ParentAssetRef {
-  id: string;
-  name: string;
-  asset_tag?: string;
-  status?: string;
-  serial_number?: string;
-  barcode?: string;
-  rfid_tag?: string;
-  purchase_date?: string;
-  purchase_cost?: number;
-  currency?: string;
-  supplier?: string;
-  invoice_number?: string;
-  warranty_end?: string;
-  location?: string;
-}
-
-/**
- * The parent asset owning a CI, plus the inventory fields it contributes.
- * `parent_asset` is absent when the parent could not be read; the composition
- * link alone is still meaningful.
- */
-export interface CIParent {
-  composition: Composition;
-  parent_asset?: ParentAssetRef;
-  inherited_fields: string[];
-}
-
-export const compositionApi = {
-  /** Resolves the parent asset of a CI. Rejects with a 404 ApiError when the CI is standalone. */
-  parentOfCI(ciId: string) {
-    return fetchAPI<CIParent>(`/cis/${ciId}/parent`);
-  },
-};
-
 // ─── Field provenance / overrides (§13) ─────────────────────────────────────
 
 export interface FieldValue {

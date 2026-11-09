@@ -827,7 +827,6 @@ export const A11Y_HANDLERS: Handler[] = [
   { path: `/cis/${CI_ID}`, reply: fixed(ci) },
   { path: `/cis/${CI_PEER}`, reply: fixed(ciPeer) },
   { path: /^\/cis\/[^/]+\/relationships$/, reply: fixed(list([relationship])) },
-  { path: /^\/cis\/[^/]+\/parent$/, reply: () => ({ status: 404, body: { status: 404 } }) },
   {
     path: /^\/cis\/[^/]+\/fields$/,
     reply: fixed({
@@ -940,6 +939,42 @@ export const A11Y_HANDLERS: Handler[] = [
   },
   { path: /^\/topology\/cis\/[^/]+\/neighbors$/, reply: fixed(graph) },
   { path: '/topology', reply: fixed(graph) },
+  // WP-818, WP-324: the impact panel of the failure simulation on the
+  // topology (/topology?simulate=CI_ID): the peer is affected and a
+  // service with the CI as its single point of failure, in one client and
+  // one site.
+  {
+    path: '/impact',
+    reply: fixed({
+      failed_cis: [graph.nodes[0]],
+      impacted: [
+        {
+          ...graph.nodes[1],
+          heuristic: false,
+          hops: 1,
+          via: { ci_id: CI_ID, rel_type: 'connected_to' },
+          path: [
+            {
+              from_ci_id: CI_ID,
+              to_ci_id: CI_PEER,
+              rel_type: 'connected_to',
+              category: 'network',
+            },
+          ],
+        },
+      ],
+      count: 1,
+      summary: { failed: 1, impacted: 1, certain: 1, heuristic: 0, by_category: { network: 1 } },
+      affected_services: [
+        { id: CI_PEER, name: M.ciPeer, ci_type: 'switch', status: 'maintenance', heuristic: false },
+      ],
+      client_ids: [CLIENT],
+      site_ids: [SITE],
+      service_spofs: [{ id: CI_ID, name: M.ci, ci_type: SERVER_TYPE, service_ids: [CI_PEER] }],
+      spof_truncated: false,
+      blast_radius: { cis: 1, services: 1, services_heuristic: 0, clients: 1, sites: 1, spof: 1 },
+    }),
+  },
   { path: '/relationship-types', reply: fixed(list([])) },
   // Locations, room plan and racks.
   { path: '/locations/tree', reply: fixed({ data: [location] }) },

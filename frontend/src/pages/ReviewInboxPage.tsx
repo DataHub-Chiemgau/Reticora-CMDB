@@ -22,7 +22,7 @@
  * and an item with a ticket links to it.
  */
 import { ChevronLeft, ChevronRight, Inbox, MousePointerClick, Ticket } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
@@ -56,7 +56,7 @@ import {
   trInteractiveClasses,
 } from '../components/ui/table';
 import { cn } from '../components/ui/utils';
-import { useRowNavigation } from '../components/ui/useRowNavigation';
+import { useRowNavigation, type RowNavigationProps } from '../components/ui/useRowNavigation';
 import { ScrollRegion } from '../components/ScrollRegion';
 import {
   REVIEW_KINDS,
@@ -222,11 +222,106 @@ function ItemTickets({ item, className }: { item: ReviewItem; className?: string
   );
 }
 
+// One formatter per language: a page of 100 rows would otherwise build a new
+// Intl.RelativeTimeFormat per row and render.
+const relativeFormatters = new Map<string, Intl.RelativeTimeFormat>();
+
+function relativeFormatter(language: string): Intl.RelativeTimeFormat {
+  let formatter = relativeFormatters.get(language);
+  if (!formatter) {
+    formatter = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+    relativeFormatters.set(language, formatter);
+  }
+  return formatter;
+}
+
+/** The handlers of the page a row calls: always those of the latest render. */
+interface RowActions {
+  open: (item: ReviewItem) => void;
+  toggle: (item: ReviewItem) => void;
+  rowProps: (id: string) => RowNavigationProps;
+}
+
+/**
+ * ReviewRow is one item of the queue. It is memoized: it renders again only
+ * when its item, its box, its opening or its place in the Tab order change.
+ */
+const ReviewRow = memo(function ReviewRow({
+  item,
+  canResolve,
+  checked,
+  selected,
+  tabbable,
+  actions,
+}: {
+  item: ReviewItem;
+  canResolve: boolean;
+  checked: boolean;
+  selected: boolean;
+  tabbable: boolean;
+  actions: RefObject<RowActions>;
+}) {
+  const { t } = useTranslation();
+  const navigation = (id: string) => actions.current.rowProps(id);
+  return (
+    <tr
+      ref={(element) => navigation(item.id).ref(element)}
+      tabIndex={tabbable ? 0 : -1}
+      onFocus={(event) => navigation(item.id).onFocus(event)}
+      onKeyDown={(event) => navigation(item.id).onKeyDown(event)}
+      onClick={() => actions.current.open(item)}
+      className={cn(trInteractiveClasses, selected && 'bg-accent-soft hover:bg-accent-soft')}
+    >
+      {canResolve ? (
+        <td className={`${tdClasses} w-10 pr-0`}>
+          <input
+            type="checkbox"
+            aria-label={t('reviews.select', { name: summary(item) })}
+            checked={checked}
+            disabled={item.status !== 'open'}
+            onChange={() => actions.current.toggle(item)}
+            onClick={(event) => event.stopPropagation()}
+            // The row is the Tab stop; Space on it toggles this box.
+            tabIndex={-1}
+          />
+        </td>
+      ) : null}
+      <td className={tdClasses}>
+        <Badge variant="info">{t(`reviews.kinds.${item.kind}`, item.kind)}</Badge>
+      </td>
+      <td className={cn(tdPrimaryClasses, 'min-w-[11rem] max-w-[18rem] [overflow-wrap:anywhere]')}>
+        <button
+          type="button"
+          // The row is the Tab stop; Enter on it opens this item.
+          tabIndex={-1}
+          className="rounded text-left underline-offset-2 hover:text-accent hover:underline focus-visible:outline-none"
+          aria-current={selected ? 'true' : undefined}
+        >
+          <span className="sr-only">{t(`reviews.kinds.${item.kind}`, item.kind)} </span>
+          {summary(item)}
+        </button>
+        {item.status !== 'open' ? (
+          <span className="ml-2 align-middle">
+            <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
+          </span>
+        ) : null}
+        <ItemTickets item={item} className="ml-2 align-middle" />
+      </td>
+      <td className={tdClasses}>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Age iso={item.created_at} />
+          {item.escalated ? <Badge variant="danger">{t('reviews.escalated')}</Badge> : null}
+        </div>
+      </td>
+    </tr>
+  );
+});
+
 /** relativeAge words the age of an item ("3 days ago"); the full date is the tooltip. */
 function relativeAge(iso: string, language: string): string {
   const created = new Date(iso).getTime();
   if (Number.isNaN(created)) return '—';
-  const formatter = new Intl.RelativeTimeFormat(language, { numeric: 'auto' });
+  const formatter = relativeFormatter(language);
   const minutes = Math.round((created - Date.now()) / 60_000);
   if (Math.abs(minutes) < 60) return formatter.format(Math.min(minutes, 0), 'minute');
   const hours = Math.round(minutes / 60);
@@ -384,6 +479,12 @@ export function ReviewInboxPage() {
       if (item && canResolve && item.status === 'open') toggle(item);
     },
   });
+
+  // The rows are memoized and take the handlers of this render through a
+  // ref: a change of one row (its box, the opened item) or of the bar above
+  // the table does not re-render all rows of the page (up to 100).
+  const rowActions = useRef<RowActions>({ open, toggle, rowProps: rowNavigation.getRowProps });
+  rowActions.current = { open, toggle, rowProps: rowNavigation.getRowProps };
 
   return (
     <div className="space-y-4">
@@ -615,66 +716,15 @@ export function ReviewInboxPage() {
                 </thead>
                 <tbody>
                   {items.map((item) => (
-                    <tr
+                    <ReviewRow
                       key={item.id}
-                      {...rowNavigation.getRowProps(item.id)}
-                      onClick={() => open(item)}
-                      className={cn(
-                        trInteractiveClasses,
-                        selectedId === item.id && 'bg-accent-soft hover:bg-accent-soft',
-                      )}
-                    >
-                      {canResolve ? (
-                        <td className={`${tdClasses} w-10 pr-0`}>
-                          <input
-                            type="checkbox"
-                            aria-label={t('reviews.select', { name: summary(item) })}
-                            checked={checked.has(item.id)}
-                            disabled={item.status !== 'open'}
-                            onChange={() => toggle(item)}
-                            onClick={(event) => event.stopPropagation()}
-                            // The row is the Tab stop; Space on it toggles this box.
-                            tabIndex={-1}
-                          />
-                        </td>
-                      ) : null}
-                      <td className={tdClasses}>
-                        <Badge variant="info">{t(`reviews.kinds.${item.kind}`, item.kind)}</Badge>
-                      </td>
-                      <td
-                        className={cn(
-                          tdPrimaryClasses,
-                          'min-w-[11rem] max-w-[18rem] [overflow-wrap:anywhere]',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          // The row is the Tab stop; Enter on it opens this item.
-                          tabIndex={-1}
-                          className="rounded text-left underline-offset-2 hover:text-accent hover:underline focus-visible:outline-none"
-                          aria-current={selectedId === item.id ? 'true' : undefined}
-                        >
-                          <span className="sr-only">
-                            {t(`reviews.kinds.${item.kind}`, item.kind)}{' '}
-                          </span>
-                          {summary(item)}
-                        </button>
-                        {item.status !== 'open' ? (
-                          <span className="ml-2 align-middle">
-                            <Badge variant="neutral">{t(`reviews.statuses.${item.status}`)}</Badge>
-                          </span>
-                        ) : null}
-                        <ItemTickets item={item} className="ml-2 align-middle" />
-                      </td>
-                      <td className={tdClasses}>
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <Age iso={item.created_at} />
-                          {item.escalated ? (
-                            <Badge variant="danger">{t('reviews.escalated')}</Badge>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
+                      item={item}
+                      canResolve={canResolve}
+                      checked={checked.has(item.id)}
+                      selected={selectedId === item.id}
+                      tabbable={rowNavigation.activeId === item.id}
+                      actions={rowActions}
+                    />
                   ))}
                 </tbody>
               </table>

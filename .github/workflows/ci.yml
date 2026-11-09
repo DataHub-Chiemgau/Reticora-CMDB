@@ -658,7 +658,10 @@ jobs:
   # and mobile Safari. TST-03 (WP-201): so do the browser flows CI, review,
   # drag/undo, topology, export and command palette (e2e/*.spec.ts, mocked
   # backend in e2e/support/backend.ts); the onboarding suite against a real
-  # installation runs in install-smoke.yml. WP-531: one job and one report
+  # installation runs in install-smoke.yml. TST-03 [P2] (WP-324): so do the
+  # Phase 2 flows guided creation, form builder, import, warehouse and
+  # tickets (fixtures in e2e/support/phase2.ts), and a11y.spec.ts checks the
+  # P2 pages, their open states and dialogs. WP-531: one job and one report
   # artifact per project (playwright-report-<project>, also when green); the
   # previous browser versions run in e2e-prev.yml (E-88).
   e2e:

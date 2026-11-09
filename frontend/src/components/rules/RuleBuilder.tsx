@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Ban, FolderPlus, GitBranch, Plus, Trash2, Undo2 } from 'lucide-react';
 import { Button, IconButton } from '../ui/Button';
@@ -1832,11 +1832,13 @@ function isExpressionProps(props: RuleBuilderProps): props is ExpressionBuilderP
  * preview by evaluateRule, the expression mode (WP-802) $defs/expr for
  * computed attributes with a preview by evalExpr in the zone of the
  * organization. Every output passes parseFilter, parseCondition, parseRule
- * or parseExpr before it is reported as ready.
+ * or parseExpr before it is reported as ready. It is memoized: a form that
+ * re-renders for its other fields (every keystroke of a text field) does not
+ * re-render the node tree while the props of the builder stay the same.
  */
-export function RuleBuilder(props: RuleBuilderProps) {
+export const RuleBuilder = memo(function RuleBuilder(props: RuleBuilderProps) {
   if (isConditionProps(props)) return <ConditionBuilder {...props} />;
   if (isValidationProps(props)) return <ValidationBuilder {...props} />;
   if (isExpressionProps(props)) return <ExpressionBuilder {...props} />;
   return <FilterBuilder {...props} />;
-}
+});

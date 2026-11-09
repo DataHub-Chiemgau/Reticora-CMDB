@@ -1307,56 +1307,9 @@ async function checkPage(
   await expectNoViolations(page, route.include);
 }
 
-// The dialogs of the CI type administration on the data of the a11y fixtures
-// (organisation type M.ciType with the child M.ciTypeChild, one template). Radix portals a dialog under
-// <body>, outside the App shell that gives the pages their text colour: the
-// unclassed checkbox labels of the field editor were black on the dark
-// dialog (1.18:1). The page behind an open dialog is hidden (aria-hidden),
-// so axe checks the dialog.
-const DIALOGS: {
-  name: string;
-  prepare: (page: Page) => Promise<void>;
-  /** The element whose text colour must not be the browser default black. */
-  plainText: (page: Page) => Locator;
-}[] = [
-  {
-    name: 'CI type field editor',
-    prepare: async (page) => {
-      await page.getByRole('treeitem', { name: M.ciType }).click();
-      await page.getByRole('button', { name: /^(feld hinzufügen|add field)$/i }).click();
-      await page
-        .getByRole('dialog')
-        .getByRole('checkbox', { name: /^(eindeutig|unique)$/i })
-        .check();
-      await expect(
-        page.getByRole('dialog').getByRole('combobox', { name: /^(eindeutig je|unique per)$/i }),
-      ).toBeVisible();
-    },
-    plainText: (page) =>
-      page
-        .getByRole('dialog')
-        .locator('label')
-        .filter({ has: page.getByRole('checkbox', { name: /^(eindeutig|unique)$/i }) }),
-  },
-  {
-    name: 'CI type templates',
-    prepare: async (page) => {
-      await page.getByRole('button', { name: /^(aus typvorlage|from type template)$/i }).click();
-      await expect(page.getByRole('dialog').getByRole('button', { name: /server/i })).toBeVisible();
-    },
-    plainText: (page) =>
-      page
-        .getByRole('dialog')
-        .getByRole('button', { name: /server/i })
-        .locator('p')
-        .first(),
-  },
-];
-
-// WP-806 (UI-15): the flow dialogs of the inventory page and the assign
-// dialog of WP-318 with their pickers. The flows need the modules inventory
-// and stocktake and the features stock and assets_basic (E-44); the handlers
-// say so explicitly and go ahead of A11Y_HANDLERS.
+// WP-806 (UI-15): the flows need the modules inventory and stocktake and
+// the features stock and assets_basic (E-44); the handlers say so
+// explicitly and go ahead of A11Y_HANDLERS.
 const FLOW_HANDLERS: Handler[] = [
   {
     path: '/modules',
@@ -1386,17 +1339,9 @@ const FLOW_HANDLERS: Handler[] = [
   },
 ];
 
-const FLOW_DIALOGS: { name: string; url: string; button: RegExp }[] = [
-  { name: 'inventory receive', url: '/inventory', button: /^(empfangen|receive)$/i },
-  { name: 'inventory move', url: '/inventory', button: /^(verschieben|move)$/i },
-  { name: 'inventory reserve', url: '/inventory', button: /^(reservieren|reserve)$/i },
-  { name: 'assignments assign', url: '/assignments', button: /^(zuweisen|assign)$/i },
-];
-
-// WP-807 (UI-15, INV-03): the scan dialog in manual entry and the assign
-// dialog with the signature field. Both need the features barcode and
-// signature (E-44) besides those of the flows; the entitlements say so ahead
-// of A11Y_HANDLERS.
+// WP-807 (UI-15, INV-03): the scan dialog and the signature field need the
+// features barcode and signature (E-44) besides those of the flows; the
+// entitlements say so ahead of A11Y_HANDLERS.
 const SCAN_HANDLERS: Handler[] = [
   FLOW_HANDLERS[0]!,
   {
@@ -1416,9 +1361,131 @@ const SCAN_HANDLERS: Handler[] = [
   },
 ];
 
-const SCAN_DIALOGS: { name: string; prepare: (page: Page) => Promise<void> }[] = [
+/**
+ * settled waits until exactly one dialog is open and every animation of the
+ * page has ended, so axe does not measure the contrast of a dialog that is
+ * still fading in (or of one fading out behind it).
+ */
+async function settled(page: Page) {
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.waitForFunction(() =>
+    document.getAnimations().every((a) => a.playState !== 'running'),
+  );
+}
+
+/** openFlow opens a flow dialog of a page by its button and waits for its first picker. */
+const openFlow = (button: RegExp) => async (page: Page) => {
+  await page.getByRole('button', { name: button }).click();
+  await expect(page.getByRole('dialog').getByRole('combobox').first()).toBeVisible();
+};
+
+interface A11yDialog {
+  name: string;
+  /** The page the dialog opens on. */
+  url: string;
+  /** Handlers ahead of the fixtures, e.g. the features of the flow. */
+  handlers?: Handler[];
+  /** Opens the dialog and brings it into the state that is checked. */
+  prepare: (page: Page) => Promise<void>;
+  /** An element whose text colour must not be the browser default black. */
+  plainText?: (page: Page) => Locator;
+}
+
+// The open dialogs on the data of the a11y fixtures, each on its page
+// (WP-324). Radix portals a dialog under <body>, outside the App shell that
+// gives the pages their text colour: the unclassed checkbox labels of the
+// field editor were black on the dark dialog (1.18:1). The page behind an
+// open dialog is hidden (aria-hidden), so axe checks the dialog, once its
+// animations have ended.
+const DIALOGS: A11yDialog[] = [
+  {
+    // The CI type administration: organisation type M.ciType with the child
+    // M.ciTypeChild, one template.
+    name: 'CI type field editor',
+    url: '/ci-types',
+    prepare: async (page) => {
+      await expect(page.getByText(M.ciType).first()).toBeVisible();
+      await page.getByRole('treeitem', { name: M.ciType }).click();
+      await page.getByRole('button', { name: /^(feld hinzufügen|add field)$/i }).click();
+      await page
+        .getByRole('dialog')
+        .getByRole('checkbox', { name: /^(eindeutig|unique)$/i })
+        .check();
+      await expect(
+        page.getByRole('dialog').getByRole('combobox', { name: /^(eindeutig je|unique per)$/i }),
+      ).toBeVisible();
+    },
+    plainText: (page) =>
+      page
+        .getByRole('dialog')
+        .locator('label')
+        .filter({ has: page.getByRole('checkbox', { name: /^(eindeutig|unique)$/i }) }),
+  },
+  {
+    name: 'CI type templates',
+    url: '/ci-types',
+    prepare: async (page) => {
+      await expect(page.getByText(M.ciType).first()).toBeVisible();
+      await page.getByRole('button', { name: /^(aus typvorlage|from type template)$/i }).click();
+      await expect(page.getByRole('dialog').getByRole('button', { name: /server/i })).toBeVisible();
+    },
+    plainText: (page) =>
+      page
+        .getByRole('dialog')
+        .getByRole('button', { name: /server/i })
+        .locator('p')
+        .first(),
+  },
+  {
+    // WP-317: the guided creation with the subtypes of a tile unfolded.
+    name: 'guided create',
+    url: '/cmdb',
+    prepare: async (page) => {
+      await expect(page.getByText(M.ci).first()).toBeVisible();
+      await page
+        .getByRole('button', { name: /^(CI anlegen|Create CI)$/ })
+        .first()
+        .click();
+      const dialog = page.getByRole('dialog');
+      const fold = dialog.getByRole('button', { name: /^(Untertypen von|Show subtypes of) / });
+      await fold.first().click();
+      await expect(
+        dialog.getByRole('list', { name: /^(Untertypen von|Subtypes of) / }).first(),
+      ).toBeVisible();
+    },
+  },
+  // WP-806 (UI-15): the flow dialogs of the inventory page and the assign
+  // dialog of WP-318 with their pickers.
+  {
+    name: 'inventory receive',
+    url: '/inventory',
+    handlers: FLOW_HANDLERS,
+    prepare: openFlow(/^(empfangen|receive)$/i),
+  },
+  {
+    name: 'inventory move',
+    url: '/inventory',
+    handlers: FLOW_HANDLERS,
+    prepare: openFlow(/^(verschieben|move)$/i),
+  },
+  {
+    name: 'inventory reserve',
+    url: '/inventory',
+    handlers: FLOW_HANDLERS,
+    prepare: openFlow(/^(reservieren|reserve)$/i),
+  },
+  {
+    name: 'assignments assign',
+    url: '/assignments',
+    handlers: FLOW_HANDLERS,
+    prepare: openFlow(/^(zuweisen|assign)$/i),
+  },
+  // WP-807 (UI-15, INV-03): the scan dialog in manual entry and the assign
+  // dialog with the signature field.
   {
     name: 'scan (manual entry)',
+    url: '/assignments',
+    handlers: SCAN_HANDLERS,
     prepare: async (page) => {
       // No camera: the dialog reads codes from the text field only.
       await page.evaluate(() =>
@@ -1431,23 +1498,86 @@ const SCAN_DIALOGS: { name: string; prepare: (page: Page) => Promise<void> }[] =
       await expect(
         page.getByRole('dialog').getByLabel(/^(code \(handscanner|code \(handheld)/i),
       ).toBeVisible();
-      // The command palette closes while the scan dialog opens: the check
-      // waits until the palette is gone and every transition has ended, so
-      // axe does not measure the contrast of a half-faded dialog.
-      await expect(page.getByRole('dialog')).toHaveCount(1);
-      await page.waitForFunction(() =>
-        document.getAnimations().every((a) => a.playState !== 'running'),
-      );
     },
   },
   {
     name: 'assignments assign with signature',
+    url: '/assignments',
+    handlers: SCAN_HANDLERS,
     prepare: async (page) => {
       await page.getByRole('button', { name: /^(zuweisen|assign)$/i }).click();
       await expect(
         page.getByRole('dialog').getByRole('img', { name: /^(unterschrift|signature)/i }),
       ).toBeVisible();
     },
+  },
+  {
+    // WP-323: a new edge of the CI with the attribute form of its type.
+    name: 'relationship with attributes',
+    url: `/cmdb/${CI_ID}`,
+    handlers: [RELATIONSHIP_TYPES],
+    prepare: async (page) => {
+      await expect(page.getByRole('heading', { name: M.ci })).toBeVisible();
+      await page.getByRole('button', { name: /^(Beziehung hinzufügen|Add relationship)$/ }).click();
+      const dialog = page.getByRole('dialog');
+      await dialog
+        .getByRole('combobox', { name: /^(Beziehungstyp|Relationship type)$/ })
+        .selectOption({ label: 'a11y backs up' });
+      await expect(dialog.getByLabel(/^(Zeitplan|Schedule)/)).toBeVisible();
+    },
+  },
+  {
+    // WP-800: the migration of the CIs of a template version.
+    name: 'template migration',
+    url: '/ci-types/templates',
+    handlers: [TEMPLATE_PERMISSIONS],
+    prepare: async (page) => {
+      await page
+        .getByRole('button', { name: /^(Template migrieren|Migrate template): / })
+        .first()
+        .click();
+      await expect(
+        page
+          .getByRole('dialog')
+          .getByRole('combobox', { name: /^(Ausgangsversion|Source version)/ }),
+      ).toBeVisible();
+    },
+  },
+];
+
+// The open states of the P2 pages (WP-324): the bulk bar of a selection
+// (WP-816), the impact panel of the failure simulation (WP-818) and the
+// opened section of the business calendars (WP-815).
+const OPEN_STATES: (Pick<A11yRoute, 'url' | 'handlers' | 'ready' | 'prepare'> & {
+  name: string;
+})[] = [
+  {
+    name: '/cmdb with selected rows',
+    url: '/cmdb',
+    prepare: async (page) => {
+      await page
+        .getByRole('checkbox', { name: new RegExp(`^(${M.ci} auswählen|Select ${M.ci})$`) })
+        .check();
+    },
+    ready: (page) => page.getByRole('toolbar', { name: /^(Massenbearbeitung|Bulk edit)$/ }),
+  },
+  {
+    name: '/topology with impact panel',
+    url: `/topology?simulate=${CI_ID}`,
+    ready: (page) =>
+      page.getByRole('list', {
+        name: /^(Single Points of Failure der Services|Single points of failure of the services)/,
+      }),
+  },
+  {
+    name: '/slas with business calendars open',
+    url: '/slas',
+    prepare: async (page) => {
+      const toggle = page.getByRole('button', { name: /^(Business-Kalender|Business calendars)/ });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    },
+    ready: (page) => page.locator('#main-content td', { hasText: 'a11y Bürozeiten' }),
   },
 ];
 
@@ -1533,33 +1663,11 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
             await checkPage(
               page,
               {
-                url: '/ci-types',
-                prepare: async (p) => {
-                  await expect(p.getByText(M.ciType).first()).toBeVisible();
-                  await dialog.prepare(p);
-                },
-                ready: (p) => p.getByRole('dialog'),
-                include: '[role="dialog"]',
-              },
-              theme,
-              language,
-            );
-            await expect(dialog.plainText(page)).not.toHaveCSS('color', 'rgb(0, 0, 0)');
-          });
-        }
-      }
-
-      for (const dialog of FLOW_DIALOGS) {
-        for (const theme of THEMES) {
-          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
-            await checkPage(
-              page,
-              {
                 url: dialog.url,
-                handlers: FLOW_HANDLERS,
+                handlers: dialog.handlers,
                 prepare: async (p) => {
-                  await p.getByRole('button', { name: dialog.button }).click();
-                  await expect(p.getByRole('dialog').getByRole('combobox').first()).toBeVisible();
+                  await dialog.prepare(p);
+                  await settled(p);
                 },
                 ready: (p) => p.getByRole('dialog'),
                 include: '[role="dialog"]',
@@ -1567,25 +1675,17 @@ test.describe('accessibility (WCAG 2.1 AA)', () => {
               theme,
               language,
             );
+            if (dialog.plainText) {
+              await expect(dialog.plainText(page)).not.toHaveCSS('color', 'rgb(0, 0, 0)');
+            }
           });
         }
       }
 
-      for (const dialog of SCAN_DIALOGS) {
+      for (const state of OPEN_STATES) {
         for (const theme of THEMES) {
-          test(`dialog ${dialog.name} (${themeName(theme)})`, async ({ page }) => {
-            await checkPage(
-              page,
-              {
-                url: '/assignments',
-                handlers: SCAN_HANDLERS,
-                prepare: dialog.prepare,
-                ready: (p) => p.getByRole('dialog'),
-                include: '[role="dialog"]',
-              },
-              theme,
-              language,
-            );
+          test(`page ${state.name} (${themeName(theme)})`, async ({ page }) => {
+            await checkPage(page, state, theme, language);
           });
         }
       }

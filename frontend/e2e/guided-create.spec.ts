@@ -1,6 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 import { AT, CI_TYPES, ORG_ID, expect, list, mockBackend, signIn, test } from './support/backend';
+import {
+  ACCESS_SWITCH_TYPE,
+  ACCESS_TEMPLATE,
+  P2_ASSET,
+  P2_TYPE_HANDLERS,
+  accessSwitchForm,
+  assetListHandlers,
+} from './support/phase2';
 
 // TST-03, MET-51, UI-12 (WP-317): the guided creation of a CI. A tile
 // chooses the type, manufacturer and model offer the stored values of the
@@ -8,7 +16,9 @@ import { AT, CI_TYPES, ORG_ID, expect, list, mockBackend, signIn, test } from '.
 // come from the resolved form (GET /ci-types/{id}/form) and a conditional
 // field appears and becomes required on input. The POST carries the UUID
 // of the type, the master fields as columns and the attribute. axe finds
-// no violation in any step of the open dialog. Runs in every browser
+// no violation in any step of the open dialog. WP-324 adds the folded
+// subtype tiles with the variant of the subtype and the creation of an
+// asset through the same tiles (support/phase2.ts). Runs in every browser
 // project of playwright.config.ts; the strict mock checks every request
 // and answer against api/openapi.yaml.
 
@@ -186,4 +196,179 @@ test('creates a CI through the tiles, suggestions and a conditional field', asyn
     attributes: { mount: 'rack', rack_unit: 12 },
     discovery_source: 'manual',
   });
+});
+
+// WP-324: the subtypes of a type fold under its tile (parent_type_id,
+// WP-248); a subtype with exactly one variant (template, WP-251) reads its
+// form with that template and prefills its default, and the CI carries the
+// template.
+test('creates a CI of a subtype from its folded tile with the variant of the type', async ({
+  page,
+}) => {
+  const calls = await mockBackend(page, [
+    ...P2_TYPE_HANDLERS,
+    { path: '/cis', reply: () => ({ body: list([]) }) },
+    {
+      method: 'POST',
+      path: '/cis',
+      reply: (request) => {
+        const input = request.postDataJSON() as Record<string, unknown>;
+        return {
+          status: 201,
+          body: {
+            ...storedCI('11111111-1111-4111-8111-111111111112', String(input.name), '', ''),
+            ...input,
+            // The stored CI names its templates with key and version.
+            templates: [
+              {
+                template_id: ACCESS_TEMPLATE.id,
+                key: ACCESS_TEMPLATE.key,
+                version: 1,
+                position: 0,
+              },
+            ],
+          },
+        };
+      },
+    },
+    {
+      path: '/templates',
+      reply: (_request, url) => ({
+        body: list(
+          url.searchParams.get('ci_type_id') === ACCESS_SWITCH_TYPE.id ? [ACCESS_TEMPLATE] : [],
+        ),
+      }),
+    },
+    {
+      path: `/ci-types/${ACCESS_SWITCH_TYPE.id}/form`,
+      reply: (_request, url) => ({ body: accessSwitchForm(url.searchParams.get('template_id')) }),
+    },
+    { path: '/locations/tree', reply: () => ({ body: { data: [] } }) },
+  ]);
+  await signIn(page);
+  await page.goto('/cmdb');
+
+  await page.getByRole('button', { name: 'CI anlegen' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('button', { name: 'Netzwerkgerät', exact: true })).toBeVisible();
+  // The subtypes are folded under the tile of their parent.
+  await expect(dialog.getByRole('button', { name: 'Access-Switch' })).toHaveCount(0);
+  const fold = dialog.getByRole('button', { name: 'Untertypen von Netzwerkgerät anzeigen' });
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  const subtypes = dialog.getByRole('list', { name: 'Untertypen von Netzwerkgerät' });
+  await expect(subtypes.getByRole('button')).toHaveText(['Access-Switch', 'Core-Switch']);
+  await expectNoAxeViolations(page);
+  await subtypes.getByRole('button', { name: 'Access-Switch' }).click();
+  await expect(subtypes.getByRole('button', { name: 'Access-Switch' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await dialog.getByRole('button', { name: 'Weiter' }).click();
+
+  await expect(dialog.getByRole('heading', { name: 'Hersteller und Modell' })).toBeFocused();
+  await dialog.getByRole('textbox', { name: 'Hersteller', exact: true }).fill('Contoso');
+  await dialog.getByRole('textbox', { name: 'Modell', exact: true }).fill('AX-24');
+  await dialog.getByRole('button', { name: 'Weiter' }).click();
+
+  // The only variant of the subtype applies: its default is prefilled.
+  await expect(dialog.getByRole('heading', { name: 'Angaben' })).toBeFocused();
+  await expect(dialog.getByLabel(/^Ports/)).toHaveValue('24');
+  await dialog.getByLabel('Name *').fill('access-sw-01');
+  await dialog.getByLabel('Uplink').fill('core-sw-01');
+  await expectNoAxeViolations(page);
+  await dialog.getByRole('button', { name: 'Anlegen' }).click();
+  await expect(dialog).toBeHidden();
+
+  expect(
+    calls
+      .filter((c) => c.path === `/ci-types/${ACCESS_SWITCH_TYPE.id}/form`)
+      .map((c) => new URLSearchParams(c.search).get('template_id')),
+  ).toContain(ACCESS_TEMPLATE.id);
+  const posts = calls.filter((c) => c.method === 'POST' && c.path === '/cis');
+  expect(posts).toHaveLength(1);
+  expect(posts[0]!.body).toEqual({
+    name: 'access-sw-01',
+    ci_type_id: ACCESS_SWITCH_TYPE.id,
+    status: 'active',
+    manufacturer: 'Contoso',
+    model: 'AX-24',
+    attributes: { p2_uplink: 'core-sw-01', p2_ports: 24 },
+    templates: [{ template_id: ACCESS_TEMPLATE.id }],
+    discovery_source: 'manual',
+  });
+});
+
+// WP-324 (UI-12, WP-319): the asset creation runs through the same tiles
+// (the asset categories) and the fields of the category, the details
+// folded. Contracts have no tiles (WP-808) and are not part of this flow.
+test('creates an asset through the category tiles of the same flow', async ({ page }) => {
+  const created: Record<string, unknown>[] = [];
+  const calls = await mockBackend(page, [
+    ...assetListHandlers(created),
+    {
+      method: 'POST',
+      path: '/assets',
+      reply: (request) => {
+        const asset = {
+          ...P2_ASSET,
+          ...(request.postDataJSON() as Record<string, unknown>),
+          id: 'a5000000-0000-4000-8000-0000000000c2',
+        };
+        created.push(asset);
+        return { status: 201, body: asset };
+      },
+    },
+  ]);
+  await signIn(page);
+  await page.goto('/assets');
+  await expect(page.getByRole('link', { name: P2_ASSET.name })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Asset anlegen' }).first().click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Welche Art von Asset legst du an?')).toBeVisible();
+  const tiles = dialog.getByRole('region', { name: 'Kategorie' });
+  // One tile per category, in the order of the labels.
+  await expect(tiles.getByRole('button')).toHaveText([
+    'Cloud-Ressource',
+    'Hardware',
+    'Lizenz',
+    'Software',
+    'Sonstiges',
+    'Zubehör',
+  ]);
+  await expectNoAxeViolations(page);
+  await tiles.getByRole('button', { name: 'Hardware' }).click();
+
+  await expect(dialog.getByText('Kategorie: Hardware')).toBeVisible();
+  await dialog.getByLabel(/^Inventarnummer/).fill('INV-2001');
+  await dialog.getByLabel(/^Name/).fill('Notebook 2001');
+  await dialog.getByLabel(/^Hersteller/).fill('Contoso');
+  await dialog.getByLabel(/^Modell/).fill('NB-14');
+  const more = dialog.getByRole('button', { name: 'Weitere Angaben' });
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await more.click();
+  await expect(dialog.getByRole('button', { name: 'Weniger Angaben' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
+  await dialog.getByLabel(/^Seriennummer/).fill('SN-2001');
+  await expectNoAxeViolations(page);
+  await dialog.getByRole('button', { name: 'Anlegen' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('link', { name: 'Notebook 2001' })).toBeVisible();
+
+  expect(
+    calls.filter((c) => c.method === 'POST' && c.path === '/assets').map((c) => c.body),
+  ).toEqual([
+    {
+      inventory_no: 'INV-2001',
+      name: 'Notebook 2001',
+      category: 'hardware',
+      manufacturer: 'Contoso',
+      model: 'NB-14',
+      serial_number: 'SN-2001',
+    },
+  ]);
 });

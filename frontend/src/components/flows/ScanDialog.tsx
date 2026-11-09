@@ -250,6 +250,19 @@ function CodeScanner({ active, onCode, busy }: CodeScannerProps) {
     onCode(value, source);
   });
   const showVideo = active && camera.mode !== 'manual';
+  // Without the camera the text field takes the codes of a handheld scanner:
+  // it gets the focus as soon as the dialog knows that, not only when the
+  // field mounts (autoFocus missed a camera that failed after the first
+  // render, so the scanner typed into nothing; WP-324). One frame later, so
+  // the focus scope of the dialog (and of a dialog it opens from) has
+  // settled and does not move it back.
+  const codeId = useId();
+  const manualMode = camera.mode === 'manual';
+  useEffect(() => {
+    if (!manualMode) return undefined;
+    const frame = requestAnimationFrame(() => document.getElementById(codeId)?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [manualMode, codeId]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -292,6 +305,7 @@ function CodeScanner({ active, onCode, busy }: CodeScannerProps) {
       <form onSubmit={submit} className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
           <Input
+            id={codeId}
             label={t('scan.codeLabel')}
             value={code}
             onChange={(event) => setCode(event.target.value)}
