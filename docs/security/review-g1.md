@@ -111,9 +111,11 @@ Sicherheitswirkung“ (Abschnitt „Befunde der Korrektur G1 (ab F-355)“).
   (2026-10-25), für die High innerhalb der Frist (Abschnitt
   „Scanergebnisse“).
 - **Pentest:** Der externe Pentest (WP-210, E-28, B3) ist laut Erklärung des
-  Auftraggebers vom 2026-10-15 erledigt. Bericht, Befunde und Nachtest
-  liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
-  `docs/security/pentest-g1.md` nachzureichen.
+  Auftraggebers vom 2026-10-15 erledigt. Nach dem Beschluss des
+  Auftraggebers vom 2026-10-28 gilt diese Erklärung als Nachweis für G1 und
+  G2 (E-103). Bericht, Befunde und Nachtest liegen im Repository nicht vor
+  und werden nicht nachgereicht; `docs/security/pentest-g1.md` verweist auf
+  die Erklärung.
 
 **Freigabe des Sicherheitsreviews:** Das Review ist mit der Freigabe des
 Auftraggebers vom 2026-10-15 freigegeben. Unter den Befunden SR-01 bis SR-11
@@ -126,12 +128,12 @@ der Korrektur, Fortschreibung vom 2026-11-01); die Critical-Advisories der
 Entwicklungsabhängigkeiten sind mit WP-654 behoben (Abschnitt
 „Scanergebnisse“). Das
 Ausstiegskriterium „keine offenen High/Critical“ verlangt zusätzlich den
-Pentest-Nachweis (WP-210, B3). Die Erklärung des Auftraggebers vom
-2026-10-15, B3 sei erledigt, ersetzt ihn nach der Übergangsregel von E-76
-(`docs/plan/g1-korrektur/entscheidungen.md`) nicht; nachzureichen sind
-Zusammenfassung und Befundliste in `docs/security/pentest-g1.md` (A-07,
-WP-453). Enthält die Befundliste ein offenes High oder Critical, ist das
-Kriterium nicht erfüllt.
+Pentest-Nachweis (WP-210, B3). Nach E-76
+(`docs/plan/g1-korrektur/entscheidungen.md`) ersetzte die Erklärung des
+Auftraggebers vom 2026-10-15, B3 sei erledigt, diesen Nachweis nicht. Der
+Beschluss des Auftraggebers vom 2026-10-28 löst E-76 in diesem Punkt ab: Die
+Erklärung gilt als Nachweis für G1 und G2 (E-103). Zusammenfassung und
+Befundliste werden nicht nachgereicht (A-07 erledigt, WP-453 entfällt).
 
 Die Referenzumgebung des Lasttests ist anerkannt: Der Auftraggeber hat E-58
 am 2026-10-15 entschieden (Option 1). Den Lasttest belegen der lokale
@@ -139,11 +141,13 @@ Nachweislauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979
 auf Commit `918a832`; nach dem Merge wiederholt der nächtliche Lauf ihn auf
 dem Release-Kandidaten. SR-06 bleibt offen, bis vor GA ein dedizierter
 Referenzhost bereitsteht. Der Auftraggeber hat G1 am 2026-10-15 freigegeben.
-Nach E-76 ersetzt seine Erklärung die Nachweise nicht; das Gate-Ergebnis
-lautet „offen“ (`docs/acceptance/g1-gate.md`, WP-451). Nachzureichen sind der
-grüne CI-Lauf auf PR #64 mit dem Merge nach `main` und die Nachweise zu B3
-(Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09), die der
-Auftraggeber für erledigt erklärt hat.
+Das Gate-Ergebnis lautet „offen“ (`docs/acceptance/g1-gate.md`, WP-451).
+Für B3 (Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09) gilt
+nach dem Beschluss des Auftraggebers vom 2026-10-28 seine Erklärung vom
+2026-10-15 als Nachweis für G1 und G2 (E-103); diese Nachweise sind
+gestrichen und werden nicht nachgereicht. Den CI-Lauf auf dem
+Release-Kandidaten führt der Abschnitt „Läufe auf dem Release-Kandidaten“
+(WP-595).
 B5 ist mit E-17 geschlossen; gemessen ist mit 10.000 Objekten
 (`docs/acceptance/g1-gate.md`).
 
@@ -740,11 +744,13 @@ nachgetragen:
 WP-210: Nach E-28 beauftragt der Auftraggeber den Pentest (Aufgabe A-07).
 Bericht und Nachtest werden in `docs/security/pentest-g1.md` zusammengefasst.
 Am 2026-10-15 hat der Auftraggeber den Pentest (B3) für erledigt erklärt.
-Nach der Übergangsregel von E-76 ersetzt die Erklärung den Nachweis nicht;
-GATE-03 und NFR-08 stehen auf „offen“ (`docs/acceptance/g1-gate.md`,
-WP-451). Bericht, Befunde und Nachtest
-liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
-`docs/security/pentest-g1.md` nachzureichen.
+Nach seinem Beschluss vom 2026-10-28 gilt diese Erklärung als Nachweis für
+G1 und G2 (E-103). GATE-03 (Pentest-Anteil) und NFR-08 stehen ohne PASS
+durch Erklärung auf „offen“ und als Ausnahme der Art `erklaerung` mit
+„entfällt (E-103)“ in `docs/acceptance/g1-ausnahmen.csv`
+(`docs/acceptance/g1-gate.md`, WP-831). Bericht, Befunde und Nachtest liegen
+im Repository nicht vor und werden nicht nachgereicht; für GA verlangt
+SEC-11 einen eigenen Pentest.
 
 Die G1-Nachbesserung ändert den Datenbank-Einstieg der Mandantentransaktionen,
 den Ingest-Pfad (Spuren, Subjects) und die Impact-API. Alle drei liegen im

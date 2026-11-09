@@ -1,0 +1,10 @@
+id;art;grund;entscheidung;lieferung
+AUT-05;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+AUT-06;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+NET-04;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+NFR-08;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+NFR-09;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+ABN-01;erklaerung;Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+GATE-03;erklaerung;Pentest-Anteil: Erklärung des Auftraggebers als Nachweis für G1 und G2 (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+GATE-02;erklaerung;abgeleitet aus den übrigen Zeilen (Fixture);E-76 Option 2, E-103;entfällt (E-103)
+GATE-04;np;GA-Regel, nicht Teil von G1 (Fixture);E-03;keine zu G1

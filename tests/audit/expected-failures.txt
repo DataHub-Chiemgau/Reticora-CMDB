@@ -7,5 +7,4 @@
 sh;tests/audit/g1-gate-evidence.test.sh;abn01_texts;F-138
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_field;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;pentest_findings;F-039
-sh;tests/audit/g1-gate-evidence.test.sh;pentest_summary;F-039
 sh;tests/audit/g1-gate-evidence.test.sh;subprocessors;F-137

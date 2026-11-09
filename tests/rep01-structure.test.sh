@@ -53,8 +53,9 @@
 # documented release-candidate runs (no placeholder, no "steht aus") and the
 # install smoke evidence on the last product change (install_evidence_current,
 # moved from tests/audit/g1-gate-evidence.test.sh, F-122); for "offen" and
-# "bestanden" also every GATE row PASS and no exception of kind erklaerung or
-# luecke, for "bedingt bestanden" conditions (1) to (5) instead.
+# "bestanden" also every GATE row PASS and no exception of kind luecke or of
+# kind erklaerung without E-103 (WP-831), for "bedingt bestanden" conditions
+# (1) to (5) instead.
 #
 # The fixture self-tests (rep01_*, tests/fixtures/rep01/) prove that the gate
 # checks catch every format variant of an open finding and each consistency
@@ -227,6 +228,15 @@ done
 #       no exception is of kind luecke;
 #   (3) every exception of kind erklaerung names "Frist …" in column
 #       lieferung;
+#   E-103 (WP-831): a row of kind erklaerung whose column entscheidung names
+#   E-103 and whose column lieferung reads "entfällt (E-103)" needs no
+#   deadline: the declaration of 2026-10-15 is the evidence for G1 and G2.
+#   Condition (3) skips it, and (1) demands no delivery table row for it but
+#   still that the section names its ID and quotes the declaration. Without
+#   E-103 both conditions apply unchanged. The rule declaration stays: no
+#   status of the checklist is PASS by declaration. --final does not count
+#   such a row as an open exception (final_exceptions); it does every other
+#   row of kind erklaerung or luecke.
 #   (4) every GATE row (annex, section status, GATE-03 condition) is PASS or
 #       itself an exception of kind erklaerung; of GATE-03 only the condition
 #       "Pentest …" may be open, its other conditions are PASS;
@@ -386,8 +396,17 @@ gate_check() {
     res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' |
         sed -E 's/^\*\*Ergebnis: *(bedingt +bestanden|[[:alpha:]]+).*/\1/I; s/ +/ /g')"
     res="${res,,}"
-    # Exceptions with their delivery: ID <TAB> kind <TAB> lieferung.
-    xd="$( { [ -f "$X" ] && tail -n +2 "$X"; } | awk -F';' 'NF >= 5 { print $1 "\t" $2 "\t" $5 }')"
+    # Exceptions with their delivery: ID <TAB> kind <TAB> E-103 <TAB>
+    # lieferung. E-103 is 1 for a row whose column entscheidung names E-103
+    # and whose column lieferung reads "entfällt (E-103)": the declaration of
+    # the Auftraggeber is the evidence for G1 and G2, nothing is delivered
+    # (WP-831). The flag precedes lieferung, so an empty lieferung cannot
+    # shift it.
+    xd="$( { [ -f "$X" ] && tail -n +2 "$X"; } | awk -F';' '
+        function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+        NF >= 5 {
+            e = ($4 ~ /(^|[^0-9A-Za-z-])E-103([^0-9]|$)/ && trim($5) == "entfällt (E-103)") ? 1 : 0
+            print $1 "\t" $2 "\t" e "\t" $5 }')"
     findings="$(finding_rows R "$RV"; finding_rows P "$PT")"
     crit="$(awk -F'\t' '$3 == "critical" && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
     pthc="$(awk -F'\t' '$1 == "P" && ($3 == "critical" || $3 == "high") && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
@@ -534,10 +553,12 @@ gate_check() {
         else
             grep -q 'Erklärung des Auftraggebers' <<< "$rel" ||
                 v conditional_release "section 'Freigabe nach E-76' does not quote the declaration of the Auftraggeber"
-            while IFS=$'\t' read -r xid xart xdl; do
+            while IFS=$'\t' read -r xid xart xe xdl; do
                 [ "$xart" = erklaerung ] || continue
                 grep -qE "(^|[^A-Z0-9-])${xid}([^0-9]|\$)" <<< "$rel" ||
                     v conditional_release "section 'Freigabe nach E-76' does not name $xid (erklaerung)"
+                # E-103: no delivery, so no deadline in a delivery table.
+                [ "$xe" = 1 ] && continue
                 while IFS= read -r d; do
                     [ -n "$d" ] || continue
                     awk -F'|' -v d="$d" '
@@ -565,9 +586,11 @@ gate_check() {
         while IFS=$'\t' read -r xid xart; do
             [ "$xart" = luecke ] && v conditional_ids "$xid is an exception of kind luecke"
         done <<< "$xs"
-        # (3) Every exception of kind erklaerung names its deadline.
-        while IFS=$'\t' read -r xid xart xdl; do
+        # (3) Every exception of kind erklaerung names its deadline, unless
+        # E-103 makes the declaration its evidence ("entfällt (E-103)").
+        while IFS=$'\t' read -r xid xart xe xdl; do
             [ "$xart" = erklaerung ] || continue
+            [ "$xe" = 1 ] && continue
             grep -qE 'Frist[[:space:]]+[^[:space:]]' <<< "$xdl" ||
                 v conditional_deadlines "$xid (erklaerung) names no deadline (Frist) in column lieferung: $xdl"
         done <<< "$xd"
@@ -688,8 +711,11 @@ gate_check() {
     if [ "$res" != "bedingt bestanden" ]; then
         rows="$(gate_rows_not_pass)"
         [ -n "$rows" ] && v final_gate_rows "not PASS: $rows"
-        rows="$(awk -F'\t' '$2 == "erklaerung" || $2 == "luecke" { printf "%s (%s) ", $1, $2 }' <<< "$xs")"
-        [ -n "$rows" ] && v final_exceptions "exceptions of kind erklaerung or luecke: $rows"
+        # E-103: a row of kind erklaerung whose evidence is the declaration
+        # (lieferung "entfällt (E-103)") is no open exception; every other
+        # row of kind erklaerung or luecke is.
+        rows="$(awk -F'\t' '($2 == "erklaerung" && $3 != 1) || $2 == "luecke" { printf "%s (%s) ", $1, $2 }' <<< "$xd")"
+        [ -n "$rows" ] && v final_exceptions "exceptions of kind erklaerung (without E-103) or luecke: $rows"
     fi
     # The runs on the release candidate are documented (WP-595).
     for f in "$G" "$RV" "$root/docs/acceptance/g1-installation.md" "$root/docs/README.md"; do
@@ -715,12 +741,12 @@ describe() {
         gate03_rows) echo "GATE-03 is PASS only when every condition is" ;;
         finding_ids) echo "GATE-02 an open SR/PT finding keeps the catalog IDs it names from PASS" ;;
         exceptions) echo "GATE-02 the IDs of docs/acceptance/g1-ausnahmen.csv are not PASS (E-76)" ;;
-        declaration) echo "GATE-02 no ID is PASS by declaration, no annex status names one (E-76)" ;;
+        declaration) echo "GATE-02 no ID is PASS by declaration, no annex status names one (E-76, E-103)" ;;
         gate02_all) echo "GATE-02 is PASS only when every [B]/[Q] ID is" ;;
         result_rows) echo "the result is 'bestanden' only when every GATE row is PASS" ;;
-        conditional_release) echo "E-76 'bedingt bestanden' (1): section 'Freigabe nach E-76' quotes the declaration, names every ID of kind erklaerung and gives a deadline per open delivery" ;;
+        conditional_release) echo "E-76 'bedingt bestanden' (1): section 'Freigabe nach E-76' quotes the declaration, names every ID of kind erklaerung and gives a deadline per open delivery (none for E-103)" ;;
         conditional_ids) echo "E-76 'bedingt bestanden' (2): every ID that is not PASS is an exception of kind erklaerung or np, none of kind luecke" ;;
-        conditional_deadlines) echo "E-76 'bedingt bestanden' (3): every exception of kind erklaerung names its deadline (Frist)" ;;
+        conditional_deadlines) echo "E-76 'bedingt bestanden' (3): every exception of kind erklaerung names its deadline (Frist), unless E-103 makes the declaration its evidence" ;;
         conditional_gate_rows) echo "E-76 'bedingt bestanden' (4): every GATE row is PASS or itself an exception of kind erklaerung whose other conditions are PASS" ;;
         conditional_findings) echo "E-76 'bedingt bestanden' (5): no open Critical, no open High/Critical in the pentest" ;;
         reasons) echo "GATE-02 every ID that is not PASS has a reason" ;;
@@ -735,7 +761,7 @@ describe() {
         final_review_high) echo "--final no SR finding of the security review rated Critical or High is open (F-428)" ;;
         final_pentest) echo "--final no open High/Critical pentest finding" ;;
         final_gate_rows) echo "--final every GATE row is PASS (result offen or bestanden)" ;;
-        final_exceptions) echo "--final no exception of kind erklaerung or luecke (result offen or bestanden)" ;;
+        final_exceptions) echo "--final no exception of kind luecke or of kind erklaerung without E-103 (result offen or bestanden)" ;;
         final_rc_runs) echo "--final the runs on the release candidate are documented (no placeholder, no 'steht aus')" ;;
     esac
 }
@@ -775,6 +801,13 @@ check "GATE-01 the security review records the P0 findings F-001 to F-015 of the
 # shellcheck disable=SC2016 # expanded when check evaluates the condition
 check "GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings of the correction in table '## Übersicht' (F-428)" \
     '[ -n "$(reaudit_overview audit/g1-reaudit/FINDINGS.md)" ]'
+
+# E-103 (WP-831): the declaration of the Auftraggeber is the evidence of the
+# pentest for G1 and G2; nothing is delivered later, so the summary carries no
+# item 'nachzureichen' (case pentest_summary of
+# tests/audit/g1-gate-evidence.test.sh, F-039, moved here).
+check "GATE-03 docs/security/pentest-g1.md has no item 'nachzureichen' (E-103)" \
+    "! grep -q 'nachzureichen' docs/security/pentest-g1.md"
 
 # --- Installation evidence on the release candidate (WP-595, F-122) ---------
 # install_evidence ROOT prints nothing when the install smoke evidence in
@@ -1020,6 +1053,27 @@ selftest conditional_pentest_high conditional conditional_findings conditional_f
 # "bestanden" still needs every GATE row PASS and, with --final, no
 # exception of kind erklaerung.
 selftest conditional_as_bestanden conditional result_rows final_exceptions \
+    subst "$C" 's/^\*\*Ergebnis: bedingt bestanden/**Ergebnis: bestanden/'
+
+# E-103 (WP-831): fixture "declared" is the result "bedingt bestanden" with
+# the declared IDs as exceptions of kind erklaerung that name E-103 and read
+# "entfällt (E-103)" in column lieferung, without deadline and without a
+# delivery table. Without E-103 a row needs its deadline again; no ID is PASS
+# by declaration; the section still names every ID.
+selftest declared declared pass pass
+selftest declared_without_e103 declared conditional_deadlines conditional_deadlines \
+    subst "$X" 's/^(NFR-08;erklaerung;[^;]*);E-76 Option 2, E-103;/\1;E-76 Option 2;/'
+selftest declared_delivery_without_e103 declared conditional_release conditional_deadlines \
+    subst "$X" 's/^(NFR-08;erklaerung;[^;]*);E-76 Option 2, E-103;entfällt \(E-103\)$/\1;E-76 Option 2;A-07 Pentest-Zusammenfassung (Fixture)/'
+selftest declared_e103_with_delivery declared conditional_deadlines conditional_deadlines \
+    subst "$X" 's/^(NFR-08;erklaerung;.*);entfällt \(E-103\)$/\1;A-07 Pentest-Zusammenfassung (Fixture)/'
+selftest declared_pass_by_declaration declared declaration declaration \
+    subst "$C" 's/^\| NFR-08 \| \[B\] \| offen/| NFR-08 | [B] | PASS (Erklärung des Auftraggebers, E-103)/'
+selftest declared_release_without_id declared conditional_release conditional_release \
+    subst "$C" 's/^G2 \(E-103\)\. Die Freigabe gilt für AUT-05, AUT-06, NET-04, NFR-08, NFR-09,$/G2 (E-103). Die Freigabe gilt für AUT-05, AUT-06, NET-04, NFR-09,/'
+selftest declared_release_no_declaration declared conditional_release conditional_release \
+    subst "$C" 's/^Erklärung des Auftraggebers vom/Mitteilung vom/'
+selftest declared_as_bestanden declared result_rows final_gate_rows \
     subst "$C" 's/^\*\*Ergebnis: bedingt bestanden/**Ergebnis: bestanden/'
 
 # install_evidence_current (F-122): the evidence names the last product
