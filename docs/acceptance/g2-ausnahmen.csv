@@ -1,0 +1,18 @@
+id;art;grund;entscheidung;lieferung
+NFR-02;erklaerung;Lastnachweis G2 hält nur den vorläufigen Budgetsatz G2 (E-146), gegen NFR-02 im Wortlaut verfehlen 14 Budgets im Median ihre Schwelle (D-1), Lastarchive nur als GitHub-Artefakte (D-2), kein Referenzhost (D-3);Entscheidung des Auftraggebers vom 2026-11-09 (Gate G2 freigegeben), E-146, E-58;Frist vor GA (Folge-WP-Vorschläge V-1 bis V-8 aus docs/acceptance/lasttest-g2.md, Retest auf dem Referenzhost nach E-58 und SR-06)
+RBA-07;erklaerung;SR-58 (berechnete CI-Attribute legen Asset-Felder an den Feldrechten vorbei offen) und SR-59 (Formularzustände als Orakel für unlesbare Felder) offen, Medium, ohne Folge-WP (D-4);Entscheidung des Auftraggebers vom 2026-11-09 (Gate G2 freigegeben);Frist vor GA (Termin des Sicherheitsreviews Phase 2, Folge-WP-Vorschlag für SR-58 und SR-59)
+SEC-11;erklaerung;SR-60 (Fremdimages des Betriebs ohne Digest und Scan, Keycloak 24) offen, Medium (D-4), Review-Stand f74831fc ohne Fortschreibung für PR #150 (D-6);Entscheidung des Auftraggebers vom 2026-11-09 (Gate G2 freigegeben);Frist vor GA (Termin des Sicherheitsreviews Phase 2, Folge-WP-Vorschlag für SR-60 und Fortschreibung des Reviews)
+GATE-02;erklaerung;abgeleitet aus den übrigen Zeilen: GATE-02 folgt aus den Ausnahmen NFR-02, RBA-07 und SEC-11;Entscheidung des Auftraggebers vom 2026-11-09 (Gate G2 freigegeben);Frist vor GA (folgt aus NFR-02, RBA-07 und SEC-11)
+MET-20;np;Anforderungstext nicht geliefert, Umsetzung nach den Querverweisen, abschluss_wp leer;E-37, E-48;keine zu G2
+MET-30;np;Anforderungstext nicht geliefert (Templates), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-31;np;Anforderungstext nicht geliefert (Templates), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-32;np;Anforderungstext nicht geliefert (Templates), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-33;np;Anforderungstext nicht geliefert (Templates), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-34;np;Anforderungstext nicht geliefert (Templates), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-40;np;Anforderungstext nicht geliefert (Regeln, berechnete Attribute), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-41;np;Anforderungstext nicht geliefert (Regeln, berechnete Attribute), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-42;np;Anforderungstext nicht geliefert (Regeln, berechnete Attribute), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-43;np;Anforderungstext nicht geliefert (Regeln, berechnete Attribute), abschluss_wp leer;E-37, E-48;keine zu G2
+MET-44;np;Anforderungstext nicht geliefert (Regeln, berechnete Attribute), abschluss_wp leer;E-37, E-48;keine zu G2
+NFR-10;np;Lasttest vor G1, G1-Nachweis in docs/acceptance/lasttest-g1.md, der G2-Lastnachweis steht unter NFR-02;E-58;keine zu G2
+TKT-03;np;[O] ohne Gate-Wirkung (GATE-05), WP-293 optional;E-47;keine zu G2

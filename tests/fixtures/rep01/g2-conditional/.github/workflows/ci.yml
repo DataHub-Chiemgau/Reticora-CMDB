@@ -1,0 +1,20 @@
+# Fixture "g2" (WP-331): excerpt of .github/workflows/ci.yml with the job
+# traceability only, read by the G2 stage of tests/rep01-structure.test.sh.
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  traceability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check docs/traceability.csv
+        working-directory: backend
+        env:
+          TRACEABILITY_PR_TITLE: ${{ github.event.pull_request.title }}
+          TRACEABILITY_PR_BODY: ${{ github.event.pull_request.body }}
+          TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P2"
+        run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/

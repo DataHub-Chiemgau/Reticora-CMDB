@@ -9,10 +9,13 @@ GATE-04 (GA). Die Nachweise sind Tests und die Traceability
 (`docs/traceability.csv`); diese Checkliste ist nie Nachweis einer
 Traceability-Zeile (F-121, WP-450).
 
-**Die Gate-Entscheidung trifft der Auftraggeber.** Diese Checkliste bereitet
-sie vor: Sie belegt, was bestanden ist, und führt die Abweichungen und
-Ausnahmen auf, die der Auftraggeber bewerten muss (Abschnitt „Ergebnis“). Sie
-trägt keine Freigabe ein.
+**Die Gate-Entscheidung trifft der Auftraggeber.** Diese Checkliste hat sie
+vorbereitet: Sie belegt, was bestanden ist, und führt die Abweichungen und
+Ausnahmen auf, die der Auftraggeber bewerten musste (Abschnitt „Ergebnis“).
+Seine Entscheidung vom 2026-11-09 steht im Abschnitt „Freigabe des
+Auftraggebers“; die IDs, die nicht PASS sind, stehen als Ausnahmen in
+`docs/acceptance/g2-ausnahmen.csv` (Format wie
+`docs/acceptance/g1-ausnahmen.csv`).
 
 Prüfungen:
 
@@ -51,49 +54,118 @@ Prüfungen:
     mit der Stufe `P2` und hat kein `continue-on-error`;
   - das Ergebnis „bestanden“ verlangt jede GATE-Zeile des Anhangs PASS;
     `--final` verlangt außerdem keinen Platzhalter eines RC-Laufs und
-    keinen Vermerk, dass ein Lauf aussteht.
-- Selbsttests auf der Fixture `tests/fixtures/rep01/g2/` (`rep01_g2_*`)
-  belegen jede Regel der G2-Stufe in beiden Modi.
+    keinen Vermerk, dass ein Lauf aussteht;
+  - (g) Ausnahmen: Jede ID aus `docs/acceptance/g2-ausnahmen.csv` (Spalten
+    `id;art;grund;entscheidung;lieferung`, Art `erklaerung`, `luecke` oder
+    `np` wie in G1) hat eine Zeile im Anhang und ist nicht PASS. Das
+    Ergebnis „bedingt bestanden“ (Freigabe des Auftraggebers, wie E-76
+    Option 2 in G1) verlangt (1) den Abschnitt „Freigabe des
+    Auftraggebers“ mit der wörtlichen Entscheidung und jeder ID der Art
+    `erklaerung`, (2) jede ID, die nicht PASS ist, als Ausnahme der Art
+    `erklaerung` oder `np` und keine Ausnahme der Art `luecke`, (3) in der
+    Spalte `lieferung` jeder Zeile der Art `erklaerung` eine Frist
+    („Frist …“) und (4) jede GATE-Zeile des Anhangs PASS oder selbst eine
+    Ausnahme der Art `erklaerung`. Ein offenes Critical schließt (b) in
+    jedem Modus aus.
+- Selbsttests auf den Fixtures `tests/fixtures/rep01/g2/` (Ergebnis
+  „bestanden“) und `tests/fixtures/rep01/g2-conditional/` (Ergebnis
+  „bedingt bestanden“) (`rep01_g2_*`) belegen jede Regel der G2-Stufe in
+  beiden Modi.
 
 Stand: 2026-11-09. Produktstand des Release-Kandidaten ist `69e6668d`
 (`main` nach PR #152; der letzte Produktcode kam mit PR #150, `6d019370`;
 PR #151 und #152 ändern nur Lastskripte, Workflows der Lastläufe und
-Dokumentation). Release-Kandidat G2 ist `main` nach dem Merge von WP-327 und
-WP-331; beide ändern nur Dokumentation, Tests und die CI-Konfiguration.
+Dokumentation). Release-Kandidat G2 ist `e17954ca`, `main` nach dem Merge
+von WP-327 und WP-331 (PR #153); beide ändern nur Dokumentation, Tests und
+die CI-Konfiguration. Die Läufe auf `e17954ca` stehen im Abschnitt „Läufe
+auf dem Release-Kandidaten“.
+
+Nachtrag 2026-11-09 (Gate-Entscheidung): Der Auftraggeber hat G2 am
+2026-11-09 freigegeben (Abschnitt „Freigabe des Auftraggebers“). Das
+Ergebnis lautet „bedingt bestanden“: NFR-02, RBA-07, SEC-11 und GATE-02 sind
+nicht PASS und stehen als vom Auftraggeber akzeptierte Ausnahmen mit Frist
+in `docs/acceptance/g2-ausnahmen.csv`; „bestanden“ verlangte jede GATE-Zeile
+PASS. TST-04 und OPS-06 sind mit den Läufen auf `e17954ca` belegt.
+`docs/acceptance/g1-gate.md` ändert dieser Nachtrag nicht (D-8).
 
 ## Ergebnis
 
-**Ergebnis: offen.** Entscheidung des Auftraggebers ausstehend. Diese
-Checkliste trägt keine Freigabe ein.
+**Ergebnis: bedingt bestanden.** G2 ist durch den Auftraggeber am
+2026-11-09 freigegeben (Abschnitt „Freigabe des Auftraggebers“). Bedingt,
+weil NFR-02, RBA-07, SEC-11 und damit GATE-02 nicht PASS sind; sie stehen
+als vom Auftraggeber akzeptierte Ausnahmen der Art `erklaerung` mit Frist in
+`docs/acceptance/g2-ausnahmen.csv`, die N/P-IDs dort mit der Art `np`.
+Release-Kandidat ist `e17954ca`.
 
 Bestanden (belegt):
 
 - GATE-01: kein offenes Critical in allen Quellen (Abschnitt GATE-01),
-  Scans grün auf `69e6668d` (CI-Lauf 42675826333).
+  Scans grün auf `69e6668d` (CI-Lauf 42675826333) und auf dem
+  Release-Kandidaten `e17954ca` (CI-Lauf 42695897709).
 - GATE-05: [O]-Punkte ohne Gate-Wirkung.
 - SEQ-01: Merge-Folge der Phase 2 ohne Verletzung einer WP-Voraussetzung
   (Abschnitt SEQ-01).
-- DOD-01 und GLO-11: Traceability mit `B,Q,P2` lokal ohne fehlende Zeile,
-  jedes WP des Phase-2-Plans mit Commit.
+- DOD-01 und GLO-11: Traceability mit `B,Q,P2` ohne fehlende Zeile, im
+  CI-Lauf 42695897709 auf `e17954ca` grün, jedes WP des Phase-2-Plans mit
+  Commit.
+- TST-04: CI-Lauf 42695897709 auf `e17954ca`, alle 30 Jobs grün.
+- OPS-06: Ausfallsuite, Lauf 42695925438 auf `e17954ca` grün.
+- Install-Smoke (INS-01, INS-04) auf `e17954ca`: Lauf 42695897334 grün.
 - Release-Konfiguration G2 (WP-830) und die Nachweise von E2E, Last,
   Sicherheitsreview und Abnahme auf Commits mit WP-830.
-- 94 von 113 IDs des Anhangs PASS, 13 N/P mit Begründung, 6 offen.
+- 96 von 113 IDs des Anhangs PASS, 13 N/P mit Begründung, 4 offen
+  (NFR-02, RBA-07, SEC-11, GATE-02), alle als Ausnahmen freigegeben.
 
-Offen (Nachweis fehlt noch, Abschnitt GATE-02, „FAIL und offen“):
+Nicht auf dem Release-Kandidaten gelaufen ist `gate-final.yml` (nur auf
+Tags `v*` und von Hand); sein letzter Lauf 41514357730 ist auf `201f6fbe`
+rot. Der lokale Lauf von `tests/rep01-structure.test.sh --final` auf dem
+Stand dieser Eintragung ist in allen G2-Regeln grün und bleibt rot nur in
+Regeln der G1-Stufe, weil `docs/acceptance/g1-gate.md` bewusst auf „offen“
+steht (Abschnitt „Läufe auf dem Release-Kandidaten“).
 
-- TST-04: vollständiger CI-Lauf auf dem Release-Kandidaten (Merge-Commit
-  von WP-331); Vorlauf auf `69e6668d` grün.
-- OPS-06: Lauf der Ausfallsuite auf dem Release-Kandidaten; der letzte
-  grüne Lauf (42550700633) ist auf `6ba79f54`, vor den Produktänderungen
-  von PR #147 bis #150.
-- `gate-final.yml` (`--final`, `TestTraceabilityFile`) auf dem
-  Release-Kandidaten; bisher kein Lauf nach PR #111.
-- GATE-02 folgt aus den übrigen Zeilen.
+### Freigabe des Auftraggebers
 
-### Zur Entscheidung des Auftraggebers
+Entscheidung des Auftraggebers vom 2026-11-09 (wörtlich): „Gate G2 ist
+freigegeben, trag die Entscheidung ein“.
+
+Die Freigabe gilt für G2 mit dem Release-Kandidaten `e17954ca`. Sie nimmt
+die offenen Punkte als Ausnahmen bzw. Restrisiken an; ein Nachweis wird
+dadurch nicht ersetzt, die IDs bleiben „offen“ (wie E-76 in G1):
+
+- NFR-02 (D-1, D-2, D-3), RBA-07 (D-4), SEC-11 (D-4, D-6) und GATE-02 (folgt
+  aus ihnen) als Ausnahmen der Art `erklaerung` in
+  `docs/acceptance/g2-ausnahmen.csv`;
+- die N/P-IDs MET-20, MET-30 bis MET-34, MET-40 bis MET-44, NFR-10 und
+  TKT-03 als Ausnahmen der Art `np`;
+- D-1 bis D-9 als akzeptierte Abweichungen und Restrisiken nach der Tabelle
+  unten.
+
+TST-04 und OPS-06, beim Stand vor der Freigabe offen, sind mit den Läufen
+42695897709 und 42695925438 auf `e17954ca` belegt und PASS.
+
+Die Fristen sind die der Quellen (Termin „vor GA“ im Sicherheitsreview
+Phase 2, Referenzhost vor GA nach E-58 und SR-06, Vorläufigkeit der
+Lastschwellen nach E-146); der Auftraggeber hat mit der Freigabe keine
+eigenen Fristen genannt. Die Folge-WPs sind Vorschläge; angelegt ist noch
+keines.
+
+| # | Behandlung nach der Freigabe | Frist | Folge-WP-Vorschlag |
+|---|---|---|---|
+| D-1 | akzeptiert: NFR-02 gilt für G2 gegen den vorläufigen Budgetsatz G2 (E-146); Ausnahme NFR-02 | vor GA | V-1 `g2-search-rework` bis V-8 `g2-view-presets` (`docs/acceptance/lasttest-g2.md`) |
+| D-2 | akzeptiert: Lastarchive nur als GitHub-Artefakte | innerhalb der Aufbewahrungsfrist der Artefakte | Übernahme nach `tests/load/README.md` |
+| D-3 | akzeptiert: kein lokaler Lastlauf, kein Referenzhost | vor GA (E-58, SR-06) | Retest auf dem Referenzhost |
+| D-4 | akzeptiert: SR-58, SR-59, SR-60 (Medium) offen; Ausnahmen RBA-07 und SEC-11 | vor GA (Review) | ein Folge-WP für SR-58 bis SR-60 (die im Review genannten Nummern WP-854 und WP-855 sind anders vergeben) |
+| D-5 | akzeptiert: Low SR-50, SR-61 bis SR-63 offen | vor GA (Review), SR-50 ohne Termin | Folge-WP je Befund nach Review |
+| D-6 | akzeptiert: Review-Stand `f74831fc`, keine Fortschreibung vor G2; Teil der Ausnahme SEC-11 | vor GA | Fortschreibung des Sicherheitsreviews Phase 2 für PR #150 |
+| D-7 | akzeptiert als bekannte Abweichung: `listAssetCIs` bleibt `x-status: planned` | vor GA | Gerüst `GET /api/v1/assets/{id}/cis` entfernen (Nachtrag) |
+| D-8 | akzeptiert: Phase 2 vor dem GO von WP-600; WP-600 gilt nach der Entscheidung vom 2026-11-09 als erledigt, `docs/acceptance/g1-gate.md` bleibt unverändert auf „offen“ | – | Eintrag der G1-Gate-Entscheidung in `g1-gate.md` (nicht Teil dieser Freigabe) |
+| D-9 | Nachweis nach E-103, keine Ausnahme | – | – |
+
+### Abweichungen und Ausnahmen (D-1 bis D-9)
 
 Diese Abweichungen und Ausnahmen sind nicht durch einen Test zu schließen.
-Der Auftraggeber bewertet sie bei der Gate-Entscheidung:
+Der Auftraggeber hat sie mit der Freigabe vom 2026-11-09 bewertet (Tabelle
+oben); die Spalte „Stand“ gibt den Stand vor der Freigabe wieder:
 
 | # | Abweichung oder Ausnahme | Betrifft | Stand | Quelle |
 |---|---|---|---|---|
@@ -104,24 +176,24 @@ Der Auftraggeber bewertet sie bei der Gate-Entscheidung:
 | D-5 | **Offene Low-Befunde:** SR-50 (404 statt 422 bei fremdem Verweis, API-03, kein Folge-WP für G2), SR-61 (Ticket-Anhänge ohne Feature `documents`, vor GA), SR-62 (Rücksprung nach dem Login, react-router-Advisories Moderate, vor GA), SR-63 (Kanalmatrix ohne eigene Zeilen für Entsorgung, SLA, Kalender, Ticket-Anhänge, Etiketten-Batches; vor GA). Info SR-64 bis SR-66 akzeptiert bzw. dokumentiert. | GQL-04 (Abgleich), keine Gate-ID offen | offen | `docs/security/review-phase2.md` |
 | D-6 | **Prüfstand des Sicherheitsreviews `f74831fc`.** Danach kam Produktcode mit PR #150 (WP-854 bis WP-859, Lastregression Runde 4: Beziehungssuche, Bulk je CI in einer Transaktion). Das Review ist für diesen Code nicht fortgeschrieben; die Tests der Kanalmatrix und Feldrechte liefen im CI-Lauf 42675826333 auf `69e6668d` grün. | SEC-11, GATE-01 | Bewertung, ob eine Fortschreibung vor G2 nötig ist | `docs/security/review-phase2.md`, „Prüfstand“, „Offene Punkte für WP-331“ |
 | D-7 | **Eine Operation mit `x-status: planned`:** `GET /api/v1/assets/{id}/cis` (`listAssetCIs`) steht noch als Gerüst in `api/openapi.yaml`; die CIs eines Assets liefert `GET /api/v1/cis?filter[asset_id]=` (E-38, WP-272). Der Plan verlangt zum G2-Release keine Operation mit `x-status: planned`; `api/openapi.yaml` gehört nicht zur Dateiliste von WP-331. | API-06 (PASS mit WP-830) | Gerüst entfernen (Nachtrag) oder als bekannte Abweichung hinnehmen | `docs/plan/phase2/implementierungsplan.md`, „Pfadvertrag“ |
-| D-8 | **Phase 2 begann vor dem GO von WP-600 (`k-gate`).** PR #112 (2026-11-02) ist der erste Merge der Phase 2; `docs/acceptance/g1-gate.md` steht weiter auf „Ergebnis: offen“. Nach der Entscheidung des Auftraggebers vom 2026-11-09 gilt WP-600 als erledigt; einen Commit „WP-600:“ und die vier G1-Zeilen des Korrekturplans (GATE-01, GATE-02, GATE-05, SEQ-01 mit WP-600) gibt es nicht. | SEQ-01 | durch Entscheidung vom 2026-11-09 abgedeckt; Eintrag in `g1-gate.md` nicht Teil von WP-331 | Abschnitt SEQ-01 |
+| D-8 | **Phase 2 begann vor dem GO von WP-600 (`k-gate`).** PR #112 (2026-11-02) ist der erste Merge der Phase 2; `docs/acceptance/g1-gate.md` steht weiter auf „Ergebnis: offen“. Nach der Entscheidung des Auftraggebers vom 2026-11-09 gilt WP-600 als erledigt; einen Commit „WP-600:“ und die vier G1-Zeilen des Korrekturplans (GATE-01, GATE-02, GATE-05, SEQ-01 mit WP-600) gibt es nicht. | SEQ-01 | durch Entscheidung vom 2026-11-09 abgedeckt; Eintrag in `g1-gate.md` nicht Teil von WP-331 und nicht Teil der G2-Freigabe | Abschnitt SEQ-01 |
 | D-9 | **Abnahme durch Erklärung (E-103).** AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b) und der Pentest sind durch die Erklärung des Auftraggebers vom 2026-10-15 nachgewiesen; Pentest-Befundliste, v2-Texte und Subprozessorenliste liegen nicht vor. | GATE-01, GATE-02 | nach E-103 Nachweis für G2 | Abschnitt GATE-02, „Abnahme durch Erklärung“ |
 
 ### Läufe auf dem Release-Kandidaten
 
-Ein roter Lauf stünde hier mit Ursache und Folge-WP. Läufe auf `69e6668d`
-gelten für den Produktstand des Release-Kandidaten; die
-Platzhalterzeilen werden nach dem Merge von WP-331 mit Lauf-ID und
-Commit gefüllt (`tests/rep01-structure.test.sh --final` verlangt das).
+Ein roter Lauf stünde hier mit Ursache und Folge-WP. Release-Kandidat ist
+`e17954ca` (`main` nach PR #153 mit WP-327 und WP-331). Läufe auf
+`69e6668d` gelten für den Produktstand des Release-Kandidaten.
 
 | Workflow | Gegenstand | Commit | Lauf | Ergebnis |
 |---|---|---|---|---|
 | `ci.yml` (push auf `main`) | alle 30 Jobs, u. a. `backend` (Kanalmatrix TEN-09, DIS-08), `frontend`, `e2e` in sechs Browserprojekten (WP-324), `traceability`, `gate`, `govulncheck` (backend, collector, edgecore), `npm-audit`, `image-scan` (backend, collector, frontend, postgres), `image-scan-thirdparty` (clamd), `migrations`, `auditdefect` | `69e6668d` | 42675826333 | grün |
-| `ci.yml` auf dem Release-Kandidaten | TST-04, `traceability` mit `B,Q,P2` | RC-Lauf ausstehend (Merge von WP-331) | RC-Lauf ausstehend | RC-Lauf ausstehend |
+| `ci.yml` (push auf `main`) auf dem Release-Kandidaten | TST-04, alle 30 Jobs wie oben, `traceability` mit `B,Q,P2` | `e17954ca` | 42695897709 | grün (30 von 30 Jobs) |
 | `install-smoke.yml` (push auf `main`) | Install-Smoke mit Onboarding-Suite (INS-01, INS-04), clamd im Profil `documents`, Real-Stack-Suite in sechs Browserprojekten, Ratchet, Reinstall, TLS | `e3c1aa7d` (Produktstand wie `69e6668d`) | 42661935039 | grün |
-| `install-smoke.yml` (push auf `main`) | wie oben | `69e6668d` | 42675825844 | lief beim Stand dieser Checkliste noch |
-| `outage.yml` | Ausfallsuite mit clamd- und SMTP-Szenario (OPS-06) | RC-Lauf ausstehend | RC-Lauf ausstehend (letzter grüner Lauf 42550700633 auf `6ba79f54`) | RC-Lauf ausstehend |
-| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile` | RC-Lauf ausstehend | RC-Lauf ausstehend | RC-Lauf ausstehend |
+| `install-smoke.yml` (push auf `main`) | wie oben | `69e6668d` | 42675825844 | grün |
+| `install-smoke.yml` (push auf `main`) auf dem Release-Kandidaten | wie oben; `release-mode` übersprungen (nur auf Tags) | `e17954ca` | 42695897334 | grün |
+| `outage.yml` (von Hand) auf dem Release-Kandidaten | Ausfallsuite mit clamd- und SMTP-Szenario (OPS-06) | `e17954ca` | 42695925438 (vorher grün: 42550700633 auf `6ba79f54`) | grün |
+| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile` | nicht auf `e17954ca` gelaufen (Auslöser nur Tag `v*` oder von Hand); letzter Lauf auf `201f6fbe` | 41514357730 | rot (G1); lokal auf dem Stand dieser Eintragung: alle G2-Regeln grün, rot nur in Regeln der G1-Stufe (`final_gate_rows`, `final_rc_runs` für `g1-gate.md`, `review-g1.md`, `g1-installation.md`, `docs/README.md`), weil `g1-gate.md` bewusst auf „offen“ steht (D-8); `TestTraceabilityFile` mit `B,Q,P2` lokal grün |
 | `load.yml` (drei Läufe, `scenarios=all`) | Lastnachweis NFR-02, NFR-03, ABN-02 nach E-58 | `69e6668d` | 42675878596, 42675885412, 42675891357 | grün (Satz G2) |
 | `load-evidence.yml` | Bewertung nach E-58 (Median), `gate` = `G2` | `69e6668d` | 42683419968 | grün, „alle Budgets gehalten“ (Satz G2) |
 
@@ -145,7 +217,7 @@ Commit gefüllt (`tests/rep01-structure.test.sh --final` verlangt das).
 | Performance (`load.yml`, Release-Standard G2) | WP-327 | `69e6668d` | 42675878596, 42675885412, 42675891357; Bewertung 42683419968 |
 | Sicherheitsreview | WP-329 | `f74831fc` (Kopf von PR #149, enthält PR #146) | `docs/security/review-phase2.md` |
 | Abnahme ABN-01 (c) | WP-330 | PR #146 (`6ba79f54`), Commit nach WP-830 | `docs/acceptance/abn-01.md`, `frontend/e2e/metamodel-scenario.spec.ts` |
-| Install-Smoke mit Onboarding-Suite (Release-Standard ohne `RETICORA_MODULES`) | – | `e3c1aa7d` | 42661935039 |
+| Install-Smoke mit Onboarding-Suite (Release-Standard ohne `RETICORA_MODULES`) | – | `e3c1aa7d`; Release-Kandidat `e17954ca` | 42661935039; 42695897334 |
 
 ## GATE-01 – Kein offenes Critical
 
@@ -194,7 +266,8 @@ NFR-10, die dort fehlt; GATE-03 (nur G1) und GATE-04 (GA) gehören nicht
 dazu. Für gemischte Tags zählt der P2-Anteil. Der Status je ID steht im
 [Anhang](#anhang-status-je-id). PASS heißt: Die Traceability-Zeile des
 `abschluss_wp` liegt vor, ihr Test ist im CI-Lauf 42675826333 auf
-`69e6668d` grün, und kein offener Befund berührt die ID.
+`69e6668d` und im CI-Lauf 42695897709 auf dem Release-Kandidaten
+`e17954ca` grün, und kein offener Befund berührt die ID.
 
 Traceability (lokal, `TRACEABILITY_REQUIRE_COMPLETE=B,Q,P2`): „Phase 2: 0 of
 112 IDs of docs/plan/phase2/abdeckung.csv without a row of their
@@ -202,7 +275,9 @@ abschluss_wp“, „Phase 2: 0 planned rows missing“; G1 unverändert
 (214 von 219 [B]/[Q]-IDs mit Zeile, 9 Ausnahmen nach
 `docs/acceptance/g1-ausnahmen.csv`).
 
-**Status:** offen. Folgt aus der Tabelle „FAIL und offen“.
+**Status:** offen. Folgt aus der Tabelle „FAIL und offen“; nach der
+Freigabe des Auftraggebers vom 2026-11-09 Ausnahme der Art `erklaerung`
+(`docs/acceptance/g2-ausnahmen.csv`).
 
 ### N/P und WARN
 
@@ -229,12 +304,14 @@ SOLL-Punkte mit WARN.
 
 | ID | Status | Begründung |
 |---|---|---|
-| NFR-02 | offen | Nachgewiesen nur gegen den vorläufigen Budgetsatz G2 (E-146); gegen NFR-02 im Wortlaut 14 Budgets im Median verfehlt (D-1). Bewertung durch den Auftraggeber. |
-| RBA-07 | offen | Feldrechte in allen Kanälen belegt (`TestFieldRightsChannelMatrix`, WP-730), aber SR-58 (berechnete Attribute umgehen die Feldrechte des Assets) und SR-59 (Formularzustände als Orakel) sind offen, Medium, ohne Folge-WP (D-4). |
-| SEC-11 | offen | Sicherheitsreview Phase 2 nach ASVS L2 liegt vor (WP-329), Scans grün; SR-60 (Fremdimages ohne Digest und Scan) nennt SEC-11 und ist offen, Medium (D-4); Review-Stand `f74831fc` (D-6). |
-| OPS-06 | offen | Ausfallsuite (`tests/outage/run.sh`, clamd- und SMTP-Szenario) auf dem Release-Kandidaten noch nicht gelaufen; letzter grüner Lauf 42550700633 auf `6ba79f54`. |
-| TST-04 | offen | Vollständiger CI-Lauf auf dem Release-Kandidaten (Merge von WP-331) fehlt; der Vorlauf 42675826333 auf `69e6668d` ist in allen 30 Jobs grün. |
-| GATE-02 | offen | Folgt aus den übrigen Zeilen dieser Tabelle. |
+| NFR-02 | offen | Nachgewiesen nur gegen den vorläufigen Budgetsatz G2 (E-146); gegen NFR-02 im Wortlaut 14 Budgets im Median verfehlt (D-1). Vom Auftraggeber am 2026-11-09 als Ausnahme freigegeben, Frist vor GA. |
+| RBA-07 | offen | Feldrechte in allen Kanälen belegt (`TestFieldRightsChannelMatrix`, WP-730), aber SR-58 (berechnete Attribute umgehen die Feldrechte des Assets) und SR-59 (Formularzustände als Orakel) sind offen, Medium, ohne Folge-WP (D-4). Vom Auftraggeber am 2026-11-09 als Ausnahme freigegeben, Frist vor GA. |
+| SEC-11 | offen | Sicherheitsreview Phase 2 nach ASVS L2 liegt vor (WP-329), Scans grün; SR-60 (Fremdimages ohne Digest und Scan) nennt SEC-11 und ist offen, Medium (D-4); Review-Stand `f74831fc` (D-6). Vom Auftraggeber am 2026-11-09 als Ausnahme freigegeben, Frist vor GA. |
+| GATE-02 | offen | Folgt aus NFR-02, RBA-07 und SEC-11. Vom Auftraggeber am 2026-11-09 als Ausnahme freigegeben. |
+
+Seit dem Stand vor der Freigabe PASS: OPS-06 (Ausfallsuite, Lauf
+42695925438 auf `e17954ca` grün) und TST-04 (CI-Lauf 42695897709 auf
+`e17954ca`, alle 30 Jobs grün).
 
 ### Abnahme durch Erklärung
 
@@ -368,7 +445,8 @@ Abweichungen mit Begründung:
   des Phase-2-Plans hat einen Commit „WP-nnn:“, und `CheckWorkPackages`
   meldet mit der Stufe `P2` 0 fehlende Planzeilen über alle nicht optionalen
   WPs. Die CI-Jobs `traceability`, `gate`, `backend`, `frontend`, `lint`
-  und `e2e` sind auf `69e6668d` grün (CI-Lauf 42675826333).
+  und `e2e` sind auf `69e6668d` grün (CI-Lauf 42675826333) und auf dem
+  Release-Kandidaten `e17954ca` (CI-Lauf 42695897709).
 - **GLO-11:** Der CI-Job `traceability` setzt seit WP-331
   `TRACEABILITY_REQUIRE_COMPLETE=B,Q,P2` ohne `continue-on-error`. Lauf
   lokal auf diesem WP: 0 fehlende Zeilen über alle 112 IDs der
@@ -466,7 +544,7 @@ Begründung im Abschnitt GATE-02.
 | NFR-02 | [B] | offen | `tests/load/` | WP-327 |
 | NFR-10 | [Q] | N/P | vor G1 (G1-Nachweis, `docs/acceptance/lasttest-g1.md`) | – |
 | NTF-05 | [B], Zusätze [P2], [P3] | PASS | `backend/internal/notify/stock_notify_integration_test.go` | WP-845 |
-| OPS-06 | [Q] | offen | `tests/outage/run.sh` | WP-331 |
+| OPS-06 | [Q] | PASS | `tests/outage/run.sh`; Lauf 42695925438 auf `e17954ca` | WP-331 |
 | OVR-03 | [P2] | PASS | `backend/internal/ci/bulk_override_integration_test.go` | WP-306 |
 | RBA-05 | [P2–P4], [A] | PASS | `backend/internal/server/modules_test.go` | WP-830 |
 | RBA-06 | [P2] | PASS | `backend/internal/permission/role_matrix_integration_test.go` | WP-245 |
@@ -493,7 +571,7 @@ Begründung im Abschnitt GATE-02.
 | TKT-03 | [O] | N/P | `backend/internal/ticket/provider_test.go` | WP-293 |
 | TST-01 | [B], Teilumfang [P2] | PASS | `backend/internal/citype/inherit_test.go` | WP-326 |
 | TST-03 | [B], Teilumfang [P2] | PASS | `frontend/e2e/form-builder.spec.ts` | WP-324 |
-| TST-04 | [Q] | offen | `.github/workflows/ci.yml` | WP-331 |
+| TST-04 | [Q] | PASS | `.github/workflows/ci.yml`; CI-Lauf 42695897709 auf `e17954ca` | WP-331 |
 | UI-11 | [P2] | PASS | `frontend/src/components/rules/ComputedEditor.test.tsx` | WP-802 |
 | UI-12 | [P2] | PASS | `frontend/src/pages/AssetListPage.test.tsx` | WP-319 |
 | UI-14 | [P2–P4, A] | PASS | `frontend/e2e/a11y.spec.ts` | WP-324 |

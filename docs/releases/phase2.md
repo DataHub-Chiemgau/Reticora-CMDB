@@ -6,6 +6,21 @@ offene Punkte führt `docs/acceptance/g2-gate.md`. Die GitHub-Release-Notes
 erzeugt `.github/workflows/release.yml` weiter mit `--generate-notes`;
 dieses Dokument ist die fachliche Zusammenfassung.
 
+## Gate-Entscheidung G2
+
+Entscheidung des Auftraggebers vom 2026-11-09: „Gate G2 ist freigegeben,
+trag die Entscheidung ein“. Ergebnis in `docs/acceptance/g2-gate.md`:
+**bedingt bestanden**, Release-Kandidat `e17954ca` (`main` nach PR #153).
+Auf dem Release-Kandidaten grün: CI (Lauf 42695897709, alle 30 Jobs,
+TST-04), Ausfallsuite (`outage.yml`, Lauf 42695925438, OPS-06) und
+Install-Smoke (Lauf 42695897334). Nicht PASS und vom Auftraggeber als
+Ausnahmen mit Frist vor GA angenommen sind NFR-02 (vorläufige Lastschwellen
+G2), RBA-07 (SR-58, SR-59) und SEC-11 (SR-60, Review-Stand) und daraus
+GATE-02 (`docs/acceptance/g2-ausnahmen.csv`); die Abweichungen D-1 bis D-9
+der Checkliste gelten als akzeptierte Restrisiken mit Frist bzw.
+Folge-WP-Vorschlag (siehe „Bekannte Einschränkungen“). Gate G1
+(`docs/acceptance/g1-gate.md`) bleibt davon unberührt auf „offen“.
+
 ## Überblick
 
 Phase 2 schaltet die Module der Phase P2 im Release-Standard frei:

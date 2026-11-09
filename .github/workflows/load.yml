@@ -67,7 +67,8 @@
 # with RETICORA_S3_*; the import of documents with the clamd scan is not
 # measured.
 #
-# Budget sets (E-146, decision of 2026-11-09 after run 42649690603): the
+# Budget sets (E-146, decision of 2026-11-09 after run 42649690603, revised
+# the same day against run variance after run 42661932847): the
 # p95 budgets of api.js and phase2.js come from tests/load/budgets.json,
 # the set BUDGET_GATE: G2 (default, also for the nightly run) holds the
 # provisional budgets of the decision, G1 the budgets of NFR-02 of the G1

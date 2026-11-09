@@ -19,7 +19,8 @@
 # (runs before WP-822), whose last line names the job set G1. Further jobs
 # of the runs (api-large-*) are evaluated as well. The gate also selects
 # the p95 budgets of api.js and phase2.js (tests/load/budgets.json, E-146):
-# G2 the provisional budgets of the decision of 2026-11-09, G1 those of
+# G2 the provisional budgets of the decision of 2026-11-09 (revised the
+# same day against run variance, run 42661932847), G1 those of
 # NFR-02. A run without an archive (expired, never archived) fails the
 # download step.
 name: Load evidence
