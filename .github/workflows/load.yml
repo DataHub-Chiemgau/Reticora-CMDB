@@ -132,6 +132,11 @@ jobs:
       - name: Test the evaluation over three runs
         run: ./tests/load/evaluate-runs.test.sh
 
+      # E-104 (WP-839): GET /cis caps its total at 10,000; ingest.js counts
+      # the visible records exactly beyond it (tests/load/count.js, node).
+      - name: Test the exact counts of the ingest scenarios
+        run: ./tests/load/count.test.sh
+
       # F-388 (WP-659): a failed request or a bulk job that did not succeed
       # makes the run red; k6 against a stub of the API.
       - uses: grafana/setup-k6-action@v1

@@ -29,7 +29,12 @@
 //         device of its own, the probes take further servers. A record is
 //         visible when its CI was seen in the run (last_seen_at). Budgets:
 //         every delay < VISIBLE_BUDGET_S, every request sent and accepted,
-//         every record visible and no new CI (ingest_new_cis).
+//         every record visible and no new CI (ingest_new_cis: the CIs
+//         created since the start of the run).
+//
+// The counts are exact beyond the capped total of GET /cis (E-104, WP-839:
+// 10,000 with total_capped): count.js splits a capped count by the next
+// character of the serial number or name.
 //
 // A record that never becomes visible fails every scenario
 // (ingest_records_missing): once the queue is empty and the count stopped
@@ -52,6 +57,7 @@ import http from 'k6/http';
 import exec from 'k6/execution';
 import { check, fail, sleep } from 'k6';
 import { Counter, Gauge, Trend } from 'k6/metrics';
+import { exactCount } from './count.js';
 import { BASE_URL, failed, get, params, post, seedDevice, total, uuid } from './lib.js';
 
 const SCENARIO = __ENV.SCENARIO || 'load';
@@ -160,13 +166,25 @@ export const options = {
 // the server stores last_seen_at to the second.
 const since = (t) => encodeURIComponent(`${new Date(Math.floor(t / 1000) * 1000).toISOString().slice(0, 19)}Z`);
 
-// seenSince selects the servers seen since t (rediscover; the switches of
-// the LLDP neighbors do not count).
-const seenSince = (t) => `filter[name][like]=srv-*&filter[last_seen_at][gte]=${since(t)}`;
+// listCount returns the total of GET /cis?query and whether it was capped
+// (E-104), null on an error.
+function listCount(query, name) {
+  const res = failed(http.get(`${BASE_URL}/api/v1/cis?limit=1&${query}`, params(name)), name);
+  return res.status === 200 ? { total: Number(res.json('total')), capped: res.json('total_capped') === true } : null;
+}
+
+// startsWith selects the CIs whose field starts with p for exactCount, with
+// equal the CIs whose field is p.
+const startsWith = (field, p, equal) => (equal ? `filter[${field}]=${p}` : `filter[${field}][like]=${p}*`);
+
+// seenCount returns how many servers were seen since t (rediscover; the
+// switches of the LLDP neighbors do not count), -1 on an error.
+const seenCount = (t, name) =>
+  exactCount((p, equal) => listCount(`${startsWith('name', p, equal)}&filter[last_seen_at][gte]=${since(t)}`, name), 'srv-');
 
 // setup names the run once for every VU: the serial numbers of the run share
 // its prefix. For rediscover it checks that the records describe the seed
-// and notes the CIs before the run.
+// and notes the servers seen since the start before the run.
 export function setup() {
   const data = { run: __ENV.RUN_ID || String(Date.now()), start: Date.now() };
   if (SCENARIO === 'rediscover') {
@@ -180,8 +198,10 @@ export function setup() {
     if (total(`filter[name]=${last.name}`, 'setup') !== 1) {
       fail(`the seed has no ${last.name}: seed it with -objects ${OBJECTS}`);
     }
-    data.cis = total('', 'setup');
-    data.seen = total(seenSince(data.start), 'setup');
+    data.seen = seenCount(data.start, 'setup');
+    if (data.seen < 0) {
+      fail('no count of the servers seen since the start of the run');
+    }
   }
   return data;
 }
@@ -255,11 +275,10 @@ export function rediscover() {
   }
 }
 
-// visibleCount returns how many CIs have a serial number with prefix.
+// visibleCount returns how many CIs have a serial number with prefix, also
+// beyond the capped total (-1 on an error).
 function visibleCount(prefix) {
-  const res = failed(http.get(`${BASE_URL}/api/v1/cis?limit=1&filter[serial_number][like]=${prefix}*`, params('visible-poll')),
-    'visible-poll');
-  return res.status === 200 ? Number(res.json('total')) : -1;
+  return exactCount((p, equal) => listCount(startsWith('serial_number', p, equal), 'visible-poll'), prefix);
 }
 
 // backlog reads the ingest backlog of /readyz: total is the server's last
@@ -381,7 +400,8 @@ export function probe(data) {
 // rediscoverProbe re-discovers a server from the top of the seed every
 // PROBE_EVERY_S during the load; it is visible when its CI was seen after
 // the probe was sent. Then it waits until every server of the run was seen
-// and counts the CIs that came up new.
+// and counts the CIs created since the start of the run: a total of the
+// whole organization is capped at 10,000 (E-104) and would not grow.
 export function rediscoverProbe(data) {
   const end = Date.now() + DURATION_S * 1000;
   const probes = probeDuringLoad(end, PROBES, (i) => {
@@ -392,11 +412,12 @@ export function rediscoverProbe(data) {
     }
     return () => total(`filter[serial_number]=${d.serial}&filter[last_seen_at][gte]=${since(sent)}`, 'probe-poll') > 0;
   });
-  const seen = () => total(seenSince(data.start), 'visible-poll') - data.seen;
+  const seen = () => seenCount(data.start, 'visible-poll') - data.seen;
   tail('rediscover', seen, OFFERED + probes, end);
-  const cis = total('', 'visible-poll');
-  newCIs.add(Math.max(0, cis - data.cis));
-  console.log(`rediscover: ${cis} CIs, ${data.cis} before the run`);
+  const created = listCount(`filter[created_at][gte]=${since(data.start)}`, 'visible-poll');
+  newCIs.add(created ? created.total : 0);
+  console.log(`rediscover: ${created ? created.total : 'no count of the'} CIs created since the start of the run` +
+    (created && created.capped ? ' (capped)' : ''));
 }
 
 // spool sends SPOOL_RECORDS records as a collector flushes its spool: one

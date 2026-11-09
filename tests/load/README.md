@@ -587,8 +587,9 @@ nimmt die Last die Server 5 bis 9.004, die Probe-Records die Server von
 ab. `setup` prüft, dass die Records zum Seed passen, und zählt die CIs.
 Gesehen heißt: `last_seen_at` des CIs (sekundengenau) liegt nach dem Senden;
 gezählt werden die Server (`filter[name][like]=srv-*`), die seit dem
-Laufbeginn gesehen wurden. `ingest_new_cis` ist die Zahl der CIs nach dem
-Lauf minus der Zahl davor.
+Laufbeginn gesehen wurden. `ingest_new_cis` ist die Zahl der CIs, die seit
+dem Laufbeginn angelegt wurden (`filter[created_at][gte]`): Die Zahl aller
+CIs der Organisation ist ab 10.000 gedeckelt (E-104) und wüchse nicht.
 
 Ursachenbestätigung F-118 (Hypothese: die Identitätssuche mit MACs vor
 WP-434 senkt den Durchsatz bei der Wiederentdeckung): `load.yml` per
@@ -617,7 +618,13 @@ die Verzögerung (`ingest_visible_delay`).
   des Szenarios, zur Information und als Nenner der Datenbankkosten),
   `ingest_new_cis` (`rediscover`: neue CIs, Budget 0). Sichtbar heißt:
   `GET /cis?filter[serial_number][like]=<Lauf>*` zählt den Record
-  (`rediscover`: das CI wurde nach dem Senden gesehen, siehe oben).
+  (`rediscover`: das CI wurde nach dem Senden gesehen, siehe oben). Seit
+  WP-839 ist `total` ab 10.000 gedeckelt (E-104, `total_capped`); ein
+  gedeckelter Zähler wird nach dem nächsten Zeichen der Seriennummer bzw.
+  des Namens aufgeteilt, bis jeder Teil exakt zählt (`tests/load/count.js`,
+  Selbsttest `count.test.sh` im Job `prepare`). Vorher blieb `load` mit
+  12.000 Records bei 10.000 sichtbaren stehen (`ingest_records_missing` =
+  2.000, Läufe 41566049639 und 41760522355).
 - **Vollständigkeit.** Alle Szenarien scheitern, sobald ein Record fehlt
   (`ingest_records_missing` = 0): Ist die Queue leer (`/readyz`, eine
   Stichprobe, die nach dem letzten Anstieg genommen wurde) und wächst die

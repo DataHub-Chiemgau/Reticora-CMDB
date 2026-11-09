@@ -395,6 +395,22 @@ func TestSearchFieldPermissions(t *testing.T) {
 		if hits, _ = w.find(t, policy, "alpha -"+frSecret); hits[w.alpha].EntityID == "" {
 			t.Errorf("%s: negation of the unreadable value hides the CI", name)
 		}
+		// A phrase of two readable values that the unreadable one parts in
+		// the document is one of the readable text: the prefilter of the
+		// restricted types keeps the CI by the words of the phrase.
+		if hits, _ = w.find(t, policy, `"acme osname266"`); hits[w.alpha].EntityID == "" {
+			t.Errorf("%s: a phrase of readable values across the unreadable one finds no CI", name)
+		}
+	}
+	// The operating system follows the serial number in the summary.
+	if _, err := f.Admin.Exec(bg, `UPDATE ci SET os_name = 'osname266' WHERE id = $1`, w.alpha); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.repo.ReindexTenant(f.OrgCtx(f.OrgA), f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	if hits, _ := w.find(t, nil, `"acme osname266"`); len(hits) != 0 {
+		t.Errorf("phase 1: the phrase across the serial number matches: %s", mustJSON(hits))
 	}
 	_, none := w.role(t, "wp266-none", [4]string{"ci", "", "core.serial_number", "none"})
 	hidden("field grant none", none)
