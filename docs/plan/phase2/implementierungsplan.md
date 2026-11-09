@@ -41,7 +41,7 @@ Gemergt sind WP-001 bis WP-214, WP-240 bis WP-242, die G1-Nachbesserung WP-332 b
 
 - **101 IDs im Umfang** mit WP-Zuordnung sowie 11 N/P-IDs ohne Wortlaut (nur Entscheidung, siehe E-37): alle IDs mit Tag [P2], die P2-Anteile gemischt getaggter IDs ([B]/[Pn]-Kombinationen, [P2–P3], [P2–P4, A]) und der Phase-2-Anteil von MET-45 (Tag im Katalog unvollständig). Dazu kommen die [Q]-IDs, die nach GATE-02 ab Phase 1 für jedes Gate gelten: DOD-01, GLO-11, SEQ-01, GATE-01, GATE-02, GATE-05, TEN-09, OPS-06, INS-01, INS-04, DIS-08, TST-04, SEC-11, ABN-01, ABN-02 und ABN-03. Von ABN-01 liefert Phase 2 Szenario (c); (a) und (b) sind durch die Erklärung des Auftraggebers vom 2026-10-15 nachgewiesen, die nach E-103 auch für G2 gilt; (d) und (e) sind mit `frontend/e2e/onboarding.spec.ts`, `frontend/e2e-real/abn-01-konflikt.spec.ts` und `frontend/e2e/conflict.spec.ts` für G2 erneut nachzuweisen. NFR-10 und GATE-03 gelten nach ihrem Wortlaut nur für G1, GATE-04 erst für GA. TKT-03 [O] ist als optionales WP ohne Gate-Wirkung enthalten (GATE-05, E-47).
 - **Nicht Bestandteil:** [P3]-Anteile (Monitoring, Workflows, Compliance, Wartungsfenster, SMS/Pager, Health, DSGVO-Workflows), [P4]-Anteile (Agent, Mobil/Offline, RFID, Inventur Pro, Ticketing Pro, Reseller, Schlüssel, Desk, Schulung, Disposition), [P5] und Add-ons [A] (IGA, KI). Die nach E-03 verschobenen WPs mit ausschließlich P3/P4/[A]-IDs (WP-219, WP-220, WP-228, WP-230 bis WP-234) bleiben verschoben. Aus G1 kommen nicht in Phase 2: SR-06 (dedizierter Referenzhost für den Lastnachweis, vor GA nach E-58), SR-10 (Obergrenze der MACs und Interfaces je DeviceRecord, Vertragsänderung nach API-01, vor GA), F-316 (asynchroner Audit-Runner, vor GA) und F-212 (Add-on-Zeilen aus 000086, mit der Aktivierung der Add-on-Module). Der Altconsumer `reticora-ingest` und 1.000 Records/s [P5] (`docs/acceptance/lasttest-g1.md`, Abschnitt „Offene Punkte“, Punkt 2) brauchen kein Folge-WP in Phase 2.
-- **234 Arbeitspakete** mit zusammen **357,5 PT**, davon 1 optionales WP ([O]). **G2-Umfang: 233 WPs mit 355,5 PT.** Entfallene WPs stehen mit Grund in der Tabelle der entfallenen WPs; Teile, die Phase 1 oder der Korrekturplan schon umgesetzt haben, sind in den Neufassungen gestrichen und im Feld „Problem“ belegt.
+- **236 Arbeitspakete** mit zusammen **360,0 PT**, davon 1 optionales WP ([O]). **G2-Umfang: 235 WPs mit 358,0 PT.** Entfallene WPs stehen mit Grund in der Tabelle der entfallenen WPs; Teile, die Phase 1 oder der Korrekturplan schon umgesetzt haben, sind in den Neufassungen gestrichen und im Feld „Problem“ belegt.
 - **Nachtrag vom 2026-10-26 (WP-499, F-123):** Meilenstein [M2.11 Lint-Altlast](#m211-lint-altlast-nachtrag-wp-499) mit 17 Arbeitspaketen WP-613 bis WP-629 (14,0 PT) baut die Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie ab (Folge-WP nach WP-001 AK4); sie gehören zu keiner [P2]-ID und ändern die Zahlen oben nicht.
 - **Nummerierung:** WP-Nummern sind über alle drei Pläne eindeutig. Die Traceability-Prüfung liest auf main den Phase-1-Plan und den Korrekturplan (`PlanFiles` in `backend/internal/traceability/traceability.go`, WP-336); WP-243 nimmt diesen Plan als dritten auf. WP-243 bis WP-331 behalten ihre Nummern aus dem Plan vom 2026-10-13. WP-332 bis WP-335 belegt die G1-Nachbesserung im Phase-1-Plan, WP-336 bis WP-612 und WP-630 bis WP-703 der Korrekturplan; WP-613 bis WP-629 sind die Lint-WPs dieses Plans (M2.11). Bei einer Teilung behält der erste Teil Nummer und Schlüssel. Weitere Teile und neue WPs, auch die Folge-WPs aus G1, erhalten Nummern ab WP-704 ohne Suffix, weil Parser und CI genau drei Ziffern erwarten. Das sind `wpPattern` in `backend/internal/traceability/traceability.go` und der Job `traceability` in `.github/workflows/ci.yml`: Er übergibt PR-Titel und -Text als `TRACEABILITY_PR_TITLE` und `TRACEABILITY_PR_BODY`, und `WorkPackagesIn` liest daraus die Nummern. Die Nummern sind deshalb nicht fortlaufend. Entfallene WPs behalten ihre Nummer; sie wird nicht neu vergeben. Die verschobenen Phase-1-WPs mit P2-IDs ersetzt dieser Plan durch eigene WPs (Tabelle unten, E-46); ihre Blöcke im Phase-1-Plan bleiben unverändert und werden nicht mehr als PR-Nummer verwendet.
 - **Reihenfolge** nach SEQ-01, Phase 2: Metamodell (Abschnitt 11) → Verträge, Asset/Lager/Stocktake, Dokumente → Ticketing Essential/Standard → Import, Bulk, Views → G2; „dazu Feldrechte“ (README §17) als eigener Meilenstein direkt nach dem Metamodell, damit alle Modul-DTOs den Feldrechte-Filter von Beginn an einbinden. Alles beginnt nach dem GO von WP-600 (E-59 (Korrekturplan)). Die G1-Folgearbeiten (M2.0b) laufen parallel zum Metamodell und sind vor den WPs gemergt, die ihren Pfad nutzen.
@@ -64,7 +64,7 @@ Gemergt sind WP-001 bis WP-214, WP-240 bis WP-242, die G1-Nachbesserung WP-332 b
 | [M2.7 Beziehungen, Graph und Netz](#m27-beziehungen-graph-und-netz) | Eigene Beziehungstypen und -attribute, Kantenhistorie (REL-06, REL-07, REL-09), Service-Impact und projizierte Netzknoten (IMP-08, IMP-10, IMP-11), IP-Reservierung und Duplikaterkennung (NET-06, NET-09). Läuft parallel zu M2.3 bis M2.6. | WP-294 – WP-300, WP-771 – WP-773 | 10 | 17,0 | REL-06/07/09, IMP-08/10/11, NET-06/09 PASS; Impact-Erweiterungen sind additiv und im Sparse-Fieldset `fields=` verfügbar (E-57); `TestTopologyQueryBudget`, `TestImpactWorstCase` und `TestIngestStatementBudget` grün. |
 | [M2.8 Import, Bulk, Views, Suche, Export, BFF, Historie](#m28-import-bulk-views-suche-export-bff-historie) | Import mit Mapping-Layer (IMP-IO-01), Bulk mit Undo (BLK-02, OVR-03), geteilte Views (VIE-02), Suchfelder und Filter-AST (SRC-02, SRC-03), DATEV (EXP-01), GraphQL-Aggregate (GQL-03), Snapshot und Zustand zum Zeitpunkt T (AUD-08). | WP-301 – WP-312, WP-774 – WP-776, WP-778 – WP-784, WP-786 – WP-795 | 32 | 51,5 | IMP-IO-01, BLK-02, OVR-03, VIE-02, SRC-02, SRC-03, EXP-01 (DATEV), GQL-03, AUD-08 PASS; anlegende Pfade von Import und Bulk nehmen Identitäts- und `max_cis`-Sperre und zählen in der Transaktion neu; neue Listen und Suchfelder halten p95 bei 10.000 Objekten einschließlich `total` (E-17). |
 | [M2.9 Oberflächen Phase 2](#m29-oberflächen-phase-2) | Admin-Oberflächen für das Metamodell, Klick-Builder, Form Builder mit Preview, geführte Anlage, Picker und Alltagsflows, Modul-Oberflächen (Assets, Verträge, Lager, Bestellungen, Inventur, Dokumente, Tickets, Import, Bulk, Views, Beziehungen), Playwright-Abläufe (UI-11, UI-12, UI-14, UI-15, MET-50 bis MET-52, SRC-03, TST-03). | WP-313 – WP-324, WP-797 – WP-803, WP-805 – WP-810, WP-812 – WP-818, WP-846 | 33 | 53,5 | UI-11, UI-12, UI-14 (P2-Anteil), UI-15, MET-50 bis MET-52, TST-03 (P2-Anteil) PASS; axe ohne Befunde auf neuen Seiten; neue Listen mit Client- oder Site-Bezug folgen der Scope-Auswahl (`SCOPED_LISTS` in `frontend/src/api/client.ts`). |
-| [M2.10 Seed, Qualität, Abnahme und Gate G2](#m210-seed-qualität-abnahme-und-gate-g2) | Seed-Erweiterung (SIM-01), TST-01-Pflichtfälle, Performance-Sanity mit `load.yml` (ABN-02, NFR-02), Konkurrenzmatrix und Isolationstest über die Phase-2-Kanäle (ABN-03, TEN-09), internes Sicherheitsreview mit Fortschreibung der offenen SR-Befunde (SEC-11), Abnahmeszenario (c) (ABN-01), Gate G2 (GATE-01/02/05, DOD-01, SEQ-01, GLO-11). | WP-325 – WP-331, WP-819 – WP-830 | 19 | 30,5 | Gate-Checkliste `docs/acceptance/g2-gate.md` vollständig belegt; kein offenes Critical aus Audit (einschließlich Teil 03), Sicherheitsreview Phase 2 und Pentest-Befundliste (E-103); ABN-02 nach dem Protokoll aus E-58 mit `load.yml` bei 10.000 Objekten (E-17), Impact-Budgets aus WP-335 gehalten; P2-Module im G2-Release eingeschaltet und je Organisation über Entitlements freigeschaltet. |
+| [M2.10 Seed, Qualität, Abnahme und Gate G2](#m210-seed-qualität-abnahme-und-gate-g2) | Seed-Erweiterung (SIM-01), TST-01-Pflichtfälle, Performance-Sanity mit `load.yml` (ABN-02, NFR-02), Konkurrenzmatrix und Isolationstest über die Phase-2-Kanäle (ABN-03, TEN-09), internes Sicherheitsreview mit Fortschreibung der offenen SR-Befunde (SEC-11), Abnahmeszenario (c) (ABN-01), Gate G2 (GATE-01/02/05, DOD-01, SEQ-01, GLO-11). | WP-325 – WP-331, WP-819 – WP-830, WP-852 – WP-853 | 21 | 33,0 | Gate-Checkliste `docs/acceptance/g2-gate.md` vollständig belegt; kein offenes Critical aus Audit (einschließlich Teil 03), Sicherheitsreview Phase 2 und Pentest-Befundliste (E-103); ABN-02 nach dem Protokoll aus E-58 mit `load.yml` bei 10.000 Objekten (E-17), Impact-Budgets aus WP-335 gehalten; P2-Module im G2-Release eingeschaltet und je Organisation über Entitlements freigeschaltet. |
 | [M2.11 Lint-Altlast (Nachtrag WP-499)](#m211-lint-altlast-nachtrag-wp-499) | Abbau der Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie (errcheck, ineffassign, gofmt/goimports, unused/staticcheck/unconvert, govet, gocritic), je WP höchstens 15 Dateien (WP-001 AK4, F-123). | WP-613 – WP-629 | 17 | 14,0 | golangci-lint ohne `new-from-rev` meldet für backend, collector und edgecore 0 Befunde; `new-from-rev` entfernt. |
 
 Reihenfolge nach SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`) und README §17. Vor allen Meilensteinen steht das GO des Gate-WP WP-600 (`k-gate`) des Korrekturplans (E-59 (Korrekturplan), Option 1); vorher beginnt kein WP dieses Plans.
@@ -92,7 +92,7 @@ flowchart LR
     M27["M2.7 Beziehungen, Graph und Netz<br/>10 WPs · 17,0 PT"]
     M28["M2.8 Import, Bulk, Views, Suche, Export, BFF, Historie<br/>32 WPs · 51,5 PT"]
     M29["M2.9 Oberflächen Phase 2<br/>33 WPs · 53,5 PT"]
-    M210["M2.10 Seed, Qualität, Abnahme und Gate G2<br/>19 WPs · 30,5 PT"]
+    M210["M2.10 Seed, Qualität, Abnahme und Gate G2<br/>21 WPs · 33,0 PT"]
     M20 --> M20b
     M20 --> M21
     M20b --> M28
@@ -14001,8 +14001,10 @@ API-06;[P2]/[P3]/[P4]/[A];C;frontend/src/api/deprecatedPaths.test.ts;WP-846
 | [WP-828](#wp-828--kanal-isolationsmatrix-phase-2-nach-ten-09-p2-kanäle-für-alle-scope-arten) | `g2-channel-matrix` | Kanal-Isolationsmatrix Phase 2 nach TEN-09: P2-Kanäle für alle Scope-Arten | 2,0 | WP-208, WP-271, WP-277, WP-275, WP-269, WP-270, WP-267, WP-283, WP-285, WP-286, WP-287, WP-290, WP-303, WP-305, WP-311, WP-308, WP-310, WP-762, WP-756 |
 | [WP-329](#wp-329--internes-sicherheitsreview-phase-2-owasp-asvs-l2-release-kandidat-g2-threat-model-scans-nachverfolgung-g1) | `g2-security` | Internes Sicherheitsreview Phase 2 (OWASP ASVS L2): Release-Kandidat G2, Threat-Model, Scans, Nachverfolgung G1 | 2,0 | WP-829, WP-326, WP-827, WP-826, WP-830, WP-831, WP-839, WP-704, WP-707, WP-708, WP-712, WP-713, WP-714, WP-718, WP-719, WP-724, WP-727, WP-728, WP-730, WP-732, WP-735, WP-737, WP-740, WP-743, WP-747, WP-749, WP-750, WP-752, WP-754, WP-755, WP-757, WP-759, WP-760, WP-761, WP-763, WP-765, WP-767, WP-768, WP-769, WP-293, WP-770, WP-771, WP-772, WP-773, WP-776, WP-782, WP-788, WP-789, WP-791, WP-792, WP-795, WP-800, WP-802, WP-803, WP-805, WP-807, WP-810, WP-812, WP-813, WP-814, WP-815, WP-816, WP-818, WP-324, WP-209, WP-004, WP-282, WP-832 |
 | [WP-829](#wp-829--sicherheitstests-phase-2-dokument-auslieferung-presign-import-parser-bulk-revert-etiketten-lookup) | `g2-security-tests` | Sicherheitstests Phase 2: Dokument-Auslieferung, Presign, Import-Parser, Bulk-Revert, Etiketten-Lookup | 1,0 | WP-734, WP-301, WP-305, WP-783, WP-784, WP-762, WP-030, WP-781 |
+| [WP-852](#wp-852--sr-56-dokument-bleibt-nach-wegfall-des-letzten-links-gescopt-entlinken-löschen-des-ziels-kanalzeile-document-link) | `g2-doc-link-scope` | SR-56: Dokument bleibt nach Wegfall des letzten Links gescopt (Entlinken, Löschen des Ziels), Kanalzeile document-link | 1,5 | WP-267, WP-851, WP-827, WP-828, WP-329 |
+| [WP-853](#wp-853--sr-57-clamd-im-kubernetes-standard-und-startprüfung-beim-leeren-release-standard-g2) | `g2-clamd-default` | SR-57: clamd im Kubernetes-Standard und Startprüfung beim leeren Release-Standard G2 | 1,0 | WP-735, WP-830, WP-329 |
 | [WP-330](#wp-330--abnahmeszenario-abn-01-c-metamodell-playwright-ablauf-protokollabschnitt-und-eingefrorene-daten) | `g2-abnahme` | Abnahmeszenario ABN-01 (c) Metamodell: Playwright-Ablauf, Protokollabschnitt und eingefrorene Daten | 1,5 | WP-324, WP-314, WP-306, WP-325, WP-317, WP-212, WP-712, WP-719, WP-830 |
-| [WP-331](#wp-331--g2-gateprüfung-traceability-stufe-p2-blockierend-g2-stufe-der-gate-prüfung-gate-checkliste-und-release-notes) | `g2-gate` | G2-Gateprüfung: Traceability-Stufe P2 blockierend, G2-Stufe der Gate-Prüfung, Gate-Checkliste und Release-Notes | 2,0 | WP-830, WP-831, WP-330, WP-327, WP-328, WP-329, WP-326, WP-243, WP-244, WP-324, WP-312, WP-262, WP-289, WP-292, WP-256, WP-270, WP-288, WP-297, WP-298, WP-299, WP-300, WP-319, WP-323, WP-832, WP-821, WP-828, WP-827, WP-825, WP-826, WP-213, WP-600 |
+| [WP-331](#wp-331--g2-gateprüfung-traceability-stufe-p2-blockierend-g2-stufe-der-gate-prüfung-gate-checkliste-und-release-notes) | `g2-gate` | G2-Gateprüfung: Traceability-Stufe P2 blockierend, G2-Stufe der Gate-Prüfung, Gate-Checkliste und Release-Notes | 2,0 | WP-830, WP-831, WP-330, WP-327, WP-328, WP-329, WP-326, WP-243, WP-244, WP-324, WP-312, WP-262, WP-289, WP-292, WP-256, WP-270, WP-288, WP-297, WP-298, WP-299, WP-300, WP-319, WP-323, WP-832, WP-821, WP-828, WP-827, WP-825, WP-826, WP-852, WP-853, WP-213, WP-600 |
 | [WP-830](#wp-830--release-standard-g2-p2-module-ohne-reticora_modules-freigegeben-p3p4a-bleiben-abgeschaltet) | `g2-release` | Release-Standard G2: P2-Module ohne RETICORA_MODULES freigegeben, P3/P4/[A] bleiben abgeschaltet | 1,0 | WP-214, WP-244, WP-705, WP-706, WP-704, WP-707, WP-708, WP-712, WP-713, WP-714, WP-718, WP-719, WP-724, WP-728, WP-727, WP-730, WP-770, WP-732, WP-735, WP-737, WP-270, WP-740, WP-743, WP-747, WP-749, WP-750, WP-752, WP-755, WP-754, WP-757, WP-759, WP-760, WP-761, WP-763, WP-765, WP-767, WP-769, WP-768, WP-771, WP-772, WP-773, WP-776, WP-782, WP-784, WP-788, WP-789, WP-791, WP-792, WP-795, WP-800, WP-802, WP-803, WP-805, WP-807, WP-810, WP-812, WP-320, WP-813, WP-815, WP-814, WP-816, WP-322, WP-818, WP-282, WP-324, WP-846 |
 
 ### WP-325 – Seed Phase 2 I: Rahmen der Phase-2-Schritte, Metamodell (Vererbung, Sets, Templates, Regeln, Layouts), Nutzer je Rolle, Feldrechte, Lasttest-Schlüssel je Rolle
@@ -14777,6 +14779,112 @@ SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
 
 **Nicht Bestandteil:** Nicht Bestandteil: die Behebung gefundener Schwachstellen (Folge-WPs aus WP-329), Cross-Tenant-Referenzen im Import (WP-827), die Feldrechte-Kanalmatrix (WP-730, WP-326), die Grenzen nach E-49 und das Entpackverhältnis (Tests in WP-301), das API-Limit von 5.000 Zeilen (WP-303) sowie Fälle, die schon die Tests von WP-030, WP-268, WP-733 und WP-734 abdecken.
 
+### WP-852 – SR-56: Dokument bleibt nach Wegfall des letzten Links gescopt (Entlinken, Löschen des Ziels), Kanalzeile document-link
+
+**Schlüssel:** `g2-doc-link-scope` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-267 (`doc-model`), WP-851 (`doc-create-links`), WP-827 (`g2-isolation`), WP-828 (`g2-channel-matrix`), WP-329 (`g2-security`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TEN-09 | [Q] | PARTIAL | High | Teil (Folge-WP aus WP-329: Dokumente werden durch Entlinken oder Löschen des Ziels nicht org-weit, SR-56; Kanalzeile `document-link`, SR-63) | `docs/audit/02-mandanten-auth-entitlements.md:42` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:25` |
+
+**Problem:** Das Sicherheitsreview Phase 2 (WP-329, `docs/security/review-phase2.md`) führt SR-56 als Critical; es sperrt G2 (GATE-01). Die Policy `document_tenant_isolation` (000064, 000139, 000217) zeigt ein Dokument, wenn es keinen Link hat (`link_count = 0`) oder mindestens einen sichtbaren. E-09 prüft nur die Anlage: `require_linked_row` (Constraint-Trigger auf INSERT) und `require_visible_parent`. Entfernt ein Principal von Client 2 den letzten Link eines Dokuments, das nur mit einem Objekt von Client 2 verknüpft ist (`DELETE /api/v1/documents/{id}/links/{link_id}`, `document.PGRepository.UnlinkDocument`), fällt `link_count` auf 0, und jeder Principal mit `document:read` in jedem Client sieht Metadaten, Versionen und Inhalt. Seit 000275 (WP-827) entfernen die Trigger `delete_target_document_links` die Links eines gelöschten Assets, Tickets, Standorts, einer Inventur, eines Entsorgungsnachweises, einer Lagerbewegung oder eines CIs (Retention), seit 000238 die eines Vertrags; deren Dokumente werden dabei ohne Absicht org-weit. `TestModuleTablesInheritObjectScope` (`backend/internal/tenant/rls/module_object_integration_test.go`, Teil „probe_doc_link_count.sql part A“) hält das als erwartet fest. Die Kanalmatrix hat keine Zeile für das Entlinken (SR-63).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration `000281_document_orphaned_scope`: Spalte `document.orphaned boolean NOT NULL DEFAULT false`. `count_document_links()` setzt sie, sobald der Zähler durch Entfernen oder Umhängen eines Links auf 0 fällt; ein neuer Link setzt sie nicht zurück. Ein Dokument, das Links hatte, wird damit nie durch den Wegfall seiner Links org-weit, gleich ob ein Principal entlinkt oder ein Ziel gelöscht wird (`delete_target_document_links`, `delete_contract_document_links`). Die Spalte schreiben nur die Zähler-Trigger (Wächter wie `protect_link_counter`, 000139).
+- [ ] `document_tenant_isolation` zeigt ein Dokument ohne Link nur dann allen Principals der Organisation, wenn es nie Links hatte (`link_count = 0 AND NOT orphaned`); ein verwaistes Dokument sehen nur org-weite Principals (ohne Client-, Site- und Team-Einschränkung, E-09, E-11). Org-weite Principals sehen, ändern und verknüpfen es weiter; ein gescopter Principal kann es nicht verknüpfen (`require_visible_parent`, `link_count = 0`). `document_version`, Suche (`hitVisible`), KI-Chunks und Presign folgen über die Policy von `document`.
+- [ ] Backfill: Dokumente ohne Link, deren Links 000275 in `migration_quarantine` verschoben hat oder für die `audit_log` einen Eintrag `document.linked` oder `document.unlinked` führt, werden als verwaist markiert. Die Down-Migration stellt `count_document_links()` und die Policy aus 000139/000217 wieder her und entfernt die Spalte; `TestMigrationsRoundtrip` bleibt grün, `docs/schema-baseline.md` ist nachgeführt.
+- [ ] Das Prädikat `documentVisible` in `backend/internal/document/pg_repository.go` bildet die Regel nach, damit das Repository ohne die Policy exakt bleibt.
+- [ ] Regressionstest als App-Rolle (`backend/internal/tenant/rls/document_link_scope_integration_test.go`, neu, `TestDocumentStaysScopedWithoutLinks`): Ein Principal von Client 2 entfernt den letzten Link eines Dokuments von Client 2; danach sieht Client 1 es nicht (Liste, Detail, Versionen), Client 2 auch nicht, der org-weite Principal schon. Gleiches nach dem Löschen jedes Linkziels aus 000275 und 000238 (CI, Asset, Ticket, Standort, Vertrag; Inventur, Entsorgungsnachweis und Lagerbewegung über den Löschpfad, den ihr Wächter zulässt). Ein nie verknüpftes Dokument eines org-weiten Principals bleibt für alle sichtbar. Der Test ist vor der Migration rot.
+- [ ] `TestModuleTablesInheritObjectScope` prüft im Teil „probe_doc_link_count.sql part A“ das neue Verhalten: Nach dem Entfernen des letzten Links sehen die Principals von Client 1 und Client 2 das Dokument nicht mehr, der org-weite Principal schon.
+- [ ] Kanalmatrix (TEN-09, SR-63): neue Zeile `document-link` in `rls.Channels` (`backend/internal/tenant/rls/matrix_fixtures.go`) und `channel_matrix_p2_integration_test.go`: `DELETE /api/v1/documents/{id}/links/{link_id}` je Scope-Art (eigener Link 204, Link außerhalb des Scopes 404 wie unbekannt) und danach die Sichtbarkeit des verwaisten Dokuments für jeden Principal (404 für alle gescopten, 200 für org-weite).
+- [ ] `docs/security/review-phase2.md`: SR-56 „behoben“ mit Commit; SR-63 vermerkt die Zeile `document-link`; `docs/security/threat-model.md` T33 mit dem Nachweis.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/migrations/000281_document_orphaned_scope.up.sql (neu)
+- backend/migrations/000281_document_orphaned_scope.down.sql (neu)
+- docs/schema-baseline.md
+- backend/internal/document/pg_repository.go
+- backend/internal/tenant/rls/document_link_scope_integration_test.go (neu)
+- backend/internal/tenant/rls/module_object_integration_test.go
+- backend/internal/tenant/rls/matrix_fixtures.go
+- backend/internal/tenant/rls/channel_matrix_p2_integration_test.go
+- docs/security/review-phase2.md
+- docs/security/threat-model.md
+- docs/traceability.csv
+
+**Migration/RLS:** `000281_document_orphaned_scope` (up/down): Spalte `document.orphaned`, `count_document_links()` setzt sie, Wächtertrigger, Policy `document_tenant_isolation` mit `NOT orphaned` im Zweig ohne Link, Backfill aus `migration_quarantine` (000275) und `audit_log`. ENABLE + FORCE RLS bleiben. Gleiches Muster für `maintenance_window` (`ci_count`) vor dem Freischalten von P3 (Modul `maintenance`).
+
+**Tests:**
+
+- `TestDocumentStaysScopedWithoutLinks` (neu) als App-Rolle gegen PostgreSQL mit beiden Wegen (Entlinken durch einen gescopten Principal, Löschen des Ziels).
+- `TestModuleTablesInheritObjectScope` mit dem umgestellten Teil A.
+- `TestChannelMatrix` mit der Zeile `document-link`; `TestRLSCatalog`, `TestDocumentRepositoryClientScope`, die Link-Tests in `backend/internal/document/` und `TestMigrationsRoundtrip` bleiben grün.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-09;[Q];G2;backend/internal/tenant/rls/document_link_scope_integration_test.go;WP-852
+```
+
+**Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden (2026-10-01)); [E-11](../entscheidungen.md#e-11) Semantik des Team-Scopes (entschieden (2026-10-28, Option 1))
+
+**Nicht Bestandteil:** Nicht Bestandteil: Wartungsfenster (`maintenance_window`, Modul P3, in G2 abgeschaltet); eine Freigabe verwaister Dokumente zurück an die Organisation über die API; die übrigen Zeilen aus SR-63 (vor GA).
+
+### WP-853 – SR-57: clamd im Kubernetes-Standard und Startprüfung beim leeren Release-Standard G2
+
+**Schlüssel:** `g2-clamd-default` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-735 (`doc-scan-ops`), WP-830 (`g2-release`), WP-329 (`g2-security`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| SEC-09 | [P2] | nicht geprüft | – | Teil (Folge-WP aus WP-329: Malware-Scan im Release-Standard G2 betriebsbereit, SR-57) | – | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:40` |
+
+**Problem:** SR-57 (Medium, vor G2 empfohlen): Seit WP-830 ist das Modul `documents` ohne `RETICORA_MODULES` aktiv. `deploy/k8s/base` und das Overlay `staging` enthalten die Komponente `clamav` nicht und setzen `RETICORA_CLAMD_ADDR` nicht; nur `overlays/prod` bindet sie ein, mit dem veralteten Kommentar „the module itself stays off until RETICORA_MODULES enables it“. `Config.documentScanErrors` prüft clamd und NATS nur, wenn `documentsEnabled()` das Modul ausdrücklich nennt (`documents`, `P2`, `all`), nicht beim leeren Release-Standard. Uploads bleiben dann `pending_scan` und enden in `scan_failed` (fail-closed, kein Bypass), ohne Hinweis beim Start.
+
+**Akzeptanzkriterien:**
+
+- [ ] `documentsEnabled()` wertet `RETICORA_MODULES` wie `server.ParseModules`: leer (Release-Standard G2) und `P2` schalten `documents` ein, ebenso `all` und der Schlüssel `documents`. Außerhalb von `development` verlangt die Startprüfung dann `RETICORA_CLAMD_ADDR` und `RETICORA_NATS_URL` (E-42, OPS-01).
+- [ ] Die Komponente `clamav` (`deploy/k8s/base/components/clamav`, Pin `clamav/clamav:1.5.4@sha256:…` wie `deploy/docker-compose/docker-compose.yml`, geprüft im Job `image-scan-thirdparty`) ist in `deploy/k8s/base` eingebunden; `staging` und `prod` erben sie. `overlays/prod` bindet sie nicht mehr selbst ein, ihr Kommentar nennt den Release-Standard.
+- [ ] `TestAuditT5K8sRenderedEnvSatisfiesStartCheck` rendert base, staging und prod mit `RETICORA_CLAMD_ADDR` und besteht die Startprüfung; ein Fixture-Overlay ohne `RETICORA_CLAMD_ADDR` meldet die Startprüfung.
+- [ ] `TestValidateDocumentScanner` prüft den leeren Release-Standard (ohne clamd: Fehler; mit clamd und NATS: gültig) und eine Modulliste ohne `documents` (gültig ohne clamd).
+- [ ] Kommentare in `backend/internal/config/config.go`, `deploy/k8s/base/components/clamav/kustomization.yaml`, `deploy/docker-compose/docker-compose.yml` und `docs/betrieb/referenzmodell.md` nennen den Release-Standard; `docs/security/review-phase2.md` setzt SR-57 auf „behoben“.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/internal/config/config.go
+- backend/internal/config/config_test.go
+- backend/internal/config/k8s_required_env_test.go
+- deploy/k8s/base/kustomization.yaml
+- deploy/k8s/base/components/clamav/kustomization.yaml
+- deploy/k8s/overlays/prod/kustomization.yaml
+- deploy/docker-compose/docker-compose.yml
+- docs/betrieb/referenzmodell.md
+- docs/security/review-phase2.md
+- docs/security/threat-model.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `TestValidateDocumentScanner` und `TestAuditT5K8sRenderedEnvSatisfiesStartCheck` (CI-Job `k8s-manifests` mit kustomize v5.8.1).
+- Unverändert grün: `image-scan-thirdparty` (gleicher Pin), Install-Smoke-Test (Compose setzt `RETICORA_CLAMD_ADDR` und `RETICORA_NATS_URL`), `tests/k8s/kind-smoke.test.sh`; der Lauf `k8s-smoke` auf kind wendet das Overlay `staging` mit clamd an.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-09;[P2];G2;backend/internal/config/config_test.go;WP-853
+```
+
+**Entscheidungsbedarf:** [E-42](entscheidungen.md#e-42) SEC-09: Betrieb des Malware-Scans (ClamAV) und Verhalten bei Ausfall (entschieden (2026-10-28, Option 1))
+
+**Nicht Bestandteil:** Nicht Bestandteil: ein clamd-Check in `/readyz`; die Signaturversorgung air-gapped (`docs/betrieb/referenzmodell.md`, WP-735); weitere Ausfallszenarien (WP-735, WP-331).
+
 ### WP-330 – Abnahmeszenario ABN-01 (c) Metamodell: Playwright-Ablauf, Protokollabschnitt und eingefrorene Daten
 
 **Schlüssel:** `g2-abnahme` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
@@ -14832,7 +14940,7 @@ ABN-01;[Q];G2;frontend/e2e/metamodel-scenario.spec.ts;WP-330
 
 **Schlüssel:** `g2-gate` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-831 (`g1-nachweise`), WP-330 (`g2-abnahme`), WP-327 (`g2-perf`), WP-328 (`g2-concurrency`), WP-329 (`g2-security`), WP-326 (`g2-tst01`), WP-243 (`p2-trace`), WP-244 (`p2-entitlements`), WP-324 (`ui-e2e-p2`), WP-312 (`aud-snapshot`), WP-262 (`met-export-all`), WP-289 (`inv-barcode`), WP-292 (`tkt-sla-calendar`), WP-256 (`met-instance`), WP-270 (`ast-contract-expiry`), WP-288 (`inv-standard`), WP-297 (`imp-blast`), WP-298 (`imp-projection`), WP-299 (`net-ip-reservation`), WP-300 (`net-duplicate-ip`), WP-319 (`ui-assets-contracts`), WP-323 (`ui-relationships-graph`), WP-832 (`g1-befunde-teil03`), WP-821 (`g2-seed-scale`), WP-828 (`g2-channel-matrix`), WP-827 (`g2-isolation`), WP-825 (`g2-concurrency-cycles`), WP-826 (`g2-concurrency-writers`), WP-213 (`g1-gate`), WP-600 (`k-gate`)
+**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-831 (`g1-nachweise`), WP-330 (`g2-abnahme`), WP-327 (`g2-perf`), WP-328 (`g2-concurrency`), WP-329 (`g2-security`), WP-326 (`g2-tst01`), WP-243 (`p2-trace`), WP-244 (`p2-entitlements`), WP-324 (`ui-e2e-p2`), WP-312 (`aud-snapshot`), WP-262 (`met-export-all`), WP-289 (`inv-barcode`), WP-292 (`tkt-sla-calendar`), WP-256 (`met-instance`), WP-270 (`ast-contract-expiry`), WP-288 (`inv-standard`), WP-297 (`imp-blast`), WP-298 (`imp-projection`), WP-299 (`net-ip-reservation`), WP-300 (`net-duplicate-ip`), WP-319 (`ui-assets-contracts`), WP-323 (`ui-relationships-graph`), WP-832 (`g1-befunde-teil03`), WP-821 (`g2-seed-scale`), WP-828 (`g2-channel-matrix`), WP-827 (`g2-isolation`), WP-825 (`g2-concurrency-cycles`), WP-826 (`g2-concurrency-writers`), WP-852 (`g2-doc-link-scope`), WP-853 (`g2-clamd-default`), WP-213 (`g1-gate`), WP-600 (`k-gate`)
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|
