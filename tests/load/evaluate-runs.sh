@@ -39,6 +39,17 @@
 #      archives of runs before WP-822 evaluable (E-58: the evaluation is
 #      reproducible); its last line names the job set G1.
 #
+# --gate also selects the budget set of the latency and duration thresholds
+# (E-146): every p95 threshold "p(95)<..." of a metric that
+# tests/load/budgets.json lists is evaluated with the budget of the set
+# of the gate, whatever bound the run recorded: G2 the provisional budgets
+# of the decision of 2026-11-09 (the set load.yml runs with by default,
+# BUDGET_GATE), G1 the budgets of NFR-02. So --gate G2 checks the same
+# budgets as k6 in load.yml, and the archives of either set stay
+# evaluable by the other. --partial evaluates with the set G2. The
+# report names the set; other thresholds (failures, ingest, counters)
+# are evaluated as recorded.
+#
 # Otherwise the runs are not evaluable: the last line of the report is
 # "Bewertung nach E-58 (Median über drei Läufe): nicht bewertbar: ...",
 # each reason also goes to stderr, and the script exits 1. The medians are
@@ -97,6 +108,12 @@ fi
 gate=${gate:-G2}
 if [ "$#" -ne 3 ]; then
 	usage
+fi
+# The budget set of the gate (E-146): metric -> p95 budget in ms.
+budgets_file="$(dirname "$0")/budgets.json"
+if ! budgets="$(jq -ce --arg g "$gate" '.gates[$g] | select(type == "object")' "$budgets_file" 2>/dev/null)"; then
+	echo "evaluate-runs: no budget set $gate in $budgets_file" >&2
+	exit 2
 fi
 runs=() ids=()
 for dir in "$@"; do
@@ -284,7 +301,7 @@ summaries() {
 # one), so the median of three is the worse of two present values. The
 # thresholds of the ingest beside a write job follow those of the job.
 evaluate() {
-	jq -rn --argjson jobs "$(printf '%s\n' "${jobs[@]}" | jq -R . | jq -sc .)" \
+	jq -rn --argjson jobs "$(printf '%s\n' "${jobs[@]}" | jq -R . | jq -sc .)" --argjson budgets "$budgets" \
 		--argjson ingestJobs "$(printf '%s\n' "${ingest_jobs[@]}" | jq -R . | jq -sc .)" \
 		--argjson ids "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -sc .)" \
 		--argjson blocked "$(printf '%s\n' "${blocked[@]}" | jq -R 'select(. != "")' | jq -sc .)" --arg prefix "$prefix" '
@@ -305,6 +322,9 @@ evaluate() {
 			elif $p.op == "!=" then $p.bound else infinite end;
 		def status: if . == "success" then "grün" elif . == "fehlt" then "**fehlt**" else "**rot**" end;
 		def source($s): if $s == "ingest" then .ingest else .metrics end;
+		# A p95 budget of the set of the gate replaces the recorded bound.
+		def budget($m): if (test("^\\s*p\\(95\\)\\s*<\\s*[-+0-9.eE]+\\s*$")) and ($budgets[$m] | type == "number")
+			then "p(95)<\($budgets[$m])" else . end;
 		def mark($s): if $s == "ingest" then " (paralleler Ingest)" else "" end;
 
 		[inputs] as $all
@@ -313,7 +333,7 @@ evaluate() {
 			| ([$per[] | select(.status != "success")] | length) as $red
 			| [("metrics", "ingest") as $s
 				| [$per[] | source($s) // {} | to_entries[] | select(.value | type == "object" and has("thresholds"))
-				| .key as $m | .value.thresholds | keys[] | {s: $s, m: $m, t: .}] | unique[]
+				| .key as $m | .value.thresholds | keys[] | {s: $s, m: $m, t: budget($m)}] | unique[]
 				| . as $thr | ($thr.t | parse) as $p
 				| [$per[] | source($thr.s) | if type == "object" then .[$thr.m] else null end | value($p.stat // "")] as $vals
 				| ($vals | map(. // worst($p)) | sort | .[1]) as $med
@@ -361,6 +381,8 @@ report="$(
 		echo "Jobsatz $gate (\`--gate $gate\`). Voraussetzungen (WP-206, NFR-10): derselbe Server-Commit in allen"
 		echo "drei Läufen und in jedem Lauf jeder der ${#all_jobs[@]} Jobs $(printf "\`%s\`, " "${all_jobs[@]}" | sed 's/, $//') (in der Zeile Jobs genannt und mit Verzeichnis)."
 	fi
+	echo "Latenz- und Dauerbudgets (p95): Satz $gate aus \`tests/load/budgets.json\` (E-146); er ersetzt die im Lauf"
+	echo "aufgezeichnete Grenze jeder dort geführten p95-Schwelle."
 	if [ "${#blocked[@]}" -eq 0 ]; then
 		echo "Voraussetzungen erfüllt."
 	else

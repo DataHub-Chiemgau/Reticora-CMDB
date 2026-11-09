@@ -67,6 +67,13 @@
 # with RETICORA_S3_*; the import of documents with the clamd scan is not
 # measured.
 #
+# Budget sets (E-146, decision of 2026-11-09 after run 42649690603): the
+# p95 budgets of api.js and phase2.js come from tests/load/budgets.json,
+# the set BUDGET_GATE: G2 (default, also for the nightly run) holds the
+# provisional budgets of the decision, G1 the budgets of NFR-02 of the G1
+# evidence (input budget_gate). tests/load/evaluate-runs.sh --gate reads
+# the same file. The failure thresholds are the same in both sets.
+#
 # The job archive gathers the k6 summaries, run records (commit, lscpu,
 # memory, configuration) and outcomes of all jobs into one artifact,
 # load-archive-<run id>, that docs/acceptance/artefakte/lasttest/<run id>/
@@ -99,6 +106,13 @@ on:
       scenarios:
         description: "Jobs to run, comma-separated (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume, api-large, phase2, import, template, computed), or all"
         default: "all"
+      budget_gate:
+        description: "p95 budgets of api.js and phase2.js (tests/load/budgets.json, E-146): G2 (provisional budgets of 2026-11-09) or G1 (NFR-02)"
+        type: choice
+        options:
+          - G2
+          - G1
+        default: G2
   schedule:
     - cron: "17 2 * * *"
 
@@ -219,6 +233,8 @@ jobs:
       TICKETS: ${{ matrix.phase2_volumes == 'inputs' && (inputs.tickets || '10000') || '' }}
       CONSUMABLES: ${{ matrix.phase2_volumes == 'inputs' && (inputs.consumables || '10000') || '' }}
       LATENCY_BUDGETS: ${{ matrix.latency_budgets || 'all' }}
+      # E-146: the budget set of api.js and phase2.js (tests/load/budgets.json).
+      BUDGET_GATE: ${{ inputs.budget_gate || 'G2' }}
       DURATION: ${{ inputs.duration || '2m' }}
       SERVER_SHA: ${{ needs.prepare.outputs.server_sha }}
       SCENARIO_NAME: ${{ matrix.scenario }}
@@ -449,6 +465,7 @@ jobs:
           set -o pipefail
           mkdir -p load-results
           args=(-e BASE_URL=http://localhost:8080 -e API_KEY="$(cat "$RUNNER_TEMP/load.key")" -e DURATION="$DURATION" -e OBJECTS="$OBJECTS")
+          args+=(-e BUDGET_GATE="$BUDGET_GATE")
           if [ -n "$K6_SCENARIO" ]; then
             args+=(-e SCENARIO="$K6_SCENARIO")
           fi
@@ -648,6 +665,7 @@ jobs:
             echo "k6 scenario: ${K6_SCENARIO:-default}"
             echo "objects: $OBJECTS"
             echo "latency budgets: $LATENCY_BUDGETS"
+            echo "budget set: $BUDGET_GATE"
             echo "duration: $DURATION"
             echo "seed options: ${SEED_ARGS:-none}"
             echo "phase-2 volumes: ${ASSETS:-SIM-01} assets, ${TICKETS:-SIM-01} tickets, ${CONSUMABLES:-SIM-01} consumables"

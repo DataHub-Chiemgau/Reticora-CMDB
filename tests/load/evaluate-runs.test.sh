@@ -21,6 +21,12 @@
 # phase-2 jobs: a phase2 budget and an ingest budget of a write job missed
 # in the median, an ingest summary missing in one run with the median held,
 # a write job without any ingest summary;
+# the budget sets (E-146, tests/load/budgets.json): --gate G2 evaluates
+# every p95 threshold the set lists with its G2 budget whatever bound the
+# run recorded (runs of G1 and G2 in one table row), --gate G1 with the
+# budgets of NFR-02, a value between the two held with G2 and missed with
+# G1, a p95 threshold without a budget keeps its bound, G1 of the file
+# unchanged (NFR-02) and both sets with the same keys;
 # with --partial: one noisy run with the median held; a job red in one run
 # with every threshold held; a job missing in one run with the median held
 # (the worse of the other two values); thresholds missed in two runs; a job
@@ -181,7 +187,8 @@ ingest() {
 	mkdir -p "$1/ingest"
 	jq -n --argjson delay "$2" '{metrics: {
 		"ingest_visible_delay": {"avg": 900, "p(95)": ($delay * 0.9), "max": $delay, "count": 11, "thresholds": {"max<30000": ($delay >= 30000)}},
-		"ingest_records_missing": {"count": 0, "rate": 0, "thresholds": {"count==0": false}}
+		"ingest_records_missing": {"count": 0, "rate": 0, "thresholds": {"count==0": false}},
+		"http_req_duration{name:ingest}": {"p(95)": 240, "max": 610, "count": 4000, "thresholds": {"p(95)<1000": false}}
 	}}' >"$1/ingest/ingest.json"
 }
 
@@ -271,13 +278,16 @@ check "the runs" "$OUT" '^\| 1002 \| https://github\.com/DataHub-Chiemgau/Retico
 check "the preconditions are met" "$OUT" '^Voraussetzungen erfüllt\.$'
 check "the nine jobs of G2 in the order of load.yml" "$(grep '^## Job' <<<"$OUT" | tr '\n' ' ')" '^## Job `api` ## Job `ingest` ## Job `ingest-spool` ## Job `ingest-rediscover` ## Job `nfr01-volume` ## Job `phase2` ## Job `import` ## Job `template` ## Job `computed` $'
 check "the gate G2 and its nine jobs named" "$OUT" '^Jobsatz G2 \(`--gate G2`\)\. Voraussetzungen'
-check "a phase2 threshold" "$OUT" '^\| `http_req_duration\{name:relation_search\}` \| `p\(95\)<500` \| 310 ms \| 310 ms \| 310 ms \| 310 ms \| ja \|$'
+check "a phase2 threshold with its G2 budget" "$OUT" '^\| `http_req_duration\{name:relation_search\}` \| `p\(95\)<1500` \| 310 ms \| 310 ms \| 310 ms \| 310 ms \| ja \|$'
 check "a threshold of a write job" "$OUT" '^\| `import_jobs_succeeded` \| `count==4` \| 4 \| 4 \| 4 \| 4 \| ja \|$'
 check "a threshold of the ingest beside a write job" "$OUT" '^\| `ingest_visible_delay` \(paralleler Ingest\) \| `max<30000` \| 2100 ms \| 2100 ms \| 2100 ms \| 2100 ms \| ja \|$'
 check "the same metric in the write job and the ingest beside it" "$(grep -c '^| `http_req_failed` (paralleler Ingest) | `rate==0` |' <<<"$OUT")" '^3$'
 check "the verdict of a write job counts the ingest thresholds" "$(sed -n '/^## Job `template`/,/^Urteil/p' <<<"$OUT" | tail -n 1)" '^Urteil: gehalten \(Schwellen im Median: 6 von 6 gehalten; rot in 0 von 3 Läufen\)\.$'
 check "a column per run" "$OUT" '^\| Metrik \| Schwelle \| 1001 \| 1002 \| 1003 \| Median \| gehalten \|$'
-check "a p95 threshold: the p95 per run and their median" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
+check "a p95 threshold: the p95 per run and their median, the G2 budget for the recorded G1 bound" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
+check "the budget set named" "$OUT" '^Latenz- und Dauerbudgets \(p95\): Satz G2 aus `tests/load/budgets\.json` \(E-146\)'
+check "a p95 threshold without a budget keeps its bound" "$OUT" '^\| `http_req_duration\{name:ingest\}` \| `p\(95\)<1000` \| 240 ms \| 240 ms \| 240 ms \| 240 ms \| ja \|$'
+check "an unchanged budget of G1 in G2" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<300` \| 120\.1 ms \| 130 ms \| 110 ms \| 120\.1 ms \| ja \|$'
 check "a rate threshold with its decimals" "$OUT" '^\| `checks` \| `rate>0\.99` \| 1 \| 0\.9953 \| 1 \| 1 \| ja \|$'
 check "a gauge threshold" "$OUT" '^\| `ingest_drain_records_per_s` \| `value>=200` \| 798 Records/s \| 388\.2 Records/s \| 963\.1 Records/s \| 798 Records/s \| ja \|$'
 check "a max threshold" "$OUT" '^\| `ingest_spool_flush` \| `max<300000` \| 15100 ms \| 28720 ms \| 20000 ms \| 20000 ms \| ja \|$'
@@ -358,12 +368,12 @@ check "--gate G2: the evidence line" "$(tail -n 1 <<<"$OUT")" '^Bewertung nach E
 # The jobs of phase 2: a budget of phase2 missed in two runs.
 Q="$TMP_ROOT/phase2-missed"
 for id in 1601 1602 1603; do full "$Q/$id"; done
-result "$Q/1601" phase2 failure && phase2 "$Q/1601" 120 640 9000
+result "$Q/1601" phase2 failure && phase2 "$Q/1601" 120 1640 9000
 result "$Q/1602" phase2 success && phase2 "$Q/1602" 130 450 9500
-result "$Q/1603" phase2 failure && phase2 "$Q/1603" 110 720 8800
+result "$Q/1603" phase2 failure && phase2 "$Q/1603" 110 1720 8800
 evaluate "a phase2 budget missed in the median: exit 1" 1 "$Q/1601" "$Q/1602" "$Q/1603"
-check "phase2: the missed p95 and its median" "$OUT" '^\| `http_req_duration\{name:relation_search\}` \| `p\(95\)<500` \| 640 ms \| 450 ms \| 720 ms \| 640 ms \| \*\*nein\*\* \|$'
-check "phase2: the overall line names the budget and the red runs" "$(tail -n 1 <<<"$OUT")" '^Bewertung nach E-58 \(Median über drei Läufe\): verfehlt: `phase2` `http_req_duration\{name:relation_search\}` `p\(95\)<500`; `phase2` rot in 2 von 3 Läufen$'
+check "phase2: the missed p95 and its median" "$OUT" '^\| `http_req_duration\{name:relation_search\}` \| `p\(95\)<1500` \| 1640 ms \| 450 ms \| 1720 ms \| 1640 ms \| \*\*nein\*\* \|$'
+check "phase2: the overall line names the budget and the red runs" "$(tail -n 1 <<<"$OUT")" '^Bewertung nach E-58 \(Median über drei Läufe\): verfehlt: `phase2` `http_req_duration\{name:relation_search\}` `p\(95\)<1500`; `phase2` rot in 2 von 3 Läufen$'
 
 # The ingest beside a write job (WP-823): NFR-03 missed in two runs while
 # the write job itself holds its thresholds.
@@ -402,6 +412,35 @@ check "no ingest summary: shown in the table" "$OUT" '^\| Paralleler Ingest \| �
 check "no ingest summary: the verdict" "$(sed -n '/^## Job `template`/,/^Urteil/p' <<<"$OUT" | tail -n 1)" '^Urteil: \*\*verfehlt\*\* \(Schwellen im Median: 3 von 3 gehalten, keine Zusammenfassung `template-ingest\.json` des parallelen Ingest; rot in 0 von 3 Läufen\)\.$'
 check "no ingest summary: the overall line" "$(tail -n 1 <<<"$OUT")" '^Bewertung nach E-58 \(Median über drei Läufe\): verfehlt: `template` ohne Zusammenfassung des parallelen Ingest \(`template-ingest\.json`\)$'
 
+# The budget sets (E-146): tests/load/budgets.json holds G1 (NFR-02) and G2
+# with the same keys; G1 stays the budgets of NFR-02.
+BUDGETS=tests/load/budgets.json
+check "budgets.json: G1 and G2 with the same metrics" "$(jq -r '(.gates.G1 | keys) == (.gates.G2 | keys)' "$BUDGETS")" '^true$'
+check "budgets.json: every budget a positive number" "$(jq -r '[.gates[][]] | all(type == "number" and . > 0)' "$BUDGETS")" '^true$'
+check "budgets.json: G2 never below G1" "$(jq -r '.gates.G1 as $g1 | .gates.G2 | to_entries | all(.value >= $g1[.key])' "$BUDGETS")" '^true$'
+check "budgets.json: G1 is NFR-02 (detail and rack 300 ms, topology 3 s, impact and blast radius 2 s, bulk 30 s, else 500 ms)" \
+	"$(jq -r '.gates.G1 | to_entries | all(.value == (
+		if (.key | test("name:(detail|rack)}")) then 300 elif (.key | test("name:topology}")) then 3000
+		elif (.key | test("name:(impact|impact_full|blast_radius)}")) then 2000 elif (.key | test("^bulk_")) then 30000 else 500 end))' "$BUDGETS")" '^true$'
+check "budgets.json: the 27 budgets of api.js and phase2.js" "$(jq -r '.gates.G1 | length' "$BUDGETS")" '^27$'
+# A run recorded with the G2 bounds (load.yml since E-146), two with the G1
+# bounds: one row per threshold, with the budget of the gate; a list p95
+# between G1 and G2 is held with --gate G2 and missed with --gate G1.
+V="$TMP_ROOT/budget-sets"
+for id in 2101 2102 2103; do full "$V/$id"; done
+result "$V/2101" api success && api "$V/2101" 700 110 870.5 1
+result "$V/2102" api success && api "$V/2102" 650 110 870.5 1
+result "$V/2103" api success && api "$V/2103" 720 110 870.5 1
+jq '.metrics["http_req_duration{name:list}"].thresholds = {"p(95)<1500": false}' "$V/2102/api/api.json" >"$TMP_ROOT/g2.json" && mv "$TMP_ROOT/g2.json" "$V/2102/api/api.json"
+evaluate "a list p95 between G1 and G2 with --gate G2: exit 0" 0 --gate G2 "$V/2101" "$V/2102" "$V/2103"
+check "--gate G2: one row with the G2 budget for runs of G1 and G2" "$(grep -c '^| `http_req_duration{name:list}` |' <<<"$(sed -n '/^## Job `api`/,/^Urteil/p' <<<"$OUT")")" '^1$'
+check "--gate G2: the list held with p(95)<1500" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 700 ms \| 650 ms \| 720 ms \| 700 ms \| ja \|$'
+evaluate "the same runs with --gate G1: exit 1" 1 --gate G1 "$V/2101" "$V/2102" "$V/2103"
+check "--gate G1: the budget set G1 named" "$OUT" '^Latenz- und Dauerbudgets \(p95\): Satz G1 aus `tests/load/budgets\.json`'
+check "--gate G1: the list missed with p(95)<500" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<500` \| 700 ms \| 650 ms \| 720 ms \| 700 ms \| \*\*nein\*\* \|$'
+check "--gate G1: a phase2 budget of G1" "$OUT" '^\| `http_req_duration\{name:relation_search\}` \| `p\(95\)<500` \| 310 ms'
+check "--gate G1: the overall line names the G1 budget" "$(tail -n 1 <<<"$OUT")" '^Bewertung nach E-58 \(Median über drei Läufe, Jobsatz G1\): verfehlt: `api` `http_req_duration\{name:list\}` `p\(95\)<500`$'
+
 # --partial (a diagnosis, never the evidence): the jobs the runs have, a job
 # missing in a run counts as red there.
 # One noisy run: api misses two budgets in run 2, the median holds.
@@ -413,7 +452,7 @@ result "$N/2003" api success && api "$N/2003" 120 110 870.5 1
 evaluate "one noisy run, median held: exit 0" 0 --partial "$N/2001" "$N/2002" "$N/2003"
 check "--partial: the mode named" "$OUT" '^Teilbewertung \(`--partial`\), kein G1-Nachweis: '
 check "--partial: only the jobs of the runs" "$(grep '^## Job' <<<"$OUT" | tr '\n' ' ')" '^## Job `api` $'
-check "the missed value in its run, the median within" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<500` \| 89\.4 ms \| 504 ms \| 120 ms \| 120 ms \| ja \|$'
+check "the missed value in its run, the median within" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 504 ms \| 120 ms \| 120 ms \| ja \|$'
 check "the second missed value" "$OUT" '^\| `http_req_duration\{name:detail\}` \| `p\(95\)<300` \| 120\.1 ms \| 467 ms \| 110 ms \| 120\.1 ms \| ja \|$'
 check "the red run" "$OUT" '^\| Status des Jobs \| – \| grün \| \*\*rot\*\* \| grün \| rot in 1 von 3 \| ja \|$'
 check "held although red in one run" "$OUT" '^Urteil: gehalten \(Schwellen im Median: 4 von 4 gehalten; rot in 1 von 3 Läufen\)\.$'
@@ -447,20 +486,20 @@ check "the missing job is red in its run" "$OUT" '^\| Status des Jobs \| – \| 
 # (lower bounds).
 X="$TMP_ROOT/missed"
 for id in 5001 5002 5003; do run "$X/$id" api ingest-spool; done
-result "$X/5001" api failure && api "$X/5001" 89.44 120.1 2100 0.98
+result "$X/5001" api failure && api "$X/5001" 89.44 120.1 3100 0.98
 result "$X/5002" api success && api "$X/5002" 101.2 130 1900 0.995
-result "$X/5003" api failure && api "$X/5003" 95 110 2300 0.97
+result "$X/5003" api failure && api "$X/5003" 95 110 3300 0.97
 result "$X/5001" ingest-spool failure && spool "$X/5001" 150 15100 0
 result "$X/5002" ingest-spool success && spool "$X/5002" 250 16000 0
 result "$X/5003" ingest-spool failure && spool "$X/5003" 180 17000 0
 evaluate "thresholds missed in two runs: exit 1" 1 --partial "$X/5001" "$X/5002" "$X/5003"
-check "a p95 missed in the median" "$OUT" '^\| `http_req_duration\{name:impact\}` \| `p\(95\)<2000` \| 2100 ms \| 1900 ms \| 2300 ms \| 2100 ms \| \*\*nein\*\* \|$'
+check "a p95 missed in the median" "$OUT" '^\| `http_req_duration\{name:impact\}` \| `p\(95\)<3000` \| 3100 ms \| 1900 ms \| 3300 ms \| 3100 ms \| \*\*nein\*\* \|$'
 check "a rate missed in the median" "$OUT" '^\| `checks` \| `rate>0\.99` \| 0\.98 \| 0\.995 \| 0\.97 \| 0\.98 \| \*\*nein\*\* \|$'
 check "a gauge missed in the median" "$OUT" '^\| `ingest_drain_records_per_s` \| `value>=200` \| 150 Records/s \| 250 Records/s \| 180 Records/s \| 180 Records/s \| \*\*nein\*\* \|$'
-check "a threshold held next to them" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
+check "a threshold held next to them" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| 89\.4 ms \| 101\.2 ms \| 95 ms \| 95 ms \| ja \|$'
 check "red in two runs fails the job" "$OUT" '^\| Status des Jobs \| – \| \*\*rot\*\* \| grün \| \*\*rot\*\* \| rot in 2 von 3 \| \*\*nein\*\* \|$'
 check "the verdict names both" "$OUT" '^Urteil: \*\*verfehlt\*\* \(Schwellen im Median: 2 von 4 gehalten; rot in 2 von 3 Läufen\)\.$'
-check "the overall line names every miss" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): verfehlt: `api` `checks` `rate>0\.99`; `api` `http_req_duration\{name:impact\}` `p\(95\)<2000`; `api` rot in 2 von 3 Läufen; `ingest-spool` `ingest_drain_records_per_s` `value>=200`; `ingest-spool` rot in 2 von 3 Läufen$'
+check "the overall line names every miss" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): verfehlt: `api` `checks` `rate>0\.99`; `api` `http_req_duration\{name:impact\}` `p\(95\)<3000`; `api` rot in 2 von 3 Läufen; `ingest-spool` `ingest_drain_records_per_s` `value>=200`; `ingest-spool` rot in 2 von 3 Läufen$'
 refute "a held threshold is not named" "$(tail -n 1 <<<"$OUT")" 'name:list'
 
 # A job missing in one run and red in another; a job in only one run.
@@ -475,7 +514,7 @@ result "$Y/6003" nfr01-volume success && volume "$Y/6003" 300
 evaluate "a job missing in one run and red in another: exit 1" 1 --partial "$Y/6001" "$Y/6002" "$Y/6003"
 check "missing and red: the median is the worse value" "$OUT" '^\| `ingest_visible_delay` \| `max<30000` \| fehlt \| 51550 ms \| 4820 ms \| 51550 ms \| \*\*nein\*\* \|$'
 check "missing and red count as two red runs" "$OUT" '^\| Status des Jobs \| – \| \*\*fehlt\*\* \| \*\*rot\*\* \| grün \| rot in 2 von 3 \| \*\*nein\*\* \|$'
-check "a job in one run has no median" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<500` \| fehlt \| fehlt \| 300 ms \| – \| \*\*nein\*\* \|$'
+check "a job in one run has no median" "$OUT" '^\| `http_req_duration\{name:list\}` \| `p\(95\)<1500` \| fehlt \| fehlt \| 300 ms \| – \| \*\*nein\*\* \|$'
 check "the overall line names both jobs" "$(tail -n 1 <<<"$OUT")" '^Teilbewertung nach E-58 \(Median über drei Läufe, kein G1-Nachweis\): verfehlt: .*`ingest-rediscover` rot in 2 von 3 Läufen; .*`nfr01-volume` rot in 2 von 3 Läufen$'
 refute "the green job is not named" "$(tail -n 1 <<<"$OUT")" '`api`'
 
