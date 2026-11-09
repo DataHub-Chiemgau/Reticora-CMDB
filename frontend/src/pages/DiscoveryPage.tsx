@@ -39,6 +39,7 @@ import {
   useEnrollmentClientChoice,
 } from '../components/EnrollmentClientSelect';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { CredentialsSection } from '../components/discovery/CredentialsSection';
 import { Panel } from '../components/spatial/Panel';
 import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
@@ -921,6 +922,9 @@ function ScopeList({ collector, canManage }: { collector: Collector; canManage: 
   );
 }
 
+/** The anchor of the credentials section (UI-14). */
+const CREDENTIALS_ANCHOR = 'credentials';
+
 /** The anchor of the card of the scope suggestions, the target of CollectorHints. */
 const SUGGESTIONS_ANCHOR = 'scope-suggestions';
 
@@ -1096,6 +1100,11 @@ export function DiscoveryPage() {
           description={t('discovery.emptyHint')}
         />
       ) : null}
+
+      {/* The credentials the scopes choose from (UI-14); empty without credential:read. */}
+      <div id={CREDENTIALS_ANCHOR} className="scroll-mt-6 empty:hidden">
+        <CredentialsSection />
+      </div>
     </div>
   );
 }

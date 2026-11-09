@@ -2726,9 +2726,40 @@ export interface Credential {
   updated_at: string;
 }
 
+/** The kinds of a credential (CreateCredentialRequest.kind in api/openapi.yaml). */
+export type CredentialKind =
+  | 'snmp_v2c'
+  | 'snmp_v3'
+  | 'ssh_password'
+  | 'ssh_key'
+  | 'redfish'
+  | 'ipmi'
+  | 'wmi'
+  | 'api_token'
+  | 'nut'
+  | 'nas';
+
+/**
+ * A new credential. The secret is write-only: the server encrypts it and no
+ * response returns it (SEC-01, COL-02). Without client_id it is
+ * organization-wide.
+ */
+export interface CredentialInput {
+  name: string;
+  kind: CredentialKind;
+  client_id?: string;
+  secret: Record<string, string>;
+}
+
 export const credentialApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Credential>> {
     return fetchAPI(`/credentials${buildQuery(params)}`);
+  },
+  create(input: CredentialInput): Promise<Credential> {
+    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(input) });
+  },
+  remove(id: string): Promise<void> {
+    return fetchAPI(`/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   rotateKeys(): Promise<{ key_version: number; rotated: number }> {
     return fetchAPI('/credentials/rotate-keys', { method: 'POST' });

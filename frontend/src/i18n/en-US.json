@@ -617,7 +617,69 @@
       "failed": "The suggestion could not be resolved: {{reason}}"
     },
     "empty": "No collector connected yet",
-    "emptyHint": "Connect a collector in the customer network. Its subnets appear here as suggestions for you to confirm."
+    "emptyHint": "Connect a collector in the customer network. Its subnets appear here as suggestions for you to confirm.",
+    "credentials": {
+      "title": "Credentials",
+      "intro": "Credentials the collectors use to query devices (SNMP, SSH, Redfish, IPMI, WMI, NUT, NAS, API). Secrets are stored encrypted and never shown again; to change one, delete it and create it anew.",
+      "listLabel": "List of credentials",
+      "add": "Add credentials",
+      "none": "No credentials yet.",
+      "loadFailed": "The credentials could not be loaded.",
+      "organizationWide": "All customers (organization-wide)",
+      "allClients": "All customers (organization-wide)",
+      "deleteNamed": "Delete credentials {{name}}",
+      "columns": {
+        "name": "Name",
+        "kind": "Kind",
+        "client": "Customer",
+        "createdAt": "Created"
+      },
+      "kinds": {
+        "snmp_v2c": "SNMP v2c",
+        "snmp_v3": "SNMP v3",
+        "ssh_password": "SSH (password)",
+        "ssh_key": "SSH (key)",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api_token": "API token",
+        "nut": "NUT (UPS)",
+        "nas": "NAS"
+      },
+      "fields": {
+        "community": "Community",
+        "username": "User",
+        "password": "Password",
+        "auth_protocol": "Auth protocol",
+        "auth_password": "Auth password",
+        "priv_protocol": "Privacy protocol",
+        "priv_password": "Privacy password",
+        "private_key": "Private key (file)",
+        "passphrase": "Key passphrase",
+        "token": "Token"
+      },
+      "form": {
+        "title": "Add credentials",
+        "secretLegend": "Secret",
+        "secretHint": "The entries are stored encrypted and never shown again.",
+        "keyHint": "The key file (PEM/OpenSSH) is read but not shown.",
+        "optional": "{{field}} (optional)",
+        "nameRequired": "Enter a name.",
+        "fieldRequired": "{{field}} is required.",
+        "reenter": "The secrets were removed from the form; enter them again."
+      },
+      "confirmDelete": {
+        "title": "Delete credentials?",
+        "text": "The credentials {{name}} are deleted; the collectors can no longer use them.",
+        "confirm": "Delete permanently"
+      },
+      "errors": {
+        "forbidden": "You lack the right for this (credential:manage) or the customer is outside your scope.",
+        "notFound": "These credentials no longer exist.",
+        "reason": "Reason: {{detail}}",
+        "deleteFailed": "The credentials {{name}} could not be deleted. {{reason}}"
+      }
+    }
   },
   "webhook": {
     "title": "Webhooks",

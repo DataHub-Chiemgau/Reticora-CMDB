@@ -617,7 +617,69 @@
       "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
     },
     "empty": "Noch kein Collector verbunden",
-    "emptyHint": "Verbinden Sie einen Collector im Kundennetz. Seine Subnetze erscheinen hier als Vorschläge, die Sie bestätigen."
+    "emptyHint": "Verbinden Sie einen Collector im Kundennetz. Seine Subnetze erscheinen hier als Vorschläge, die Sie bestätigen.",
+    "credentials": {
+      "title": "Zugangsdaten",
+      "intro": "Zugangsdaten, mit denen die Collector Geräte abfragen (SNMP, SSH, Redfish, IPMI, WMI, NUT, NAS, API). Geheimnisse werden verschlüsselt gespeichert und nie wieder angezeigt; zum Ändern löschen und neu anlegen.",
+      "listLabel": "Liste der Zugangsdaten",
+      "add": "Zugangsdaten anlegen",
+      "none": "Noch keine Zugangsdaten angelegt.",
+      "loadFailed": "Die Zugangsdaten konnten nicht geladen werden.",
+      "organizationWide": "Alle Kunden (organisationsweit)",
+      "allClients": "Alle Kunden (organisationsweit)",
+      "deleteNamed": "Zugangsdaten {{name}} löschen",
+      "columns": {
+        "name": "Name",
+        "kind": "Art",
+        "client": "Kunde",
+        "createdAt": "Angelegt"
+      },
+      "kinds": {
+        "snmp_v2c": "SNMP v2c",
+        "snmp_v3": "SNMP v3",
+        "ssh_password": "SSH (Passwort)",
+        "ssh_key": "SSH (Schlüssel)",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api_token": "API-Token",
+        "nut": "NUT (USV)",
+        "nas": "NAS"
+      },
+      "fields": {
+        "community": "Community",
+        "username": "Benutzer",
+        "password": "Passwort",
+        "auth_protocol": "Auth-Protokoll",
+        "auth_password": "Auth-Passwort",
+        "priv_protocol": "Privacy-Protokoll",
+        "priv_password": "Privacy-Passwort",
+        "private_key": "Privater Schlüssel (Datei)",
+        "passphrase": "Passphrase des Schlüssels",
+        "token": "Token"
+      },
+      "form": {
+        "title": "Zugangsdaten anlegen",
+        "secretLegend": "Geheimnis",
+        "secretHint": "Die Eingaben werden verschlüsselt gespeichert und nie wieder angezeigt.",
+        "keyHint": "Die Schlüsseldatei (PEM/OpenSSH) wird gelesen, aber nicht angezeigt.",
+        "optional": "{{field}} (optional)",
+        "nameRequired": "Geben Sie einen Namen an.",
+        "fieldRequired": "{{field}} ist erforderlich.",
+        "reenter": "Die Geheimnisse wurden aus dem Formular entfernt; geben Sie sie erneut ein."
+      },
+      "confirmDelete": {
+        "title": "Zugangsdaten löschen?",
+        "text": "Die Zugangsdaten {{name}} werden gelöscht; die Collector können sie danach nicht mehr verwenden.",
+        "confirm": "Endgültig löschen"
+      },
+      "errors": {
+        "forbidden": "Dafür fehlt Ihnen das Recht (credential:manage) oder der Kunde liegt außerhalb Ihres Bereichs.",
+        "notFound": "Die Zugangsdaten gibt es nicht mehr.",
+        "reason": "Grund: {{detail}}",
+        "deleteFailed": "Die Zugangsdaten {{name}} konnten nicht gelöscht werden. {{reason}}"
+      }
+    }
   },
   "webhook": {
     "title": "Webhooks",
