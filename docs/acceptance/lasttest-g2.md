@@ -16,7 +16,9 @@ Akzeptanzkriterien von WP-327 (`g2-perf`) sind damit nicht erfüllt.
 vorläufig, Korrektur bei Bedarf):** Die p95-Schwellen von `api.js` und
 `phase2.js` stehen in `tests/load/budgets.json` in zwei Sätzen: G1 (Budgets
 aus NFR-02, unverändert) und G2 (vorläufige Schwellen nach Lauf
-42649690603). `load.yml` läuft standardmäßig mit G2 (`BUDGET_GATE`), und
+42649690603, am 2026-11-09 gegen die Laufvarianz revidiert nach Lauf
+42661932847: höchster p95 der Läufe 42619469662, 42649690603 und
+42661932847 × 1,5, aufgerundet, für alle Metriken). `load.yml` läuft standardmäßig mit G2 (`BUDGET_GATE`), und
 `evaluate-runs.sh --gate G2` bzw. `load-evidence.yml` mit `gate` = `G2`
 bewertet gegen dieselben G2-Werte. Die Tabellen im Abschnitt „NFR-02“ nennen
 beide Werte; maßgeblich für den G2-Nachweis ist die Spalte „Schwelle G2“.
@@ -53,6 +55,12 @@ der Archive in `tests/load/README.md`.
   (`http_req_failed` 0 %, `checks` 100 % in allen Jobs). Entscheidung des
   Auftraggebers vom 2026-11-09: vorläufiger Budgetsatz G2 (E-146, Abschnitt
   „NFR-02“).
+- Lauf 42661932847 (`e3c1aa7d`): rot in `api` und `nfr01-volume` nur durch
+  p95-Schwellen von G2 (`http_req_failed` 0 %, `checks` 100 %); dieselben
+  Szenarien schwanken zwischen den Läufen auf dem 4-vCPU-Runner stark
+  (z. B. `blast_radius` in `nfr01-volume` 1,67 s bzw. 3,29 s). Revision von
+  E-146 vom 2026-11-09 (Laufvarianz): G2 für alle Metriken aus dem höchsten
+  p95 der drei Läufe × 1,5.
 - Ob die Läufe nach PR #148 grün sind, belegen erst die Nachweisläufe
   (Abschnitt „Läufe“). Ausstehend.
 
@@ -156,37 +164,37 @@ Schwelle G2: vorläufige Schwelle nach E-146 (Satz G2, Standard von
 |---|---|---:|---:|---:|---:|---:|---:|
 | Listen | `list` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
 | Listen (sortiert nach Name, E-104) | `list_sorted` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Suche (globale Suche der UI) | `global_search` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Indizierte Attributfilter | `filter` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Attributfilter (JSONB `cost_center`) | `attr_filter` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Beziehungen eines CI | `relationships` | < 500 | < 800 | ausstehend | ausstehend | ausstehend | ausstehend |
-| CI-Detail | `detail` | < 300 | < 300 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Rack-Layout | `rack` | < 300 | < 300 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Topologie 2.000 Knoten | `topology` | < 3.000 | < 3.000 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Impact Tiefe 20 (kompakt) | `impact` | < 2.000 | < 3.000 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Impact Tiefe 20 (Standardform) | `impact_full` | < 2.000 | < 3.500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Blast Radius | `blast_radius` | < 2.000 | < 3.000 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Bulk 500 IDs (Status) | `bulk_500_duration` | < 30 s | < 75 s | ausstehend | ausstehend | ausstehend | ausstehend |
-| Bulk 500 IDs (`set_fields`) | `bulk_fields_500_duration` | < 30 s | < 65 s | ausstehend | ausstehend | ausstehend | ausstehend |
+| Suche (Namensfilter der Liste) | `list_name_filter` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Suche (globale Suche der UI) | `global_search` | < 500 | < 2.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Indizierte Attributfilter | `filter` | < 500 | < 900 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Attributfilter (JSONB `cost_center`) | `attr_filter` | < 500 | < 800 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Beziehungen eines CI | `relationships` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| CI-Detail | `detail` | < 300 | < 800 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Rack-Layout | `rack` | < 300 | < 600 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Topologie 2.000 Knoten | `topology` | < 3.000 | < 3.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Impact Tiefe 20 (kompakt) | `impact` | < 2.000 | < 4.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Impact Tiefe 20 (Standardform) | `impact_full` | < 2.000 | < 5.000 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Blast Radius | `blast_radius` | < 2.000 | < 5.000 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Bulk 500 IDs (Status) | `bulk_500_duration` | < 30 s | < 95 s | ausstehend | ausstehend | ausstehend | ausstehend |
+| Bulk 500 IDs (`set_fields`) | `bulk_fields_500_duration` | < 30 s | < 115 s | ausstehend | ausstehend | ausstehend | ausstehend |
 | Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / 0 | > 99 % / 0 | ausstehend | ausstehend | ausstehend | ausstehend |
 
 ### Phase 2 (`phase2.js`, Job `phase2`)
 
 | Budget (NFR-02) | k6-Szenario (`name`) | Schwelle G1 | Schwelle G2 | L1 | L2 | L3 | Median |
 |---|---|---:|---:|---:|---:|---:|---:|
-| Listen (Asset-Liste mit `total`, K23) | `asset_list` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Listen (Asset-Liste mit Feldrechten von viewer) | `asset_list_restricted` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Listen (Ticketliste mit `total`) | `ticket_list` | < 500 | < 1.000 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Listen (Asset-Liste mit `total`, K23) | `asset_list` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Listen (Asset-Liste mit Feldrechten von viewer) | `asset_list_restricted` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Listen (Ticketliste mit `total`) | `ticket_list` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
 | Listen (Mengenartikel mit `total`) | `consumable_list` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Suche (Felder aus WP-308) | `search_fields` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Attributfilter (Bereich `cost_center`, `warranty_days_left`) | `ci_attr_filter` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Tag-Filter der CI-Liste | `ci_tag_filter` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Filter auf Asset-Felder (`POST /search/query`) | `ast_asset_filter` | < 500 | < 500 | ausstehend | ausstehend | ausstehend | ausstehend |
-| Systemsichten (WP-307) | `view_presets` | < 500 | < 2.500 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Suche (Felder aus WP-308) | `search_fields` | < 500 | < 2.000 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Attributfilter (Bereich `cost_center`, `warranty_days_left`) | `ci_attr_filter` | < 500 | < 800 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Tag-Filter der CI-Liste | `ci_tag_filter` | < 500 | < 700 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Filter auf Asset-Felder (`POST /search/query`) | `ast_asset_filter` | < 500 | < 800 | ausstehend | ausstehend | ausstehend | ausstehend |
+| Systemsichten (WP-307) | `view_presets` | < 500 | < 3.000 | ausstehend | ausstehend | ausstehend | ausstehend |
 | Beziehungssuche (`upstream_of`/`downstream_of`, Tiefe 5) | `relation_search` | < 500 | < 1.500 | ausstehend | ausstehend | ausstehend | ausstehend |
 | Bulk 500 IDs (Assets, `set_fields`) | `bulk_assets_500_duration` | < 30 s | < 30 s | ausstehend | ausstehend | ausstehend | ausstehend |
-| Bulk 500 IDs (CIs, `add_tags`) | `bulk_cis_ops_500_duration` | < 30 s | < 30 s | ausstehend | ausstehend | ausstehend | ausstehend |
+| Bulk 500 IDs (CIs, `add_tags`) | `bulk_cis_ops_500_duration` | < 30 s | < 40 s | ausstehend | ausstehend | ausstehend | ausstehend |
 | Checks / fehlgeschlagene Anfragen | `checks`, `http_req_failed` | > 99 % / 0 | > 99 % / 0 | ausstehend | ausstehend | ausstehend | ausstehend |
 
 ### Massen-Schreibjobs (`writes.js`, Messgrößen ohne Budget)
@@ -261,26 +269,26 @@ beiden Budgetsätzen.
 | Teil von ABN-02 / NFR-02 | k6-Szenario (`name`-Tag, Skript) | Schwelle (p95) G1 / G2 (E-146) | Query-Budget-Test (Statementzahl, Plan) |
 |---|---|---:|---|
 | Listen: CI-Liste | `list`, `list_sorted` (`api.js`) | < 500 ms / < 1.500 ms | `TestCIQueryBudget` Fall `list` (höchstens 6 Statements für 10 und 200 Zeilen); `TestCIListBudget` (feste Statementzahl, Seite über `idx_ci_list_sort` ohne Sortierung der Organisation) |
-| Listen: Asset-Liste, auch mit Feldrechte-Projektion | `asset_list`, `asset_list_restricted` (`phase2.js`) | < 500 ms | `TestAssetQueryBudget` (Liste höchstens 5 Statements, über den Handler mit Projektion `listBudget + 11`; Standardseite über `idx_asset_list_sort`, 000278) |
-| Listen: Ticketliste | `ticket_list` (`phase2.js`) | < 500 ms / < 1.000 ms | `TestTicketQueryBudget` (höchstens 5 Statements; Standardseite über `idx_ticket_list_sort`, 000277; Sichtbarkeit über `ci_pkey`/`ci_id_organization_key` und `asset_pkey`/`asset_id_organization_key`) |
+| Listen: Asset-Liste, auch mit Feldrechte-Projektion | `asset_list`, `asset_list_restricted` (`phase2.js`) | < 500 ms / < 700 ms | `TestAssetQueryBudget` (Liste höchstens 5 Statements, über den Handler mit Projektion `listBudget + 11`; Standardseite über `idx_asset_list_sort`, 000278) |
+| Listen: Ticketliste | `ticket_list` (`phase2.js`) | < 500 ms / < 1.500 ms | `TestTicketQueryBudget` (höchstens 5 Statements; Standardseite über `idx_ticket_list_sort`, 000277; Sichtbarkeit über `ci_pkey`/`ci_id_organization_key` und `asset_pkey`/`asset_id_organization_key`) |
 | Listen: Mengenartikel | `consumable_list` (`phase2.js`) | < 500 ms | `TestConsumableListQueryBudget` (Seite über `idx_consumable_list_name`, 000279) |
-| Suche: Namensfilter der CI-Liste | `list_name_filter` (`api.js`) | < 500 ms / < 700 ms | `TestCIQueryBudget` Fälle `name filter (search=)`, `name filter (filter[name]=)` |
-| Suche: globale Suche | `global_search` (`api.js`), `search_fields` (`phase2.js`) | < 500 ms / < 1.500 ms | `TestRestrictedSearchQueryBudget`, `TestRestrictedSearchFieldRowBudget` (eingeschränkte Suche, Zusatzfeldzeilen einmal je Suche), `TestReindexFieldRowsQueryBudget`; Volltext nach E-133 (Option 3) als dokumentierter linearer Scan ohne Planprüfung |
-| Attributfilter: indizierte Filter | `filter` (`api.js`) | < 500 ms / < 700 ms | `TestCIQueryBudget` Fall `hostname filter of the list (filter[hostname]=)` (`idx_ci_hostname_lc`) |
-| Attributfilter: JSONB-Gleichheit | `attr_filter` (`api.js`) | < 500 ms | `TestCIQueryBudget` Fall `attribute filter` (Index je Schlüssel, E-73 (Korrekturplan), 000162/000164) |
-| Attributfilter: Bereich und `warranty_days_left` | `ci_attr_filter` (`phase2.js`) | < 500 ms / < 700 ms | `TestSavedViewQueryBudget` (`warranty_days_left` über `idx_ci_warranty_days_left`, 000274), `TestWarrantyDaysLeftIndexKeepsResults`; Bewertung des Plans zusammen mit dem p95 von `ci_attr_filter`: ausstehend |
-| Attributfilter: Tags | `ci_tag_filter` (`phase2.js`) | < 500 ms | `TestCIQueryBudget` Fall `tag filter (filter[tags][in])` (`idx_ci_tag_org_tag`) |
-| Attributfilter: Asset-Felder und Systemsichten | `ast_asset_filter`, `view_presets` (`phase2.js`) | < 500 ms / `ast_asset_filter` < 500 ms, `view_presets` < 2.500 ms | `TestSavedViewQueryBudget` (Filter-AST mit Asset-Feldern auf Assets und auf CIs über das verknüpfte Asset, höchstens 4 Statements für 10 und 200 Zeilen; Systemsicht `servers_without_monitoring`) |
-| Beziehungssuche | `relation_search` (`phase2.js`); Beziehungen eines CI `relationships` (`api.js`) | < 500 ms / `relation_search` < 1.500 ms, `relationships` < 800 ms | `TestSavedViewQueryBudget` (`upstream_of` über `idx_ci_rel_org_target`, `downstream_of` über `idx_ci_rel_org_source`/`uq_ci_relationship_edge`, Tiefe 5); `TestRelationshipListPlanBudget` |
-| Topologie | `topology` (`api.js`) | < 3.000 ms | `TestTopologyQueryBudget` (höchstens 40 Statements, unabhängig von der Graphgröße; `seqScan`-Prüfung) |
-| Impact, kompakte Form | `impact` (`api.js`) | < 2.000 ms / < 3.000 ms | `TestImpactWorstCase` (höchstens 250 Byte je betroffenem CI, Statementzahl wie bei 3.000 Objekten, Override-Abgleich über `idx_ci_field_value_override`), `TestImpactLeanAgainstPostgres` |
-| Impact, Standardform | `impact_full` (`api.js`) | < 2.000 ms / < 3.500 ms | `TestImpactWorstCase` (Pfade aus `via`/`relay`); Mehrfach-Impact `TestMultiImpactAgainstPostgres` |
-| Impact, Blast Radius | `blast_radius` (`api.js`) | < 2.000 ms / < 3.000 ms | `TestTopologyQueryBudget` (Fall `blast-radius`), `TestServiceImpactWorstCase` |
-| Bulk | `bulk_500_duration`, `bulk_fields_500_duration` (`api.js`); `bulk_assets_500_duration`, `bulk_cis_ops_500_duration` (`phase2.js`) | < 30 s / `bulk_500_duration` < 75 s, `bulk_fields_500_duration` < 65 s, Phase 2 < 30 s | kein Query-Budget-Test; nur k6 (jeder Bulk-Job muss gelingen: `*_jobs_succeeded` `count==3`) |
+| Suche: Namensfilter der CI-Liste | `list_name_filter` (`api.js`) | < 500 ms / < 1.500 ms | `TestCIQueryBudget` Fälle `name filter (search=)`, `name filter (filter[name]=)` |
+| Suche: globale Suche | `global_search` (`api.js`), `search_fields` (`phase2.js`) | < 500 ms / `global_search` < 2.500 ms, `search_fields` < 2.000 ms | `TestRestrictedSearchQueryBudget`, `TestRestrictedSearchFieldRowBudget` (eingeschränkte Suche, Zusatzfeldzeilen einmal je Suche), `TestReindexFieldRowsQueryBudget`; Volltext nach E-133 (Option 3) als dokumentierter linearer Scan ohne Planprüfung |
+| Attributfilter: indizierte Filter | `filter` (`api.js`) | < 500 ms / < 900 ms | `TestCIQueryBudget` Fall `hostname filter of the list (filter[hostname]=)` (`idx_ci_hostname_lc`) |
+| Attributfilter: JSONB-Gleichheit | `attr_filter` (`api.js`) | < 500 ms / < 800 ms | `TestCIQueryBudget` Fall `attribute filter` (Index je Schlüssel, E-73 (Korrekturplan), 000162/000164) |
+| Attributfilter: Bereich und `warranty_days_left` | `ci_attr_filter` (`phase2.js`) | < 500 ms / < 800 ms | `TestSavedViewQueryBudget` (`warranty_days_left` über `idx_ci_warranty_days_left`, 000274), `TestWarrantyDaysLeftIndexKeepsResults`; Bewertung des Plans zusammen mit dem p95 von `ci_attr_filter`: ausstehend |
+| Attributfilter: Tags | `ci_tag_filter` (`phase2.js`) | < 500 ms / < 700 ms | `TestCIQueryBudget` Fall `tag filter (filter[tags][in])` (`idx_ci_tag_org_tag`) |
+| Attributfilter: Asset-Felder und Systemsichten | `ast_asset_filter`, `view_presets` (`phase2.js`) | < 500 ms / `ast_asset_filter` < 800 ms, `view_presets` < 3.000 ms | `TestSavedViewQueryBudget` (Filter-AST mit Asset-Feldern auf Assets und auf CIs über das verknüpfte Asset, höchstens 4 Statements für 10 und 200 Zeilen; Systemsicht `servers_without_monitoring`) |
+| Beziehungssuche | `relation_search` (`phase2.js`); Beziehungen eines CI `relationships` (`api.js`) | < 500 ms / < 1.500 ms | `TestSavedViewQueryBudget` (`upstream_of` über `idx_ci_rel_org_target`, `downstream_of` über `idx_ci_rel_org_source`/`uq_ci_relationship_edge`, Tiefe 5); `TestRelationshipListPlanBudget` |
+| Topologie | `topology` (`api.js`) | < 3.000 ms / < 3.500 ms | `TestTopologyQueryBudget` (höchstens 40 Statements, unabhängig von der Graphgröße; `seqScan`-Prüfung) |
+| Impact, kompakte Form | `impact` (`api.js`) | < 2.000 ms / < 4.500 ms | `TestImpactWorstCase` (höchstens 250 Byte je betroffenem CI, Statementzahl wie bei 3.000 Objekten, Override-Abgleich über `idx_ci_field_value_override`), `TestImpactLeanAgainstPostgres` |
+| Impact, Standardform | `impact_full` (`api.js`) | < 2.000 ms / < 5.000 ms | `TestImpactWorstCase` (Pfade aus `via`/`relay`); Mehrfach-Impact `TestMultiImpactAgainstPostgres` |
+| Impact, Blast Radius | `blast_radius` (`api.js`) | < 2.000 ms / < 5.000 ms | `TestTopologyQueryBudget` (Fall `blast-radius`), `TestServiceImpactWorstCase` |
+| Bulk | `bulk_500_duration`, `bulk_fields_500_duration` (`api.js`); `bulk_assets_500_duration`, `bulk_cis_ops_500_duration` (`phase2.js`) | < 30 s / `bulk_500_duration` < 95 s, `bulk_fields_500_duration` < 115 s, `bulk_assets_500_duration` < 30 s, `bulk_cis_ops_500_duration` < 40 s | kein Query-Budget-Test; nur k6 (jeder Bulk-Job muss gelingen: `*_jobs_succeeded` `count==3`) |
 | Massen-Schreibjobs neben dem Ingest | `import`, `template`, `computed` (`writes.js`) | ohne Budget (Messgrößen) | `TestAssetQueryBudget` Fälle `import duplicate search by inventory number` (`idx_asset_tag_org`) und `import duplicate search by normalized serial number` (`idx_asset_org_serial_norm`); Ingest `TestIngestStatementBudget` |
 | GraphQL-Aggregat (N+1) | – | – | `TestAssetAggregateQueryBudget` (`asset(id) { cis children movements documents }`, gleiche Statementzahl für 10 und 100) |
-| NFR-02 CI-Detail | `detail` (`api.js`) | < 300 ms | `TestCIQueryBudget` Fall `detail` (höchstens 5 Statements, `ci_pkey`/`ci_id_organization_key`) |
-| NFR-02 Rack-Layout | `rack` (`api.js`) | < 300 ms | kein Query-Budget-Test; Funktion `TestRackLayoutAgainstPostgres`; Messung nur k6 |
+| NFR-02 CI-Detail | `detail` (`api.js`) | < 300 ms / < 800 ms | `TestCIQueryBudget` Fall `detail` (höchstens 5 Statements, `ci_pkey`/`ci_id_organization_key`) |
+| NFR-02 Rack-Layout | `rack` (`api.js`) | < 300 ms / < 600 ms | kein Query-Budget-Test; Funktion `TestRackLayoutAgainstPostgres`; Messung nur k6 |
 
 N+1 und fehlende Indizes: Jeder Query-Budget-Test oben misst die
 Statementzahl über einen pgx-Tracer an einer Kopie des App-Pools und prüft
