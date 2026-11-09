@@ -4,6 +4,7 @@ import { renderWithProviders } from '../../test/utils';
 import { useShellStore } from '../../stores/shell';
 import type { AppPage } from '../CommandPalette';
 import { SidebarNav } from './SidebarNav';
+import { NavLockContext } from './navigation';
 
 const PAGES: AppPage[] = ['dashboard', 'cmdb', 'topology', 'reviews', 'tickets', 'users'];
 
@@ -64,5 +65,50 @@ describe('SidebarNav', () => {
     expect(screen.getByRole('link', { name: 'Topologie' })).toBeInTheDocument();
     // The rail has no group headings.
     expect(screen.queryByRole('button', { name: 'Infrastruktur' })).toBeNull();
+  });
+
+  describe('locked pages of the plan (WP-857)', () => {
+    function renderLocked(plan: string | undefined, route = '/cmdb', collapsed = false) {
+      useShellStore.setState({ collapsed: false, groups: { assets: true } });
+      return renderWithProviders(
+        <NavLockContext.Provider value={{ pages: new Set<AppPage>(['assets']), plan }}>
+          <SidebarNav visiblePages={new Set(PAGES)} collapsed={collapsed} />
+        </NavLockContext.Provider>,
+        { route },
+      );
+    }
+
+    it('shows a locked page with lock, aria-disabled and the plan', () => {
+      renderLocked('essential');
+      const link = screen.getByRole('link', { name: 'Inventar' });
+      expect(link).toHaveAttribute('aria-disabled', 'true');
+      expect(link).toHaveAttribute('data-locked', 'true');
+      expect(link).toHaveAccessibleDescription('Nicht im Paket Essential enthalten');
+      expect(link.querySelector('svg.lucide-lock')).not.toBeNull();
+      // The group of a locked page is shown, the link leads to the hint page.
+      expect(screen.getByRole('button', { name: 'Assets' })).toBeInTheDocument();
+      expect(link).toHaveAttribute('href', '/assets');
+    });
+
+    it('names no plan it does not know', () => {
+      renderLocked(undefined);
+      expect(screen.getByRole('link', { name: 'Inventar' })).toHaveAccessibleDescription(
+        'Nicht in Ihrem Paket enthalten',
+      );
+    });
+
+    it('leaves the other pages unlocked', () => {
+      renderLocked('essential');
+      const link = screen.getByRole('link', { name: 'Topologie' });
+      expect(link).not.toHaveAttribute('aria-disabled');
+      expect(link).not.toHaveAccessibleDescription();
+    });
+
+    it('keeps the hint in the icon rail', () => {
+      renderLocked('standard', '/cmdb', true);
+      expect(screen.getByRole('link', { name: 'Inventar' })).toHaveAccessibleDescription(
+        'Nicht im Paket Standard enthalten',
+      );
+    });
   });
 });

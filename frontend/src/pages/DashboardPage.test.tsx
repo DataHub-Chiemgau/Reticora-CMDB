@@ -369,4 +369,193 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('button', { name: 'Tickets' })).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/entitlements'))).toBe(true);
   });
+
+  describe('quick access and setup checklist (WP-857)', () => {
+    const SETUP_READER = {
+      user_id: 'user-1',
+      permissions: ['ci:read', 'discovery:read', 'credential:read', 'location:read'],
+    };
+    const client = (id: string, slug: string) => ({
+      id,
+      organization_id: 'org-1',
+      name: slug,
+      slug,
+      external_ref: null,
+      timezone: null,
+      settings: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+
+    function signInAs(sub: string) {
+      useAuthStore.setState({
+        token: 'header.payload.signature',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        user: { sub },
+      });
+    }
+
+    beforeEach(() => {
+      window.localStorage.clear();
+      useDashboardStore.setState({ role: 'technician', hidden: [], setupHiddenFor: [] });
+    });
+
+    function checklist() {
+      return screen.findByRole('heading', { name: 'Einrichtung' }).then((heading) => {
+        const section = heading.closest('section');
+        expect(section).not.toBeNull();
+        return within(section as HTMLElement);
+      });
+    }
+
+    it('offers the reachable pages and leaves out the locked ones', async () => {
+      signInAs('user-1');
+      stubFetchRoutes({
+        '/me/permissions': { user_id: 'user-1', permissions: ['ci:read'] },
+        '/modules': { data: [{ key: 'ticketing', phase: 'P2', nav: ['tickets'], enabled: false }] },
+        '/entitlements': paginated([
+          { organization_id: 'org-1', feature_key: 'cmdb_core', plan: 'essential', enabled: true },
+          { organization_id: 'org-1', feature_key: 'topology', plan: 'essential', enabled: true },
+          {
+            organization_id: 'org-1',
+            feature_key: 'assets_basic',
+            plan: 'essential',
+            enabled: false,
+          },
+        ]),
+        '/cis': paginated([]),
+        '/collectors': paginated([]),
+      });
+
+      renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+      const region = await screen.findByRole('heading', { name: 'Schnellzugriff' });
+      const quick = within(region.closest('section') as HTMLElement);
+      expect(quick.getByRole('link', { name: 'CMDB' })).toHaveAttribute('href', '/cmdb');
+      await waitFor(() => expect(quick.getByRole('link', { name: 'Topologie' })).toBeVisible());
+      // Locked by the plan, switched off in the release, without the right.
+      await waitFor(() => expect(quick.queryByRole('link', { name: 'Inventar' })).toBeNull());
+      expect(quick.queryByRole('link', { name: 'Tickets' })).toBeNull();
+      expect(quick.queryByRole('link', { name: 'Kunden' })).toBeNull();
+      // The dashboard does not lead to itself.
+      expect(quick.queryByRole('link', { name: 'Dashboard' })).toBeNull();
+    });
+
+    it('ticks off the steps from the existing lists and links where they are done', async () => {
+      const fetchMock = stubFetchRoutes({
+        '/me/permissions': SETUP_READER,
+        '/clients': paginated([client('cl-1', 'default')]),
+        '/sites': { ...paginated([]), total: 1 },
+        '/credentials': { ...paginated([]), total: 0 },
+        '/cis?limit=1&offset=0&status=active': { ...paginated([]), total: 3 },
+        '/cis?limit=1&offset=0&status=maintenance': { ...paginated([]), total: 2 },
+        '/cis?limit=1&offset=0': { ...paginated([]), total: 5 },
+        '/collectors': paginated([]),
+      });
+
+      renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+      const list = await checklist();
+      expect(await list.findByText('2 von 5 Schritten erledigt')).toBeInTheDocument();
+      const steps = list.getAllByRole('listitem');
+      expect(steps.map((step) => within(step).getByRole('link').textContent)).toEqual([
+        'Kunde anlegen',
+        'Standort anlegen',
+        'Zugangsdaten anlegen',
+        'Collector registrieren',
+        'Erste CIs erfassen',
+      ]);
+      expect(list.getByRole('link', { name: 'Kunde anlegen' })).toHaveAttribute('href', '/clients');
+      expect(list.getByRole('link', { name: 'Standort anlegen' })).toHaveAttribute(
+        'href',
+        '/locations',
+      );
+      expect(list.getByRole('link', { name: 'Zugangsdaten anlegen' })).toHaveAttribute(
+        'href',
+        '/discovery',
+      );
+      expect(list.getByRole('link', { name: 'Collector registrieren' })).toHaveAttribute(
+        'href',
+        '/onboarding',
+      );
+      expect(list.getByRole('link', { name: 'Erste CIs erfassen' })).toHaveAttribute(
+        'href',
+        '/cmdb',
+      );
+      // Only the default client exists: the step is open; a site and CIs are there.
+      expect(within(steps[0]!).getByText('Offen')).toBeInTheDocument();
+      expect(within(steps[1]!).getByText('Erledigt')).toBeInTheDocument();
+      expect(within(steps[2]!).getByText('Offen')).toBeInTheDocument();
+      expect(within(steps[3]!).getByText('Offen')).toBeInTheDocument();
+      expect(within(steps[4]!).getByText('Erledigt')).toBeInTheDocument();
+      // Counts are lists with limit=1, no endpoint of their own.
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls).toContain('/api/v1/sites?limit=1');
+      expect(urls).toContain('/api/v1/credentials?limit=1');
+    });
+
+    it('counts a client of its own besides the default client', async () => {
+      stubFetchRoutes({
+        '/me/permissions': { user_id: 'user-1', permissions: ['location:read'] },
+        '/clients': paginated([client('cl-1', 'default'), client('cl-2', 'acme')]),
+        '/sites': { ...paginated([]), total: 0 },
+        '/cis': paginated([]),
+        '/collectors': paginated([]),
+      });
+
+      renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+      const list = await checklist();
+      expect(await list.findByText('1 von 2 Schritten erledigt')).toBeInTheDocument();
+    });
+
+    it('leaves out the steps without the right', async () => {
+      const fetchMock = stubFetchRoutes({
+        '/me/permissions': { user_id: 'user-1', permissions: ['ci:read'] },
+        '/cis': { ...paginated([]), total: 0 },
+        '/collectors': paginated([]),
+      });
+
+      renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+      const list = await checklist();
+      expect(list.getAllByRole('listitem')).toHaveLength(1);
+      expect(list.getByRole('link', { name: 'Erste CIs erfassen' })).toBeInTheDocument();
+      expect(list.queryByRole('link', { name: 'Kunde anlegen' })).toBeNull();
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls.some((url) => url.includes('/credentials'))).toBe(false);
+      expect(urls.some((url) => url.includes('/sites'))).toBe(false);
+    });
+
+    it('is hidden per user and can be shown again', async () => {
+      signInAs('user-1');
+      stubFetchRoutes({
+        '/me/permissions': { user_id: 'user-1', permissions: ['ci:read'] },
+        '/entitlements': paginated([]),
+        '/modules': { data: [] },
+        '/cis': { ...paginated([]), total: 0 },
+        '/collectors': paginated([]),
+      });
+
+      const { unmount } = renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+
+      const list = await checklist();
+      fireEvent.click(list.getByRole('button', { name: 'Liste ausblenden' }));
+      expect(screen.queryByRole('heading', { name: 'Einrichtung' })).toBeNull();
+      expect(
+        JSON.parse(window.localStorage.getItem('reticora-dashboard-setup-hidden') ?? '[]'),
+      ).toEqual(['user-1']);
+      const toggle = screen.getByRole('button', { name: 'Einrichtungsliste' });
+      expect(toggle).toHaveAttribute('aria-pressed', 'false');
+      unmount();
+
+      // Another user of the browser still sees the list.
+      signInAs('user-2');
+      renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+      expect(await screen.findByRole('heading', { name: 'Einrichtung' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Liste ausblenden' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Einrichtungsliste' }));
+      expect(await screen.findByRole('heading', { name: 'Einrichtung' })).toBeInTheDocument();
+    });
+  });
 });

@@ -178,6 +178,40 @@
       "operations": "Operations and stock"
     }
   },
+  "discoverability": {
+    "lockedInPlan": "Not included in the {{plan}} plan",
+    "lockedNoPlan": "Not included in your plan",
+    "plans": {
+      "essential": "Essential",
+      "standard": "Standard",
+      "pro": "Pro",
+      "enterprise": "Enterprise"
+    },
+    "locked": {
+      "title": "“{{name}}” is not part of your plan",
+      "description": "The function exists in Reticora but is not enabled in your organization's plan. Contact your organization's administrators if you want to use it.",
+      "back": "Go to dashboard"
+    },
+    "quickAccess": {
+      "title": "Quick access",
+      "general": "General"
+    },
+    "setup": {
+      "title": "Setup",
+      "progress": "{{done}} of {{total}} steps done",
+      "hide": "Hide list",
+      "toggle": "Setup checklist",
+      "done": "Done",
+      "open": "Open",
+      "steps": {
+        "client": "Create a customer",
+        "site": "Create a site",
+        "credential": "Create credentials",
+        "collector": "Register a collector",
+        "cis": "Capture the first CIs"
+      }
+    }
+  },
   "toast": {
     "undo": "Undo",
     "dismiss": "Dismiss notification",

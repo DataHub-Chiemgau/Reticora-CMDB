@@ -178,6 +178,40 @@
       "operations": "Betrieb und Bestand"
     }
   },
+  "discoverability": {
+    "lockedInPlan": "Nicht im Paket {{plan}} enthalten",
+    "lockedNoPlan": "Nicht in Ihrem Paket enthalten",
+    "plans": {
+      "essential": "Essential",
+      "standard": "Standard",
+      "pro": "Pro",
+      "enterprise": "Enterprise"
+    },
+    "locked": {
+      "title": "„{{name}}“ gehört nicht zu Ihrem Paket",
+      "description": "Die Funktion ist in Reticora vorhanden, aber im Paket Ihrer Organisation nicht freigeschaltet. Wenden Sie sich an die Administration Ihrer Organisation, wenn Sie sie nutzen möchten.",
+      "back": "Zum Dashboard"
+    },
+    "quickAccess": {
+      "title": "Schnellzugriff",
+      "general": "Allgemein"
+    },
+    "setup": {
+      "title": "Einrichtung",
+      "progress": "{{done}} von {{total}} Schritten erledigt",
+      "hide": "Liste ausblenden",
+      "toggle": "Einrichtungsliste",
+      "done": "Erledigt",
+      "open": "Offen",
+      "steps": {
+        "client": "Kunde anlegen",
+        "site": "Standort anlegen",
+        "credential": "Zugangsdaten anlegen",
+        "collector": "Collector registrieren",
+        "cis": "Erste CIs erfassen"
+      }
+    }
+  },
   "toast": {
     "undo": "Rückgängig",
     "dismiss": "Benachrichtigung schließen",

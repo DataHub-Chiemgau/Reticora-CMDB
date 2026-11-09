@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { entitlementApi, moduleApi } from '../api/client';
+import { useEffectivePermissions } from '../api/hooks';
 import { useAuthStore } from '../auth/authStore';
+import { navPageStates } from '../components/shell/navigation';
+import type { NavPageState } from '../components/shell/navigation';
+import type { AppPage } from '../components/CommandPalette';
 
 /**
  * Map of feature_key -> enabled for the current tenant. When the tenant has no
@@ -22,16 +27,22 @@ export function useEntitlements() {
     queryFn: async () => {
       const res = await entitlementApi.list({ limit: 200 });
       const map: EntitlementMap = {};
+      let plan: string | undefined;
       for (const e of res.data ?? []) {
         map[e.feature_key] = e.enabled;
+        // Every row carries the plan of the organization; cmdb_core is
+        // always there and wins over the others (WP-857).
+        if (e.plan && (!plan || e.feature_key === 'cmdb_core')) {
+          plan = e.plan;
+        }
       }
-      return map;
+      return { map, plan };
     },
     enabled: isAuthenticated,
     staleTime: 60_000,
   });
 
-  const map = query.data;
+  const map = query.data?.map;
   const isEnabled = (feature: string | undefined): boolean => {
     // While loading or when the feature has no gate, default to visible so the
     // core navigation (dashboard, cmdb) never flickers away.
@@ -40,7 +51,19 @@ export function useEntitlements() {
     return map[feature] ?? false;
   };
 
-  return { entitlements: map, isEnabled, isLoading: query.isLoading };
+  return {
+    entitlements: map,
+    plan: query.data?.plan,
+    isEnabled,
+    isLoading: query.isLoading,
+  };
+}
+
+type ModuleList = Awaited<ReturnType<typeof moduleApi.list>>['data'];
+
+/** isPageServed: no switched-off module lists the page (unknown until loaded: served). */
+function isPageServed(modules: ModuleList | undefined, page: string): boolean {
+  return !modules || !modules.some((m) => !m.enabled && m.nav.includes(page));
 }
 
 /**
@@ -61,8 +84,7 @@ export function useModules() {
   const isModuleEnabled = (key: string): boolean =>
     // Unknown until loaded: hide nothing so the navigation does not flicker.
     !modules || (modules.find((m) => m.key === key)?.enabled ?? true);
-  const isPageEnabled = (page: string): boolean =>
-    !modules || !modules.some((m) => !m.enabled && m.nav.includes(page));
+  const isPageEnabled = (page: string): boolean => isPageServed(modules, page);
 
   return { modules, isModuleEnabled, isPageEnabled, isLoading: query.isLoading };
 }
@@ -149,4 +171,36 @@ export const navPermissionFor: Record<string, string | undefined> = {
  */
 export function hasPermission(permissions: readonly string[] | undefined, key: string): boolean {
   return permissions?.includes(key) ?? false;
+}
+
+/**
+ * useNavAccess applies the one visibility rule of the navigation (WP-857,
+ * navPageState) to every page: the sidebar, the command palette, the
+ * dashboard's quick access and the hint page of a locked route all read
+ * it. A page of a switched-off release module or without the user's right
+ * is hidden; a page whose only obstacle is the plan is locked. The rights
+ * fail closed while they load (like useHasPermission). Call it only from
+ * signed-in parts: it reads /entitlements, /modules and /me/permissions.
+ */
+export function useNavAccess() {
+  const { entitlements, plan, isLoading } = useEntitlements();
+  const { modules } = useModules();
+  const permissions = useEffectivePermissions().data?.permissions;
+  const states = useMemo(
+    () =>
+      navPageStates({
+        isEntitled: (page) => {
+          const feature = navFeatureFor[page];
+          return !feature || !entitlements || (entitlements[feature] ?? false);
+        },
+        isPageEnabled: (page) => isPageServed(modules, page),
+        isPermitted: (page) => {
+          const required = navPermissionFor[page];
+          return !required || hasPermission(permissions, required);
+        },
+      }),
+    [entitlements, modules, permissions],
+  );
+  const stateOf = (page: AppPage): NavPageState => states.get(page) ?? 'hidden';
+  return { states, stateOf, plan, isLoading };
 }

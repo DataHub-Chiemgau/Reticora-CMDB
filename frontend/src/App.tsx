@@ -8,7 +8,9 @@ import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
 import { AppShell, PublicShell } from './components/shell/AppShell';
-import { NAV_GROUPS } from './components/shell/navigation';
+import { NavLockContext } from './components/shell/navigation';
+import type { NavLock } from './components/shell/navigation';
+import { pageOfPath } from './components/shell/SidebarNav';
 import { Skeleton } from './components/ui/Skeleton';
 import { ToastViewport } from './components/ui/Toast';
 import { useAuthStore } from './auth/authStore';
@@ -16,14 +18,8 @@ import { refreshSession } from './auth/session';
 import { signOut } from './auth/signOut';
 import { LoginPage } from './pages/auth/LoginPage';
 import { CallbackPage } from './pages/auth/CallbackPage';
-import {
-  hasPermission,
-  navFeatureFor,
-  navPermissionFor,
-  useEntitlements,
-  useModules,
-} from './hooks/useEntitlements';
-import { useEffectivePermissions, useHasPermission } from './api/hooks';
+import { navFeatureFor, useEntitlements, useModules, useNavAccess } from './hooks/useEntitlements';
+import { useHasPermission } from './api/hooks';
 import { useOpenReviewCount } from './hooks/useReviews';
 import { nextThemeMode, useThemeStore } from './stores/theme';
 import type { ThemeMode } from './stores/theme';
@@ -130,6 +126,7 @@ const InvitationAcceptPage = lazyPage(
 );
 const MapPage = lazyPage(() => import('./pages/MapPage'), 'MapPage');
 const RoomPlanPage = lazyPage(() => import('./pages/RoomPlanPage'), 'RoomPlanPage');
+const FeatureLockedPage = lazyPage(() => import('./pages/FeatureLockedPage'), 'FeatureLockedPage');
 
 // Full-screen fallback while a page chunk loads.
 function PageFallback() {
@@ -362,26 +359,37 @@ function SignedInShell({
   user: { name?: string; email?: string };
   onSignOut: () => void;
 }) {
-  // Entitlement-gated navigation: modules the tenant's plan does not
-  // include are hidden instead of producing a 403 on click (progressive
-  // disclosure). Modules of later phases are switched off in the G1 release
-  // (WP-214): their pages are hidden whatever the plan includes. Pages that
-  // need a permission (navPermissionFor) are filtered as well (UI-12,
-  // WP-804), so the palette and the sidebar offer the same pages.
-  const { isEnabled } = useEntitlements();
-  const { isPageEnabled } = useModules();
-  const isPermitted = usePermittedPage();
-  const visiblePages = useMemo(() => {
-    const pages = new Set<AppPage>();
-    for (const group of NAV_GROUPS) {
-      for (const { page } of group.items) {
-        if (isEnabled(navFeatureFor[page]) && isPageEnabled(page) && isPermitted(page)) {
-          pages.add(page);
-        }
-      }
+  // One visibility rule for the sidebar, the palette and the dashboard
+  // (navPageState, WP-857): modules of later phases switched off in the
+  // release (WP-214) and pages without the user's permission
+  // (navPermissionFor, UI-12, WP-804) are hidden; pages the tenant's plan
+  // does not include are shown locked and lead to a hint page instead of a
+  // page full of 403 errors.
+  const { states, plan, isLoading: entitlementsLoading } = useNavAccess();
+  const { visiblePages, lock } = useMemo(() => {
+    const visible = new Set<AppPage>();
+    const locked = new Set<AppPage>();
+    for (const [page, state] of states) {
+      if (state === 'visible') visible.add(page);
+      if (state === 'locked') locked.add(page);
     }
-    return pages;
-  }, [isEnabled, isPageEnabled, isPermitted]);
+    return { visiblePages: visible, lock: { pages: locked, plan } satisfies NavLock };
+  }, [states, plan]);
+
+  // The route of a locked page shows the hint page; while the plan loads a
+  // gated page waits instead of sending requests the server would refuse.
+  const { pathname } = useLocation();
+  const activePage = pageOfPath(pathname);
+  let content = children;
+  if (activePage && lock.pages.has(activePage)) {
+    content = (
+      <Suspense fallback={<PageFallback />}>
+        <FeatureLockedPage page={activePage} plan={plan} />
+      </Suspense>
+    );
+  } else if (activePage && navFeatureFor[activePage] && entitlementsLoading) {
+    content = <PageFallback />;
+  }
 
   // The inbox shows its open items beside the navigation entry. Without
   // discovery:read the request is not made (like the dashboard widget).
@@ -390,23 +398,25 @@ function SignedInShell({
   const counts = { reviews: openReviews.data };
 
   return (
-    <AppShell
-      theme={theme}
-      user={user}
-      onSignOut={onSignOut}
-      visiblePages={visiblePages}
-      counts={counts}
-      banners={
-        <>
-          {/* Expiring entitlements (ENT-07, WP-464). */}
-          <EntitlementExpiryBanner />
-          {/* The active metamodel draft above every page (MET-53, WP-798). */}
-          <DraftBanner />
-        </>
-      }
-    >
-      {children}
-    </AppShell>
+    <NavLockContext.Provider value={lock}>
+      <AppShell
+        theme={theme}
+        user={user}
+        onSignOut={onSignOut}
+        visiblePages={visiblePages}
+        counts={counts}
+        banners={
+          <>
+            {/* Expiring entitlements (ENT-07, WP-464). */}
+            <EntitlementExpiryBanner />
+            {/* The active metamodel draft above every page (MET-53, WP-798). */}
+            <DraftBanner />
+          </>
+        }
+      >
+        {content}
+      </AppShell>
+    </NavLockContext.Provider>
   );
 }
 
@@ -453,33 +463,20 @@ function RequireAuth() {
 }
 
 /**
- * usePermittedPage tells whether the signed-in user holds the permission a
- * page requires (navPermissionFor, UI-12, WP-804), read from the effective
- * rights of GET /me/permissions (with the rights of the session's IdP
- * groups since WP-428). While the rights load or cannot be read the page
- * counts as not permitted (fail closed like useHasPermission). Only signed-in
- * parts of the shell call it, so the sign-in page sends no request.
- */
-function usePermittedPage(): (page: AppPage) => boolean {
-  const permissions = useEffectivePermissions().data?.permissions;
-  return (page) => {
-    const required = navPermissionFor[page];
-    return !required || hasPermission(permissions, required);
-  };
-}
-
-/**
- * PermittedCommandPalette passes the command palette a page predicate that
- * combines the release modules with the permission of navPermissionFor, so
- * the palette offers the same pages as the navigation.
+ * PermittedCommandPalette offers the pages the navigation shows (the rule
+ * of navPageState, WP-857): neither hidden nor locked pages. Only signed-in
+ * parts of the shell render it, so the sign-in page sends no request.
  */
 function PermittedCommandPalette({
   isPageEnabled = () => true,
   ...props
 }: ComponentProps<typeof CommandPalette>) {
-  const isPermitted = usePermittedPage();
+  const { stateOf } = useNavAccess();
   return (
-    <CommandPalette {...props} isPageEnabled={(page) => isPageEnabled(page) && isPermitted(page)} />
+    <CommandPalette
+      {...props}
+      isPageEnabled={(page) => isPageEnabled(page) && stateOf(page) === 'visible'}
+    />
   );
 }
 
