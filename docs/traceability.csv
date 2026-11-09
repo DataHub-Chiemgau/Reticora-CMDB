@@ -1567,3 +1567,4 @@ API-06;[P2]/[P3]/[P4]/[A];G2;backend/internal/server/modules_test.go;WP-830
 RBA-05;[P2–P4], [A];G2;backend/internal/server/modules_test.go;WP-830
 ABN-01;[Q];G2;frontend/e2e/metamodel-scenario.spec.ts;WP-330
 SEC-11;[Q];G2;tests/rep01-structure.test.sh;WP-831
+GATE-01;[Q];G2;tests/rep01-structure.test.sh;WP-832

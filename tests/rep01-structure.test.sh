@@ -16,7 +16,9 @@
 #            audit/g1-reaudit/FINDINGS.md, also findings added later) is an
 #            SR finding of the review or listed in its section "Befunde der
 #            Korrektur ohne Sicherheitswirkung" with a reason (F-428,
-#            WP-699);
+#            WP-699); docs/audit/befunde.csv carries section 03 (Teil 03,
+#            A-03) and every Critical row of it stands with a status in the
+#            annex "Critical/High-Befunde des Audits" of the review (WP-832);
 #   GATE-02  every [B]/[Q] ID that docs/acceptance/g1-gate.md carries as N/P,
 #            WARN or offen has a reason, and every traceability row pointing to
 #            the checklist names an ID listed there; the IDs of
@@ -341,6 +343,7 @@ gate_check() {
     local V2="$root/docs/spec/v2/aut-05-aut-06-net-04.md"
     local annex findings g03 body xs xd res crit pthc pentest ten09 rel
     local RA="$root/audit/g1-reaudit/FINDINGS.md" ra srrows listed srhc
+    local BF="$root/docs/audit/befunde.csv" bf bfann
     local id s n fid sev open row cid xid xart xdl f p d line field tf rack notpass rows
     # STATUS: annex status per ID (first row), XART: kind of exception,
     # SEC: "**Status:**" of the GATE sections, REASON: words of the reason in
@@ -477,6 +480,42 @@ gate_check() {
                 v reaudit_coverage "$fid ($p) is neither an SR finding of docs/security/review-g1.md nor listed in section 'Befunde der Korrektur ohne Sicherheitswirkung'"
             fi
         done <<< "$ra"
+    fi
+
+    # WP-832 (A-03, A-28): docs/audit/befunde.csv carries section 03 (Teil
+    # 03), and every Critical row of it stands with a status in the annex
+    # "Critical/High-Befunde des Audits" of the review, rated Critical. The
+    # CSV quotes fields with ';', so it is read with the csv module. Without
+    # the file (fixtures) the rule is skipped; the repository check below
+    # demands the file.
+    if [ -f "$BF" ]; then
+        bf="$(python3 -c '
+import csv, sys
+with open(sys.argv[1], encoding="utf-8") as f:
+    rows = list(csv.reader(f, delimiter=";"))
+for r in rows[1:]:
+    if len(r) >= 5:
+        print(r[0].strip() + "\t" + r[2].strip() + "\t" + r[4].strip())
+' "$BF")"
+        awk -F'\t' '$2 == "03"' <<< "$bf" | grep -q . ||
+            v audit_findings "docs/audit/befunde.csv has no row of section 03 (Teil 03, A-03)"
+        bfann="$(section "$RV" '^## Anhang: Critical/High-Befunde' | awk -F'|' '
+            function trim(s) { gsub(/\*/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+            /^[ \t]*\|/ {
+                for (i = 3; i < NF; i++) {
+                    c = tolower(trim($i))
+                    if (c ~ /^(critical|kritisch|high|hoch|medium|mittel|low|niedrig)$/) {
+                        st = trim($(i + 1))
+                        if (st != "" && st != "–" && st != "-") print trim($2) "\t" c
+                        break
+                    }
+                }
+            }')"
+        while IFS=$'\t' read -r fid _ sev; do
+            [ "$sev" = Critical ] || continue
+            awk -F'\t' -v f="$fid" '$1 == f && ($2 == "critical" || $2 == "kritisch") { found = 1 } END { exit !found }' <<< "$bfann" ||
+                v audit_findings "Critical $fid of docs/audit/befunde.csv has no Critical row with a status in the annex of docs/security/review-g1.md"
+        done <<< "$bf"
     fi
 
     # GATE-03: an open High/Critical pentest finding keeps GATE-03 from PASS.
@@ -730,7 +769,7 @@ gate_check() {
 GATE_RULES=(result gate01_critical sr11_severity gate03_pentest gate03_rows finding_ids exceptions declaration
     gate02_all result_rows conditional_release conditional_ids conditional_deadlines conditional_gate_rows
     conditional_findings reasons agree rack_site_scope delivery_pentest delivery_subprocessors delivery_abn01
-    delivery_v2 reaudit_coverage)
+    delivery_v2 reaudit_coverage audit_findings)
 FINAL_RULES=(final_critical final_pentest final_review_high final_gate_rows final_exceptions final_rc_runs)
 describe() {
     case "$1" in
@@ -757,6 +796,7 @@ describe() {
         delivery_abn01) echo "GATE-02 PASS of ABN-01 needs the frozen texts (a) and (b) (A-02)" ;;
         delivery_v2) echo "GATE-02 PASS of AUT-05/AUT-06/NET-04 needs the v2 texts and their comparison (A-02)" ;;
         reaudit_coverage) echo "GATE-01 every P0–P2 finding of audit/g1-reaudit/FINDINGS.md is an SR finding of the review or listed without security impact (F-428)" ;;
+        audit_findings) echo "GATE-01 docs/audit/befunde.csv has section 03 and every Critical row of it stands with a status in the annex of the review (WP-832, A-03)" ;;
         final_critical) echo "--final no open Critical finding in review and pentest" ;;
         final_review_high) echo "--final no SR finding of the security review rated Critical or High is open (F-428)" ;;
         final_pentest) echo "--final no open High/Critical pentest finding" ;;
@@ -801,6 +841,11 @@ check "GATE-01 the security review records the P0 findings F-001 to F-015 of the
 # shellcheck disable=SC2016 # expanded when check evaluates the condition
 check "GATE-01 audit/g1-reaudit/FINDINGS.md lists the findings of the correction in table '## Übersicht' (F-428)" \
     '[ -n "$(reaudit_overview audit/g1-reaudit/FINDINGS.md)" ]'
+
+# WP-832: rule audit_findings reads docs/audit/befunde.csv; it is skipped
+# without the file, so the repository must have it.
+check "GATE-01 docs/audit/befunde.csv exists (source of the audit findings, WP-832)" \
+    "[ -s docs/audit/befunde.csv ]"
 
 # E-103 (WP-831): the declaration of the Auftraggeber is the evidence of the
 # pentest for G1 and G2; nothing is delivered later, so the summary carries no
@@ -986,6 +1031,37 @@ selftest reaudit_finding_p3_only final pass pass reaudit_findings "$RA_F902"
 selftest reaudit_overview_empty final reaudit_coverage reaudit_coverage reaudit_findings
 selftest reaudit_sr_high_open final pass final_review_high reaudit_sr High offen
 selftest reaudit_sr_critical_open final gate01_critical final_review_high reaudit_sr '**Critical**' offen
+# WP-832 (A-03): docs/audit/befunde.csv carries section 03, and every
+# Critical row of it stands with a status in the annex of the review (rated
+# Critical); an open one fails GATE-01 like every annex row.
+audit_csv() {
+    mkdir -p docs/audit
+    {
+        printf 'id;tag;abschnitt;status;severity;aufwand;evidenz;befund_kurz;bericht\n'
+        printf '%s\n' "$@"
+    } > docs/audit/befunde.csv
+}
+BF_TEN06='TEN-06;[B];02;ABWEICHEND;Critical;L;`fixture`;Fixture;fixture:1'
+BF_AST01='AST-01;[P2];09;ABWEICHEND;Critical;L;`fixture`;Fixture;fixture:2'
+BF_MET10='MET-10;"B/G1; Teil P2/G2";03;ABWEICHEND;High;L;"`fixture`; `fixture`";Fixture;fixture:3'
+BF_LOC10='LOC-10;B/G1;03;ABWEICHEND;Critical;L;`fixture`;Fixture;fixture:4'
+BF_XSCOPE='X-SCOPE;Querschnitt CH11/CH25, PRI-10;03;ABWEICHEND;Critical;L;`fixture`;Fixture;fixture:5'
+audit_annexed() {
+    audit_csv "$BF_TEN06" "$BF_AST01" "$BF_MET10" "$BF_LOC10" "$BF_XSCOPE"
+    append "$R" "| LOC-10 | B/G1 | Critical | $1 | WP-000 |"
+    append "$R" '| X-SCOPE | Querschnitt | **Critical** | geschlossen | WP-000 |'
+}
+audit_downgraded() {
+    audit_csv "$BF_TEN06" "$BF_LOC10"
+    append "$R" '| LOC-10 | B/G1 | High | geschlossen | WP-000 |'
+}
+selftest audit_findings_complete final pass pass audit_csv "$BF_TEN06" "$BF_AST01" "$BF_MET10"
+selftest audit_findings_no_section03 final audit_findings audit_findings audit_csv "$BF_TEN06" "$BF_AST01"
+selftest audit_findings_critical_missing final audit_findings audit_findings audit_csv "$BF_TEN06" "$BF_MET10" "$BF_LOC10"
+selftest audit_findings_critical_listed final pass pass audit_annexed geschlossen
+selftest audit_findings_critical_open final gate01_critical final_critical audit_annexed offen
+selftest audit_findings_critical_no_status final audit_findings audit_findings audit_annexed ''
+selftest audit_findings_downgraded final audit_findings audit_findings audit_downgraded
 # F-040: TEN-09 PASS needs the recorded rack site-scope finding.
 selftest rack_site_scope final rack_site_scope - drop "$R" '^\| SR-12 \|'
 selftest rack_site_scope_open open rack_site_scope - subst "$C" 's/^\| TEN-09 \| \[Q\] \| offen/| TEN-09 | [Q] | PASS/'
