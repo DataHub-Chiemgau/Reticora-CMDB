@@ -1,0 +1,5 @@
+id;tag;epic;testdatei;wp
+GATE-01;[Q];G2;tests/rep01-structure.test.sh;WP-331
+GATE-05;[Q];G2;tests/rep01-structure.test.sh;WP-331
+IMP-IO-01;[P2];C;backend/internal/importer/parse_test.go;WP-301
+TKT-03;[O];B;backend/internal/ticket/provider_test.go;WP-293

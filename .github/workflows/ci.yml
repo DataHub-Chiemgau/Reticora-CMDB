@@ -344,9 +344,16 @@ jobs:
   # unique across all three, and the deferred WP-215 to WP-239 are no work
   # packages of a PR (E-46). The Phase-2 plan must agree with
   # docs/plan/phase2/abdeckung.csv in every run; Phase-2 completeness (a row of
-  # the abschluss_wp of every ID) is reported. TRACEABILITY_REQUIRE_COMPLETE
-  # takes a comma-separated list of levels: P2 blocks on Phase 2 (gate G2),
-  # 1 on every [B]/[Pn]/[A] ID; this job sets none (E-30, E-48).
+  # the abschluss_wp of every ID) is checked in every run.
+  # TRACEABILITY_REQUIRE_COMPLETE takes a comma-separated list of levels: P2
+  # blocks on Phase 2, 1 on every [B]/[Pn]/[A] ID (E-30, E-48). Since gate G2
+  # (WP-331) this job sets B,Q,P2: every ID of docs/plan/phase2/abdeckung.csv
+  # needs a row of its abschluss_wp (Phase-1 rows do not count) and every
+  # non-optional WP of the Phase-2 plan all its planned rows
+  # (CheckWorkPackages); only the IDs with abschluss_wp '-' (E-37) and the
+  # optional WP-293 (TKT-03 [O], GATE-05) are exempt. The level never
+  # contains O (GATE-05); tests/rep01-structure.test.sh checks the level and
+  # that the job may not fail (GLO-11).
   traceability:
     runs-on: ubuntu-latest
     steps:
@@ -364,6 +371,7 @@ jobs:
         env:
           TRACEABILITY_PR_TITLE: ${{ github.event.pull_request.title }}
           TRACEABILITY_PR_BODY: ${{ github.event.pull_request.body }}
+          TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P2"
         run: go test -count=1 -v -run 'TestTraceabilityFile' ./internal/traceability/
 
   # TST-04 (WP-337): the defect tests of the Phase-1 acceptance audit run
@@ -471,8 +479,10 @@ jobs:
           path: ${{ runner.temp }}/auditdefect/
           retention-days: 14
 
-  # Gate G1 (WP-213): REP-01 structure, gate checklist, open Critical findings,
-  # frozen acceptance artefacts and workflow syntax; the break-glass alert
+  # Gates G1 (WP-213) and G2 (WP-331): REP-01 structure, gate checklists
+  # docs/acceptance/g1-gate.md and docs/acceptance/g2-gate.md, open Critical
+  # findings (review-g1.md, pentest-g1.md, review-phase2.md), frozen
+  # acceptance artefacts and workflow syntax; the break-glass alert
   # (WP-362, SEC-07); the container log retention (WP-458, NFR-06).
   gate:
     runs-on: ubuntu-latest
@@ -482,7 +492,7 @@ jobs:
       - name: PyYAML for the workflow check
         run: python3 -c 'import yaml' || (sudo apt-get update && sudo apt-get install -y python3-yaml)
 
-      - name: Gate and structure checks (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
+      - name: Gate and structure checks G1 and G2 (REP-01, GATE-01/02/05, SEQ-01, DOD-01, GLO-11)
         run: ./tests/rep01-structure.test.sh
 
       # SEC-11/TST-04 (WP-389): every release image is in the image-scan

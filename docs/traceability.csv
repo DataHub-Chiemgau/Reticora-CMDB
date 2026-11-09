@@ -1578,3 +1578,18 @@ UI-15;[P2];G2;backend/internal/signup/default_client_integration_test.go;WP-854
 UI-14;[P2–P4, A];G2;frontend/src/components/discovery/CredentialsSection.test.tsx;WP-856
 UI-14;[P2–P4, A];G2;frontend/src/components/shell/navigation.test.ts;WP-857
 MET-05;[P2];G2;backend/internal/citype/client_hidden_integration_test.go;WP-858
+ABN-02;[Q];G2;tests/load/;WP-327
+NFR-02;[B];G2;tests/load/;WP-327
+NFR-03;[B], Teilumfang [P5];G2;tests/load/;WP-327
+GATE-01;[Q];G2;tests/rep01-structure.test.sh;WP-331
+GATE-02;[Q];G2;tests/rep01-structure.test.sh;WP-331
+GATE-05;[Q];G2;tests/rep01-structure.test.sh;WP-331
+DOD-01;[Q];G2;tests/rep01-structure.test.sh;WP-331
+SEQ-01;[Q];G2;tests/rep01-structure.test.sh;WP-331
+GLO-11;[Q];G2;tests/rep01-structure.test.sh;WP-331
+TEN-09;[Q];G2;backend/internal/tenant/rls/channel_matrix_integration_test.go;WP-331
+OPS-06;[Q];G2;tests/outage/run.sh;WP-331
+INS-01;[Q];G2;tests/install-smoke-health.test.sh;WP-331
+INS-04;[Q];G2;frontend/e2e/onboarding.spec.ts;WP-331
+DIS-08;[Q];G2;backend/internal/discovery/errors_test.go;WP-331
+TST-04;[Q];G2;.github/workflows/ci.yml;WP-331
