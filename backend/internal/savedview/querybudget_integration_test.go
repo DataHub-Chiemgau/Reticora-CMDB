@@ -335,3 +335,105 @@ func TestSavedViewQueryBudget(t *testing.T) {
 	analyze()
 	check("with 5,000 CIs, assets and edges of organization B")
 }
+
+// TestRelationshipWalkStarBudget covers the walk of upstream_of from a CI
+// with thousands of sources (finding of load run 42619469662,
+// relation_search: 13.8 s per count, 60 s and EOF for the page) in a
+// database of its own (scopetest.BudgetDatabase) shaped like the load seed:
+// 10,000 CIs of organization A, every CI with a client and a site (the
+// planner then takes the row level security filters of ci and
+// ci_relationship for so selective that it expects about one row per
+// level), a switch CIs 1 to 5,000 are connected to and a PDU that powers
+// CIs 5,001 to 10,000.
+//
+// The count and the page of upstream_of the switch, the SQL the engine
+// really sends, are EXPLAINed with ANALYZE as the application role: the
+// walk reads the 5,000 edges into the switch, probes the edges into each
+// source through idx_ci_rel_org_target (none) and reads at most 18,000
+// rows of ci_relationship and ci, though the planner expects 5,000 edges
+// per probe. Flattened into a join, the step of the
+// walk read every CI of the organization with its edges per level and
+// joined them to the work table (100 million join rows in the load run).
+//
+// Retest (locally without TimescaleDB with scopetest.MigrationsDirEnv):
+//
+//	cd backend && go test -count=1 -run TestRelationshipWalkStarBudget ./internal/savedview/
+func TestRelationshipWalkStarBudget(t *testing.T) {
+	db := scopetest.BudgetDatabase(t)
+	f := scopetest.Seed(t, "8f")
+	bg := context.Background()
+	t.Cleanup(func() {
+		var current string
+		if err := f.Admin.QueryRow(bg, `SELECT current_database()`).Scan(&current); err != nil || current != db {
+			t.Errorf("truncate: connected to %q, want %s: %v", current, db, err)
+			return
+		}
+		if _, err := f.Admin.Exec(bg, `TRUNCATE ci_relationship, ci CASCADE`); err != nil {
+			t.Errorf("truncate: %v", err)
+		}
+	})
+	f.Room(t, f.Client1, "star-1")
+	f.Room(t, f.Client2, "star-2")
+	const orgCIs, sources = 10000, 5000
+	seed := []struct {
+		name, sql string
+		args      []any
+	}{
+		{"CIs", `INSERT INTO ci (organization_id, client_id, site_id, ci_type_id, name, status)
+			SELECT $1, s.client_id, s.id, t.id, 'st-' || n, 'active'
+			FROM generate_series(1, $2::int) AS n
+			JOIN site s ON s.organization_id = $1 AND s.name = 'star-' || (n % 2 + 1)
+			JOIN ci_type t ON t.key = 'server' AND t.organization_id IS NULL`, []any{f.OrgA, orgCIs}},
+		// The switch and the PDU of the load seed (cmd/seed): every CI
+		// is connected to one of them or powered by it, so ci_relationship
+		// has two targets and the planner expects 5,000 edges into any CI.
+		{"hubs", `INSERT INTO ci (organization_id, client_id, site_id, ci_type_id, name, status)
+			SELECT $1, s.client_id, s.id, t.id, t.key, 'active' FROM site s
+			JOIN ci_type t ON t.key IN ('switch', 'pdu') AND t.organization_id IS NULL
+			WHERE s.organization_id = $1 AND s.name = 'star-1'`, []any{f.OrgA}},
+		{"edges", `WITH c AS (SELECT substring(name FROM 4)::int AS n, id FROM ci WHERE organization_id = $1 AND name LIKE 'st-%')
+			INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type)
+			SELECT $1, c.id, h.id, CASE WHEN h.name = 'switch' THEN 'connected_to' ELSE 'powered_by' END
+			FROM c JOIN ci h ON h.organization_id = $1 AND h.name = CASE WHEN c.n <= $2::int THEN 'switch' ELSE 'pdu' END`,
+			[]any{f.OrgA, sources}},
+	}
+	for _, s := range seed {
+		if _, err := f.Admin.Exec(bg, s.sql, s.args...); err != nil {
+			t.Fatalf("seed %s: %v", s.name, err)
+		}
+	}
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci, ci_relationship`); err != nil {
+		t.Fatal(err)
+	}
+	var hub string
+	if err := f.Admin.QueryRow(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND name = 'switch'`, f.OrgA).Scan(&hub); err != nil {
+		t.Fatal(err)
+	}
+
+	trace := scopetest.NewQueryTrace(t, f.App)
+	engine := savedview.NewPGQueryEngine(trace.Pool)
+	spec := &savedview.FilterSpec{EntityKind: "ci", UpstreamOf: hub}
+	query := func() (int, int, error) {
+		rows, total, err := engine.Query(f.OrgCtx(f.OrgA), f.OrgA, spec, api.PaginationParams{Limit: 50})
+		return len(rows), total, err
+	}
+	var page, total int
+	stmts := trace.Run(t, func() error {
+		var err error
+		page, total, err = query()
+		return err
+	})
+	if page != 50 || total != sources {
+		t.Errorf("upstream_of the switch: %d rows of %d, want 50 of %d", page, total, sources)
+	}
+	orgWide := database.OrgWideScope(f.OrgA, f.User)
+	budget := &scopetest.QueryBudget{Tables: []string{"ci_relationship", "ci"}, Indexes: [][]string{{"idx_ci_rel_org_target"}}, MaxRows: 18000}
+	for _, part := range []string{"SELECT COUNT(*) FROM ci", " ORDER BY "} {
+		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, "star of 5,000 sources", "upstream_of the switch ("+strings.TrimSpace(part)+")",
+			scopetest.Statement(t, stmts, part), budget)
+	}
+	scopetest.TimeBudget(t, "upstream_of the switch, page of 50 rows", 5, 500*time.Millisecond, func() error {
+		_, _, err := query()
+		return err
+	})
+}
