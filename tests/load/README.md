@@ -454,7 +454,8 @@ Ohne GitHub CLI: Artefakt `load-archive-<Lauf-ID>` auf der Seite des Laufs
 laden und nach `docs/acceptance/artefakte/lasttest/` entpacken. Danach die
 Werte aus `ergebnis.md` in den Bericht übernehmen: für G1
 `docs/acceptance/lasttest-g1.md` (Platzhalter `⟨LAUF-n…⟩`), für G2
-`docs/acceptance/lasttest-g2.md` (WP-327; Platzhalter „ausstehend“). Als
+`docs/acceptance/lasttest-g2.md` (WP-327; Nachweis auf `69e6668d`, Werte
+aus der Bewertung von `load-evidence.yml` und den Job-Logs). Als
 „vollständiger Lauf“ zählt ein Lauf mit `scenarios=all` im ersten Versuch,
 dessen `ergebnis.md` „Vollständig: ja“ meldet; „exit 0“ heißt „Ergebnis:
 alle Jobs grün“. Für die Nachweise von G1 und G2 gilt statt „drei Läufe mit

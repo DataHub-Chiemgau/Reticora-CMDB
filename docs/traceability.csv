@@ -1578,3 +1578,6 @@ UI-15;[P2];G2;backend/internal/signup/default_client_integration_test.go;WP-854
 UI-14;[P2–P4, A];G2;frontend/src/components/discovery/CredentialsSection.test.tsx;WP-856
 UI-14;[P2–P4, A];G2;frontend/src/components/shell/navigation.test.ts;WP-857
 MET-05;[P2];G2;backend/internal/citype/client_hidden_integration_test.go;WP-858
+ABN-02;[Q];G2;tests/load/;WP-327
+NFR-02;[B];G2;tests/load/;WP-327
+NFR-03;[B], Teilumfang [P5];G2;tests/load/;WP-327
