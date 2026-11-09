@@ -434,19 +434,21 @@ gh run download "$run" -R DataHub-Chiemgau/Reticora-CMDB -n "load-archive-$run" 
 
 Ohne GitHub CLI: Artefakt `load-archive-<Lauf-ID>` auf der Seite des Laufs
 laden und nach `docs/acceptance/artefakte/lasttest/` entpacken. Danach die
-Werte aus `ergebnis.md` in `docs/acceptance/lasttest-g1.md` übernehmen
-(Platzhalter `⟨LAUF-n…⟩`). Als „vollständiger Lauf“ zählt ein Lauf mit
-`scenarios=all` im ersten Versuch, dessen `ergebnis.md` „Vollständig: ja“
-meldet; „exit 0“ heißt „Ergebnis: alle Jobs grün“. Für den G1-Nachweis gilt
-statt „drei Läufe mit exit 0“ die Bewertung über drei Läufe (nächster
-Abschnitt).
+Werte aus `ergebnis.md` in den Bericht übernehmen: für G1
+`docs/acceptance/lasttest-g1.md` (Platzhalter `⟨LAUF-n…⟩`), für G2
+`docs/acceptance/lasttest-g2.md` (WP-327; Platzhalter „ausstehend“). Als
+„vollständiger Lauf“ zählt ein Lauf mit `scenarios=all` im ersten Versuch,
+dessen `ergebnis.md` „Vollständig: ja“ meldet; „exit 0“ heißt „Ergebnis:
+alle Jobs grün“. Für die Nachweise von G1 und G2 gilt statt „drei Läufe mit
+exit 0“ die Bewertung über drei Läufe (nächster Abschnitt).
 
 ### Bewertung über drei Läufe (WP-439, E-58)
 
 Nachtrag des Auftraggebers zu E-58 vom 2026-10-26: Der Lastnachweis für G1
 (WP-439, AK 3) wird über die drei Läufe des Nachweises mit dem Median
 bewertet; das ersetzt „drei aufeinanderfolgende Läufe mit exit 0“. Jeder
-Lauf wird weiter wie oben archiviert.
+Lauf wird weiter wie oben archiviert. Der Nachweis für G2 (WP-327) folgt
+demselben Protokoll (E-58 im Phase-2-Plan) mit den Jobs von G2.
 
 - **Budget:** Eine k6-Schwelle gilt als gehalten, wenn der Median ihrer
   Messwerte über die drei Läufe sie einhält. Messwert eines Laufs ist der
@@ -462,6 +464,15 @@ Lauf wird weiter wie oben archiviert.
   Kenngröße nicht exportiert): zählt als verfehlt. Der Median ist dann der
   schlechtere der beiden anderen Werte; fehlen zwei, gibt es keinen Median
   und die Schwelle gilt als verfehlt.
+- **Paralleler Ingest der Schreibjobs** (WP-823, WP-327): In den Jobs
+  `import`, `template` und `computed` gelten zusätzlich die Schwellen des
+  Ingest neben `writes.js` (`<job>-ingest.json`: `ingest_visible_delay`
+  `max<30000`, `ingest_records_missing` `count==0`, `http_req_failed`
+  `rate==0` u. a.; NFR-03) nach derselben Regel. Sie stehen in der Tabelle
+  des Jobs mit dem Zusatz „(paralleler Ingest)“ und zählen in sein Urteil.
+  Fehlt die Zusammenfassung in einem Lauf, gilt ihr Wert dort als
+  verfehlt; fehlt sie in allen drei Läufen, ist der Job verfehlt („ohne
+  Zusammenfassung des parallelen Ingest“).
 
 `tests/load/evaluate-runs.sh` (Selbsttest `tests/load/evaluate-runs.test.sh`
 im Job `prepare`) wendet die Regel auf genau drei Archive an:
@@ -469,22 +480,36 @@ im Job `prepare`) wendet die Regel auf genau drei Archive an:
 ```sh
 a=docs/acceptance/artefakte/lasttest
 tests/load/evaluate-runs.sh "$a/<Lauf-ID-1>" "$a/<Lauf-ID-2>" "$a/<Lauf-ID-3>"
+# Archive des G1-Nachweises (Läufe vor WP-822):
+tests/load/evaluate-runs.sh --gate G1 "$a/<Lauf-ID-1>" "$a/<Lauf-ID-2>" "$a/<Lauf-ID-3>"
 ```
 
 **Voraussetzungen des Nachweises** (WP-206/WP-612 „Drei vollständige
 Läufe“, NFR-10, F-417): Die drei Läufe nennen in `ergebnis.md` unter
 „Server, Seed und Migrationen“ denselben Commit, und jeder Lauf hat jeden
-der fünf Jobs `api`, `ingest`, `ingest-spool`, `ingest-rediscover` und
-`nfr01-volume` (in der Zeile „Jobs“ genannt und mit seinem Verzeichnis im
-Archiv, also `scenarios=all`). Sonst sind die Läufe **nicht bewertbar**:
-Die letzte Zeile lautet „Bewertung nach E-58 (Median über drei Läufe):
-nicht bewertbar: <Gründe>“ (verschiedene oder fehlende Server-Commits mit
-Lauf-ID und Commit, je fehlendem Job die Läufe ohne ihn), jeder Grund steht
-zusätzlich auf stderr, Exit 1. Die Tabellen und Mediane stehen trotzdem im
-Bericht.
+Job des Jobsatzes (in der Zeile „Jobs“ genannt und mit seinem Verzeichnis
+im Archiv, also `scenarios=all`). `--gate` wählt den Jobsatz (WP-327):
 
-Bewertet werden die fünf Jobs und alle weiteren, die eines der drei
-`ergebnis.md` nennt. Die Ausgabe (Markdown) nennt die drei Läufe (Link,
+- **G2** (Standard, Nachweis für G2 und `load-evidence.yml`): die fünf Jobs
+  von G1 als Regression, `api`, `ingest`, `ingest-spool`,
+  `ingest-rediscover` und `nfr01-volume`, dazu `phase2` (WP-822) und die
+  Schreibjobs `import`, `template` und `computed` (WP-823); neun Jobs.
+- **G1**: nur die fünf Jobs von G1. Archive aus der Zeit vor WP-822 haben
+  die Jobs der Phase 2 nicht und wären für G2 nicht bewertbar; mit
+  `--gate G1` bleibt ihre Bewertung reproduzierbar (E-58), etwa die der
+  G1-Nachweisläufe N1 bis N3 (`docs/acceptance/lasttest-g1.md`). Die
+  letzte Zeile lautet dann „Bewertung nach E-58 (Median über drei Läufe,
+  Jobsatz G1): …“ und ist damit nicht mit einem G2-Nachweis zu verwechseln.
+
+Sonst sind die Läufe **nicht bewertbar**: Die letzte Zeile lautet
+„Bewertung nach E-58 (Median über drei Läufe): nicht bewertbar: <Gründe>“
+(verschiedene oder fehlende Server-Commits mit Lauf-ID und Commit, je
+fehlendem Job die Läufe ohne ihn), jeder Grund steht zusätzlich auf
+stderr, Exit 1. Die Tabellen und Mediane stehen trotzdem im Bericht.
+
+Bewertet werden die Jobs des Jobsatzes und alle weiteren, die eines der
+drei `ergebnis.md` nennt (bei `scenarios=all` auch `api-large-28000` und
+`api-large-50000`). Die Ausgabe (Markdown) nennt die drei Läufe (Link,
 Server-Commit, Eingaben, Vollständigkeit und Ergebnis aus `ergebnis.md`),
 die Voraussetzungen und ob sie erfüllt sind, je Job jede Schwelle mit dem
 Messwert je Lauf, dem Median und „gehalten“ ja/nein, den Status des Jobs je
@@ -495,21 +520,27 @@ Läufen rot sind) bzw. „… nicht bewertbar: …“. Exit 0 nur, wenn die
 Voraussetzungen erfüllt sind, jede Schwelle jedes Jobs im Median gehalten
 und kein Job in mindestens zwei Läufen rot ist, sonst 1; falsche Argumente
 (nicht genau drei Archive, ein Verzeichnis ohne `ergebnis.md`, derselbe
-Lauf zweimal, eine unlesbare k6-Zusammenfassung, kein Job) Exit 2.
+Lauf zweimal, eine unlesbare k6-Zusammenfassung auch des parallelen Ingest,
+kein Job, ein unbekannter Jobsatz, `--partial` zusammen mit `--gate`)
+Exit 2.
 
 **Teilbewertung** (`tests/load/evaluate-runs.sh --partial <Archiv-1>
-<Archiv-2> <Archiv-3>`): eigener Modus zur Diagnose, **kein G1-Nachweis**.
+<Archiv-2> <Archiv-3>`): eigener Modus zur Diagnose, **kein G1-Nachweis**
+und kein G2-Nachweis.
 Bewertet werden nur die Jobs, die einer der drei Läufe nennt oder als
 Verzeichnis hat (etwa drei Läufe mit `scenarios=nfr01-volume`); ein Job, der
 in einem Lauf fehlt, zählt dort als rot (Regel oben). Voraussetzung ist
 auch hier derselbe Server-Commit in allen drei Läufen. Die letzte Zeile
 beginnt mit „Teilbewertung nach E-58 (Median über drei Läufe, kein
 G1-Nachweis)“, nie mit „Bewertung nach E-58“; Exit wie oben.
-`load-evidence.yml` ruft das Skript immer ohne `--partial` auf.
+`load-evidence.yml` ruft das Skript immer ohne `--partial` auf. Die
+Headroom-Läufe (Abschnitt „Headroom nach E-17“) sind Einzelläufe ohne
+Bewertung nach dem Median.
 
 In GitHub Actions macht das der Workflow `load-evidence.yml` (WP-612,
 manuell, Eingaben `run_1` bis `run_3`: die Lauf-IDs der drei
-`load.yml`-Läufe). Er lädt die Artefakte `load-archive-<Lauf-ID>` der drei
+`load.yml`-Läufe, und `gate`: `G2` (Standard) oder `G1`, an das Skript als
+`--gate`). Er lädt die Artefakte `load-archive-<Lauf-ID>` der drei
 Läufe (`actions/download-artifact` mit `run-id`), ruft
 `tests/load/evaluate-runs.sh` auf und schreibt die Bewertung in Job-Log,
 Zusammenfassung und das Artefakt `load-evidence-<eigene Lauf-ID>`
@@ -522,6 +553,56 @@ vor dem Download mit Exit 2, ein Lauf ohne Archiv (abgelaufen oder ohne Job
 gh workflow run load-evidence.yml -R DataHub-Chiemgau/Reticora-CMDB \
   -f run_1=<Lauf-ID-1> -f run_2=<Lauf-ID-2> -f run_3=<Lauf-ID-3>
 ```
+
+Das Ergebnis für G2 (die drei Läufe, ihre Bewertung, NFR-02 je Budget,
+NFR-03, NFR-01-Volumina, die Zuordnung von ABN-02, Headroom und offene
+Punkte) steht in `docs/acceptance/lasttest-g2.md` (WP-327), das für G1 in
+`docs/acceptance/lasttest-g1.md`.
+
+### Headroom nach E-17 (WP-327)
+
+E-17 (entschieden 2026-10-15): Die Budgets gelten bei 10.000 Objekten (CI +
+Asset) je Organisation; 50.000 Objekte sind Headroom, funktionsfähig ohne
+Budgetzusage. WP-327 misst die Jobs `api` und `phase2` zusätzlich bei
+25.000 und 50.000 Objekten. Das sind Einzelläufe von `load.yml` per
+`workflow_dispatch` mit `scenarios=api,phase2` und den Seed-Eingaben
+`objects` (CIs) und `assets`; Tickets und Mengenartikel zählen nach NFR-01
+nicht als Objekte. Es gilt die Grenze des Seeds **`objects + assets` ≤
+50.000** (`cmd/seed`, `MaxObjects`; `-assets` 60 bis 50.000 − `-objects`),
+sonst scheitert jeder Job im Schritt „Seed“. Vorschlag für die Verteilung
+(CIs und Assets je zur Hälfte, Tickets und Mengenartikel wie die Assets):
+
+| Lauf | `objects` | `assets` | `tickets` | `consumables` | Objekte (CI + Asset) |
+|---|---:|---:|---:|---:|---:|
+| Headroom 25.000 | 12500 | 12500 | 12500 | 12500 | 25.000 |
+| Headroom 50.000 | 25000 | 25000 | 25000 | 25000 | 50.000 |
+
+```sh
+gh workflow run load.yml -R DataHub-Chiemgau/Reticora-CMDB \
+  -f scenarios=api,phase2 -f objects=12500 -f assets=12500 \
+  -f tickets=12500 -f consumables=12500
+gh workflow run load.yml -R DataHub-Chiemgau/Reticora-CMDB \
+  -f scenarios=api,phase2 -f objects=25000 -f assets=25000 \
+  -f tickets=25000 -f consumables=25000
+```
+
+Weicht die Verteilung ab (etwa mehr CIs für `GET /cis`), steht sie mit den
+Eingaben je Lauf im Bericht; die Grenze bleibt. Die Schwellen von `api.js`
+und `phase2.js` laufen unverändert mit (`LATENCY_BUDGETS=all`); in diesen
+Läufen ist eine verfehlte Schwelle ein Messwert und kein Gate, ein roter
+Job also kein Fehlschlag des Nachweises. Erfasst werden der p95 von
+`GET /api/v1/cis` (`list`, `list_sorted`) und `GET /api/v1/search`
+(`global_search`) mit `total` in der Form nach E-104 (gedeckelt bei
+10.000, `total_capped`), von `/api/v1/assets`, `/api/v1/tickets` und
+`/api/v1/consumables` (`asset_list`, `ticket_list`, `consumable_list`) mit
+ihrer exakten Zählung je Anfrage (`SELECT COUNT(*)`, K23) sowie die
+Fehlerfreiheit (`http_req_failed`, `checks`). Die Eingaben `assets`,
+`tickets` und `consumables` stehen je Job in `run-<job>.txt`
+(„phase-2 volumes“), der Bestand nach dem Seed in `volumes-<job>.txt`;
+`ergebnis.md` nennt unter „Eingaben“ nur `objects`. Die Jobs
+`api-large-28000` und `api-large-50000` (WP-839, Teil von `scenarios=all`)
+und `nfr01-volume` (WP-439, 10.000 CIs mit den NFR-01-Volumina) ersetzen
+diese Läufe nicht.
 
 ### Datenbankkosten je Record (F-118)
 
@@ -660,4 +741,21 @@ die Verzögerung (`ingest_visible_delay`).
 Ergänzend prüfen die Integrationstests `backend/internal/ci/querybudget_integration_test.go`
 und `backend/internal/topology/querybudget_integration_test.go` die Zahl der
 Statements je Anfrage (kein N+1) und per `EXPLAIN` die Indexnutzung zentraler
-Abfragen (ABN-02).
+Abfragen (ABN-02). Für die Pfade der Phase 2 tun das die Query-Budget-Tests
+aus WP-824 und den Korrekturen danach, mit den gemeinsamen Helfern aus
+`backend/internal/database/scopetest/querybudget.go`:
+
+| Test | Datei | Prüft |
+|---|---|---|
+| `TestCIListBudget`, `TestCINodeReadBudget` | `backend/internal/ci/list_budget_integration_test.go` | Seite der CI-Liste über `idx_ci_list_sort` mit fester Statementzahl und Knotenlesung von Topologie und Impact (WP-605, WP-438) |
+| `TestAssetQueryBudget` | `backend/internal/asset/querybudget_integration_test.go` | Asset-Liste (auch mit Feldrechte-Projektion), Inventarnummer, Duplikatsuche des Imports |
+| `TestTicketQueryBudget` | `backend/internal/ticket/querybudget_integration_test.go` | Ticketliste, Ticketnummer, Sichtbarkeit über `ci` und `asset` |
+| `TestConsumableListQueryBudget` | `backend/internal/consumable/querybudget_integration_test.go` | Mengenartikel-Liste |
+| `TestSavedViewQueryBudget`, `TestWarrantyDaysLeftIndexKeepsResults` | `backend/internal/savedview/querybudget_integration_test.go`, `warranty_index_integration_test.go` | Filter-AST mit Asset-Feldern, `upstream_of`/`downstream_of` bis Tiefe 5, `warranty_days_left` |
+| `TestAssetAggregateQueryBudget` | `backend/internal/graphqlbff/querybudget_integration_test.go` | GraphQL-Aggregat `asset(id)` ohne N+1 |
+| `TestRelationshipListPlanBudget` | `backend/internal/relationship/list_plan_integration_test.go` | Beziehungsliste eines CI |
+| `TestRestrictedSearchQueryBudget`, `TestRestrictedSearchFieldRowBudget`, `TestReindexFieldRowsQueryBudget` | `backend/internal/search/restricted_plan_integration_test.go`, `reindex_budget_integration_test.go` | eingeschränkte Suche und Reindex der Feldzeilen |
+
+Zeitgrenzen gelten nur mit `RETICORA_PERF_BUDGET=1` (auf dem 4-vCPU-Host);
+in `ci.yml` laufen die Tests ohne Zeitgrenze gegen PostgreSQL. Die Zuordnung
+zu den Teilen von ABN-02 steht in `docs/acceptance/lasttest-g2.md`.

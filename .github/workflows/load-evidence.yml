@@ -7,11 +7,18 @@
 # three runs are evaluable, every threshold of every job is held in the
 # median and no job is red in two runs, 1 when not, 2 on a run ID that is no
 # number or given twice. Evaluable are only three runs of the same server
-# commit ("Server, Seed und Migrationen") with each of the five jobs (api,
-# ingest, ingest-spool, ingest-rediscover, nfr01-volume) in every run
-# (WP-206, F-417); the evidence never uses the partial mode of the script.
-# A run without an archive (expired, never archived) fails the download
-# step.
+# commit ("Server, Seed und Migrationen") with each job of the gate in every
+# run (WP-206, F-417); the evidence never uses the partial mode of the
+# script. The input gate selects the jobs (--gate of the script, WP-327):
+# G2 (default, the evidence of gate G2) the five jobs of G1 as regression
+# (api, ingest, ingest-spool, ingest-rediscover, nfr01-volume) and the jobs
+# of phase 2, phase2 (WP-822) and the write jobs import, template and
+# computed (WP-823); in the write jobs the thresholds of the ingest beside
+# them (<job>-ingest.json, NFR-03) are evaluated by the same rule. G1 the
+# five jobs of G1 alone: it re-evaluates the archives of the G1 evidence
+# (runs before WP-822), whose last line names the job set G1. Further jobs
+# of the runs (api-large-*) are evaluated as well. A run without an archive
+# (expired, never archived) fails the download step.
 name: Load evidence
 
 on:
@@ -26,6 +33,13 @@ on:
       run_3:
         description: "Run ID of the third load.yml run"
         required: true
+      gate:
+        description: "Job set of the evidence: G2 (the nine jobs of G2) or G1 (the five jobs of G1, archives before WP-822)"
+        type: choice
+        options:
+          - G2
+          - G1
+        default: G2
 
 permissions:
   contents: read
@@ -88,10 +102,11 @@ jobs:
           RUN_1: ${{ inputs.run_1 }}
           RUN_2: ${{ inputs.run_2 }}
           RUN_3: ${{ inputs.run_3 }}
+          GATE: ${{ inputs.gate || 'G2' }}
         run: |
           mkdir -p evidence
           rc=0
-          tests/load/evaluate-runs.sh "archives/$RUN_1" "archives/$RUN_2" "archives/$RUN_3" > evidence/bewertung.md || rc=$?
+          tests/load/evaluate-runs.sh --gate "$GATE" "archives/$RUN_1" "archives/$RUN_2" "archives/$RUN_3" > evidence/bewertung.md || rc=$?
           cat evidence/bewertung.md
           cat evidence/bewertung.md >> "$GITHUB_STEP_SUMMARY"
           echo "evaluate-runs.sh exit code: $rc"
