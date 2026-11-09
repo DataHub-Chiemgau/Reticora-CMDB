@@ -56,6 +56,8 @@ export interface CI {
   model?: string;
   serial_number?: string;
   management_ip?: string;
+  /** Host name of the CI; the picker shows it with the management IP (WP-859). */
+  hostname?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
   /**

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -413,6 +414,58 @@ func TestHandler_ListFilter(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Total != 1 {
 		t.Errorf("expected 1 item with status=active, got %d", resp.Total)
+	}
+}
+
+// TestHandler_ListSearch covers SRC-02 for the memory repository
+// (WP-859): search= matches the name, the host name, the serial number and
+// the management IP as a substring without regard to case, as the PG
+// repository does for name, host name and IP.
+func TestHandler_ListSearch(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(NewService(repo))
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+
+	core := &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "core-switch", Hostname: "SW-Core-01",
+		ManagementIP: "10.85.9.17", SerialNumber: "SN-4711", Status: "active", Attributes: map[string]any{}}
+	access := &Item{OrganizationID: "org-1", CITypeID: "type-server", Name: "access", Hostname: "ap-lager",
+		ManagementIP: "192.168.85.9", Status: "active", Attributes: map[string]any{}}
+	other := &Item{OrganizationID: "org-2", CITypeID: "type-server", Name: "core-other", Hostname: "sw-core-02",
+		ManagementIP: "10.85.9.18", Status: "active", Attributes: map[string]any{}}
+	for _, item := range []*Item{core, access, other} {
+		if err := repo.Create(context.Background(), item); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for term, want := range map[string][]string{
+		"CORE-SWITCH": {"core-switch"},
+		"sw-core":     {"core-switch"},
+		"10.85.":      {"core-switch"},
+		"85.9":        {"access", "core-switch"},
+		"sn-4711":     {"core-switch"},
+		"nothing":     {},
+	} {
+		req := tenantCtx(httptest.NewRequest("GET", "/api/v1/cis?sort=name&sort_dir=asc&search="+url.QueryEscape(term), nil))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("search %q: %d %s", term, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Data []Item `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		got := make([]string, 0, len(resp.Data))
+		for i := range resp.Data {
+			got = append(got, resp.Data[i].Name)
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("search %q: %v, want %v", term, got, want)
+		}
 	}
 }
 

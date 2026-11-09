@@ -56,6 +56,11 @@ export interface PickerOption {
   kindLabel: string;
   name: string;
   code?: string;
+  /**
+   * detail tells hits of the same name apart, e.g. host name and management
+   * IP of a CI (WP-859).
+   */
+  detail?: string;
 }
 
 interface PickerComboboxProps {
@@ -229,6 +234,11 @@ export function PickerCombobox({
                 {option.code ? (
                   <span className="font-mono text-xs text-fg-muted">{option.code}</span>
                 ) : null}
+                {option.detail ? (
+                  <span className="ml-auto truncate font-mono text-xs text-fg-muted">
+                    {option.detail}
+                  </span>
+                ) : null}
               </li>
             ))
           : null}
@@ -289,7 +299,9 @@ export interface ObjectPickerProps {
  * id (UI-15, WP-318). It searches the scoped type lists with limit 20 after
  * a typing pause: GET /cis, /assets and /consumables with search; withScope
  * adds client and site of the scope switcher. GET /search stays with the
- * command palette, it is not narrowed by client and site.
+ * command palette, it is not narrowed by client and site. The search of
+ * GET /cis also matches host name and management IP (SRC-02, WP-859); a CI
+ * hit shows both, so targets of the same name can be told apart.
  */
 export function ObjectPicker({
   label,
@@ -329,13 +341,19 @@ export function ObjectPicker({
   const kindLabel = (k: ObjectKind) => t(`pickers.kinds.${k}`);
   const search = kind === 'asset' ? assets : kind === 'consumable' ? consumables : cis;
   let hits: PickedObject[] = [];
+  // details are the host name and management IP of the CI hits by key.
+  const details = new Map<string, string>();
   if (kind === 'ci') {
-    hits = (cis.data?.data ?? []).map((ci) => ({
-      kind: 'ci',
-      id: ci.id,
-      name: ci.name,
-      code: ci.asset?.inventory_no ?? ci.serial_number,
-    }));
+    hits = (cis.data?.data ?? []).map((ci) => {
+      const detail = [ci.hostname, ci.management_ip].filter(Boolean).join(' · ');
+      if (detail) details.set(`ci:${ci.id}`, detail);
+      return {
+        kind: 'ci',
+        id: ci.id,
+        name: ci.name,
+        code: ci.asset?.inventory_no ?? ci.serial_number,
+      };
+    });
   } else if (kind === 'asset') {
     hits = (assets.data?.data ?? []).map((asset) => ({
       kind: 'asset',
@@ -388,6 +406,7 @@ export function ObjectPicker({
           kindLabel: kindLabel(hit.kind),
           name: hit.name,
           code: hit.code,
+          detail: details.get(`${hit.kind}:${hit.id}`),
         }))}
         onSelect={(index) => {
           const hit = hits[index];

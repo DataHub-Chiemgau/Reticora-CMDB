@@ -406,8 +406,15 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			args = append(args, filter.RoomID)
 			argPos++
 		}
+		// search= matches the name, the host name and the management IP
+		// as a substring (SRC-02, WP-859): the object picker finds a
+		// relationship target by any of them. host() renders the address
+		// without its prefix length. ILIKE is not leakproof, so no index
+		// serves it under row level security; the predicate stays a filter
+		// of the list's plan (idx_ci_list_sort or the planner's choice for
+		// a filtered list), as name ILIKE alone was.
 		if filter.Search != "" {
-			whereParts = append(whereParts, fmt.Sprintf("name ILIKE $%d", argPos))
+			whereParts = append(whereParts, fmt.Sprintf("(name ILIKE $%[1]d OR hostname ILIKE $%[1]d OR host(management_ip) ILIKE $%[1]d)", argPos))
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
