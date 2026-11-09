@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000280_search_field_scope
+Stand: Migration 000281_document_orphaned_scope
 
 ## Prüfung
 
@@ -363,6 +363,17 @@ des gelöschten Ziels in derselben Transaktion (wie
 `app_scope_widen`, fester `search_path`). Links, die beim Upgrade auf kein
 Ziel zeigen, stehen mit Grund `dropped: link target missing` in
 `migration_quarantine` und werden entfernt.
+
+Seit Migration 000281 (WP-852, SR-56) wird ein Dokument durch den Wegfall
+seiner Links nicht mehr org-weit: `document.orphaned` (boolean, Standard
+`false`) setzt `count_document_links`, sobald `link_count` auf 0 fällt;
+ein neuer Link setzt es nicht zurück, schreiben darf es nur der
+Zähler-Trigger (`document_orphaned_guard`, `protect_link_counter`).
+`document_tenant_isolation` zeigt ein Dokument ohne Link nur dann allen
+Prinzipalen der Organisation, wenn es nie Links hatte
+(`link_count = 0 AND NOT orphaned`); ein verwaistes sehen nur org-weite
+Prinzipale. Backfill aus `migration_quarantine` (000275) und den
+`audit_log`-Einträgen `document.linked`/`document.unlinked`.
 
 ### Dokumentversionen und Speichernutzung (WP-731)
 

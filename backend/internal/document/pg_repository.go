@@ -54,14 +54,18 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 
 // A link is visible when its target is visible under the transaction's
 // tenant scope (linkVisible, links.go); a document is visible when it is not
-// soft-deleted (WP-732) and not linked at all or linked to at least one
-// visible target. The policies of document and document_link (migrations
-// 000064, 000139, 000217) filter the same rows except the deleted ones,
-// which only the repository and the search hide (migration 000221: the
-// retention run sees them under its org-wide scope); the predicates keep
-// the repository exact without them.
+// soft-deleted (WP-732) and linked to at least one visible target or not
+// linked at all. An unlinked document that had links (document.orphaned,
+// migration 000281, SR-56) is visible to org-wide principals only, so
+// neither an unlink nor the deletion of a link target makes it org-wide.
+// The policies of document and document_link (migrations 000064, 000139,
+// 000217, 000281) filter the same rows except the deleted ones, which only
+// the repository and the search hide (migration 000221: the retention run
+// sees them under its org-wide scope); the predicates keep the repository
+// exact without them.
 var (
-	documentVisible = "(" + documentNotDeleted + " AND (NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
+	documentVisible = "(" + documentNotDeleted + " AND ((NOT EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id)" +
+		" AND (NOT document.orphaned OR " + orgWideDocumentSQL + "))" +
 		" OR EXISTS (SELECT 1 FROM document_link WHERE document_link.document_id = document.id AND " + linkVisible + ")))"
 	// documentWritable admits a document for UPDATE and DELETE (WP-341,
 	// migration 000139): a principal restricted in none of the client, site

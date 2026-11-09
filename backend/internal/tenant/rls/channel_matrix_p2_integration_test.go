@@ -613,6 +613,44 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	}
 	rows["document"] = document
 
+	// document-link (SR-56, SR-63, WP-852): the owner of each side creates
+	// a document with a single link to an asset of its side; p removes that
+	// link. A document outside the scope is not found (404) like an unknown
+	// one; the team principal may not write a link without its team
+	// (restrictive DELETE policy of document_link, 000217), which is not
+	// found either. After the removal the document had links and has none:
+	// only an org-wide principal still sees it (migration 000281), so it is
+	// never exposed to another client, site or team.
+	rows["document-link"] = matrixRow{write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
+		var out []matrixProbe
+		for i := range 3 {
+			doc := m.create(t, s.owners[i], "/api/v1/documents", map[string]any{"title": m.name(p2Prefix + "-udoc"), "file_name": "x.txt"})
+			link := m.create(t, s.owners[i], "/api/v1/documents/"+doc+"/links", map[string]any{"entity_type": "asset", "entity_id": s.freshAsset(t, m, i, "")})
+			want := http.StatusNoContent
+			switch {
+			case !s.located[i][p.kind]:
+				want = http.StatusNotFound
+			case !p.scope.Teams.All:
+				want = http.StatusNotFound
+			}
+			removed := want == http.StatusNoContent
+			out = append(out, matrixProbe{name: fmt.Sprintf("last link of a document of side %d", i+1), method: http.MethodDelete,
+				path: "/api/v1/documents/" + doc + "/links/" + link, want: want,
+				after: m.count(removed, `SELECT count(*) FROM document WHERE id = $1 AND link_count = 0 AND orphaned`, doc)})
+			after := s.located[i].status(p, http.StatusOK)
+			if removed && !p.scope.OrgWide() {
+				after = http.StatusNotFound
+			}
+			pr := get("/api/v1/documents/"+doc, after)
+			if after == http.StatusNotFound {
+				pr.hide = []string{doc}
+			}
+			out = append(out, pr)
+		}
+		return append(out, matrixProbe{method: http.MethodDelete, path: "/api/v1/documents/" + s.documents[0].id + "/links/" + unknownID,
+			want: http.StatusNotFound})
+	}}
+
 	consumable := readRow("/api/v1/consumables", s.consumables[:])
 	consumableRead := consumable.read
 	consumable.read = func(p *channelPrincipal) []matrixProbe {

@@ -16,7 +16,9 @@ import (
 // CIs and key assignments derive client and site from the referenced object,
 // follow it when it moves, and the policies hide and reject rows outside the
 // principal's scope. Documents and maintenance windows are visible without
-// links or through at least one visible link (migration 000064); a principal
+// links or through at least one visible link (migration 000064); a document
+// whose last link went is visible to org-wide principals only (migration
+// 000281, WP-852, SR-56); a principal
 // restricted in the client or site scope writes them only when it sees all
 // of their links, cannot create or link an unlinked (org-wide) one, and the
 // link counters stay exact and are not writable (migration 000139, WP-341,
@@ -390,6 +392,8 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 		{"org-wide principal sets link_count", orgWide, `UPDATE document SET link_count = 0 WHERE id = $1`, docShared},
 		{"client 1 sets ci_count", c1, `UPDATE maintenance_window SET ci_count = 0 WHERE id = $1`, winOwn},
 		{"org-wide principal sets ci_count", orgWide, `UPDATE maintenance_window SET ci_count = 5 WHERE id = $1`, winOrg},
+		// document.orphaned is written by the counter trigger only (000281).
+		{"org-wide principal sets orphaned", orgWide, `UPDATE document SET orphaned = true WHERE id = $1`, docShared},
 	} {
 		if _, err := exec(c.scope, c.sql, c.id); !denied(err) {
 			t.Errorf("%s: %v, want 42501", c.name, err)
@@ -439,7 +443,9 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 	}
 
 	// probe_doc_link_count.sql part A: every client removes its own link and
-	// the counter follows, so the document becomes org-wide again.
+	// the counter follows. The document had links, so it does not become
+	// org-wide again (SR-56, WP-852, migration 000281): only the org-wide
+	// principal sees it, neither client does.
 	if n, err := exec(c1, `DELETE FROM document_link WHERE document_id = $1 AND entity_id = $2`, docProbe, ciA); err != nil || n != 1 {
 		t.Errorf("client 1 removes its link: %d rows, %v", n, err)
 	}
@@ -457,6 +463,19 @@ func moduleObjectWrites(t *testing.T, f *scopetest.Fixture, user string) {
 		return tx.QueryRow(ctx, `SELECT count(*) FROM document WHERE id = $1`, docProbe).Scan(&visible)
 	}); err != nil || visible != 1 {
 		t.Errorf("A3 org-wide principal sees the unlinked document: %d, %v; want 1", visible, err)
+	}
+	for _, p := range []struct {
+		name  string
+		scope database.TenantScope
+	}{{"client 1", c1}, {"client 2", c2}, {"site 1", s1}} {
+		if err := database.WithTenant(bg, f.App, &p.scope, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM document WHERE id = $1`, docProbe).Scan(&visible)
+		}); err != nil || visible != 0 {
+			t.Errorf("A4 %s sees the document whose last link was removed: %d, %v; want 0", p.name, visible, err)
+		}
+	}
+	if got := scalarText(t, f, `SELECT orphaned::text FROM document WHERE id = $1`, docProbe); got != "true" {
+		t.Errorf("A5 orphaned after the last link was removed: %s, want true", got)
 	}
 
 	// Deleting a CI cascades to its window entries; the counter of a window
