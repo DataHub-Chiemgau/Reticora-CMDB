@@ -3,6 +3,7 @@ package ticket_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,8 +38,11 @@ import (
 //     every CI and asset of the organization through hashed subplans).
 //
 // Both run with organization A alone and again with 5,000 tickets of
-// organization B. The default sort (created_at), the COUNT(*) of the whole
-// list and the search with ILIKE are left to k6 (WP-822). With
+// organization B. The default list (created_at DESC, finding of the load
+// run of PR #147) reads its page from idx_ticket_list_sort (000277) and
+// checks ticketVisible for the tickets of the page only, and its COUNT(*)
+// reads the visible CIs and assets once (hashed subplans) instead of once
+// per ticket. The search with ILIKE is left to k6 (WP-822). With
 // RETICORA_PERF_BUDGET=1 the list of 200 rows and the page sorted by
 // number must stay below the 500 ms of NFR-02 (best of five).
 //
@@ -129,8 +133,9 @@ func TestTicketQueryBudget(t *testing.T) {
 	if small != large {
 		t.Errorf("ticket list: %d statements for 10 rows, %d for 200 (N+1)", small, large)
 	}
-	// begin with the tenant context, count, page, commit.
-	const listBudget = 4
+	// begin with the tenant context, count, sorting off for the page (the
+	// default order without filters), page, commit.
+	const listBudget = 5
 	if large > listBudget {
 		t.Errorf("ticket list: %d statements, budget %d", large, listBudget)
 	}
@@ -175,6 +180,9 @@ func TestTicketQueryBudget(t *testing.T) {
 	// asset_id_organization_key, so each group holds both.
 	visibleBudget := &scopetest.QueryBudget{Tables: []string{"ticket", "ci", "asset"},
 		Indexes: [][]string{{"ci_pkey", "ci_id_organization_key"}, {"asset_pkey", "asset_id_organization_key"}}, MaxRows: orgTickets / 100}
+	// The default page: 50 tickets and their related CIs and assets.
+	defaultPageBudget := &scopetest.QueryBudget{Tables: []string{"ticket", "ci", "asset"},
+		Indexes: [][]string{{"idx_ticket_list_sort"}}, MaxRows: orgTickets / 100}
 	orgWide := database.OrgWideScope(f.OrgA, f.User)
 	check := func(state string) {
 		t.Helper()
@@ -197,6 +205,50 @@ func TestTicketQueryBudget(t *testing.T) {
 			_, lerr := byNumber()
 			return lerr
 		})
+
+		// The default list (created_at DESC, finding of the load run of
+		// PR #147): the page reads its tickets from idx_ticket_list_sort
+		// with the setting the list makes before it (enable_sort off) and
+		// checks ticketVisible for them only; the count reads the visible
+		// CIs and assets once, not once per ticket.
+		stmts = trace.Run(t, func() error {
+			items, total, lerr := repo.List(ctx, f.OrgA, &ticket.FilterParams{}, api.PaginationParams{Limit: 50})
+			if lerr == nil && (len(items) != 50 || total != orgTickets) {
+				t.Errorf("%s: default list: %d items of %d, want 50 of %d", state, len(items), total, orgTickets)
+			}
+			return lerr
+		})
+		var plan []byte
+		if err := database.WithTenant(bg, f.App, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+			// The settings the list made before its page.
+			for _, s := range stmts {
+				if strings.Contains(s.SQL, " ORDER BY ") {
+					break
+				}
+				if strings.HasPrefix(s.SQL, "SET LOCAL ") {
+					if _, serr := tx.Exec(ctx, s.SQL); serr != nil {
+						return serr
+					}
+				}
+			}
+			pageStmt := scopetest.Statement(t, stmts, " ORDER BY created_at ")
+			return tx.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+pageStmt.SQL, pageStmt.Args...).Scan(&plan)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		reads := scopetest.ReadPlan(t, plan)
+		if problem := reads.Problem(defaultPageBudget); problem != "" {
+			t.Errorf("ABN-02 violated: %s, default page: %s", state, problem)
+		}
+		t.Logf("%s, default page: %s", state, reads.Plan)
+		countStmt := scopetest.Statement(t, stmts, "SELECT COUNT(*) FROM ticket")
+		counted := scopetest.ReadPlan(t, scopetest.AnalyzeAsApp(t, f.App, &orgWide, countStmt))
+		for _, table := range []string{"ci", "asset"} {
+			if counted.Scans[table] > 1 {
+				t.Errorf("%s, count of the list: %d scans of %s, want one: %s", state, counted.Scans[table], table, counted.Plan)
+			}
+		}
+		t.Logf("%s, count of the list: %s", state, counted.Plan)
 	}
 	check("organization A alone")
 	seed(f.OrgB, reporterB, []any{nil, nil}, 51, 5050)
