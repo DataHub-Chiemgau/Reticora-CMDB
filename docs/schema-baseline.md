@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000277_ticket_list_sort_index
+Stand: Migration 000278_asset_list_sort_index
 
 ## Prüfung
 
@@ -88,6 +88,12 @@ Ebenso der Index der Standardsortierung der Ticketliste (Migration 000277):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ticket_list_sort ON ticket (organization_id, created_at DESC, id DESC);
+```
+
+Ebenso der Index der Standardsortierung der Asset-Liste (Migration 000278):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_list_sort ON asset (organization_id, created_at DESC, id DESC);
 ```
 
 Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration
