@@ -3,6 +3,7 @@ package search_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -148,14 +149,45 @@ func fullFieldRowReads(nodes []searchPlanNode) int {
 	return n
 }
 
+// fieldPolicyProblem returns why the policy of search_document_field costs
+// more than its own columns, or "": since 000280 the policy checks the
+// client and site columns of a field row, so search_document is read about
+// once per statement (the candidates), not once per field row (the lookup
+// of 000228, about 45,000 buffers per global search of the load run
+// 42582336513), and the custom field rows and tag rows of the organization
+// are read through idx_search_document_field_match, not by a scan of every
+// field row.
+func fieldPolicyProblem(nodes []searchPlanNode) string {
+	documentLoops := 0
+	for _, node := range nodes {
+		loops, _ := node["Actual Loops"].(float64)
+		if node["Relation Name"] == "search_document" {
+			documentLoops += int(loops)
+		}
+		cond, _ := node["Index Cond"].(string)
+		recheck, _ := node["Recheck Cond"].(string)
+		if node["Relation Name"] == "search_document_field" && !strings.Contains(cond+recheck, "document_id") &&
+			node["Index Name"] != "idx_search_document_field_match" {
+			return "the custom field rows are not read through idx_search_document_field_match"
+		}
+	}
+	if documentLoops > maxFieldRowLoops {
+		return fmt.Sprintf("search_document is read %d times, at most %d (the policy of the field rows looks up their document)",
+			documentLoops, maxFieldRowLoops)
+	}
+	return ""
+}
+
 // TestRestrictedSearchFieldRowBudget covers the cost of the search with
 // restricted field permissions over the custom field rows (WP-308, tags of
 // WP-788; NFR-02) like search_fields of the load test (tests/load/phase2.js:
 // the load tag on 500 CIs): 1,000 CIs with a sensitive field, 300 of them
 // with a tag. The scope statement and the hit statement of the search are
 // explained as reticora_app in the tenant transaction. The custom field rows
-// of the organization are read once per search, by the scope statement,
-// which hands the ids of the matching documents to the hit statement; the
+// of the organization are read by the scope statement only (the match,
+// and at most once more for the custom field names of its candidates,
+// both through idx_search_document_field_match since 000280), which hands
+// the ids of the matching documents to the hit statement; the
 // hit statement reads the field rows of a candidate at most twice (its
 // readable summary and its readable custom fields). Before, both
 // statements read all custom field rows, and the readable fields and the
@@ -248,14 +280,17 @@ func TestRestrictedSearchFieldRowBudget(t *testing.T) {
 		if res.Total != c.hits || len(res.Data) != min(c.hits, 5) {
 			t.Errorf("%q: %d hits (total %d), want %d", text, len(res.Data), res.Total, c.hits)
 		}
-		full := 0
+		full := map[string]int{}
 		for _, part := range []string{"COALESCE(array_agg(DISTINCT f.field)", "AS read_fields FROM"} {
 			stmt, ok := log.last(part)
 			if !ok {
 				t.Fatalf("%q: no statement with %q", text, part)
 			}
 			nodes := explain(stmt)
-			full += fullFieldRowReads(nodes)
+			full[part] = fullFieldRowReads(nodes)
+			if problem := fieldPolicyProblem(nodes); problem != "" {
+				t.Errorf("%q: %s: %s: %s", text, part, problem, describeSearchPlan(nodes))
+			}
 			if part == "AS read_fields FROM" {
 				loops := 0
 				for _, n := range nodes {
@@ -271,8 +306,16 @@ func TestRestrictedSearchFieldRowBudget(t *testing.T) {
 			}
 			t.Logf("%q (%d hits) %s: %s", text, res.Total, part, describeSearchPlan(nodes))
 		}
-		if full != 1 {
-			t.Errorf("%q: the statements of the search read the custom field rows of the organization %d times, want once", text, full)
+		// The scope statement reads the matching rows (attr) and may read
+		// the custom field names of its candidates with one read of the
+		// organization's rows through idx_search_document_field_match
+		// (hash join) instead of one lookup per candidate; the hit
+		// statement reads none of them.
+		if scope := full["COALESCE(array_agg(DISTINCT f.field)"]; scope < 1 || scope > 2 {
+			t.Errorf("%q: the scope statement reads the custom field rows of the organization %d times, want once or twice", text, scope)
+		}
+		if hit := full["AS read_fields FROM"]; hit != 0 {
+			t.Errorf("%q: the hit statement reads the custom field rows of the organization %d times, want none", text, hit)
 		}
 	}
 }

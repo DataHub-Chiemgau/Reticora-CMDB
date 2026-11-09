@@ -115,4 +115,7 @@ var ScopeKinds = []string{"org", "client", "site", "team", "multi", "other-org"}
 var ClientMatrixTables = map[string]string{
 	"ci_identity_mac": "identity MACs of ci with the client and site of their CI, kept by the trigger on ci " +
 		"(migration 000161, WP-434); the identity search of discovery reads it under the scope of the principal",
+	"search_document_field": "field rows of the full-text index with the client and site of their search document, " +
+		"kept by the triggers search_field_scope and search_field_scope_propagation (migration 000280); the global " +
+		"search reads them under the scope of the principal",
 }
