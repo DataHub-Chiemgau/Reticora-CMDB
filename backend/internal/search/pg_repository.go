@@ -249,11 +249,14 @@ const contactTokenMatch = `(search_document.entity_type = 'contact' AND EXISTS (
 
 // attributeMatch finds ci and asset documents whose custom field rows
 // (attributes.<key>, WP-308) or tag row (core.tags, WP-788) match the text
-// of parameter textArg. The field rows have no index on vector (K22); they
-// are read by document over their primary key.
+// of parameter textArg. The field rows have no index on vector (K22). The
+// matching rows are read once per query (an uncorrelated IN, a hashed
+// subplan): a correlated EXISTS read the field rows of every ci and asset
+// document of the organization by document, one index probe each, while
+// the match is evaluated for every row of search_document.
 func attributeMatch(textArg int) string {
-	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND EXISTS (SELECT 1 FROM search_document_field f
-		WHERE f.document_id = search_document.id AND (starts_with(f.field, 'attributes.') OR f.field = '%s')
+	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND search_document.id IN (SELECT f.document_id FROM search_document_field f
+		WHERE (starts_with(f.field, 'attributes.') OR f.field = '%s')
 		  AND f.vector @@ websearch_to_tsquery('simple', $%d)))`, tagField, textArg)
 }
 
@@ -440,14 +443,22 @@ func hitAssetRef(a *sqlArgs, assetGrants []string) string {
 
 // restrictedWhere is the condition of the candidates of a search with
 // restricted field permissions: the conditions of the phase 1 query, with
-// search_vector as the prefilter. A query with a negation or a phrase is
-// no monotone condition (a word that only an unreadable field holds would
-// exclude the hit, an adjacency could arise between readable fields), so
-// it does not prefilter the restricted types. The custom field rows and
-// the identifiers (WP-308) prefilter with all fields of a restricted type
-// and with the open ones of the others (openIdentifierFields). It returns
-// the conditions, the parameter of the organization and the one of the
-// text (0 without text).
+// search_vector as the prefilter. A query with a negation is no monotone
+// condition (a word that only an unreadable field holds would exclude the
+// hit), so it does not prefilter the restricted types. A phrase is none
+// either (an adjacency could arise between readable fields once an
+// unreadable one between them is left out), but it implies its words: a
+// restricted type is prefiltered with the phrase operators of the query
+// turned into AND (relaxedPhrase). The words of title and readable fields
+// are words of search_vector (title and summary, the summary being the
+// summary fields), so this drops no hit; the hit still has to match its
+// readable text (restrictedQuery). Without the prefilter every document of
+// a restricted type went through the readable text of restrictedQuery for
+// a hyphenated name such as srv-05001 ('srv' <-> '-05001'). The custom
+// field rows and the identifiers (WP-308) prefilter with all fields of a
+// restricted type and with the open ones of the others
+// (openIdentifierFields). It returns the conditions, the parameter of the
+// organization and the one of the text (0 without text).
 func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where []string, org, text int) {
 	org = a.add(q.OrganizationID)
 	where = []string{fmt.Sprintf("organization_id = $%d", org), hitVisible}
@@ -457,7 +468,8 @@ func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where [
 		if len(tokens) > 0 {
 			match += " OR " + fmt.Sprintf(contactTokenMatch, a.add(tokens))
 		}
-		match += fmt.Sprintf(" OR (entity_type = ANY($%d::text[]) AND websearch_to_tsquery('simple', $%d)::text ~ '[!<]')", a.add(restricted), text)
+		match += fmt.Sprintf(" OR (entity_type = ANY($%d::text[]) AND (websearch_to_tsquery('simple', $%d)::text ~ '!' OR search_vector @@ %s))",
+			a.add(restricted), text, relaxedPhrase(text))
 		match += " OR " + attributeMatch(text)
 		if ids, ok := ParseIdentifiers(q.Text); ok {
 			if fields := openIdentifierFields(q, restricted); len(fields) > 0 {
@@ -471,6 +483,18 @@ func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where [
 		where = append(where, fmt.Sprintf("entity_type = ANY($%d)", a.add(q.EntityTypes)))
 	}
 	return where, org, text
+}
+
+// relaxedPhrase is the query of parameter textArg with every phrase
+// operator (<-> and <N>) turned into AND: it matches every document the
+// query matches, for a query without negation (restrictedWhere). The text
+// form of a tsquery quotes each lexeme, and a lexeme holds no space, so
+// only the operators between lexemes have the form " <...> "; <-> binds
+// tighter than &, which binds tighter than |, and the text form sets
+// parentheses where a phrase holds & or |, so the replacement keeps the
+// structure of the query.
+func relaxedPhrase(textArg int) string {
+	return fmt.Sprintf(`regexp_replace(websearch_to_tsquery('simple', $%d)::text, ' <(-|[0-9]+)> ', ' & ', 'g')::tsquery`, textArg)
 }
 
 // fieldOrder orders the field rows of a document like its summary.
@@ -687,6 +711,14 @@ func (r *PGRepository) ResolveUsers(ctx context.Context, q *Query) ([]string, er
 	return ids, err
 }
 
+// customPlanSQL keeps the search transaction on custom plans. pgx prepares
+// every statement, and after five executions on a connection PostgreSQL
+// may switch to the generic plan, in which websearch_to_tsquery of the
+// text parameter is no constant: it is computed again for every document
+// and field row it is compared with instead of once at planning. The
+// statements of a search are planned anew each time (a few ms) instead.
+const customPlanSQL = `SET LOCAL plan_cache_mode = force_custom_plan`
+
 func (r *PGRepository) Query(ctx context.Context, in *Query) (Result, error) {
 	// The users of the text are resolved per query on a copy (WP-788).
 	query := *in
@@ -698,6 +730,11 @@ func (r *PGRepository) Query(ctx context.Context, in *Query) (Result, error) {
 	var res Result
 	var counted int
 	err := database.WithRequestTenant(ctx, r.pool, q.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		// The statements of the search are planned with their parameters
+		// (customPlanSQL).
+		if _, err := tx.Exec(ctx, customPlanSQL); err != nil {
+			return err
+		}
 		var tokens []string
 		if vault := pii.Default(); vault != nil {
 			var err error
