@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { entitlementApi, moduleApi } from '../api/client';
+import { ApiError, entitlementApi, moduleApi } from '../api/client';
 import { useEffectivePermissions } from '../api/hooks';
 import { useAuthStore } from '../auth/authStore';
 import { navPageStates } from '../components/shell/navigation';
@@ -13,6 +13,23 @@ import type { AppPage } from '../components/CommandPalette';
  * a reliable statement about availability, not just overrides.
  */
 export type EntitlementMap = Record<string, boolean>;
+
+/**
+ * entitlementReadOptions are the query options of the shell's plan, module
+ * and expiry reads. A
+ * user without entitlement:read (e.g. the client-scoped role
+ * client_technician) gets 403 on both: retrying does not change that, and
+ * every part that mounts later (a page reading useEntitlements) must not
+ * send the refused read again. Such a refetch put the query back to
+ * "pending" and the gate of SignedInShell unmounted the page it had just
+ * shown, endlessly (e2e-real CS01/TP05, WP-857).
+ */
+export const entitlementReadOptions = {
+  retry: (failureCount: number, error: unknown) =>
+    !(error instanceof ApiError && (error.status === 401 || error.status === 403)) &&
+    failureCount < 1,
+  retryOnMount: false,
+} as const;
 
 /**
  * useEntitlements resolves which product modules are enabled for the current
@@ -40,6 +57,7 @@ export function useEntitlements() {
     },
     enabled: isAuthenticated,
     staleTime: 60_000,
+    ...entitlementReadOptions,
   });
 
   const map = query.data?.map;
@@ -55,7 +73,12 @@ export function useEntitlements() {
     entitlements: map,
     plan: query.data?.plan,
     isEnabled,
-    isLoading: query.isLoading,
+    // Only the first read: once it has settled (data or error), a later
+    // read never counts as loading again, so a gated page that is shown
+    // is not swapped for the loading state. Without the plan (an error,
+    // e.g. 403 without entitlement:read) every page counts as entitled:
+    // the server stays the one that refuses.
+    isLoading: query.isLoading && query.errorUpdateCount === 0,
   };
 }
 
@@ -78,6 +101,7 @@ export function useModules() {
     queryFn: async () => (await moduleApi.list()).data ?? [],
     enabled: isAuthenticated,
     staleTime: 5 * 60_000,
+    ...entitlementReadOptions,
   });
 
   const modules = query.data;

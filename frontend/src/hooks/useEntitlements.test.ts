@@ -3,7 +3,13 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClientProvider } from '@tanstack/react-query';
-import { hasPermission, navFeatureFor, navPermissionFor, useModules } from './useEntitlements';
+import {
+  hasPermission,
+  navFeatureFor,
+  navPermissionFor,
+  useEntitlements,
+  useModules,
+} from './useEntitlements';
 import { useAuthStore } from '../auth/authStore';
 import { createTestQueryClient, stubFetchRoutes } from '../test/utils';
 
@@ -163,5 +169,49 @@ describe('useModules', () => {
     expect(result.current.isPageEnabled('cmdb')).toBe(true);
     expect(result.current.isModuleEnabled('ticketing')).toBe(false);
     expect(result.current.isModuleEnabled('iga')).toBe(true);
+  });
+});
+
+describe('useEntitlements without entitlement:read', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    useAuthStore.setState({ token: null, expiresAt: null, user: null });
+  });
+
+  // A client-scoped technician (client_technician) lacks entitlement:read:
+  // the plan cannot be read (403). Every page counts as entitled (the
+  // server refuses where needed), and a part that mounts later neither
+  // reads again nor reports loading: the gate of SignedInShell unmounted
+  // the topology page on that endlessly (e2e-real CS01/TP05, WP-857).
+  it('settles once on 403 and never reports loading again', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    const fetchMock = stubFetchRoutes({
+      '/entitlements': new Response(
+        JSON.stringify({ status: 403, title: 'Forbidden', detail: 'missing permission' }),
+        { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+      ),
+    });
+    const client = createTestQueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client }, children);
+
+    const shell = renderHook(() => useEntitlements(), { wrapper });
+    await waitFor(() => expect(shell.result.current.isLoading).toBe(false));
+    expect(shell.result.current.entitlements).toBeUndefined();
+    expect(shell.result.current.isEnabled('topology')).toBe(true);
+
+    // The page mounts its own reader of the same query.
+    const page = renderHook(() => useEntitlements(), { wrapper });
+    expect(page.result.current.isLoading).toBe(false);
+    expect(shell.result.current.isLoading).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(page.result.current.isLoading).toBe(false);
+    expect(shell.result.current.isLoading).toBe(false);
+    const reads = fetchMock.mock.calls.filter(([input]) => String(input).includes('/entitlements'));
+    expect(reads).toHaveLength(1);
   });
 });

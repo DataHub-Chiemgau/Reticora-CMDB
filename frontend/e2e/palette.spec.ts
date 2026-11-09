@@ -1,4 +1,13 @@
-import { expect, FEATURES, list, mockBackend, ORG_ID, signIn, test } from './support/backend';
+import {
+  expect,
+  FEATURES,
+  list,
+  mainNavigation,
+  mockBackend,
+  ORG_ID,
+  signIn,
+  test,
+} from './support/backend';
 
 // TST-03 (WP-201): the command palette opens with Ctrl+K (Meta+K on macOS),
 // filters by keyboard input and navigates with Enter. Runs in every browser
@@ -62,8 +71,15 @@ test('does not offer a page locked by the plan', async ({ page }) => {
   await signIn(page);
   await page.goto('/cmdb');
   await expect(page.locator('#main-content')).toBeVisible();
-  // The plan has loaded: the inventory is locked in the navigation.
-  await expect(page.locator('a[href="/assets"][aria-disabled="true"]')).toHaveCount(1);
+  // The plan has loaded: the inventory is locked in the navigation (in the
+  // drawer on narrow viewports, which Escape closes again).
+  const nav = await mainNavigation(page);
+  await expect(nav.locator('a[href="/assets"][aria-disabled="true"]')).toHaveCount(1);
+  const drawerClose = page.getByRole('button', { name: 'Navigation schließen' });
+  if (await drawerClose.isVisible()) {
+    await page.keyboard.press('Escape');
+    await expect(drawerClose).toBeHidden();
+  }
 
   await page.keyboard.press('Control+k');
   const search = page.getByRole('combobox', { name: 'Befehle durchsuchen' });

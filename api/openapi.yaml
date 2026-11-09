@@ -3213,6 +3213,8 @@ paths:
                 $ref: '#/components/schemas/EntitlementListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/modules:
     get:
@@ -3235,6 +3237,8 @@ paths:
                 $ref: '#/components/schemas/ModuleListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/entitlements/check/{feature}:
     parameters:
