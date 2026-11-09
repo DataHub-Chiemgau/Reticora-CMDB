@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# rep01-structure.test.sh — structure and gate checks of gate G1 (WP-213,
-# WP-451):
+# rep01-structure.test.sh — structure and gate checks of the gates G1
+# (WP-213, WP-451) and G2 (WP-331, stage G2 below). Gate G1:
 #   REP-01   repository structure (internal/{notify,jobs,locations,pii,reviews,
 #            rules}, api/rules.schema.json, docs/acceptance, docs/decisions,
 #            docs/schema-baseline.md; pii after E-15);
@@ -63,6 +63,30 @@
 # checks catch every format variant of an open finding and each consistency
 # rule; they run in both modes.
 #
+# Gate G2 (WP-331) checks docs/acceptance/g2-gate.md (rules g2_*; the G1
+# checks above stay unchanged, IDs with a middle segment such as IMP-IO-01
+# are matched by [A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2}):
+#   (a) the sections GATE-01, GATE-02 with "N/P und WARN", GATE-05, SEQ-01,
+#       DOD-01 and GLO-11 and the result (offen or bestanden);
+#   (b) GATE-01: no open Critical SR/PT finding in
+#       docs/security/review-phase2.md (severity normalised as in G1, F-300),
+#       no open row of the finding table of GATE-01 (geschlossen, behoben or
+#       "abgeschaltet (E-03)"), every Critical ID of sources (4) to (7) with
+#       a row; --final: no open Critical/High SR finding there (F-428);
+#   (c) GATE-02: every N/P and WARN row has a status and a reason, every ID
+#       of the annex that is not PASS has a reason, no traceability row names
+#       the checklist (F-121). The G1 rules on declarations and deliveries do
+#       not apply: after E-103 "PASS (Erklärung des Auftraggebers vom
+#       2026-10-15)" is allowed;
+#   (d) GATE-05: no row ";[O];G2;", no O in TRACEABILITY_REQUIRE_COMPLETE,
+#       WP-293 "G2-Umfang: optional", TKT-03 and SRC-03 named;
+#   (e) SEQ-01 names the steps of Phase 2;
+#   (f) GLO-11: the job traceability sets TRACEABILITY_REQUIRE_COMPLETE with
+#       level P2 and has no continue-on-error;
+#   the result "bestanden" needs every GATE row of the annex PASS; --final
+#   forbids "RC-Lauf ausstehend" and "steht aus" in the checklist. The
+#   fixture self-tests rep01_g2_* run on tests/fixtures/rep01/g2/.
+#
 # The traceability rows themselves are checked by
 # backend/internal/traceability (TestTraceabilityFile).
 #
@@ -109,7 +133,7 @@ for section in GATE-01 GATE-02 GATE-03 GATE-05 SEQ-01; do
 done
 
 # GATE-02: every row of the N/P and WARN table carries a reason.
-np_rows=$(sed -nE '/^#{2,3} N\/P und WARN/,/^#{2,3} [^N]/p' "$GATE" | grep -E '^\| *[A-Z]{2,5}-[0-9]{2} *\|' || true)
+np_rows=$(sed -nE '/^#{2,3} N\/P und WARN/,/^#{2,3} [^N]/p' "$GATE" | grep -E '^\| *[A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2} *\|' || true)
 check "GATE-02 the checklist lists N/P and WARN IDs" "[ -n \"\$np_rows\" ]"
 while IFS='|' read -r _ id status reason _; do
     id=$(echo "$id" | xargs)
@@ -127,7 +151,7 @@ done < <(grep -F ";${GATE};" "$TRACE")
 
 # GATE-05: [O] IDs never block a gate.
 check "GATE-05 no [O] ID in the gate rows of docs/traceability.csv" \
-    "! grep -E '^[A-Z]{2,5}-[0-9]{2};\[O\];G1;' ${TRACE} >/dev/null"
+    "! grep -E '^[A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2};\[O\];G1;' ${TRACE} >/dev/null"
 check "GATE-05 the traceability check selects only [B]/[Q] for the gate" \
     "grep -q 'gateTag = regexp.MustCompile' backend/internal/traceability/traceability.go && ! grep -E '^var gateTag.*O' backend/internal/traceability/traceability.go >/dev/null"
 
@@ -355,7 +379,7 @@ gate_check() {
     is_pass() { [[ "${STATUS[$1]-}" == PASS* ]]; }
     np_exception() { [ "${XART[$1]-}" = np ]; }
 
-    annex="$(section "$G" '^## Anhang' | grep -E '^\| *[A-Z]{2,5}-[0-9]{2} *\|' | awk -F'|' '
+    annex="$(section "$G" '^## Anhang' | grep -E '^\| *[A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2} *\|' | awk -F'|' '
         { id = $2; s = $4; gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/\*/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s)
           print id "\t" s }')"
     while IFS=$'\t' read -r id s; do
@@ -541,7 +565,7 @@ for r in rows[1:]:
                 continue
             fi
             v finding_ids "$cid is PASS while $fid ($sev) is open and names it"
-        done < <(grep -oE '\b[A-Z]{2,5}-[0-9]{2}\b' <<< "$row" | grep -vE '^(SR|PT|WP)-' | sort -u)
+        done < <(grep -oE '\b[A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2}\b' <<< "$row" | grep -vE '^(SR|PT|WP)-' | sort -u)
     done <<< "$findings"
 
     # E-76: the IDs of the exception list are not PASS.
@@ -898,6 +922,199 @@ if [ "$MODE" = final ]; then
     fi
 fi
 
+# --- Gate G2 (WP-331) ---------------------------------------------------------
+# gate2_check ROOT MODE checks docs/acceptance/g2-gate.md,
+# docs/security/review-phase2.md, docs/traceability.csv and the job
+# traceability of .github/workflows/ci.yml below ROOT and prints one line
+# "<rule><TAB><detail>" per violation. The documents are data: they are
+# parsed with awk/grep, never passed to eval.
+#
+# Conventions read here (documented in docs/acceptance/g2-gate.md):
+# - Result: the first line "**Ergebnis: offen" or "**Ergebnis: bestanden" of
+#   section "## Ergebnis".
+# - Finding table of GATE-01: | <ID> | Critical | <Status> | <Nachweis> |,
+#   ID [A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2} or X-[A-Z]+; closed is a status that
+#   starts with geschlossen or behoben, or reads "abgeschaltet (E-03)".
+# - Annex "## Anhang …": | ID | Tag | Status | Nachweis | WP |; the reason of
+#   an ID that is not PASS is a row | ID | Status | Begründung | with at
+#   least three words in section GATE-02.
+G2_ID='[A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2}'
+G2_CRITICAL_IDS=(AST-01 AST-05 MGT-02 SRC-03 EXP-01 GQL-04 MET-14 MGT-01 SRC-01 SRC-04 TKT-01
+    LOC-10 LOC-11 X-SCOPE X-MANUAL AGT-05 MGT-04 WFL-01 WFL-02)
+G2_SEQ_STEPS=(Metamodell Feldrechte Dokumente Verträge Asset Lager Stocktake Ticketing Import Bulk Views G2)
+
+# g2_require_complete CI prints the value of TRACEABILITY_REQUIRE_COMPLETE
+# set in the job traceability of the workflow CI.
+g2_job() {
+    [ -f "$1" ] || return 0
+    awk '/^  [a-z][a-z0-9_-]*:[ \t]*$/ { inside = ($0 ~ /^  traceability:/) } inside' "$1"
+}
+g2_require_complete() {
+    g2_job "$1" | sed -nE 's/^[[:space:]]+TRACEABILITY_REQUIRE_COMPLETE:[[:space:]]*"?([^"#[:space:]]*)"?.*/\1/p' | head -n 1
+}
+
+gate2_check() {
+    local root="$1" mode="$2"
+    local G="$root/docs/acceptance/g2-gate.md" RV="$root/docs/security/review-phase2.md"
+    local T="$root/docs/traceability.csv" CI="$root/.github/workflows/ci.yml"
+    local res g01 annex body findings crit srhc level seq id s n st line step
+    local -A STATUS=() REASON=() ROW=()
+    v() { printf '%s\t%s\n' "$1" "$2"; }
+
+    # (a) sections and result.
+    if [ ! -s "$G" ]; then
+        v g2_sections "docs/acceptance/g2-gate.md is missing"
+        return 0
+    fi
+    for s in GATE-01 GATE-02 GATE-05 SEQ-01 DOD-01 GLO-11; do
+        grep -qE "^## .*${s}" "$G" || v g2_sections "no section for ${s}"
+    done
+    [ -n "$(section "$G" '^### N/P und WARN')" ] || v g2_sections "section GATE-02 has no table 'N/P und WARN'"
+    res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' | sed -E 's/^\*\*Ergebnis: *([[:alpha:]]+).*/\1/')"
+    res="${res,,}"
+    case "$res" in
+        offen|bestanden) ;;
+        *) v g2_sections "section Ergebnis has no line '**Ergebnis: offen' or '**Ergebnis: bestanden'" ;;
+    esac
+
+    # (b) GATE-01: no open Critical SR/PT finding in the review of Phase 2.
+    findings="$(finding_rows R "$RV")"
+    [ -f "$RV" ] || v g2_review_critical "docs/security/review-phase2.md is missing"
+    crit="$(awk -F'\t' '$2 ~ /^(SR|PT)-[0-9]+$/ && $3 == "critical" && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
+    [ -n "$crit" ] && v g2_review_critical "open Critical findings in docs/security/review-phase2.md: $crit"
+    # Finding table of GATE-01: ID <TAB> status.
+    # awk without interval expressions (mawk): the ID is matched in bash.
+    g01="$(section "$G" '^## GATE-01' | awk -F'|' '
+        function trim(s) { gsub(/\*/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
+        /^\|/ && tolower(trim($3)) ~ /^(critical|kritisch)$/ { print trim($2) "\t" trim($4) }')"
+    while IFS=$'\t' read -r id st; do
+        [[ "$id" =~ ^(${G2_ID}|X-[A-Z]+)$ ]] || continue
+        ROW[$id]=1
+        case "${st,,}" in
+            geschlossen*|behoben*|"abgeschaltet (e-03)"*) ;;
+            *) v g2_gate01_table "GATE-01 row $id is '$st'" ;;
+        esac
+    done <<< "$g01"
+    for id in "${G2_CRITICAL_IDS[@]}"; do
+        [ -n "${ROW[$id]-}" ] || v g2_gate01_table "GATE-01 has no row for the Critical ID $id"
+    done
+
+    # (c) GATE-02: N/P and WARN rows with status and reason; reasons of the
+    # IDs that are not PASS; the checklist is no evidence.
+    while IFS='|' read -r _ id st n _; do
+        id="$(xargs <<< "$id")"
+        [ -n "$id" ] || continue
+        [ "$(wc -w <<< "$st")" -ge 1 ] && [ "$(wc -w <<< "$n")" -ge 3 ] ||
+            v g2_np_reasons "N/P and WARN row $id has no status or a reason of fewer than three words"
+    done < <(section "$G" '^### N/P und WARN' | grep -E "^\| *${G2_ID} *\|")
+    annex="$(section "$G" '^## Anhang' | grep -E "^\| *${G2_ID} *\|" | awk -F'|' '
+        { id = $2; s = $4; gsub(/^[ \t]+|[ \t]+$/, "", id); gsub(/\*/, "", s); gsub(/^[ \t]+|[ \t]+$/, "", s)
+          print id "\t" s }')"
+    [ -n "$annex" ] || v g2_reasons "the checklist has no annex '## Anhang' with a status per ID"
+    while IFS=$'\t' read -r id s; do
+        [ -n "$id" ] && [ -z "${STATUS[$id]+x}" ] && STATUS[$id]="$s"
+    done <<< "$annex"
+    body="$(section "$G" '^## GATE-02' | awk -F'|' '
+        /^\| *ID *\| *Status *\|/ { t = 1; next }
+        /^\|[-|: ]+$/ { next }
+        /^\|/ { if (t) { id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id)
+                         n = 0; m = split($4, w, /[ \t]+/); for (k = 1; k <= m; k++) if (w[k] != "") n++
+                         print id "\t" n }
+                next }
+        { t = 0 }')"
+    while IFS=$'\t' read -r id n; do
+        [ -n "$id" ] && [ -z "${REASON[$id]+x}" ] && REASON[$id]="$n"
+    done <<< "$body"
+    while IFS=$'\t' read -r id s; do
+        [ -n "$id" ] || continue
+        [[ "$s" == PASS* ]] && continue
+        [ "${REASON[$id]:-0}" -ge 3 ] || v g2_reasons "$id is '$s' without a reason in section GATE-02"
+    done <<< "$annex"
+    while IFS= read -r line; do
+        [ -n "$line" ] && v g2_reasons "traceability row names the checklist as evidence: $line"
+    done < <( [ -f "$T" ] && grep -F ';docs/acceptance/g2-gate.md;' "$T")
+
+    # (d) GATE-05: no [O] row of G2, no O in the level, TKT-03 and SRC-03.
+    while IFS= read -r line; do
+        [ -n "$line" ] && v g2_gate05 "[O] row of gate G2: $line"
+    done < <( [ -f "$T" ] && grep -E "^${G2_ID};\[O\];G2;" "$T")
+    level="$(g2_require_complete "$CI")"
+    if [[ ",${level}," == *,O,* ]]; then
+        v g2_gate05 "TRACEABILITY_REQUIRE_COMPLETE=$level contains O"
+    fi
+    s="$(section "$G" '^## GATE-05')"
+    for id in TKT-03 SRC-03; do
+        grep -qF "$id" <<< "$s" || v g2_gate05 "section GATE-05 does not name $id"
+    done
+
+    # (e) SEQ-01 names the steps of Phase 2.
+    seq="$(section "$G" '^## SEQ-01')"
+    for step in "${G2_SEQ_STEPS[@]}"; do
+        grep -qF "$step" <<< "$seq" || v g2_seq "section SEQ-01 does not name $step"
+    done
+
+    # (f) GLO-11: level P2 in the job traceability, no continue-on-error.
+    if [[ ",${level}," != *,P2,* ]]; then
+        v g2_glo11 "the job traceability does not set TRACEABILITY_REQUIRE_COMPLETE with level P2 (found '${level}')"
+    fi
+    g2_job "$CI" | grep -q 'continue-on-error' && v g2_glo11 "the job traceability has continue-on-error"
+
+    # The result 'bestanden' needs every GATE row of the annex PASS.
+    if [ "$res" = bestanden ]; then
+        for id in "${!STATUS[@]}"; do
+            [[ "$id" == GATE-* ]] || continue
+            [[ "${STATUS[$id]}" == PASS* ]] || v g2_result_rows "the result is 'bestanden', $id is '${STATUS[$id]}'"
+        done
+    fi
+
+    [ "$mode" = final ] || return 0
+    srhc="$(awk -F'\t' '$2 ~ /^SR-[0-9]+$/ && ($3 == "critical" || $3 == "high") && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
+    [ -n "$srhc" ] && v g2_final_review_high "open Critical/High SR findings in docs/security/review-phase2.md: $srhc"
+    while IFS= read -r line; do
+        [ -n "$line" ] && v g2_final_rc_runs "docs/acceptance/g2-gate.md:${line%%:*}: ${line#*:}"
+    done < <(grep -nE 'RC-Lauf ausstehend|RC run pending|steht aus' "$G" | cut -c1-160)
+    return 0
+}
+
+G2_RULES=(g2_sections g2_review_critical g2_gate01_table g2_np_reasons g2_reasons g2_gate05 g2_seq g2_glo11
+    g2_result_rows)
+G2_FINAL_RULES=(g2_final_review_high g2_final_rc_runs)
+describe2() {
+    case "$1" in
+        g2_sections) echo "G2 (a) docs/acceptance/g2-gate.md has the sections GATE-01, GATE-02 (N/P und WARN), GATE-05, SEQ-01, DOD-01, GLO-11 and the result" ;;
+        g2_review_critical) echo "G2 (b) GATE-01 no open Critical SR/PT finding in docs/security/review-phase2.md" ;;
+        g2_gate01_table) echo "G2 (b) GATE-01 every Critical ID of sources (4) to (7) has a closed row in the finding table" ;;
+        g2_np_reasons) echo "G2 (c) GATE-02 every N/P and WARN row has a status and a reason" ;;
+        g2_reasons) echo "G2 (c) GATE-02 every ID that is not PASS has a reason, the checklist is no evidence (F-121)" ;;
+        g2_gate05) echo "G2 (d) GATE-05 no [O] row of G2, no O in the level, TKT-03 and SRC-03 without gate effect" ;;
+        g2_seq) echo "G2 (e) SEQ-01 names the steps of Phase 2" ;;
+        g2_glo11) echo "G2 (f) GLO-11 the job traceability sets TRACEABILITY_REQUIRE_COMPLETE with level P2 and may not fail" ;;
+        g2_result_rows) echo "G2 the result is 'bestanden' only when every GATE row is PASS" ;;
+        g2_final_review_high) echo "G2 --final no SR finding of docs/security/review-phase2.md rated Critical or High is open (F-428)" ;;
+        g2_final_rc_runs) echo "G2 --final the runs on the release candidate are documented (no placeholder, no 'steht aus')" ;;
+    esac
+}
+
+gate2_out="$(gate2_check . "$MODE")"
+rules=("${G2_RULES[@]}")
+[ "$MODE" = final ] && rules+=("${G2_FINAL_RULES[@]}")
+for rule in "${rules[@]}"; do
+    hits="$(awk -F'\t' -v r="$rule" '$1 == r { print $2 }' <<< "$gate2_out")"
+    if [ -z "$hits" ]; then
+        ok "$(describe2 "$rule")"
+    else
+        while IFS= read -r hit; do fail "$(describe2 "$rule"): $hit"; done <<< "$hits"
+    fi
+done
+# Repository checks of the G2 stage that read the plan (not in the fixture).
+# Read once, then grep a here-string (pipefail and grep -q, see above).
+# shellcheck disable=SC2034 # read by check through eval
+wp293="$(sed -n '/^### WP-293 /,/^\*\*Schlüssel:\*\*/p' docs/plan/phase2/implementierungsplan.md)"
+check "G2 (d) GATE-05 WP-293 carries 'G2-Umfang: optional' in the Phase-2 plan" \
+    "grep -qF '**G2-Umfang:** optional' <<< \"\$wp293\""
+check "G2 (a) docs/traceability.csv has no row naming docs/acceptance/g2-gate.md (F-121)" \
+    "! grep -qF ';docs/acceptance/g2-gate.md;' docs/traceability.csv"
+
 # --- Fixture self-tests (WP-451) --------------------------------------------
 # Each case copies a fixture of tests/fixtures/rep01, changes it and runs the
 # gate checks in both modes. Fixture "final" is a complete gate (every GATE
@@ -1185,6 +1402,110 @@ if git init -q "$IE" 2>/dev/null; then
 else
     fail "rep01_install_evidence: git init of a temporary repository"
 fi
+
+# --- Fixture self-tests of the G2 stage (WP-331) ------------------------------
+# Fixture "g2" is a complete gate G2 (result bestanden, every GATE row PASS,
+# no open Critical or High SR finding). Each case copies it, changes it and
+# runs gate2_check in both modes; WANT as for selftest.
+selftest2() {
+    local name="$1" wn="$2" wf="$3" dir mode want got
+    shift 3
+    CASES=$((CASES + 1))
+    dir="$TMP_ROOT/$CASES"
+    if [ ! -d "$FIX/g2" ]; then
+        fail "rep01_g2_${name}: fixture $FIX/g2 exists"
+        return
+    fi
+    cp -r "$FIX/g2" "$dir"
+    if [ $# -gt 0 ]; then
+        (cd "$dir" && "$@")
+        if diff -rq "$FIX/g2" "$dir" >/dev/null; then
+            fail "rep01_g2_${name}: the change '$*' alters the fixture"
+            return
+        fi
+    fi
+    for mode in normal final; do
+        if [ "$mode" = normal ]; then want="$wn"; else want="$wf"; fi
+        [ "$want" = - ] && continue
+        got="$(gate2_check "$dir" "$mode" | cut -f1 | sort -u | tr '\n' ' ')"
+        if [ "$want" = pass ] && [ -z "$got" ]; then
+            ok "rep01_g2_${name} (${mode}): the G2 checks pass"
+        elif [ "$want" != pass ] && grep -qw -- "$want" <<< "$got"; then
+            ok "rep01_g2_${name} (${mode}): the G2 checks report ${want}"
+        else
+            fail "rep01_g2_${name} (${mode}): want ${want}, got: ${got:-pass}"
+        fi
+    done
+}
+probe2() { selftest2 "$1" "$3" "$4" append "$R2" "$2"; }
+R2=docs/security/review-phase2.md
+C2=docs/acceptance/g2-gate.md
+T2=docs/traceability.csv
+W2=.github/workflows/ci.yml
+
+# rep01_g2_control: the repository passes the G2 checks in normal mode.
+if [ -z "$(gate2_check . normal)" ]; then
+    ok "rep01_g2_control: the repository passes the G2 checks in normal mode"
+else
+    fail "rep01_g2_control: the repository passes the G2 checks in normal mode"
+fi
+selftest2 fixture pass pass
+# (b) every format of an open Critical SR/PT finding fails; fixed passes; an
+# open High fails only --final (F-428).
+probe2 sr_critical      '| SR-90 | Critical | offen | probe | WP-999 |'         g2_review_critical g2_review_critical
+probe2 sr_bold_critical '| SR-91 | **Critical** | **offen** | probe | WP-999 |' g2_review_critical g2_review_critical
+probe2 sr_kritisch      '| **SR-92** | Kritisch | offen | probe | WP-999 |'     g2_review_critical g2_review_critical
+probe2 pt_lowercase     '| PT-93 | critical | offen | probe | WP-999 |'         g2_review_critical g2_review_critical
+probe2 sr_fixed         '| SR-94 | Critical | **behoben** (WP-999) | probe | WP-999 |' pass pass
+probe2 sr_high_open     '| SR-95 | High | offen | probe | WP-999 |'             pass g2_final_review_high
+probe2 sr_hoch_open     '| SR-96 | **Hoch** | offen | probe | WP-999 |'         pass g2_final_review_high
+probe2 sr_medium_open   '| SR-97 | Medium | offen | probe | WP-999 |'           pass pass
+# (b) an open row of the GATE-01 table, also IDs X-SCOPE and IMP-IO-01; a
+# missing Critical ID; "abgeschaltet (E-03)" closes.
+selftest2 gate01_open g2_gate01_table g2_gate01_table \
+    subst "$C2" 's/^\| X-SCOPE \| Critical \| geschlossen \|/| X-SCOPE | Critical | offen |/'
+selftest2 gate01_mid_segment g2_gate01_table g2_gate01_table \
+    subst "$C2" 's/^(\| X-MANUAL \| Critical \| geschlossen \|.*)$/\1\n| IMP-IO-01 | **Critical** | offen | probe |/'
+selftest2 gate01_missing_id g2_gate01_table g2_gate01_table drop "$C2" '^\| WFL-02 \| Critical \|'
+selftest2 gate01_switched_off pass pass \
+    subst "$C2" 's/^\| AST-01 \| Critical \| geschlossen \|/| AST-01 | Critical | abgeschaltet (E-03) |/'
+# (a) sections and result.
+selftest2 section_missing g2_sections g2_sections subst "$C2" 's/^## SEQ-01 .*/## Reihenfolge/'
+selftest2 np_table_missing g2_sections g2_sections subst "$C2" 's/^### N\/P und WARN$/### Ausnahmen/'
+selftest2 result_missing g2_sections g2_sections drop "$C2" '^\*\*Ergebnis: '
+selftest2 result_bestanden_open g2_result_rows g2_result_rows \
+    subst "$C2" 's/^\| GATE-05 \| \[Q\] \| PASS \|/| GATE-05 | [Q] | offen |/'
+selftest2 result_offen pass pass subst "$C2" 's/^\*\*Ergebnis: bestanden/**Ergebnis: offen/'
+# (c) reasons; E-103: PASS by declaration is allowed in G2; the checklist is
+# no evidence.
+selftest2 np_reason_short g2_np_reasons g2_np_reasons \
+    subst "$C2" 's/^\| MET-20 \| N\/P \| .*/| MET-20 | N\/P | E-37 |/'
+selftest2 not_pass_without_reason g2_reasons g2_reasons \
+    subst "$C2" 's/^\| SRC-02 \| \[P2\] \| PASS \|/| SRC-02 | [P2] | offen |/'
+selftest2 pass_by_declaration pass pass \
+    subst "$C2" 's/^\| NFR-08 \| PASS \|/| NFR-08 | PASS (Erklärung des Auftraggebers vom 2026-10-15) |/'
+selftest2 checklist_as_evidence g2_reasons g2_reasons \
+    append "$T2" 'SRC-02;[P2];G2;docs/acceptance/g2-gate.md;WP-999'
+# (d) GATE-05.
+selftest2 o_row g2_gate05 g2_gate05 append "$T2" 'TKT-03;[O];G2;backend/internal/ticket/provider_test.go;WP-293'
+selftest2 o_row_mid_segment g2_gate05 g2_gate05 append "$T2" 'IMP-IO-01;[O];G2;backend/internal/importer/job_test.go;WP-999'
+selftest2 o_level g2_gate05 g2_gate05 subst "$W2" 's/TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P2"/TRACEABILITY_REQUIRE_COMPLETE: "B,Q,O,P2"/'
+selftest2 gate05_tkt03 g2_gate05 g2_gate05 subst "$C2" '/^## GATE-05/,/^## /{s/TKT-03/TKT-0x/g}'
+# (e) SEQ-01.
+selftest2 seq_step g2_seq g2_seq subst "$C2" '/^## SEQ-01/,/^## /{s/Stocktake/Inventur/g}'
+# (f) GLO-11: level P2 and no continue-on-error.
+selftest2 glo11_no_p2 g2_glo11 g2_glo11 subst "$W2" 's/TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P2"/TRACEABILITY_REQUIRE_COMPLETE: "B,Q"/'
+selftest2 glo11_unset g2_glo11 g2_glo11 drop "$W2" 'TRACEABILITY_REQUIRE_COMPLETE'
+selftest2 glo11_p2x g2_glo11 g2_glo11 subst "$W2" 's/TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P2"/TRACEABILITY_REQUIRE_COMPLETE: "B,Q,P20"/'
+selftest2 glo11_continue g2_glo11 g2_glo11 subst "$W2" 's/^(    runs-on: ubuntu-latest)$/\1\n    continue-on-error: true/'
+selftest2 glo11_other_job pass pass append "$W2" '  other:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - run: "true"'
+# --final: a placeholder or a note 'steht aus' of the runs fails.
+selftest2 rc_runs_placeholder pass g2_final_rc_runs append "$C2" '| outage.yml | RC-Lauf ausstehend | – |'
+selftest2 rc_runs_pending pass g2_final_rc_runs append "$C2" 'Der Lauf auf dem Release-Kandidaten steht aus.'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
