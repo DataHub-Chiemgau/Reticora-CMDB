@@ -124,6 +124,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   locations: undefined,
   inventory: 'stock',
   'saved-views': undefined,
+  // The client administration (WP-855) is core like the location tree.
+  clients: undefined,
 };
 
 /**
@@ -135,6 +137,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
  */
 export const navPermissionFor: Record<string, string | undefined> = {
   'ci-types': 'citype:manage',
+  // The client list reads with location:read; writing needs user:manage (WP-855).
+  clients: 'location:read',
 };
 
 /**

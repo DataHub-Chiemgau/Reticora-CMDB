@@ -935,6 +935,13 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/inventory', url: '/inventory', ready: text('a11y-move') },
   { path: '/locations', url: '/locations', ready: text(M.location) },
+  {
+    // WP-855: the client administration with the write actions of
+    // user:manage (fixture rights) on the fixture client.
+    path: '/clients',
+    url: '/clients',
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-client' }),
+  },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
   {
     // WP-817: the tag catalog, read-only without tag:manage.

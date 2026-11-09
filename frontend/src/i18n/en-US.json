@@ -51,7 +51,8 @@
     "rules": "Rule catalog",
     "import": "Import",
     "contracts": "Contracts",
-    "suppliers": "Suppliers"
+    "suppliers": "Suppliers",
+    "clients": "Customers"
   },
   "common": {
     "save": "Save",
@@ -4167,6 +4168,39 @@
       "forbiddenRead": "No permission to read the tags.",
       "notFound": "The tag no longer exists.",
       "invalid": "Invalid values: {{detail}}",
+      "reason": "The action failed: {{detail}}"
+    }
+  },
+  "clients": {
+    "title": "Customers",
+    "subtitle": "The customers of the organization. Sites, CIs and assets belong to a customer.",
+    "readOnly": "You can read the customers; creating, changing and deleting require the permission user:manage.",
+    "create": "Add customer",
+    "createTitle": "Add customer",
+    "createFromSite": "New customer",
+    "editTitle": "Edit \"{{name}}\"",
+    "editLabel": "Edit: {{name}}",
+    "deleteLabel": "Delete: {{name}}",
+    "deleteTitle": "Delete customer \"{{name}}\"?",
+    "deleteConfirm": "The customer is deleted permanently, together with its sites. While other objects still refer to the customer, the server refuses the deletion.",
+    "empty": "No customers yet. Add a customer before you add sites.",
+    "loadError": "The customers cannot be loaded.",
+    "slugHint": "Unique short name within the organization; suggested from the name.",
+    "fields": {
+      "name": "Name",
+      "slug": "Short name"
+    },
+    "errors": {
+      "nameRequired": "Enter a name.",
+      "slugRequired": "Enter a short name.",
+      "nameTaken": "A customer with this name already exists.",
+      "slugTaken": "This short name is already taken.",
+      "conflict": "A customer with these details already exists.",
+      "inUse": "The customer is still used by: {{kinds}}",
+      "deleteNotFound": "The customer was not deleted: it no longer exists, or objects still refer to it.",
+      "forbidden": "You lack the permission user:manage.",
+      "forbiddenRead": "No permission to read the customers.",
+      "notFound": "The customer no longer exists.",
       "reason": "The action failed: {{detail}}"
     }
   },

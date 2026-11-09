@@ -983,7 +983,18 @@ export const LOCATION_CHILD_KINDS: Record<LocationKind, LocationKind[]> = {
   bin: [],
 };
 
-/** clientApi lists the clients a site can belong to. */
+/** A client (customer) of the organization (LOC-02). */
+export type Client = components['schemas']['Client'];
+/** The body of POST /clients (WP-855). */
+export type ClientCreateRequest = components['schemas']['CreateClientRequest'];
+/** The body of PATCH /clients/{id} (WP-855). */
+export type ClientUpdateRequest = components['schemas']['UpdateClientRequest'];
+
+/**
+ * clientApi reads and writes the clients (customers) of the organization:
+ * reading needs location:read, creating, changing and deleting user:manage
+ * (WP-855).
+ */
 export const clientApi = {
   /** One page of 200 clients; `offset` reads the following pages (F-340). */
   list({ offset = 0 }: { offset?: number } = {}) {
@@ -992,7 +1003,22 @@ export const clientApi = {
     );
   },
   get(id: string) {
-    return fetchAPI<components['schemas']['Client']>(`/clients/${encodeURIComponent(id)}`);
+    return fetchAPI<Client>(`/clients/${encodeURIComponent(id)}`);
+  },
+  /** create adds a client; a taken name or slug is 409 naming the field. */
+  create(data: ClientCreateRequest) {
+    return fetchAPI<Client>('/clients', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update changes the sent fields of a client (PATCH). */
+  update(id: string, data: ClientUpdateRequest) {
+    return fetchAPI<Client>(`/clients/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** remove deletes a client; the server deletes its sites with it. */
+  remove(id: string) {
+    return fetchAPI<void>(`/clients/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
 };
 

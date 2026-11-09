@@ -3,6 +3,7 @@ import {
   Archive,
   Armchair,
   Bookmark,
+  Building,
   Boxes,
   Bot,
   ClipboardCheck,
@@ -170,6 +171,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     defaultOpen: false,
     items: [
       { page: 'users', icon: Users },
+      { page: 'clients', icon: Building },
       { page: 'permissions', icon: UserCheck },
       { page: 'ci-types', icon: Shapes },
       { page: 'rules', icon: ListTodo },

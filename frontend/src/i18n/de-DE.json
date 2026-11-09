@@ -51,7 +51,8 @@
     "rules": "Regelkatalog",
     "import": "Import",
     "contracts": "Verträge",
-    "suppliers": "Lieferanten"
+    "suppliers": "Lieferanten",
+    "clients": "Kunden"
   },
   "common": {
     "save": "Speichern",
@@ -4167,6 +4168,39 @@
       "forbiddenRead": "Keine Berechtigung, die Tags zu lesen.",
       "notFound": "Den Tag gibt es nicht mehr.",
       "invalid": "Ungültige Angaben: {{detail}}",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "clients": {
+    "title": "Kunden",
+    "subtitle": "Die Kunden der Organisation. Standorte, CIs und Assets werden einem Kunden zugeordnet.",
+    "readOnly": "Sie können die Kunden lesen; Anlegen, Ändern und Löschen erfordern das Recht user:manage.",
+    "create": "Kunde anlegen",
+    "createTitle": "Kunde anlegen",
+    "createFromSite": "Neuer Kunde",
+    "editTitle": "„{{name}}“ bearbeiten",
+    "editLabel": "Bearbeiten: {{name}}",
+    "deleteLabel": "Löschen: {{name}}",
+    "deleteTitle": "Kunde „{{name}}“ löschen?",
+    "deleteConfirm": "Der Kunde wird endgültig gelöscht, seine Standorte mit ihm. Verweisen noch andere Objekte auf den Kunden, lehnt der Server das Löschen ab.",
+    "empty": "Noch keine Kunden. Legen Sie einen Kunden an, bevor Sie Standorte anlegen.",
+    "loadError": "Die Kunden können nicht geladen werden.",
+    "slugHint": "Eindeutiges Kürzel innerhalb der Organisation; wird aus dem Namen vorgeschlagen.",
+    "fields": {
+      "name": "Name",
+      "slug": "Kürzel"
+    },
+    "errors": {
+      "nameRequired": "Geben Sie einen Namen an.",
+      "slugRequired": "Geben Sie ein Kürzel an.",
+      "nameTaken": "Einen Kunden mit diesem Namen gibt es schon.",
+      "slugTaken": "Dieses Kürzel ist bereits vergeben.",
+      "conflict": "Ein Kunde mit diesen Angaben existiert bereits.",
+      "inUse": "Der Kunde wird noch verwendet von: {{kinds}}",
+      "deleteNotFound": "Der Kunde wurde nicht gelöscht: Es gibt ihn nicht mehr, oder es verweisen noch Objekte auf ihn.",
+      "forbidden": "Ihnen fehlt das Recht user:manage.",
+      "forbiddenRead": "Keine Berechtigung, die Kunden zu lesen.",
+      "notFound": "Den Kunden gibt es nicht mehr.",
       "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }
   },

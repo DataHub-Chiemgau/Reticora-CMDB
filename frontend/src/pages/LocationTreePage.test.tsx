@@ -75,11 +75,28 @@ type Write = (body: Record<string, unknown>, url: string) => Response;
 
 function stubApi(
   onCreate: Write,
-  { onUpdate, onDelete }: { onUpdate?: Write; onDelete?: (url: string) => Response } = {},
+  {
+    onUpdate,
+    onDelete,
+    onCreateClient,
+    permissions,
+  }: {
+    onUpdate?: Write;
+    onDelete?: (url: string) => Response;
+    onCreateClient?: Write;
+    /** The effective rights; without them /me/permissions is not answered (no right). */
+    permissions?: string[];
+  } = {},
 ) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/locations/tree')) return json({ data: tree });
+    if (url.includes('/me/permissions') && permissions) {
+      return json({ user_id: 'user-1', permissions });
+    }
+    if (url.endsWith('/clients') && init?.method === 'POST' && onCreateClient) {
+      return onCreateClient(JSON.parse(String(init.body)) as Record<string, unknown>, url);
+    }
     if (url.includes('/clients')) {
       return json({
         data: [{ id: 'client-1', organization_id: 'org-1', name: 'Acme', slug: 'acme' }],
@@ -251,6 +268,78 @@ describe('LocationTreePage', () => {
     await waitFor(() =>
       expect(created).toEqual([{ kind: 'site', name: 'Outpost', client_id: 'client-1' }]),
     );
+  });
+
+  // WP-855: a holder of user:manage creates the client of a new site from
+  // the site dialog; the new client is selected afterwards.
+  it('creates a new client from the site dialog and selects it', async () => {
+    const created: Record<string, unknown>[] = [];
+    const clientsCreated: Record<string, unknown>[] = [];
+    stubApi(
+      (body) => {
+        created.push(body);
+        return json(node('site-3', 'site', 'Outpost'), 201);
+      },
+      {
+        permissions: ['location:read', 'user:manage'],
+        onCreateClient: (body) => {
+          clientsCreated.push(body);
+          return json(
+            {
+              id: 'client-9',
+              organization_id: 'org-1',
+              name: body.name,
+              slug: body.slug,
+              external_ref: null,
+              timezone: null,
+              settings: {},
+              created_at: '2026-01-01T00:00:00Z',
+              updated_at: '2026-01-01T00:00:00Z',
+            },
+            201,
+          );
+        },
+      },
+    );
+    renderWithProviders(<LocationTreePage />, { route: '/locations' });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Standort anlegen|Create site/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Neuer Kunde' }));
+    const clientDialog = await screen.findByRole('dialog', { name: 'Kunde anlegen' });
+    fireEvent.change(within(clientDialog).getByLabelText('Name'), {
+      target: { value: 'Neu Kunde AG' },
+    });
+    fireEvent.click(within(clientDialog).getByRole('button', { name: 'Anlegen' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Kunde anlegen' })).not.toBeInTheDocument(),
+    );
+    expect(clientsCreated).toEqual([{ name: 'Neu Kunde AG', slug: 'neu-kunde-ag' }]);
+    // The site form was not sent by the client dialog's submit.
+    expect(created).toEqual([]);
+    const siteDialog = screen.getByRole('dialog');
+    const client = within(siteDialog).getByRole('combobox') as HTMLSelectElement;
+    await waitFor(() => expect(client).toHaveValue('client-9'));
+    expect(client.selectedOptions[0]?.textContent).toBe('Neu Kunde AG');
+
+    fireEvent.change(within(siteDialog).getByRole('textbox'), { target: { value: 'Outpost' } });
+    fireEvent.click(within(siteDialog).getByRole('button', { name: 'Anlegen' }));
+    await waitFor(() =>
+      expect(created).toEqual([{ kind: 'site', name: 'Outpost', client_id: 'client-9' }]),
+    );
+  });
+
+  it('offers no new client without user:manage', async () => {
+    stubApi(() => json({}, 500), { permissions: ['location:read'] });
+    renderWithProviders(<LocationTreePage />, { route: '/locations' });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Standort anlegen|Create site/ }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() =>
+      expect((within(dialog).getByRole('combobox') as HTMLSelectElement).options).toHaveLength(2),
+    );
+    expect(within(dialog).queryByRole('button', { name: 'Neuer Kunde' })).toBeNull();
   });
 
   describe('edit dialog (LOC-07, F-079)', () => {
