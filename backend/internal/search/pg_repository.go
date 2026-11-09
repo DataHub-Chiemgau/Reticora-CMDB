@@ -255,9 +255,29 @@ const contactTokenMatch = `(search_document.entity_type = 'contact' AND EXISTS (
 // document of the organization by document, one index probe each, while
 // the match is evaluated for every row of search_document.
 func attributeMatch(textArg int) string {
-	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND search_document.id IN (SELECT f.document_id FROM search_document_field f
+	return attributeIn(attributeRows(textArg))
+}
+
+// attributeRows reads the ids of the documents whose custom field rows or
+// tag row match the text of parameter textArg (attributeMatch); a document
+// with several matching rows comes more than once.
+func attributeRows(textArg int) string {
+	return fmt.Sprintf(`SELECT f.document_id FROM search_document_field f
 		WHERE (starts_with(f.field, 'attributes.') OR f.field = '%s')
-		  AND f.vector @@ websearch_to_tsquery('simple', $%d)))`, tagField, textArg)
+		  AND f.vector @@ websearch_to_tsquery('simple', $%d)`, tagField, textArg)
+}
+
+// attributeIn is the condition of attributeMatch over the document ids the
+// subquery rows returns.
+func attributeIn(rows string) string {
+	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND search_document.id IN (%s))`, rows)
+}
+
+// attributeAny is the condition of attributeMatch over the document ids of
+// parameter idsArg (uuid[]), which the scope statement of the restricted
+// search read with attributeRows (restrictedQuery).
+func attributeAny(idsArg int) string {
+	return fmt.Sprintf(`(search_document.entity_type IN ('ci', 'asset') AND search_document.id = ANY($%d::uuid[]))`, idsArg)
 }
 
 // userIn finds the documents with a user field of the fields that holds
@@ -457,9 +477,11 @@ func hitAssetRef(a *sqlArgs, assetGrants []string) string {
 // a hyphenated name such as srv-05001 ('srv' <-> '-05001'). The custom
 // field rows and the identifiers (WP-308) prefilter with all fields of a
 // restricted type and with the open ones of the others
-// (openIdentifierFields). It returns the conditions, the parameter of the
+// (openIdentifierFields). attr returns the condition of the custom field
+// rows for the parameter of the text (attributeMatch or the ids the scope
+// statement read). It returns the conditions, the parameter of the
 // organization and the one of the text (0 without text).
-func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where []string, org, text int) {
+func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string, attr func(text int) string) (where []string, org, text int) {
 	org = a.add(q.OrganizationID)
 	where = []string{fmt.Sprintf("organization_id = $%d", org), hitVisible}
 	if strings.TrimSpace(q.Text) != "" {
@@ -470,7 +492,7 @@ func restrictedWhere(a *sqlArgs, q *Query, tokens, restricted []string) (where [
 		}
 		match += fmt.Sprintf(" OR (entity_type = ANY($%d::text[]) AND (websearch_to_tsquery('simple', $%d)::text ~ '!' OR search_vector @@ %s))",
 			a.add(restricted), text, relaxedPhrase(text))
-		match += " OR " + attributeMatch(text)
+		match += " OR " + attr(text)
 		if ids, ok := ParseIdentifiers(q.Text); ok {
 			if fields := openIdentifierFields(q, restricted); len(fields) > 0 {
 				match += " OR " + identifierIn(a, org, fields, &ids)
@@ -569,27 +591,51 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 		assetGrants = []string{}
 	}
 
+	// The custom field rows that match the text are read once, by the
+	// scope statement (attr): the policy of search_document_field looks
+	// up the document of every custom field row of the organization before
+	// the match (@@ is not leakproof), so each read costs one index probe
+	// per row. The statement returns the ids of their documents with the
+	// scopes, and the query below matches them by id (attributeAny) instead
+	// of reading the rows again. The candidates of the restricted types
+	// still match by their readable fields there (RBA-07), and the query
+	// reads search_document under its policy as before; like a scope, a
+	// custom field row written after the scope statement counts from the
+	// next search.
 	var scopes sqlArgs
-	where, _, _ := restrictedWhere(&scopes, q, tokens, restricted)
+	where, _, text := restrictedWhere(&scopes, q, tokens, restricted, func(int) string { return attributeIn("SELECT document_id FROM attr") })
 	scopeSQL := fmt.Sprintf(`SELECT c.entity_type, c.type_id, c.scope_client, c.scope_site, c.team_id, c.object_id, c.asset_ref,
-		COALESCE(array_agg(DISTINCT f.field) FILTER (WHERE f.field IS NOT NULL), '{}')
+		COALESCE(array_agg(DISTINCT f.field) FILTER (WHERE f.field IS NOT NULL), '{}') AS fields
 		FROM (SELECT id, entity_type, %s AS type_id, %s AS scope_client, %s AS scope_site, %s AS team_id, %s AS object_id, %s AS asset_ref
 			FROM search_document WHERE %s AND entity_type = ANY($%d::text[])) AS c
 		LEFT JOIN search_document_field f ON f.document_id = c.id AND starts_with(f.field, 'attributes.')
 		GROUP BY 1, 2, 3, 4, 5, 6, 7`,
 		hitTypeID, hitClientID, hitSiteID, hitTeamID, hitObjectID(&scopes), hitAssetRef(&scopes, assetGrants), strings.Join(where, " AND "), scopes.add(restricted))
+	with, attrIDs := "", `'{}'::text[]`
+	if text > 0 {
+		with = "WITH attr AS MATERIALIZED (" + attributeRows(text) + ") "
+		attrIDs = `(SELECT COALESCE(array_agg(DISTINCT attr.document_id::text), '{}') FROM attr)`
+	}
+	// One row without a scope carries the ids when no candidate of a
+	// restricted type matched.
+	scopeSQL = with + `SELECT ` + attrIDs + `, COALESCE(sc.entity_type, ''), COALESCE(sc.type_id, ''), COALESCE(sc.scope_client, ''),
+		COALESCE(sc.scope_site, ''), COALESCE(sc.team_id, ''), COALESCE(sc.object_id, ''), COALESCE(sc.asset_ref, ''), COALESCE(sc.fields, '{}')
+		FROM (VALUES (1)) AS one(x) LEFT JOIN (` + scopeSQL + `) AS sc ON true`
 	rows, err := tx.Query(ctx, scopeSQL, scopes.args...)
 	if err != nil {
 		return "", nil, fmt.Errorf("read search scopes: %w", err)
 	}
 	var found []fieldScope
+	var matchedAttrs []string
 	for rows.Next() {
 		var fs fieldScope
-		if serr := rows.Scan(&fs.entityType, &fs.typeID, &fs.clientID, &fs.siteID, &fs.teamID, &fs.objectID, &fs.assetRef, &fs.attributes); serr != nil {
+		if serr := rows.Scan(&matchedAttrs, &fs.entityType, &fs.typeID, &fs.clientID, &fs.siteID, &fs.teamID, &fs.objectID, &fs.assetRef, &fs.attributes); serr != nil {
 			rows.Close()
 			return "", nil, serr
 		}
-		found = append(found, fs)
+		if fs.entityType != "" {
+			found = append(found, fs)
+		}
 	}
 	rows.Close()
 	if rerr := rows.Err(); rerr != nil {
@@ -609,8 +655,11 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 		}
 	}
 
+	if matchedAttrs == nil {
+		matchedAttrs = []string{}
+	}
 	a := &sqlArgs{}
-	where, org, text := restrictedWhere(a, q, tokens, restricted)
+	where, org, text := restrictedWhere(a, q, tokens, restricted, func(int) string { return attributeAny(a.add(matchedAttrs)) })
 	restrictedArg := a.add(restricted)
 	allowed := fmt.Sprintf(`SELECT s.fields FROM unnest($%d::text[], $%d::text[], $%d::text[], $%d::text[], $%d::text[], $%d::text[], $%d::text[], $%d::text[])
 		AS s(entity_type, type_id, client_id, site_id, team_id, object_id, asset_ref, fields)
@@ -625,11 +674,17 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 		FROM search_document_field f WHERE f.document_id = x.id AND f.field = ANY(string_to_array(x.read_fields, ','))
 		  AND array_position(%s, f.field) IS NOT NULL), '') ELSE x.summary END`,
 		restrictedArg, fieldOrder("x.entity_type"), fieldOrder("x.entity_type"))
+	// Each level ends with OFFSET 0, so the planner keeps it as a subquery
+	// instead of pulling it up: a pulled-up level copies the expressions of
+	// its columns into every reference of the levels above, and the scope
+	// lookups (type, asset), the readable fields and the readable summary,
+	// each a subquery on the field rows under their policy, ran several
+	// times per candidate (score, match, snippet, read_fields).
 	candidates := fmt.Sprintf(`SELECT id, organization_id, entity_type, entity_id, title, summary, url, metadata, client_id, site_id, updated_at, search_vector,
-		%s AS type_id, %s AS scope_client, %s AS scope_site, %s AS team_id, %s AS object_id, %s AS asset_ref FROM search_document WHERE %s`,
+		%s AS type_id, %s AS scope_client, %s AS scope_site, %s AS team_id, %s AS object_id, %s AS asset_ref FROM search_document WHERE %s OFFSET 0`,
 		hitTypeID, hitClientID, hitSiteID, hitTeamID, hitObjectID(a), hitAssetRef(a, assetGrants), strings.Join(where, " AND "))
 	vector := fmt.Sprintf(`SELECT doc.*, CASE WHEN doc.entity_type = ANY($%d::text[]) THEN to_tsvector('simple', doc.title || ' ' || doc.read_summary) ELSE doc.search_vector END AS vec
-		FROM (SELECT x.*, %s AS read_summary FROM (SELECT cand.*, COALESCE((%s), '') AS read_fields FROM (%s) AS cand) AS x) AS doc`,
+		FROM (SELECT x.*, %s AS read_summary FROM (SELECT cand.*, COALESCE((%s), '') AS read_fields FROM (%s) AS cand OFFSET 0) AS x OFFSET 0) AS doc OFFSET 0`,
 		restrictedArg, readSummary, allowed, candidates)
 	score, match, snippet := "0.0", "true", "''"
 	if text > 0 {
